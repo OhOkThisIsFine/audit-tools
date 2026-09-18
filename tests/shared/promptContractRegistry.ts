@@ -337,6 +337,7 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
   ["quotePromptCommandArg", "src/shared/tooling/exec.ts", "command quoting helper matched by the prompt-name scan — no rendered output contract"],
   ["renderPromptCommand", "src/shared/tooling/exec.ts", "command rendering helper matched by the prompt-name scan — no worker output contract"],
   ["toPromptPathToken", "src/shared/tooling/exec.ts", "path token helper matched by the prompt-name scan — no rendered output contract"],
+  ["normalizePromptBodyPaths", "src/shared/tooling/exec.ts", "path normalizer applied to an already-rendered prompt body by writeStepContract — states no contract of its own"],
 ].map(([builder, file, gapReason]) => ({
   builder,
   file,

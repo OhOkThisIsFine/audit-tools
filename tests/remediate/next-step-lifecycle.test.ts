@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { loaderCommand } from "../../src/remediate/steps/prompts.js";
+import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
 import {
   createNextStepHarness,
   makePlanningState,
@@ -289,7 +290,9 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     const prompt = await readFile(step.prompt_path, "utf8");
 
     expect(step.step_kind).toBe("collect_starting_point");
-    expect(prompt).toContain(missingPath);
+    // `writeStepContract` states every path in the body the same way it states
+    // the step's path FIELDS — forward-slashed.
+    expect(prompt).toContain(normalizePromptBodyPaths(missingPath));
     expect(prompt).toMatch(/did not exist/i);
   });
 

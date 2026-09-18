@@ -618,6 +618,7 @@ export type {
 export { scanBoundSubmission } from "./submission/submissionScan.js";
 export type {
   HostResultOutcomes,
+  IssueRemedy,
   SubmissionIngestHistory,
   TrailingSubmissionRefusal,
   // A TYPE, and it must be re-exported as one: a value re-export of a
@@ -630,6 +631,7 @@ export type {
 export {
   enrichMissingSubmissionIssues,
   isMissingObservation,
+  SUBMISSION_ISSUE_REMEDY,
   WORK_ITEM_OUTCOMES,
   eventSignature,
   readSubmissionIngestHistory,

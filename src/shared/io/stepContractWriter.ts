@@ -1,8 +1,14 @@
+// sites-pinned: tests/shared/step-contract-writer.test.ts, tests/audit/semantic-review-step.test.ts
+// (THE boundary every step renderer's prompt passes through: dropping the body
+// normalization puts a backslashed path back into every rendered prompt)
 import { mkdir, writeFile, readFile, readdir, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stepsDir } from "./auditToolsPaths.js";
 import { writeJsonFile } from "./json.js";
-import { toPromptPathToken } from "../tooling/exec.js";
+import {
+  normalizePromptBodyPaths,
+  toPromptPathToken,
+} from "../tooling/exec.js";
 
 /**
  * Single source of truth for the step-contract object + writer shared by both
@@ -283,9 +289,17 @@ export async function writeStepContract<
   // never reads this step from a shared file another peer has clobbered.
   const promptPath = currentPromptPath(input.artifactsDir, agentId);
   const stepPath = currentStepPath(input.artifactsDir, agentId);
-  const promptContent = input.trimPromptStart
-    ? input.prompt.trimStart()
-    : input.prompt;
+  // ONE normalization, applied to every step renderer's body. A path FIELD
+  // below goes through `toPromptPathToken`; the body used to go through
+  // nothing, so on win32 the same file reached the reader as
+  // `C:\...\host-workload.json` in the prose and `C:/.../host-workload.json`
+  // in the field beside it. The backslashed form breaks in every bash-like
+  // shell. Fixing this in each renderer is the copy-per-site shape this repo
+  // refuses; the one writer every step contract passes through is the boundary
+  // that owns it.
+  const promptContent = normalizePromptBodyPaths(
+    input.trimPromptStart ? input.prompt.trimStart() : input.prompt,
+  );
   await writeFile(promptPath, promptContent, "utf8");
 
   const callerArtifactPaths = input.artifactPaths ?? {};

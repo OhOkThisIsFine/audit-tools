@@ -1,3 +1,7 @@
+// sites-pinned: tests/audit/semantic-review-step.test.ts, tests/audit/host-handoff.test.ts
+// (the remedy map decides which section a refusal renders under, so inverting
+// any entry moves a work item to the wrong heading in the semantic-review
+// prompt)
 /**
  * Shared recording and trailing-state diagnostics for host-result ingestion.
  *
@@ -14,7 +18,10 @@ import {
   type SubmissionEventKind,
   type SubmissionLedgerEvent,
 } from "./submissionLedger.js";
-import type { SubmissionIssue } from "./submissionClassifier.js";
+import type {
+  SubmissionIssue,
+  SubmissionIssueCode,
+} from "./submissionClassifier.js";
 
 /** The accepted/rejected pair supplied by either host-result boundary. */
 export interface HostResultOutcomes<TIssueCode extends string = string> {
@@ -55,24 +62,76 @@ export async function readTrailingSubmissionRefusals(
 }
 
 /**
- * Is this issue an OBSERVATION that nothing has been written yet, rather than a
- * refusal of something that WAS written?
+ * WHAT THE READER OF A REFUSAL MUST DO ABOUT IT — the one thing a rendered
+ * ingest report is for.
  *
- * The distinction is the whole point of the split. "The host has not finished"
- * and "the host's work was refused" are different facts with different remedies
- * — the first asks for patience, the second for a repair — and a rendering that
- * gives them one shape forces every reader (a host parser, an operator, a
- * retry loop) to special-case the message text to tell them apart. That is
- * exactly what the measured friction was: a host parser special-casing the
- * string "no result file exists".
+ * Three answers, because there are three:
+ *
+ *  - `wait`   — nothing was written yet. The remedy is patience.
+ *  - `repair` — something WAS written and refused. The remedy is a corrected
+ *               result at the bound path.
+ *  - `none`   — the submission is settled and no work remains. The item is
+ *               finished (a concurrent ingest accepted it), or the refusal is
+ *               about the run's own persisted documents rather than about any
+ *               result, and the tool repairs it itself.
+ *
+ * The third answer is the one that was missing. `duplicate_submission_id` and
+ * the audit draw's `workload_stale` were rendered beside the repairable
+ * refusals, under one paragraph telling the reader to repair the result and
+ * write it again — so a reader who obeyed went looking for a work item the
+ * republished workload does not carry, because the item is no longer pending.
+ * Obedience has to be sufficient (owner review 2026-09-17, prompt 13).
+ *
+ * NOT the same vocabulary as {@link WORK_ITEM_OUTCOMES} below, and the two must
+ * not be merged. That one answers "what state is this item observed to be in",
+ * derived from evidence the run holds (a corroborated commit). This one answers
+ * "what should the reader do", derived from the issue CODE alone. An item can be
+ * `awaiting_result` with no refusal to remedy at all.
  *
  * The code is authoritative, never the message: a draw's prose may be reworded
  * at any time and the answer must not move with it.
  */
+export type IssueRemedy = "wait" | "repair" | "none";
+
+/**
+ * The remedy of every SHARED submission code. A draw that adds its own codes
+ * builds its own `Record<ItsCodeUnion, IssueRemedy>` by spreading this one — the
+ * record type is what makes a new code state its remedy to compile, rather than
+ * defaulting into whichever section a filter happens to leave it in (the audit
+ * draw's is `AUDIT_INGEST_ISSUE_REMEDY`).
+ */
+export const SUBMISSION_ISSUE_REMEDY: Readonly<
+  Record<SubmissionIssueCode, IssueRemedy>
+> = {
+  submission_missing: "wait",
+  submission_malformed: "repair",
+  submission_contract_invalid: "repair",
+  submission_rejected: "repair",
+  // The work item was ALREADY ACCEPTED by a concurrent ingest of this run, so
+  // it is not pending, it is not republished, and there is nothing to write.
+  duplicate_submission_id: "none",
+};
+
+/**
+ * Is this issue an OBSERVATION that nothing has been written yet, rather than a
+ * refusal of something that WAS written?
+ *
+ * Kept as its own name because four call sites read exactly this question, and
+ * derived from {@link SUBMISSION_ISSUE_REMEDY} so the "wait" answer has ONE
+ * home. A draw-specific code is absent from the shared record and so is not a
+ * missing observation — which is what every caller already assumed.
+ *
+ * The distinction was the whole point of the original two-way split. "The host
+ * has not finished" and "the host's work was refused" are different facts with
+ * different remedies, and a rendering that gives them one shape forces every
+ * reader (a host parser, an operator, a retry loop) to special-case the message
+ * text to tell them apart. That is exactly what the measured friction was: a
+ * host parser special-casing the string "no result file exists".
+ */
 export function isMissingObservation<TIssueCode extends string>(
   issue: SubmissionIssue<TIssueCode>,
 ): boolean {
-  return issue.code === "submission_missing";
+  return SUBMISSION_ISSUE_REMEDY[issue.code as SubmissionIssueCode] === "wait";
 }
 
 /**

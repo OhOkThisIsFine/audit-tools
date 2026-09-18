@@ -1,3 +1,7 @@
+// sites-pinned: tests/shared/step-contract-writer.test.ts, tests/audit/semantic-review-step.test.ts
+// (the prompt-path helpers decide how every written prompt states a path;
+// broadening the match corrupts non-path text, narrowing it leaves a
+// backslashed path in the body)
 import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 import { win32 } from "node:path";
 
@@ -339,6 +343,36 @@ function isPromptPathToken(value: string): boolean {
 
 export function toPromptPathToken(value: string): string {
   return isPromptPathToken(value) ? value.replace(/\\/g, "/") : value;
+}
+
+/**
+ * Every win32 ABSOLUTE path inside a free-text prompt body, forward-slashed.
+ *
+ * {@link toPromptPathToken} normalizes one whole token, which is what a step
+ * contract's path FIELDS are. A prompt body is a free string: a renderer
+ * interpolates a path into a sentence, so the same file reaches the reader
+ * backslashed in the prose and forward-slashed in the field beside it. A
+ * backslashed path breaks in every bash-like shell the reader may paste it
+ * into, and the disagreement itself makes the reader guess which form the tool
+ * means.
+ *
+ * ANCHORED ON A DRIVE LETTER OR A UNC ROOT, deliberately. The relative forms
+ * `toPromptPathToken` also accepts (`.\x`, `a\b.json`) are not recognized here:
+ * inside free text they are indistinguishable from a regular expression, an
+ * escape sequence, or a code sample, and rewriting one of those would corrupt
+ * prompt content. An absolute path has no such collision.
+ *
+ * A match ends at whitespace, so a path holding a SPACE is normalized up to
+ * that space. The result still agrees with what {@link toPromptPathToken} puts
+ * in the path field beside it, because the remainder of such a path holds no
+ * further separator to convert. Quoting a path with a space is the reader's
+ * problem either way, and free text cannot solve it.
+ */
+export function normalizePromptBodyPaths(body: string): string {
+  return body.replace(
+    /(?:[A-Za-z]:\\|\\\\[^\\\s"'`]+\\)[^\s"'`<>|]*/gu,
+    (match) => match.replace(/\\/g, "/"),
+  );
 }
 
 // Tokens matching this charset need no quoting in any of the three dialects

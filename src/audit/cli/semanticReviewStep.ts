@@ -6,7 +6,6 @@ import { resolve } from "node:path";
 
 import {
   deriveLaneDemand,
-  isMissingObservation,
   linkFrictionRunIds,
   readJsonFile,
 } from "audit-tools/shared";
@@ -23,6 +22,7 @@ import {
   type AuditHostTask,
   type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
+import { renderIngestReportLines } from "./ingestIssueSections.js";
 import { nextStepCommand } from "./prompts.js";
 import { writeCurrentStep } from "./steps.js";
 
@@ -63,85 +63,9 @@ function toHostTask(task: AuditTask): AuditHostTask {
 }
 
 /**
- * The classified failures of the ingest that just ran, stated to the host that
- * has to repair them. Same section the remediate draw already renders from the
- * same shared vocabulary — a work item whose result never arrived, would not
- * parse, or failed the contract is NAMED here instead of silently reappearing
- * in an identical workload.
- */
-function renderIngestIssueLines(
-  issues: readonly AuditHostIngestIssue[],
-): string[] {
-  // MISSING and REJECTED are stated under their OWN headings. They shared one
-  // before, which forced a host parser to special-case the message text — the
-  // measured friction — and told the reader the same thing about two situations
-  // whose remedies are opposite: one is patience, the other is a repair. The
-  // split is on the CODE, so rewording a message cannot move an item between
-  // the two.
-  const missing = issues.filter(isMissingObservation);
-  const rejected = issues.filter((issue) => !isMissingObservation(issue));
-  const section = (heading: string, lines: readonly string[]): string[] =>
-    lines.length === 0 ? [] : [heading, "", ...lines, ""];
-  return [
-    ...section(
-      "## Results not yet written",
-      missing.map((issue) => `- ${describeIssue(issue)}`),
-    ),
-    ...section(
-      "## Result status requiring attention",
-      rejected.map((issue) => `- ${describeIssue(issue)}`),
-    ),
-    ...(issues.length === 0
-      ? []
-      : [
-          // NOT "the bindings are unchanged": the run id is derived from the review
-          // obligation, so a partial ingest does NOT re-mint the run and the bound
-          // paths of carried-over items are stable. What still moves is the ASK — a
-          // re-planned task's prompt digest, and therefore its bound path, is
-          // different, and a result written against the old ask is correctly refused.
-          // So the workload published below is the authority for what to write, and a
-          // path quoted above is only guaranteed current for an item whose ask the
-          // ingest did not change.
-          "Each named work item is still pending and is republished in the workload below. Write its repaired result at that workload's bound `result_path` — that workload is always the authority for where a result is read.",
-          "",
-        ]),
-  ];
-}
-
-/** One issue as a bullet, with its locators. Shared by both sections above. */
-function describeIssue(issue: AuditHostIngestIssue): string {
-  return (
-    `${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
-    `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`
-  );
-}
-
-/**
- * The ADVISORY half of the ingest report: validation warnings on results that
- * WERE accepted. Deliberately a separate renderer from {@link renderIngestIssueLines}
- * — these need no repair, so they must not share a section (or a count) with
- * items that could not be accepted, or an accepted-with-warning result reads as
- * a refusal that never happened.
- */
-function renderValidationWarningLines(
-  warnings: readonly AuditHostValidationWarning[],
-): string[] {
-  if (warnings.length === 0) return [];
-  return [
-    "## Advisory notes on accepted results",
-    "",
-    ...warnings.map(
-      (warning) =>
-        `- \`${warning.work_item_id}\` was ACCEPTED; advisory: ${warning.message}`,
-    ),
-    "",
-  ];
-}
-
-/**
- * Publish the complete provider-neutral semantic-review workload. The host owns
- * every execution choice; audit-tools only binds prompts/results and ingests
- * validated AuditResult objects on the next invocation.
+ * Publish the complete semantic-review workload. The host owns every execution
+ * choice; audit-tools only binds prompts/results and ingests validated
+ * AuditResult objects on the next invocation.
  */
 export async function renderSemanticReviewStep(params: {
   root: string;
@@ -215,9 +139,11 @@ export async function renderSemanticReviewStep(params: {
       summary:
         `Published ${handoff.workload.work_items.length} pending semantic-review ` +
         `work item(s) for host execution.` +
+        // The summary states the COUNT and points at the report; it does not
+        // quote a heading. Which headings render depends on the remedy of each
+        // issue, so a quoted heading can name a section that is not there.
         (issues.length > 0
-          ? ` ${issues.length} prior submission(s) were not accepted — see "Result status requiring attention"` +
-            ` and "Results not yet written".`
+          ? ` ${issues.length} prior submission issue(s) are stated in the step prompt.`
           : ""),
       pending_tasks: handoff.workload.work_items.length,
       completed_tasks: completedTaskIds.size,
@@ -234,15 +160,23 @@ export async function renderSemanticReviewStep(params: {
     prompt: [
       "# audit-code semantic review",
       "",
-      ...renderIngestIssueLines(issues),
-      ...renderValidationWarningLines(validationWarnings),
-      `Read the complete provider-neutral workload at: ${handoff.workload_path}`,
+      ...renderIngestReportLines({
+        issues,
+        validationWarnings,
+        workloadFollows: true,
+      }),
+      `Read the workload at: ${handoff.workload_path}`,
       "",
-      "Execute every work item using the host facilities available in this conversation.",
-      "For each item, follow its prompt and write the exact result contract to its bound result_path.",
-      "Missing or invalid results remain pending; do not edit audit state or hand-merge results.",
+      // Two imperative steps, not one directive plus a plea. The removed plea
+      // ("do not edit audit state or hand-merge results") asked the reader to
+      // remember a rule `ingestAuditHostResults` already enforces: a result is
+      // bound to its run id, work item id and prompt digest, so a hand-merged
+      // or moved result is refused mechanically.
+      "For each work item in the workload:",
+      "1. Follow its prompt.",
+      "2. Write the result JSON at its bound `result_path`.",
       "",
-      `When the available results are written, run: ${continueCommand}`,
+      `When the results are written, run: ${continueCommand}`,
       "",
     ].join("\n"),
     access: {

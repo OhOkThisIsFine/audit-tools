@@ -15,6 +15,7 @@ import {
   type IntakeSummary,
 } from "../../src/remediate/intake.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
+import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -796,9 +797,12 @@ describe("resolveIntakeStep", () => {
     expect(result.kind).toBe("step");
     if (result.kind !== "step") throw new Error("expected step");
     expect(result.step.step_kind).toBe("confirm_auto_discovered_input");
-    // The prompt written to disk should name the discovered path
+    // The prompt written to disk should name the discovered path, in the ONE
+    // form `writeStepContract` states every path in — forward-slashed, the same
+    // as the step's own path fields. A native win32 path is what the renderer
+    // hands in; the writer normalizes it.
     const prompt = await readFile(result.step.prompt_path, "utf8");
-    expect(prompt).toContain(auditFindingsPath);
+    expect(prompt).toContain(normalizePromptBodyPaths(auditFindingsPath));
   });
 
   it("N-R01: with ack confirmed, proceeds past confirm_auto_discovered_input to intake", async () => {
@@ -994,8 +998,8 @@ describe("resolveIntakeStep", () => {
     if (result.kind !== "step") throw new Error("expected step");
     expect(result.step.step_kind).toBe("confirm_auto_discovered_input");
     const prompt = await readFile(result.step.prompt_path, "utf8");
-    expect(prompt).toContain(jsonPath);
-    expect(prompt).toContain(mdPath);
+    expect(prompt).toContain(normalizePromptBodyPaths(jsonPath));
+    expect(prompt).toContain(normalizePromptBodyPaths(mdPath));
     // Each discovered source carries provenance metadata (type/mtime).
     expect(prompt).toMatch(/type: (document|structured_audit)/);
   });

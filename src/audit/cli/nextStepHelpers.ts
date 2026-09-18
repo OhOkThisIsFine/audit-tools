@@ -18,7 +18,6 @@ import {
   hashContent,
   isFileMissingError,
   isJsonParseError,
-  isMissingObservation,
   isRecord,
   readJsonFile,
   readSubmissionIngestHistory,
@@ -156,6 +155,7 @@ import {
   type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
 import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
+import { renderIngestReportLines } from "./ingestIssueSections.js";
 import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   AUDIT_GATE_SUBMISSION_SCOPE,
@@ -3396,45 +3396,21 @@ async function withFoldAdvisories(
  * carried advisory is never dropped on the floor because the run happened to
  * move on to a different step kind — it is rendered as text, in the same
  * wording the semantic-review step's own sections use.
+ *
+ * "The same wording" is now MECHANICAL: both callers render through the one
+ * {@link renderIngestReportLines}. This function used to hand-copy the split,
+ * the bullet format and the headings, and the copy had already gone stale
+ * against the section it claimed to match.
+ *
+ * `workloadFollows` is FALSE here: this report rides a step of another kind,
+ * so no workload is published below it.
  */
 function renderCarriedAdvisoryLines(carried: FoldAdvisories): string[] {
-  const lines: string[] = [];
-  // The SAME missing/rejected split the semantic-review step renders, because a
-  // carried advisory and the step's own issues are the same fact reaching the
-  // operator through two different channels; they must not disagree on shape.
-  const describe = (issue: AuditHostIngestIssue): string =>
-    `${issue.work_item_id ? `\`${issue.work_item_id}\` (${issue.code}): ` : `${issue.code}: `}` +
-    `${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`;
-  const missing = carried.ingestIssues.filter(isMissingObservation);
-  const refused = carried.ingestIssues.filter((issue) => !isMissingObservation(issue));
-  if (missing.length > 0) {
-    lines.push(
-      "## Results not yet written",
-      "",
-      ...missing.map((issue) => `- ${describe(issue)}`),
-      "",
-    );
-  }
-  if (refused.length > 0) {
-    lines.push(
-      "## Result status requiring attention",
-      "",
-      ...refused.map((issue) => `- ${describe(issue)}`),
-      "",
-    );
-  }
-  if (carried.validationWarnings.length > 0) {
-    lines.push(
-      "## Advisory notes on accepted results",
-      "",
-      ...carried.validationWarnings.map(
-        (warning) =>
-          `- \`${warning.work_item_id}\` was ACCEPTED; advisory: ${warning.message}`,
-      ),
-      "",
-    );
-  }
-  return lines;
+  return renderIngestReportLines({
+    issues: carried.ingestIssues,
+    validationWarnings: carried.validationWarnings,
+    workloadFollows: false,
+  });
 }
 
 /** Emit the no-executor blocked step (the hand loop's `!selected_executor` arm). */

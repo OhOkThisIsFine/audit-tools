@@ -210,3 +210,137 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     );
   });
 });
+
+/**
+ * The text a host actually reads. The step's JSON fields have their own tests
+ * above; these pin the PROMPT, because the prompt is what the reader obeys and
+ * the JSON is the fallback (owner review 2026-09-17, prompt 13).
+ */
+describe("the semantic-review prompt states the right remedy for each refusal", () => {
+  /** The body of one `## ` section, up to the next heading or the end. */
+  function section(prompt: string, heading: string): string {
+    const start = prompt.indexOf(heading);
+    if (start === -1) return "";
+    const rest = prompt.slice(start + heading.length);
+    const end = rest.indexOf("\n## ");
+    return end === -1 ? rest : rest.slice(0, end);
+  }
+
+  async function renderWithIssues(): Promise<string> {
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
+    const step = await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      bundle,
+      ingestIssues: [
+        {
+          code: "submission_missing",
+          work_item_id: "task-a",
+          message: "no result file exists at the bound path",
+          result_path: "runs/semantic-host-run/results/task-a.json",
+        },
+        {
+          code: "submission_contract_invalid",
+          work_item_id: "task-b",
+          message: "file_coverage[0].total_lines is 40 but src/b.ts holds 2 lines",
+          result_path: "runs/semantic-host-run/results/task-b.json",
+        },
+        {
+          code: "duplicate_submission_id",
+          work_item_id: "task-c",
+          message:
+            "work item 'task-c' was already accepted by a concurrent ingest of this run",
+          result_path: "runs/semantic-host-run/results/task-c.json",
+        },
+        {
+          code: "workload_stale",
+          message:
+            "the persisted audit host workload is STALE — re-prepare the handoff",
+        },
+      ],
+    });
+    return await readFile(step.prompt_path, "utf8");
+  }
+
+  it("puts a SETTLED refusal under its own heading, never under the repair heading", async () => {
+    // `duplicate_submission_id` means a CONCURRENT ingest already ACCEPTED that
+    // work item (`ingestAuditHostResults` raises it only after the accepted-
+    // results ledger refuses the addition), so the item is no longer pending and
+    // the republished workload does not carry it. `workload_stale` names no work
+    // item at all and the tool re-prepares it in the same call. Both used to land
+    // under "Result status requiring attention", whose one paragraph told the
+    // reader to repair the result and write it again — an instruction that sends
+    // the reader looking for a bound path the workload does not hold.
+    const prompt = await renderWithIssues();
+
+    expect(section(prompt, "## Results not yet written")).toContain("task-a");
+    expect(section(prompt, "## Results to repair and write again")).toContain(
+      "task-b",
+    );
+    expect(
+      section(prompt, "## Results to repair and write again"),
+      "a settled work item must not appear under the repair heading",
+    ).not.toContain("task-c");
+    const settled = section(prompt, "## Settled — no action needed");
+    expect(settled).toContain("task-c");
+    expect(settled).toContain("workload_stale");
+    expect(prompt).not.toContain("## Result status requiring attention");
+  });
+
+  it("states the repair paragraph only when something is repairable", async () => {
+    // The paragraph is the repair instruction. A run whose only refusals are
+    // settled has nothing to repair, so stating it there re-introduces the same
+    // wrong instruction the section split exists to remove.
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
+    const step = await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      bundle,
+      ingestIssues: [
+        {
+          code: "duplicate_submission_id",
+          work_item_id: "task-c",
+          message: "already accepted by a concurrent ingest of this run",
+          result_path: "runs/semantic-host-run/results/task-c.json",
+        },
+      ],
+    });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(prompt).toContain("## Settled — no action needed");
+    expect(prompt).not.toContain("## Results to repair and write again");
+    // The paragraph's OWN opening words, not a phrase the current wording
+    // happens to carry: an assertion on wording that a rewrite drops stops
+    // reaching the property it names, and then it passes against a tree that
+    // states the paragraph unconditionally.
+    expect(
+      prompt,
+      "the repair instruction must not be stated when nothing is repairable",
+    ).not.toContain("Each item above is still pending");
+  });
+
+  it("prints every path in the prompt BODY the way it prints them in the JSON fields", async () => {
+    // `writeStepContract` normalizes every host-facing path FIELD through
+    // `toPromptPathToken`, and its header states why: raw Windows backslashes
+    // break in the bash-like shells a host may use. A prompt body is not a
+    // field, so the same file used to be printed twice in one step — forward-
+    // slashed in `artifact_paths.host_workload`, backslashed in the text the
+    // reader acts on.
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
+    const step = await renderSemanticReviewStep({
+      root,
+      artifactsDir,
+      activeReviewRun,
+      bundle,
+    });
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    expect(prompt).toContain(step.artifact_paths.host_workload!);
+    expect(
+      prompt,
+      "no rendered prompt may carry a Windows-style absolute path",
+    ).not.toMatch(/[A-Za-z]:\\/u);
+  });
+});

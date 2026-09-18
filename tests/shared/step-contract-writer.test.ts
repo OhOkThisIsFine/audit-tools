@@ -288,3 +288,59 @@ test("invalidateStepContracts removes the per-agent slot DIRECTORY, so a later w
     await cleanup();
   }
 });
+
+// The prompt BODY carries paths the same way the step's path FIELDS do. This is
+// the ONE boundary every step renderer's prompt passes through, so pinning it
+// here pins the class: no renderer can re-introduce a backslashed path by
+// interpolating one into its own sentence. Owner review of prompt 13,
+// 2026-09-17 ("Fix the class now, with a contract test").
+test("writeStepContract forward-slashes absolute paths inside the prompt BODY", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, "artifacts");
+    await writeStepContract<TestStepContract>(
+      baseInput(artifactsDir, {
+        prompt: [
+          "Read the workload at: C:\\Users\\dev\\repo\\.audit-tools\\host-workload.json",
+          "The share copy is at \\\\build\\share\\audit\\host-workload.json",
+        ].join("\n"),
+      }),
+    );
+
+    const promptOnDisk = await readFile(currentPromptPath(artifactsDir), "utf8");
+    expect(promptOnDisk).toContain(
+      "C:/Users/dev/repo/.audit-tools/host-workload.json",
+    );
+    expect(promptOnDisk).toContain("//build/share/audit/host-workload.json");
+    expect(
+      promptOnDisk,
+      "no written prompt may carry a Windows-style absolute path",
+    ).not.toMatch(/[A-Za-z]:\\/u);
+  } finally {
+    await cleanup();
+  }
+});
+
+// The other half of the same contract: the normalization is anchored on an
+// absolute-path root, so free text that merely holds backslashes — a regular
+// expression, an escape sequence, a code sample — reaches the reader unchanged.
+// A renderer that states a regex in its prompt must not have it rewritten.
+test("writeStepContract leaves non-path backslashes in the prompt BODY alone", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const artifactsDir = join(dir, "artifacts");
+    const body = [
+      "Match each id with /^[A-Za-z]\\d{4}$/u before you write it.",
+      "A literal tab is written \\t and a newline \\n.",
+      "The regex \\\\s+ collapses run-on whitespace.",
+    ].join("\n");
+    await writeStepContract<TestStepContract>(
+      baseInput(artifactsDir, { prompt: body }),
+    );
+
+    const promptOnDisk = await readFile(currentPromptPath(artifactsDir), "utf8");
+    expect(promptOnDisk).toBe(body);
+  } finally {
+    await cleanup();
+  }
+});
