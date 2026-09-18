@@ -420,3 +420,12 @@
   parse fails and `raw` keeps the envelope plus the advice. Only a non-completed job is affected,
   and no caller reads that body as an answer. **Property:** the body of a failed job is the lane's
   own text too, with the relay's advice returned beside it like `lanesTried` and `notice`.
+
+- **The in-scan `duplicate_submission_id` branch may now be unreachable (2026-09-18, low, friction:
+  tool_should_decide).** Prompt 20 made every result id tool-derived (`deriveResultId` over the
+  work item id and its prompt digest), and each item has one result path. So the `seen` check in
+  `scanOneSubmission` (`src/shared/submission/submissionScan.ts`) fires only when two files in one
+  scan parse to the same item and digest, and no test found this lap crosses it. The concurrent
+  ingest branch in `src/audit/cli/dispatch/hostHandoff.ts` is a different path and stays live.
+  **Property:** every issue code the classifier declares has a reachable production path and a
+  test that reaches it; prove one for the in-scan branch, or delete the branch.

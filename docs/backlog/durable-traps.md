@@ -23,6 +23,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `tests/shared/sync-spawn-budget.test.ts` reds because three sync spawns each blocked >60s
   (2026-09-16 — all three passed alone on the quiet re-run).
 
+- **A background PowerShell task can fail with NO output (2026-09-18).** `npm run build` started
+  as a background PowerShell task exited non-zero with an empty log; the same chain started as a
+  background Bash task (`cmd1 && cmd2 > log 2>&1`) worked. Start a long gate as a Bash background
+  task, and read its log file.
+
 - **An entry that reinterprets an incident must quote or link the primary record's own words for
   the mechanism, not restate them.** A paraphrase can change the mechanism while looking like a
   faithful summary, then send implementation toward a defect the primary record never described.
