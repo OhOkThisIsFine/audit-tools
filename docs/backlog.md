@@ -240,11 +240,11 @@
 - `durable-traps.md:887` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
 - `durable-traps.md:889` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
 - `durable-traps.md:901` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
-- `durable-traps.md:911` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
-- `durable-traps.md:928` — Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).
-- `durable-traps.md:943` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
-- `durable-traps.md:954` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
-- `durable-traps.md:960` — "File missing" is classified from ENOENT alone, and a path that traverses a FILE does not report ENOENT on both platforms (2026-09-03).
+- `durable-traps.md:917` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
+- `durable-traps.md:934` — Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).
+- `durable-traps.md:949` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
+- `durable-traps.md:960` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
+- `durable-traps.md:966` — "File missing" is classified from ENOENT alone, and a path that traverses a FILE does not report ENOENT on both platforms (2026-09-03).
 
 <!-- END GENERATED SEEK INDEX -->
 

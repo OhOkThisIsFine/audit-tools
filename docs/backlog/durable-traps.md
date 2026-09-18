@@ -907,6 +907,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   error instead of a visibly missing tail. Do not debug the quoting. Write multi-line file content
   with the Write tool and let Bash operate on the path — that also makes the content diffable and
   re-runnable, which the heredoc never was.
+  **The same failure hits a SINGLE-LINE command carrying one long quoted argument (2026-09-17)** —
+  a `node .claude/hooks/attest-loop-core-review.mjs --checked "<~900 characters>"` call died with
+  the identical message, at a constant reported line, with no quote character anywhere in the
+  argument. Shortening and rewording it did not help. The PowerShell tool ran the same command
+  with a single-quoted argument and succeeded first try. So the shape to avoid is a long quoted
+  argument in the Bash tool, not just a heredoc, and the escape is the PowerShell tool.
 
 - **Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not
   come back (2026-08-27).** From [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md).
