@@ -25,8 +25,11 @@ import {
   CP_MODULE_DECOMPOSITION_VERSION,
 } from "../../src/remediate/validation/contractPipeline.js";
 import { validateArtifacts } from "../../src/remediate/validation/artifacts.js";
-import { ROLES } from "../../src/remediate/steps/contractPipelinePrompts.js";
-import { contractPipelineDir } from "../../src/remediate/contractPipeline/artifactStore.js";
+import { ROLES, renderContractPipelinePrompt } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import {
+  CP_ARTIFACT_NAMES,
+  contractPipelineDir,
+} from "../../src/remediate/contractPipeline/artifactStore.js";
 import { intakePaths } from "../../src/remediate/intake.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
@@ -323,13 +326,23 @@ describe("INV-CVG-1: validateArtifacts batches every gate failure in one result 
 // ── B5 prompt guidance parity (INV-CVG-5) ─────────────────────────────────────
 
 describe("INV-CVG-5: decomposition role prompt guidance parity with the gate", () => {
-  it("POSITIVE: ROLES.decomposition.description tells the author to verify logic location / reject re-export shims", () => {
-    const desc = ROLES.decomposition.description;
-    expect(desc).toMatch(/re-export shim/i);
-    expect(desc).toMatch(/actually lives|where the named/i);
+  it("POSITIVE: the decomposition field rules state the shim rule as an instruction", () => {
+    expect(ROLES.decomposition.fieldRules).toContain(
+      "Scope each module at the file that holds its logic, never at a file that only re-exports (`export * from …`, `export { x } from …`).",
+    );
   });
 
-  it("NEGATIVE: the guidance references the enforcing gate so hint and gate stay paired", () => {
-    expect(ROLES.decomposition.description).toContain("validateDecompositionFileScope");
+  it("NEGATIVE: the worker text names no gate — the gate re-emits the phase itself (prompt 18)", () => {
+    // The pairing that matters is mechanical: next-step refuses a shim-only
+    // file_scope and re-emits decomposition (see the M-B3 re-emit test). A gate
+    // name in the worker text tells the worker nothing it can act on.
+    const rendered = renderContractPipelinePrompt({
+      role: "decomposition",
+      artifactPaths: Object.fromEntries(
+        CP_ARTIFACT_NAMES.map((name) => [name, `/cp/${name}.json`]),
+      ) as Parameters<typeof renderContractPipelinePrompt>[0]["artifactPaths"],
+    });
+    expect(rendered.prompt).not.toContain("validateDecompositionFileScope");
+    expect(rendered.prompt).not.toMatch(/gate/i);
   });
 });

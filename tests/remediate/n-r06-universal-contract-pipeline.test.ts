@@ -440,7 +440,7 @@ describe("N-R06: Path A (structured audit-findings.json) enters contract pipelin
 
     expect(rendered.prompt).toContain(seedPath);
     expect(rendered.prompt).toContain("Path-A Audit Seed");
-    expect(rendered.prompt).toContain("structured audit-findings report");
+    expect(rendered.prompt).toContain("Frame the goal around these findings.");
   });
 
   it("context_collection prompt references the path-A seed when it is present", async () => {

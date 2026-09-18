@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,7 +52,7 @@ const ALL_PATHS = {
 } as const;
 
 describe("contract pipeline prompt renderer — all roles", () => {
-  const EXPECTED_ROLES = [
+  const EXPECTED_PHASES = [
     "goal_normalization",
     "context_collection",
     "decomposition",
@@ -68,16 +67,17 @@ describe("contract pipeline prompt renderer — all roles", () => {
     "critic",
     "judge",
     "implementation_planning",
-    "closing",
   ];
 
-  it("phase order covers all expected roles", () => {
-    for (const role of EXPECTED_ROLES) {
-      expect(CONTRACT_PIPELINE_PHASE_ORDER).toContain(role);
-    }
+  it("phase order is exactly the expected phases", () => {
+    // `closing` is not a phase: the close phase writes verification_report
+    // itself (`buildVerificationReport`), so no worker prompt exists for it.
+    expect(CONTRACT_PIPELINE_PHASE_ORDER).toEqual(EXPECTED_PHASES);
   });
 
-  for (const role of EXPECTED_ROLES) {
+  // cyclic_seam_resolution is a phase with no role: the phase step renders its
+  // prompt from the detected cycles (see CP-NODE-13 below).
+  for (const role of EXPECTED_PHASES.filter((phase) => phase !== "cyclic_seam_resolution")) {
     describe(`role: ${role}`, () => {
       it("renders a prompt that includes the role title", () => {
         const result = renderContractPipelinePrompt({
@@ -123,7 +123,7 @@ describe("contract pipeline prompt renderer — all roles", () => {
           artifactPaths: ALL_PATHS,
           repoRoot: FAKE_REPO_ROOT,
         });
-        expect(result.prompt.toLowerCase()).toMatch(/stop after writing/);
+        expect(result.prompt).toContain("**Stop after you write the output file.**");
       });
 
       it("prompt includes the expected JSON schema or contract shape", () => {
@@ -224,7 +224,9 @@ describe("adversarial critic and judge roles", () => {
       repoRoot: FAKE_REPO_ROOT,
     });
     expect(result.prompt).toMatch(/addresses_counterexamples/);
-    expect(result.prompt).toMatch(/Traceability is mandatory/);
+    expect(result.prompt).toContain(
+      "Every accepted counterexample that is not waived is in some node's `addresses_counterexamples`.",
+    );
   });
 
   it("phase order runs critic then judge between assessment and implementation planning", () => {
@@ -298,7 +300,7 @@ describe("test_validator_plan role", () => {
       artifactPaths: ALL_PATHS,
       repoRoot: FAKE_REPO_ROOT,
     });
-    expect(result.prompt.toLowerCase()).toMatch(/stop after writing/i);
+    expect(result.prompt).toContain("**Stop after you write the output file.**");
   });
 
   it("CONTRACT_PIPELINE_PHASE_ORDER places test_validator_plan correctly", () => {
@@ -532,8 +534,8 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
 // CP-NODE-13 — the prompts the contract-pipeline GATES emit inline.
 //
 // Two prompts in the pipeline are not rendered by the role renderer above: the
-// cyclic-seam resolution step and the seed-digest refusal, both built inside
-// the gate that emits them. They carry contract obligations of their own, so
+// cyclic-seam resolution step and the seed-digest refusal, both built from
+// state the role table cannot see (the detected cycles, the drifted sources). They carry contract obligations of their own, so
 // they are pinned here alongside the rendered roles.
 // ---------------------------------------------------------------------------
 describe("CP-NODE-13: inline gate prompts", () => {
@@ -601,50 +603,25 @@ describe("CP-NODE-13: inline gate prompts", () => {
     expect(prompt).toContain("Rewrite");
     expect(prompt).toContain("obligation_ledger.input.json");
     expect(prompt).toContain("designated_obligation_id");
-    expect(prompt).toMatch(/re-check re-runs cycle detection over the ledger/);
-
+    expect(prompt).toContain("The tool runs cycle detection again on the ledger you leave");
+    // The worker is emitted only while a cycle exists, so `resolved` is its one
+    // answer (prompt 18, owner 2026-09-18).
+    expect(prompt).toContain('"status": "resolved"');
+    expect(prompt).not.toContain("no_cycles");
   });
 
-  it("PINS the renderer's copy of the same record schema by content hash", () => {
-    // The role renderer carries a SECOND copy of the cyclic-seam record schema,
-    // beside the gate's inline prompt. `contractPipelinePrompts.ts` was outside
-    // CP-NODE-13's write scope, so it was PINNED rather than repaired and this
-    // test recorded the staleness (`designated_obligation_id` was missing, so it
-    // documented a record the re-check rejects).
-    //
-    // P45 REACHED THE REPAIR. The staleness is now closed — the renderer's copy
-    // carries `designated_obligation_id`, and its other value vocabularies are
-    // derived from `contractPipeline/sketchSource.ts` rather than hand-written —
-    // so the pin is re-recorded here with its note retired, exactly as the note
-    // above instructed ("If you REPAIRED it: good — re-record the hash here and
-    // delete this note").
-    //
-    // Pinned by CONTENT HASH, deliberately, rather than by asserting field
-    // presence: a presence assertion is GREEN while an unrelated part of the copy
-    // drifts and goes RED only on the one field it names. A hash is red on ANY
-    // change in either direction, which is what routes the decision to the file's
-    // owner instead of to whoever happens to touch it next.
-    const rendered = renderContractPipelinePrompt({
-      role: "cyclic_seam_resolution",
-      artifactPaths: ALL_PATHS,
-      repoRoot: FAKE_REPO_ROOT,
-    });
-    const schema = rendered.prompt.match(
-      /```json\n([\s\S]*?cyclic-seam-resolution\/v1alpha1[\s\S]*?)\n```/,
-    )?.[1];
-    expect(schema, "the renderer must still emit a cyclic-seam record schema").toBeDefined();
-    expect(
-      createHash("sha256").update(schema!, "utf8").digest("hex"),
-      [
-        "The renderer's cyclic_seam_resolution schema changed.",
-        "This copy is NO LONGER stale — it carries `designated_obligation_id` and",
-        "derives its vocabularies from `contractPipeline/sketchSource.ts` (see",
-        "tests/remediate/step-prompt-sketch-drift.test.ts, which holds the field",
-        "values to the validators). It still is not the prompt the pipeline",
-        "dispatches for this phase; the gate's inline prompt is.",
-        "If you changed this deliberately, re-record the hash here.",
-      ].join(" "),
-    ).toBe("e7983ea766150f26505d69bc1ae5c7548069d670859e5e9e7cd3a87dd8e5dbe2");
+  it("the role renderer carries no second copy of the cyclic-seam record schema", () => {
+    // The role table used to hold a SECOND copy of this prompt, pinned here by
+    // content hash because it was not the text the pipeline dispatched. Prompt
+    // 18 (owner, 2026-09-18) retired it: the phase has ONE prompt, the one the
+    // phase step renders from the detected cycles.
+    expect(() =>
+      renderContractPipelinePrompt({
+        role: "cyclic_seam_resolution",
+        artifactPaths: ALL_PATHS,
+        repoRoot: FAKE_REPO_ROOT,
+      }),
+    ).toThrow(/Unknown contract-pipeline role: "cyclic_seam_resolution"/);
   });
 
   it("the seed-digest refusal names the mismatched path and the recovery", async () => {

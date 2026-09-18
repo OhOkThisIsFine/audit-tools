@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts
+// sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts
 //   contract-pipeline: the promotion computes no finding field FindingSchema would drop.
 //   dc3: the fan-out wording (needs, not mechanism) and the TRANSPORT report for a
 //   partially returned wave.
@@ -125,7 +125,7 @@ import {
 import type { JudgeRepairTarget } from "audit-tools/shared";
 import {
   CYCLIC_SEAM_BREAK_STRATEGIES,
-  CYCLIC_SEAM_RESOLUTION_STATUSES,
+  CYCLIC_SEAM_RESOLUTION_STATUSES_OFFERED,
   isCyclicSeamBreakStrategy,
   sketchValues,
 } from "../contractPipeline/sketchSource.js";
@@ -157,6 +157,7 @@ import {
   validateGoalIdConsistency,
   validateWorkBlockSeamPreparation,
   validateContractCitationGrounding,
+  validateDecompositionFileScope,
 } from "../validation/contractPipeline.js";
 // Imported from the owning gate module directly (as derive.ts does): this
 // loop-core path consumes the single outcome-based entry point and its
@@ -193,9 +194,6 @@ const ARTIFACT_TO_PHASE: Partial<Record<ContractPipelineArtifactName, string>> =
 // ── Phase → step kind mapping ──────────────────────────────────────────────────
 
 const CONTRACT_STEP_KIND: RemediationStepKind = "contract_pipeline";
-const PRE_IMPLEMENTATION_PHASE_ORDER = CONTRACT_PIPELINE_PHASE_ORDER.filter(
-  (phase) => phase !== "closing",
-);
 
 /**
  * Granularity collapse GROUPS (T1 slice 4b). Each group is a run of CONSECUTIVE
@@ -346,7 +344,7 @@ async function buildScaffoldSection(
         : "";
     return `## Pre-filled Skeleton — fill only the blank slots
 
-The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, \`kind\`, and \`scope_anchors\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. The negative assertion MUST name one of the spec's \`scope_anchors\` (the touched symbol/file) and must not be an unscoped repo-wide scan, or it fails the negative-scoping gate. Do not add, remove, or rename specs. If an obligation is genuinely untestable, replace its spec body with an \`inapplicable_claim\` citing its \`obligation_id\` and a falsifiable reason.${carryNote}
+The obligation ledger was derived deterministically. Below is the test-plan skeleton: one spec per testable obligation, with \`obligation_id\`, \`name\`, \`kind\`, and \`scope_anchors\` already filled. Fill ONLY each \`assertions\` array — every spec needs at least one positive (satisfied-path) assertion AND one negative (failure-path) assertion. The negative assertion MUST name one of the spec's \`scope_anchors\` (the touched symbol/file) and must not be an unscoped repo-wide scan, or it fails the negative-scoping gate. Do not add, remove, or rename specs. If an obligation is genuinely untestable, keep the spec's \`obligation_id\` and \`name\`, and replace its \`kind\`, \`scope_anchors\` and \`assertions\` with \`"inapplicable_claim": { "obligation_id": "<the same obligation_id>", "reason": "<a reason the ledger can disprove>" }\`.${carryNote}
 
 \`\`\`json
 ${JSON.stringify(scaffold, null, 2)}
@@ -629,7 +627,7 @@ export function shouldEnterContractPipeline(
 
 /** Return the first pipeline phase whose output artifact does not exist. */
 export function nextMissingContractPhase(artifactsDir: string): string | null {
-  for (const phase of PRE_IMPLEMENTATION_PHASE_ORDER) {
+  for (const phase of CONTRACT_PIPELINE_PHASE_ORDER) {
     const artifactName = PHASE_TO_ARTIFACT[phase];
     if (!artifactName) continue;
 
@@ -973,17 +971,10 @@ export async function detectSeedSourceDigestMismatches(
  * `finalized_module_contracts` (not `design_spec`).
  */
 // Post-redesign: finalized_module_contracts replaces the deprecated design_spec
-// target, which is no longer a member of the shared `JudgeRepairTarget` either.
-//
-// ExtendedRepairTarget EXCLUDES `counterexample`: the validator admits it (a
-// judge may demand the critic re-run), but this loop's repair renderer has a
-// schema sketch for the three contract artifacts only, so it cannot regenerate a
-// counterexample report. Deriving from the shared union and narrowing here states
-// that gap as a type rather than leaving it to a runtime lookup.
-type ExtendedRepairTarget = Exclude<
-  JudgeRepairTarget,
-  "counterexample" | "design_spec"
->;
+// target. The legacy alias stays admissible (a report from an older release),
+// so the loop's own target type narrows it out: the repair renderer has a schema
+// sketch for the three contract artifacts only.
+type ExtendedRepairTarget = Exclude<JudgeRepairTarget, "design_spec">;
 
 /**
  * Infer the most appropriate repair target from judge classifications when no
@@ -1136,24 +1127,14 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
 
   // Map judge.repair_directive.target if present; if absent, infer from classifications.
   //
-  // No `design_spec` normalization. The validator and the shared `JudgeRepairTarget`
-  // union now derive from ONE declaration of the repair-target vocabulary
-  // (`contractPipeline/sketchSource.ts`), so `design_spec` — the pre-redesign name
-  // for `finalized_module_contracts` — is not a value the type admits and not a
-  // value the validator accepts. The branch that rewrote it used to be the only
-  // thing keeping a legacy name working, and carried a cast that erased the very
-  // check it was performing.
-  //
-  // `counterexample` is admitted by the contract and refused HERE, at the one
-  // place that would have to act on it: this loop's repair renderer has a schema
-  // sketch for the three contract artifacts only (see REPAIR_TARGET_SCHEMA), so a
-  // directive naming the critic's own report falls back to the inferred contract
-  // repair rather than being carried into a renderer that cannot honour it.
+  // The validator admits only the three contract artifacts plus the legacy
+  // `design_spec` alias (a report from an older release); `counterexample` is
+  // refused at ingestion with its reason, never swapped here. The legacy alias
+  // falls through to the inferred target, as it always has.
   const rawDirective = judge.repair_directive;
   const directive: { target: ExtendedRepairTarget; instruction: string } = rawDirective
     ? {
         target:
-          rawDirective.target === "counterexample" ||
           rawDirective.target === "design_spec"
             ? inferRepairDirective(judge).target
             : rawDirective.target,
@@ -1556,7 +1537,16 @@ async function evaluatePreCriticCitationGrounding(
   const citations = decompositionModulesToCitations(decomposition);
   if (citations.length === 0) return null;
   const result = await validateContractCitationGrounding(citations, repoRoot);
-  const errors = result.issues.filter((issue) => issue.severity === "error");
+  // The same boundary owns the re-export-shim rule: a file_scope that grounds
+  // only at a barrel is as unfixable downstream as one that does not ground at
+  // all, and the decomposition prompt states the rule as binding.
+  // Its tree-readability issue repeats the citation gate's own, so it is dropped.
+  const shimIssues = (await validateDecompositionFileScope(decomposition, repoRoot)).filter(
+    (issue) => issue.path !== "decomposition_file_scope.repo_tree",
+  );
+  const errors = [...result.issues, ...shimIssues].filter(
+    (issue) => issue.severity === "error",
+  );
   if (errors.length === 0) return null;
   return { errorLines: errors.map((issue) => `- [${issue.path}] ${issue.message}`) };
 }
@@ -2123,11 +2113,27 @@ After writing the output file, run:
   });
 }
 
-function writeContractPhaseStep(
+async function writeContractPhaseStep(
   ctx: ContractGateContext,
   phase: string,
   extraSection?: string,
 ): Promise<RemediationStep> {
+  if (phase === "cyclic_seam_resolution") {
+    // One text for this phase: a generic re-emit carries the same ledger-rewrite
+    // instructions as the gate's own attempt (see renderCyclicSeamResolutionPrompt).
+    const graph = await readSeamObligationGraph(ctx.artifactsDir);
+    const outputPath = contractInputFilePath(ctx.artifactsDir, "cyclic_seam_resolution");
+    return writeContractPromptStep(ctx, {
+      prompt: renderCyclicSeamResolutionPrompt({
+        cycleDescriptions: renderCycleDescriptions(detectCyclicSeamObligations(graph.nodes)),
+        ledgerInputPath: contractInputFilePath(ctx.artifactsDir, "obligation_ledger"),
+        outputPath,
+        extraSection: extraSection ? `\n${extraSection}` : undefined,
+      }),
+      outputPath,
+      stopCondition: CYCLIC_SEAM_RESOLUTION_STOP,
+    });
+  }
   const rendered = renderContractPipelinePrompt({
     role: phase,
     artifactPaths: ctx.artifactPaths,
@@ -2211,7 +2217,7 @@ async function writeCollapsedRoundTripStep(
 
 This is a low-complexity change, so these ${phases.length} coherent authoring phases are combined into a SINGLE round-trip. Complete EVERY section below — author them top-down, writing each artifact to its named path (each later section's inputs are the files you write in the earlier sections of this same round-trip). Then run next-step ONCE.
 
-Treat any per-section "Stop after writing the output file / do not advance" instruction as scoped to that section only — it does NOT mean stop the round-trip. Finish all sections first.
+Treat any per-section "Stop after you write the output file" / "Do not start the next phase" instruction as scoped to that section only — it does NOT mean stop the round-trip. Finish all sections first.
 
 If you cannot complete a section (an artifact would be malformed), write the ones you can and run next-step: the pipeline re-emits any missing or invalid artifact as its own fine-grained step, so no work is lost.
 
@@ -3537,20 +3543,51 @@ Manually rewrite the obligation_ledger to remove circular depends_on references,
 
   return {
     via: "step",
-    prompt: `# Cyclic Seam Resolution
+    prompt: renderCyclicSeamResolutionPrompt({
+      cycleDescriptions,
+      ledgerInputPath,
+      outputPath,
+      extraSection: rejectionSection,
+    }),
+    outputPath,
+    stopCondition: CYCLIC_SEAM_RESOLUTION_STOP,
+  };
+};
 
-Circular interface-definition obligations were detected in the obligation ledger. You must resolve every cycle using one of the two sanctioned strategies below, then REWRITE THE LEDGER and write the resolution record.
+const CYCLIC_SEAM_RESOLUTION_STOP =
+  "Stop after rewriting the obligation_ledger, writing the cyclic_seam_resolution output file, and running next-step.";
+
+/**
+ * The ONE worker prompt for cyclic-seam resolution. The gate emits it for each
+ * attempt, and every generic re-emit of the phase (a refused ingestion, a stale
+ * archive, a goal-id mismatch) emits it too — a second, shorter text used to
+ * reach the worker on those re-emits and left out the ledger rewrite that the
+ * re-check requires, so the retry was refused for a rule it was never told.
+ *
+ * The worker writes only `resolved`: `no_cycles` is the tool's own record, and
+ * the re-check refuses any record while the ledger still has a cycle.
+ */
+export function renderCyclicSeamResolutionPrompt(params: {
+  cycleDescriptions: string;
+  ledgerInputPath: string;
+  outputPath: string;
+  extraSection?: string;
+}): string {
+  const { cycleDescriptions, ledgerInputPath, outputPath } = params;
+  return `# Cyclic Seam Resolution
+
+The obligation ledger has circular interface-definition obligations. Break each cycle with one of the two strategies below. Then rewrite the ledger and write the resolution record.
 
 ## Detected Cycles
 
 ${cycleDescriptions}
-${rejectionSection}
-## Sanctioned Break Strategies
+${params.extraSection ?? ""}
+## Break Strategies
 
 For each cycle, choose one:
 
-1. **Mediator module** — Introduce a third obligation/module that both sides depend on. The mediator owns the shared primitive; neither original module defines an interface for the other. The mediator must be an obligation that EXISTS in the ledger and is NOT a member of the cycle.
-2. **Single authority** — Designate one of the cycle's own obligations as the definitive owner of the interface. The others become consumers only. Record this as an explicit, scoped exception.
+1. **Mediator** — Designate a third obligation that both sides depend on. The mediator owns the shared primitive; neither original obligation defines an interface for the other. The mediator must exist in the ledger and must not be a member of the cycle.
+2. **Single authority** — Designate one of the cycle's own obligations as the owner of the interface. The others become consumers only. Name the scoped exception in \`exception_registration\`.
 
 ## Required Inputs
 
@@ -3558,10 +3595,10 @@ For each cycle, choose one:
 
 ## Your Task
 
-Two files, both required — the record alone is not a break:
+Write two files. The record alone does not break a cycle:
 
-1. **Rewrite \`${ledgerInputPath}\`** so the cycle's \`depends_on\` edges actually route through the obligation you designate. The re-check re-runs cycle detection over the ledger you leave behind; a resolution record whose ledger still carries the cycle is rejected, not accepted.
-2. **Write the resolution record** to exactly \`${outputPath}\`, naming for each cycle the obligation id you designated:
+1. **Rewrite \`${ledgerInputPath}\`** so each cycle's \`depends_on\` edges route through the obligation you designate. The tool runs cycle detection again on the ledger you leave; it refuses the record while any cycle remains.
+2. **Write the resolution record** to exactly \`${outputPath}\`, with one entry per cycle:
 
 \`\`\`json
 {
@@ -3571,24 +3608,18 @@ Two files, both required — the record alone is not a break:
     {
       "members": ["<obligation-id>", "..."],
       "break_strategy": "${sketchValues(CYCLIC_SEAM_BREAK_STRATEGIES)}",
-      "designated_obligation_id": "<the mediating obligation, or the single authority — must exist in the rewritten ledger>",
+      "designated_obligation_id": "<the mediator, or the single authority — must exist in the rewritten ledger>",
       "resolution_description": "<what was changed and why>",
       "exception_registration": "<if single_authority: the named scoped exception; otherwise null>"
     }
   ],
-  "status": "${sketchValues(CYCLIC_SEAM_RESOLUTION_STATUSES)}"
+  "status": "${sketchValues(CYCLIC_SEAM_RESOLUTION_STATUSES_OFFERED)}"
 }
 \`\`\`
 
-If after analysis you find the cycles are already broken (e.g. upon re-reading the ledger the depends_on edges do not actually form a cycle), set status to "no_cycles" and cycles to [].
-
-**Stop after writing the two files.** Do not edit source files. Do not advance to the next pipeline step.
-`,
-    outputPath,
-    stopCondition:
-      "Stop after rewriting the obligation_ledger, writing the cyclic_seam_resolution output file, and running next-step.",
-  };
-};
+**Stop after you write the two files.** Do not edit source files. Do not start the next phase.
+`;
+}
 
 /**
  * Cyclic-seam RE-CHECK. The worker has written a `resolved` record; verify the
@@ -3614,18 +3645,29 @@ const cyclicSeamRecheckGate: ContractGate = async (ctx) => {
   const resolution = envelopePayload(resolutionEnvelope) as
     | Record<string, unknown>
     | undefined;
-  if (
-    !resolution ||
-    resolution.status !== "resolved" ||
-    !Array.isArray(resolution.cycles) ||
-    resolution.cycles.length === 0
-  ) {
-    return null;
-  }
+  if (!resolution) return null;
 
+  // The record never decides whether cycles remain — the live ledger does. A
+  // `no_cycles` record (the tool's own, or a worker's) passes only while the
+  // ledger is acyclic, and a `resolved` record passes only when every per-cycle
+  // break holds AND no cycle is left anywhere. Before, any status other than
+  // `resolved`, or a `resolved` record with an empty `cycles` list, advanced the
+  // pipeline with the cycles still in the ledger.
   const graph = await readSeamObligationGraph(ctx.artifactsDir);
+  const remaining = detectCyclicSeamObligations(graph.nodes);
   let rejection: string | undefined;
-  for (const cycleRecord of resolution.cycles as Array<Record<string, unknown>>) {
+  if (resolution.status !== "resolved") {
+    if (remaining.length === 0) return null;
+    rejection =
+      `The resolution record says status ${JSON.stringify(resolution.status ?? null)}, but the ` +
+      `obligation ledger still has ${remaining.length} cycle(s):\n\n${renderCycleDescriptions(remaining)}\n\n` +
+      `Break each cycle in the ledger, then write status "resolved" with one entry per cycle.`;
+  }
+  const cycleRecords =
+    !rejection && Array.isArray(resolution.cycles)
+      ? (resolution.cycles as Array<Record<string, unknown>>)
+      : [];
+  for (const cycleRecord of cycleRecords) {
     if (!Array.isArray(cycleRecord.members)) continue;
     const members = (cycleRecord.members as unknown[]).filter(
       (member): member is string => typeof member === "string",
@@ -3653,6 +3695,12 @@ const cyclicSeamRecheckGate: ContractGate = async (ctx) => {
       rejection = validation.reason ?? `Cycle [${members.join(", ")}] was not resolved.`;
       break;
     }
+  }
+  if (!rejection && remaining.length > 0) {
+    rejection =
+      `The obligation ledger still has ${remaining.length} cycle(s) that no accepted break ` +
+      `removed:\n\n${renderCycleDescriptions(remaining)}\n\nBreak each of them in the ledger, ` +
+      `and record one entry per cycle.`;
   }
 
   if (!rejection) return null;
@@ -3808,7 +3856,7 @@ ${preCriticGate.errorLines.join("\n")}
         discriminator: "decomposition:citation_grounding:pre_critic",
         note:
           "decomposition re-emitted: a module's file_scope cited a component " +
-          "that does not exist in the working tree (M-B3 citation grounding).",
+          "that does not exist in the working tree, or only re-export shims.",
         category: "trap",
       },
       "remediate-code",
@@ -3816,9 +3864,9 @@ ${preCriticGate.errorLines.join("\n")}
     return {
       via: "phase",
       phase: "decomposition",
-      extraSection: `## Source-Grounded Citation Gate Errors
+      extraSection: `## Module File Scope Errors
 
-A module's file_scope cites a component that does not exist in the working tree. file_scope lives in the module decomposition (the finalized contracts carry interface fields, not paths), so fix the offending path(s) in the decomposition — every cited path or symbol must point at something real before adversarial review begins:
+A module's file_scope does not point at real logic in the working tree. Fix each path below in the decomposition: every path must exist, and each module must own at least one file that holds its logic, not only files that re-export:
 
 ${preCriticCitationGate.errorLines.join("\n")}
 `,

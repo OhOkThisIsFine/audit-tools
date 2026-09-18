@@ -24,6 +24,7 @@ import {
   renderContractPipelinePrompt,
   renderContractRepairPrompt,
 } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { renderCyclicSeamResolutionPrompt } from "../../src/remediate/steps/contractPipeline.js";
 import { synthesizeIntakePrompt } from "../../src/remediate/steps/prompts.js";
 import {
   CharterComparisonSubmissionSchema,
@@ -225,12 +226,6 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
     render: renderPipeline("contract_finalization"),
   },
   {
-    builder: "renderContractPipelinePrompt[cyclic_seam_resolution]",
-    schema: { name: "validateCyclicSeamResolution", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "cycles.members", "cycles.break_strategy", "cycles.resolution_description", "cycles.exception_registration", "status"],
-    render: renderPipeline("cyclic_seam_resolution"),
-  },
-  {
     builder: "renderContractPipelinePrompt[obligation_ledger]",
     schema: { name: "validateObligationLedger", file: "src/remediate/validation/contractPipeline.ts" },
     projectionFields: ["contract_version", "goal_id", "obligations.id", "obligations.description", "obligations.kind", "obligations.depends_on", "obligations.status"],
@@ -271,12 +266,6 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
     schema: { name: "validateImplementationDAG", file: "src/remediate/validation/contractPipeline.ts" },
     projectionFields: ["contract_version", "goal_id", "nodes.id", "nodes.title", "nodes.description", "nodes.satisfies_obligations", "nodes.addresses_counterexamples", "nodes.addressed_critique_items", "nodes.depends_on", "nodes.verification_obligation_ids", "nodes.targeted_commands", "nodes.status", "edges.from", "edges.to", "edges.kind"],
     render: renderPipeline("implementation_planning"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[closing]",
-    schema: { name: "validateVerificationReport", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "findings.finding_id", "findings.traces.trace_id", "findings.traces.kind", "findings.traces.label", "findings.traces.evidence", "findings.traces.status", "findings.overall_status", "overall_status"],
-    render: renderPipeline("closing"),
   },
   {
     builder: "renderContractRepairPrompt[finalized_module_contracts]",
@@ -341,6 +330,21 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
 
 export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
   ...pipelineProjectionRows,
+  {
+    // Prompt 18: the cyclic-seam worker is rendered only by the re-check gate,
+    // which names the detected cycles — there is no ROLES entry for it.
+    builder: "renderCyclicSeamResolutionPrompt",
+    file: "src/remediate/steps/contractPipeline.ts",
+    disposition: "projection",
+    schema: { name: "validateCyclicSeamResolution", file: "src/remediate/validation/contractPipeline.ts" },
+    projectionFields: ["contract_version", "goal_id", "cycles.members", "cycles.break_strategy", "cycles.designated_obligation_id", "cycles.resolution_description", "cycles.exception_registration", "status"],
+    render: () =>
+      renderCyclicSeamResolutionPrompt({
+        cycleDescriptions: "Cycle 1: [OBL-A, OBL-B]",
+        ledgerInputPath: artifactPaths.obligation_ledger,
+        outputPath: artifactPaths.cyclic_seam_resolution,
+      }),
+  },
   {
     builder: "synthesizeIntakePrompt",
     file: "src/remediate/steps/prompts.ts",

@@ -761,9 +761,9 @@ describe("INV-remediate-pipeline-08: phase order is single-sourced — phase nam
     }
   });
 
-  it("CONTRACT_PIPELINE_PHASE_ORDER contains 'closing' as the last phase", () => {
+  it("CONTRACT_PIPELINE_PHASE_ORDER ends at 'implementation_planning' (the close phase writes verification_report itself)", () => {
     const last = CONTRACT_PIPELINE_PHASE_ORDER[CONTRACT_PIPELINE_PHASE_ORDER.length - 1];
-    expect(last).toBe("closing");
+    expect(last).toBe("implementation_planning");
   });
 
   it("CONTRACT_PIPELINE_PHASE_ORDER has no duplicate phases", () => {

@@ -117,7 +117,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(step.step_kind).toBe("contract_pipeline");
     expect(step.artifact_paths.output).toMatch(/goal_spec\.input\.json$/);
     expect(prompt).toMatch(/Goal Normalization/);
-    expect(prompt).toMatch(/Stop after writing the output file/i);
+    expect(prompt).toMatch(/Stop after you write the output file/);
     expect(prompt).not.toMatch(/Extract Findings From Intake Brief/);
   });
 

@@ -33,10 +33,14 @@
   delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
   discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
   §"The estimator charters".
-- **The host-prompt review reached prompt 17.** In
-  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 17 read APPROVED (owner,
-  2026-09-17 and 2026-09-18); rows 18 through 20 are still PROPOSED and wait for the owner's
-  one-at-a-time review. Row 16 moved a worker's clarification question onto the item it pauses
+- **The host-prompt review reached prompt 18.** In
+  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 18 read APPROVED (owner,
+  2026-09-17 and 2026-09-18); rows 19 and 20 are still PROPOSED and wait for the owner's
+  one-at-a-time review. Row 18 gave each contract-pipeline role its own read scope and Field
+  Rules, and moved three asks into tooling: a shim-only decomposition scope re-emits
+  decomposition, the cyclic-seam re-check reads the live ledger (the record never decides whether
+  cycles remain), and the judge's `counterexample` repair target is refused with a reason. The
+  `closing` worker phase is retired: the close phase writes `verification_report`. Row 16 moved a worker's clarification question onto the item it pauses
   (the run-level list is retired) and made every resolution file a bare array that is refused whole
   on one bad entry; row 17a shares that parser and its rules text. Row 17b refuses a malformed
   review resolution whole (a wrong field name used to approve a declined finding) and records the
@@ -55,10 +59,10 @@
 
 ## Immediate next
 
-**Open prompt 18** — `contract_pipeline` in `src/remediate/steps/contractPipelinePrompts.ts`,
-specs 18a (phased worker) and 18b (repair). Render the live prompt text. Measure its defects
-against the schema that consumes the submission. Then ask the owner. Prompt 20 is loop-core: it needs `/design-check` plus a staged-tree
-attestation.
+**Open prompt 19** — `verify_remediation`. The tracker row says no renderer exists and
+verification is mechanical, so Part 2 row 19 is stale. Confirm that against the code. Then ask
+the owner how to close the row. Prompt 20 is loop-core: it needs `/design-check` plus a
+staged-tree attestation.
 
 **Live owner decision:** none. The owner decided on 2026-09-17 to hold this lap's branch unpushed
 until prompt 20 is approved, and to land it in one ceremony then.

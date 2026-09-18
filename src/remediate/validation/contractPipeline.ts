@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-pipeline.test.ts
 /**
  * Validation helpers for contract-pipeline artifacts.
  * Follows the ValidationIssue[] pattern used by the rest of the remediator
@@ -15,6 +16,7 @@ import {
   ASSESSMENT_FINDING_STATUSES,
   ASSESSMENT_VERDICTS,
   CONTRACT_REPAIR_TARGETS,
+  CONTRACT_REPAIR_TARGETS_OFFERED,
   CONTEXT_ENTRY_KINDS,
   COUNTEREXAMPLE_CLASSIFICATIONS,
   CRITIQUE_ITEM_KINDS,
@@ -434,17 +436,25 @@ export function validateTestValidatorPlan(
       }
       requireString(spec.obligation_id, `${path}.test_specs[${i}].obligation_id`, issues);
       requireString(spec.name, `${path}.test_specs[${i}].name`, issues);
-      requireOneOf(spec.kind, TEST_SPEC_KINDS, `${path}.test_specs[${i}].kind`, issues);
-      if (!Array.isArray(spec.assertions) || spec.assertions.length === 0) {
-        pushValidationIssue(
-          issues,
-          `${path}.test_specs[${i}].assertions`,
-          `${path}.test_specs[${i}].assertions must be a non-empty array of strings.`,
-        );
-      } else {
-        requireStringArray(spec.assertions, `${path}.test_specs[${i}].assertions`, issues);
+      // A spec that disputes its obligation carries no test: it needs only its
+      // id, its name and the claim. The scaffold tells the worker to replace the
+      // spec body with the claim, and this validator used to refuse exactly that.
+      const inapplicable = spec.inapplicable_claim !== undefined;
+      if (!inapplicable || spec.kind !== undefined) {
+        requireOneOf(spec.kind, TEST_SPEC_KINDS, `${path}.test_specs[${i}].kind`, issues);
       }
-      if (spec.inapplicable_claim !== undefined) {
+      if (!inapplicable || spec.assertions !== undefined) {
+        if (!Array.isArray(spec.assertions) || (!inapplicable && spec.assertions.length === 0)) {
+          pushValidationIssue(
+            issues,
+            `${path}.test_specs[${i}].assertions`,
+            `${path}.test_specs[${i}].assertions must be a non-empty array of strings.`,
+          );
+        } else {
+          requireStringArray(spec.assertions, `${path}.test_specs[${i}].assertions`, issues);
+        }
+      }
+      if (inapplicable) {
         if (!isRecord(spec.inapplicable_claim)) {
           pushValidationIssue(
             issues,
@@ -563,7 +573,18 @@ export function validateJudgeReport(
     if (!isRecord(v.repair_directive)) {
       pushValidationIssue(issues, `${path}.repair_directive`, `${path}.repair_directive must be an object.`);
     } else {
-      requireOneOf(v.repair_directive.target, CONTRACT_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
+      if (v.repair_directive.target === "counterexample") {
+        // Named, not only listed: the critic's report is the input the judge
+        // rules on, so a repair of it is a new critic round, not a repair. Before,
+        // the loop swapped this target for another one in silence.
+        pushValidationIssue(
+          issues,
+          `${path}.repair_directive.target`,
+          `${path}.repair_directive.target "counterexample" is not a repair target: the judge rules on the critic's report and cannot order it rewritten. Name the contract artifact that must change (${CONTRACT_REPAIR_TARGETS_OFFERED.join(", ")}), or classify the counterexample as residual_risk.`,
+        );
+      } else {
+        requireOneOf(v.repair_directive.target, CONTRACT_REPAIR_TARGETS, `${path}.repair_directive.target`, issues);
+      }
       requireString(v.repair_directive.instruction, `${path}.repair_directive.instruction`, issues);
     }
   }

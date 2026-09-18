@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/contract-pipeline-prompts.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-validation-gates.test.ts
 /**
  * Bounded prompt renderers for each of the contract-pipeline roles.
  * Each renderer accepts only the required artifact paths for its role and
@@ -5,6 +6,7 @@
  * schema-grounded rather than embedding raw artifact content.
  */
 import { DEPENDENCY_MAP } from "../contractPipeline/artifactStore.js";
+import { GOAL_ID_MAX_LENGTH } from "../contractPipeline/idRegistry.js";
 import {
   ASSESSMENT_FINDING_STATUSES,
   ASSESSMENT_VERDICTS,
@@ -14,8 +16,6 @@ import {
   CRITIQUE_ITEM_KINDS,
   CRITIQUE_ITEM_SEVERITIES,
   CRITIQUE_VERDICTS,
-  CYCLIC_SEAM_BREAK_STRATEGIES,
-  CYCLIC_SEAM_RESOLUTION_STATUSES,
   GOAL_SOURCE_TYPES,
   IMPLEMENTATION_EDGE_KINDS,
   IMPLEMENTATION_NODE_STATUSES,
@@ -24,10 +24,6 @@ import {
   OBLIGATION_STATUSES,
   SEAM_RESOLUTION_DECISIONS,
   TEST_SPEC_KINDS,
-  VERIFICATION_FINDING_STATUSES,
-  VERIFICATION_REPORT_STATUSES,
-  VERIFICATION_TRACE_KINDS,
-  VERIFICATION_TRACE_STATUSES,
   sketchValues,
 } from "../contractPipeline/sketchSource.js";
 import type { ContractPipelineArtifactName } from "../contractPipeline/artifactStore.js";
@@ -52,11 +48,42 @@ interface ContractPipelineRole {
   outputKey: ContractPipelineArtifactName;
   /** JSON schema / contract shape description for the output. */
   outputSchema: string;
-  /** Short description of what this role does. */
+  /** The role's task: what the worker writes, and nothing the tool does later. */
   description: string;
+  /**
+   * The rules the tool ENFORCES on this role's output, stated where the field is
+   * written. The repair prompt for an artifact states the same rules (see
+   * `REPAIR_TARGET_ROLE`), so a first write and a repair cannot be told
+   * different things. Only rules a validator or gate refuses belong here.
+   */
+  fieldRules?: readonly string[];
+  /**
+   * Which repository files the worker may read beyond the listed inputs, as the
+   * end of "You may also read repository files …". Absent: the worker reads the
+   * listed files only. Present only for the roles whose output cannot be right
+   * without the source: an unconditional "do not read source files" made a
+   * careful worker guess where a module's logic lives.
+   */
+  repoReads?: string;
+  /**
+   * What the Path-A seed asks of THIS role. Absent: the role gets no seed
+   * section. One sentence per role, because "frame the goal and context" is the
+   * task of the first two roles only.
+   */
+  pathASeed?: string;
   /** Whether this phase requires independent review (not the author). Defaults to false. */
   isIndependentCritic?: boolean;
 }
+
+/**
+ * The ONE statement of the `targeted_commands` rule. The tool executes each
+ * entry verbatim through a shell, one invocation per entry; the rule is
+ * single-sourced in `audit-tools/shared` (`commandLeavesDeclaredShape`), and
+ * this text states it where the field is written. A worker that emitted
+ * `npm run build && npm run check` on 23 nodes cost a whole DAG regeneration.
+ */
+const TARGETED_COMMANDS_RULE =
+  "`targeted_commands`: one command per entry, run verbatim through a shell. Write `\"npm run build\"` and `\"npm run check\"` as two entries, never `\"npm run build && npm run check\"`. Do not use a pipe, a redirect, `;` or command substitution: the tool refuses those, and the whole DAG is written again.";
 
 export const ROLES: Record<string, ContractPipelineRole> = {
   goal_normalization: {
@@ -70,8 +97,11 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "success_criteria": ["<measurable criteria>"],
   "source_type": "${sketchValues(GOAL_SOURCE_TYPES)}"
 }`,
-    description:
-      "Normalize the remediation objective into a bounded, unambiguous goal spec.",
+    description: "State the remediation objective as one bounded goal.",
+    fieldRules: [
+      `\`goal_id\` is kebab-case: a lowercase letter first, then lowercase letters, digits and single \`-\` separators, at most ${GOAL_ID_MAX_LENGTH} characters.`,
+    ],
+    pathASeed: "Frame the goal around these findings.",
   },
   context_collection: {
     title: "Context Collection",
@@ -83,7 +113,10 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "context_summary": "<free-text summary>"
 }`,
     description:
-      "Collect the code and documentation context relevant to the goal.",
+      "Collect the code and documents that the goal touches. Give one reason for each entry.",
+    fieldRules: ["Every `path` is relative to the repository root."],
+    repoReads: "that are relevant to the goal",
+    pathASeed: "Include every file these findings name.",
   },
   decomposition: {
     title: "Module Decomposition",
@@ -100,7 +133,14 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "Decompose the goal into a set of named modules with rough responsibilities and file scope. For a Path-A seed, preserve its bounded work topology: map implementation modules with source_work_block_ids, and create a distinct seam-preparation module for every work_block_seam where requires_preparation=true (one module may prepare several seams). A seam-preparation module lists prepares_seam_ids and must own each prepared seam's contested `file` in its file_scope; downstream implementation modules are mechanically dependency-gated behind it. Do not draft seam contracts yet — only identify modules and ownership/preparation roles. Before assigning a module's file_scope, verify where the named responsibility logic ACTUALLY lives in the repository — open the candidate file and confirm it implements the logic. Do NOT scope a module at a thin re-export shim / barrel (a file that only does `export * from …` / `export { x } from …`): scope it at the file where the real logic lives, or the enforcing gate (validateDecompositionFileScope) will reject a shim-only file_scope.",
+      "Split the goal into named modules. Give each module its responsibility and the files it owns. On Path A, map modules to work blocks with `source_work_block_ids`, and add one seam-preparation module for each seam in the seed where `requires_preparation` is true (one module may prepare several seams). Do not draft contracts.",
+    fieldRules: [
+      "Scope each module at the file that holds its logic, never at a file that only re-exports (`export * from …`, `export { x } from …`).",
+      "Every `file_scope` path exists in the repository.",
+      "A seam-preparation module lists the seams in `prepares_seam_ids`, and its `file_scope` includes each prepared seam's `file`.",
+    ],
+    repoReads: "to confirm where each module's logic lives",
+    pathASeed: "Map every work block in the seed to a module.",
   },
   module_contract_drafting: {
     title: "Per-Module Contract Drafting",
@@ -123,7 +163,14 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "For every module in the decomposition, draft a contract covering inputs, outputs, invariants, side-effects, validation boundary, failure modes, and what it needs from each neighbor. Read each module's file scope from the repository before drafting. No single agent owns both sides of a seam.",
+      "Draft a contract for each module in the decomposition: inputs, outputs, invariants, side effects, validation boundary, failure modes, and what it needs from each neighbor.",
+    fieldRules: [
+      "Each `name` equals a module name in the decomposition.",
+      "`inputs` and `outputs` are not empty.",
+      "On Path A, each finding id in the seed appears in an invariant, a failure mode, an input or an output.",
+    ],
+    repoReads: "in each module's file scope",
+    pathASeed: "Cover every finding id in the seed.",
   },
   seam_reconciliation: {
     title: "Seam Reconciliation",
@@ -143,7 +190,10 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "Deterministically list every seam mismatch where module A's declared output differs from module B's declared input (or neighbor_need). For each mismatch, decide which side adjusts and what the agreed interface is. A seam_reconciliation_report with no mismatches (all seams already consistent) is valid.",
+      "For each seam where one module's output differs from its neighbor's input or need, record the mismatch, which side adjusts, and the agreed interface. An empty `mismatches` list is correct when every seam agrees.",
+    fieldRules: [
+      "`module_a` and `module_b` are exact module names from the module contracts.",
+    ],
   },
   contract_finalization: {
     title: "Per-Module Contract Finalization",
@@ -163,31 +213,17 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "For every module contract in module_contracts, incorporate any reconciliation decisions from seam_reconciliation_report and produce the finalized module contract. Record which seam adjustments were applied. When one module produces something another consumes, tag that shared artifact identically in the producer's outputs and the consumer's inputs with an 'artifact:<name>' token (e.g. 'artifact:validated-roster') — the tool matches these tokens to derive implementation ordering (producer before consumer) mechanically, so you never have to hand-add depends_on edges.",
+      "Apply each reconciliation decision and write the final contract for each module. Record the seam adjustments you applied. When one module produces something another consumes, tag it as `artifact:<name>` (for example `artifact:validated-roster`) in the producer's `outputs` and in the consumer's `inputs`: the tool orders the implementation from these tokens.",
+    fieldRules: [
+      "Keep the module set exactly: one contract for each module in `module_contracts`, and no other.",
+      "`inputs` and `outputs` are not empty.",
+      "Do not add `depends_on`.",
+    ],
   },
-  cyclic_seam_resolution: {
-    title: "Cyclic Seam Resolution",
-    outputKey: "cyclic_seam_resolution",
-    outputSchema: `{
-  "contract_version": "remediate-code-contract-pipeline/cyclic-seam-resolution/v1alpha1",
-  "goal_id": "<from obligation_ledger>",
-  "cycles": [{
-    "members": ["<obligation-id>", "..."],
-    "break_strategy": "${sketchValues(CYCLIC_SEAM_BREAK_STRATEGIES)}",
-    "designated_obligation_id": "<the mediating obligation, or the single authority — must exist in the rewritten ledger>",
-    "resolution_description": "<what was changed and why>",
-    "exception_registration": "<scoped exception name when single_authority, otherwise null>"
-  }],
-  "status": "${sketchValues(CYCLIC_SEAM_RESOLUTION_STATUSES)}"
-}`,
-    description:
-      "Detect and resolve circular interface-definition obligations in the obligation ledger. If no cycles exist, record status=no_cycles and an empty cycles array. For each detected cycle, choose a sanctioned break strategy (mediator module or single authority) and record the resolution. Verify mentally that the break does not re-introduce a cycle before writing the output.",
-  },
-  // NOTE: the obligation ledger is now DERIVED deterministically by the tool
-  // (S1, `contractPipeline/derive.ts` → the `obligation_ledger` intercept in
-  // `buildNextContractPipelineStep`), so this role is not dispatched on the
-  // normal path. It is retained for the judge-repair path (a judge may target
-  // `obligation_ledger`) and as the canonical shape documentation.
+  // Repair only: the tool derives the obligation ledger itself
+  // (`contractPipeline/derive.ts`), so this role reaches a worker only as the
+  // target of a judge repair. The text states that derivation, because a
+  // repaired ledger passes the same gates as a derived one.
   obligation_ledger: {
     title: "Obligation Ledger",
     outputKey: "obligation_ledger",
@@ -195,15 +231,23 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "contract_version": "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
   "goal_id": "<from goal_spec>",
   "obligations": [{
-    "id": "<obligation-id>",
+    "id": "OBL-<module-slug>-<suffix>",
     "description": "<concrete obligation>",
     "kind": "${sketchValues(OBLIGATION_KINDS)}",
     "depends_on": [],
-    "status": "${sketchValues(OBLIGATION_STATUSES)}"
+    "status": "${sketchValues(OBLIGATION_STATUSES)}",
+    "module": "<module-name>",
+    "change_classification": "<keep the value from the current ledger>",
+    "source_finding_ids": ["<audit finding id this obligation implements, when any>"]
   }]
 }`,
-    description:
-      "Derive a bounded set of implementation obligations from the goal spec and finalized module contracts. Each invariant in the finalized module contracts yields an invariant obligation; each seam interface yields a test obligation. Derive obligations largely deterministically from the finalized contracts.",
+    description: "Rewrite the obligation ledger from the finalized module contracts.",
+    fieldRules: [
+      "One `structural` obligation for each module, one `invariant` obligation for each module invariant, and one `behavioral` obligation for each module failure mode.",
+      "Each id is `OBL-<module-slug>-<suffix>`. The suffix is `contract` for the structural obligation, `inv-<n>` for the n-th invariant and `fail-<n>` for the n-th failure mode. `<module-slug>` is the module name in lowercase, with each run of other characters replaced by one `-`.",
+      "`module` is the module name. Keep each obligation's `change_classification` from the current ledger.",
+      "Keep every audit finding id that the current ledger names, in `source_finding_ids` or in the description.",
+    ],
   },
   critique: {
     title: "Conceptual Design Critique",
@@ -215,7 +259,10 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "verdict": "${sketchValues(CRITIQUE_VERDICTS)}"
 }`,
     description:
-      "Provide philosophy/alternatives/directions critique of the finalized module contracts.",
+      "Critique the finalized module contracts: philosophy, alternatives, direction.",
+    fieldRules: [
+      "Mark an item `blocking` only when the finalized contracts must change and can express the change. Mark every other item `advisory`.",
+    ],
     isIndependentCritic: true,
   },
   test_validator_plan: {
@@ -236,7 +283,11 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }]
 }`,
     description:
-      "Convert every obligation in the obligation ledger into a concrete test spec BEFORE any implementation begins. One TestSpec entry per obligation. A worker may flag a planned test inapplicable only by citing the specific obligation_id it disputes and providing a falsifiable reason that can be checked against the ledger — bare rationale is not sufficient. Do not invent obligations not present in the ledger.",
+      "Write one test spec for each invariant and behavioral obligation, before any implementation. To dispute an obligation, write an `inapplicable_claim` with a reason that the ledger can disprove. Do not invent obligations.",
+    fieldRules: [
+      "A spec for a behavior change has at least one positive (success-path) assertion and one negative (failure-path) assertion. The negative assertion names the changed symbol or file, not the whole repository. An obligation classified as an addition needs one assertion of either kind.",
+      "A disputed spec has only `obligation_id`, `name` and `inapplicable_claim`, and the claim's `obligation_id` equals the spec's.",
+    ],
   },
   assessment: {
     title: "Contract Assessment",
@@ -248,7 +299,8 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "verdict": "${sketchValues(ASSESSMENT_VERDICTS)}"
 }`,
     description:
-      "Assess whether the design spec satisfies all invariants and obligations.",
+      "For each obligation, state whether the design satisfies it, with evidence.",
+    fieldRules: ["A `violated` finding lists at least one evidence entry."],
   },
   critic: {
     title: "Adversarial Critic (Counterexample Search)",
@@ -287,7 +339,11 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }
 }`,
     description:
-      "Judge every counterexample from the critic: `accepted` (real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not actually falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). Verdict is `approved` only when no accepted counterexample demands a contract repair — then omit `repair_directive`. Otherwise verdict is `needs_repair` and `repair_directive` must name the single artifact whose regeneration addresses the accepted counterexamples. A repair demand must be EXPRESSIBLE in the target artifact's own schema: for finalized_module_contracts that surface is the seven interface fields, prose seam_adjustments, and implementation ordering ONLY as `artifact:<name>` producer/consumer tokens in inputs/outputs, with the module set preserved. A counterexample whose remedy needs anything outside that surface (a new schema field, a new module, structured per-block data) is `residual_risk` (recorded), never `accepted` — an accepted demand the repair cannot express stalls the loop instead of fixing anything.",
+      "Judge every counterexample from the critic: `accepted` (a real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). The verdict is `approved` only when no accepted counterexample needs a contract repair; then omit `repair_directive`. Otherwise the verdict is `needs_repair`, and `repair_directive` names the one artifact whose rewrite addresses the accepted counterexamples.",
+    fieldRules: [
+      `\`repair_directive.target\` is one of ${CONTRACT_REPAIR_TARGETS_OFFERED.map((t) => `\`${t}\``).join(", ")}.`,
+      "A repair must be expressible in the target's own schema. For `finalized_module_contracts`, that is the seven interface fields, prose `seam_adjustments`, and implementation order only as `artifact:<name>` tokens in `inputs` and `outputs`, with the module set kept. A counterexample whose remedy needs anything else (a new schema field, a new module, structured per-block data) is `residual_risk`, not `accepted`.",
+    ],
     isIndependentCritic: true,
   },
   implementation_planning: {
@@ -311,24 +367,13 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   }],
   "edges": [{ "from": "<id>", "to": "<id>", "kind": "${sketchValues(IMPLEMENTATION_EDGE_KINDS)}" }]
 }`,
-    description:
-      "Decompose the implementation into a bounded dependency DAG of tasks. Traceability is mandatory: every node must list at least one obligation id from the obligation ledger (in satisfies_obligations or verification_obligation_ids) or one judge-accepted counterexample id (in addresses_counterexamples) — untraceable nodes are rejected. Accepted and residual_risk counterexamples from the judge report must be covered by nodes or verification obligations. Declare in output_files EVERY file a node will create or edit — including the test files it must write, the sources generated artifacts mirror, new shared modules, and manifests: the enforced write scope derives from these declarations plus the owning module's contract, and an omitted companion file stalls the work item on a mid-run clarification.",
-  },
-  closing: {
-    title: "Contract Pipeline Closing",
-    outputKey: "verification_report",
-    outputSchema: `{
-  "contract_version": "remediate-code-verification-report/v1alpha1",
-  "goal_id": "<from goal_spec>",
-  "findings": [{
-    "finding_id": "<id>",
-    "traces": [{ "trace_id": "<id>", "kind": "${sketchValues(VERIFICATION_TRACE_KINDS)}", "label": "...", "evidence": ["..."], "status": "${sketchValues(VERIFICATION_TRACE_STATUSES)}" }],
-    "overall_status": "${sketchValues(VERIFICATION_FINDING_STATUSES)}"
-  }],
-  "overall_status": "${sketchValues(VERIFICATION_REPORT_STATUSES)}"
-}`,
-    description:
-      "Verify all obligations are satisfied and produce the verification report.",
+    description: "Split the implementation into a dependency DAG of bounded tasks.",
+    fieldRules: [
+      "Every node lists at least one obligation id (in `satisfies_obligations` or `verification_obligation_ids`) or one accepted counterexample id (in `addresses_counterexamples`).",
+      "Every accepted counterexample that is not waived is in some node's `addresses_counterexamples`.",
+      "`output_files` lists every file the node creates or edits: the tests it writes, the sources a generated artifact mirrors, new shared modules and manifests. Each file is in a directory that exists.",
+      TARGETED_COMMANDS_RULE,
+    ],
   },
 };
 
@@ -345,9 +390,8 @@ export interface ContractPipelineRenderInput {
   repoRoot?: string;
   /**
    * Path to the Path-A seed file when the intake source is a structured
-   * audit-findings report. When present, goal_normalization and
-   * context_collection prompts reference the seed so every pipeline node
-   * traces back to an auditor finding.
+   * audit-findings report. When present, each role with a `pathASeed` sentence
+   * lists the seed and says what that role must do with it.
    */
   pathASeedPath?: string;
   /**
@@ -413,37 +457,35 @@ function renderIndependentCriticDirective(
 }
 
 /**
- * Per-role OUTPUT constraints — the field rules that are mechanically enforced
- * downstream, stated in the prompt that produces the field.
- *
- * Why these live in the prompt at all, given the tool also enforces them: the
- * tool's enforcement is the guarantee, but it can only REFUSE — repair costs a
- * bounded re-emit, and a re-emit that does not state the rule re-earns the same
- * refusal. Stating the rule where the field is authored is what makes the first
- * attempt admissible; the tool still refuses an inadmissible one regardless of
- * whether the producer read this. The rule is single-sourced in
- * `audit-tools/shared` (`commandLeavesDeclaredShape`), so this text and the
- * refusal cannot drift on what the rule IS.
- *
- * `implementation_planning` is the one role with such a constraint today: its
- * `targeted_commands` are executed verbatim through a shell, one invocation per
- * entry. A worker that emitted `npm run build && npm run check` on 23 nodes
- * burned a whole DAG regeneration on a defect the tool can also repair
- * mechanically — but the repair still costs a round-trip, and the one-invocation
- * rule was nowhere in the prompt that asked for the field.
+ * The `## Field Rules` section, or nothing when a role has no enforced rule.
+ * The worker prompt and the repair prompt both render it, from the same role.
  */
-function renderOutputConstraints(role: string): string {
-  if (role !== "implementation_planning") return "";
-  return `
-## Field Constraints — enforced, not advisory
+function renderFieldRules(rules: readonly string[] | undefined): string {
+  if (!rules || rules.length === 0) return "";
+  return `\n## Field Rules\n\n${rules.map((rule) => `- ${rule}`).join("\n")}\n`;
+}
 
-Each node's \`targeted_commands\` entries are executed ONE INVOCATION PER ENTRY,
-verbatim through a shell. Write \`"npm run build"\` and \`"npm run check"\` as TWO
-entries — never \`"npm run build && npm run check"\`, and never with a pipe,
-redirect, \`;\` or command substitution. A bare \`&&\` chain is split for you, but
-every other chained or substituting form is REFUSED and costs a full DAG
-regeneration.
+/** The self-check block both prompts end with. */
+function renderSelfCheck(
+  outputKey: ContractPipelineArtifactName,
+  outputPath: string,
+  repoRoot: string | undefined,
+): string {
+  return `
+Check the file before you stop:
+
+\`${loaderCommand(
+    `validate-artifact --name ${outputKey} --file ${outputPath}${repoRoot ? ` --root ${repoRoot}` : ""}`,
+  )}\`
+
+\`status: "ok"\` means the file is admissible. Otherwise, fix each problem it names.
 `;
+}
+
+function renderCwdNote(repoRoot: string | undefined): string {
+  return repoRoot
+    ? `\n> Set the shell/tool working directory to \`${repoRoot}\` before running any commands.\n`
+    : "";
 }
 
 export interface ContractPipelineRenderResult {
@@ -511,62 +553,44 @@ export function renderContractPipelinePrompt(
       ? `\n## Source Inputs\n\n${input.sourcePaths.map((p) => `- \`${p}\``).join("\n")}\n`
       : "";
 
-  const cwdNote = input.repoRoot
-    ? `\n> Set the shell/tool working directory to \`${input.repoRoot}\` before running any commands.\n`
-    : "";
-
-  // Path-A seed section: included for goal_normalization and context_collection
-  // when the intake source is a structured audit-findings report.
-  const PATH_A_SEED_ROLES = new Set([
-    "goal_normalization",
-    "context_collection",
-    "decomposition",
-    "module_contract_drafting",
-  ]);
   const pathASeedSection =
-    input.pathASeedPath && PATH_A_SEED_ROLES.has(input.role)
-      ? `\n## Path-A Audit Seed\n\nThis run originates from a structured audit-findings report. The seed file below contains the findings summary and affected files — your output must frame the goal and context around these findings so every subsequent pipeline node traces to an auditor finding:\n\n- \`${input.pathASeedPath}\` (path_a_seed)\n`
+    input.pathASeedPath && role.pathASeed
+      ? `\n## Path-A Audit Seed\n\n- \`${input.pathASeedPath}\` (path_a_seed) — ${role.pathASeed}\n`
       : "";
+
+  const readScope = role.repoReads
+    ? `Read the files above. You may also read repository files ${role.repoReads}.`
+    : "Read the files above. Do not read other files.";
 
   const independentCriticDirective = renderIndependentCriticDirective(
     input.role,
     input.adversarialDepth,
   );
 
-  const outputConstraints = renderOutputConstraints(input.role);
-
   const prompt = `# ${role.title}
 
 ${role.description}
-${cwdNote}${independentCriticDirective}
+${renderCwdNote(input.repoRoot)}${independentCriticDirective}
 ## Required Inputs
 ${inputSections.length > 0 ? inputSections.join("\n") : "_No artifact inputs required for this role._"}
 ${sourceSections}${pathASeedSection}
+## What You May Read
+
+${readScope}
+
 ## Your Task
 
-Read only the artifact files listed above. Do not read unrelated source files.
-
-Write your result to exactly:
+Write the complete artifact to exactly:
 
 \`${outputPath}\`
 
-The output must conform to this JSON schema shape:
+It must have this JSON shape:
 
 \`\`\`json
 ${role.outputSchema}
 \`\`\`
-${outputConstraints}
-Before advancing, you can self-check the output against its contract:
-
-\`${loaderCommand(
-    `validate-artifact --name ${role.outputKey} --file ${outputPath}${
-      input.repoRoot ? ` --root ${input.repoRoot}` : ""
-    }`,
-  )}\`
-
-A \`status: "ok"\` result means the structure is valid; otherwise fix the reported issues before running next-step.
-
-**Stop after writing the output file.** Do not edit source files. Do not advance to the next pipeline step.
+${renderFieldRules(role.fieldRules)}${renderSelfCheck(role.outputKey, outputPath, input.repoRoot)}
+**Stop after you write the output file.** Do not edit source files. Do not start the next phase.
 `;
 
   return { prompt, outputPath, role };
@@ -577,6 +601,11 @@ A \`status: "ok"\` result means the structure is valid; otherwise fix the report
  * and the phase progression order (object insertion order is the dependency
  * order). `CONTRACT_PIPELINE_PHASE_ORDER` and contractPipeline.ts's
  * `ARTIFACT_TO_PHASE` both derive from this — never re-list the phases.
+ *
+ * `cyclic_seam_resolution` has no entry in `ROLES`: its one prompt is rendered
+ * by the gate that owns the phase (`renderCyclicSeamResolutionPrompt` in
+ * `contractPipeline.ts`), because it needs the detected cycles. There is no
+ * `closing` phase: the close phase writes the verification report itself.
  */
 export const PHASE_TO_ARTIFACT: Record<string, ContractPipelineArtifactName> = {
   goal_normalization: "goal_spec",
@@ -593,7 +622,6 @@ export const PHASE_TO_ARTIFACT: Record<string, ContractPipelineArtifactName> = {
   critic: "counterexample",
   judge: "judge_report",
   implementation_planning: "implementation_dag",
-  closing: "verification_report",
 };
 
 /**
@@ -662,7 +690,7 @@ const REPAIR_TRIGGER_CONTRACT: Record<
 > = {
   judge: {
     lead: (target) =>
-      `The adversarial judge rejected the current contract. Regenerate \`${target}\` IN FULL so that every judge-accepted counterexample is addressed.`,
+      `The adversarial judge rejected the current contract. Rewrite \`${target}\` in full so that it addresses every accepted counterexample.`,
     instructionHeading: "Judge Instruction",
     requiredInputs: [
       "goal_spec",
@@ -672,12 +700,11 @@ const REPAIR_TRIGGER_CONTRACT: Record<
       "counterexample",
       "judge_report",
     ],
-    readingNote:
-      "pay particular attention to the accepted counterexamples in the judge report's classifications",
+    readingNote: "the accepted counterexamples in the judge report's classifications",
   },
   critique: {
     lead: (target) =>
-      `The conceptual design critique raised BLOCKING concerns about the current design. Regenerate \`${target}\` IN FULL so that none of those concerns still applies.`,
+      `The conceptual design critique raised blocking concerns. Rewrite \`${target}\` in full so that no blocking concern still applies.`,
     instructionHeading: "Blocking Concerns",
     // The critique gate runs BEFORE any downstream artifact is derived, so the
     // judge-side artifacts do not exist yet. Listing them is what sent workers
@@ -687,23 +714,26 @@ const REPAIR_TRIGGER_CONTRACT: Record<
       "finalized_module_contracts",
       "conceptual_design_critique",
     ],
-    readingNote:
-      "read each blocking concern's own description in the conceptual design critique before rewriting",
+    readingNote: "each blocking concern in the conceptual design critique",
   },
 };
 
-/** Schema shape per repair target, sourced from the producing role. */
-const REPAIR_TARGET_SCHEMA: Record<ContractRepairRenderInput["target"], () => string> = {
-  finalized_module_contracts: () => ROLES.contract_finalization.outputSchema,
-  obligation_ledger: () => ROLES.obligation_ledger.outputSchema,
-  contract_assessment_report: () => ROLES.assessment.outputSchema,
+/**
+ * The role that first writes each repair target. The repair prompt renders
+ * that role's sketch AND its field rules: a repaired artifact passes the same
+ * validator and the same gates as a first write, so the two prompts state one
+ * set of rules from one place.
+ */
+const REPAIR_TARGET_ROLE: Record<ContractRepairRenderInput["target"], ContractPipelineRole> = {
+  finalized_module_contracts: ROLES.contract_finalization,
+  obligation_ledger: ROLES.obligation_ledger,
+  contract_assessment_report: ROLES.assessment,
 };
 
 /**
- * Render the bounded repair step for a failing judge verdict: regenerate the
- * named contract artifact in full, addressing the accepted counterexamples and
- * the judge's instruction. The next pipeline invocation re-validates and
- * re-derives everything downstream via the staleness DAG.
+ * Render the bounded repair step for a failing gate: rewrite the named contract
+ * artifact in full, addressing the gate's instruction. The worker edits only the
+ * target; the pipeline brings every later artifact back on its own.
  */
 export function renderContractRepairPrompt(
   input: ContractRepairRenderInput,
@@ -723,15 +753,12 @@ export function renderContractRepairPrompt(
       );
     }
   }
-
-  const cwdNote = input.repoRoot
-    ? `\n> Set the shell/tool working directory to \`${input.repoRoot}\` before running any commands.\n`
-    : "";
+  const role = REPAIR_TARGET_ROLE[input.target];
 
   const prompt = `# Contract Repair: ${input.target}
 
 ${contract.lead(input.target)}
-${cwdNote}
+${renderCwdNote(input.repoRoot)}
 ## ${contract.instructionHeading}
 
 ${input.instruction}
@@ -742,19 +769,17 @@ ${requiredInputs.map((key) => `- \`${input.artifactPaths[key]}\` (${key})`).join
 
 ## Your Task
 
-Read the inputs above — ${contract.readingNote}. Rewrite the complete, corrected artifact (not a diff) to exactly:
+Read the inputs above. Attend to ${contract.readingNote}. Write the complete artifact, not a diff, to exactly:
 
 \`${outputPath}\`
 
-The output must conform to this JSON schema shape:
+It must have this JSON shape:
 
 \`\`\`json
-${REPAIR_TARGET_SCHEMA[input.target]()}
+${role.outputSchema}
 \`\`\`
-
-Downstream artifacts are re-derived automatically after this repair — do not edit any other artifact.
-
-**Stop after writing the output file.** Do not edit source files. Do not advance to the next pipeline step.
+${renderFieldRules(role.fieldRules)}${renderSelfCheck(input.target, outputPath, input.repoRoot)}
+**Stop after you write the output file.** Do not edit any other artifact or any source file. Do not start the next phase.
 `;
 
   return { prompt, outputPath };

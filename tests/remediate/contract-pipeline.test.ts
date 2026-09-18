@@ -500,9 +500,10 @@ describe("N-R08: obligation_ledger as first-class phase", () => {
       role: "implementation_planning",
       artifactPaths: artifactPathsFor("implementation_planning"),
     });
-    expect(result.prompt).toMatch(/ONE INVOCATION PER ENTRY/i);
-    expect(result.prompt).toContain("targeted_commands");
-    expect(result.prompt).toMatch(/npm run build && npm run check/);
+    expect(result.prompt).toContain(
+      "`targeted_commands`: one command per entry, run verbatim through a shell.",
+    );
+    expect(result.prompt).toContain('never `"npm run build && npm run check"`');
   });
 
   it("a role with no declared output constraint carries no constraint section", () => {
@@ -545,6 +546,28 @@ describe("validateTestValidatorPlan — valid payloads", () => {
     };
     const issues = validateTestValidatorPlan(payload);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
+  });
+
+  it("prompt 18: admits an inapplicable spec with no kind and no assertions, and still requires both on an applicable spec", () => {
+    // An inapplicable spec describes no test, so it carries no test kind and
+    // nothing to assert. The prompt and the scaffold both write it that way.
+    const spec = (inapplicable: boolean) => ({
+      obligation_id: "O-2",
+      name: "no runtime path",
+      ...(inapplicable
+        ? { inapplicable_claim: { obligation_id: "O-2", reason: "A pure invariant with no runtime testable path." } }
+        : {}),
+    });
+    const payload = (inapplicable: boolean) => ({
+      contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
+      goal_id: "G1",
+      test_specs: [spec(inapplicable)],
+      created_at: new Date().toISOString(),
+    });
+    expect(validateTestValidatorPlan(payload(true)).filter((i) => i.severity === "error")).toEqual([]);
+    const applicable = validateTestValidatorPlan(payload(false)).map((i) => i.path);
+    expect(applicable).toContain("test_validator_plan.test_specs[0].kind");
+    expect(applicable.some((path) => path.startsWith("test_validator_plan.test_specs[0].assertions"))).toBe(true);
   });
 });
 

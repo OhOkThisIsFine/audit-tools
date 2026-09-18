@@ -96,22 +96,36 @@ describe("every declared input has a producer that runs BEFORE it", () => {
     Object.entries(PHASE_TO_ARTIFACT).map(([phase, artifact]) => [artifact, phase]),
   );
 
-  it("every contract-pipeline artifact has exactly one producing phase", () => {
+  // Artifacts the TOOL writes after the last worker phase, each with the writer
+  // that produces it. Prompt 18 retired the `closing` worker text: no worker phase
+  // writes `verification_report`, the close phase builds it.
+  const toolWritten = new Map<ContractPipelineArtifactName, string>([
+    ["verification_report", "buildVerificationReport (src/remediate/phases/close.ts), after every phase"],
+  ]);
+
+  it("every contract-pipeline artifact has exactly one producing phase, or a named tool writer", () => {
     const producerless = CP_ARTIFACT_NAMES.filter(
-      (name) => !artifactToPhase.has(name),
+      (name) => !artifactToPhase.has(name) && !toolWritten.has(name),
     );
     expect(
       producerless,
       "an artifact no phase produces can be NAMED as an input but never written",
     ).toEqual([]);
+    for (const name of toolWritten.keys()) {
+      expect(
+        artifactToPhase.has(name),
+        `${name} is declared tool-written but a phase also produces it`,
+      ).toBe(false);
+    }
   });
 
   it("every DEPENDENCY_MAP dependency is produced strictly earlier in the phase order", () => {
     const violations: string[] = [];
     for (const name of CP_ARTIFACT_NAMES) {
-      const ownIndex = CONTRACT_PIPELINE_PHASE_ORDER.indexOf(
-        artifactToPhase.get(name)!,
-      );
+      // A tool-written artifact is produced after the last phase.
+      const ownIndex = toolWritten.has(name)
+        ? CONTRACT_PIPELINE_PHASE_ORDER.length
+        : CONTRACT_PIPELINE_PHASE_ORDER.indexOf(artifactToPhase.get(name)!);
       for (const dep of DEPENDENCY_MAP[name]) {
         const depPhase = artifactToPhase.get(dep);
         if (depPhase === undefined) {

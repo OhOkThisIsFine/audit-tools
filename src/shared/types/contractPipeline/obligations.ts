@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-pipeline.test.ts
 /**
  * Contract-pipeline artifact: obligations phase.
  *
@@ -108,22 +109,39 @@ export interface ObligationLedger {
 
 // ── TestValidatorPlan ─────────────────────────────────────────────────────────
 
-/** One test spec derived from a ledger obligation, to be created before code. */
-export interface TestSpec {
+/**
+ * One test spec derived from a ledger obligation, to be created before code.
+ *
+ * Two shapes. A spec that tests its obligation carries a `kind` and at least one
+ * assertion. A spec that DISPUTES its obligation carries an `inapplicable_claim`
+ * instead, and needs no kind and no assertions: there is no test to describe.
+ */
+export type TestSpec = ApplicableTestSpec | InapplicableTestSpec;
+
+interface TestSpecIdentity {
   /** The obligation ID from the ObligationLedger this test spec covers. */
   obligation_id: string;
   /** Short name for this test. */
   name: string;
+}
+
+interface ApplicableTestSpec extends TestSpecIdentity {
   /** Kind of test. */
   kind: "unit" | "integration" | "schema" | "invariant" | "e2e";
   /** Concrete, falsifiable assertion strings for this test. Must be non-empty. */
   assertions: string[];
+  inapplicable_claim?: undefined;
+}
+
+interface InapplicableTestSpec extends TestSpecIdentity {
+  kind?: ApplicableTestSpec["kind"];
+  assertions?: string[];
   /**
-   * When present, declares this test inapplicable. The claim must cite the
-   * specific obligation ID and provide a falsifiable reason checkable against
-   * the ledger — bare rationale is insufficient.
+   * Declares this test inapplicable. The claim must cite the specific
+   * obligation ID and provide a falsifiable reason checkable against the
+   * ledger — bare rationale is insufficient.
    */
-  inapplicable_claim?: {
+  inapplicable_claim: {
     /** The obligation ID this claim disputes (must match obligation_id above). */
     obligation_id: string;
     /** Falsifiable reason why this test is inapplicable per the ledger. */
@@ -222,12 +240,16 @@ export interface JudgedCounterexample {
  * ({@link CONTRACT_REPAIR_TARGETS_OFFERED}), because no new report should be
  * authored against a name the repair loop normalizes away — the asymmetry is
  * the same accept-legacy / emit-current split the store's version policy uses.
+ *
+ * `counterexample` is NOT a member. The judge rules on the critic's report, so
+ * it cannot order that report rewritten, and the repair loop can regenerate only
+ * the three contract artifacts. It was admitted once and then swapped for an
+ * inferred target in silence; the validator now refuses it with that reason.
  */
 export const CONTRACT_REPAIR_TARGETS = [
   "finalized_module_contracts",
   "obligation_ledger",
   "contract_assessment_report",
-  "counterexample",
   "design_spec",
 ] as const;
 
@@ -271,9 +293,8 @@ export const CONTRACT_REPAIR_TARGETS_OFFERED = CONTRACT_REPAIR_TARGETS.filter(
  * type a third set.
  *
  * `finalized_module_contracts` is the post-redesign name for what `design_spec`
- * used to hold, and the four non-legacy members are exactly the artifacts a
- * repair can regenerate. `finalized_module_contracts` and `counterexample` are
- * absent from this union's history only because the union predated them.
+ * used to hold, and the three non-legacy members are exactly the artifacts a
+ * repair can regenerate.
  *
  * A `design_spec` directive is ADMITTED by the validator (back-compat) but is
  * not a repair order the loop acts on: it falls through to

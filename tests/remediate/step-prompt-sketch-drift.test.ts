@@ -58,6 +58,7 @@ import { dirname, resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 
 import { ROLES, renderContractPipelinePrompt } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { renderCyclicSeamResolutionPrompt } from "../../src/remediate/steps/contractPipeline.js";
 import {
   validateConceptualDesignCritique,
   validateContextBundle,
@@ -258,17 +259,14 @@ function probeReachesValidator(
 }
 
 /**
- * The schema sketch a rendered prompt carries — everything inside the ```json
- * fence after "conform to this JSON schema shape". Reading the RENDERED prompt
- * rather than the source constant is the point: this is the text a worker
- * actually sees, and it is why a probe cannot accidentally compare a constant to
- * itself.
+ * The schema sketch a rendered prompt carries — everything inside its FIRST
+ * ```json fence. Every worker prompt renders exactly one output shape, and it is
+ * the first JSON fence in the text. Reading the RENDERED prompt rather than the
+ * source constant is the point: this is the text a worker actually sees, and it
+ * is why a probe cannot accidentally compare a constant to itself.
  */
 function sketchOf(prompt: string): string {
-  const marker = "conform to this JSON schema shape:";
-  const section = prompt.split(marker)[1];
-  if (section === undefined) return "";
-  const fenced = section.split("```json")[1];
+  const fenced = prompt.split("```json")[1];
   if (fenced === undefined) return "";
   return fenced.split("```")[0]!;
 }
@@ -300,6 +298,26 @@ const PATHS = Object.fromEntries(
     `/project/.audit-tools/remediation/intake/contract/${name}.json`,
   ]),
 ) as Record<ContractPipelineArtifactName, string>;
+
+/**
+ * Every worker sketch the sweep ranges over: each ROLES entry, plus the
+ * cyclic-seam worker. Prompt 18 moved the cyclic-seam prompt out of ROLES — the
+ * re-check gate renders it with the cycles it detected — so it is named here by
+ * its builder rather than dropped from the sweep.
+ */
+const SKETCH_ROLES: readonly string[] = [...Object.keys(ROLES), "cyclic_seam_resolution"];
+
+/** The rendered prompt a worker reads for `role`. */
+function promptFor(role: string): string {
+  if (role === "cyclic_seam_resolution") {
+    return renderCyclicSeamResolutionPrompt({
+      cycleDescriptions: "Cycle 1: [OBL-A, OBL-B]",
+      ledgerInputPath: PATHS.obligation_ledger,
+      outputPath: PATHS.cyclic_seam_resolution,
+    });
+  }
+  return renderContractPipelinePrompt({ role, artifactPaths: PATHS }).prompt;
+}
 
 // ── Payload builders: minimal valid shapes carrying one probed value ──────────
 
@@ -646,6 +664,13 @@ const VOCABULARIES: readonly Vocabulary[] = [
     build: cyclicSeamPayload,
     validate: validateCyclicSeamResolution,
     path: "cyclic_seam_resolution.status",
+    // Prompt 18: the validator still admits `no_cycles` (the tool writes that
+    // record itself when the ledger has no cycles), but the worker is offered
+    // only `resolved`. Derived from the two declarations, never re-listed.
+    offeredExclusions: sketchSource.CYCLIC_SEAM_RESOLUTION_STATUSES.filter(
+      (status) =>
+        !(sketchSource.CYCLIC_SEAM_RESOLUTION_STATUSES_OFFERED as readonly string[]).includes(status),
+    ),
   },
   {
     role: "obligation_ledger",
@@ -746,29 +771,39 @@ const VOCABULARIES: readonly Vocabulary[] = [
     validate: validateImplementationDAG,
     path: "implementation_dag.edges[0].kind",
   },
+];
+
+/**
+ * Vocabularies of an artifact the TOOL writes, so no worker sketch renders them.
+ * `verification_report` is built by the close phase (`buildVerificationReport`,
+ * `src/remediate/phases/close.ts`); prompt 18 retired the `closing` worker text
+ * that described it to nobody. The probes stay: each declaration must still be
+ * exactly what the validator admits, checked without a sketch.
+ */
+const TOOL_WRITTEN_VOCABULARIES: readonly Vocabulary[] = [
   {
-    role: "closing",
+    role: "close (tool-written)",
     field: "kind",
     build: verificationPayload,
     validate: validateVerificationReport,
     path: "verification_report.findings[0].traces[0].kind",
   },
   {
-    role: "closing",
+    role: "close (tool-written)",
     field: "status",
     build: verificationTraceStatusPayload,
     validate: validateVerificationReport,
     path: "verification_report.findings[0].traces[0].status",
   },
   {
-    role: "closing",
+    role: "close (tool-written)",
     field: "overall_status",
     build: verificationFindingStatusPayload,
     validate: validateVerificationReport,
     path: "verification_report.findings[0].overall_status",
   },
   {
-    role: "closing",
+    role: "close (tool-written)",
     field: "overall_status",
     build: verificationReportStatusPayload,
     validate: validateVerificationReport,
@@ -802,10 +837,9 @@ interface SketchAlternation {
   readonly field: string;
   /**
    * Which appearance of this field within the sketch, in render order, counting
-   * from 0. Two probes may share one field name in one sketch (`closing` renders
-   * `overall_status` per finding and again at report level, and the two disagree
-   * — the report level excludes `skipped`), and the sketch carries no label
-   * saying which is which. Render order is the only in-sketch fact that
+   * from 0. Two probes may share one field name in one sketch (a field rendered
+   * per record and again at report level, with two different vocabularies), and
+   * the sketch carries no label saying which is which. Render order is the only in-sketch fact that
    * separates them, so it is what {@link vocabularyFor} matches on.
    */
   readonly occurrence: number;
@@ -853,10 +887,9 @@ const FIELD_REFERENCE_PLACEHOLDER = /^<[^>]*\b[a-z][a-z0-9]*_[a-z0-9_]*\b[^>]*>$
 function findAlternations(role: string, sketch: string): SketchAlternation[] {
   const found: SketchAlternation[] = [];
   // `occurrence` counts this field's appearances WITHIN THIS SKETCH, in render
-  // order. Two probes may share one field name in one sketch (`closing` renders
-  // `overall_status` per finding and again at report level; the two disagree —
-  // the report level excludes `skipped`), and the sketch does not label which is
-  // which. Render order is the only in-sketch fact that separates them, so it is
+  // order. Two probes may share one field name in one sketch (a field rendered
+  // per record and again at report level, with two different vocabularies), and
+  // the sketch does not label which is which. Render order is the only in-sketch fact that separates them, so it is
   // the index {@link vocabularyFor} matches on.
   const seen = new Map<string, number>();
   for (const match of sketch.matchAll(/"([a-z_][a-z0-9_]*)": "([^"]*)"/g)) {
@@ -956,12 +989,7 @@ function computeOccurrences(): BoundVocabulary[] {
       bound.push({ entry: entries[0]!, occurrence: 0 });
       continue;
     }
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: entries[0]!.role,
-        artifactPaths: PATHS,
-      }).prompt,
-    );
+    const sketch = sketchOf(promptFor(entries[0]!.role));
     // Order the entries by WHERE their field occurs in the rendered text, read
     // off the sketch rather than declared: the sketch is what the worker sees,
     // and the sweep compares occurrence N of a field against the Nth occurrence
@@ -1396,7 +1424,7 @@ describe("step prompt sketches derive from the validators that read their output
   });
 
   it("every probe reaches the validator check it names (no vacuous comparison)", () => {
-    for (const entry of VOCABULARIES) {
+    for (const entry of [...VOCABULARIES, ...TOOL_WRITTEN_VOCABULARIES]) {
       probeReachesValidator(
         `${entry.role}.${entry.field}`,
         entry.build,
@@ -1413,11 +1441,8 @@ describe("step prompt sketches derive from the validators that read their output
     // probe, or a probe that disagrees with the sketch all surface here — by
     // role and field — rather than waiting for someone to notice.
     const alternations: SketchAlternation[] = [];
-    for (const role of Object.keys(ROLES)) {
-      const sketch = sketchOf(
-        renderContractPipelinePrompt({ role, artifactPaths: PATHS }).prompt,
-      );
-      alternations.push(...findAlternations(role, sketch));
+    for (const role of SKETCH_ROLES) {
+      alternations.push(...findAlternations(role, sketchOf(promptFor(role))));
     }
 
     // The sweep must FIND something, or a renderer change that emptied the
@@ -1617,15 +1642,7 @@ describe("step prompt sketches derive from the validators that read their output
       const exclusions = entry.offeredExclusions ?? [];
       if (exclusions.length === 0) continue;
       const admitted = admittedValues(entry.build, entry.validate, entry.path);
-      const offered = offeredValueSet(
-        sketchOf(
-          renderContractPipelinePrompt({
-            role: entry.role,
-            artifactPaths: PATHS,
-          }).prompt,
-        ),
-        entry.field,
-      );
+      const offered = offeredValueSet(sketchOf(promptFor(entry.role)), entry.field);
       for (const excluded of exclusions) {
         expect(
           admitted,
@@ -1653,28 +1670,22 @@ describe("step prompt sketches derive from the validators that read their output
 
   // ── The measured drifts, named so a regression reads as itself ─────────────
 
-  it("cyclic_seam_resolution renders every status the validator admits", () => {
+  it("cyclic_seam_resolution offers the worker only `resolved`; the tool alone writes `no_cycles`", () => {
+    // Prompt 18: the record never decides whether cycles remain — the re-check
+    // gate reads the ledger. The worker is dispatched only when cycles exist, so
+    // the one status it may write is `resolved`. Both sets are WRITTEN OUT here,
+    // never read off the declarations the sketch renders.
     const admitted = admittedValues(
       cyclicSeamPayload,
       (value) => validateCyclicSeamResolution(value),
       "cyclic_seam_resolution.status",
     );
-    expect(admitted.length, "the probe found no admitted status at all").toBeGreaterThan(1);
-
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: "cyclic_seam_resolution",
-        artifactPaths: PATHS,
-      }).prompt,
-    );
+    expect([...admitted].sort()).toEqual(["no_cycles", "resolved"]);
+    const sketch = sketchOf(promptFor("cyclic_seam_resolution"));
     expect(
       offeredValueSet(sketch, "status"),
-      "the sketch must offer exactly the statuses the validator admits",
-    ).toEqual([...admitted].sort());
-    // The two values missing from the sketch at HEAD, named so a regression
-    // reads as itself rather than as a set difference.
-    expect(admitted).toContain("user_decision_required");
-    expect(admitted).toContain("blocked");
+      "the worker sketch must offer only the status a worker may write",
+    ).toEqual(["resolved"]);
   });
 
   it("the cyclic-seam CONTRACT validator gates break_strategy, not just the later re-check", () => {
@@ -1708,12 +1719,7 @@ describe("step prompt sketches derive from the validators that read their output
     );
     expect(admitted.length).toBeGreaterThan(1);
 
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: "cyclic_seam_resolution",
-        artifactPaths: PATHS,
-      }).prompt,
-    );
+    const sketch = sketchOf(promptFor("cyclic_seam_resolution"));
     expect(offeredValueSet(sketch, "break_strategy")).toEqual([...admitted].sort());
   });
 
@@ -1723,12 +1729,7 @@ describe("step prompt sketches derive from the validators that read their output
       (value) => validateJudgeReport(value),
       "judge_report.repair_directive.target",
     );
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: "judge",
-        artifactPaths: PATHS,
-      }).prompt,
-    );
+    const sketch = sketchOf(promptFor("judge"));
     // The legacy alias(es) are the ONE deliberate exception, and they are
     // asserted rather than filtered silently: the validator keeps accepting them
     // so a judge report written by an older release still loads (named
@@ -1748,13 +1749,20 @@ describe("step prompt sketches derive from the validators that read their output
       expect(admitted, `${legacy} must stay admissible for back-compat`).toContain(legacy);
       expect(offeredValueSet(sketch, "target")).not.toContain(legacy);
     }
-    expect(admitted).toContain("counterexample");
+    // Prompt 18: `counterexample` is REFUSED, with a reason — the judge rules on
+    // the critic's report and cannot order it rewritten. The refusal is not a
+    // silent swap to another target.
+    expect(admitted).not.toContain("counterexample");
+    const refusal = issuesAt(
+      validateJudgeReport(judgePayload({ target: "counterexample" })),
+      "judge_report.repair_directive.target",
+    );
+    expect(refusal.join("\n")).toContain('"counterexample" is not a repair target');
     expect(admitted).toContain("finalized_module_contracts");
     expect(admitted).toContain("obligation_ledger");
     expect(admitted).toContain("contract_assessment_report");
     const expectedOffered = [
       "contract_assessment_report",
-      "counterexample",
       "finalized_module_contracts",
       "obligation_ledger",
     ];
@@ -1768,7 +1776,7 @@ describe("step prompt sketches derive from the validators that read their output
     ).toEqual(expectedOffered);
   });
 
-  it("verification_report renders every trace kind, trace status and finding status the validator admits", () => {
+  it("verification_report declarations are exactly what the validator admits (the tool writes the report)", () => {
     const traceKind = admittedValues(
       verificationPayload,
       (value) => validateVerificationReport(value),
@@ -1790,22 +1798,13 @@ describe("step prompt sketches derive from the validators that read their output
       "verification_report.overall_status",
     );
 
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: "closing",
-        artifactPaths: PATHS,
-      }).prompt,
-    );
-    expect(offeredValueSet(sketch, "kind")).toEqual([...traceKind].sort());
-    // `status` appears on the TRACE only — the finding level spells its own as
-    // `overall_status` — so this key is the trace vocabulary exactly.
-    expect(offeredValueSet(sketch, "status")).toEqual([...traceStatus].sort());
-    // `overall_status` appears twice (per finding, and report level), so the
-    // sketch offers the UNION of the two — and each is asserted separately
-    // below, so a member dropped from either occurrence still reds.
-    expect(offeredValueSet(sketch, "overall_status")).toEqual(
-      [...new Set([...findingStatus, ...reportStatus])].sort(),
-    );
+    // No worker sketch renders this artifact: `buildVerificationReport` in the
+    // close phase writes it. So the declarations the builder types against are
+    // held to the validator directly.
+    expect([...traceKind].sort()).toEqual([...sketchSource.VERIFICATION_TRACE_KINDS].sort());
+    expect([...traceStatus].sort()).toEqual([...sketchSource.VERIFICATION_TRACE_STATUSES].sort());
+    expect([...findingStatus].sort()).toEqual([...sketchSource.VERIFICATION_FINDING_STATUSES].sort());
+    expect([...reportStatus].sort()).toEqual([...sketchSource.VERIFICATION_REPORT_STATUSES].sort());
     // The per-finding-only value and the report-level strictness, named: the
     // report level deliberately excludes `skipped`.
     expect(traceKind).toContain("counterexample");
@@ -1826,12 +1825,7 @@ describe("step prompt sketches derive from the validators that read their output
     );
     expect(nodeStatus.length).toBeGreaterThan(1);
 
-    const sketch = sketchOf(
-      renderContractPipelinePrompt({
-        role: "implementation_planning",
-        artifactPaths: PATHS,
-      }).prompt,
-    );
+    const sketch = sketchOf(promptFor("implementation_planning"));
     expect(
       offeredValueSet(sketch, "status"),
       "the sketch showed 1 of the 4 node statuses at HEAD",
@@ -1856,13 +1850,8 @@ describe("the created_at asymmetry is a DECISION, not a drift", () => {
     // EVERY role, not a sample: the asymmetry is a property of the whole
     // renderer, and a new sketch that asks the host for a clock reading is the
     // one regression a sampled role list would miss.
-    for (const role of Object.keys(ROLES)) {
-      const sketch = sketchOf(
-        renderContractPipelinePrompt({
-          role,
-          artifactPaths: PATHS,
-        }).prompt,
-      );
+    for (const role of SKETCH_ROLES) {
+      const sketch = sketchOf(promptFor(role));
       expect(
         sketch.includes('"created_at"'),
         `${role}'s sketch must not ask the host for a timestamp the tool owns`,
@@ -1889,7 +1878,7 @@ describe("the created_at asymmetry is a DECISION, not a drift", () => {
 
     // …and the same for every other validator, swept rather than sampled: the
     // requirement is what makes the decision coherent for ALL fifteen.
-    for (const entry of VOCABULARIES) {
+    for (const entry of [...VOCABULARIES, ...TOOL_WRITTEN_VOCABULARIES]) {
       if (entry.role === "judge" || entry.role === "implementation_planning") continue;
       const payload = entry.build(
         admittedValues(entry.build, entry.validate, entry.path)[0] ?? "pending",

@@ -1212,6 +1212,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
     finalizedModuleContractsOverride?: unknown,
     obligationLedgerOverride?: unknown,
     moduleDecompositionOverride?: unknown,
+    cyclicResolutionOverride?: unknown,
   ): Promise<void> {
     const base = payloads();
     const chainNames = [
@@ -1238,7 +1239,7 @@ describe("design-spec structural gates: critic phase gate checks", () => {
       } else if (name === "obligation_ledger" && obligationLedgerOverride !== undefined) {
         await writeRawArtifact(name, obligationLedgerOverride);
       } else if (name === "cyclic_seam_resolution") {
-        await writeRawArtifact(name, {
+        await writeRawArtifact(name, cyclicResolutionOverride ?? {
           contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
           goal_id: "G1",
           cycles: [],
@@ -1329,14 +1330,48 @@ describe("design-spec structural gates: critic phase gate checks", () => {
     expect(step?.step_kind).toBe("contract_pipeline");
     const prompt = await promptOf(step!);
     // The citation gate fired…
-    expect(prompt).toMatch(/Source-Grounded Citation Gate Errors/);
+    expect(prompt).toContain("## Module File Scope Errors");
+    expect(prompt).toContain("ghost-dir/ghost-file-xyz.ts");
     // …and re-emitted the DECOMPOSITION phase (its prompt carries the decompose
     // instruction), NOT contract_finalization.
-    expect(prompt).toMatch(/Decompose the goal into a set of named modules/i);
+    expect(prompt).toContain("Split the goal into named modules.");
     expect(step?.stop_condition ?? "").toMatch(/phase "decomposition"/);
   });
 
-  it("appends a circular-dependency advisory naming the action when the warning is present", async () => {
+  it("prompt 18: a file_scope of only re-export shims re-emits the DECOMPOSITION phase", async () => {
+    // The shim rule used to be prose only: the decomposition text named the gate,
+    // but next-step never ran it, so a module scoped at a barrel reached the
+    // critic. The pre-critic gate now runs it and re-emits the owning phase.
+    await writeFile(join(TEST_DIR, "src", "barrel.ts"), 'export * from "./auth.js";\n', "utf8");
+    spawnSync("git", ["add", "src/barrel.ts"], { cwd: TEST_DIR, shell: false, encoding: "utf8" });
+    const shimDecomposition = {
+      contract_version: CP_MODULE_DECOMPOSITION_VERSION,
+      goal_id: "G1",
+      modules: [
+        { name: "auth-module", responsibilities: "authenticates", file_scope: ["src/barrel.ts"] },
+      ],
+      created_at: CREATED_AT,
+    };
+    const structuralLedger = {
+      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
+      goal_id: "G1",
+      obligations: [
+        { id: "O-1", description: "the module boundary is respected", kind: "structural", depends_on: [], status: "pending" },
+      ],
+      created_at: CREATED_AT,
+    };
+    await writeChainThroughAssessment(undefined, structuralLedger, shimDecomposition);
+
+    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+    const prompt = await promptOf(step!);
+    expect(prompt).toContain("## Module File Scope Errors");
+    expect(prompt).toContain("src/barrel.ts");
+    expect(prompt).toContain("Split the goal into named modules.");
+    expect(step?.stop_condition ?? "").toMatch(/phase "decomposition"/);
+  });
+
+  describe("prompt 18: the resolution record never decides whether cycles remain", () => {
     const circularLedger = {
       contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
       goal_id: "G1",
@@ -1346,18 +1381,37 @@ describe("design-spec structural gates: critic phase gate checks", () => {
       ],
       created_at: CREATED_AT,
     };
-    await writeChainThroughAssessment(undefined, circularLedger);
 
-    const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+    it("a no_cycles record over a cyclic ledger is refused, and the resolution phase re-emitted", async () => {
+      // Before: any status other than `resolved` skipped the re-check, so this
+      // record carried the cycle past the gate to the critic.
+      await writeChainThroughAssessment(undefined, circularLedger);
 
-    expect(step?.step_kind).toBe("contract_pipeline");
-    const prompt = await promptOf(step!);
-    // Should emit the critic phase step (not re-emit design)
-    expect(prompt).toMatch(/Critic|counterexample/i);
-    // Advisory section for circular dependency warning — the diagnostic plus the
-    // action, never an internal record id.
-    expect(prompt).toContain("Circular interface-definition dependency");
-    expect(prompt).toContain("re-drafting the interface definitions");
+      const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+      const prompt = await promptOf(step!);
+      expect(prompt).toContain("# Cyclic Seam Resolution");
+      expect(prompt).toContain('The resolution record says status "no_cycles"');
+      expect(prompt).not.toContain("# Adversarial Critic");
+    });
+
+    it("a resolved record with no cycle entries over a cyclic ledger is refused", async () => {
+      // Before: the per-cycle loop ran over an empty list and accepted it.
+      await writeChainThroughAssessment(undefined, circularLedger, undefined, {
+        contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
+        goal_id: "G1",
+        cycles: [],
+        status: "resolved",
+        created_at: CREATED_AT,
+      });
+
+      const step = await buildNextContractPipelineStep(STEP_OPTIONS);
+
+      const prompt = await promptOf(step!);
+      expect(prompt).toContain("# Cyclic Seam Resolution");
+      expect(prompt).toContain("that no accepted break removed");
+      expect(prompt).not.toContain("# Adversarial Critic");
+    });
   });
 });
 

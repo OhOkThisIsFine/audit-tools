@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts
 /**
  * The value vocabularies a step prompt's schema sketch and its VALIDATOR both
  * read — declared once, here, so they cannot disagree.
@@ -61,15 +62,21 @@
  */
 
 /**
- * `cyclic_seam_resolution.status`. Four values: two describe a resolution the
- * worker authored, two describe a resolution the tool must escalate or refuse.
+ * `cyclic_seam_resolution.status` — what the validator admits. `no_cycles` is
+ * the tool's own record, written when the ledger has no cycle; `resolved` is the
+ * worker's record of the breaks it made. The escalation states
+ * (`user_decision_required`, `blocked`) are routes the gate takes, never a
+ * record: nothing wrote them, and a worker that wrote one moved the pipeline
+ * forward with the cycles still in the ledger.
  */
-export const CYCLIC_SEAM_RESOLUTION_STATUSES = [
-  "no_cycles",
-  "resolved",
-  "user_decision_required",
-  "blocked",
-] as const;
+export const CYCLIC_SEAM_RESOLUTION_STATUSES = ["no_cycles", "resolved"] as const;
+
+/**
+ * The subset of {@link CYCLIC_SEAM_RESOLUTION_STATUSES} the worker's sketch
+ * offers. The worker is emitted only when the ledger has a cycle, so its one
+ * answer is `resolved`; the re-check refuses any record while a cycle remains.
+ */
+export const CYCLIC_SEAM_RESOLUTION_STATUSES_OFFERED = ["resolved"] as const;
 
 /** `cyclic_seam_resolution.cycles[].break_strategy`. */
 export const CYCLIC_SEAM_BREAK_STRATEGIES = [
