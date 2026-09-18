@@ -5,11 +5,10 @@
 
 ## Live state
 
-- **v0.52.0 is published and installed globally.** Release commit `84e2a2d9` passed the publish
-  workflow ([run 35191266555](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35191266555));
-  npm resolves 0.52.0 and both installed command surfaces report 0.52.0. Content: the findings
-  contract `v1alpha2` (`audit_read`, below), the dispatch-lane reader fix, and the release-script
-  and doc commits that followed 0.51.11.
+- **v0.52.2 is published and installed globally.** Release commit `45ddaa42` passed the publish
+  workflow ([run 35318741570](https://github.com/OhOkThisIsFine/audit-tools/actions/runs/35318741570));
+  npm resolves 0.52.2 and both installed command surfaces report 0.52.2. Content: host-prompt
+  review rows 8–20. 0.52.1 holds the same content (the release-resume defect, below).
 - **The cleanup-and-implementation lap is complete.** Every packet (P00–P30) is on `main`; the
   machine-local plan directory and its wave log are the record of how each landed.
 - **The commit gate runs at git's own boundary.** The tracked `.githooks/` run
@@ -64,8 +63,9 @@
 
 ## Immediate next
 
-**Land the lap branch** once: `--no-ff`, both attester classes, the adopted suite stamp. Then
-`/ship`.
+**Fix the release resume** (`docs/backlog/open-bugs.md`, "A release re-run after a
+registry-propagation timeout cuts a SECOND release"): it cut a duplicate release twice, and the
+cause is now known.
 
 **Live owner decision:** none.
 
