@@ -54,10 +54,8 @@ through 16c. Render the live prompt text. Measure its defects against the schema
 submission. Then ask the owner. Prompt 20 is loop-core: it needs `/design-check` plus a staged-tree
 attestation.
 
-**Live owner decision:** whether to land this lap's branch
-`lap/2026-09-17-track-down-and-finish-the-interrupted-ho-hya3` to `main` now, or after prompts 16
-through 20. The branch has no upstream, so commits `751cf340` through `dedf1cd2` are invisible on
-`origin/main`.
+**Live owner decision:** none. The owner decided on 2026-09-17 to hold this lap's branch unpushed
+until prompt 20 is approved, and to land it in one ceremony then.
 
 ## Deliberate state, not bugs
 
