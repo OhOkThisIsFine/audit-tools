@@ -344,11 +344,14 @@ describe("decideNextStepInner — N-R04: intent gate with draft checkpoint", () 
       JSON.stringify(summary),
       "utf8",
     );
-    // Also need a source manifest
+    // Also need a source manifest — in the shape the tool writes for a
+    // `--guidance-file` run (a manifest never has an empty `sources` list).
+    const conversationPath = join(ARTIFACTS_DIR, "intake", "conversation-start.md");
+    await writeFile(conversationPath, "Fix the tests.\n", "utf8");
     const manifest: IntakeSourceManifest = {
       schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
       created_from: "conversation",
-      sources: [],
+      sources: [{ type: "conversation", path: conversationPath, label: "conversation-start" }],
     };
     await writeFile(
       join(ARTIFACTS_DIR, "intake", "source-manifest.json"),

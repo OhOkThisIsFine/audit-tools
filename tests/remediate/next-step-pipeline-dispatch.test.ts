@@ -56,6 +56,26 @@ function spawnCli(
     });
 }
 
+/**
+ * A waiting-for-clarification state whose named items are paused on their own
+ * worker questions — the question's one home is the item it pauses.
+ */
+function pausedOnQuestions(
+  questions: ReadonlyArray<
+    [findingId: string, category: "scope_of_fix" | "behavioral_semantics" | "issue_appropriateness", description: string]
+  >,
+): RemediationState {
+  const state = makePlanningState({ status: "waiting_for_clarification" });
+  for (const [findingId, category, description] of questions) {
+    state.items![findingId] = {
+      ...state.items![findingId]!,
+      status: "needs_clarification",
+      clarification_question: { category, description },
+    };
+  }
+  return state;
+}
+
 beforeEach(async () => {
   await harness.resetTestRepo();
 });
@@ -500,22 +520,12 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
   });
 
   it("blocked clarifications emit one batched user prompt", async () => {
-    await saveState({
-      ...makePlanningState(),
-      status: "waiting_for_clarification",
-      clarifications: [
-        {
-          finding_id: "F-001",
-          category: "scope_of_fix",
-          description: "Clarify one.",
-        },
-        {
-          finding_id: "F-002",
-          category: "behavioral_semantics",
-          description: "Clarify two.",
-        },
-      ],
-    });
+    await saveState(
+      pausedOnQuestions([
+        ["F-001", "scope_of_fix", "Clarify one."],
+        ["F-002", "behavioral_semantics", "Clarify two."],
+      ]),
+    );
     await acknowledgeResume();
     await writeIntentCheckpoint();
 
@@ -523,20 +533,20 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const prompt = await readFile(step.prompt_path, "utf8");
 
     expect(step.step_kind).toBe("collect_clarifications");
-    expect(prompt).toContain("F-001");
-    expect(prompt).toContain("F-002");
-    expect(prompt).toMatch(/one batched response/i);
+    expect(prompt).toContain("Clarify one.");
+    expect(prompt).toContain("Clarify two.");
+    expect(prompt).toMatch(/all of the questions in one message/i);
+    // The example entry names the first real id, never a placeholder.
+    expect(prompt).toContain('"finding_id": "F-001"');
   });
 
   it("clarification_resolution.json is applied and the run advances", async () => {
-    await saveState({
-      ...makePlanningState(),
-      status: "waiting_for_clarification",
-      clarifications: [
-        { finding_id: "F-001", category: "scope_of_fix", description: "Clarify one." },
-        { finding_id: "F-002", category: "issue_appropriateness", description: "Clarify two." },
-      ],
-    });
+    await saveState(
+      pausedOnQuestions([
+        ["F-001", "scope_of_fix", "Clarify one."],
+        ["F-002", "issue_appropriateness", "Clarify two."],
+      ]),
+    );
     await acknowledgeResume();
     await writeIntentCheckpoint();
     await writeFile(

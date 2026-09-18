@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -17,18 +18,53 @@ export const INTAKE_SUMMARY_SCHEMA_VERSION =
 export const INTAKE_CLARIFICATION_SCHEMA_VERSION =
   "remediate-code-intake-clarifications/v1alpha1" as const;
 
-export type IntakeSourceType = "document" | "conversation" | "structured_audit";
+// The source manifest is TOOL-ONLY: the resolver writes it from `--input` and
+// `--guidance-file`, and no prompt asks the host to write it. So the schema is
+// `.strict()` — an extra or wrong-shaped field is a hand edit, and a hand edit
+// is refused on read with a named reason rather than trusted.
+const IntakeSourceSchema = z
+  .object({
+    type: z.enum(["document", "conversation", "structured_audit"]),
+    path: z.string().min(1),
+    label: z.string().optional(),
+  })
+  .strict();
+export type IntakeSource = z.infer<typeof IntakeSourceSchema>;
 
-export interface IntakeSource {
-  type: IntakeSourceType;
-  path: string;
-  label?: string;
-}
+const IntakeSourceManifestSchema = z
+  .object({
+    schema_version: z.literal(INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION),
+    created_from: z.enum(["input", "default_candidates", "conversation", "mixed"]),
+    sources: z.array(IntakeSourceSchema).min(1),
+  })
+  .strict();
+export type IntakeSourceManifest = z.infer<typeof IntakeSourceManifestSchema>;
 
-export interface IntakeSourceManifest {
-  schema_version: typeof INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION;
-  created_from: "input" | "default_candidates" | "conversation" | "mixed";
-  sources: IntakeSource[];
+/**
+ * Read `intake/source-manifest.json`: undefined when absent, the manifest when
+ * it matches {@link IntakeSourceManifestSchema}, and a THROW naming each bad
+ * field otherwise. The throw becomes a blocked step through
+ * `runWithBlockedStepBackstop`, exactly as {@link validateIntakeSummary} does,
+ * and it tells the host how to recover: delete the file and re-run with the
+ * flags, which rewrite it.
+ */
+export async function readSourceManifest(
+  path: string,
+): Promise<IntakeSourceManifest | undefined> {
+  const raw = await readOptionalJsonFile<unknown>(path);
+  if (raw === undefined) return undefined;
+  const parsed = IntakeSourceManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .join("; ");
+    throw new Error(
+      `Malformed intake source manifest at ${path}: ${issues}. The tool writes this ` +
+        "file; do not write it by hand. Delete it and re-run next-step with " +
+        "`--input <path>` (repeat it for each document) and/or `--guidance-file <path>`.",
+    );
+  }
+  return parsed.data;
 }
 
 // Zod is the single source for shape + type here (matching the repo-wide
@@ -318,9 +354,9 @@ export function blockingIntakeQuestions(
  * each gate: the reconcile cannot be skipped by a consumer that forgot to ask.
  *
  * `answered` is the resolution's ids that actually carry a decision. A blank
- * answer is not one: `validateClarificationResolution` requires the field to be
- * present, but a whitespace-only string decides nothing, and treating it as a
- * resolution would clear a blocking question the user never addressed.
+ * answer is not one: `validateClarificationResolution` refuses the file that
+ * holds it, and this read must not clear a blocking question on a
+ * whitespace-only string before that refusal runs.
  *
  * Pure and idempotent, and it never invents a `ready`: it removes resolved
  * questions and leaves `ready` exactly as authored. A run whose only blocking
@@ -442,6 +478,11 @@ export function validateClarificationResolution(
     }
     if (typeof answer.answer !== "string") {
       errors.push(`answers[${i}] is missing required field 'answer'`);
+    } else if (answer.answer.trim().length === 0) {
+      // A blank answer decides nothing (reconcileIntakeQuestions does not count
+      // it), so accepting the file would re-ask the same question with no reason
+      // given. Refuse it by name instead.
+      errors.push(`answers[${i}].answer is blank — write the user's answer`);
     }
   }
 
@@ -505,9 +546,7 @@ export async function readIntakeArtifacts(
     clarificationResolution,
   );
   return {
-    manifest: await readOptionalJsonFile<IntakeSourceManifest>(
-      paths.sourceManifest,
-    ),
+    manifest: await readSourceManifest(paths.sourceManifest),
     conversationStart: await readOptionalTextFile(paths.conversationStart),
     // File absent → undefined (no summary yet, not a defect). File present →
     // validated at read time (see validateIntakeSummary); malformed content

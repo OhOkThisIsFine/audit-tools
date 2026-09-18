@@ -278,9 +278,12 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
 
     expect(step.step_kind).toBe("collect_starting_point");
     expect(currentStep.step_kind).toBe("collect_starting_point");
-    expect(prompt).toMatch(/document paths/i);
+    // The host gives the starting point with flags; the tool owns the manifest.
+    expect(prompt).toContain("--input");
+    expect(prompt).toContain("--guidance-file");
     expect(prompt).toMatch(/conversational feedback/i);
-    expect(step.artifact_paths.source_manifest).toMatch(/source-manifest\.json$/);
+    expect(step.artifact_paths).not.toHaveProperty("source_manifest");
+    expect(step.artifact_paths.conversation_start).toMatch(/conversation-start\.md$/);
   });
 
   it("explicit missing input emits a starting-point step with the missing path", async () => {

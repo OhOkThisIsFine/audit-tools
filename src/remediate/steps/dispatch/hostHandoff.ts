@@ -308,7 +308,6 @@ interface RemediationHostDecision {
 
 const CURRENT_STATE_KEYS = new Set([
   "applied_edit_surface",
-  "clarifications",
   "closing_context",
   "closing_plan",
   "contract_version",
@@ -325,6 +324,7 @@ const CURRENT_STATE_KEYS = new Set([
 const CURRENT_ITEM_KEYS = new Set([
   "block_id",
   "clarification_context",
+  "clarification_question",
   "completed_at",
   "failure_context",
   "failure_reason",
@@ -3364,17 +3364,14 @@ function commitRemediationStateUpdates(
           item.status = "needs_clarification";
           delete item.completed_at;
           item.failure_reason = outcome.question;
-          const clarifications = nextState.clarifications ?? [];
-          if (!clarifications.some((entry) => entry.finding_id === findingId)) {
-            clarifications.push({
-              finding_id: findingId,
-              category: isClarificationCategory(outcome.category)
-                ? outcome.category
-                : "scope_of_fix",
-              description: outcome.question,
-            });
-          }
-          nextState.clarifications = clarifications;
+          // The question lives on the item (its one home): the clarification
+          // round lists every paused item, so no answer can erase another's.
+          item.clarification_question = {
+            category: isClarificationCategory(outcome.category)
+              ? outcome.category
+              : "scope_of_fix",
+            description: outcome.question,
+          };
         }
       }
       continue;

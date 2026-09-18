@@ -13,7 +13,6 @@ import type { RemediationState } from "../state/store.js";
 import { StateStore } from "../state/store.js";
 import { isInProgressStatus } from "../state/itemStatus.js";
 import {
-  validateClarificationRequest,
   validateRemediationPlan,
   validateTriageResolution,
 } from "./remediationState.js";
@@ -468,23 +467,6 @@ export async function validateArtifacts(
   const persistedPlan = await readJsonForValidation(planPath, issues);
   if (persistedPlan) {
     pushErrorIssues(issues, validateRemediationPlan(persistedPlan));
-  }
-
-  const clarificationRequest = await readJsonForValidation(
-    join(artifactsDir, "clarification_request.json"),
-    issues,
-  );
-  if (clarificationRequest) {
-    if (!Array.isArray(clarificationRequest)) {
-      issues.push("clarification_request.json must be an array.");
-    } else {
-      for (const [index, request] of clarificationRequest.entries()) {
-        pushErrorIssues(
-          issues,
-          validateClarificationRequest(request, `clarification_request[${index}]`),
-        );
-      }
-    }
   }
 
   const triageBatch = await readJsonForValidation(

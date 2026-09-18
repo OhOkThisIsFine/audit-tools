@@ -1,8 +1,9 @@
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
+import { z } from "zod";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -167,6 +168,7 @@ import {
   manifestIsInputBound,
   readIntakeArtifacts,
   readProjectFacts,
+  readSourceManifest,
   writeProjectFacts,
   resolveManifestSources,
   type IntakeSourceManifest,
@@ -2621,81 +2623,141 @@ Stop after presenting this choice. Do not advance the run until the user decides
 // must map to `clarified` (proceed with the finding), never to a drop. The
 // finding-dropping token is named `reject_finding` — it speaks about the
 // FINDING, not the ambiguity, and so can't be confused with "no ambiguity here."
-type PlanClarificationAction = "clarified" | "reject_finding" | "defer";
+const PLAN_CLARIFICATION_ACTIONS = ["clarified", "reject_finding", "defer"] as const;
 
-const PLAN_CLARIFICATION_ACTIONS: readonly PlanClarificationAction[] = [
-  "clarified",
-  "reject_finding",
-  "defer",
-];
-
-function isPlanClarificationAction(value: unknown): value is PlanClarificationAction {
-  return (
-    typeof value === "string" &&
-    (PLAN_CLARIFICATION_ACTIONS as readonly string[]).includes(value)
-  );
-}
-
-interface PlanClarificationResolution {
-  finding_id: string;
-  action: PlanClarificationAction;
-  rationale?: string;
-  /**
-   * Files the answer ADDS to the owning block's write scope
-   * (open-bugs.md:110): every file the fix must create or edit beyond the
-   * promoted scope — the test a node must write, the source a generated
-   * artifact mirrors, a new shared module, a manifest. Applied only with
-   * action "clarified"; validated whole-file fail-closed BEFORE anything is
-   * applied, so the host never edits the plan by hand.
-   */
-  scope_additions?: string[];
-}
-
-/** Carry `scope_additions` through when it is an array; keep string entries. */
-function normalizedScopeAdditions(entry: Record<string, unknown>): {
-  scope_additions?: string[];
-} {
-  if (!Array.isArray(entry.scope_additions)) return {};
-  return {
-    scope_additions: entry.scope_additions.filter(
-      (p): p is string => typeof p === "string",
-    ),
-  };
-}
-
-function normalizePlanClarificationResolutions(value: unknown): PlanClarificationResolution[] {
-  if (Array.isArray(value)) {
-    return value.filter(isRecord).flatMap((entry) => {
-      if (typeof entry.finding_id === "string" && isPlanClarificationAction(entry.action)) {
-        return [
-          {
-            finding_id: entry.finding_id,
-            action: entry.action,
-            rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
-            ...normalizedScopeAdditions(entry),
-          },
-        ];
-      }
-      return [];
-    });
-  }
-  if (!isRecord(value)) return [];
-  if (Array.isArray((value as Record<string, unknown>).resolutions)) {
-    return normalizePlanClarificationResolutions((value as Record<string, unknown>).resolutions);
-  }
-  if (Array.isArray((value as Record<string, unknown>).items)) {
-    return normalizePlanClarificationResolutions((value as Record<string, unknown>).items);
-  }
-  return Object.entries(value as Record<string, unknown>).flatMap(([findingId, entry]) => {
-    if (!isRecord(entry)) return [];
-    if (!isPlanClarificationAction(entry.action)) return [];
-    return [{
-      finding_id: typeof entry.finding_id === "string" ? entry.finding_id : findingId,
-      action: entry.action,
-      rationale: typeof entry.rationale === "string" ? entry.rationale : undefined,
-      ...normalizedScopeAdditions(entry),
-    }];
+/**
+ * One entry of a clarification resolution file. Strict: an unknown field is
+ * refused, not ignored.
+ *
+ * - `rationale` is REQUIRED and non-empty on `clarified`: it becomes the item's
+ *   `clarification_context`, the answer the next worker reads. A `clarified`
+ *   entry without it re-opened the item with no answer attached.
+ * - `scope_additions` lists the files the answer ADDS to the owning block's
+ *   write scope (open-bugs.md:110): every file the fix must create or edit
+ *   beyond the promoted scope — the test a node must write, the source a
+ *   generated artifact mirrors, a new shared module, a manifest. It is allowed
+ *   ONLY on `clarified`, the one action that re-opens the item; on
+ *   `reject_finding` or `defer` it used to be ignored without a word. Each path
+ *   is validated whole-file fail-closed BEFORE anything is applied
+ *   (`validateClarificationScopeAdditions`), so the host never edits the plan
+ *   by hand.
+ */
+const PlanClarificationResolutionSchema = z
+  .object({
+    finding_id: z.string().min(1, "must be a non-empty finding id"),
+    action: z.enum(PLAN_CLARIFICATION_ACTIONS),
+    rationale: z.string().optional(),
+    scope_additions: z.array(z.string()).optional(),
+  })
+  .strict()
+  .superRefine((entry, ctx) => {
+    if (entry.action === "clarified" && (entry.rationale ?? "").trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["rationale"],
+        message:
+          'is required and must be non-empty when action is "clarified" — it carries the answer to the next worker',
+      });
+    }
+    if (entry.action !== "clarified" && entry.scope_additions !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["scope_additions"],
+        message: `is allowed only with action "clarified" — a ${entry.action} entry widens no write scope`,
+      });
+    }
   });
+
+type PlanClarificationResolution = z.infer<typeof PlanClarificationResolutionSchema>;
+
+type ParsedPlanClarifications =
+  | { ok: true; resolutions: PlanClarificationResolution[] }
+  | { ok: false; reason: string };
+
+/**
+ * Read and validate a clarification resolution file — the mid-run
+ * `clarification_resolution.json` and the up-front `ambiguity_resolution.json`
+ * share this one parser.
+ *
+ * ONE shape is accepted: a bare JSON array of entries. Every entry is checked
+ * against {@link PlanClarificationResolutionSchema}, and a second entry for the
+ * same finding is refused. Any bad entry refuses the WHOLE file, and the reason
+ * names the entry's index and field. The parser this replaced accepted four
+ * shapes and dropped a bad entry in silence: an `"action": "approve"` lost the
+ * user's answer, and the item then waited forever for a question the round no
+ * longer showed.
+ */
+async function readPlanClarificationResolutions(
+  path: string,
+): Promise<ParsedPlanClarifications> {
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `the file is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      reason:
+        "the file must be a JSON array of entries — an object wrapper such as " +
+        '`{"resolutions": [...]}` is not accepted',
+    };
+  }
+  const problems: string[] = [];
+  const firstEntryFor = new Map<string, number>();
+  const resolutions: PlanClarificationResolution[] = [];
+  value.forEach((entry, index) => {
+    const parsed = PlanClarificationResolutionSchema.safeParse(entry);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path.length > 0 ? ` \`${issue.path.join(".")}\`` : "";
+        problems.push(`entry [${index}]${field}: ${issue.message}`);
+      }
+      return;
+    }
+    const prior = firstEntryFor.get(parsed.data.finding_id);
+    if (prior !== undefined) {
+      problems.push(
+        `entry [${index}] \`finding_id\`: \`${parsed.data.finding_id}\` is already answered by entry [${prior}]`,
+      );
+      return;
+    }
+    firstEntryFor.set(parsed.data.finding_id, index);
+    resolutions.push(parsed.data);
+  });
+  return problems.length > 0
+    ? { ok: false, reason: problems.join("; ") }
+    : { ok: true, resolutions };
+}
+
+/**
+ * Every whole-file refusal of a parsed resolution, in check order: the parse,
+ * then the closed id set, then the scope additions. Null means the file may be
+ * applied.
+ */
+async function planClarificationRefusal(
+  root: string,
+  state: RemediationState,
+  parsed: ParsedPlanClarifications,
+  validIds: ReadonlySet<string>,
+  outsideSetLabel: string,
+): Promise<string | null> {
+  if (!parsed.ok) return parsed.reason;
+  const unknownIds = parsed.resolutions
+    .map((r) => r.finding_id)
+    .filter((id) => !validIds.has(id));
+  if (unknownIds.length > 0) {
+    return `finding id(s) ${outsideSetLabel}: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`;
+  }
+  const scopeRefusals = await validateClarificationScopeAdditions(root, state, parsed.resolutions);
+  if (scopeRefusals.length > 0) {
+    return `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`;
+  }
+  return null;
 }
 
 /**
@@ -2772,6 +2834,8 @@ function applyClarificationActionToItem(
   res: PlanClarificationResolution,
   now: string,
 ): void {
+  // The question is answered (or the finding is closed): it leaves the item.
+  delete item.clarification_question;
   if (res.action === "reject_finding") {
     item.status = "deemed_inappropriate";
     item.failure_reason = res.rationale;
@@ -2803,35 +2867,21 @@ async function applyPlanClarificationResolution(
 ): Promise<{ kind: "applied"; state: RemediationState } | { kind: "refused"; step: RemediationStep }> {
   if (!state.plan || !state.items) return { kind: "applied", state };
   const resolutionPath = join(artifactsDir, "clarification_resolution.json");
-  const resolutions = normalizePlanClarificationResolutions(
-    await readOptionalJsonFile<unknown>(resolutionPath),
-  );
-  // Uniform id-join contract: an unknown finding_id refuses the WHOLE
-  // resolution (archived, nothing applied) and re-halts with the unknown ids
-  // named — the silent-continue alternative drops the user's answer on a typo'd
-  // id and force-closes its item as abandoned at the fall-through below.
-  const unknownIds = resolutions
-    .map((r) => r.finding_id)
-    .filter((id) => !state.items?.[id]);
-  if (unknownIds.length > 0) {
-    await withFsRetry(() =>
-      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
-    );
-    return {
-      kind: "refused",
-      step: await handleWaitingForClarification(
-        root,
-        artifactsDir,
-        state,
-        `finding id(s) not in the plan: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`,
-      ),
-    };
-  }
-  // Scope deltas ride the same whole-file fail-closed contract as unknown ids:
-  // an invalid addition refuses everything, so a decision record never
+  const parsed = await readPlanClarificationResolutions(resolutionPath);
+  // Uniform whole-file fail-closed contract: a malformed entry, an id outside
+  // the paused set, or an invalid scope addition refuses the WHOLE resolution
+  // (archived, nothing applied) and re-halts with the reason named. The
+  // silent-continue alternative drops the user's answer and leaves its item
+  // waiting on a question nobody is asked, so a decision record never
   // half-applies (open-bugs.md:110).
-  const scopeRefusals = await validateClarificationScopeAdditions(root, state, resolutions);
-  if (scopeRefusals.length > 0) {
+  const refusal = await planClarificationRefusal(
+    root,
+    state,
+    parsed,
+    new Set(pausedClarifications(state).map((q) => q.finding_id)),
+    "not waiting for a clarification",
+  );
+  if (refusal !== null || !parsed.ok) {
     await withFsRetry(() =>
       rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
     );
@@ -2841,10 +2891,11 @@ async function applyPlanClarificationResolution(
         root,
         artifactsDir,
         state,
-        `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`,
+        refusal ?? "the resolution could not be read",
       ),
     };
   }
+  const resolutions = parsed.resolutions;
   const now = new Date().toISOString();
   let appliedCount = 0;
   for (const res of resolutions) {
@@ -2885,9 +2936,29 @@ async function applyPlanClarificationResolution(
     : hasUnansweredClarification(state)
       ? "waiting_for_clarification"
       : "implementing";
-  state.clarifications = [];
   await store.saveState(state);
   return { kind: "applied", state };
+}
+
+/**
+ * The open worker questions: one per item paused as `needs_clarification`,
+ * read from the item itself (its `clarification_question`), in content-stable
+ * finding-id order. The item is the question's one home, so this list cannot
+ * disagree with the item statuses the round waits on.
+ */
+function pausedClarifications(state: RemediationState): ClarificationRequest[] {
+  return Object.values(state.items ?? {})
+    .filter((item) => item.status === "needs_clarification")
+    .sort((left, right) => compareCodeUnits(left.finding_id, right.finding_id))
+    .map((item) => ({
+      finding_id: item.finding_id,
+      // The state store refuses a paused item without a question, so the
+      // fallback is unreachable from a stored state; it keeps the render total.
+      ...(item.clarification_question ?? {
+        category: "scope_of_fix" as const,
+        description: item.failure_reason ?? "(no question recorded)",
+      }),
+    }));
 }
 
 async function handleWaitingForClarification(
@@ -2896,12 +2967,6 @@ async function handleWaitingForClarification(
   state: RemediationState,
   refusal?: string,
 ): Promise<RemediationStep> {
-  const clarifications =
-    state.clarifications ??
-    (await readOptionalJsonFile<ClarificationRequest[]>(
-      join(artifactsDir, "clarification_request.json"),
-    )) ??
-    [];
   const resolutionPath = join(artifactsDir, "clarification_resolution.json");
   return writeCurrentStep({
     stepKind: "collect_clarifications",
@@ -2909,12 +2974,11 @@ async function handleWaitingForClarification(
     runId: stateRunId(state),
     repoRoot: root,
     artifactsDir,
-    prompt: clarificationPrompt(clarifications, resolutionPath, refusal),
+    prompt: clarificationPrompt(pausedClarifications(state), resolutionPath, refusal),
     allowedCommands: [loaderCommand("next-step")],
     stopCondition:
       "Stop after asking the user for clarification answers, unless the answers are already available and the prompt told you to continue.",
     artifactPaths: {
-      clarification_request: join(artifactsDir, "clarification_request.json"),
       clarification_resolution: resolutionPath,
     },
   });
@@ -3126,18 +3190,22 @@ async function runPlanAmbiguityGate(
 
   // Resolution present: apply it to items, mark the gate done, archive inputs so
   // it cannot re-halt.
-  const resolutions = normalizePlanClarificationResolutions(
-    await readOptionalJsonFile<unknown>(resolutionPath),
+  // The same whole-file fail-closed contract as the mid-run round: a malformed
+  // entry, a finding id outside the plan, or an invalid scope addition refuses
+  // the WHOLE resolution (archived, nothing applied) and the gate re-halts with
+  // the reason named — the silent-continue alternative drops a host answer,
+  // leaving its item to fall to mid-run triage unexplained. At this up-front
+  // gate no workload binding exists yet, so an applied scope widening simply
+  // flows into the first dispatch.
+  const parsed = await readPlanClarificationResolutions(resolutionPath);
+  const refusal = await planClarificationRefusal(
+    root,
+    state,
+    parsed,
+    new Set(findings.map((f) => f.id)),
+    "not in the plan",
   );
-  // Uniform id-join contract: a resolution naming a finding id outside the plan
-  // is REFUSED whole (archived, nothing applied) and the gate re-halts with the
-  // unknown ids named — the silent-continue alternative drops a host answer on a
-  // typo'd id, leaving its item to fall to mid-run triage unexplained.
-  const validIds = new Set(findings.map((f) => f.id));
-  const unknownIds = resolutions
-    .map((r) => r.finding_id)
-    .filter((id) => !validIds.has(id));
-  if (unknownIds.length > 0) {
+  if (refusal !== null || !parsed.ok) {
     await withFsRetry(() =>
       rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
     );
@@ -3154,7 +3222,7 @@ async function runPlanAmbiguityGate(
         candidates,
         resolutionPath,
         findings.map((f) => f.id),
-        `finding id(s) not in the plan: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`,
+        refusal ?? "the resolution could not be read",
       ),
       allowedCommands: [loaderCommand("next-step")],
       stopCondition:
@@ -3165,38 +3233,7 @@ async function runPlanAmbiguityGate(
       },
     });
   }
-  // Scope deltas: the same whole-file fail-closed contract as unknown ids
-  // (open-bugs.md:110). At this up-front gate no workload binding exists yet,
-  // so an applied widening simply flows into the first dispatch.
-  const scopeRefusals = await validateClarificationScopeAdditions(root, state, resolutions);
-  if (scopeRefusals.length > 0) {
-    await withFsRetry(() =>
-      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
-    );
-    const candidates =
-      (await readOptionalJsonFile<ClarificationRequest[]>(requestPath)) ??
-      detectPlanAmbiguities(findings, state.items);
-    return writeCurrentStep({
-      stepKind: "collect_clarifications",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: ambiguityReviewPrompt(
-        candidates,
-        resolutionPath,
-        findings.map((f) => f.id),
-        `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`,
-      ),
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after re-submitting a corrected ambiguity resolution, unless it is already written and the prompt told you to continue.",
-      artifactPaths: {
-        ambiguity_request: requestPath,
-        ambiguity_resolution: resolutionPath,
-      },
-    });
-  }
+  const resolutions = parsed.resolutions;
   const now = new Date().toISOString();
   let changed = false;
   for (const res of resolutions) {
@@ -4907,6 +4944,14 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           if (outcome.kind === "refused") return { kind: "emit", step: outcome.step };
           return { kind: "transition", state: outcome.state };
         }
+        // A wait with no paused item has no question to ask: a round rendered
+        // from it lists nothing, and no answer can satisfy it. Return to
+        // `implementing`, whose own obligations route the run onward.
+        if (!hasUnansweredClarification(s)) {
+          s.status = "implementing";
+          await store.saveState(s);
+          return { kind: "transition", state: s };
+        }
         return {
           kind: "emit",
           step: await handleWaitingForClarification(root, artifactsDir, s),
@@ -5225,9 +5270,7 @@ async function advanceUnderPhaseLock(deps: {
   // resumes rather than tripping the input_conflict gate.
   const suppliedInputUnchanged = suppliedInputMatchesRun(
     inputResolution,
-    await readOptionalJsonFile<IntakeSourceManifest>(
-      intakePaths(artifactsDir).sourceManifest,
-    ),
+    await readSourceManifest(intakePaths(artifactsDir).sourceManifest),
   );
 
   // The linear pre-intake gates run as obligations through the shared advance

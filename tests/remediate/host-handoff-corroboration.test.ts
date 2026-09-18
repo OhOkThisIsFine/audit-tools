@@ -1586,13 +1586,12 @@ describe("remediation host handoff repository corroboration", () => {
     expect(clarificationResult.state.items.F1!.status).toBe(
       "needs_clarification",
     );
-    expect(clarificationResult.state.clarifications).toEqual([
-      {
-        finding_id: "F1",
-        category: "compatibility_policy",
-        description: "Should the legacy export remain as an alias?",
-      },
-    ]);
+    // The question lives on the item it pauses — its one home.
+    expect(clarificationResult.state.items.F1!.clarification_question).toEqual({
+      category: "compatibility_policy",
+      description: "Should the legacy export remain as an alias?",
+    });
+    expect(clarificationResult.state).not.toHaveProperty("clarifications");
   });
 
   it("refuses an orphaned trusted baseline on the normal lane and accepts it only under the explicit recovery verb", async () => {

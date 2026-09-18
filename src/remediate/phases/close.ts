@@ -59,7 +59,7 @@ import type {
   RemediationOutcomeFinalStatus,
   RemediationOutcomeItem,
 } from "../state/types.js";
-import { intakePaths, type IntakeSourceManifest } from "../intake.js";
+import { intakePaths, readSourceManifest, type IntakeSourceManifest } from "../intake.js";
 import { isAuditFindingsReport } from "./plan.js";
 import {
   dispositionToOutcomeStatus,
@@ -573,9 +573,7 @@ async function loadStructuredSourceFindingsById(
   const findingsById = new Map<string, Finding>();
   let manifest: IntakeSourceManifest | undefined;
   try {
-    manifest = await readOptionalJsonFile<IntakeSourceManifest>(
-      intakePaths(options.artifactsDir).sourceManifest,
-    );
+    manifest = await readSourceManifest(intakePaths(options.artifactsDir).sourceManifest);
   } catch {
     return findingsById;
   }

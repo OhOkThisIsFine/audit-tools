@@ -3,7 +3,6 @@ import {
   validateFinding,
   validateRemediationPlan,
   validateRemediationBlock,
-  validateClarificationRequest,
   validateTriageResolution,
 } from "../../src/remediate/validation/remediationState.js";
 import {
@@ -240,29 +239,6 @@ describe("validateRemediationBlock", () => {
     expect(
       issues.some((i) => i.severity === "error" && i.path.includes("dependencies")),
     ).toBe(true);
-  });
-});
-
-describe("validateClarificationRequest", () => {
-  it("passes a valid clarification request", () => {
-    const req = {
-      finding_id: "F-001",
-      category: "scope_of_fix",
-      description: "What scope?",
-    };
-    const issues = validateClarificationRequest(req);
-    expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
-  });
-
-  it("errors for an invalid category", () => {
-    const issues = validateClarificationRequest({
-      finding_id: "F-001",
-      category: "made_up",
-      description: "x",
-    });
-    expect(issues.filter((i) => i.severity === "error").length).toBeGreaterThan(
-      0,
-    );
   });
 });
 

@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/clarification-round-contract.test.ts
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -11,8 +12,8 @@ import {
 import {
   RemediationPlan,
   RemediationItemState,
-  ClarificationRequest,
   ClosingPlan,
+  isClarificationCategory,
   CoverageLedger,
   RemediationHostHandoffRecord,
   RemediationHostHandoffRecordSchema,
@@ -72,7 +73,6 @@ export interface RemediationState {
   status: RemediationRunStatus;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
-  clarifications?: ClarificationRequest[];
   closing_plan?: ClosingPlan;
   started_at?: string;
   step_count?: number;
@@ -240,6 +240,7 @@ function validateState(value: unknown): string[] {
       }
     }
   }
+  errors.push(...clarificationQuestionErrors(obj));
   if (status === "closing") {
     const closingPlan = obj["closing_plan"];
     if (!closingPlan || typeof closingPlan !== "object" || Array.isArray(closingPlan)) {
@@ -261,6 +262,130 @@ function validateState(value: unknown): string[] {
     }
   }
   return errors;
+}
+
+/**
+ * The clarification invariants. A worker question lives on its item, so:
+ *
+ * - the retired run-level `clarifications` list is refused (it was a second
+ *   copy of the questions, and clearing it after a partial answer left the
+ *   unanswered items with nothing to show — the round then listed no question
+ *   and the run could not progress);
+ * - an item paused as `needs_clarification` must carry its question, because
+ *   the clarification round is built from those items alone.
+ *
+ * A state written before the move is translated on READ by
+ * {@link adoptLegacyClarifications}, so these refuse only a WRITE of the old
+ * shape.
+ */
+function clarificationQuestionErrors(obj: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if (obj["clarifications"] !== undefined) {
+    errors.push(
+      "clarifications is retired: a worker question lives on its item as clarification_question",
+    );
+  }
+  const items = obj["items"];
+  if (!items || typeof items !== "object" || Array.isArray(items)) return errors;
+  for (const [key, item] of Object.entries(items as Record<string, unknown>)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const it = item as Record<string, unknown>;
+    if (it["status"] !== "needs_clarification") continue;
+    const question = it["clarification_question"];
+    if (
+      !question ||
+      typeof question !== "object" ||
+      Array.isArray(question) ||
+      !isClarificationCategory((question as Record<string, unknown>)["category"]) ||
+      typeof (question as Record<string, unknown>)["description"] !== "string" ||
+      ((question as Record<string, unknown>)["description"] as string).trim().length === 0
+    ) {
+      errors.push(
+        `items["${key}"] is needs_clarification but carries no valid clarification_question ` +
+          "(a category and a non-empty description)",
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * The READ rule for a state written before the worker question moved onto its
+ * item. Such a state holds the questions in a run-level `clarifications` list,
+ * and the old ingest ALSO wrote each question into the paused item's
+ * `failure_reason`.
+ *
+ * Every `needs_clarification` item without a `clarification_question` takes
+ * one: from its entry in the legacy list when there is one, else from its
+ * `failure_reason` (this recovers a run that the old partial-answer defect
+ * already wedged, where the list was cleared but the item still waits). The
+ * legacy list is then dropped, and the next write persists the new shape.
+ *
+ * This is the one place a read is not byte-faithful, and it touches only the
+ * retired shape: a current state passes through unchanged.
+ */
+function adoptLegacyClarifications(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const obj = raw as Record<string, unknown>;
+  const items = obj["items"];
+  const hasItems = Boolean(items) && typeof items === "object" && !Array.isArray(items);
+  const needsQuestion = hasItems
+    ? Object.values(items as Record<string, unknown>).some(
+        (item) =>
+          Boolean(item) &&
+          typeof item === "object" &&
+          (item as Record<string, unknown>)["status"] === "needs_clarification" &&
+          (item as Record<string, unknown>)["clarification_question"] === undefined,
+      )
+    : false;
+  if (obj["clarifications"] === undefined && !needsQuestion) return raw;
+
+  const legacy = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(obj["clarifications"])) {
+    for (const entry of obj["clarifications"] as unknown[]) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const e = entry as Record<string, unknown>;
+      if (typeof e["finding_id"] === "string" && !legacy.has(e["finding_id"])) {
+        legacy.set(e["finding_id"], e);
+      }
+    }
+  }
+  const { clarifications: _retired, ...rest } = obj;
+  if (!hasItems) return rest;
+  const nextItems: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(items as Record<string, unknown>)) {
+    const it = item as Record<string, unknown> | null;
+    if (
+      !it ||
+      typeof it !== "object" ||
+      it["status"] !== "needs_clarification" ||
+      it["clarification_question"] !== undefined
+    ) {
+      nextItems[key] = item;
+      continue;
+    }
+    const entry = legacy.get(key);
+    const description =
+      typeof entry?.["description"] === "string" && entry["description"].trim()
+        ? entry["description"]
+        : typeof it["failure_reason"] === "string" && it["failure_reason"].trim()
+          ? it["failure_reason"]
+          : "The worker paused this finding for a clarification but recorded no question text.";
+    const options = Array.isArray(entry?.["options"])
+      ? (entry["options"] as unknown[]).filter((o): o is string => typeof o === "string")
+      : [];
+    nextItems[key] = {
+      ...it,
+      clarification_question: {
+        category: isClarificationCategory(entry?.["category"])
+          ? entry["category"]
+          : "scope_of_fix",
+        description,
+        ...(options.length > 0 ? { options } : {}),
+      },
+    };
+  }
+  return { ...rest, items: nextItems };
 }
 
 const LOCK_FILENAME = "state.lock";
@@ -303,7 +428,8 @@ export class StateStore {
         // `validateState` throws SchemaVersionMismatchError for a state stamped
         // with another release's contract version; that propagates out of the
         // read exactly as the policy requires (see the constant's doc).
-        const errors = validateState(raw);
+        const adopted = adoptLegacyClarifications(raw);
+        const errors = validateState(adopted);
         if (errors.length > 0) {
           throw new Error(
             `state.json failed schema validation: ${errors.join("; ")}`,
@@ -316,7 +442,9 @@ export class StateStore {
         // written before the field existed has none until its next write, and
         // `validateState` admits that (see the constant's doc) — which is the
         // whole reason the field is optional on the type rather than required.
-        return raw as RemediationState;
+        // The one exception is the retired clarification shape, translated by
+        // `adoptLegacyClarifications`; a current state is returned unchanged.
+        return adopted as RemediationState;
       },
       // The WRITE hook. Without it the store's own `persist` wrote whatever a
       // caller handed it — the load gate was the only validation on the path,

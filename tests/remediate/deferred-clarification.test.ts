@@ -41,6 +41,15 @@ function item(
     finding_id: findingId,
     status,
     block_id: blockId,
+    // The state store refuses a paused item without its question.
+    ...(status === "needs_clarification"
+      ? {
+          clarification_question: {
+            category: "scope_of_fix" as const,
+            description: "How far should the boundary refactor reach?",
+          },
+        }
+      : {}),
   };
 }
 
@@ -193,13 +202,6 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
       F1: item("F1", "B1", "needs_clarification"),
       F2: item("F2", "B2", "pending"),
     });
-    st.clarifications = [
-      {
-        finding_id: "F1",
-        category: "scope_of_fix",
-        description: "How far should the boundary refactor reach?",
-      },
-    ];
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
     await harness.writeIntentCheckpoint();
@@ -231,15 +233,13 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
     await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
-      JSON.stringify({
-        resolutions: [
+      JSON.stringify([
           {
             finding_id: "F1",
             action: "reject_finding",
             rationale: "Not a real issue.",
           },
-        ],
-      }),
+      ]),
       "utf8",
     );
 
@@ -292,13 +292,6 @@ describe("an applied clarification answer invalidates the persisted host-handoff
       F1: item("F1", "B1", "needs_clarification"),
     });
     st.status = "implementing";
-    st.clarifications = [
-      {
-        finding_id: "F1",
-        category: "scope_of_fix",
-        description: "How far should the boundary refactor reach?",
-      },
-    ];
     st.host_handoff = {
       contract_version: "remediation-host-handoff-record/v1alpha1",
       // The run id is the plan id (stateRunId), so the record belongs to THIS
@@ -313,15 +306,13 @@ describe("an applied clarification answer invalidates the persisted host-handoff
     await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
-      JSON.stringify({
-        resolutions: [
+      JSON.stringify([
           {
             finding_id: "F1",
             action: "clarified",
             rationale: "Narrow the fix to the module boundary.",
           },
-        ],
-      }),
+      ]),
       "utf8",
     );
 
@@ -359,15 +350,7 @@ describe("clarification scope delta widens the owning block in-band", () => {
 
   function needsClarificationState() {
     const blocks = [{ ...block("B1", ["F1"]), touched_files: ["src/F1.ts"] }];
-    const st = stateWith(blocks, { F1: item("F1", "B1", "needs_clarification") });
-    st.clarifications = [
-      {
-        finding_id: "F1",
-        category: "scope_of_fix",
-        description: "Which companion files may the fix touch?",
-      },
-    ];
-    return st;
+    return stateWith(blocks, { F1: item("F1", "B1", "needs_clarification") });
   }
 
   it("a clarified resolution's scope_additions widen the owning block and drop the stale binding", async () => {
@@ -384,16 +367,14 @@ describe("clarification scope delta widens the owning block in-band", () => {
     await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
-      JSON.stringify({
-        resolutions: [
+      JSON.stringify([
           {
             finding_id: "F1",
             action: "clarified",
             rationale: "Also create the pinning test and the shared helper.",
             scope_additions: ["tests/f1-pin.test.ts", "src/shared/f1Helper.ts"],
           },
-        ],
-      }),
+      ]),
       "utf8",
     );
 
@@ -423,16 +404,14 @@ describe("clarification scope delta widens the owning block in-band", () => {
     await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
-      JSON.stringify({
-        resolutions: [
+      JSON.stringify([
           {
             finding_id: "F1",
             action: "clarified",
             rationale: "Widen.",
             scope_additions: ["../outside-the-repo.ts"],
           },
-        ],
-      }),
+      ]),
       "utf8",
     );
 

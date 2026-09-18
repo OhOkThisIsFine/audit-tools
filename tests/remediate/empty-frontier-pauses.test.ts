@@ -170,16 +170,15 @@ describe("empty frontier: a clarification holding a phase barrier", () => {
       block("B2", ["F2"], { phase_ordinal: 1 }),
     ];
     const st = stateWith(blocks, {
-      F1: item("F1", "B1", "needs_clarification"),
+      F1: {
+        ...item("F1", "B1", "needs_clarification"),
+        clarification_question: {
+          category: "scope_of_fix",
+          description: "How far should the boundary refactor reach?",
+        },
+      },
       F2: item("F2", "B2", "pending"),
     });
-    st.clarifications = [
-      {
-        finding_id: "F1",
-        category: "scope_of_fix",
-        description: "How far should the boundary refactor reach?",
-      },
-    ];
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
     await harness.writeIntentCheckpoint();

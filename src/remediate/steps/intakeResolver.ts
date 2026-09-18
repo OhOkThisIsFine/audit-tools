@@ -1,4 +1,5 @@
 
+// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
@@ -108,12 +109,12 @@ export async function resolveIntakeStep(params: {
         paths,
       ),
       allowedCommands: [
-        params.loaderCommand("next-step"),
         params.loaderCommand("next-step --input <path>"),
+        params.loaderCommand("next-step --guidance-file <path>"),
+        params.loaderCommand("next-step --input <path> --guidance-file <path>"),
       ],
       stopCondition,
       artifactPaths: {
-        source_manifest: paths.sourceManifest,
         conversation_start: paths.conversationStart,
       },
     }),
@@ -449,9 +450,20 @@ export async function resolveIntakeStep(params: {
   }
 
   if (!isIntakeReady(summary)) {
-    // If the summary claims ready:true but has empty required fields, re-issue
-    // synthesize_intake so the agent rewrites the summary with proper content.
-    if (summary.ready && intakeSummaryContentErrors(summary).length > 0) {
+    // Two not-ready summaries have no question to ask, so each goes back to
+    // synthesize_intake with the reason named: `ready:true` with empty required
+    // fields, and `ready:false` with no blocking question. The second one used
+    // to reach collect_intake_clarifications with ZERO questions — a step no
+    // answer can clear, because the validator needs an answer to a blocking one.
+    const contentErrors = summary.ready ? intakeSummaryContentErrors(summary) : [];
+    const unaskableNotReady =
+      !summary.ready && blockingIntakeQuestions(summary).length === 0;
+    if (contentErrors.length > 0 || unaskableNotReady) {
+      const reason = unaskableNotReady
+        ? "The previous intake summary set `ready: false` but listed no blocking question " +
+          "(`blocking: true`), so there is nothing to ask the user. Either set `ready` to " +
+          "`true`, or add each open blocking question to `open_questions` with `blocking: true`."
+        : `The previous intake summary set \`ready: true\` but ${contentErrors.join(" and ")}.`;
       return {
         kind: "step",
         step: await writeCurrentStep({
@@ -460,15 +472,15 @@ export async function resolveIntakeStep(params: {
           runId: params.randomRunId("INTAKE"),
           repoRoot: root,
           artifactsDir,
-          prompt: params.synthesizeIntakePrompt(
+          prompt: `${params.synthesizeIntakePrompt(
             paths.sourceManifest,
             sourceResolution.resolved,
             paths,
             Boolean(clarificationResolution),
-          ),
+          )}\n\n**Rewrite required.** ${reason}\n`,
           allowedCommands: [params.loaderCommand("next-step")],
           stopCondition:
-            "Stop after rewriting the intake summary with non-empty goals and affected_files, then rerunning next-step.",
+            "Stop after rewriting the intake summary, then rerunning next-step.",
           artifactPaths: {
             source_manifest: paths.sourceManifest,
             intake_summary: paths.summary,

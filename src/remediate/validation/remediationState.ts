@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/validation.test.ts, tests/remediate/clarification-round-contract.test.ts
 import {
   type ValidationIssue,
   isRecord,
@@ -8,15 +9,6 @@ import {
 
 const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
 const VALID_CONFIDENCES = new Set(["high", "medium", "low"]);
-const VALID_CLARIFICATION_CATEGORIES = new Set([
-  "public_contract",
-  "behavioral_semantics",
-  "scope_of_fix",
-  "dependency_introduction",
-  "compatibility_policy",
-  "intent_vs_symptom",
-  "issue_appropriateness",
-]);
 
 export function validateFinding(
   value: unknown,
@@ -181,29 +173,6 @@ export function validateRemediationPlan(
     );
   }
 
-  return issues;
-}
-
-export function validateClarificationRequest(
-  value: unknown,
-  path = "clarification",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  issues.push(
-    ...requireKeys(value, path, ["finding_id", "category", "description"]),
-  );
-  if (!isRecord(value)) return issues;
-
-  if (
-    typeof value.category === "string" &&
-    !VALID_CLARIFICATION_CATEGORIES.has(value.category)
-  ) {
-    pushValidationIssue(
-      issues,
-      `${path}.category`,
-      `Invalid category "${value.category}"; expected one of ${[...VALID_CLARIFICATION_CATEGORIES].join(", ")}.`,
-    );
-  }
   return issues;
 }
 

@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/intake-starting-point-contract.test.ts
 import type {
   ClarificationRequest,
   RemediationItemState,
@@ -11,7 +12,6 @@ import {
 } from "audit-tools/shared";
 import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
-  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
   blockingIntakeQuestions,
   intakePaths,
@@ -30,11 +30,57 @@ function blockedItems(state: RemediationState): RemediationItemState[] {
   return Object.values(state.items ?? {}).filter((item) => item.status === "blocked");
 }
 
+/**
+ * The resolution-entry rules: an example entry, the three actions as a table,
+ * the `scope_additions` rule, and the whole-file refusal. They state exactly
+ * what the one resolution parser (`readPlanClarificationResolutions`,
+ * nextStep.ts) accepts.
+ */
+function resolutionEntryRules(
+  firstId: string,
+  rationaleExample: string,
+): string {
+  return `\`\`\`json
+[
+  {
+    "finding_id": "${firstId}",
+    "action": "clarified",
+    "rationale": "${rationaleExample}"
+  }
+]
+\`\`\`
+
+The file is a JSON array with one entry per finding. Each entry has
+\`finding_id\`, \`action\` and, for \`clarified\`, \`rationale\`. Use one of these
+three actions:
+
+| \`action\` | Use it when | Effect |
+|---|---|---|
+| \`clarified\` | The user answered, or the question was not ambiguous after all. | The fix continues. \`rationale\` is REQUIRED and must not be empty: it carries the answer to the worker. |
+| \`reject_finding\` | The finding itself is not a real issue. | The finding is DROPPED. Never use it to say only that the question was not ambiguous. |
+| \`defer\` | The user chose to skip this finding in this run. | The finding is not fixed in this run. Only the user decides a deferral. |
+
+A \`clarified\` entry can also have \`scope_additions\`: a list of files that the
+answer adds to the fix's write scope, such as a test the fix must create. Write
+each path relative to the repository root. A path may name a new file, but its
+directory must already contain a file that git tracks. Do not put
+\`scope_additions\` on a \`reject_finding\` or \`defer\` entry. Never edit the
+plan's \`touched_files\` by hand.
+
+The tool refuses the WHOLE file when any entry is wrong: an unknown action, a
+missing or empty \`rationale\` on \`clarified\`, a \`scope_additions\` path that
+breaks the rule above, a duplicate \`finding_id\`, or an id outside the set below.
+The refusal names the entry and the field. Nothing is applied, and this step
+comes back.`;
+}
+
 export function clarificationPrompt(
   clarifications: ClarificationRequest[],
   resolutionPath: string,
   refusal?: string,
 ): string {
+  const ids = clarifications.map((c) => c.finding_id);
+  const count = clarifications.length;
   return `
 # Resolve Remediation Clarifications
 ${
@@ -46,7 +92,8 @@ ${
 `
     : ""
 }
-Ask the user to resolve all clarifications in one batched response.
+Workers paused ${count} finding${count === 1 ? "" : "s"} because each needs an
+answer from the user. Ask the user all of the questions in one message.
 
 ${clarifications
   .map(
@@ -64,35 +111,13 @@ After the user answers, write JSON to exactly:
 
 \`${resolutionPath}\`
 
-\`\`\`json
-[
-  {
-    "finding_id": "...",
-    "action": "clarified",
-    "rationale": "...",
-    "scope_additions": ["optional — files the answer ADDS to the fix's write scope"]
-  }
-]
-\`\`\`
-
-Per item use \`"action": "clarified"\` (the user answered, OR there was no real
-ambiguity after all — proceed with the finding, put the answer/decision in
-\`rationale\`), \`"action": "reject_finding"\` (the FINDING itself is not a real
-issue — this DROPS it, so use it only to discard a finding, never just to say the
-question wasn't ambiguous), or \`"action": "defer"\` (the user explicitly chose to
-skip it this run).
-
-When the answer requires files outside the item's current write scope — a test
-the fix must create, the source a generated artifact mirrors, a new shared
-module, a manifest — list them (repo-relative) in \`scope_additions\`: the tool
-widens the owning block and re-mints the work item. NEVER edit the plan's
-\`touched_files\` by hand. An entry that does not resolve beneath the repository
-root, or whose directory does not exist in the tracked tree, refuses the whole
-resolution and re-presents this step.
+${resolutionEntryRules(ids[0] ?? "F-001", "the user's answer, in words the worker can act on")}
 
 \`finding_id\` MUST be drawn from this closed set (copy, never retype):
-${clarifications.map((c) => `\`${c.finding_id}\``).join(", ") || "_(none)_"}. An id
-outside it refuses the whole resolution and re-presents this step.
+${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
+
+You can answer only some of the findings. A finding with no entry stays paused,
+and a later step asks about it again.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;
@@ -420,43 +445,26 @@ Checked default input locations:
 ${checkedPaths.map((candidate) => `- \`${candidate}\``).join("\n")}
 ${missing}
 
-If the user provides document paths, write JSON to exactly:
+Give the starting point to the tool with command flags. The tool records the
+sources itself: do not write a source manifest, and do not edit source files.
 
-\`${paths.sourceManifest}\`
+- **Documents.** Pass each path with \`--input\`. Repeat \`--input\` once for each
+  document. An \`audit-findings.json\` report is read as structured findings.
 
-\`\`\`json
-{
-  "schema_version": "${INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION}",
-  "created_from": "conversation",
-  "sources": [
-    { "type": "document", "path": "path/from/user-or-absolute-path", "label": "input-01" }
-  ]
-}
-\`\`\`
+  \`${loaderCommand("next-step --input <path> --input <path>")}\`
 
-If the user provides conversational feedback, write their full feedback to
-exactly:
+- **Conversational feedback.** Write the user's full feedback, in their words,
+  to exactly:
 
-\`${paths.conversationStart}\`
+  \`${paths.conversationStart}\`
 
-Then include that file in the source manifest:
+  Then pass that file with \`--guidance-file\`:
 
-\`\`\`json
-{
-  "schema_version": "${INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION}",
-  "created_from": "conversation",
-  "sources": [
-    { "type": "conversation", "path": ${JSON.stringify(paths.conversationStart)}, "label": "conversation-start" }
-  ]
-}
-\`\`\`
+  \`${loaderCommand(["next-step", "--guidance-file", paths.conversationStart])}\`
 
-If the user provides both, include both source types in the same manifest. Do
-not edit source files.
+- **Both.** Write the feedback file as above. Then pass both flags in one command:
 
-Then run:
-
-\`${loaderCommand("next-step")}\`
+  \`${loaderCommand(["next-step", "--input", "<path>", "--guidance-file", paths.conversationStart])}\`
 `;
 }
 
@@ -582,10 +590,11 @@ export function collectIntakeClarificationsPrompt(
   paths: ReturnType<typeof intakePaths>,
 ): string {
   const questions = blockingIntakeQuestions(summary);
+  const ids = questions.map((question) => question.id);
   return `
 # Resolve Remediation Intake Questions
 
-Ask the user to answer all blocking intake questions in one response.
+Ask the user all of the blocking intake questions below in one message.
 
 ${questions
   .map(
@@ -607,13 +616,23 @@ After the user answers, write JSON to exactly:
   "schema_version": "${INTAKE_CLARIFICATION_SCHEMA_VERSION}",
   "answers": [
     {
-      "question_id": "Q-001",
-      "answer": "User's answer",
-      "rationale": "Optional short note about how the answer resolves ambiguity"
+      "question_id": "${ids[0] ?? "Q-001"}",
+      "answer": "the user's answer, in their words"
     }
   ]
 }
 \`\`\`
+
+Write one entry in \`answers\` for each question the user answered. \`answer\` is
+required and must not be blank. You can add an optional \`rationale\`: a short
+note on how the answer removes the ambiguity.
+
+\`question_id\` MUST be drawn from this closed set (copy, never retype):
+${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
+
+The tool refuses the file when an entry has an unknown \`question_id\` or a blank
+\`answer\`, or when no entry answers a question above. The refusal names each
+problem, and this step comes back.
 
 Then run:
 

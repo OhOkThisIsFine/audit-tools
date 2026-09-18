@@ -202,6 +202,16 @@ export const ClarificationRequestSchema = z
   .strict();
 export type ClarificationRequest = z.infer<typeof ClarificationRequestSchema>;
 
+/**
+ * A worker's open question, carried ON the paused item
+ * (`RemediationItemState.clarification_question`). The item is the ONE home of
+ * the question: the clarification round lists every item whose status is
+ * `needs_clarification`, so answering some questions can never erase the
+ * others. A separate run-level question list used to be a second copy; clearing
+ * it after a partial answer left the unanswered items with no question to show.
+ */
+export type ClarificationQuestion = Omit<ClarificationRequest, "finding_id">;
+
 /** The canonical clarification categories (single-sourced from the schema). */
 export const CLARIFICATION_CATEGORIES =
   ClarificationRequestSchema.shape.category.options;
@@ -413,6 +423,12 @@ export interface RemediationItemState {
   completed_at?: string;
   /** User's clarification answer, carried from applyClarificationResolution into the implement prompt. */
   clarification_context?: string;
+  /**
+   * The worker's open question. Required while `status` is
+   * `needs_clarification` (the state store refuses a paused item without one),
+   * and removed when the answer is applied. See {@link ClarificationQuestion}.
+   */
+  clarification_question?: ClarificationQuestion;
   /**
    * The failure context (failure_reason + last_successful_step) captured at
    * the time this item was queued for retry. Carried into re-dispatch prompts
