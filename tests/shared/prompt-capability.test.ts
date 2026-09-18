@@ -54,6 +54,11 @@ import {
   materializeFanoutLanes,
   renderLaneResultsFooter,
 } from "../../src/audit/cli/fanoutLanes.js";
+// A lane prompt is a prompt BODY, so every absolute path inside it is written in
+// the forward-slashed host-facing form — the same form `writeStepContract` uses
+// for the step contract beside it (owner review 2026-09-17, prompts 13 and 14).
+// `lane.resultPath` is the native path, so a test must normalize before matching.
+import { toPromptPathToken } from "../../src/shared/tooling/exec.js";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -225,7 +230,7 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
         expect(
           text,
           `${lane.id} must state its own tool-bound result path`,
-        ).toContain(lane.resultPath);
+        ).toContain(toPromptPathToken(lane.resultPath));
         expect(text).toContain(LANE_RESULTS_HEADING);
         expect(
           text,
@@ -241,7 +246,61 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
       }
       // Another lane's bound path never leaks into this lane's prompt.
       const alpha = await readFile(fanout.lanes[0]!.promptPath, "utf8");
-      expect(alpha).not.toContain(fanout.lanes[1]!.resultPath);
+      expect(alpha).not.toContain(toPromptPathToken(fanout.lanes[1]!.resultPath));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The footer's own path is normalized where the footer is built, so the test
+  // above cannot see the SECOND half of the path-form fix: a path the CALLER
+  // wrote into the prompt body. The synthesis-narrative prompt is exactly that
+  // case — its overflow line names the findings report — and a lane that reads
+  // one path form in its prompt body and another in the step contract beside it
+  // cannot tell whether the two name one file (owner review 2026-09-17, prompts
+  // 13 and 14: fix the class, with a contract test).
+  it("materializeFanoutLanes forward-slashes an absolute path written into the prompt BODY", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "c2-lane-body-paths-"));
+    try {
+      const windowsPath = String.raw`C:\Code\audit-tools\.audit-tools\audit\audit-findings.json`;
+      const uncPath = String.raw`\\build01\share\.audit-tools\audit\audit-findings.json`;
+      const fanout = await materializeFanoutLanes({
+        artifactsDir: dir,
+        runId: "c2-body-path-scope",
+        lanes: [
+          {
+            id: "lane_body",
+            label: "Body",
+            promptFilename: "body-prompt.md",
+            promptText: [
+              "# Body",
+              "",
+              `Read the complete report at ${windowsPath} when a theme needs it.`,
+              `The mirror lives at ${uncPath}.`,
+              "",
+              "Match an id with /^F-\\d+$/ — a regex is not a path.",
+            ].join("\n"),
+          },
+        ],
+      });
+
+      const text = (await readFile(fanout.lanes[0]!.promptPath, "utf8")).replace(
+        /\r\n/g,
+        "\n",
+      );
+      expect(
+        text,
+        "a drive-letter path the caller wrote into the body is forward-slashed",
+      ).toContain("C:/Code/audit-tools/.audit-tools/audit/audit-findings.json");
+      expect(
+        text,
+        "a UNC path is normalized the same way",
+      ).toContain("//build01/share/.audit-tools/audit/audit-findings.json");
+      expect(text, "no backslashed form survives").not.toContain(windowsPath);
+      expect(
+        text,
+        "the normalizer is anchored on a path root, so a regex in the body is untouched",
+      ).toContain(String.raw`/^F-\d+$/`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

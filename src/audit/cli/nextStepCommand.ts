@@ -12,6 +12,8 @@ import {
   renderFanoutExecutionLines,
   writeTextFile,
   writeJsonFile,
+  toPromptPathToken,
+  AUDIT_FINDINGS_FILENAME,
 } from "audit-tools/shared";
 import type { AnalyzerPolicy } from "audit-tools/shared";
 // The ONE shared table-driven step-emission scaffold. Imported by relative path
@@ -1651,8 +1653,16 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
       GATE_LANES.synthesis_narrative,
     );
     const continueCommand = nextStepCommand(root, artifactsDir);
+    // The complete findings report, named in the prompt AND granted below. The
+    // prompt renders at most 120 findings (most-severe-first); on a real audit —
+    // the dogfood runs produced 2,179 and 3,230 — the rest live only here, so a
+    // reader that needs one must be able to reach it. Owner review 2026-09-17,
+    // prompt 14 of docs/reviews/prompt-refinement-2026-09-13.md.
+    const findingsPath = toPromptPathToken(
+      join(artifactsDir, AUDIT_FINDINGS_FILENAME),
+    );
     const basePrompt = result.bundle.audit_findings
-      ? renderSynthesisNarrativePrompt(result.bundle.audit_findings)
+      ? renderSynthesisNarrativePrompt(result.bundle.audit_findings, findingsPath)
       : "# Synthesis narrative\n\nNo findings report is available; write an empty themes array.";
     // Always-materialized (design resolution 2): the findings digest (up to 120
     // findings) is a lane FILE, never inlined into the step prompt. This step
@@ -1698,7 +1708,10 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
         }),
       ].join("\n"),
       access: {
-        read_paths: fanout.readPaths,
+        // The lane's own prompt file, PLUS the findings report its overflow line
+        // names. A path stated in a prompt the reader cannot open is worse than
+        // no path at all.
+        read_paths: [...fanout.readPaths, findingsPath],
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,

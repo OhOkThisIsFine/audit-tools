@@ -1,3 +1,9 @@
+// sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts
+//
+// This module is the SECOND prompt-writing boundary in the tool (writeStepContract
+// is the first): every lane prompt file on disk is written here, so the path form
+// a lane reader sees is decided here.
+
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -5,8 +11,10 @@ import {
   deriveLaneDemand,
   estimateTokensFromBytes,
   laneAssetsDir,
+  toPromptPathToken,
   type LaneDemand,
 } from "audit-tools/shared";
+import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
 
 import {
   laneSubmissionPath,
@@ -157,16 +165,28 @@ export function renderLaneResultsFooter(resultPath: string): string {
     "",
     "Write your submission (a single JSON object) to:",
     "",
-    `  ${resultPath}`,
+    `  ${toPromptPathToken(resultPath)}`,
     "",
     LANE_RESULT_FALLBACK_SENTENCE,
     "",
   ].join("\n");
 }
 
-/** A lane's prompt body with its bound results-path section appended. */
+/**
+ * A lane's prompt body with its bound results-path section appended, with every
+ * absolute path in the result forward-slashed.
+ *
+ * A lane prompt is a SECOND prompt-writing boundary beside `writeStepContract`,
+ * which normalizes the same way (owner review 2026-09-17, prompt 13: "fix the
+ * class now"). Without this, one run hands its reader `C:\...\workload.json` in
+ * the lane file and `C:/.../workload.json` in the step contract's path field for
+ * the same file. `normalizePromptBodyPaths` is anchored on a drive letter or a
+ * UNC root, so a regex or an escape sequence inside a prompt body is untouched.
+ */
 function footedPromptText(promptText: string, resultPath: string): string {
-  return `${promptText.replace(/\s+$/, "")}\n\n${renderLaneResultsFooter(resultPath)}`;
+  return normalizePromptBodyPaths(
+    `${promptText.replace(/\s+$/, "")}\n\n${renderLaneResultsFooter(resultPath)}`,
+  );
 }
 
 /**

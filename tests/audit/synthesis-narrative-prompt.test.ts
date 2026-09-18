@@ -7,6 +7,13 @@ const { renderSynthesisNarrativePrompt } = await import("../../src/audit/reporti
 // MAX_RENDERED_FINDINGS is 120 (internal constant in synthesisNarrativePrompt.ts).
 const MAX_RENDERED_FINDINGS = 120;
 
+/**
+ * The complete findings report's host-facing path. The emitter passes the real
+ * one and GRANTS it in the step's `read_paths` (owner review 2026-09-17, prompt
+ * 14): the overflow line is only actionable if the reader can open what it names.
+ */
+const FINDINGS_PATH = "/tmp/.audit-tools/audit/audit-findings.json";
+
 function makeFinding(i: number, overrides: Partial<Finding> = {}): Finding {
   return {
     id: `F-${String(i).padStart(4, "0")}`,
@@ -48,7 +55,7 @@ test("renderSynthesisNarrativePrompt renders header and finding summaries for a 
     }),
   ];
   const report = makeReport(findings, 2);
-  const prompt = renderSynthesisNarrativePrompt(report);
+  const prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
 
   expect(prompt, "prompt contains header").toMatch(/# Synthesis narrative/);
   expect(prompt, "prompt shows finding count").toMatch(/- Findings: 1/);
@@ -65,7 +72,10 @@ test("renderSynthesisNarrativePrompt renders header and finding summaries for a 
   expect(prompt, "no overflow note for small report").not.toMatch(/more findings/);
 });
 
-test("renderSynthesisNarrativePrompt preserves contract-assessment distinctions", () => {
+// Owner review 2026-09-17 (prompt 14 of docs/reviews/prompt-refinement-2026-09-13.md)
+// removed two sentences. This test states WHY each one went, so a later reader
+// who wants to put one back has the measurement rather than the absence.
+test("renderSynthesisNarrativePrompt asks for no distinction the rendered line cannot carry", () => {
   const report = makeReport([
     makeFinding(1, {
       id: "DR-001",
@@ -80,12 +90,45 @@ test("renderSynthesisNarrativePrompt preserves contract-assessment distinctions"
       title: "Configuration layers can collapse",
     }),
   ]);
-  const prompt = renderSynthesisNarrativePrompt(report);
+  const prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
 
+  // The line still carries severity / lens / category, unchanged.
   expect(prompt).toMatch(/DR-001 \[medium\/architecture\/inferred_contract_gap\]/);
   expect(prompt).toMatch(/DR-002 \[medium\/architecture\/design_simplification\]/);
-  expect(prompt).toMatch(/contract assessment findings from conceptual design critique findings/);
-  expect(prompt).toMatch(/Do not re-audit the code, change severities, or invent new findings/);
+
+  // But the prompt no longer asks the reader to separate "contract assessment"
+  // from "design critique" findings: the lens vocabulary has ONE architecture
+  // value and `category` is a free string the reviewer writes, so no rendered
+  // line tells the two apart and the request was unanswerable.
+  expect(
+    prompt,
+    "the observational-vs-conceptual request is not answerable from the rendered line",
+  ).not.toMatch(/contract assessment/i);
+
+  // And the three-part negative is gone: two of its three parts name things the
+  // reader never writes back (`SynthesisNarrative` carries no severity field).
+  expect(
+    prompt,
+    "the prompt must not warn against changing a field the reader does not submit",
+  ).not.toMatch(/change severities/i);
+});
+
+test("renderSynthesisNarrativePrompt orders findings most-severe-first before the cap applies", () => {
+  // Merge order, deliberately worst-last: `buildAuditFindingsDeliverable` copies
+  // the findings array untouched, so without a sort the cap would cut by arrival.
+  const findings = [
+    ...Array.from({ length: MAX_RENDERED_FINDINGS }, (_, i) =>
+      makeFinding(i + 1, { severity: "info" }),
+    ),
+    makeFinding(9001, { id: "F-CRIT", severity: "critical" }),
+    makeFinding(9002, { id: "F-HIGH", severity: "high" }),
+  ];
+  const prompt = renderSynthesisNarrativePrompt(makeReport(findings), FINDINGS_PATH);
+
+  const lines = prompt.split("\n").filter((l) => /^- F-/.test(l));
+  expect(lines.length, "the cap still holds").toBe(MAX_RENDERED_FINDINGS);
+  expect(lines[0], "the critical finding is rendered first, not cut").toMatch(/F-CRIT/);
+  expect(lines[1], "the high finding is rendered second").toMatch(/F-HIGH/);
 });
 
 // ── Overflow path ────────────────────────────────────────────────────────────
@@ -94,10 +137,18 @@ test("renderSynthesisNarrativePrompt includes overflow note when findings exceed
   const TOTAL = MAX_RENDERED_FINDINGS + 15; // 135
   const findings = Array.from({ length: TOTAL }, (_, i) => makeFinding(i + 1));
   const report = makeReport(findings);
-  const prompt = renderSynthesisNarrativePrompt(report);
+  const prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
 
-  const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
-  expect(prompt.includes(overflowNote), `overflow note present: "${overflowNote}"`).toBeTruthy();
+  expect(
+    prompt,
+    "the overflow line states how many findings it omitted",
+  ).toContain(`... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings`);
+  // The note must name a path the reader can actually open — a bare filename
+  // sends it looking for a file it is granted no access to.
+  expect(
+    prompt,
+    "the overflow line names the complete findings report by its granted path",
+  ).toContain(FINDINGS_PATH);
 
   // Count rendered finding lines (lines starting with "- F-")
   const findingLines = prompt.split("\n").filter((l) => /^- F-/.test(l));
@@ -111,7 +162,7 @@ test("renderSynthesisNarrativePrompt includes overflow note when findings exceed
 
 test("renderSynthesisNarrativePrompt renders sentinel line when findings array is empty", () => {
   const report = makeReport([]);
-  const prompt = renderSynthesisNarrativePrompt(report);
+  const prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
 
   expect(prompt, "sentinel line present").toMatch(/\(no findings were recorded\)/);
   expect(prompt, "no overflow note when findings empty").not.toMatch(/more findings/);
@@ -142,7 +193,7 @@ test("renderSynthesisNarrativePrompt emits to process.stderr when findings excee
   const report = makeReport(findings);
 
   const { stderrChunks } = withCapturedStderrSync(() =>
-    renderSynthesisNarrativePrompt(report),
+    renderSynthesisNarrativePrompt(report, FINDINGS_PATH),
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("synthesisNarrative: truncated"));
@@ -158,7 +209,7 @@ test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for exactly
   const report = makeReport(findings);
 
   const { stderrChunks } = withCapturedStderrSync(() =>
-    renderSynthesisNarrativePrompt(report),
+    renderSynthesisNarrativePrompt(report, FINDINGS_PATH),
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
@@ -170,7 +221,7 @@ test("renderSynthesisNarrativePrompt does NOT emit to process.stderr for fewer t
   const report = makeReport(findings);
 
   const { stderrChunks } = withCapturedStderrSync(() =>
-    renderSynthesisNarrativePrompt(report),
+    renderSynthesisNarrativePrompt(report, FINDINGS_PATH),
   );
 
   const truncationChunks = stderrChunks.filter((c) => c.includes("truncated findings list"));
@@ -184,11 +235,13 @@ test("renderSynthesisNarrativePrompt still contains overflow note in prompt when
 
   let prompt!: string;
   withCapturedStderrSync(() => {
-    prompt = renderSynthesisNarrativePrompt(report);
+    prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
   });
 
-  const overflowNote = `... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`;
-  expect(prompt.includes(overflowNote), "overflow note still present in returned prompt").toBeTruthy();
+  expect(
+    prompt,
+    "overflow note still present in returned prompt",
+  ).toContain(`... and ${TOTAL - MAX_RENDERED_FINDINGS} more findings`);
 });
 
 // ── summarizeFinding truncation ───────────────────────────────────────────────
@@ -205,7 +258,7 @@ test("summarizeFinding truncates affected_files to 4 paths", () => {
     ],
   });
   const report = makeReport([finding]);
-  const prompt = renderSynthesisNarrativePrompt(report);
+  const prompt = renderSynthesisNarrativePrompt(report, FINDINGS_PATH);
 
   expect(prompt, "first file appears").toMatch(/src\/a\.ts/);
   expect(prompt, "second file appears").toMatch(/src\/b\.ts/);

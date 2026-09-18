@@ -609,9 +609,22 @@ export function buildAuditFindingsReport(
  * executive summary / top risks. Deterministic and idempotent — the same
  * narrative yields the same report.
  *
- * Uniform id-join contract: a `finding_ids` entry that names no finding in the
- * report REFUSES the whole narrative (throws, naming the unknown ids) — never a
- * silent drop, which would present a theme as covering findings it does not.
+ * Uniform id-join contract, both halves REFUSING (owner review 2026-09-17,
+ * docs/reviews/prompt-refinement-2026-09-13.md prompt 14):
+ *
+ *  • a `finding_ids` entry that names no finding in the report refuses the whole
+ *    narrative (throws, naming the unknown ids) — never a silent drop, which
+ *    would present a theme as covering findings it does not; and
+ *  • a finding claimed by TWO themes refuses it too. That case was previously
+ *    repaired in silence: the first theme to list the id kept it and the later
+ *    theme had it stripped, so the stored narrative differed from the submitted
+ *    one and nobody was told. It also made the result ORDER-DEPENDENT, which the
+ *    convergence obligation (`tests/audit/synthesis-narrative-convergence.test.ts`)
+ *    wants the narrative free of: two semantically identical narratives supplied
+ *    in different theme order would resolve the overlap differently.
+ *
+ * A repeat of one id INSIDE a single theme is not an overlap — it breaks no
+ * rule — so it is deduplicated without comment.
  */
 export function applyNarrative(
   report: AuditFindingsReport,
@@ -633,15 +646,34 @@ export function applyNarrative(
     );
   }
 
+  // Each id's claiming themes, in the order they appear. Deduplicated within a
+  // theme first, so a theme that lists one id three times claims it once.
+  const claimants = new Map<string, string[]>();
   for (const theme of narrative.themes ?? []) {
-    // Deduplicate within the theme first, then drop ids already claimed by a
-    // prior (first-claiming) theme. This enforces the "each finding belongs to
-    // at most one theme" contract — the first theme in narrative.themes to list
-    // a given id wins; later themes have it stripped. (Unknown ids were refused
-    // wholesale above, so every id here is a real finding.)
-    const findingIds = [
-      ...new Set((theme.finding_ids ?? []).filter((id) => !themeByFinding.has(id))),
-    ];
+    for (const id of new Set(theme.finding_ids ?? [])) {
+      const claiming = claimants.get(id);
+      if (claiming === undefined) claimants.set(id, [theme.theme_id]);
+      else claiming.push(theme.theme_id);
+    }
+  }
+  const overlaps = [...claimants.entries()].filter(
+    ([, claiming]) => claiming.length > 1,
+  );
+  if (overlaps.length > 0) {
+    throw new Error(
+      `synthesis narrative refused — ${overlaps.length} finding(s) are claimed by more than ` +
+        `one theme: ${overlaps
+          .map(([id, claiming]) => `${id} (${claiming.join(", ")})`)
+          .join("; ")}. A finding belongs to at most one theme; assign each ` +
+        `contested finding to the single theme whose root cause explains it, and ` +
+        `re-submit the whole narrative.`,
+    );
+  }
+
+  for (const theme of narrative.themes ?? []) {
+    // Unknown ids and cross-theme overlaps were both refused above, so the only
+    // repair left is the within-theme repeat, which breaks no rule.
+    const findingIds = [...new Set(theme.finding_ids ?? [])];
     themes.push({
       theme_id: theme.theme_id,
       title: theme.title,

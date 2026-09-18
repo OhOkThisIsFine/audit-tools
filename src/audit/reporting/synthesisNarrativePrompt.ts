@@ -1,4 +1,12 @@
+// sites-pinned: tests/audit/synthesis-narrative-prompt.test.ts, tests/audit/reporting-invariants.test.ts
+//
+// The narrative prompt is a LANE file: a reader opens this one file and writes
+// the narrative JSON back. Everything it needs to obey the prompt must either be
+// in the file or at a path the lane is granted, which is why the findings-report
+// path is a parameter here rather than a bare filename in the prose.
+
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { severityRank } from "audit-tools/shared";
 
 const MAX_RENDERED_FINDINGS = 120;
 
@@ -16,31 +24,60 @@ function summarizeFinding(finding: AuditFindingsReport["findings"][number]): str
  * Prompt for the optional synthesis-narrative pass. The host groups the
  * already-finalized deterministic findings into root-cause themes and writes a
  * `SynthesisNarrative` JSON document — it does not re-audit or invent findings.
+ *
+ * Owner review 2026-09-17 (docs/reviews/prompt-refinement-2026-09-13.md, prompt
+ * 14) settled three things this renderer now states:
+ *
+ *  1. The findings are ordered MOST-SEVERE-FIRST before the cap applies. They
+ *     arrive in merge order (see `buildAuditFindingsDeliverable`, which copies
+ *     the array untouched), and a dogfood audit produces two to three THOUSAND
+ *     findings — so a merge-order cut at 120 could, and on a real run would,
+ *     drop every `critical` finding off the end of a prompt that then asks the
+ *     reader for the top risks. The sort is stable, so merge order survives as
+ *     the tie-break within one severity.
+ *  2. The overflow line names the REAL findings-report path. It previously said
+ *     "see audit-findings.json" — a bare filename, outside the one path the
+ *     lane is granted (`fanoutLanes.ts` declares the lane's own prompt file),
+ *     so the note pointed the reader at something it could neither locate nor
+ *     open. The emitter now grants that path alongside it.
+ *  3. Two themes that claim one finding refuse the whole narrative. The prompt
+ *     states the rule the consumer enforces, never a rule the consumer quietly
+ *     repairs — `applyNarrative` is the enforcer.
  */
 export function renderSynthesisNarrativePrompt(
   report: AuditFindingsReport,
+  /**
+   * Host-facing path of the complete findings report. The overflow line points
+   * the reader here, and the emitting step grants it read access — so this is
+   * an ACCESS-BEARING argument, not a cosmetic one.
+   */
+  findingsPath: string,
 ): string {
-  const findings = report.findings;
-  const rendered = findings.slice(0, MAX_RENDERED_FINDINGS).map(summarizeFinding);
+  // Stable sort, most-severe-first: `severityRank` is 5 for `critical` down to
+  // 1 for `info`, and V8's sort is stable, so findings of equal severity keep
+  // the merge order the report was built in.
+  const ordered = [...report.findings].sort(
+    (left, right) => severityRank(right.severity) - severityRank(left.severity),
+  );
+  const rendered = ordered.slice(0, MAX_RENDERED_FINDINGS).map(summarizeFinding);
+  const omitted = ordered.slice(MAX_RENDERED_FINDINGS);
   const overflowNote =
-    findings.length > MAX_RENDERED_FINDINGS
-      ? [`  ... and ${findings.length - MAX_RENDERED_FINDINGS} more findings (see audit-findings.json).`]
+    omitted.length > 0
+      ? [
+          `  ... and ${omitted.length} more findings, every one at \`${omitted[0]!.severity}\` severity or below. Read the complete report at ${findingsPath} when a theme needs them.`,
+        ]
       : [];
 
-  if (findings.length > MAX_RENDERED_FINDINGS) {
+  if (omitted.length > 0) {
     process.stderr.write(
-      `[audit-code] synthesisNarrative: truncated findings list to ${MAX_RENDERED_FINDINGS} of ${findings.length} total — remaining findings omitted from narrative prompt (see audit-findings.json)\n`
+      `[audit-code] synthesisNarrative: truncated findings list to ${MAX_RENDERED_FINDINGS} of ${ordered.length} total — remaining findings omitted from narrative prompt (see ${findingsPath})\n`
     );
   }
 
   return [
     "# Synthesis narrative",
     "",
-    "The deterministic audit is complete. Your job is to add an interpretive narrative on top of the finalized findings — group them into a small number of root-cause themes, write a short executive summary, and list the top risks.",
-    "",
-    "Do not re-audit the code, change severities, or invent new findings. Use only the findings below; reference them by their exact `id`.",
-    "",
-    "When categories distinguish observational contract assessment findings from conceptual design critique findings, keep that distinction visible in themes and top risks instead of flattening them into one architecture bucket.",
+    "The deterministic audit is complete. Group its findings into a small number of root-cause themes, write a short executive summary, and list the top risks. Reference every finding by its exact `id`.",
     "",
     "## Summary",
     "",
@@ -48,6 +85,8 @@ export function renderSynthesisNarrativePrompt(
     `- Work blocks: ${report.summary.work_block_count}`,
     "",
     "## Findings",
+    "",
+    "Ordered most-severe first.",
     "",
     ...(rendered.length > 0 ? rendered : ["- (no findings were recorded)"]),
     ...overflowNote,
@@ -72,7 +111,11 @@ export function renderSynthesisNarrativePrompt(
     "}",
     "```",
     "",
-    "Prefer a handful of substantive themes over many thin ones. Every `finding_ids` entry MUST be an id listed above, copied exactly (a closed set — never retype or invent one): an unknown id refuses the WHOLE narrative and you will be asked to re-submit it. A finding may belong to at most one theme.",
+    "Rules:",
+    "",
+    "- Every `finding_ids` entry is a finding id of this audit, copied exactly. One unknown id refuses the whole narrative.",
+    "- A finding belongs to at most one theme. Two themes that claim the same finding refuse the whole narrative.",
+    "- Prefer a few substantive themes over many thin ones.",
     "",
   ].join("\n");
 }

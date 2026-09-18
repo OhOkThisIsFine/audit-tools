@@ -401,7 +401,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     file: "src/audit/reporting/synthesisNarrativePrompt.ts",
     disposition: "derived",
     schema: { name: "SynthesisNarrativeSchema", file: "src/shared/types/finding.ts", object: SynthesisNarrativeSchema },
-    render: () => renderSynthesisNarrativePrompt({ findings: [], summary: { finding_count: 0, work_block_count: 0 } } as unknown as Parameters<typeof renderSynthesisNarrativePrompt>[0]),
+    render: () => renderSynthesisNarrativePrompt({ findings: [], summary: { finding_count: 0, work_block_count: 0 } } as unknown as Parameters<typeof renderSynthesisNarrativePrompt>[0], "registry-fixture/audit-findings.json"),
   },
   {
     builder: "renderCriticalFlowFallbackPrompt",

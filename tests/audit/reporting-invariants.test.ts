@@ -1,7 +1,8 @@
 /**
  * Regression tests for audit-reporting module invariants:
  *   INV-audit-reporting-01 — render-equals-contract (JSON↔markdown parity)
- *   INV-audit-reporting-04 — applyNarrative sanitizes duplicate finding_ids across themes
+ *   INV-audit-reporting-04 — applyNarrative REFUSES a finding claimed by two themes
+ *                            (owner review 2026-09-17; it used to strip in silence)
  *   INV-audit-reporting-06 — normalizeExistingFindingsReport recomputes counts from findings+work_blocks
  *   INV-audit-reporting-07 — language-neutral render (no per-ecosystem special-casing)
  *   INV-audit-reporting-08 — truncation diagnostic uses process.stderr, not console.warn
@@ -591,7 +592,13 @@ test("escapeControlCharacters preserves tab, LF and CR — the bytes markdown le
 
 // ── INV-audit-reporting-04: applyNarrative sanitizes duplicate finding_ids ───
 
-test("INV-04: a finding_id claimed by the first theme is not re-assigned by a later theme", () => {
+// Owner review 2026-09-17 (prompt 14 of docs/reviews/prompt-refinement-2026-09-13.md)
+// OVERTURNED the first-claiming rule this block previously pinned. The tool used
+// to keep a contested finding in the first theme and strip it from the later one
+// in silence, so the stored narrative differed from the submitted one and nobody
+// was told. It also made the outcome depend on theme ORDER. Both halves now
+// refuse instead, the same way an unknown finding id already did.
+test("INV-04: a finding claimed by two themes refuses the whole narrative", () => {
   const report = baseReport();
   const [first, second] = report.findings;
 
@@ -617,30 +624,50 @@ test("INV-04: a finding_id claimed by the first theme is not re-assigned by a la
     top_risks: [],
   };
 
-  const enriched = applyNarrative(report, narrative);
+  expect(() => applyNarrative(report, narrative)).toThrow(/claimed by more than\s+one theme/);
+  // The refusal must be actionable: it names the contested finding AND both
+  // themes, so the reader knows which assignment to settle.
+  expect(() => applyNarrative(report, narrative)).toThrow(
+    new RegExp(`${first.id}[^;]*T-1[^;]*T-2`),
+  );
+});
 
-  // Both themes are preserved.
+test("INV-04: two themes with disjoint finding_ids are both kept", () => {
+  const report = baseReport();
+  const [first, second] = report.findings;
+
+  const enriched = applyNarrative(report, {
+    themes: [
+      {
+        theme_id: "T-1",
+        title: "First theme",
+        root_cause: "Root cause A.",
+        finding_ids: [first.id],
+        suggested_fix_pattern: "Fix A.",
+      },
+      {
+        theme_id: "T-2",
+        title: "Second theme",
+        root_cause: "Root cause B.",
+        finding_ids: [second.id],
+        suggested_fix_pattern: "Fix B.",
+      },
+    ],
+    executive_summary: "Two themes.",
+    top_risks: [],
+  });
+
   if (enriched.themes === undefined) {
     throw new Error("narrative themes missing");
   }
   expect(enriched.themes.length).toBe(2);
-
   const t1 = enriched.themes.find((t) => t.theme_id === "T-1");
   const t2 = enriched.themes.find((t) => t.theme_id === "T-2");
-  expect(t1).toBeTruthy();
-  expect(t2).toBeTruthy();
   if (t1 === undefined || t2 === undefined) {
     throw new Error("expected narrative themes missing");
   }
-
-  // T-1 keeps first.id as first-claimer.
-  expect(t1.finding_ids.includes(first.id), "T-1 must retain the first-claimed id").toBeTruthy();
-
-  // T-2 must NOT contain first.id (already claimed by T-1).
-  expect(!t2.finding_ids.includes(first.id), "T-2 must not contain a finding_id already claimed by T-1").toBeTruthy();
-
-  // T-2 keeps second.id which was not previously claimed.
-  expect(t2.finding_ids.includes(second.id), "T-2 must keep its unclaimed finding_id").toBeTruthy();
+  expect(t1.finding_ids).toEqual([first.id]);
+  expect(t2.finding_ids).toEqual([second.id]);
 });
 
 test("INV-04: duplicate finding_ids within one theme's list are deduplicated", () => {
@@ -950,7 +977,7 @@ test("INV-08: renderSynthesisNarrativePrompt writes truncation notice to process
   };
 
   try {
-    renderSynthesisNarrativePrompt(report);
+    renderSynthesisNarrativePrompt(report, "/tmp/.audit-tools/audit/audit-findings.json");
   } finally {
     process.stderr.write = origStderrWrite;
     console.warn = origConsoleWarn;
@@ -972,7 +999,7 @@ test("INV-08: renderSynthesisNarrativePrompt does NOT write to stderr when findi
   };
 
   try {
-    renderSynthesisNarrativePrompt(report);
+    renderSynthesisNarrativePrompt(report, "/tmp/.audit-tools/audit/audit-findings.json");
   } finally {
     process.stderr.write = origStderrWrite;
   }
