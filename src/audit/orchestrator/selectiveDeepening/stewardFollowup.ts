@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/orchestrator-remediation.test.ts
 import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask } from "../../types.js";
 import { isRecord } from "audit-tools/shared";
@@ -31,6 +32,26 @@ export function buildVerificationFollowupTasks(params: {
       coverage.total_lines,
     ]),
   );
+  // The SURFACE, not the coverage, is what a follow-up may name. A steward is
+  // granted the whole surface its lens was applied to and chooses what to open,
+  // so "I did not open this file and it needs a closer look" is a legitimate —
+  // in fact the most valuable — follow-up. Filtering on coverage alone would
+  // have silently dropped exactly those, leaving the steward able to request a
+  // second look only at files it had already read.
+  const surfacePaths = new Set([
+    ...coverageByPath.keys(),
+    ...(params.task?.file_paths ?? []),
+  ]);
+  // The steward task states a line count for every file on its surface, so an
+  // UNOPENED file has a count here even though the result never measured one.
+  // Without this the count fell through to 0 and the follow-up was dispatched
+  // claiming an empty file. The caller's own index still wins over it: the
+  // surface counts were themselves copied from the base results, while a
+  // supplied index is read fresh.
+  const fallbackLineIndex: Record<string, number> = {
+    ...params.task?.file_line_counts,
+    ...params.lineIndex,
+  };
   const concerns = [
     ...(params.result.verification.concerns ?? []),
     ...(params.result.verification.coverage_concerns ?? []),
@@ -52,7 +73,7 @@ export function buildVerificationFollowupTasks(params: {
     const suggestedPaths = Array.isArray(suggestion.file_paths)
       ? suggestion.file_paths.filter(
           (path): path is string =>
-            typeof path === "string" && coverageByPath.has(path),
+            typeof path === "string" && surfacePaths.has(path),
         )
       : [];
     const paths = uniqueSorted(suggestedPaths);
@@ -86,14 +107,17 @@ export function buildVerificationFollowupTasks(params: {
       // NO `task` source, deliberately. This follow-up is built FROM a result,
       // so the result's measured coverage is the fresher number and the parent
       // task's assigned count may already be stale. Precedence here is stated by
-      // what is passed: result, then the index. `coverageByPath` above stays as
-      // the membership FILTER, which is a different question from the count.
+      // what is passed: result, then the merged index. `surfacePaths` above stays
+      // the membership FILTER, which is a different question from the count —
+      // and the parent's surface counts reach the count only as the LAST
+      // fallback, inside `fallbackLineIndex`, which is what stops an unopened
+      // surface file from being dispatched as zero lines.
       file_line_counts: Object.fromEntries(
         paths.map((path) => [
           path,
           lineCountForPath(path, {
             result: params.result,
-            lineIndex: params.lineIndex,
+            lineIndex: fallbackLineIndex,
           }),
         ]),
       ),

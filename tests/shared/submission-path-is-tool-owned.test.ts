@@ -324,7 +324,9 @@ function aFindng(): Record<string, unknown> {
     confidence: "high",
     lens: "correctness",
     summary: "Something is wrong.",
-    affected_files: [{ path: AUDITED_FILE }],
+    // Verbatim from the fixture file's first line: every affected_files entry
+    // must carry a quote or declare why none exists, or the door refuses it.
+    affected_files: [{ path: AUDITED_FILE, quoted_text: "const a = 1;" }],
     evidence: [`${AUDITED_FILE}:1`],
   };
 }
@@ -736,7 +738,7 @@ describe("the audit accepted-results ledger", () => {
             confidence: "high",
             lens: "correctness",
             summary: "Something is wrong.",
-            affected_files: [{ path: AUDITED_FILE }],
+            affected_files: [{ path: AUDITED_FILE, quoted_text: "const a = 1;" }],
             evidence: [`${AUDITED_FILE}:1`],
             grounding: { status: "grounded" },
           },

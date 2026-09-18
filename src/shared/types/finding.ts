@@ -115,6 +115,24 @@ export const FindingLocationObjectSchema = z.object({
    * (S7 anti-hallucination — grounding the claim, not attesting the read).
    */
   quoted_text: z.string().optional(),
+  /**
+   * The reviewer's DECLARATION that this file holds no span worth quoting, and
+   * the reason why — an absence stated on the record instead of an absence the
+   * reader has to interpret.
+   *
+   * It exists because an audit finding with no quote cannot be grounded, and the
+   * two causes of a missing quote are opposite: a genuine one (the defect is the
+   * ABSENCE of code — no validation, no gate, no call — so there is nothing
+   * verbatim to copy) and a failure to do the work. Silence looked the same in
+   * both cases, so every quoteless finding landed under "Ungrounded Findings".
+   *
+   * A declaration is a claim an adversarial pass can CHECK: if a quotable span
+   * did exist and the reviewer said one did not, that casts doubt on the
+   * finding's groundedness — which is a stronger signal than the missing quote
+   * ever was. Never both this and `quoted_text` on the same entry: an entry that
+   * can quote must quote (`AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE`).
+   */
+  no_quotable_span: z.string().min(1).optional(),
   /** Content hash of the file when the finding was planned (remediator). */
   hash_at_plan_time: z.string().optional(),
 });
@@ -131,6 +149,25 @@ export const FINDING_LINE_END_INTEGER_RULE =
   "affected_files[].line_end must be an integer >= 1.";
 export const FINDING_LINE_ORDER_RULE =
   "affected_files: when both ends are cited, line_start must be less than or equal to line_end.";
+
+/**
+ * THE one statement of the audit draw's grounding rule for a cited file.
+ *
+ * It lives beside the line-span rules for the same reason they do: the schema
+ * refinement that refuses a worker submission, the batch validator that refuses
+ * a result from any other door, and the dispatch prompt that asks for the quote
+ * all render this exact sentence, so the ask and the refusal cannot drift.
+ *
+ * Audit-only by design: it is enforced on the audit worker's projection
+ * (`WorkerFindingLocationSchema`), not on this shared location schema, because a
+ * remediator plan finding is re-minted from graph nodes and has no reviewer to
+ * quote anything.
+ */
+export const AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE =
+  "affected_files: every entry must carry EITHER quoted_text — verbatim text copied from that file, " +
+  "which the tool re-reads from disk to ground the finding — OR no_quotable_span, a short statement of " +
+  "why that file holds nothing quotable (the defect is the absence of code, for example). Never both, " +
+  "and never neither: a finding with no quote and no declaration is refused.";
 
 /** One violated line-span rule, naming the field that violates it. */
 export interface FindingLocationLineIssue {

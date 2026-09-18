@@ -339,7 +339,12 @@ describe(FAILURE_SIGNATURE, () => {
             confidence: "medium",
             lens: "correctness",
             summary: "A finding with every base-required field but no evidence.",
-            affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }],
+            // The quote is carried so EVIDENCE is the one thing missing: a
+            // quoteless entry is refused in its own right, and that refusal
+            // would pre-empt the evidence refusal this test measures.
+            affected_files: [
+              { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
+            ],
           },
         ],
       }),
@@ -381,7 +386,9 @@ describe(FAILURE_SIGNATURE, () => {
             confidence: "medium",
             lens: "correctness",
             summary: "A complete finding under the one-source contract.",
-            affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }],
+            affected_files: [
+              { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
+            ],
             evidence: ["src/a.ts:1 - variable overwritten before use"],
           },
         ],

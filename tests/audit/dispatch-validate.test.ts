@@ -458,7 +458,9 @@ describe("validateAuditResults: the signature and path regime dispatch/validate.
           confidence: "high",
           lens: "correctness",
           summary: "S",
-          affected_files: [{ path: "src/x.ts", line_start: 2, line_end: 6 }],
+          affected_files: [
+            { path: "src/x.ts", line_start: 2, line_end: 6, quoted_text: "return x;" },
+          ],
           evidence: ["e"],
         },
       ],

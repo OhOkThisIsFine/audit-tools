@@ -10,6 +10,7 @@ import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 // one is renamed.
 import { LENS_VERIFICATION_TAG } from "../orchestrator/selectiveDeepening/shared.js";
 import {
+  AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   describeValue,
   findingLocationLineIssues,
   formatValidationIssues,
@@ -585,7 +586,7 @@ function validateVerificationFollowupTask(
           task_id: taskId,
           field: `${label}.file_paths[${index}]`,
           message:
-            `${label}.file_paths[${index}] references '${path}', which is outside the verification task's file_coverage. ` +
+            `${label}.file_paths[${index}] references '${path}', which is outside the verification task's assigned surface. ` +
             `Followup tasks list files in 'file_paths' (array of strings), not 'file_coverage'; allowed: ${[...allowedPaths].join(", ")}.`,
         });
       }
@@ -673,6 +674,23 @@ function validateVerification(
     issues,
   );
 
+  // REQUIRED under the selective policy, and only there. A steward granted its
+  // whole lens surface decides what to open, so the choice is half of its
+  // answer: a one-file coverage over a 300-file surface is judgeable only
+  // against a stated reason. Keyed on the TASK's policy rather than on the tag,
+  // because the policy is the field that made an unopened file legal. With no
+  // task in hand the policy is unknown, so no claim is made — the host door
+  // (`verificationContractFailure`) is the boundary that always has the binding.
+  if (task?.coverage_policy === "selective") {
+    validateRequiredStringField(
+      value.selection_rationale,
+      "verification.selection_rationale",
+      taskId,
+      resultIndex,
+      issues,
+    );
+  }
+
   if (value.followup_tasks === undefined) {
     return;
   }
@@ -686,10 +704,19 @@ function validateVerification(
     return;
   }
 
-  // Followup tasks may target any file within the packet/unit boundary, not just
-  // the assigned files surfaced in this result's coverage. Built through the ONE
-  // containment rule the host door also uses, so the two cannot diverge.
+  // Followup tasks may target any file this task was ASSIGNED, plus whatever its
+  // coverage and the packet/unit boundary add. Built through the ONE containment
+  // rule the host door also uses, so the two cannot diverge.
+  //
+  // `assignedPaths` is load-bearing and was missing. The host door passed the
+  // binding's assigned keys and this door did not, and the two agreed only
+  // because a steward's assignment used to EQUAL its coverage. Under a
+  // `"selective"` assignment they differ by design: the assignment is the whole
+  // lens surface and the coverage is the part the steward opened. Without the
+  // assignment this set would shrink to what the steward read, which refuses the
+  // one follow-up the field exists for — naming a surface file nobody opened.
   const allowedPaths = verificationAllowedPaths({
+    assignedPaths: task?.file_paths,
     coveragePaths: coverage.map((entry) => entry.path),
     boundaryPaths: normBoundary,
   });
@@ -911,7 +938,15 @@ function validateResultFileCoverage(
     validateFileCoverageEntry(fileCoverage[j], j, ctx, seenCoveragePaths, declaredAssignedCoveragePaths, normalizedFileCoverage, issues);
   }
 
-  if (task) {
+  // COMPLETENESS IS PER-POLICY, not universal. A `"complete"` assignment (the
+  // per-file lane, and the default when the field is absent) must cover every
+  // assigned file. A `"selective"` assignment is the lens steward: its
+  // `file_paths` is the whole surface its lens was applied to, and choosing
+  // which of those files to open IS the task, so an uncovered surface file is
+  // the contract rather than a violation. Containment still holds — an entry
+  // outside the assignment is refused by `validateFileCoverageEntry` above,
+  // under both policies.
+  if (task && task.coverage_policy !== "selective") {
     for (const path of task.file_paths) {
       if (!seenCoveragePaths.has(normalizeCoveragePath(path))) {
         pushIssue(issues, { result_index: resultIndex, task_id: taskId, field: "file_coverage", message: `file_coverage must include every assigned file. Missing '${path}'.` });
@@ -1008,6 +1043,27 @@ function validateResultFindings(
             (task ? ` The task's assigned files are: ${task.file_paths.join(", ")}.` : ""),
         });
         continue;
+      }
+      // GROUNDING, at the batch door. The worker projection's refinement
+      // (`WorkerFindingLocationSchema`) closes the host door; this closes every
+      // other one (`validate-results`, a re-validated persisted result), so a
+      // result cannot reach synthesis ungrounded by arriving through the door
+      // that did not ask. Same sentence, same shared constant.
+      const quoted =
+        typeof affected.quoted_text === "string" &&
+        affected.quoted_text.trim().length > 0;
+      const declared =
+        typeof affected.no_quotable_span === "string" &&
+        affected.no_quotable_span.trim().length > 0;
+      if (quoted === declared) {
+        pushIssue(issues, {
+          result_index: resultIndex,
+          task_id: taskId,
+          field: `${label}.affected_files[${k}].${quoted ? "no_quotable_span" : "quoted_text"}`,
+          message:
+            AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE +
+            ` Cited file: ${affected.path}.`,
+        });
       }
       if (!Number.isInteger(affected.line_start)) continue;
       const start = Number(affected.line_start);

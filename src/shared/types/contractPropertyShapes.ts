@@ -105,6 +105,7 @@ const FINDING_LOCATION_SHAPE = {
   line_end: str(true),
   symbol: str(true),
   quoted_text: str(true),
+  no_quotable_span: str(true),
   hash_at_plan_time: str(true),
 };
 /**
@@ -234,6 +235,21 @@ const AUDIT_TASK_TYPE: ContractTypeShape = {
     // Found by the widened optionality half (D5) — the row was never checked
     // against its own schema before, because the test skipped `AuditTask`.
     file_line_counts: { kind: "record", value: str(), allowsUndefined: true },
+    // The two selective-lane fields. `coverage_policy` states whether the
+    // result must cover every bound file; `file_metrics` carries what the tool
+    // already knows about each file on the surface, so a selective reviewer
+    // chooses from evidence rather than from a name.
+    coverage_policy: str(true),
+    file_metrics: arrayOf(
+      object({
+        path: str(),
+        total_lines: str(),
+        score: str(),
+        signals: arrayOf(str()),
+        prior_findings: { kind: "record", value: str() },
+      }),
+      true,
+    ),
     line_ranges: arrayOf(object({ path: str(), start: str(), end: str() }), true),
     inputs: { kind: "record", value: str(), allowsUndefined: true },
     rationale: str(),

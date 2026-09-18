@@ -156,7 +156,13 @@ test("worker audit result accepts a category more specific than its lens", () =>
           confidence: "high",
           lens: "security",
           summary: "The category field can be more specific than the lens.",
-          affected_files: [{ path: "src/api/auth.ts", line_start: 1 }],
+          affected_files: [
+            {
+              path: "src/api/auth.ts",
+              line_start: 1,
+              quoted_text: "exec(userInput)",
+            },
+          ],
           evidence: ["src/api/auth.ts:1 - command boundary"],
         },
       ],
@@ -263,7 +269,7 @@ test("the worker finding schema omits exactly the refused tool-owned verdicts (D
     confidence: "high" as const,
     lens: "correctness",
     summary: "Something is wrong.",
-    affected_files: [{ path: "src/a.ts" }],
+    affected_files: [{ path: "src/a.ts", quoted_text: "const x = 1;" }],
     evidence: ["src/a.ts:1"],
   };
   accepts(WorkerFindingSchema, validFinding, "valid worker finding");

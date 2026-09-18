@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/orchestrator-remediation.test.ts
 import { lineCountForPath, lineCountFromSources } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
@@ -7,8 +8,6 @@ import {
   DEEPENING_TAG,
   IMPORTANT_LENS_VERIFICATION_LENSES,
   LENS_VERIFICATION_TAG,
-  MAX_LENS_VERIFICATION_FILES,
-  MAX_LENS_VERIFICATION_RESULT_SUMMARIES,
   SEVERITY_RANK,
   formatList,
   getExternalAnalyzerPaths,
@@ -209,63 +208,104 @@ function shouldBuildLensVerificationTask(params: {
   return !params.existingTasks.some((task) => task.task_id === candidateId);
 }
 
-function selectLensVerificationFiles(
-  sources: LensVerificationSource[],
-  externalAnalyzerPaths: Set<string>,
-  lens: Lens,
-): string[] {
-  const scores = new Map<string, { score: number; lines: number }>();
-  function add(path: string, score: number, lines: number): void {
-    const current = scores.get(path) ?? { score: 0, lines };
-    current.score += score;
-    current.lines = Math.max(current.lines, lines);
-    scores.set(path, current);
+/** One surface file's metrics, exactly as `AuditTask.file_metrics` declares them. */
+type LensSurfaceFileMetric = NonNullable<AuditTask["file_metrics"]>[number];
+
+/**
+ * The metrics a lens steward chooses its own review from.
+ *
+ * EVERY file the lens was applied to appears exactly once. `score` is the same
+ * ranking the deleted twelve-file cap used to TRUNCATE by; it now only ORDERS
+ * the list. A steward that never sees a file can neither judge that file's
+ * coverage nor name it in a follow-up, and naming a path costs nothing — so the
+ * rank is a hint, never a boundary.
+ *
+ * A path that a finding cites but that this lens never reviewed stays OFF the
+ * surface: the surface states what the lens covered, and a path with no review
+ * behind it has no line count and no coverage to judge.
+ */
+function buildLensSurfaceMetrics(params: {
+  sources: LensVerificationSource[];
+  surfacePaths: string[];
+  externalAnalyzerPaths: Set<string>;
+  lineIndex?: Record<string, number>;
+}): LensSurfaceFileMetric[] {
+  const onSurface = new Set(params.surfacePaths);
+  const scores = new Map<string, number>();
+  const signals = new Map<string, Set<string>>();
+  const priorFindings = new Map<string, Map<string, number>>();
+
+  function add(path: string, score: number, signal: string): void {
+    if (!onSurface.has(path)) return;
+    scores.set(path, (scores.get(path) ?? 0) + score);
+    const set = signals.get(path) ?? new Set<string>();
+    set.add(signal);
+    signals.set(path, set);
   }
 
-  for (const source of sources) {
-    const priorityScore = priorityRank(source.task?.priority);
+  for (const source of params.sources) {
     const highRiskClean = isHighRiskCleanResult(source.result, source.task);
     for (const path of resultFiles(source)) {
-      add(path, priorityScore, lineCountForPath(path, { task: source.task, result: source.result }));
-      if (source.task?.tags?.includes("critical_flow")) add(path, SCORE_CRITICAL_FLOW, 0);
-      if (source.task?.tags?.includes("external_analyzer_signal")) add(path, SCORE_EXTERNAL_ANALYZER_SIGNAL, 0);
-      if (source.task?.tags?.includes("large_file")) add(path, SCORE_LARGE_FILE, 0);
-      if (highRiskClean) add(path, SCORE_HIGH_RISK_CLEAN, 0);
+      add(
+        path,
+        priorityRank(source.task?.priority),
+        `${priorityLabel(source.task?.priority)}_priority`,
+      );
+      if (source.task?.tags?.includes("critical_flow")) {
+        add(path, SCORE_CRITICAL_FLOW, "critical_flow");
+      }
+      if (source.task?.tags?.includes("external_analyzer_signal")) {
+        add(path, SCORE_EXTERNAL_ANALYZER_SIGNAL, "external_analyzer_signal");
+      }
+      if (source.task?.tags?.includes("large_file")) {
+        add(path, SCORE_LARGE_FILE, "large_file");
+      }
+      if (highRiskClean) {
+        add(path, SCORE_HIGH_RISK_CLEAN, "high_risk_clean");
+      }
     }
     for (const finding of source.result.findings) {
       for (const file of finding.affected_files) {
-        add(file.path, SEVERITY_RANK[finding.severity], 0);
+        if (!onSurface.has(file.path)) continue;
+        add(file.path, SEVERITY_RANK[finding.severity], "prior_finding");
+        const counts =
+          priorFindings.get(file.path) ?? new Map<string, number>();
+        counts.set(finding.severity, (counts.get(finding.severity) ?? 0) + 1);
+        priorFindings.set(file.path, counts);
       }
     }
   }
 
-  for (const path of externalAnalyzerPaths) {
-    if (scores.has(path)) {
-      add(path, SCORE_EXTERNAL_ANALYZER_PATH_MATCH, 0);
-    }
+  for (const path of params.externalAnalyzerPaths) {
+    add(path, SCORE_EXTERNAL_ANALYZER_PATH_MATCH, "external_analyzer_path_match");
   }
 
-  const ranked = [...scores.entries()].sort((a, b) => {
-    const scoreDelta = b[1].score - a[1].score;
-    if (scoreDelta !== 0) return scoreDelta;
-    const lineDelta = b[1].lines - a[1].lines;
-    if (lineDelta !== 0) return lineDelta;
-    return compareCodeUnits(a[0], b[0]);
-  });
-  if (ranked.length > MAX_LENS_VERIFICATION_FILES) {
-    process.stderr.write(
-      JSON.stringify({
-        level: "warn",
-        source: "audit-code:selectiveDeepening",
-        event: "truncated_verification_file_list",
-        lens,
-        kept: MAX_LENS_VERIFICATION_FILES,
-        total: ranked.length,
-        ts: new Date().toISOString(),
-      }) + "\n",
-    );
-  }
-  return ranked.slice(0, MAX_LENS_VERIFICATION_FILES).map(([path]) => path);
+  const tasks = params.sources
+    .map((source) => source.task)
+    .filter((task): task is AuditTask => task !== undefined);
+  const results = params.sources.map((source) => source.result);
+
+  // Ordered by prior signal, strongest first — a content-derived, stable key
+  // (score, then size, then path), so the list never churns the task's hash.
+  return params.surfacePaths
+    .map((path) => ({
+      path,
+      total_lines: lineCountFromSources(path, tasks, results, params.lineIndex),
+      score: scores.get(path) ?? 0,
+      signals: uniqueSorted(signals.get(path) ?? []),
+      prior_findings: Object.fromEntries(
+        [...(priorFindings.get(path) ?? new Map<string, number>())].sort(
+          (left, right) => compareCodeUnits(left[0], right[0]),
+        ),
+      ),
+    }))
+    .sort((left, right) => {
+      const scoreDelta = right.score - left.score;
+      if (scoreDelta !== 0) return scoreDelta;
+      const lineDelta = right.total_lines - left.total_lines;
+      if (lineDelta !== 0) return lineDelta;
+      return compareCodeUnits(left.path, right.path);
+    });
 }
 
 function summarizeLensVerificationSource(source: LensVerificationSource): string {
@@ -297,32 +337,25 @@ function buildLensVerificationTask(params: {
   lineIndex?: Record<string, number>;
 }): AuditTask {
   const sourceIds = sourceTaskIds(params.sources);
-  const selectedPaths = selectLensVerificationFiles(
-    params.sources,
-    params.externalAnalyzerPaths,
-    params.lens,
+  const surfacePaths = uniqueSorted(params.sources.flatMap(resultFiles));
+  const fileMetrics = buildLensSurfaceMetrics({
+    sources: params.sources,
+    surfacePaths,
+    externalAnalyzerPaths: params.externalAnalyzerPaths,
+    lineIndex: params.lineIndex,
+  });
+  const surfaceLines = fileMetrics.reduce(
+    (sum, metric) => sum + metric.total_lines,
+    0,
   );
-  const allPaths = uniqueSorted(params.sources.flatMap(resultFiles));
-  const omittedPathCount = Math.max(0, allPaths.length - selectedPaths.length);
-  const externalPathsInScope = allPaths.filter((path) =>
+  const externalPathsInScope = surfacePaths.filter((path) =>
     params.externalAnalyzerPaths.has(path),
   );
-  if (params.sources.length > MAX_LENS_VERIFICATION_RESULT_SUMMARIES) {
-    process.stderr.write(
-      JSON.stringify({
-        level: "warn",
-        source: "audit-code:selectiveDeepening",
-        event: "truncated_result_summary_list",
-        lens: params.lens,
-        kept: MAX_LENS_VERIFICATION_RESULT_SUMMARIES,
-        total: params.sources.length,
-        ts: new Date().toISOString(),
-      }) + "\n",
-    );
-  }
-  const summaries = params.sources
+  // A COPY before the sort: `params.sources` belongs to the caller, and the old
+  // in-place `.sort()` reordered the array the trigger derivation had already
+  // read from.
+  const summaries = [...params.sources]
     .sort((a, b) => compareCodeUnits(a.result.task_id, b.result.task_id))
-    .slice(0, MAX_LENS_VERIFICATION_RESULT_SUMMARIES)
     .map(summarizeLensVerificationSource);
 
   return {
@@ -330,36 +363,31 @@ function buildLensVerificationTask(params: {
     unit_id: `lens-steward:${params.lens}`,
     pass_id: `lens-steward:${params.lens}`,
     lens: params.lens,
-    file_paths: selectedPaths,
+    file_paths: surfacePaths,
     file_line_counts: Object.fromEntries(
-      selectedPaths.map((path) => [
-        path,
-        lineCountFromSources(
-          path,
-          params.sources.map((source) => source.task).filter((task): task is AuditTask => task !== undefined),
-          params.sources.map((source) => source.result),
-          params.lineIndex,
-        ),
-      ]),
+      fileMetrics.map((metric) => [metric.path, metric.total_lines]),
     ),
+    // The steward reviews what it judges worth reviewing, so a coverage set
+    // smaller than the assignment is this lane's contract. Both completeness
+    // gates read this field.
+    coverage_policy: "selective",
+    file_metrics: fileMetrics,
     inputs: {
       source_task_ids: sourceIds.join(","),
       trigger_summary: params.triggers.join(","),
     },
     rationale:
-      `Lens steward verification for ${params.lens} after ${params.sources.length} completed base result(s) across ${allPaths.length} file(s). ` +
-      `Triggers: ${params.triggers.join(", ")}. ` +
-      "Review whether high-risk packets are suspiciously clean, severity/confidence levels are consistent, external analyzer signals were resolved rather than hand-waved, cross-packet issues are visible, no-finding conclusions are believable, and related-file findings contradict each other. " +
-      "Do not write direct findings from this verification task; return findings: [] plus verification metadata with bounded follow-up AuditTask suggestions when needed.\n" +
-      `Selected verification files: ${formatList(selectedPaths, 8)}${omittedPathCount > 0 ? `; omitted ${omittedPathCount} lower-priority file(s) from direct source checks` : ""}.\n` +
+      `Lens steward verification for ${params.lens} after ${params.sources.length} completed base result(s). ` +
+      `Your assignment is the WHOLE surface this lens was applied to: ${surfacePaths.length} file(s), ${surfaceLines} line(s). ` +
+      `Triggers: ${params.triggers.join(", ")}.\n` +
+      "You choose which of those files to open. Every file on the surface states its line count and its prior-signal metrics, ordered strongest signal first; a file you decide not to open is not a coverage failure, but state how you chose in verification.selection_rationale. " +
+      "Review whether high-risk packets are suspiciously clean, severity/confidence levels are consistent, external analyzer signals were resolved rather than hand-waved, cross-packet issues are visible, no-finding conclusions are believable, and related-file findings contradict each other.\n" +
+      "Do not write direct findings from this verification task; return findings: [] plus verification metadata with bounded follow-up AuditTask suggestions when needed. A follow-up may name any file on this surface.\n" +
       (externalPathsInScope.length > 0
-        ? `External analyzer paths in scope: ${formatList(externalPathsInScope, 8)}.\n`
+        ? `External analyzer paths on the surface: ${formatList(externalPathsInScope, 8)}.\n`
         : "") +
       "Source result summary:\n" +
-      summaries.join("\n") +
-      (params.sources.length > MAX_LENS_VERIFICATION_RESULT_SUMMARIES
-        ? `\n- ... (+${params.sources.length - MAX_LENS_VERIFICATION_RESULT_SUMMARIES} more result summaries omitted)`
-        : ""),
+      summaries.join("\n"),
     priority: "high",
     tags: [
       DEEPENING_TAG,

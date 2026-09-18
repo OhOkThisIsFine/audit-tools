@@ -431,7 +431,14 @@ test("validateAuditResults accepts a correctly-located result when the ASSIGNED 
             confidence: "high",
             lens: "correctness",
             summary: "S",
-            affected_files: [{ path: "src/audit/foo.ts", line_start: 3, line_end: 9 }],
+            affected_files: [
+              {
+                path: "src/audit/foo.ts",
+                line_start: 3,
+                line_end: 9,
+                quoted_text: "const foo = 1;",
+              },
+            ],
             evidence: ["e"],
           },
         ],
@@ -678,7 +685,14 @@ test("validateAuditResults accepts affected_files path with backslashes when fil
             confidence: "high",
             lens: "correctness",
             summary: "S",
-            affected_files: [{ path: "src\\foo.ts", line_start: 1, line_end: 5 }],
+            affected_files: [
+              {
+                path: "src\\foo.ts",
+                line_start: 1,
+                line_end: 5,
+                quoted_text: "const foo = 1;",
+              },
+            ],
             evidence: ["e"],
           },
         ],
@@ -724,7 +738,9 @@ test("validateAuditResults accepts affected_files path with leading ./ prefix wh
             confidence: "high",
             lens: "correctness",
             summary: "S",
-            affected_files: [{ path: "./src/bar.ts", line_start: 1 }],
+            affected_files: [
+              { path: "./src/bar.ts", line_start: 1, quoted_text: "const bar = 2;" },
+            ],
             evidence: ["e"],
           },
         ],
@@ -1016,7 +1032,14 @@ test("INV-09: in-scope findings in the same result are retained when one affecte
         confidence: "high",
         lens: "correctness",
         summary: "An in-scope finding.",
-        affected_files: [{ path: "src/core.ts", line_start: 5, line_end: 10 }],
+        affected_files: [
+          {
+            path: "src/core.ts",
+            line_start: 5,
+            line_end: 10,
+            quoted_text: "value.field",
+          },
+        ],
         evidence: ["src/core.ts:5 - dereference"],
       },
     ],

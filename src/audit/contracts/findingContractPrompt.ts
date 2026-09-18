@@ -14,8 +14,10 @@
 // required), and the 2026-08-21 lap then lost more to `evidence` being omitted
 // entirely while downstream validation required it.
 
+// sites-pinned: tests/audit/host-result-finding-contract.test.ts, tests/audit/host-ingest-grounding.test.ts
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
+  AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   CONFIDENCES,
   LENSES,
   SEVERITIES,
@@ -132,6 +134,11 @@ export function findingContractPromptLines(): readonly string[] {
     `Rule: ${FINDING_LINE_START_INTEGER_RULE}`,
     `Rule: ${FINDING_LINE_END_INTEGER_RULE}`,
     `Rule: ${FINDING_LINE_ORDER_RULE}`,
+    // The grounding ask. It was missing entirely: `quoted_text` was named once,
+    // and only as text the tool re-reads, so a reader who obeyed the prompt
+    // exactly shipped no quote and every finding grounded `ungrounded`. The
+    // sentence is the constant both doors refuse with.
+    `Rule: ${AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE}`,
     // Every cross-record rule the downstream validator enforces, verbatim from
     // the registry the validator itself reads — not a paraphrase.
     ...AUDIT_RESULT_RULES.map((rule) => `Rule: ${rule.statement}`),

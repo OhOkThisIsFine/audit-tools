@@ -800,9 +800,13 @@ test("runtime validation updates append disagreement follow-ups to the next revi
   expect(run.progress_summary).toMatch(/selective deepening task/i);
 });
 
-test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_FILES and emits stderr when sources exceed the limit", () => {
-  // Build 13 security tasks each covering a distinct file so that
-  // selectLensVerificationFiles sees 13 candidates and truncates to 12.
+test("a lens steward is granted its whole surface through buildSelectiveDeepeningTasks, with metrics and the selective policy", () => {
+  // 13 security tasks, each covering a distinct file. This count is the OLD
+  // cap plus one: the file list used to be sorted by signal score and sliced to
+  // 12, and this test used to assert that slice. A file COUNT measures no cost
+  // the tool cares about (13 ten-line files against one 100,000-line file), so
+  // the caps are gone and the steward now receives the whole surface and
+  // chooses what to open — see docs/reviews/lens-steward-redesign-2026-09-17.md.
   const filePaths = Array.from({ length: 13 }, (_, i) => `src/module-${i}/index.ts`);
 
   const sourceTasks: AuditTask[] = filePaths.map((filePath, i) => ({
@@ -830,7 +834,7 @@ test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_F
     // Do NOT set requires_followup: false — that would mark all as closed-clean
   }));
 
-  // Capture stderr output during buildSelectiveDeepeningTasks
+  // Capture stderr so the ABSENCE of a truncation trace is asserted, not assumed.
   const stderrLines: string[] = [];
   const originalWrite = process.stderr.write.bind(process.stderr);
   const captureWrite = (...args: Parameters<typeof originalWrite>): boolean => {
@@ -852,22 +856,56 @@ test("selectLensVerificationFiles truncates file list to MAX_LENS_VERIFICATION_F
 
   const steward = tasks.find((task) => task.tags!.includes("lens_verification"));
   expect(steward, "expected a lens steward task to be created").toBeTruthy();
-  expect(steward!.file_paths.length, "steward file_paths should be capped at MAX_LENS_VERIFICATION_FILES (12), not 13").toBe(12);
+  expect(
+    steward!.file_paths,
+    "the steward holds every file its lens was applied to, path-sorted",
+  ).toEqual([...filePaths].sort());
+  expect(
+    steward!.coverage_policy,
+    "a steward chooses what to open, so its coverage is selective",
+  ).toBe("selective");
+  expect(
+    steward!.file_line_counts,
+    "every surface file states its line count, so the steward can size its own work",
+  ).toEqual(Object.fromEntries(filePaths.map((path) => [path, 40])));
 
-  // The truncation trace is a structured JSON log line (see lensVerification.ts
-  // and the dedicated observability-signals test), not a human-readable string.
+  // The metrics are what the steward chooses BY: one entry per surface file,
+  // each carrying the signals behind its score. They replace the slice — the
+  // score orders the list instead of truncating it.
+  const metrics = steward!.file_metrics ?? [];
+  expect(metrics.map((metric) => metric.path).sort()).toEqual([...filePaths].sort());
+  expect(metrics.every((metric) => metric.total_lines === 40)).toBeTruthy();
+  expect(
+    metrics.find((metric) => metric.path === filePaths[0])?.signals,
+    "the externally flagged file states the signal that flagged it",
+  ).toContain("external_analyzer_signal");
+  expect(
+    metrics.every((metric, index) =>
+      index === 0 ? true : metrics[index - 1].score >= metric.score,
+    ),
+    "metrics are ordered strongest signal first",
+  ).toBeTruthy();
+
+  // No cap means no truncation trace. The two stderr events that used to fire
+  // here (`truncated_verification_file_list`, `truncated_result_summary_list`)
+  // no longer exist, and their absence is the assertion.
   const truncationLog = stderrLines
     .map((line) => {
       try {
-        return JSON.parse(line.trim());
+        return JSON.parse(line.trim()) as { event?: string };
       } catch {
         return null;
       }
     })
-    .find((obj) => obj && obj.event === "truncated_verification_file_list");
-  expect(truncationLog, `expected a truncated_verification_file_list log line but got: ${JSON.stringify(stderrLines)}`).toBeTruthy();
-  expect(truncationLog.kept, "kept should be MAX_LENS_VERIFICATION_FILES (12)").toBe(12);
-  expect(truncationLog.total, "total should reflect the 13 candidate files").toBe(13);
+    .find(
+      (obj) =>
+        obj?.event === "truncated_verification_file_list" ||
+        obj?.event === "truncated_result_summary_list",
+    );
+  expect(
+    truncationLog,
+    `expected no truncation log line, got: ${JSON.stringify(stderrLines)}`,
+  ).toBeUndefined();
 });
 
 test("buildFlowCoverage tolerates malformed flow paths and concerns", () => {

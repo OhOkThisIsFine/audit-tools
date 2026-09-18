@@ -101,6 +101,7 @@ export {
   FINDING_LINE_START_INTEGER_RULE,
   FINDING_LINE_END_INTEGER_RULE,
   FINDING_LINE_ORDER_RULE,
+  AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   refineFindingLocationLines,
   findingLocationLineIssues,
   FindingLocationSchema,

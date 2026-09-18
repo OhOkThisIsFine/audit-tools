@@ -73,7 +73,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "audit-host-workload/v1alpha2";
+  readonly contract_version: "audit-host-workload/v1alpha3";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -561,7 +561,7 @@ describe(FAILURE_SIGNATURE, () => {
       tasks,
     });
     expect(first.workload.contract_version).toBe(
-      "audit-host-workload/v1alpha2",
+      "audit-host-workload/v1alpha3",
     );
     expect(first.result_map.contract_version).toBe(
       "audit-host-result-map/v1alpha1",
@@ -892,7 +892,7 @@ describe(FAILURE_SIGNATURE, () => {
     // It names BOTH versions — the one found and the one this build mints — and
     // the one repair, so the host is not left to infer any of the three.
     expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
-    expect(refusal!.message).toContain("audit-host-workload/v1alpha2");
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha3");
     expect(refusal!.message).toContain("re-prepare");
 
     // RUN-SCOPED, deliberately: the refusal is about the workload DOCUMENT, not
@@ -967,14 +967,21 @@ describe(FAILURE_SIGNATURE, () => {
       )!;
 
       // The ask and the envelope are the same fact: the steward prompt must
-      // name `verification` as part of ITS result contract...
-      expect(steward.prompt.text).toMatch(/an optional `verification` object/u);
+      // name `verification` as part of ITS result contract, and must name it as
+      // REQUIRED. The prompt used to say "exactly … and verification" and then
+      // call the field optional — two halves a reader cannot obey at once — and
+      // the door now refuses a steward result that carries none.
+      expect(steward.prompt.text).toMatch(/must also carry a `verification` object/u);
+      expect(steward.prompt.text).toMatch(/verification is REQUIRED/u);
       expect(steward.prompt.text).toMatch(/verification[^.]*followup_tasks/u);
+      // The steward states the CHOICE it made over its surface, so the prompt
+      // must ask for the rationale the door requires.
+      expect(steward.prompt.text).toMatch(/verification\.selection_rationale/u);
       // ...and the base prompt must NOT carry that ask, because its envelope
       // refuses the field. Matched on the CONTRACT SENTENCE, not the bare word:
       // `verification_status` is a different field (a refused finding verdict)
       // and legitimately appears in both lanes' finding contracts.
-      expect(base.prompt.text).not.toMatch(/an optional `verification` object/u);
+      expect(base.prompt.text).not.toMatch(/carry a `verification` object/u);
       expect(base.prompt.text).not.toMatch(/verification[^.]*followup_tasks/u);
     });
 
@@ -1009,6 +1016,7 @@ describe(FAILURE_SIGNATURE, () => {
               concerns: ["Packet looked clean."],
               coverage_concerns: [],
               confidence_concerns: [],
+              selection_rationale: "One-file surface; opened it.",
               followup_tasks: [],
             },
           }),
@@ -1070,6 +1078,7 @@ describe(FAILURE_SIGNATURE, () => {
               concerns: [],
               coverage_concerns: [],
               confidence_concerns: [],
+              selection_rationale: "One-file surface; opened it.",
               followup_tasks: [],
             },
           }),
@@ -1177,6 +1186,7 @@ describe(FAILURE_SIGNATURE, () => {
       concerns: [],
       coverage_concerns: [],
       confidence_concerns: [],
+      selection_rationale: "Opened both high-score files; the rest score zero.",
       followup_tasks: [],
     };
 
@@ -1225,7 +1235,7 @@ describe(FAILURE_SIGNATURE, () => {
       );
     });
 
-    it("refuses a follow-up task naming a file outside the work item's coverage and boundary", async () => {
+    it("refuses a follow-up task naming a file outside the work item's assigned surface", async () => {
       expectRefused(
         await submitVerification({
           ...VALID_VERIFICATION,
@@ -1241,7 +1251,7 @@ describe(FAILURE_SIGNATURE, () => {
             },
           ],
         }),
-        /outside this work item's file_coverage or packet boundary/u,
+        /outside this work item's assigned surface/u,
       );
     });
 
@@ -1378,6 +1388,7 @@ describe(FAILURE_SIGNATURE, () => {
           concerns: [],
           coverage_concerns: [],
           confidence_concerns: [],
+          selection_rationale: "One-file surface; opened it.",
           followup_tasks: [
             {
               task_id: "f1",
@@ -1407,7 +1418,9 @@ describe(FAILURE_SIGNATURE, () => {
         {},
       );
       expect(
-        issues.some((issue) => /outside the verification task's file_coverage/u.test(issue.message)),
+        issues.some((issue) =>
+          /outside the verification task's assigned surface/u.test(issue.message),
+        ),
         `the batch door must refuse the same path: ${JSON.stringify(issues)}`,
       ).toBe(true);
       // The host door refuses it too, with its own words — one rule, two doors.
@@ -1426,7 +1439,7 @@ describe(FAILURE_SIGNATURE, () => {
             },
           ],
         }),
-        /outside this work item's file_coverage or packet boundary/u,
+        /outside this work item's assigned surface/u,
       );
     });
 
@@ -1578,7 +1591,7 @@ describe(FAILURE_SIGNATURE, () => {
     // It names BOTH versions — the one found and the one this build mints — and
     // states what the tool does next, so the host is not left to act on it.
     expect(refusal!.message).toContain("audit-host-task-bindings/v1alpha1");
-    expect(refusal!.message).toContain("audit-host-task-bindings/v1alpha2");
+    expect(refusal!.message).toContain("audit-host-task-bindings/v1alpha3");
     expect(refusal!.message).toContain("re-prepares the workload");
   });
 
@@ -1735,7 +1748,7 @@ describe(FAILURE_SIGNATURE, () => {
       contract_version: string;
       entries: Array<Record<string, unknown>>;
     };
-    expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha2");
+    expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha3");
     expect(reparsed.entries[0]!.tags).toEqual([]);
   });
 });

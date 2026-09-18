@@ -132,6 +132,10 @@
                 "quoted_text": {
                   "type": "string"
                 },
+                "no_quotable_span": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "hash_at_plan_time": {
                   "type": "string"
                 }
@@ -371,6 +375,9 @@
             "type": "string"
           }
         },
+        "selection_rationale": {
+          "type": "string"
+        },
         "followup_tasks": {
           "type": "array",
           "items": {
@@ -413,6 +420,50 @@
                 "additionalProperties": {
                   "type": "integer",
                   "minimum": 0
+                }
+              },
+              "coverage_policy": {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "selective"
+                ]
+              },
+              "file_metrics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "total_lines": {
+                      "type": "number"
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "signals": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "prior_findings": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "total_lines",
+                    "score",
+                    "signals",
+                    "prior_findings"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "line_ranges": {

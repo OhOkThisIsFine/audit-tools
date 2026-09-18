@@ -74,6 +74,10 @@
           "quoted_text": {
             "type": "string"
           },
+          "no_quotable_span": {
+            "type": "string",
+            "minLength": 1
+          },
           "hash_at_plan_time": {
             "type": "string"
           }

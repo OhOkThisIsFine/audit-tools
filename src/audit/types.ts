@@ -161,6 +161,47 @@ export const AuditTaskSchema = z.object({
   lens: z.string(),
   file_paths: z.array(z.string()),
   file_line_counts: z.record(z.string(), z.number()).optional(),
+  // sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/host-handoff.test.ts, tests/audit/orchestrator-remediation.test.ts
+  /**
+   * How much of `file_paths` the reviewer must cover.
+   *
+   * `"complete"` (the default when absent) is the per-file lane: every assigned
+   * file is reviewed, and a result that omits one is refused. `"selective"` is
+   * the lens steward: the assignment is the whole SURFACE its lens was applied
+   * to, and the steward chooses which of those files to open, so a coverage set
+   * smaller than the assignment is the contract rather than a violation.
+   *
+   * The axis exists because the old steward assignment was a score-ranked
+   * sample of twelve files. A file COUNT measures no cost — twelve files of ten
+   * lines is not a bounded review, and twelve files of a hundred thousand lines
+   * is not one either — and the sample also capped what a steward could NAME in
+   * a follow-up, which costs only a path. Widening the assignment to the whole
+   * surface is only safe once the completeness gates know the two lanes apart.
+   */
+  coverage_policy: z.enum(["complete", "selective"]).optional(),
+  /**
+   * Per-file metrics for a `"selective"` assignment: what the tool already
+   * knows about each file on the surface, so the reviewer can choose what to
+   * open from evidence rather than from a name.
+   *
+   * `score` ranks prior signal (priority, critical-flow and large-file tags, an
+   * external-analyzer path match, a suspiciously clean high-risk result, and the
+   * severity of findings already recorded against the path). It is a HINT, never
+   * a cap: the reviewer may open any file on the surface, in any order.
+   */
+  file_metrics: z
+    .array(
+      z.object({
+        path: z.string(),
+        total_lines: z.number(),
+        score: z.number(),
+        /** One token per contributing signal, path-stable and sorted. */
+        signals: z.array(z.string()),
+        /** Findings the base pass already recorded for this path, by severity. */
+        prior_findings: z.record(z.string(), z.number()),
+      }),
+    )
+    .optional(),
   line_ranges: z
     .array(
       z.object({
@@ -212,6 +253,19 @@ export const AuditVerificationSchema = z.object({
   concerns: z.array(z.string()).optional(),
   coverage_concerns: z.array(z.string()).optional(),
   confidence_concerns: z.array(z.string()).optional(),
+  /**
+   * How the steward chose which of its surface files to open, and which it left.
+   *
+   * A steward under `coverage_policy: "selective"` is granted the whole surface
+   * its lens was applied to and picks what to review, so the CHOICE is half of
+   * its answer: without it, a one-file coverage over a 300-file surface arrives
+   * with nothing to judge it by. The host door enforces it as REQUIRED and
+   * non-empty (`verificationContractFailure`); it is optional here for the same
+   * reason every other field of this schema is — the follow-up builder reads a
+   * partial object, and this schema is the tolerant reader, not the gate.
+   */
+  // sites-pinned: tests/audit/host-handoff.test.ts, tests/audit/validation-remediation.test.ts
+  selection_rationale: z.string().optional(),
   followup_tasks: z.array(AuditTaskSchema).optional(),
 });
 

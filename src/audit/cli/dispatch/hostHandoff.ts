@@ -51,7 +51,12 @@ import {
   WorkerFindingSchema,
   type WorkerFinding,
 } from "../../contracts/workerSchemas.js";
-import { AuditResultSchema, type AuditResult, type AuditTask } from "../../types.js";
+import {
+  AuditResultSchema,
+  AuditTaskSchema,
+  type AuditResult,
+  type AuditTask,
+} from "../../types.js";
 import {
   validateOneAuditResult,
   formatAuditResultIssues,
@@ -84,7 +89,16 @@ import {
 // re-prepare. Same one-cut precedent as the remediation twin's v1alpha2
 // (`REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION`, commit ed033294): the shape
 // changed, so the version names the shape that is actually on disk.
-const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha2" as const;
+//
+// v1alpha3 (the lens steward's surface): a `"selective"` work item's `scope`
+// carries `file_metrics` beside `files` — one entry per surface file, stating
+// its line count and the prior signal against it. The metrics ride the WORKLOAD
+// and not the prompt on purpose: a steward's surface is the whole set its lens
+// was applied to, which can run to hundreds of files, and inlining that in
+// prompt prose would make the prompt digest a function of the surface's size
+// while telling the host nothing it could act on. A v1alpha2 document refuses
+// closed as stale — the same `next-step` re-prepares it.
+const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha3" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 
@@ -123,8 +137,21 @@ const AUDIT_RESULT_ENVELOPE_KEYS = [
  * moment a second lane diverges, and that would leave a mis-laned item reporting
  * success.
  */
+/**
+ * v1alpha3 adds the per-item `coverage_policy`.
+ *
+ * It moves the version for exactly the reason `tags` did, and the reasoning
+ * above applies unchanged. THIS gate — the coverage-completeness check in
+ * {@link parseHostResult} — is the FIRST of the three that judge a submission's
+ * coverage, and it judges from the persisted BINDING rather than from the live
+ * task. So a `"selective"` item whose binding carries no policy would be judged
+ * as `"complete"`, and the steward's own contract (review what you judge worth
+ * reviewing) would be refused at the door by the tool that asked for it.
+ * Defaulting an absent policy to `"complete"` is what makes that failure silent,
+ * so an absent policy is a stale binding set instead.
+ */
 const TASK_BINDINGS_CONTRACT_VERSION =
-  "audit-host-task-bindings/v1alpha2" as const;
+  "audit-host-task-bindings/v1alpha3" as const;
 
 /**
  * The remedy a version mismatch carries. The failure is recoverable, and the
@@ -171,7 +198,17 @@ export interface AuditHostTask {
    */
   readonly demand: LaneDemand;
   readonly token_estimate: number;
+  /**
+   * How much of `file_paths` this lane must cover — see `coverage_policy` on
+   * `AuditTask`. Absent means `"complete"`, which is the base per-file lane.
+   */
+  readonly coverage_policy?: AuditTask["coverage_policy"];
+  /** Per-surface-file metrics, on a `"selective"` lane only. */
+  readonly file_metrics?: readonly LensSurfaceFileMetric[];
 }
+
+/** One surface file's metrics, exactly as `AuditTask.file_metrics` declares them. */
+type LensSurfaceFileMetric = NonNullable<AuditTask["file_metrics"]>[number];
 
 export interface AuditHostWorkItem {
   readonly id: string;
@@ -187,6 +224,19 @@ export interface AuditHostWorkItem {
   readonly scope: {
     readonly files: readonly string[];
     readonly unit_ids: readonly string[];
+    /**
+     * One entry per file in `files`, ordered by prior signal, strongest first —
+     * present on a `"selective"` item only, and absent on the base per-file
+     * lane, whose reviewer covers every file and so chooses nothing.
+     *
+     * This is what makes a whole-surface assignment reviewable. The steward is
+     * granted every file its lens was applied to, so it needs each file's size
+     * and each file's prior signal to decide what to open, and both belong
+     * beside the file list rather than in the prompt: the prompt is digested,
+     * and a digest that moves with a 137-entry metric table binds the host to a
+     * table it cannot act on from prose anyway.
+     */
+    readonly file_metrics?: readonly LensSurfaceFileMetric[];
   };
   readonly result_path: string;
 }
@@ -321,6 +371,15 @@ interface AuditHostTaskBinding {
    * the task), never by the ingest trusting the live task object.
    */
   readonly tags: readonly string[];
+  /**
+   * How much of the bound file set the submission must cover. REQUIRED, and
+   * persisted for the same reason `tags` is: the FIRST coverage-completeness
+   * gate ({@link parseHostResult}) runs at ingest, after the pause, and judges
+   * from this binding rather than from the live task. `"complete"` is the base
+   * per-file lane; `"selective"` is the lens steward, whose bound file set is
+   * the whole surface its lens was applied to.
+   */
+  readonly coverage_policy: NonNullable<AuditTask["coverage_policy"]>;
 }
 
 interface AuditHostTaskBindings {
@@ -562,14 +621,24 @@ function isVerificationLane(tags: readonly string[] | undefined): boolean {
   return tags?.includes(LENS_VERIFICATION_TAG) ?? false;
 }
 
-function buildPrompt(task: AuditHostTask, resultPath: string): string {
+function buildPrompt(
+  task: AuditHostTask,
+  resultPath: string,
+  workloadPath: string,
+): string {
+  // A `"selective"` lane's file list is NOT inlined. Its assignment is the whole
+  // surface its lens was applied to, which runs to hundreds of files on a real
+  // run, so inlining it would make the prompt mostly a path list and the prompt
+  // DIGEST a function of the surface's size. The list and its per-file metrics
+  // ride the workload the tool already writes, and the prompt names where.
+  const selective = task.coverage_policy === "selective";
   const assignment = stableStringify({
-    file_line_counts: task.file_line_counts,
-    files: task.file_paths,
+    ...(selective
+      ? { surface_file_count: task.file_paths.length }
+      : { file_line_counts: task.file_line_counts, files: task.file_paths }),
     lens: task.lens,
     pass_id: task.pass_id,
     rationale: task.rationale,
-    result_path: resultPath,
     task_id: task.task_id,
     unit_id: task.unit_id,
   });
@@ -583,11 +652,34 @@ function buildPrompt(task: AuditHostTask, resultPath: string): string {
   const verificationLane = isVerificationLane(task.tags);
   return [
     "Perform the bounded semantic audit work item below.",
-    "Review every listed file and return one JSON object at the bound result path.",
-    `Assignment: ${assignment}`,
+    // THE DESTINATION FIRST, on its own line. It used to be one field inside a
+    // single long JSON blob, which buries the one fact a reader must not have to
+    // search for: a result written anywhere else is never ingested.
+    `Write one JSON object to this exact path: ${resultPath}`,
+    // LANE-AWARE, because "review every listed file" is true of the base lane
+    // and false of a steward under selective coverage — whose whole task is to
+    // decide what is worth opening.
+    selective
+      ? `Your assignment is the whole surface this lens was applied to: ${String(task.file_paths.length)} file(s). ` +
+        `The file list is not repeated here. Read it from the work item whose id is '${task.task_id}' in ${workloadPath}: ` +
+        "scope.files names every file on the surface, and scope.file_metrics states each file's total_lines, its prior-signal " +
+        "score, the signals behind that score, and any findings the base pass already recorded against it — ordered strongest " +
+        "signal first. YOU choose which of those files to open; the score is a hint, never a boundary. " +
+        "Declare file_coverage for the files you opened, not for the whole surface."
+      : "Review every listed file.",
+    "Assignment:",
+    "```json",
+    assignment,
+    "```",
     verificationLane
-      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, and verification in addition to contract_version."
-      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
+      // `verification` is REQUIRED on this lane, and the prompt states ONE rule.
+      // It used to say "exactly … and verification" and then call the field
+      // optional, which is a contradiction a reader cannot obey both halves of.
+      // Required is the honest reading: a steward returns `findings: []`, so a
+      // steward with no `verification` carries no answer at all and is
+      // indistinguishable from a lane that failed.
+      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, reviewed_clean, and verification in addition to contract_version. On this lane verification is REQUIRED."
+      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version, plus reviewed_clean when findings is empty.",
     "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines.",
     // The finding contract is CARRIED, not referenced: it is rendered from the
     // very schema ingestion enforces, so a host never has to remember or fetch it.
@@ -602,15 +694,17 @@ function buildPrompt(task: AuditHostTask, resultPath: string): string {
  *
  * CARRIED for the same reason the finding contract is: the host cannot comply
  * with a contract it is never shown, and this one is three-deep (booleans, three
- * concern arrays, and an array of AuditTask-shaped follow-up suggestions whose
- * `file_paths` must lie inside the packet boundary). Rendered from the schema
- * ingestion enforces, so the prompt cannot describe a shape the parse refuses.
+ * concern arrays, the selection rationale, and an array of AuditTask-shaped
+ * follow-up suggestions whose `file_paths` must lie on the assigned surface).
+ * Rendered from the schema ingestion enforces, so the prompt cannot describe a
+ * shape the parse refuses.
  */
 function verificationContractPromptLines(): readonly string[] {
   return [
-    "This work item is a LENS STEWARD VERIFICATION task, so it also accepts an optional `verification` object.",
-    `verification, when present, must contain exactly ${VERIFICATION_CONTRACT_KEYS.join(", ")} — all six, with no extra key: verified and needs_followup are booleans, concerns, coverage_concerns and confidence_concerns are arrays of non-empty strings (a genuine "nothing to report" is an empty array, not an omitted field), and followup_tasks is an array of objects.`,
-    `Each verification.followup_tasks entry must contain exactly ${VERIFICATION_FOLLOWUP_KEYS.join(", ")} — all six, with no extra key: file_paths is a non-empty array of non-empty repo-relative strings, each naming a file within THIS work item's file_coverage or packet boundary; lens must be the lens of THIS task; task_id, unit_id, pass_id and rationale must be non-empty strings.`,
+    "This work item is a LENS STEWARD VERIFICATION task, so it must also carry a `verification` object.",
+    `verification must contain exactly ${VERIFICATION_CONTRACT_KEYS.join(", ")} — all ${String(VERIFICATION_CONTRACT_KEYS.length)}, with no extra key: verified and needs_followup are booleans, concerns, coverage_concerns and confidence_concerns are arrays of non-empty strings (a genuine "nothing to report" is an empty array, not an omitted field), selection_rationale is a non-empty string, and followup_tasks is an array of objects.`,
+    "verification.selection_rationale states how you chose which surface files to open and which to leave: name the signals you followed and say what you decided was not worth opening. A file you did not open is not a coverage failure, but an unexplained choice is.",
+    `Each verification.followup_tasks entry must contain exactly ${VERIFICATION_FOLLOWUP_KEYS.join(", ")} — all ${String(VERIFICATION_FOLLOWUP_KEYS.length)}, with no extra key: file_paths is a non-empty array of non-empty repo-relative strings, each naming a file on THIS work item's assigned surface (scope.files) — a file you did not open is still on the surface and may be named; lens must be the lens of THIS task; task_id, unit_id, pass_id and rationale must be non-empty strings.`,
     "Set needs_followup true only when followup_tasks is non-empty — a follow-up request with no bounded task is refused.",
   ];
 }
@@ -628,6 +722,11 @@ const VERIFICATION_CONTRACT_KEYS = [
   "concerns",
   "coverage_concerns",
   "confidence_concerns",
+  // The steward chooses which of its surface files to open, so the CHOICE is
+  // part of its answer. Without this field the selective policy would accept a
+  // one-file coverage over a 300-file surface with nothing to review it by; with
+  // it, an adversary can check the stated reason against `scope.file_metrics`.
+  "selection_rationale",
   "followup_tasks",
 ] as const;
 
@@ -694,11 +793,12 @@ function verificationAllowedPathsForEnvelope(
  * satisfies every stated rule.
  *
  * The rules mirror {@link verificationContractPromptLines} one-for-one:
- * 1. `verification` must contain exactly its six keys — no extra, no missing.
- * 2. `needs_followup` true ⇒ `followup_tasks` present and non-empty.
- * 3. each `followup_tasks` entry must contain exactly its six keys, its
- *    `lens` equal to the task's lens, and each `file_paths` string inside the
- *    packet boundary.
+ * 1. `verification` must contain exactly its declared keys — no extra, no missing.
+ * 2. `selection_rationale` must be a non-empty string.
+ * 3. `needs_followup` true ⇒ `followup_tasks` present and non-empty.
+ * 4. each `followup_tasks` entry must contain exactly its six keys, its
+ *    `lens` equal to the task's lens, and each `file_paths` string on the
+ *    assigned surface.
  *
  * Reused over the shared `AuditVerificationSchema` deliberately: that schema is
  * NON-STRICT (its arrays are optional, it drops unknown keys) because the
@@ -731,6 +831,12 @@ function verificationContractFailure(
     if (!isNonEmptyStringArray(verification[field])) {
       return `verification.${field} must be an array of non-empty strings`;
     }
+  }
+  if (
+    typeof verification.selection_rationale !== "string" ||
+    verification.selection_rationale.trim().length === 0
+  ) {
+    return "verification.selection_rationale must be a non-empty string stating how you chose which surface files to open";
   }
   const followup = verification.followup_tasks;
   if (!Array.isArray(followup)) {
@@ -767,7 +873,7 @@ function verificationContractFailure(
     for (const path of entry.file_paths) {
       if (!allowed.has(normalizeCoveragePath(path))) {
         return `${label}.file_paths references '${path}', ` +
-          "which is outside this work item's file_coverage or packet boundary";
+          "which is outside this work item's assigned surface";
       }
     }
   }
@@ -779,7 +885,9 @@ function buildWorkItem(
   task: AuditHostTask,
 ): AuditHostWorkItem {
   const resultPath = resultPathFor(paths, task.task_id);
-  const promptText = buildPrompt(task, resultPath);
+  // The SAME path the caller writes the workload to, so a selective lane is told
+  // where its surface actually is rather than where it is expected to be.
+  const promptText = buildPrompt(task, resultPath, paths.workloadPath);
   return {
     id: task.task_id,
     lens: task.lens,
@@ -794,6 +902,9 @@ function buildWorkItem(
     scope: {
       files: [...task.file_paths],
       unit_ids: [task.unit_id],
+      ...(task.file_metrics === undefined
+        ? {}
+        : { file_metrics: [...task.file_metrics] }),
     },
     result_path: resultPath,
   };
@@ -914,6 +1025,12 @@ export async function prepareAuditHostHandoff(params: {
         file_line_counts: Object.fromEntries(
           item.scope.files.map((path) => [path, task.file_line_counts[path]]),
         ),
+        // Written EXPLICITLY, never left absent: the ingest gate reads this
+        // field to decide whether the result must cover every bound file, and a
+        // task that states no policy is a COMPLETE lane. Defaulting here (at
+        // the write) rather than at the read is what lets `parseTaskBinding`
+        // refuse an absent value as a stale binding set.
+        coverage_policy: task.coverage_policy ?? "complete",
         tags: [...(task.tags ?? [])],
       };
     }),
@@ -977,7 +1094,29 @@ export async function prepareAuditHostHandoff(params: {
   });
 }
 
+/**
+ * The persisted surface metrics, re-validated against the CANONICAL shape.
+ *
+ * It reads `AuditTaskSchema.shape.file_metrics` rather than a hand-written
+ * record walk, so the door cannot admit a metric shape the task contract would
+ * refuse — and a field added to `file_metrics` is checked here without a second
+ * edit. The schema field is `.optional()`, so an absent value parses; the caller
+ * decides whether absence is allowed by whether it asks at all.
+ */
+function isSurfaceFileMetrics(value: unknown): boolean {
+  return AuditTaskSchema.shape.file_metrics.safeParse(value).success;
+}
+
 function parseWorkItem(value: unknown): AuditHostWorkItem | null {
+  // `file_metrics` is the ONE optional scope key: a selective (steward) lane
+  // carries it, every complete lane omits it. It is added to the expected set
+  // only when the document supplies it, exactly as the result envelope treats
+  // `verification` — so "these keys, plus at most one optional field" stays one
+  // statement and the scope still admits nothing a host invents.
+  const hasScopeMetrics =
+    isRecord(value) &&
+    isRecord(value.scope) &&
+    Object.hasOwn(value.scope, "file_metrics");
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -1001,11 +1140,16 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
     typeof value.prompt.text !== "string" ||
     promptSha256(value.prompt.text) !== value.prompt.sha256 ||
     !isRecord(value.scope) ||
-    !hasExactKeys(value.scope, ["files", "unit_ids"]) ||
+    !hasExactKeys(value.scope, [
+      "files",
+      "unit_ids",
+      ...(hasScopeMetrics ? ["file_metrics"] : []),
+    ]) ||
     !Array.isArray(value.scope.files) ||
     !value.scope.files.every((entry) => typeof entry === "string") ||
     !Array.isArray(value.scope.unit_ids) ||
-    !value.scope.unit_ids.every((entry) => typeof entry === "string")
+    !value.scope.unit_ids.every((entry) => typeof entry === "string") ||
+    (hasScopeMetrics && !isSurfaceFileMetrics(value.scope.file_metrics))
   ) {
     return null;
   }
@@ -1151,6 +1295,7 @@ function parseTaskBinding(value: unknown): AuditHostTaskBinding | null {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
+      "coverage_policy",
       "file_line_counts",
       "lens",
       "pass_id",
@@ -1166,6 +1311,15 @@ function parseTaskBinding(value: unknown): AuditHostTaskBinding | null {
     typeof value.unit_id !== "string" ||
     typeof value.pass_id !== "string" ||
     typeof value.lens !== "string" ||
+    // REQUIRED for the same reason `tags` is, and checked against the closed
+    // vocabulary the task contract owns: the coverage gate below reads this
+    // field to decide whether the result must cover every bound file, so an
+    // absent value is not a field to default — it is an item whose coverage
+    // contract is unknown, and `parseTaskBindings` refuses the whole set as
+    // stale.
+    !AuditTaskSchema.shape.coverage_policy.unwrap().safeParse(
+      value.coverage_policy,
+    ).success ||
     // REQUIRED, and refused as a VERSION problem rather than a shape problem —
     // see parseTaskBindings. A binding without the lane stamp cannot be judged:
     // the lane decides which result contract this item's prompt carried, so an
@@ -1367,10 +1521,14 @@ function parseHostResult(
     !isRecord(value) ||
     !hasExactKeys(value, [
       ...AUDIT_RESULT_ENVELOPE_KEYS,
-      // `verification` is the ONE optional key: required of no lane, asked of
-      // the steward lane, and refused when supplied to a lane whose contract
-      // never mentions it (see the lane check below). Every other key stays
-      // exact, so the envelope still admits nothing a host invents.
+      // `verification` is the ONE lane-conditional key: REQUIRED of the steward
+      // lane, and refused when supplied to a lane whose contract never mentions
+      // it (both checked below, where the binding's lane stamp is in hand).
+      // It is admitted conditionally HERE rather than required here, so a
+      // base-lane submission carrying one is refused by the lane gate — which
+      // names the ask that was never made — instead of by a generic key-set
+      // message. Every other key stays exact, so the envelope still admits
+      // nothing a host invents.
       ...(hasVerification ? ["verification"] : []),
     ]) ||
     value.contract_version !== RESULT_CONTRACT_VERSION ||
@@ -1411,6 +1569,18 @@ function parseHostResult(
       "result_envelope",
       "verification metadata was supplied for a work item whose contract does not request it; " +
         "remove the field or submit it through a lens_verification work item",
+    );
+  }
+  // The other half of the same lane gate. The steward prompt states one rule —
+  // `verification` is REQUIRED on this lane — so the door enforces exactly
+  // that. A steward writes no findings of its own, so a steward submission
+  // without `verification` carries no answer at all and is indistinguishable
+  // from a lane that ran and failed.
+  if (!hasVerification && isVerificationLane(binding.tags)) {
+    return refuse(
+      "result_envelope",
+      "this work item is a lens steward verification task, whose contract REQUIRES a verification " +
+        "object; a steward result without one reports no verdict at all",
     );
   }
   if (hasVerification) {
@@ -1475,14 +1645,32 @@ function parseHostResult(
     }
     coveragePaths.add(coverage.path);
   }
-  const uncovered = item.scope.files.filter((path) => !coveragePaths.has(path));
-  if (uncovered.length > 0 || coveragePaths.size !== item.scope.files.length) {
-    return refuse(
-      "file_coverage",
-      uncovered.length > 0
-        ? `file coverage: the assigned scope is not fully covered (missing ${uncovered.join(", ")})`
-        : "file coverage: entries do not match the assigned scope exactly",
-    );
+  // COMPLETENESS is per-policy; CONTAINMENT is not. Every entry has already
+  // been checked against `binding.file_line_counts` above, so a path outside
+  // the bound set is refused on both policies and only the "cover them all"
+  // half branches here.
+  //
+  // `"selective"` is the lens steward: its bound set is the whole surface its
+  // lens was applied to, and CHOOSING which of those files to open is the work
+  // the lane exists to do — so an unopened surface file is not a coverage
+  // failure. What the policy still refuses is a result that opened nothing.
+  if (binding.coverage_policy === "selective") {
+    if (coveragePaths.size === 0) {
+      return refuse(
+        "file_coverage",
+        "file coverage: a selective work item must report at least one file it actually reviewed",
+      );
+    }
+  } else {
+    const uncovered = item.scope.files.filter((path) => !coveragePaths.has(path));
+    if (uncovered.length > 0 || coveragePaths.size !== item.scope.files.length) {
+      return refuse(
+        "file_coverage",
+        uncovered.length > 0
+          ? `file coverage: the assigned scope is not fully covered (missing ${uncovered.join(", ")})`
+          : "file coverage: entries do not match the assigned scope exactly",
+      );
+    }
   }
   const result = JSON.parse(
     stableStringify({

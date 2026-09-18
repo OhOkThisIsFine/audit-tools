@@ -286,10 +286,24 @@ describe(FAILURE_SIGNATURE, () => {
     expect(issue?.message).toMatch(/tool-derived/u);
   });
 
-  it("T4: stamps `ungrounded` when no affected_files entry carries a quote", async () => {
+  // A quoteless entry is now REFUSED at the door unless it DECLARES why no span
+  // could be quoted (`no_quotable_span`). The declaration buys the finding past
+  // the contract gate; it does NOT buy it a grounding verdict — an undeclared
+  // quote is still nothing to re-verify, so the stamp stays `ungrounded` and an
+  // adversary can ask whether a quotable span existed after all.
+  it("T4: stamps `ungrounded` when an entry declares no_quotable_span instead of a quote", async () => {
     const published = await publishOneWorkItem();
-    const ingest = await submitFinding(published, baseFinding([{ path: "src/a.ts" }]));
+    const ingest = await submitFinding(
+      published,
+      baseFinding([
+        {
+          path: "src/a.ts",
+          no_quotable_span: "the defect is the absence of a guard, so no span states it",
+        },
+      ]),
+    );
 
+    expect(ingest.issues ?? []).toEqual([]);
     expect(ingest.accepted_count).toBe(1);
     const grounding = ingest.accepted_results[0]?.findings[0]?.grounding;
     expect(grounding?.status).toBe("ungrounded");

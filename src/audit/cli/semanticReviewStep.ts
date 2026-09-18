@@ -59,6 +59,15 @@ function toHostTask(task: AuditTask): AuditHostTask {
     // boundary that cannot see the lane cannot render a lane-aware contract, and
     // this mapper is where that signal was being dropped.
     ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
+    // The coverage policy and the surface metrics ride the harness for the same
+    // reason the tags do: the boundary decides from them whether the result must
+    // cover every assigned file, and what the lane is told about the surface it
+    // chooses from. Dropped here, a steward would be dispatched its whole
+    // surface under the COMPLETE gate and refused for not reading all of it.
+    ...(task.coverage_policy === undefined
+      ? {}
+      : { coverage_policy: task.coverage_policy }),
+    ...(task.file_metrics === undefined ? {} : { file_metrics: task.file_metrics }),
   };
 }
 

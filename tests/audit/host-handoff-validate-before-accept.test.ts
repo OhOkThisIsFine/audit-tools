@@ -65,7 +65,12 @@ const FINDING_OUT_OF_COVERAGE = {
   lens: "correctness",
   summary: "x is reassigned before the prior value is read.",
   evidence: ["src/a.ts:1 - x overwritten"],
-  affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 9 }],
+  // The quote is verbatim from the fixture file ("one\ntwo\n"), so grounding
+  // holds and the SPAN is the one defect this result carries — which is the
+  // whole point of the fixture.
+  affected_files: [
+    { path: "src/a.ts", line_start: 1, line_end: 9, quoted_text: "one" },
+  ],
 };
 
 async function setup() {
@@ -164,7 +169,12 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     expect(pairAfterReject.ledgerEntries).toEqual([]);
 
     // The operator fixes the SAME bound file; the next fold re-reads it.
-    await ctx.writeResult({ ...FINDING_OUT_OF_COVERAGE, affected_files: [{ path: "src/a.ts", line_start: 1, line_end: 2 }] });
+    await ctx.writeResult({
+      ...FINDING_OUT_OF_COVERAGE,
+      affected_files: [
+        { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
+      ],
+    });
     const second = await ctx.ingest();
     expect(second.accepted_count).toBe(1);
     expect(second.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
@@ -203,9 +213,9 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     // passes every error rule including the envelope's bound-count check.
     await ctx.writeResult({
       ...FINDING_OUT_OF_COVERAGE,
-      // A span-free location: every error rule holds, so only the ±1-line
-      // coverage delta below can surface — as a warning.
-      affected_files: [{ path: "src/a.ts" }],
+      // A span-free but GROUNDED location: every error rule holds, so only the
+      // ±1-line coverage delta below can surface — as a warning.
+      affected_files: [{ path: "src/a.ts", quoted_text: "one" }],
     });
 
     const ingested = await ctx.ingest({ "src/a.ts": 3 });

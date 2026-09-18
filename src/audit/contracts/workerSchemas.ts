@@ -8,6 +8,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
+  AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   FindingSchema,
   FindingLocationObjectSchema,
   LensSchema,
@@ -20,8 +21,31 @@ import {
 } from "../types.js";
 import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 
-export const WorkerFindingLocationSchema =
-  FindingLocationObjectSchema.strict().superRefine(refineFindingLocationLines);
+export const WorkerFindingLocationSchema = FindingLocationObjectSchema.strict()
+  .superRefine(refineFindingLocationLines)
+  // The audit draw's grounding rule, enforced at the SCHEMA so the host door
+  // (`parseFindings`) and the generated JSON schema state it without a second
+  // hand-written check. The sentence is the shared constant the dispatch prompt
+  // renders, so the ask and the refusal are the same words.
+  //
+  // It is on the WORKER projection and not on the shared location schema on
+  // purpose: a remediator plan finding is re-minted from graph nodes, so it has
+  // no reviewer who could quote a span or declare that none exists.
+  .superRefine((location, ctx) => {
+    const quoted =
+      typeof location.quoted_text === "string" &&
+      location.quoted_text.trim().length > 0;
+    const declared =
+      typeof location.no_quotable_span === "string" &&
+      location.no_quotable_span.trim().length > 0;
+    if (quoted === declared) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [quoted ? "no_quotable_span" : "quoted_text"],
+        message: AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
+      });
+    }
+  });
 
 // `grounding`, `verification_status`, `severity_downgraded_from`,
 // `evidence_lane` and `lead_lineage` are OMITTED, not merely left un-extended:

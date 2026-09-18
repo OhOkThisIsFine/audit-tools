@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/orchestrator-remediation.test.ts
 import {
   SEVERITIES,
   CONFIDENCES,
@@ -17,8 +18,14 @@ import type { ExternalAnalyzerResults } from "audit-tools/shared";
 export const DEEPENING_TAG = "selective_deepening";
 export const LENS_VERIFICATION_TAG = "lens_verification";
 export const LENS_VERIFICATION_FOLLOWUP_TAG = "lens_verification_followup";
-export const MAX_LENS_VERIFICATION_FILES = 12;
-export const MAX_LENS_VERIFICATION_RESULT_SUMMARIES = 12;
+// There is deliberately NO cap on a lens steward's file list or on its source
+// summaries. A steward is granted the whole surface its lens was applied to, and
+// it chooses what to review — see `coverage_policy` on `AuditTask` and
+// `docs/reviews/lens-steward-redesign-2026-09-17.md`. The two caps that used to
+// live here — both 12, one over the file list and one over the source summaries
+// (named in that review; deliberately unbackticked, because a comment citing a
+// deleted symbol is what the comment-drift gate exists to refuse) — counted
+// FILES, which measures no cost the tool cares about.
 export const MAX_VERIFICATION_FOLLOWUP_TASKS_PER_RESULT = 4;
 export const IMPORTANT_LENS_VERIFICATION_LENSES = new Set<Lens>([
   "security",

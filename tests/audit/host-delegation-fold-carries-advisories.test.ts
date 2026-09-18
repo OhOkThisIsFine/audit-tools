@@ -324,7 +324,16 @@ describe("contract:host-delegation-fold-carries-advisories-to-the-next-emission"
             confidence: "medium",
             lens: (item as unknown as { lens?: string }).lens,
             summary: "Accepted with an out-of-scope-file advisory.",
-            affected_files: [{ path: coveredPath }, { path: "src/out-of-scope.ts" }],
+            // BOTH entries carry a quote. The quote-or-declaration rule lives in
+            // the worker projection, which is scope-blind by construction — the
+            // door cannot know which path the content gate will later call
+            // out-of-scope, so it asks every entry alike. So the only defect this
+            // result has is the out-of-scope sibling itself, which is the advisory
+            // this test is about.
+            affected_files: [
+              { path: coveredPath, quoted_text: "line one" },
+              { path: "src/out-of-scope.ts", quoted_text: "line one" },
+            ],
             evidence: [`${coveredPath}:1-2 - boundary`],
           },
         ],
