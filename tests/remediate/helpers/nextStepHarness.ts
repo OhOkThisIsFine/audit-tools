@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
 import type { RemediationState } from "../../../src/remediate/state/store.js";
 import { writeContractArtifact } from "../../../src/remediate/contractPipeline/artifactStore.js";
+import { intakeSummaryFixture } from "./intakeSummaryFixture.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
@@ -294,21 +295,13 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "structured_audit",
-        goals: ["Remediate the structured audit findings."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(intakeDir, "remediation-brief.md"),
-      "# Structured intake\n",
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "structured_audit",
+          goals: ["Remediate the structured audit findings."],
+          affected_files: [],
+        }),
+      ),
       "utf8",
     );
     // Materialize every cited affected_files path as a stub in the test repo, the

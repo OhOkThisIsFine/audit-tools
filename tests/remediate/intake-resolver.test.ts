@@ -10,10 +10,10 @@ import {
   isIntakeReady,
   readIntakeArtifacts,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
   type IntakeSourceManifest,
   type IntakeSummary,
 } from "../../src/remediate/intake.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
 import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
 import { scratchDir } from "../helpers/scratch.js";
@@ -42,7 +42,7 @@ function makeStubs() {
 }
 
 /**
- * Helper: write a complete ready-intake artifact set (manifest + summary + brief)
+ * Helper: write a complete ready-intake artifact set (manifest + summary; the tool renders the brief)
  * into the given artifactsDir. Reduces boilerplate for tests that need a "ready" intake.
  */
 async function writeReadyIntakeArtifacts(
@@ -60,19 +60,8 @@ async function writeReadyIntakeArtifacts(
   };
   await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
 
-  const summary: IntakeSummary = {
-    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-    ready: true,
-    source_type: "documents",
-    goals: ["Fix all bugs"],
-    non_goals: [],
-    constraints: [],
-    affected_files: [{ path: "src/main.ts" }],
-    open_questions: [],
-    ...summaryOverrides,
-  };
+  const summary = intakeSummaryFixture(summaryOverrides);
   await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nFix everything.", "utf8");
 }
 
 describe("resolveIntakeStep", () => {
@@ -261,19 +250,15 @@ describe("resolveIntakeStep", () => {
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-        ready: true,
-        source_type: "structured_audit",
-        goals: ["Remediate the structured audit findings."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [{ path: "src/a.ts" }],
-        open_questions: [],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "structured_audit",
+          goals: ["Remediate the structured audit findings."],
+          affected_files: [{ path: "src/a.ts" }],
+        }),
+      ),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
 
     const stubs = makeStubs();
 
@@ -475,21 +460,15 @@ describe("resolveIntakeStep", () => {
     await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(manifest), "utf8");
 
     // Summary is NOT ready (ready: false, has a blocking open question)
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
+    const summary = intakeSummaryFixture({
       ready: false,
-      source_type: "documents",
       goals: [],
-      non_goals: [],
-      constraints: [],
       affected_files: [],
       open_questions: [
         { id: "Q1", question: "What is the target language?", blocking: true },
       ],
-    };
+    });
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    // Write the brief so only the unready summary + absent clarification triggers the clarifications step
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
 
     const stubs = makeStubs();
 
@@ -534,21 +513,15 @@ describe("resolveIntakeStep", () => {
       "utf8",
     );
 
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    const summary = intakeSummaryFixture({
       goals: ["Fix the parser"],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/parser.ts" }],
       open_questions: [
         { id: "Q1", question: "Target language?", blocking: true },
         { id: "Q2", question: "Style guide?", blocking: false },
       ],
-    };
+    });
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
 
     // Before the answer: the blocking question gates the run.
     const before = await readIntakeArtifacts(artifactsDir);
@@ -604,18 +577,12 @@ describe("resolveIntakeStep", () => {
       }),
       "utf8",
     );
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    const summary = intakeSummaryFixture({
       goals: ["g"],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/a.ts" }],
       open_questions: [{ id: "Q1", question: "Which one?", blocking: true }],
-    };
+    });
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief", "utf8");
     await writeFile(
       join(intakeDir, "intake-clarifications.json"),
       JSON.stringify({ answers: [{ question_id: "Q1", answer: "   " }] }),
@@ -674,19 +641,12 @@ describe("resolveIntakeStep", () => {
     };
     await writeFile(join(intakeDir, "source-manifest.json"), JSON.stringify(oldManifest), "utf8");
 
-    // A previously completed summary+brief
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    // A previously completed summary
+    const summary = intakeSummaryFixture({
       goals: ["Fix A"],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/a.ts" }],
-      open_questions: [],
-    };
+    });
     await writeFile(join(intakeDir, "intake-summary.json"), JSON.stringify(summary), "utf8");
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief for A", "utf8");
 
     const stubs = makeStubs();
 
@@ -1034,24 +994,15 @@ describe("resolveIntakeStep", () => {
     );
 
     // A previously completed summary (ready=true, no blocking questions)
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    const summary = intakeSummaryFixture({
       goals: ["Fix bugs"],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/index.ts" }],
-      open_questions: [],
-    };
+    });
     await writeFile(
       join(intakeDir, "intake-summary.json"),
       JSON.stringify(summary),
       "utf8",
     );
-
-    // A previously completed brief
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nOld brief.", "utf8");
 
     const stubs = makeStubs();
 
@@ -1368,46 +1319,22 @@ describe("resolveIntakeStep", () => {
 // N-R02: intakeSummaryContentErrors unit tests
 describe("intakeSummaryContentErrors", () => {
   it("returns empty array for a valid ready summary", () => {
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
+    const summary = intakeSummaryFixture({
       goals: ["Fix bugs"],
-      non_goals: [],
-      constraints: [],
       affected_files: [{ path: "src/a.ts" }],
-      open_questions: [],
-    };
+    });
     expect(intakeSummaryContentErrors(summary)).toEqual([]);
   });
 
   it("returns errors for ready summary with empty goals and affected_files", () => {
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
-      goals: [],
-      non_goals: [],
-      constraints: [],
-      affected_files: [],
-      open_questions: [],
-    };
+    const summary = intakeSummaryFixture({ goals: [], affected_files: [] });
     const errors = intakeSummaryContentErrors(summary);
     expect(errors.length).toBeGreaterThanOrEqual(1);
     expect(errors.some((e) => e.includes("goals"))).toBe(true);
   });
 
   it("does not flag non-ready summaries for empty content", () => {
-    const summary: IntakeSummary = {
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: false,
-      source_type: "documents",
-      goals: [],
-      non_goals: [],
-      constraints: [],
-      affected_files: [],
-      open_questions: [],
-    };
+    const summary = intakeSummaryFixture({ ready: false, goals: [], affected_files: [] });
     expect(intakeSummaryContentErrors(summary)).toEqual([]);
   });
 });

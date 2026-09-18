@@ -38,6 +38,7 @@ import {
   createNextStepHarness,
   makePlanningState,
 } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-remediate-state-inv");
@@ -94,16 +95,12 @@ function enclosingCallStatement(source: string, at: number): string {
 
 describe("blockingIntakeQuestions — INV-remediate-state-06: blocking===true semantics", () => {
   function makeSummary(questions: IntakeOpenQuestion[]): IntakeSummary {
-    return {
-      schema_version: "remediate-code-intake-summary/v1alpha1",
+    return intakeSummaryFixture({
       ready: false,
-      source_type: "documents",
       goals: [],
-      non_goals: [],
-      constraints: [],
       affected_files: [],
       open_questions: questions,
-    };
+    });
   }
 
   it("treats blocking===true as blocking", () => {

@@ -13,7 +13,6 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
   intakePaths,
   readSourceManifest,
   validateClarificationResolution,
@@ -25,21 +24,12 @@ import {
   collectStartingPointPrompt,
 } from "../../src/remediate/steps/prompts.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const TEST_DIR = scratchDir(".test-intake-starting-point-contract");
 
 function summary(overrides: Partial<IntakeSummary> = {}): IntakeSummary {
-  return {
-    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-    ready: true,
-    source_type: "documents",
-    goals: ["Fix all bugs"],
-    non_goals: [],
-    constraints: [],
-    affected_files: [{ path: "src/main.ts" }],
-    open_questions: [],
-    ...overrides,
-  };
+  return intakeSummaryFixture(overrides);
 }
 
 beforeEach(async () => {
@@ -191,7 +181,6 @@ describe("the 16c intake question round", () => {
       ),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
 
     const result = await resolveIntakeStep({
       root: TEST_DIR,

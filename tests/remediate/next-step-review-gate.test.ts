@@ -4,7 +4,7 @@
 // pipeline collapses the original findings into DAG nodes, so every finding —
 // especially the strategic (architecture / design-review) ones that previously
 // vanished into quality-tail blocks — is surfaced for an explicit approve /
-// disapprove, and disapproved findings are recorded (never silently closed).
+// decline, and declined findings are recorded (never silently closed).
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
@@ -173,14 +173,16 @@ describe("review-approval gate: approve-all resolution", () => {
   });
 });
 
-describe("review-approval gate: disapproval is recorded and excluded", () => {
-  it("a disapproved finding is recorded with a reason and dropped from the pipeline seed", async () => {
+describe("review-approval gate: a decline is recorded and excluded", () => {
+  it("a declined finding is recorded with a reason and dropped from the pipeline seed", async () => {
     await writeAuditIntake();
     await decideNextStep({ root: REPO_DIR });
 
     await writeFile(
       resolutionPath,
-      JSON.stringify({ disapproved_findings: [STRATEGIC_ID] }),
+      JSON.stringify({
+        declined_findings: [{ finding_id: STRATEGIC_ID, reason: "the router is replaced next quarter" }],
+      }),
       "utf8",
     );
     const step = await decideNextStep({ root: REPO_DIR });
@@ -188,7 +190,10 @@ describe("review-approval gate: disapproval is recorded and excluded", () => {
     expect(step.step_kind).toBe("contract_pipeline");
     const decision = JSON.parse(await readFile(decisionPath, "utf8"));
     expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([STRATEGIC_ID]);
-    expect(decision.declined[0].reason).toMatch(/disapproved/i);
+    // The user's own reason reaches the record (prompt 17b).
+    expect(decision.declined[0].reason).toBe(
+      "Declined by the user at the review gate: the router is replaced next quarter",
+    );
     expect(decision.approved_ids).toEqual([CONCRETE_ID]);
     // The declined finding is excluded from the seed AND from the filtered source.
     const seed = JSON.parse(await readFile(seedPath, "utf8"));
@@ -218,13 +223,13 @@ describe("review-approval gate: disapproval is recorded and excluded", () => {
     });
   });
 
-  it("disapproving a whole tier records every finding in it", async () => {
+  it("declining a whole tier records every finding in it", async () => {
     await writeAuditIntake();
     await decideNextStep({ root: REPO_DIR });
 
     await writeFile(
       resolutionPath,
-      JSON.stringify({ disapproved_tiers: ["strategic"] }),
+      JSON.stringify({ declined_tiers: ["strategic"] }),
       "utf8",
     );
     await decideNextStep({ root: REPO_DIR });
@@ -232,6 +237,35 @@ describe("review-approval gate: disapproval is recorded and excluded", () => {
     const decision = JSON.parse(await readFile(decisionPath, "utf8"));
     expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([STRATEGIC_ID]);
     expect(decision.declined[0].reason).toMatch(/tier/i);
+  });
+});
+
+// Prompt 17b: the gate's default is APPROVE, so a resolution the tool cannot
+// read must never be read as "no declines". A mistyped (here: the retired)
+// field name used to approve the finding the user declined, in silence.
+describe("review-approval gate: an unreadable resolution is refused whole", () => {
+  it("archives the file, records nothing, and re-halts with the reason in the banner", async () => {
+    await writeAuditIntake();
+    await decideNextStep({ root: REPO_DIR });
+
+    await writeFile(
+      resolutionPath,
+      JSON.stringify({ disapproved_findings: [STRATEGIC_ID] }),
+      "utf8",
+    );
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("collect_review_approval");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain("REFUSED and archived — nothing was recorded.");
+    expect(prompt).toContain("`disapproved_findings` is not a field — write `declined_findings`");
+    // Nothing was decided, and the refused file cannot be re-read as an answer.
+    expect(existsSync(decisionPath)).toBe(false);
+    expect(existsSync(resolutionPath)).toBe(false);
+    const refused = (await readdir(ARTIFACTS_DIR)).filter((f) =>
+      f.startsWith("review_resolution.json.refused-"),
+    );
+    expect(refused.length).toBe(1);
   });
 });
 
@@ -421,7 +455,7 @@ describe("Path-B planning review gate", () => {
 
     await writeFile(
       resolutionPath,
-      JSON.stringify({ disapproved_findings: [ARCH_NODE] }),
+      JSON.stringify({ declined_findings: [{ finding_id: ARCH_NODE }] }),
       "utf8",
     );
     const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
@@ -437,7 +471,7 @@ describe("Path-B planning review gate", () => {
     // The declined node is a recorded terminal disposition, not a silent close.
     const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
     expect(state.items[ARCH_NODE].status).toBe("ignored");
-    expect(state.items[ARCH_NODE].failure_reason).toMatch(/disapproved/i);
+    expect(state.items[ARCH_NODE].failure_reason).toMatch(/declined by the user/i);
     expect(state.items[ARCH_NODE].completed_at).toBeTruthy();
     // The approved node stays live for implementation.
     expect(state.items[SEC_NODE].status).toBe("pending");

@@ -33,12 +33,16 @@
   delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
   discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
   §"The estimator charters".
-- **The host-prompt review reached prompt 16.** In
-  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 16 read APPROVED (owner,
-  2026-09-17 and 2026-09-18); rows 17 through 20 are still PROPOSED and wait for the owner's
+- **The host-prompt review reached prompt 17.** In
+  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 17 read APPROVED (owner,
+  2026-09-17 and 2026-09-18); rows 18 through 20 are still PROPOSED and wait for the owner's
   one-at-a-time review. Row 16 moved a worker's clarification question onto the item it pauses
   (the run-level list is retired) and made every resolution file a bare array that is refused whole
-  on one bad entry; row 17a shares that parser. Row 15 became a redesign, not a wording fix: a lens steward now receives every file its
+  on one bad entry; row 17a shares that parser and its rules text. Row 17b refuses a malformed
+  review resolution whole (a wrong field name used to approve a declined finding) and records the
+  user's reason for a decline. Row 17c has the host write only `intake-summary.json` (`v1alpha2`):
+  the tool renders the brief and builds the confirmation proposal from it, and the draft
+  checkpoint is retired. Row 15 became a redesign, not a wording fix: a lens steward now receives every file its
   lens was applied to, with per-file metrics, and the two file-count caps are deleted. The axis is
   `coverage_policy` on `AuditTask`, and all three coverage-completeness gates read it. Design of
   record: `docs/reviews/lens-steward-redesign-2026-09-17.md`.
@@ -51,10 +55,9 @@
 
 ## Immediate next
 
-**Open prompt 17** — `plan_proposal` in `src/remediate/steps/prompts.ts`, specs 17a through 17c.
-17a (`ambiguityReviewPrompt`) must adopt the prompt-16 resolution rules and parser. Render the live
-prompt text. Measure its defects against the schema that consumes the
-submission. Then ask the owner. Prompt 20 is loop-core: it needs `/design-check` plus a staged-tree
+**Open prompt 18** — `contract_pipeline` in `src/remediate/steps/contractPipelinePrompts.ts`,
+specs 18a (phased worker) and 18b (repair). Render the live prompt text. Measure its defects
+against the schema that consumes the submission. Then ask the owner. Prompt 20 is loop-core: it needs `/design-check` plus a staged-tree
 attestation.
 
 **Live owner decision:** none. The owner decided on 2026-09-17 to hold this lap's branch unpushed

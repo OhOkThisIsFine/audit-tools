@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -150,8 +150,7 @@ import {
 import {
   buildReviewRequest,
   applyReviewResolution,
-  isResolutionForRequest,
-  screenResolutionIds,
+  parseReviewResolution,
   REVIEW_REQUEST_SCHEMA_VERSION,
   type ReviewRequest,
   type ReviewResolution,
@@ -171,6 +170,7 @@ import {
   readSourceManifest,
   writeProjectFacts,
   resolveManifestSources,
+  writeRemediationBrief,
   type IntakeSourceManifest,
 } from "../intake.js";
 import {
@@ -182,6 +182,7 @@ import {
   distinctAffectedFiles,
 } from "../riskSignal.js";
 import {
+  isLegacyDraftCheckpoint,
   readIntentCheckpoint,
   readIntentCheckpointLenient,
 } from "audit-tools/shared";
@@ -1999,7 +2000,7 @@ async function handleWaitingForReviewApproval(
     prompt: reviewApprovalPrompt(request, reviewResolutionPath(artifactsDir), refusal),
     allowedCommands: [loaderCommand("next-step")],
     stopCondition:
-      "Stop after presenting the findings for approval and collecting the user's approve/disapprove decision, unless the decision is already recorded and the prompt told you to continue.",
+      "Stop after presenting the findings for approval and collecting the user's approve/decline decision, unless the decision is already recorded and the prompt told you to continue.",
     artifactPaths: {
       review_request: reviewRequestPath(artifactsDir),
       review_resolution: reviewResolutionPath(artifactsDir),
@@ -2008,42 +2009,37 @@ async function handleWaitingForReviewApproval(
 }
 
 /**
- * Uniform id-join contract pre-screen for the review gate (both paths): a
- * resolution naming an unknown finding id or tier is REFUSED whole — archived
- * (never applied) and the gate re-halts with the refusal and the valid set in
- * the re-prompt. The gate's default is approve, so the silent-drop alternative
- * turns a typo'd decline into an approval. Returns the re-halt step, or null
- * when the resolution's ids are clean. `applyReviewResolution` re-checks as the
- * mechanical backstop.
+ * Read the review resolution for both gate paths, through the one strict
+ * parser ({@link parseReviewResolution}). A refused file (bad JSON, an unknown
+ * field, a wrong type, an id or tier outside the request) is archived as
+ * `.refused-<ts>` — never applied — and the gate re-halts with each problem
+ * named. The gate's default is approve, so reading past a bad file would turn
+ * the user's decline into an approval. A stale file from another run is
+ * archived as `.stale-<ts>` and the gate re-halts with no refusal. Returns the
+ * re-halt step, or the resolution to apply.
  */
-async function refuseUnknownIdResolution(
+async function readReviewResolution(
   root: string,
   artifactsDir: string,
   request: ReviewRequest,
-  resolution: ReviewResolution | null | undefined,
   resolutionPath: string,
   requestPath: string,
-): Promise<RemediationStep | null> {
-  const screen = screenResolutionIds(request, resolution);
-  if (screen.unknown_finding_ids.length === 0 && screen.unknown_tiers.length === 0) {
-    return null;
-  }
+): Promise<{ halt: RemediationStep } | { resolution: ReviewResolution }> {
+  const parsed = parseReviewResolution(await readFile(resolutionPath, "utf8"), request);
+  if (parsed.kind === "ok") return { resolution: parsed.resolution };
+  const suffix = parsed.kind === "stale" ? "stale" : "refused";
   await withFsRetry(() =>
-    rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
+    rename(resolutionPath, `${resolutionPath}.${suffix}-${Date.now()}`),
   );
   await writeJsonFile(requestPath, request);
-  const parts: string[] = [];
-  if (screen.unknown_finding_ids.length > 0) {
-    parts.push(
-      `finding id(s) not in the request: ${screen.unknown_finding_ids.map((i) => `\`${i}\``).join(", ")}`,
-    );
-  }
-  if (screen.unknown_tiers.length > 0) {
-    parts.push(
-      `unknown tier(s): ${screen.unknown_tiers.map((t) => `\`${t}\``).join(", ")}`,
-    );
-  }
-  return handleWaitingForReviewApproval(root, artifactsDir, request, parts.join("; "));
+  return {
+    halt: await handleWaitingForReviewApproval(
+      root,
+      artifactsDir,
+      request,
+      parsed.kind === "refused" ? parsed.reason : undefined,
+    ),
+  };
 }
 
 interface ReviewGateProceed {
@@ -2135,24 +2131,11 @@ async function runReviewApprovalGate(
         await readOptionalJsonFile<ReviewRequest>(requestPath),
         REVIEW_REQUEST_SCHEMA_VERSION,
       ) ?? buildReviewRequest(survivors, randomRunId("path-a-review"));
-    const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
-    if (!isResolutionForRequest(request, resolution)) {
-      // Stale cross-run resolution (plan_id mismatch): archive it and RE-HALT
-      // with the live request rather than applying another run's answer.
-      await withFsRetry(() =>
-        rename(resolutionPath, `${resolutionPath}.stale-${Date.now()}`),
-      );
-      await writeJsonFile(requestPath, request);
-      return {
-        kind: "halt",
-        step: await handleWaitingForReviewApproval(root, artifactsDir, request),
-      };
-    }
-    const refusalStep = await refuseUnknownIdResolution(
-      root, artifactsDir, request, resolution, resolutionPath, requestPath,
+    const read = await readReviewResolution(
+      root, artifactsDir, request, resolutionPath, requestPath,
     );
-    if (refusalStep) return { kind: "halt", step: refusalStep };
-    const decision = applyReviewResolution(request, resolution);
+    if ("halt" in read) return { kind: "halt", step: read.halt };
+    const decision = applyReviewResolution(request, read.resolution);
     await writeReviewDecisionRecord(decisionPath, {
       planId: request.plan_id,
       approvedIds: decision.approved_ids,
@@ -2451,9 +2434,10 @@ async function handleReadyIntakeContractPipeline(
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();
-  if (existsSync(paths.brief)) {
-    sourcePaths.add(paths.brief);
-  }
+  // The brief is the tool's render of the ready summary; write it before it
+  // becomes a pipeline source, so the source is never absent or stale.
+  await writeRemediationBrief(artifactsDir, intake.summary);
+  sourcePaths.add(paths.brief);
   for (const source of manifestSources) {
     // Swap the raw audit-findings.json for the approved-only filtered file so a
     // declined finding can never re-enter the pipeline as a source input.
@@ -3055,20 +3039,11 @@ async function runPlanningReviewGate(
       await readOptionalJsonFile<ReviewRequest>(requestPath),
       REVIEW_REQUEST_SCHEMA_VERSION,
     ) ?? buildReviewRequest(findings, reviewPlanId);
-  const resolution = await readOptionalJsonFile<ReviewResolution>(resolutionPath);
-  if (!isResolutionForRequest(request, resolution)) {
-    // Stale cross-run resolution: archive it and re-halt with the live request.
-    await withFsRetry(() =>
-      rename(resolutionPath, `${resolutionPath}.stale-${Date.now()}`),
-    );
-    await writeJsonFile(requestPath, request);
-    return handleWaitingForReviewApproval(root, artifactsDir, request);
-  }
-  const refusalStep = await refuseUnknownIdResolution(
-    root, artifactsDir, request, resolution, resolutionPath, requestPath,
+  const read = await readReviewResolution(
+    root, artifactsDir, request, resolutionPath, requestPath,
   );
-  if (refusalStep) return refusalStep;
-  const decision = applyReviewResolution(request, resolution);
+  if ("halt" in read) return read.halt;
+  const decision = applyReviewResolution(request, read.resolution);
   await writeReviewDecisionRecord(decisionPath, {
     planId: request.plan_id,
     approvedIds: decision.approved_ids,
@@ -3120,8 +3095,8 @@ function detectPlanAmbiguities(
         finding_id: f.id,
         category: "scope_of_fix",
         description:
-          `"${f.title}" is a ${lens} finding with ${fileCount === 0 ? "no cited files" : `${fileCount} affected files`}; ` +
-          "confirm how far the fix should reach (minimal local change vs. broader restructuring).",
+          `"${f.title}" is a finding in the ${lens} lens with ${fileCount === 0 ? "no cited files" : `${fileCount} affected files`}. ` +
+          "Confirm how far the fix should reach: a minimal local change, or a broader restructure.",
       });
       continue;
     }
@@ -3130,7 +3105,7 @@ function detectPlanAmbiguities(
         finding_id: f.id,
         category: "issue_appropriateness",
         description:
-          `"${f.title}" is a low-confidence finding; confirm it is a real issue worth fixing in this run.`,
+          `"${f.title}" is a low-confidence finding. Confirm that it is a real issue to fix in this run.`,
       });
     }
   }
@@ -3143,8 +3118,8 @@ function detectPlanAmbiguities(
  * ambiguity is asked as a single batched question up front rather than falling
  * silently to triage mid-run. Deterministic heuristics seed CANDIDATES; the host
  * reviews them with repo access, dismisses/adds, and batches one user round. Each
- * item is resolved as `clarified` (answered → re-opened), `deemed_inappropriate`
- * (not a real issue), or `defer` (the user's explicit choice to skip this run).
+ * item is resolved as `clarified` (answered → re-opened), `reject_finding`
+ * (not a real issue → `deemed_inappropriate`), or `defer` (the user's explicit choice to skip this run).
  *
  * Idempotent: once `ambiguity_decision.json` exists the gate is done and never
  * re-halts. An empty resolution proceeds (the host found nothing to ask).
@@ -4164,7 +4139,7 @@ async function buildConfirmIntentStep(ctx: {
   const nextCommand = loaderCommand("next-step");
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
 
-  // Read the pre-drafted checkpoint if one exists (confirmed_by: "draft").
+  // Read a checkpoint the host already wrote, if one exists.
   //
   // This is the GATE, and it reads LENIENTLY on purpose: a checkpoint whose
   // `closing_action` is outside the vocabulary must reach the refusal below,
@@ -4172,16 +4147,18 @@ async function buildConfirmIntentStep(ctx: {
   // would replace that affordance with a zod error. Every field consumed here as
   // a VALUE is still checked by name (`isClosingAction`, `customCommandOf`).
   //
-  // The REFUSED values come from `rejected`, never from `draft`: the returned
+  // The REFUSED values come from `rejected`, never from `existing`: the returned
   // checkpoint is schema-valid, so an out-of-vocabulary key is ABSENT from it
   // (see `parseIntentCheckpointLenient`). The value the refusal quotes is the one
   // the host WROTE, which is exactly what `rejected` carries.
-  const draftRead = await readIntentCheckpointLenient(checkpointPath);
-  const draft = draftRead.checkpoint;
-  const isDraft = draft?.confirmed_by === "draft";
-  const rejectedClosingAction = draftRead.rejected.find(
+  const existingRead = await readIntentCheckpointLenient(checkpointPath);
+  const existing = existingRead.checkpoint;
+  const rejectedClosingAction = existingRead.rejected.find(
     (field) => field.key === "closing_action",
   );
+  // The proposal comes from the intake summary — the one file the host wrote at
+  // synthesis. There is no draft checkpoint: the facts live in one place.
+  const summary = (await readIntakeArtifacts(artifactsDir)).summary;
 
   // Closing action: DETECTED candidates, presented for the host to choose
   // from; the tool never selects one (owner decision 92b0e2dd7cfdc06d).
@@ -4193,52 +4170,47 @@ async function buildConfirmIntentStep(ctx: {
   // A confirmed checkpoint whose closing_action is not in the vocabulary
   // re-enters this step by name — a refusal, never a silent default.
   const rawChoice: unknown =
-    draft?.confirmed_by === "host"
-      ? (draft.closing_action ?? rejectedClosingAction?.value)
+    existing?.confirmed_by === "host"
+      ? (existing.closing_action ?? rejectedClosingAction?.value)
       : undefined;
   const refusal =
     rawChoice !== undefined && !isClosingAction(rawChoice)
       ? `> **Refused:** \`closing_action\` ${JSON.stringify(rawChoice)} is not one of ${CLOSING_ACTIONS.map((a) => `\`${a}\``).join(", ")}. Rewrite the checkpoint with a valid value, or omit the field for \`none\`.\n`
-      : rawChoice === "custom" && customCommandOf(draft) === null
+      : rawChoice === "custom" && customCommandOf(existing) === null
         ? "> **Refused:** `closing_action` \"custom\" needs `closing_custom_command`, a non-empty argv array such as [\"npm\", \"run\", \"release\"]. Add it, or choose another action.\n"
         : "";
 
   let prompt: string;
-  if (isDraft && draft) {
-    // Build a consolidated single-stop proposal from the draft.
-    const draftRaw = draft as unknown as Record<string, unknown>;
-    const preDraftQuestions: Array<{ id: string; question: string; blocking?: boolean }> =
-      Array.isArray(draftRaw.pre_draft_questions)
-        ? (draftRaw.pre_draft_questions as Array<{ id: string; question: string; blocking?: boolean }>)
-        : [];
+  if (summary) {
+    // Build a consolidated single-stop proposal from the intake summary.
+    const questions = summary.open_questions ?? [];
     // INV-remediate-state-06: only explicit blocking===true is blocking.
-    const blockingQs = preDraftQuestions.filter((q) => q.blocking === true);
-    const nonBlockingQs = preDraftQuestions.filter((q) => q.blocking !== true);
-    const intentInterpretation = typeof draftRaw.intent_interpretation === "string" ? draftRaw.intent_interpretation : undefined;
+    const blockingQs = questions.filter((q) => q.blocking === true);
+    const nonBlockingQs = questions.filter((q) => q.blocking !== true);
 
     const questionLines = [
       ...blockingQs.map((q) => `- **[blocking] ${q.id}**: ${q.question}`),
       ...nonBlockingQs.map((q) => `- **[FYI] ${q.id}**: ${q.question}`),
     ].join("\n") || "- None";
 
-    const filtersBlock = draft.filters && Object.keys(draft.filters).length > 0
-      ? `\`\`\`json\n${JSON.stringify(draft.filters, null, 2)}\n\`\`\``
+    const filtersBlock = Object.keys(summary.filters).length > 0
+      ? `\`\`\`json\n${JSON.stringify(summary.filters, null, 2)}\n\`\`\``
       : "(none — remediating all findings)";
 
     prompt = `
 ${refusal}# Confirm Remediation Scope and Intent
 
-The intake worker has pre-populated the following proposal. Review each section
+The tool built the following proposal from the intake summary. Review each section
 and adjust where needed, then confirm by writing the final \`intent_checkpoint.json\`.
 
 ## Proposed Scope
 
-${draft.scope_summary ?? "(not set)"}
+${summary.scope_summary}
 
 ## Proposed Intent
 
-${draft.intent_summary ?? "(not set)"}
-${intentInterpretation ? `\n**How free-form intent was interpreted:** ${intentInterpretation}\n` : ""}
+${summary.intent_summary}
+${summary.intent_interpretation ? `\n**How free-form intent was interpreted:** ${summary.intent_interpretation}\n` : ""}
 ## Proposed Filters
 
 ${filtersBlock}
@@ -4260,10 +4232,10 @@ To confirm, write the final checkpoint to:
   "schema_version": "intent-checkpoint/v1",
   "confirmed_at": "<ISO-8601 timestamp>",
   "confirmed_by": "host",
-  "scope_summary": "${draft.scope_summary ?? "<the files/areas in scope>"}",
-  "intent_summary": "${draft.intent_summary ?? "<the goal>"}",
+  "scope_summary": ${JSON.stringify(summary.scope_summary)},
+  "intent_summary": ${JSON.stringify(summary.intent_summary)},
   "free_form_intent": "<optional: additional guidance>",
-  "filters": ${JSON.stringify(draft.filters ?? {}, null, 2)},
+  "filters": ${JSON.stringify(summary.filters, null, 2)},
   "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],
   "must_not_touch": [],
   "closing_action": "<one of the candidates above, or omit the field for none>",
@@ -4280,7 +4252,7 @@ Once written with \`"confirmed_by": "host"\`, run:
 \`${nextCommand}\`
 `;
   } else {
-    // Fallback for when there is no pre-drafted checkpoint.
+    // Fallback for when no intake summary exists yet.
     prompt = `
 ${refusal}# Confirm Remediation Scope and Intent
 
@@ -4687,11 +4659,11 @@ export function buildPreIntakeObligations(
     },
     {
       // Intent gate: fire when no confirmed checkpoint exists (no checkpoint + any
-      // intake artifact or an active run, or a draft checkpoint). Never for
+      // intake artifact or an active run). A legacy draft checkpoint was archived
+      // at the snapshot read, so it counts as no checkpoint. Never for
       // complete/closing — those already confirmed their checkpoint.
       id: "confirm_intent",
       derive: (state) => {
-        const checkpointIsDraft = existingCheckpoint?.confirmed_by === "draft";
         // A host-confirmed checkpoint carrying a closing_action outside the
         // vocabulary is not a confirmation: the step re-emits naming the value
         // (owner decision 92b0e2dd7cfdc06d — never a silent default).
@@ -4718,7 +4690,6 @@ export function buildPreIntakeObligations(
           state.status !== "complete" &&
           state.status !== "closing";
         const fires =
-          checkpointIsDraft ||
           invalidClosingAction ||
           (!existsSync(checkpointPath) &&
             (existsSync(ip.summary) ||
@@ -5258,6 +5229,14 @@ async function advanceUnderPhaseLock(deps: {
   // asking only the parsed value reads a refusal as "no answer given, so no
   // question". Strict is not the alternative: it would replace the gate's named
   // refusal with a thrown load error.
+  //
+  // A legacy DRAFT checkpoint (`confirmed_by: "draft"`, written by the retired
+  // synthesis prompt) is not a confirmation. It is archived here, so that every
+  // presence check on the checkpoint path below reads it as absent and the
+  // confirm step asks again.
+  if (isLegacyDraftCheckpoint(await readOptionalJsonFile<unknown>(checkpointPath))) {
+    await rename(checkpointPath, `${checkpointPath}.legacy-draft-${Date.now()}`);
+  }
   const checkpointRead = existsSync(checkpointPath)
     ? await readIntentCheckpointLenient(checkpointPath)
     : undefined;

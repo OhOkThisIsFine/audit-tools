@@ -1,5 +1,5 @@
 
-// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts
+// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
@@ -20,6 +20,7 @@ import {
   resolveManifestSources,
   sourceManifestsEquivalent,
   validateClarificationResolution,
+  writeRemediationBrief,
   type IntakeSource,
   type IntakeSourceManifest,
   type IntakeSummary,
@@ -28,7 +29,7 @@ import {
 const KNOWN_SCHEMA_VERSIONS = new Set([
   "audit-findings/v1alpha1",
   "remediate-code-intake-source-manifest/v1alpha1",
-  "remediate-code-intake-summary/v1alpha1",
+  "remediate-code-intake-summary/v1alpha2",
   "remediate-code-intake-clarifications/v1alpha1",
 ]);
 
@@ -73,11 +74,9 @@ export async function resolveIntakeStep(params: {
     paths: ReturnType<typeof intakePaths>,
   ) => string;
   synthesizeIntakePrompt: (
-    sourceManifestPath: string,
     resolvedSources: IntakeSource[],
     paths: ReturnType<typeof intakePaths>,
     hasClarificationResolution: boolean,
-    intentCheckpointPath?: string,
   ) => string;
   collectIntakeClarificationsPrompt: (
     summary: IntakeSummary,
@@ -361,10 +360,14 @@ export async function resolveIntakeStep(params: {
   }
 
   const summary = manifestRefreshed ? undefined : intake.summary;
-  const brief = manifestRefreshed ? undefined : intake.brief;
+  const summaryRefusal = manifestRefreshed ? undefined : intake.summaryRefusal;
   const rawClarificationResolution = manifestRefreshed
     ? undefined
     : intake.clarificationResolution;
+
+  // The brief is a render of the summary, never host-authored: refresh it
+  // whenever a schema-valid summary is read, before any step can list it.
+  if (summary) await writeRemediationBrief(artifactsDir, summary);
 
   // Validate clarification resolution before forwarding it to synthesize_intake.
   // A malformed or empty resolution file must not silently corrupt the synthesis
@@ -417,36 +420,36 @@ export async function resolveIntakeStep(params: {
     }
   }
 
-  if (
-    !summary ||
-    !brief ||
-    (!isIntakeReady(summary) && Boolean(clarificationResolution))
-  ) {
-    return {
-      kind: "step",
-      step: await writeCurrentStep({
-        stepKind: "synthesize_intake",
-        status: "ready",
-        runId: params.randomRunId("INTAKE"),
-        repoRoot: root,
-        artifactsDir,
-        prompt: params.synthesizeIntakePrompt(
-          paths.sourceManifest,
-          sourceResolution.resolved,
-          paths,
-          Boolean(clarificationResolution),
-        ),
-        allowedCommands: [params.loaderCommand("next-step")],
-        stopCondition:
-          "Stop after writing the intake summary and remediation brief, then rerunning next-step.",
-        artifactPaths: {
-          source_manifest: paths.sourceManifest,
-          intake_summary: paths.summary,
-          remediation_brief: paths.brief,
-          intake_clarifications: paths.clarificationResolution,
-        },
-      }),
-    };
+  // One builder for every synthesize_intake emit. `reason` is set when the
+  // previous summary was refused; the step then comes back with the reason
+  // appended, so the host rewrites the one file it owns.
+  const synthesizeIntakeStep = async (reason?: string): Promise<IntakeResult> => ({
+    kind: "step",
+    step: await writeCurrentStep({
+      stepKind: "synthesize_intake",
+      status: "ready",
+      runId: params.randomRunId("INTAKE"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: `${params.synthesizeIntakePrompt(
+        sourceResolution.resolved,
+        paths,
+        Boolean(clarificationResolution),
+      )}${reason ? `\n**Rewrite required.** ${reason}\n` : ""}`,
+      allowedCommands: [params.loaderCommand("next-step")],
+      stopCondition: reason
+        ? "Stop after rewriting the intake summary, then rerunning next-step."
+        : "Stop after writing the intake summary, then rerunning next-step.",
+      artifactPaths: {
+        intake_summary: paths.summary,
+        intake_clarifications: paths.clarificationResolution,
+      },
+    }),
+  });
+
+  if (!summary) return synthesizeIntakeStep(summaryRefusal);
+  if (!isIntakeReady(summary) && Boolean(clarificationResolution)) {
+    return synthesizeIntakeStep();
   }
 
   if (!isIntakeReady(summary)) {
@@ -464,31 +467,7 @@ export async function resolveIntakeStep(params: {
           "(`blocking: true`), so there is nothing to ask the user. Either set `ready` to " +
           "`true`, or add each open blocking question to `open_questions` with `blocking: true`."
         : `The previous intake summary set \`ready: true\` but ${contentErrors.join(" and ")}.`;
-      return {
-        kind: "step",
-        step: await writeCurrentStep({
-          stepKind: "synthesize_intake",
-          status: "ready",
-          runId: params.randomRunId("INTAKE"),
-          repoRoot: root,
-          artifactsDir,
-          prompt: `${params.synthesizeIntakePrompt(
-            paths.sourceManifest,
-            sourceResolution.resolved,
-            paths,
-            Boolean(clarificationResolution),
-          )}\n\n**Rewrite required.** ${reason}\n`,
-          allowedCommands: [params.loaderCommand("next-step")],
-          stopCondition:
-            "Stop after rewriting the intake summary, then rerunning next-step.",
-          artifactPaths: {
-            source_manifest: paths.sourceManifest,
-            intake_summary: paths.summary,
-            remediation_brief: paths.brief,
-            intake_clarifications: paths.clarificationResolution,
-          },
-        }),
-      };
+      return synthesizeIntakeStep(reason);
     }
 
     return {

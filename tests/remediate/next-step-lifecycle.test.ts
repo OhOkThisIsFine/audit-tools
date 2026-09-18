@@ -9,6 +9,7 @@ import {
   createNextStepHarness,
   makePlanningState,
 } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const harness = createNextStepHarness(".test-next-step-lifecycle");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint } = harness;
@@ -152,16 +153,13 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     await mkdir(intakeDir, { recursive: true });
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "structured_audit",
-        goals: ["Remediate the findings."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "structured_audit",
+          goals: ["Remediate the findings."],
+          affected_files: [],
+        }),
+      ),
       "utf8",
     );
     await writeIntentCheckpoint();
@@ -311,7 +309,7 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
 
     expect(step.step_kind).toBe("synthesize_intake");
     expect(step.artifact_paths.intake_summary).toMatch(/intake-summary\.json$/);
-    expect(prompt).toMatch(/Synthesize Remediation Intake/);
+    expect(prompt).toMatch(/Synthesize the remediation intake/);
     expect(manifest.sources[0]).toMatchObject({
       type: "document",
       path: inputPath,
@@ -351,6 +349,6 @@ describe("decideNextStep — run lifecycle, input handling, and intake routing",
     const step = await decideNextStep({ root: REPO_DIR, input: inputPath });
 
     expect(step.step_kind).toBe("synthesize_intake");
-    expect(await readFile(step.prompt_path, "utf8")).toMatch(/Synthesize Remediation Intake/);
+    expect(await readFile(step.prompt_path, "utf8")).toMatch(/Synthesize the remediation intake/);
   });
 });

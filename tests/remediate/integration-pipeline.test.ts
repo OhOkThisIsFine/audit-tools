@@ -41,6 +41,7 @@ import {
   CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
 } from "audit-tools/shared";
 import { scratchDir } from "../helpers/scratch.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-integration-pipeline");
@@ -143,19 +144,14 @@ async function writeReadyDocumentIntake(): Promise<void> {
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: "remediate-code-intake-summary/v1alpha1",
-      ready: true,
-      source_type: "documents",
-      goals: ["Fix the auth flow."],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/auth.ts" }],
-      open_questions: [],
-    }),
+    JSON.stringify(
+      intakeSummaryFixture({
+        goals: ["Fix the auth flow."],
+        affected_files: [{ path: "src/auth.ts" }],
+      }),
+    ),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Remediation Brief\n\nFix the auth flow.\n", "utf8");
 }
 
 async function writeReadyStructuredAuditIntake(auditFindingsPath: string): Promise<void> {
@@ -172,19 +168,15 @@ async function writeReadyStructuredAuditIntake(auditFindingsPath: string): Promi
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: "remediate-code-intake-summary/v1alpha1",
-      ready: true,
-      source_type: "structured_audit",
-      goals: ["Remediate the structured audit findings."],
-      non_goals: [],
-      constraints: [],
-      affected_files: [],
-      open_questions: [],
-    }),
+    JSON.stringify(
+      intakeSummaryFixture({
+        source_type: "structured_audit",
+        goals: ["Remediate the structured audit findings."],
+        affected_files: [],
+      }),
+    ),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
 }
 
 function makePlanningState(items: Record<string, unknown> = {}): RemediationState {

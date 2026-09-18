@@ -16,6 +16,7 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import { intakePaths, writeProjectFacts } from "../../src/remediate/intake.js";
 import { detectProjectFacts } from "audit-tools/shared";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const harness = createNextStepHarness(".test-closing-action-choice");
 const { REPO_DIR, ARTIFACTS_DIR, resetTestRepo, cleanupTestRepo, writeCompleteContractPipelineDag } = harness;
@@ -41,19 +42,14 @@ async function writeReadyDocumentIntake(): Promise<void> {
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: "remediate-code-intake-summary/v1alpha1",
-      ready: true,
-      source_type: "documents",
-      goals: ["Fix the auth flow."],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/auth.ts" }],
-      open_questions: [],
-    }),
+    JSON.stringify(
+      intakeSummaryFixture({
+        goals: ["Fix the auth flow."],
+        affected_files: [{ path: "src/auth.ts" }],
+      }),
+    ),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Remediation Brief\n\nFix the auth flow.\n", "utf8");
 }
 
 /**

@@ -33,10 +33,8 @@ import {
   writeContractArtifact,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { intakePaths } from "../../src/remediate/intake.js";
-import {
-  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
-} from "../../src/remediate/intake.js";
+import { INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION } from "../../src/remediate/intake.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
@@ -178,19 +176,15 @@ async function writeReadyStructuredAuditIntake(auditFindingsPath: string): Promi
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "structured_audit",
-      goals: ["Remediate the structured audit findings."],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/auth.ts" }],
-      open_questions: [],
-    }),
+    JSON.stringify(
+      intakeSummaryFixture({
+        source_type: "structured_audit",
+        goals: ["Remediate the structured audit findings."],
+        affected_files: [{ path: "src/auth.ts" }],
+      }),
+    ),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Intake\n", "utf8");
 }
 
 async function writeReadyDocumentIntake(docPath: string): Promise<void> {
@@ -207,19 +201,14 @@ async function writeReadyDocumentIntake(docPath: string): Promise<void> {
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-      ready: true,
-      source_type: "documents",
-      goals: ["Fix performance issues"],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/app.ts" }],
-      open_questions: [],
-    }),
+    JSON.stringify(
+      intakeSummaryFixture({
+        goals: ["Fix performance issues"],
+        affected_files: [{ path: "src/app.ts" }],
+      }),
+    ),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Doc intake\n", "utf8");
 }
 
 async function writeCompleteContractPipelineArtifacts(): Promise<void> {
@@ -557,16 +546,13 @@ describe("N-R06: extract_findings step kind is no longer emitted", () => {
     await writeFile(join(intakeDir, "conversation-start.md"), "Improve performance.", "utf8");
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-        ready: true,
-        source_type: "conversation",
-        goals: ["Improve performance"],
-        non_goals: [],
-        constraints: [],
-        affected_files: [{ path: "src/app.ts" }],
-        open_questions: [],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "conversation",
+          goals: ["Improve performance"],
+          affected_files: [{ path: "src/app.ts" }],
+        }),
+      ),
       "utf8",
     );
     await writeFile(join(intakeDir, "source-manifest.json"),
@@ -577,7 +563,6 @@ describe("N-R06: extract_findings step kind is no longer emitted", () => {
       }),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
 
     const result = await resolveIntakeStep({
       root: TEST_DIR,

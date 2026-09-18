@@ -6,6 +6,7 @@ import {
   createNextStepHarness,
   makePlanningState,
 } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const harness = createNextStepHarness(".test-next-step-resume-gates");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint } = harness;
@@ -192,19 +193,9 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Fix all bugs"],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
+      JSON.stringify(intakeSummaryFixture({ affected_files: [] })),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
     await writeFile(join(REPO_DIR, "notes.md"), "# notes", "utf8");
     await writeFile(
       join(ARTIFACTS_DIR, "extracted-plan.json"),
@@ -243,19 +234,9 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Fix all bugs"],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
+      JSON.stringify(intakeSummaryFixture({ affected_files: [] })),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\n", "utf8");
     await writeFile(join(REPO_DIR, "notes.md"), "# notes", "utf8");
     // Materialize the findings' cited paths so phantom-path grounding KEEPS them
     // and handlePendingExtractedPlan yields a planning *state* (the transition that

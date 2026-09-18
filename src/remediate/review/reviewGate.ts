@@ -1,5 +1,6 @@
+// sites-pinned: tests/remediate/reviewGate.test.ts, tests/remediate/next-step-review-gate.test.ts
 // Review-approval gate engine — builds the tiered item-set the user
-// approves/disapproves, and consumes their verdict.
+// approves or declines, and consumes their verdict.
 //
 // This is the single review surface for both paths. It replaced the classic
 // per-block implementation-risk preview, which fired AFTER the contract pipeline
@@ -14,9 +15,10 @@
 // pipeline can mark it terminal-without-change.
 //
 // Tool owns the structure (tiering, rationale, cost, which items must be shown);
-// the host fills only the semantic pros/cons slots when presenting. Disapproved
+// the host fills only the semantic pros/cons slots when presenting. Declined
 // items become a RECORDED terminal disposition, never a silent close.
 
+import { z } from "zod";
 import type { Finding, FindingSeverity, FindingConfidence } from "audit-tools/shared";
 import {
   type ReviewNecessity,
@@ -62,19 +64,51 @@ export interface ReviewRequest {
   tiers: ReviewTierGroup[];
 }
 
-/** The user's verdict (`review_resolution.json`). */
-export interface ReviewResolution {
-  plan_id?: string;
-  /** Finding ids the user disapproved — do NOT act on these. */
-  disapproved_findings?: string[];
-  /** Whole tiers the user disapproved (e.g. "decline everything strategic"). */
-  disapproved_tiers?: ReviewNecessity[];
-}
+/**
+ * The user's verdict (`review_resolution.json`). Strict at every level: the
+ * gate's default is APPROVE, so a field the tool does not read (a mistyped
+ * name, the retired `disapproved_*` names) would turn the user's decline into
+ * an approval in silence. An unknown field refuses the whole file instead.
+ */
+const ReviewResolutionSchema = z
+  .object({
+    plan_id: z.string().optional(),
+    /** Findings the user declined — do NOT act on these. */
+    declined_findings: z
+      .array(
+        z
+          .object({
+            finding_id: z.string(),
+            /** The user's reason, in their words. Blank reads as absent. */
+            reason: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /** Whole tiers the user declined (e.g. "decline everything strategic"). */
+    declined_tiers: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export type ReviewResolution = z.infer<typeof ReviewResolutionSchema>;
+
+/** The retired field names, each with the field that replaced it. */
+const RETIRED_RESOLUTION_FIELDS: Record<string, string> = {
+  disapproved_findings:
+    '`declined_findings`, whose entries are `{ "finding_id": "<id>", "reason": "<optional>" }`',
+  disapproved_tiers: "`declined_tiers`",
+};
+
+export type ParsedReviewResolution =
+  | { kind: "ok"; resolution: ReviewResolution }
+  /** A resolution from another run (its `plan_id` names a different request). */
+  | { kind: "stale" }
+  | { kind: "refused"; reason: string };
 
 export interface ReviewDecision {
   /** Finding ids approved to proceed to implementation. */
   approved_ids: string[];
-  /** Disapproved items, each with the recorded reason for its terminal disposition. */
+  /** Declined items, each with the recorded reason for its terminal disposition. */
   declined: Array<{ finding_id: string; reason: string }>;
 }
 
@@ -141,9 +175,9 @@ export function buildReviewRequest(
  * from the request's marks a stale leftover from another run — the caller must
  * archive it and re-halt rather than apply a cross-run answer.
  */
-export function isResolutionForRequest(
+function isResolutionForRequest(
   request: ReviewRequest,
-  resolution: ReviewResolution | null | undefined,
+  resolution: { plan_id?: unknown } | null | undefined,
 ): boolean {
   const resolutionPlanId = resolution?.plan_id;
   if (resolutionPlanId === undefined) return true;
@@ -151,100 +185,151 @@ export function isResolutionForRequest(
 }
 
 /**
- * Screen a resolution's id references against the request (uniform id-join
- * contract): every `disapproved_findings` entry must name an item in the
- * request, and every `disapproved_tiers` entry must be one of the closed
- * review-necessity names. A stray id here is not a no-op — the gate's default
- * is APPROVE, so a typo'd decline would silently become an approval. Empty
- * arrays = clean. A tier that is valid but empty in this request stays a
- * harmless no-op (it names a real vocabulary member, not a phantom item).
+ * The id references a resolution names outside the request (uniform id-join
+ * contract): every `declined_findings` id must name an item in the request,
+ * and every `declined_tiers` entry must be one of the closed review-necessity
+ * names. A tier that is valid but empty in this request stays a harmless no-op
+ * (it names a real vocabulary member, not a phantom item).
  */
-export function screenResolutionIds(
+function unknownResolutionIds(
   request: ReviewRequest,
-  resolution: ReviewResolution | null | undefined,
-): { unknown_finding_ids: string[]; unknown_tiers: string[]; valid_finding_ids: string[] } {
+  resolution: ReviewResolution,
+): string[] {
   const validIds = request.tiers.flatMap((t) => t.items.map((i) => i.finding_id));
   const validIdSet = new Set(validIds);
   const validTiers = new Set<string>(REVIEW_NECESSITY_ORDER);
-  return {
-    unknown_finding_ids: (resolution?.disapproved_findings ?? []).filter(
-      (id) => !validIdSet.has(id),
-    ),
-    unknown_tiers: (resolution?.disapproved_tiers ?? []).filter(
-      (t) => !validTiers.has(t),
-    ),
-    valid_finding_ids: validIds,
-  };
+  const problems: string[] = [];
+  (resolution.declined_findings ?? []).forEach((entry, index) => {
+    if (!validIdSet.has(entry.finding_id)) {
+      problems.push(
+        `\`declined_findings[${index}].finding_id\`: \`${entry.finding_id}\` is not in the request (valid: ${validIds.map((i) => `\`${i}\``).join(", ")})`,
+      );
+    }
+  });
+  (resolution.declined_tiers ?? []).forEach((tier, index) => {
+    if (!validTiers.has(tier)) {
+      problems.push(
+        `\`declined_tiers[${index}]\`: \`${tier}\` is not a tier (valid: ${REVIEW_NECESSITY_ORDER.map((t) => `\`${t}\``).join(", ")})`,
+      );
+    }
+  });
+  return problems;
+}
+
+/**
+ * Read the text of `review_resolution.json` against the request it answers.
+ * The WHOLE file is refused — never partly applied — when it is not valid
+ * JSON, has a field the schema does not name (the retired `disapproved_*`
+ * names get their replacement stated), has a wrong type, or names an id or a
+ * tier outside the request. The reason names each problem. A file whose
+ * `plan_id` names a different request is `stale`: it answers another run.
+ */
+export function parseReviewResolution(
+  text: string,
+  request: ReviewRequest,
+): ParsedReviewResolution {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch (error) {
+    return {
+      kind: "refused",
+      reason: `the file is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      kind: "refused",
+      reason: 'the file must be one JSON object: `{ "declined_findings": [...], "declined_tiers": [...] }`',
+    };
+  }
+  const planId = (value as { plan_id?: unknown }).plan_id;
+  if (typeof planId === "string" && planId !== request.plan_id) return { kind: "stale" };
+  const problems: string[] = [];
+  for (const [retired, replacement] of Object.entries(RETIRED_RESOLUTION_FIELDS)) {
+    if (retired in value) {
+      problems.push(`\`${retired}\` is not a field — write ${replacement}`);
+    }
+  }
+  const parsed = ReviewResolutionSchema.safeParse(value);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      if (issue.code === z.ZodIssueCode.unrecognized_keys) {
+        const unknown = issue.keys.filter((k) => !(k in RETIRED_RESOLUTION_FIELDS));
+        const where = issue.path.length > 0 ? ` in \`${issue.path.join(".")}\`` : "";
+        if (unknown.length > 0) {
+          problems.push(
+            `unknown field(s)${where}: ${unknown.map((k) => `\`${k}\``).join(", ")}`,
+          );
+        }
+        continue;
+      }
+      const field = issue.path.length > 0 ? `\`${issue.path.join(".")}\`: ` : "";
+      problems.push(`${field}${issue.message}`);
+    }
+  } else {
+    problems.push(...unknownResolutionIds(request, parsed.data));
+  }
+  return problems.length > 0 || !parsed.success
+    ? { kind: "refused", reason: problems.join("; ") }
+    : { kind: "ok", resolution: parsed.data };
 }
 
 /**
  * Apply the user's resolution to a request: every item is either approved (act
  * on it) or declined (recorded terminal disposition with a reason). An item is
- * declined if its id is in `disapproved_findings` OR its tier is in
- * `disapproved_tiers`. Everything else is approved — the default is to act,
+ * declined if its id is in `declined_findings` OR its tier is in
+ * `declined_tiers`. Everything else is approved — the default is to act,
  * because the gate's job is to let the user REMOVE items, not to require
  * opting every item in. An absent/empty resolution approves everything.
  *
- * A resolution carrying a MISMATCHED `plan_id` is rejected (throws): applying a
- * stale cross-run answer would approve/decline the wrong finding set
- * (INV-RSM-RESOLUTION-CORRELATE, COR-0b906e37). Callers pre-screen with
- * {@link isResolutionForRequest} to archive-and-re-halt instead of crashing;
- * the throw here is the mechanical backstop, not the primary UX.
+ * The resolution must come from {@link parseReviewResolution}; a stale
+ * `plan_id` or an unknown id still throws here as the mechanical backstop
+ * (INV-RSM-RESOLUTION-CORRELATE, COR-0b906e37), never the primary UX.
  *
- * Crucially, declined items are returned with an explicit reason so the caller
- * records a terminal disposition (e.g. `ignored`) rather than silently closing
- * them — the exact failure this gate exists to prevent.
+ * Crucially, declined items are returned with an explicit reason — the user's
+ * own words when they gave one — so the caller records a terminal disposition
+ * (e.g. `ignored`) rather than silently closing them, the exact failure this
+ * gate exists to prevent.
  */
 export function applyReviewResolution(
   request: ReviewRequest,
-  resolution: ReviewResolution | null | undefined,
+  resolution: ReviewResolution | undefined,
 ): ReviewDecision {
   if (!isResolutionForRequest(request, resolution)) {
     throw new Error(
       `review resolution plan_id "${resolution?.plan_id}" does not answer review request plan_id "${request.plan_id}" — stale cross-run resolution rejected (INV-RSM-RESOLUTION-CORRELATE).`,
     );
   }
-  const screen = screenResolutionIds(request, resolution);
-  if (screen.unknown_finding_ids.length > 0 || screen.unknown_tiers.length > 0) {
-    // Uniform id-join contract: refuse the WHOLE resolution. Callers pre-screen
-    // with screenResolutionIds to archive-and-re-halt; this throw is the
-    // mechanical backstop, mirroring the plan_id-mismatch backstop above.
-    const parts: string[] = [];
-    if (screen.unknown_finding_ids.length > 0) {
-      parts.push(
-        `unknown finding id(s) ${screen.unknown_finding_ids.map((i) => `"${i}"`).join(", ")} ` +
-          `(valid: ${screen.valid_finding_ids.join(", ")})`,
-      );
-    }
-    if (screen.unknown_tiers.length > 0) {
-      parts.push(
-        `unknown tier(s) ${screen.unknown_tiers.map((t) => `"${t}"`).join(", ")} ` +
-          `(valid: ${REVIEW_NECESSITY_ORDER.join(", ")})`,
-      );
-    }
-    throw new Error(
-      `review resolution refused — ${parts.join("; ")}. The gate's default is approve, ` +
-        `so a mistyped decline would silently become an approval; re-submit the whole ` +
-        `resolution with ids drawn from the request.`,
-    );
+  const unknown = resolution ? unknownResolutionIds(request, resolution) : [];
+  if (unknown.length > 0) {
+    throw new Error(`review resolution refused — ${unknown.join("; ")}`);
   }
-  const disapprovedIds = new Set(resolution?.disapproved_findings ?? []);
-  const disapprovedTiers = new Set<ReviewNecessity>(resolution?.disapproved_tiers ?? []);
+  const userReasons = new Map<string, string | undefined>(
+    (resolution?.declined_findings ?? []).map((d) => [d.finding_id, d.reason?.trim() || undefined]),
+  );
+  const declinedTiers = new Set<string>(resolution?.declined_tiers ?? []);
   const approved_ids: string[] = [];
   const declined: ReviewDecision["declined"] = [];
 
   for (const tier of request.tiers) {
-    const tierDisapproved = disapprovedTiers.has(tier.necessity);
+    const tierDeclined = declinedTiers.has(tier.necessity);
     for (const item of tier.items) {
-      if (tierDisapproved) {
+      const userReason = userReasons.get(item.finding_id);
+      if (userReason !== undefined) {
         declined.push({
           finding_id: item.finding_id,
-          reason: `Disapproved by the user at the review gate — declined the entire "${item.necessity}" tier.`,
+          reason: `Declined by the user at the review gate: ${userReason}`,
         });
-      } else if (disapprovedIds.has(item.finding_id)) {
+      } else if (tierDeclined) {
         declined.push({
           finding_id: item.finding_id,
-          reason: `Disapproved by the user at the review gate (review-necessity: ${item.necessity}).`,
+          reason: `Declined by the user at the review gate — declined the entire "${item.necessity}" tier.`,
+        });
+      } else if (userReasons.has(item.finding_id)) {
+        declined.push({
+          finding_id: item.finding_id,
+          reason: `Declined by the user at the review gate (review-necessity: ${item.necessity}).`,
         });
       } else {
         approved_ids.push(item.finding_id);

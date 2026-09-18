@@ -20,11 +20,9 @@ import {
   decideNextStep,
   INTENT_INTERPRETATION_FILENAME,
 } from "../../src/remediate/steps/nextStep.js";
-import {
-  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
-} from "../../src/remediate/intake.js";
+import { INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION } from "../../src/remediate/intake.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const TEST_DIR = scratchDir(".test-intent-constraint-clauses");
 const REPO_DIR = join(TEST_DIR, "repo");
@@ -80,17 +78,10 @@ async function writeReadySummary(): Promise<void> {
     }),
     "utf8",
   );
-  await writeFile(join(intakeDir, "remediation-brief.md"), "# Brief\nFix it.", "utf8");
-  const summary = {
-    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-    ready: true,
-    source_type: "documents",
+  const summary = intakeSummaryFixture({
     goals: ["Remediate all high findings"],
-    non_goals: [],
-    constraints: [],
     affected_files: [{ path: "src/a.ts" }],
-    open_questions: [],
-  };
+  });
   await writeFile(
     join(intakeDir, "intake-summary.json"),
     JSON.stringify(summary),

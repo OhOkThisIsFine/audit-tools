@@ -3,6 +3,7 @@ import type { Finding } from "audit-tools/shared";
 import {
   buildReviewRequest,
   applyReviewResolution,
+  parseReviewResolution,
   REVIEW_REQUEST_SCHEMA_VERSION,
 } from "../../src/remediate/review/reviewGate.js";
 
@@ -66,7 +67,7 @@ describe("applyReviewResolution", () => {
   const req = buildReviewRequest(SAMPLE, "plan-1");
 
   it("approves everything when the resolution is absent/empty (gate REMOVES, not opts-in)", () => {
-    const all = applyReviewResolution(req, null);
+    const all = applyReviewResolution(req, undefined);
     expect(all.approved_ids.sort()).toEqual(["ARC-1", "ARC-2", "COR-1", "MNT-1"]);
     expect(all.declined).toEqual([]);
 
@@ -75,7 +76,9 @@ describe("applyReviewResolution", () => {
   });
 
   it("declines specific findings with a recorded reason (never a silent close)", () => {
-    const dec = applyReviewResolution(req, { disapproved_findings: ["ARC-1", "MNT-1"] });
+    const dec = applyReviewResolution(req, {
+      declined_findings: [{ finding_id: "ARC-1" }, { finding_id: "MNT-1" }],
+    });
     expect(dec.approved_ids.sort()).toEqual(["ARC-2", "COR-1"]);
     expect(dec.declined.map((d) => d.finding_id).sort()).toEqual(["ARC-1", "MNT-1"]);
     for (const d of dec.declined) {
@@ -83,8 +86,26 @@ describe("applyReviewResolution", () => {
     }
   });
 
+  // Prompt 17b: the report records the USER'S reason when they gave one. The
+  // old file had no place for it, so every decline got the same generic line.
+  it("records the user's own reason; a blank reason falls back to the generic one", () => {
+    const dec = applyReviewResolution(req, {
+      declined_findings: [
+        { finding_id: "ARC-1", reason: "we replace this module next quarter" },
+        { finding_id: "COR-1", reason: "   " },
+      ],
+    });
+    const byId = new Map(dec.declined.map((d) => [d.finding_id, d.reason]));
+    expect(byId.get("ARC-1")).toBe(
+      "Declined by the user at the review gate: we replace this module next quarter",
+    );
+    expect(byId.get("COR-1")).toBe(
+      "Declined by the user at the review gate (review-necessity: concrete).",
+    );
+  });
+
   it("can decline an entire tier", () => {
-    const dec = applyReviewResolution(req, { disapproved_tiers: ["strategic"] });
+    const dec = applyReviewResolution(req, { declined_tiers: ["strategic"] });
     expect(dec.declined.map((d) => d.finding_id).sort()).toEqual(["ARC-1", "ARC-2"]);
     expect(dec.approved_ids.sort()).toEqual(["COR-1", "MNT-1"]);
     expect(dec.declined[0].reason).toMatch(/entire "strategic" tier/);
@@ -92,8 +113,8 @@ describe("applyReviewResolution", () => {
 
   it("tier-decline and per-finding-decline combine without double-counting", () => {
     const dec = applyReviewResolution(req, {
-      disapproved_tiers: ["mechanical"],
-      disapproved_findings: ["COR-1"],
+      declined_tiers: ["mechanical"],
+      declined_findings: [{ finding_id: "COR-1" }],
     });
     expect(dec.declined.map((d) => d.finding_id).sort()).toEqual(["COR-1", "MNT-1"]);
     expect(dec.approved_ids.sort()).toEqual(["ARC-1", "ARC-2"]);
@@ -101,18 +122,85 @@ describe("applyReviewResolution", () => {
     expect(dec.approved_ids.length + dec.declined.length).toBe(req.total);
   });
 
-  // Uniform id-join contract (design resolution 1, 2026-08-05): an unknown id in
-  // disapproved_findings must refuse the WHOLE resolution, naming the unknown ids
-  // and the valid set — never silently drop it. Today the drop turns a typo'd
-  // decline into an approval (the gate's default is approve), the exact silent
-  // failure the contract retires. Red-green validated 2026-08-05 (red at b59a2e63).
-  it("refuses a resolution whose disapproved_findings contains an id not in the request", () => {
+  // The backstop: an unknown id still throws here even though the parser
+  // refuses it first — applying a typo'd decline would approve the finding.
+  it("throws on a declined id that is not in the request (backstop)", () => {
     expect(() =>
-      applyReviewResolution(req, { disapproved_findings: ["ARC-1", "TYPO-9"] }),
+      applyReviewResolution(req, { declined_findings: [{ finding_id: "TYPO-9" }] }),
     ).toThrow(/TYPO-9/);
-    // the refusal names the valid set so the re-prompt can carry it
-    expect(() =>
-      applyReviewResolution(req, { disapproved_findings: ["TYPO-9"] }),
-    ).toThrow(/ARC-1/);
+  });
+});
+
+// Prompt 17b (owner, 2026-09-18): the tool read review_resolution.json with no
+// shape check, and the gate's default is APPROVE — so a mistyped field, a bare
+// array, or the right field with a wrong type approved the finding the user
+// declined, in silence (or crashed next-step). The parser refuses the WHOLE
+// file, and the refusal names each problem.
+describe("parseReviewResolution", () => {
+  const req = buildReviewRequest(SAMPLE, "plan-1");
+  const refusalOf = (text: string): string => {
+    const parsed = parseReviewResolution(text, req);
+    if (parsed.kind !== "refused") throw new Error(`expected a refusal, got ${parsed.kind}`);
+    return parsed.reason;
+  };
+
+  it("accepts the documented shape, with and without the optional fields", () => {
+    expect(parseReviewResolution('{"declined_findings":[],"declined_tiers":[]}', req)).toEqual({
+      kind: "ok",
+      resolution: { declined_findings: [], declined_tiers: [] },
+    });
+    const parsed = parseReviewResolution(
+      '{"plan_id":"plan-1","declined_findings":[{"finding_id":"ARC-1","reason":"r"}]}',
+      req,
+    );
+    expect(parsed.kind).toBe("ok");
+  });
+
+  it("refuses invalid JSON instead of crashing", () => {
+    expect(refusalOf("{ not json")).toMatch(/not valid JSON/);
+  });
+
+  it("refuses a bare array instead of approving everything", () => {
+    expect(refusalOf('["ARC-1"]')).toMatch(/one JSON object/);
+  });
+
+  it("refuses the retired disapproved_* names and states the new ones", () => {
+    const reason = refusalOf('{"disapproved_findings":["ARC-1"],"disapproved_tiers":[]}');
+    expect(reason).toContain("`disapproved_findings` is not a field — write `declined_findings`");
+    expect(reason).toContain("`disapproved_tiers` is not a field — write `declined_tiers`");
+  });
+
+  it("refuses an unknown field, top-level or inside an entry", () => {
+    expect(refusalOf('{"disapproved":["ARC-1"]}')).toContain("unknown field(s): `disapproved`");
+    expect(refusalOf('{"declined_findings":[{"finding_id":"ARC-1","why":"x"}]}')).toContain(
+      "unknown field(s) in `declined_findings.0`: `why`",
+    );
+  });
+
+  it("refuses a wrong type instead of crashing", () => {
+    expect(refusalOf('{"declined_findings":"ARC-1"}')).toContain("`declined_findings`:");
+    expect(refusalOf('{"declined_findings":["ARC-1"]}')).toContain("`declined_findings.0`:");
+  });
+
+  it("refuses an unknown id or tier, naming the entry and the valid set", () => {
+    const reason = refusalOf(
+      '{"declined_findings":[{"finding_id":"ARC-1"},{"finding_id":"TYPO-9"}],"declined_tiers":["optional"]}',
+    );
+    expect(reason).toContain("`declined_findings[1].finding_id`: `TYPO-9` is not in the request");
+    expect(reason).toContain("valid: `ARC-1`, `ARC-2`, `COR-1`, `MNT-1`");
+    expect(reason).toContain("`declined_tiers[0]`: `optional` is not a tier");
+  });
+
+  it("names every problem in one refusal", () => {
+    const reason = refusalOf('{"disapproved_tiers":[],"declined_tiers":"strategic","extra":1}');
+    expect(reason).toContain("`disapproved_tiers` is not a field");
+    expect(reason).toContain("`declined_tiers`:");
+    expect(reason).toContain("`extra`");
+  });
+
+  it("reads a plan_id from another run as stale, not refused", () => {
+    expect(parseReviewResolution('{"plan_id":"plan-0","declined_findings":[]}', req)).toEqual({
+      kind: "stale",
+    });
   });
 });

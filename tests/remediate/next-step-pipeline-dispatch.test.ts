@@ -15,6 +15,7 @@ import {
   AUDITOR_CONTRACT_FIXTURE,
   WRAPPER,
 } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const harness = createNextStepHarness(".test-next-step-pipeline-dispatch");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, writeReadyStructuredAuditIntake, approveReviewGate, writeCompleteContractPipelineDag, walkFriction } = harness;
@@ -100,21 +101,12 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Clean up the auth flow."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [{ path: "src/auth.ts" }],
-        open_questions: [],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(intakeDir, "remediation-brief.md"),
-      "# Remediation Brief\n\nClean up the auth flow.\n",
+      JSON.stringify(
+        intakeSummaryFixture({
+          goals: ["Clean up the auth flow."],
+          affected_files: [{ path: "src/auth.ts" }],
+        }),
+      ),
       "utf8",
     );
     await writeIntentCheckpoint();
@@ -145,21 +137,12 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Clean up the auth flow."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [{ path: "src/auth.ts" }],
-        open_questions: [],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(intakeDir, "remediation-brief.md"),
-      "# Remediation Brief\n\nClean up the auth flow.\n",
+      JSON.stringify(
+        intakeSummaryFixture({
+          goals: ["Clean up the auth flow."],
+          affected_files: [{ path: "src/auth.ts" }],
+        }),
+      ),
       "utf8",
     );
     await writeIntentCheckpoint();
@@ -199,21 +182,12 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Clean up the auth flow."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [{ path: "src/auth.ts" }],
-        open_questions: [],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(intakeDir, "remediation-brief.md"),
-      "# Remediation Brief\n\nClean up the auth flow.\n",
+      JSON.stringify(
+        intakeSummaryFixture({
+          goals: ["Clean up the auth flow."],
+          affected_files: [{ path: "src/auth.ts" }],
+        }),
+      ),
       "utf8",
     );
     await writeIntentCheckpoint();
@@ -249,7 +223,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
   it("ready intake survives a default-candidate manifest re-derivation instead of looping", async () => {
     // Regression: when next-step runs without --input but a default audit-report
     // candidate exists, the resolver re-derives the source manifest every call.
-    // An identical candidate set must not discard the persisted summary/brief and
+    // An identical candidate set must not discard the persisted summary and
     // re-emit synthesize_intake forever.
     const auditDir = join(REPO_DIR, ".audit-tools/audit");
     const reportPath = join(auditDir, "audit-report.md");
@@ -268,21 +242,13 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "documents",
-        goals: ["Fix only the critical bugs."],
-        non_goals: ["Broad refactors."],
-        constraints: [],
-        affected_files: [{ path: "src/auth.ts" }],
-        open_questions: [],
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(intakeDir, "remediation-brief.md"),
-      "# Remediation Brief\n\nCritical bugs only.\n",
+      JSON.stringify(
+        intakeSummaryFixture({
+          goals: ["Fix only the critical bugs."],
+          non_goals: ["Broad refactors."],
+          affected_files: [{ path: "src/auth.ts" }],
+        }),
+      ),
       "utf8",
     );
     await writeIntentCheckpoint();
@@ -339,19 +305,15 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
 
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "structured_audit",
-        goals: ["Remediate the structured audit findings."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "structured_audit",
+          goals: ["Remediate the structured audit findings."],
+          affected_files: [],
+        }),
+      ),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
     await writeIntentCheckpoint();
     // Past the review-approval gate (approve-all) so the run reaches the pipeline.
     await approveReviewGate();
@@ -398,19 +360,15 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     const intakeDir = join(ARTIFACTS_DIR, "intake");
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: true,
-        source_type: "structured_audit",
-        goals: ["Remediate the structured audit findings."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          source_type: "structured_audit",
+          goals: ["Remediate the structured audit findings."],
+          affected_files: [],
+        }),
+      ),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Structured intake\n", "utf8");
 
     const gated = await decideNextStep({
       root: REPO_DIR,
@@ -462,26 +420,23 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
     await writeFile(
       join(intakeDir, "intake-summary.json"),
-      JSON.stringify({
-        schema_version: "remediate-code-intake-summary/v1alpha1",
-        ready: false,
-        source_type: "documents",
-        goals: ["Clean up auth."],
-        non_goals: [],
-        constraints: [],
-        affected_files: [],
-        open_questions: [
-          {
-            id: "Q-001",
-            category: "scope_of_fix",
-            question: "Which auth flow should change?",
-            blocking: true,
-          },
-        ],
-      }),
+      JSON.stringify(
+        intakeSummaryFixture({
+          ready: false,
+          goals: ["Clean up auth."],
+          affected_files: [],
+          open_questions: [
+            {
+              id: "Q-001",
+              category: "scope_of_fix",
+              question: "Which auth flow should change?",
+              blocking: true,
+            },
+          ],
+        }),
+      ),
       "utf8",
     );
-    await writeFile(join(intakeDir, "remediation-brief.md"), "# Draft\n", "utf8");
     await writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });

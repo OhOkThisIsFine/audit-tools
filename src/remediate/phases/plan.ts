@@ -174,7 +174,7 @@ export function buildCoverageLedger(params: {
   /** Phantom paths stripped from findings that survived grounding. */
   phantomPathsRemoved?: Map<string, string[]>;
   /**
-   * Findings the user disapproved at the review-approval gate, with the recorded
+   * Findings the user declined at the review-approval gate, with the recorded
    * reason. These are IN `sourceFindings` (an approved/declined finding is a
    * filter-pass survivor — folded/dropped findings never reach the gate), so they
    * produce an in-source `declined_by_review` disposition exactly like

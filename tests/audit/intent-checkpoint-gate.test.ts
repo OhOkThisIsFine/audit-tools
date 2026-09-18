@@ -21,12 +21,11 @@ const baseCheckpoint: IntentCheckpoint = {
   intent_summary: "full-audit",
 };
 
-test("provenance (confirmed_at/confirmed_by) is invisible to both normal forms", () => {
+test("provenance (confirmed_at) is invisible to both normal forms", () => {
   const a = normalizeCheckpointForms(baseCheckpoint);
   const b = normalizeCheckpointForms({
     ...baseCheckpoint,
     confirmed_at: "2026-07-24T12:34:56Z",
-    confirmed_by: "draft",
   });
   expect(b.structured).toBe(a.structured);
   expect(b.prose).toBe(a.prose);

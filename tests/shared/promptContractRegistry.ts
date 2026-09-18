@@ -94,12 +94,7 @@ const designReviewBundleFixture = {
 } as unknown as ArtifactBundle;
 
 const intakeRender = (): string =>
-  synthesizeIntakePrompt(
-    "registry-fixture/source-manifest.json",
-    [],
-    intakePaths("registry-fixture"),
-    false,
-  );
+  synthesizeIntakePrompt([], intakePaths("registry-fixture"), false);
 
 /**
  * A two-question clarification queue — the smallest fixture that exercises both
@@ -331,7 +326,6 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
   ["renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", DRIVER_GAP],
   ["renderContractPipelinePrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — branch projection rows are registered separately"],
   ["renderContractRepairPrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — repair-target projection rows are registered separately"],
-  ["synthesizeIntakePrompt", "src/remediate/steps/prompts.ts", "multi-artifact worker prompt — output-material rows are registered separately"],
   ["currentPromptPath", "src/shared/io/stepContractWriter.ts", "path helper matched by the prompt-name scan — no rendered output contract"],
   ["buildCacheablePrompt", "src/shared/prompts.ts", "generic prompt composition helper — no worker output contract"],
   ["quotePromptCommandArg", "src/shared/tooling/exec.ts", "command quoting helper matched by the prompt-name scan — no rendered output contract"],
@@ -348,25 +342,11 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
 export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
   ...pipelineProjectionRows,
   {
-    builder: "synthesizeIntakePrompt[intake_summary]",
+    builder: "synthesizeIntakePrompt",
     file: "src/remediate/steps/prompts.ts",
     disposition: "derived",
     schema: { name: "IntakeSummarySchema", file: "src/remediate/intake.ts", object: IntakeSummarySchema },
     render: intakeRender,
-  },
-  {
-    builder: "synthesizeIntakePrompt[intent_checkpoint]",
-    file: "src/remediate/steps/prompts.ts",
-    disposition: "projection",
-    schema: { name: "buildConfirmIntentStep draft reader", file: "src/remediate/steps/nextStep.ts" },
-    projectionFields: ["schema_version", "confirmed_at", "confirmed_by", "scope_summary", "intent_summary", "filters", "pre_draft_questions", "closing_action"],
-    render: intakeRender,
-  },
-  {
-    builder: "synthesizeIntakePrompt[remediation_brief]",
-    file: "src/remediate/steps/prompts.ts",
-    disposition: "declared-gap",
-    gapReason: "worker-authored Markdown launch brief has a prose section list but no parsing schema",
   },
   {
     builder: "renderCharterKindLanePrompt",

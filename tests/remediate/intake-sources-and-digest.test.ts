@@ -5,17 +5,19 @@
  *     read-time schema validation for the host-authored intake-summary.json
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir, writeFile } from "node:fs/promises";
+import { rm, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildDocumentSourceManifest,
   readIntakeArtifacts,
+  renderRemediationBrief,
   validateIntakeSummary,
+  writeRemediationBrief,
   intakePaths,
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
-  INTAKE_SUMMARY_SCHEMA_VERSION,
 } from "../../src/remediate/intake.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { resolve } from "node:path";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -80,16 +82,10 @@ describe("buildDocumentSourceManifest", () => {
 });
 
 describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json schema validation", () => {
-  const WELL_FORMED_SUMMARY = {
-    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
-    ready: true,
-    source_type: "documents",
+  const WELL_FORMED_SUMMARY = intakeSummaryFixture({
     goals: ["Fix the bug"],
-    non_goals: [],
-    constraints: [],
     affected_files: [{ path: "src/a.ts" }],
-    open_questions: [],
-  };
+  });
 
   async function writeSummaryFile(artifactsDir: string, content: unknown) {
     const paths = intakePaths(artifactsDir);
@@ -98,9 +94,14 @@ describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json 
     return paths;
   }
 
+  // A refused summary is ABSENT, with the refusal carried beside it: the
+  // resolver re-issues synthesize_intake with the reason, so the host rewrites
+  // the one file the step asked for (prompt 17c) — never a thrown load error.
   it("REFUSES a summary whose `ready` is a truthy STRING instead of a boolean", async () => {
     await writeSummaryFile(TEST_DIR, { ...WELL_FORMED_SUMMARY, ready: "yes" });
-    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/ready/);
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toBeUndefined();
+    expect(intake.summaryRefusal).toMatch(/`ready`/);
   });
 
   it("REFUSES a summary whose `goals` is not an array", async () => {
@@ -108,41 +109,97 @@ describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json 
       ...WELL_FORMED_SUMMARY,
       goals: "Fix the bug",
     });
-    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/goals/);
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toBeUndefined();
+    expect(intake.summaryRefusal).toMatch(/`goals`/);
   });
 
-  it("the refusal error names the file path (legible, not opaque)", async () => {
-    const paths = await writeSummaryFile(TEST_DIR, {
-      ...WELL_FORMED_SUMMARY,
-      ready: "yes",
+  it("REFUSES a v1alpha1 summary, naming each missing v1alpha2 field", async () => {
+    const { source_summary, acceptance_criteria, scope_summary, intent_summary, filters, ...v1 } =
+      WELL_FORMED_SUMMARY;
+    void [source_summary, acceptance_criteria, scope_summary, intent_summary, filters];
+    await writeSummaryFile(TEST_DIR, {
+      ...v1,
+      schema_version: "remediate-code-intake-summary/v1alpha1",
     });
-    let caught: unknown;
-    try {
-      await readIntakeArtifacts(TEST_DIR);
-    } catch (err) {
-      caught = err;
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toBeUndefined();
+    for (const field of [
+      "schema_version",
+      "source_summary",
+      "acceptance_criteria",
+      "scope_summary",
+      "intent_summary",
+      "filters",
+    ]) {
+      expect(intake.summaryRefusal).toContain(`\`${field}\``);
     }
-    expect(caught).toBeInstanceOf(Error);
-    expect((caught as Error).message).toContain(paths.summary);
+  });
+
+  it("REFUSES a summary that is not valid JSON, without throwing", async () => {
+    const paths = intakePaths(TEST_DIR);
+    await mkdir(paths.dir, { recursive: true });
+    await writeFile(paths.summary, "{ not json", "utf8");
+    const intake = await readIntakeArtifacts(TEST_DIR);
+    expect(intake.summary).toBeUndefined();
+    expect(intake.summaryRefusal).toMatch(/not valid JSON/);
   });
 
   it("a well-formed summary passes through unchanged", async () => {
     await writeSummaryFile(TEST_DIR, WELL_FORMED_SUMMARY);
     const intake = await readIntakeArtifacts(TEST_DIR);
     expect(intake.summary).toEqual(WELL_FORMED_SUMMARY);
+    expect(intake.summaryRefusal).toBeUndefined();
   });
 
   it("a missing summary file is undefined — absence is not a validation refusal", async () => {
     const intake = await readIntakeArtifacts(TEST_DIR);
     expect(intake.summary).toBeUndefined();
+    expect(intake.summaryRefusal).toBeUndefined();
   });
 
-  it("validateIntakeSummary directly: rejects a non-boolean ready and accepts a well-formed summary", () => {
-    expect(() =>
-      validateIntakeSummary({ ...WELL_FORMED_SUMMARY, ready: "yes" }, "intake-summary.json"),
-    ).toThrow();
-    expect(validateIntakeSummary(WELL_FORMED_SUMMARY, "intake-summary.json")).toEqual(
-      WELL_FORMED_SUMMARY,
-    );
+  it("validateIntakeSummary directly: refuses a non-boolean ready and accepts a well-formed summary", () => {
+    expect(validateIntakeSummary({ ...WELL_FORMED_SUMMARY, ready: "yes" })).toEqual({
+      refusal: expect.stringContaining("`ready`"),
+    });
+    expect(validateIntakeSummary(WELL_FORMED_SUMMARY)).toEqual({ summary: WELL_FORMED_SUMMARY });
+  });
+});
+
+// Prompt 17c: the brief is the tool's render of the summary — the host no
+// longer writes a second file that restates it.
+describe("renderRemediationBrief / writeRemediationBrief", () => {
+  const SUMMARY = intakeSummaryFixture({
+    source_summary: "The refactor plan asks to split the router.",
+    goals: ["Split the router"],
+    affected_files: [{ path: "src/router.ts", reason: "the router" }],
+    acceptance_criteria: ["Each route module has one owner"],
+    open_questions: [{ id: "Q-001", question: "Include the CLI?", blocking: true }],
+  });
+
+  it("renders every summary section, with `- None` for an empty list", () => {
+    const brief = renderRemediationBrief(SUMMARY);
+    expect(brief.startsWith("# Remediation Brief\n")).toBe(true);
+    expect(brief).toContain("## Source Summary\n\nThe refactor plan asks to split the router.");
+    expect(brief).toContain(`## Scope\n\n${SUMMARY.scope_summary}`);
+    expect(brief).toContain(`## Intent\n\n${SUMMARY.intent_summary}`);
+    expect(brief).toContain("## Goals\n\n- Split the router");
+    expect(brief).toContain("## Non-Goals\n\n- None");
+    expect(brief).toContain("## Affected Files\n\n- `src/router.ts` — the router");
+    expect(brief).toContain("## Acceptance Criteria\n\n- Each route module has one owner");
+    expect(brief).toContain("## Open Questions\n\n- **Q-001** (blocking): Include the CLI?");
+  });
+
+  it("writes the render to the brief path, and rewrites it only on a change", async () => {
+    const paths = intakePaths(TEST_DIR);
+    await writeRemediationBrief(TEST_DIR, SUMMARY);
+    expect(await readFile(paths.brief, "utf8")).toBe(renderRemediationBrief(SUMMARY));
+    const before = (await stat(paths.brief)).mtimeMs;
+    await new Promise((r) => setTimeout(r, 20));
+    await writeRemediationBrief(TEST_DIR, SUMMARY);
+    expect((await stat(paths.brief)).mtimeMs).toBe(before);
+    const changed = { ...SUMMARY, goals: ["Split the router", "Keep the API"] };
+    await writeRemediationBrief(TEST_DIR, changed);
+    expect(await readFile(paths.brief, "utf8")).toContain("- Keep the API");
   });
 });

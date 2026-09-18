@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/intake-starting-point-contract.test.ts
+// sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import type {
   ClarificationRequest,
   RemediationItemState,
@@ -74,6 +74,24 @@ The refusal names the entry and the field. Nothing is applied, and this step
 comes back.`;
 }
 
+/**
+ * The one refusal banner every resolution prompt shows after the tool refused
+ * and archived the previous file. The reason names each problem, so the banner
+ * does not guess which kind of problem it was.
+ */
+function refusalBanner(
+  refusal: string | undefined,
+  outcome: "applied" | "recorded",
+): string {
+  return refusal
+    ? `
+> ⚠ **Your previous resolution was REFUSED and archived — nothing was ${outcome}.**
+> ${refusal}
+> Fix each problem named above. Then re-submit the WHOLE file.
+`
+    : "";
+}
+
 export function clarificationPrompt(
   clarifications: ClarificationRequest[],
   resolutionPath: string,
@@ -83,15 +101,7 @@ export function clarificationPrompt(
   const count = clarifications.length;
   return `
 # Resolve Remediation Clarifications
-${
-  refusal
-    ? `
-> ⚠ **Your previous resolution was REFUSED and archived — nothing was applied.**
-> ${refusal}
-> Re-submit the WHOLE resolution with ids drawn only from the set below.
-`
-    : ""
-}
+${refusalBanner(refusal, "applied")}
 Workers paused ${count} finding${count === 1 ? "" : "s"} because each needs an
 answer from the user. Ask the user all of the questions in one message.
 
@@ -140,76 +150,51 @@ export function ambiguityReviewPrompt(
   validFindingIds: readonly string[] = [],
   refusal?: string,
 ): string {
-  const candidateBlock = candidates.length
-    ? candidates
-        .map(
-          (item) => `
+  const count = candidates.length;
+  const intro = count
+    ? `The tool found ${count} candidate ambigu${count === 1 ? "ity" : "ities"} in the remediation plan. A candidate is a
+starting point, not a final list.`
+    : `The tool found no candidate ambiguity in the remediation plan. Still review
+the findings in the set below yourself.`;
+  const candidateBlock = candidates
+    .map(
+      (item) => `
 ## ${item.finding_id}
 
 - Category: ${item.category}
-- Candidate ambiguity: ${item.description}`,
-        )
-        .join("\n")
-    : "_(no deterministic candidates — still review the plan's findings yourself)_";
+- Candidate: ${item.description}
+`,
+    )
+    .join("");
+  const firstId = candidates[0]?.finding_id ?? validFindingIds[0] ?? "F-001";
 
   return `
-# Resolve scoping/judgment ambiguity BEFORE implementing
-${
-  refusal
-    ? `
-> ⚠ **Your previous resolution was REFUSED and archived — nothing was applied.**
-> ${refusal}
-> Re-submit the WHOLE resolution with ids drawn only from the valid set below.
-`
-    : ""
-}
-Below are deterministic **candidate** ambiguities in the remediation plan. They
-are starting points, not a final list.
-
-1. **Review each candidate against the code** (read the cited files / repo). Drop
-   any that are not genuinely ambiguous.
-2. **Add any ambiguity you find** that the heuristics missed — anything where the
-   right scope, the intended behavior, or whether to act at all is unclear.
-3. **Batch every genuine ambiguity into ONE round** of user questions. Resolve
-   them all now; do not let any scoping/judgment question slip to mid-run triage.
-
+# Resolve ambiguity in the plan before implementation
+${refusalBanner(refusal, "applied")}
+${intro}
 ${candidateBlock}
+Do these steps:
 
-After the user answers (or if you determined there is nothing genuinely
-ambiguous), write JSON to exactly:
+1. Read the cited files for each candidate. Drop a candidate that is not a real
+   ambiguity.
+2. Add each real ambiguity that the candidates missed: an unclear scope, an
+   unclear intended behavior, or an unclear choice to fix at all. It can be about
+   any finding in the set below.
+3. Ask the user all of the remaining questions in one message. Do not leave a
+   scope question for a later step.
+
+After the user answers, write JSON to exactly:
 
 \`${resolutionPath}\`
 
-\`\`\`json
-[
-  {
-    "finding_id": "...",
-    "action": "clarified",
-    "rationale": "the user's answer / decided scope",
-    "scope_additions": ["optional — files the answer ADDS to the fix's write scope"]
-  }
-]
-\`\`\`
+If no real ambiguity remains, write \`[]\`. The plan then continues unchanged.
 
-Per item: \`"action": "clarified"\` (answered, OR you decided it was not genuinely
-ambiguous — proceed with the finding, put the answer/decision in \`rationale\`),
-\`"action": "reject_finding"\` (the FINDING itself is not a real issue — this DROPS
-it; never use it merely to say a question wasn't ambiguous, or you will lose a
-finding the review gate approved), or \`"action": "defer"\` (the user explicitly
-chose to skip it this run). Deferral is the **user's** call — never decide it
-unilaterally. Write \`[]\` if nothing is genuinely ambiguous.
+${resolutionEntryRules(firstId, "the user's answer: the scope the fix must have")}
 
-When an answer requires files outside the finding's current write scope — a test
-the fix must create, the source a generated artifact mirrors, a new shared
-module, a manifest — list them (repo-relative) in \`scope_additions\`: the tool
-widens the owning block's write scope in-band. NEVER edit the plan's
-\`touched_files\` by hand. An entry that does not resolve beneath the repository
-root, or whose directory does not exist in the tracked tree, refuses the whole
-resolution and re-presents this step.
+\`finding_id\` MUST be drawn from this closed set (copy, never retype):
+${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
 
-\`finding_id\` MUST be drawn from the plan's closed id set (copy, never retype):
-${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}. An id outside
-it refuses the whole resolution and re-presents this step.
+A finding with no entry continues as planned.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;
@@ -220,13 +205,13 @@ Then run \`${loaderCommand("next-step")}\`.
  * deterministic work — bucketed every original finding by review-necessity,
  * with a rationale and a coarse implementation cost. The host's job is the
  * semantic slot the tool cannot fill: present each item to the user with the
- * pros/cons of acting vs. not, and collect approve/disapprove. The gate exists
+ * pros/cons of acting vs. not, and collect approve/decline. The gate exists
  * because design-review (strategic) findings were previously swept to a terminal
  * disposition inside quality-tail blocks without ever being shown — so the
  * strategic tier MUST be presented item-by-item, never rubber-stamped.
  *
  * Default is approve-all: an empty/absent resolution proceeds with every
- * finding. Disapproved items are RECORDED with a reason, never silently closed.
+ * finding. Declined items are RECORDED with a reason, never silently closed.
  */
 export function reviewApprovalPrompt(
   request: ReviewRequest,
@@ -253,31 +238,20 @@ export function reviewApprovalPrompt(
             badge,
             `- Why this tier: ${item.rationale}`,
             `- Implementation cost (blast radius): \`${item.implementation_cost}\``,
-            "- **Present to the user with the pros/cons of acting vs. not acting, then record their decision.**",
           ].join("\n");
         })
         .join("\n\n");
-      return `## ${tier.label} — ${tier.items.length} item(s)\n\n${tier.description}\n${items}`;
+      return `## ${tier.label} — ${tier.items.length} item(s)\n\n${tier.description}\n\n${items}`;
     })
     .join("\n\n");
 
   const validIds = request.tiers.flatMap((t) => t.items.map((i) => i.finding_id));
   return `
-# Review-Approval Gate — approve or disapprove before implementation
-${
-  refusal
-    ? `
-> ⚠ **Your previous resolution was REFUSED and archived — nothing was recorded.**
-> ${refusal}
-> Re-submit the WHOLE resolution below with ids drawn only from the valid set.
-`
-    : ""
-}
-Before any code changes, every audit finding is presented below, bucketed by how
-much of **your** judgment it needs. This gate exists so that strategic
-(design/architecture) findings are never quietly closed without your sight — so
-walk the user through them, especially the **Strategic** tier, with the trade-offs
-of acting vs. leaving each as-is.
+# Review-Approval Gate — the user approves or declines each finding
+${refusalBanner(refusal, "recorded")}
+The user decides which findings to fix before any code changes. Present every
+finding below to the user. For each Strategic finding, state the benefit and the
+cost of a fix and of no fix, and get a separate decision from the user.
 
 - Total findings: **${request.total}**
 - Strategic: **${request.counts.strategic}** · Concrete: **${request.counts.concrete}** · Mechanical: **${request.counts.mechanical}**
@@ -288,26 +262,32 @@ ${tierSections}
 
 ## Record the user's decision
 
-The default is to **proceed with every finding**. You only need to record the
-items the user wants to **disapprove** (skip). Write JSON to exactly:
+Every finding is fixed unless the user declines it. Write JSON to exactly:
 
 \`${resolutionPath}\`
 
 \`\`\`json
 {
-  "disapproved_findings": ["FINDING-ID-the-user-declined"],
-  "disapproved_tiers": []
+  "declined_findings": [],
+  "declined_tiers": []
 }
 \`\`\`
 
-- Leave \`disapproved_findings\` empty (\`[]\`) to approve everything.
-- Use \`disapproved_tiers\` (e.g. \`["mechanical"]\`) to decline an entire tier at once.
-- Disapproved findings are recorded as a declined disposition with a reason —
-  they are not acted on, and they are not silently dropped.
-- \`disapproved_findings\` entries MUST be drawn from this closed set (copy, never
-  retype): ${validIds.map((id) => `\`${id}\``).join(", ")}. \`disapproved_tiers\`
-  entries MUST be one of \`strategic\`, \`concrete\`, \`mechanical\`. An id outside
-  these sets refuses the whole resolution and re-presents this gate.
+The file above approves every finding.
+
+- To decline one finding, add \`{ "finding_id": "<id>", "reason": "<the user's
+  reason, in their words>" }\` to \`declined_findings\`. \`reason\` is optional; leave
+  it out when the user gave none.
+- To decline a whole tier, add its name to \`declined_tiers\`: \`strategic\`,
+  \`concrete\` or \`mechanical\`.
+- A declined finding is not fixed. The final report lists it with the user's
+  reason.
+- \`finding_id\` MUST be drawn from this closed set (copy, never retype):
+  ${validIds.map((id) => `\`${id}\``).join(", ")}.
+
+The tool refuses the WHOLE file when it is not valid JSON, has a field not shown
+above, has a wrong type, or names an id or tier outside the sets above. The
+refusal names each problem. Nothing is recorded, and this step comes back.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;
@@ -468,32 +448,30 @@ sources itself: do not write a source manifest, and do not edit source files.
 `;
 }
 
+/**
+ * The host writes ONE file here: the intake summary. It is the single source
+ * the tool reads — the tool renders `remediation-brief.md` from it
+ * (`writeRemediationBrief`), and the confirm step builds its scope proposal
+ * from it. The host once also wrote the brief and a "draft" intent checkpoint,
+ * which put the same facts in three files that could disagree.
+ */
 export function synthesizeIntakePrompt(
-  manifestPath: string,
   sources: IntakeSource[],
   paths: ReturnType<typeof intakePaths>,
   hasClarificationResolution: boolean,
-  intentCheckpointPath?: string,
 ): string {
   const clarificationText = hasClarificationResolution
-    ? `\nAlso read the clarification answers at:\n\n\`${paths.clarificationResolution}\`\n`
+    ? `\nAlso read the user's answers to the earlier questions:\n\n- \`${paths.clarificationResolution}\`\n`
     : "";
 
-  const checkpointPath = intentCheckpointPath ?? paths.intentCheckpoint;
-
   return `
-# Synthesize Remediation Intake
+# Synthesize the remediation intake
 
-Read the source manifest:
-
-\`${manifestPath}\`
-
-Then read only the listed source files:
+Read these source files:
 
 ${formatIntakeSources(sources)}
 ${clarificationText}
-Create a launch brief for the remediation workflow. The goal is to eliminate
-ambiguity before the normal remediation planner turns this into findings.
+Do not edit any file except the one below.
 
 Write JSON to exactly:
 
@@ -504,84 +482,49 @@ Write JSON to exactly:
   "schema_version": "${INTAKE_SUMMARY_SCHEMA_VERSION}",
   "ready": false,
   "source_type": "documents",
-  "goals": ["specific remediation goal"],
-  "non_goals": ["explicitly out-of-scope change"],
-  "constraints": ["compatibility, dependency, testing, timing, or style constraint"],
-  "affected_files": [{ "path": "relative/path.ts", "reason": "why this file is implicated" }],
+  "source_summary": "What the sources ask for, in two or three sentences.",
+  "goals": ["a specific remediation goal"],
+  "non_goals": ["a change that is out of scope"],
+  "constraints": ["a compatibility, dependency, test, timing or style constraint"],
+  "affected_files": [{ "path": "src/router.ts", "reason": "why this file is part of the fix" }],
+  "acceptance_criteria": ["an observable result that shows the goal is met"],
+  "scope_summary": "One sentence: the files and areas in scope.",
+  "intent_summary": "One sentence: the purpose of this run.",
+  "filters": {},
   "open_questions": [
     {
       "id": "Q-001",
       "category": "scope_of_fix",
-      "question": "What needs to be clarified before code changes?",
+      "question": "Does the refactor include the CLI package, or only the server?",
       "blocking": true
     }
   ]
 }
 \`\`\`
 
-Set \`ready\` to \`true\` only when the goals, non-goals, affected areas, and
-success criteria are clear enough that implementation choices will not depend
-on another user decision. If any blocking ambiguity remains, set \`ready\` to
-\`false\` and list the questions.
+Rules:
 
-Use \`source_type\` of \`structured_audit\`, \`documents\`, \`conversation\`,
-or \`mixed\`.
+- \`source_type\` is one of \`structured_audit\`, \`documents\`, \`conversation\`, \`mixed\`.
+- Set \`ready\` to \`true\` only when no implementation choice depends on another
+  user decision. Then \`goals\` must not be empty, and \`affected_files\` must not be
+  empty unless \`source_type\` is \`structured_audit\`.
+- Set \`ready\` to \`false\` when the user must decide something first. Then add each
+  question to \`open_questions\` with \`"blocking": true\`. \`ready: false\` with no
+  blocking question is refused.
+- A question without \`"blocking": true\` is information only. The user sees it at
+  confirmation, and it does not stop the run.
+- \`filters\` stays \`{}\` unless the sources clearly limit the run. Its keys are
+  \`severity\`, \`lenses\`, \`packages\` and \`themes\`, each a list of strings.
+- \`intent_interpretation\` (optional): when a conversation source states the
+  user's intent in free words, write one sentence on how you read it.
 
-Also write a Markdown launch brief to exactly:
+The tool refuses the file when a field is missing, has a wrong type, or breaks a
+rule above. The refusal names each problem, and this step comes back.
 
-\`${paths.brief}\`
+The tool writes the Markdown brief and the scope proposal from this file. Do not
+write them.
 
-The brief must include:
-
-- source summary
-- goals
-- non-goals
-- constraints
-- affected files or discovery targets
-- acceptance criteria
-- open questions, if any
-
-Also write a preliminary intent checkpoint to exactly:
-
-\`${checkpointPath}\`
-
-\`\`\`json
-{
-  "schema_version": "intent-checkpoint/v1",
-  "confirmed_at": "<ISO-8601 timestamp for when this draft was created>",
-  "confirmed_by": "draft",
-  "scope_summary": "<pre-populated scope derived from the goals and affected_files above>",
-  "intent_summary": "<pre-populated intent derived from the goals and source_type above>",
-  "filters": {},
-  "pre_draft_questions": [
-    {
-      "id": "Q-001",
-      "question": "<question text from open_questions above>",
-      "blocking": true
-    }
-  ]
-}
-\`\`\`
-
-Rules for the preliminary checkpoint:
-- \`confirmed_by\` MUST be \`"draft"\` (sentinel for unconfirmed state).
-- Pre-populate \`scope_summary\` from the goals and affected areas; pre-populate
-  \`intent_summary\` from the overall purpose (e.g. "full remediation of security
-  findings from the audit report").
-- Copy ALL open_questions into \`pre_draft_questions\`, preserving their ids and
-  blocking flags. Non-blocking questions are included as FYI context.
-- Do NOT write a \`closing_action\`: the tool detects the candidates from the
-  repository's shape and the host chooses one at confirmation.
-- If a \`free_form_intent\` was interpreted (e.g. "prioritizing security
-  findings"), record a brief explanation in \`intent_interpretation\`.
-- Leave \`filters\` empty (\`{}\`) unless the source clearly implies specific
-  severity/lens/package scope.
-
-Do not edit source files.
-
-Then run:
-
-\`${loaderCommand("next-step")}\`
+Then run \`${loaderCommand("next-step")}\`.
 `;
 }
 

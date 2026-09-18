@@ -1,8 +1,38 @@
+// sites-pinned: tests/remediate/n-r04-intent-checkpoint.test.ts, tests/audit/intent-checkpoint-gate.test.ts
 import { z } from "zod";
 import { FileDispositionStatusSchema } from "./disposition.js";
 import { CeilingSchema } from "./charter.js";
 import { CLOSING_ACTIONS } from "./closingActions.js";
 import { readOptionalJsonFile } from "../io/json.js";
+
+/**
+ * Remediate-only finding filters. One schema for the confirmed checkpoint and
+ * for the proposal the remediate intake summary carries into confirmation.
+ */
+export const IntentFiltersSchema = z
+  .object({
+    severity: z.array(z.string()).optional(),
+    lenses: z.array(z.string()).optional(),
+    packages: z.array(z.string()).optional(),
+    themes: z.array(z.string()).optional(),
+  })
+  .strict();
+
+/**
+ * The retired `confirmed_by` value of the remediate intake worker's draft
+ * checkpoint. The intake summary now carries the proposal, and a legacy draft
+ * file on disk reads as ABSENT (not confirmed) through every reader below.
+ */
+const LEGACY_DRAFT_CONFIRMED_BY = "draft";
+
+/** True for a legacy draft checkpoint — see {@link LEGACY_DRAFT_CONFIRMED_BY}. */
+export function isLegacyDraftCheckpoint(raw: unknown): boolean {
+  return (
+    raw !== null &&
+    typeof raw === "object" &&
+    (raw as { confirmed_by?: unknown }).confirmed_by === LEGACY_DRAFT_CONFIRMED_BY
+  );
+}
 
 /**
  * The accepted scope and intent for a run, confirmed by the host before
@@ -16,12 +46,8 @@ export const IntentCheckpointSchema = z
   .object({
     schema_version: z.literal("intent-checkpoint/v1"),
     confirmed_at: z.string(),
-    /**
-     * `"host"` — checkpoint has been reviewed and confirmed by the host agent.
-     * `"draft"` — preliminary checkpoint pre-populated by synthesize_intake worker;
-     *   not yet confirmed; planning must not begin and filtering must not apply.
-     */
-    confirmed_by: z.enum(["host", "draft"]),
+    /** The host confirmed this checkpoint (the only accepted value). */
+    confirmed_by: z.literal("host"),
     /** Human-readable description of the confirmed scope. */
     scope_summary: z.string(),
     /** Human-readable description of the goal (e.g. full-audit / delta). */
@@ -39,15 +65,7 @@ export const IntentCheckpointSchema = z
     /** Path globs that must never be written to. */
     must_not_touch: z.array(z.string()).optional(),
     /** Remediate-only finding filters; audit-code ignores these. */
-    filters: z
-      .object({
-        severity: z.array(z.string()).optional(),
-        lenses: z.array(z.string()).optional(),
-        packages: z.array(z.string()).optional(),
-        themes: z.array(z.string()).optional(),
-      })
-      .strict()
-      .optional(),
+    filters: IntentFiltersSchema.optional(),
     /**
      * Remediate-only: the closing action the HOST chose at confirmation, from
      * the candidates the tool detected and presented (owner decision
@@ -62,24 +80,6 @@ export const IntentCheckpointSchema = z
      * authorization, so `custom` needs no second preview at close.
      */
     closing_custom_command: z.array(z.string().min(1)).min(1).optional(),
-    /**
-     * Remediate-only, draft checkpoints: the intake worker's open questions,
-     * carried into the confirmation prompt. `blocking: true` alone blocks
-     * (INV-remediate-state-06).
-     */
-    pre_draft_questions: z
-      .array(
-        z
-          .object({
-            id: z.string(),
-            question: z.string(),
-            blocking: z.boolean().optional(),
-          })
-          .strict(),
-      )
-      .optional(),
-    /** Remediate-only, draft checkpoints: how free-form intent was read. */
-    intent_interpretation: z.string().optional(),
     /**
      * Clauses from free_form_intent that could not be encoded as lens-weight,
      * priority, or scope signals. Each entry carries the original clause text,
@@ -507,7 +507,7 @@ export async function readIntentCheckpoint(
   opts: { readonly lenient?: boolean } = {},
 ): Promise<IntentCheckpoint | undefined> {
   const raw = await readOptionalJsonFile<unknown>(path);
-  if (raw === undefined || raw === null) return undefined;
+  if (raw === undefined || raw === null || isLegacyDraftCheckpoint(raw)) return undefined;
   const parsed = IntentCheckpointSchema.safeParse(raw);
   if (parsed.success) return parsed.data;
   if (opts.lenient) return parseIntentCheckpointLenient(raw).checkpoint;
@@ -539,7 +539,7 @@ export async function readIntentCheckpointLenient(
   path: string,
 ): Promise<LenientIntentCheckpointRead> {
   const raw = await readOptionalJsonFile<unknown>(path);
-  if (raw === undefined || raw === null) {
+  if (raw === undefined || raw === null || isLegacyDraftCheckpoint(raw)) {
     return { checkpoint: undefined, rejected: [] };
   }
   return parseIntentCheckpointLenient(raw);

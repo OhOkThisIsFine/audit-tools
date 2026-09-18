@@ -39,6 +39,7 @@ import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import {
   buildReviewRequest,
   applyReviewResolution,
+  parseReviewResolution,
 } from "../../src/remediate/review/reviewGate.js";
 import { writeCurrentStep } from "../../src/remediate/steps/stepWriter.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
@@ -532,7 +533,7 @@ describe("COR-0b906e37 review resolution/request plan_id correlation", () => {
     expect(() =>
       applyReviewResolution(request, {
         plan_id: "REVIEW-FROM-ANOTHER-RUN",
-        disapproved_findings: ["F-A"],
+        declined_findings: [{ finding_id: "F-A" }],
       }),
     ).toThrow(/plan_id/);
   });
@@ -540,34 +541,24 @@ describe("COR-0b906e37 review resolution/request plan_id correlation", () => {
   it("POSITIVE: a resolution with the matching plan_id is honoured", () => {
     const decision = applyReviewResolution(request, {
       plan_id: "REVIEW-123",
-      disapproved_findings: ["F-A"],
+      declined_findings: [{ finding_id: "F-A" }],
     });
     expect(decision.declined.map((d) => d.finding_id)).toEqual(["F-A"]);
   });
 
   it("POSITIVE: a resolution without a plan_id is still accepted (host-lenient)", () => {
     const decision = applyReviewResolution(request, {
-      disapproved_findings: ["F-A"],
+      declined_findings: [{ finding_id: "F-A" }],
     });
     expect(decision.declined.map((d) => d.finding_id)).toEqual(["F-A"]);
-    const approveAll = applyReviewResolution(request, null);
+    const approveAll = applyReviewResolution(request, undefined);
     expect(approveAll.approved_ids).toEqual(["F-A"]);
   });
 
-  it("NEGATIVE→POSITIVE: isResolutionForRequest classifies correlation", async () => {
-    const gate = (await import("../../src/remediate/review/reviewGate.js")) as Record<
-      string,
-      unknown
-    >;
-    expect(typeof gate.isResolutionForRequest).toBe("function");
-    const isFor = gate.isResolutionForRequest as (
-      request: unknown,
-      resolution: unknown,
-    ) => boolean;
-    expect(isFor(request, { plan_id: "REVIEW-123" })).toBe(true);
-    expect(isFor(request, {})).toBe(true);
-    expect(isFor(request, null)).toBe(true);
-    expect(isFor(request, { plan_id: "REVIEW-OTHER" })).toBe(false);
+  it("NEGATIVE→POSITIVE: parseReviewResolution classifies correlation", () => {
+    expect(parseReviewResolution('{"plan_id":"REVIEW-123"}', request).kind).toBe("ok");
+    expect(parseReviewResolution("{}", request).kind).toBe("ok");
+    expect(parseReviewResolution('{"plan_id":"REVIEW-OTHER"}', request).kind).toBe("stale");
   });
 });
 

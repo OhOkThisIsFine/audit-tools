@@ -18,7 +18,7 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationItemState } from "../../src/remediate/state/types.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { clarificationPrompt } from "../../src/remediate/steps/prompts.js";
+import { ambiguityReviewPrompt, clarificationPrompt } from "../../src/remediate/steps/prompts.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 const IDS = ["F1", "F2"] as const;
@@ -271,5 +271,48 @@ describe("the 16a prompt text", () => {
     expect(prompt).toContain("its directory must already contain a file that git tracks");
     expect(prompt).toContain("`F-007`, `F-009`");
     expect(prompt).toContain("A finding with no entry stays paused");
+  });
+});
+
+// Prompt 17a (owner, 2026-09-18): the up-front ambiguity gate teaches the SAME
+// entry rules as 16a — its old example used "..." ids and taught
+// `scope_additions` on every entry — and shows the one shared refusal banner.
+describe("the 17a prompt text", () => {
+  const render = (
+    candidates: Parameters<typeof ambiguityReviewPrompt>[0],
+    refusal?: string,
+  ): string =>
+    ambiguityReviewPrompt(
+      candidates,
+      "/run/ambiguity_resolution.json",
+      ["F-003", "F-004"],
+      refusal,
+    ).replace(/[ \t]*\n(?![|\n])/g, " ");
+
+  it("uses the first candidate's id, or the first real id when there is no candidate", () => {
+    const withCandidate = render([
+      { finding_id: "F-004", category: "scope_of_fix", description: "How far?" },
+    ]);
+    expect(withCandidate).toContain('"finding_id": "F-004"');
+    expect(withCandidate).not.toMatch(/"scope_additions":/);
+    expect(withCandidate).toContain("The tool found 1 candidate ambiguity");
+    const none = render([]);
+    expect(none).toContain('"finding_id": "F-003"');
+    expect(none).toContain("The tool found no candidate ambiguity");
+  });
+
+  it("states the actions, the empty-array rule, the closed set, and the default", () => {
+    const prompt = render([]);
+    expect(prompt).toContain("| `reject_finding` |");
+    expect(prompt).toContain("If no real ambiguity remains, write `[]`");
+    expect(prompt).toContain("`F-003`, `F-004`");
+    expect(prompt).toContain("A finding with no entry continues as planned.");
+  });
+
+  it("shows the shared refusal banner only after a refusal", () => {
+    expect(render([])).not.toContain("REFUSED");
+    expect(render([], "entry 0: `action` is not one of the three.")).toContain(
+      "> ⚠ **Your previous resolution was REFUSED and archived — nothing was applied.**",
+    );
   });
 });

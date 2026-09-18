@@ -89,16 +89,12 @@ export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
   // rephrases are judge-arbitrated): the clauses array rides the prose normal
   // form in full, so a clause addition/removal is visible to the judge and a
   // benign answer rephrase is judgeable rather than deterministically re-staling
-  // the cascade. `pre_draft_questions` and `intent_interpretation` are the
-  // remediate intake worker's free text on a DRAFT checkpoint; audit never
-  // writes them, and as prose they are judge-arbitrated if they ever appear.
+  // the cascade.
   proseFields: [
     'scope_summary',
     'intent_summary',
     'free_form_intent',
     'constraint_clauses',
-    'pre_draft_questions',
-    'intent_interpretation',
   ],
 };
 

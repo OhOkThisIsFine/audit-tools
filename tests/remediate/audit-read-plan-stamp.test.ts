@@ -11,6 +11,7 @@ import {
 } from "../../src/remediate/steps/contractPipeline.js";
 import { intakePaths } from "../../src/remediate/intake.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 // The remediator half of the `audit_read` contract: the value on `state.plan`
 // is what the close phase's evidence leg turns into `verified_already_fixed` /
@@ -59,21 +60,12 @@ async function writeReadyIntake(): Promise<void> {
   );
   await writeFile(
     join(intakeDir, "intake-summary.json"),
-    JSON.stringify({
-      schema_version: "remediate-code-intake-summary/v1alpha1",
-      ready: true,
-      source_type: "documents",
-      goals: ["Clean up the auth flow."],
-      non_goals: [],
-      constraints: [],
-      affected_files: [{ path: "src/auth.ts" }],
-      open_questions: [],
-    }),
-    "utf8",
-  );
-  await writeFile(
-    join(intakeDir, "remediation-brief.md"),
-    "# Remediation Brief\n\nClean up the auth flow.\n",
+    JSON.stringify(
+      intakeSummaryFixture({
+        goals: ["Clean up the auth flow."],
+        affected_files: [{ path: "src/auth.ts" }],
+      }),
+    ),
     "utf8",
   );
   await h.writeIntentCheckpoint();

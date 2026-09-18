@@ -133,6 +133,8 @@ export {
   DESIGN_REVIEW_PROVENANCE_FIELDS,
   IntentCheckpointInvalidError,
   IntentCheckpointSchema,
+  IntentFiltersSchema,
+  isLegacyDraftCheckpoint,
   readIntentCheckpoint,
   readIntentCheckpointLenient,
   resolveDesignReviewBinding,

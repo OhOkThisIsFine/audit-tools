@@ -1,9 +1,10 @@
-// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
+// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-sources-and-digest.test.ts
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { writeJsonFile, type ProjectFacts } from "audit-tools/shared";
+import { writeJsonFile, writeTextFile, type ProjectFacts } from "audit-tools/shared";
 import {
+  IntentFiltersSchema,
   readOptionalJsonFile,
   readOptionalTextFile,
   isRecord,
@@ -12,8 +13,14 @@ import {
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
   "remediate-code-intake-source-manifest/v1alpha1" as const;
 
+// v1alpha2: the summary is the ONE intake file the host writes. It gained the
+// brief's facts (`source_summary`, `acceptance_criteria`) and the confirmation
+// proposal's (`scope_summary`, `intent_summary`, `filters`,
+// `intent_interpretation`); the tool renders `remediation-brief.md` from it and
+// the confirm step builds its proposal from it. A v1alpha1 file is refused by
+// name, and synthesize_intake comes back to rewrite it.
 export const INTAKE_SUMMARY_SCHEMA_VERSION =
-  "remediate-code-intake-summary/v1alpha1" as const;
+  "remediate-code-intake-summary/v1alpha2" as const;
 
 export const INTAKE_CLARIFICATION_SCHEMA_VERSION =
   "remediate-code-intake-clarifications/v1alpha1" as const;
@@ -95,43 +102,110 @@ export const IntakeSummarySchema = z.object({
     z.object({ path: z.string(), reason: z.string().optional() }),
   ),
   open_questions: z.array(IntakeOpenQuestionSchema),
+  /** What the sources ask for, in two or three sentences. */
+  source_summary: z.string(),
+  /** Observable results that show the goals are met. */
+  acceptance_criteria: z.array(z.string()),
+  /** The confirmation proposal: the files and areas in scope. */
+  scope_summary: z.string(),
+  /** The confirmation proposal: the purpose of this run. */
+  intent_summary: z.string(),
+  /** The confirmation proposal: the finding filters (the checkpoint's shape). */
+  filters: IntentFiltersSchema,
+  /** How the host read an intent a conversation source states in free words. */
+  intent_interpretation: z.string().optional(),
 });
 export type IntakeSummary = z.infer<typeof IntakeSummarySchema>;
 
 /**
  * Validate a raw parsed `intake-summary.json` payload against
- * {@link IntakeSummarySchema}, throwing a legible Error when the shape does
- * not conform — the read-time refusal for CP-NODE-2 invariants[11]'s
- * 'unvalidated intake artifacts' defect class. Before this, `readIntakeArtifacts`
- * read the file through `readOptionalJsonFile<T>`, a bare `JSON.parse(content)
- * as T` assertion with zero runtime shape checking (src/shared/io/json.ts), so
- * a structurally malformed summary — e.g. `ready: "yes"` (a truthy STRING, not
- * a boolean, so `Boolean(summary.ready)` in `isIntakeReady` silently accepted
- * it) or a non-array `goals` — was trusted verbatim. The thrown Error's
- * message becomes the caller's refusal reason: `readIntakeArtifacts` and its
- * callers run inside `runWithBlockedStepBackstop` (src/shared/io/stepContractWriter.ts),
- * which turns any throw into a `blocked` step contract naming the cause
- * verbatim — the mechanism this validation deliberately relies on instead of
- * degrading silently to `undefined` (contrast the sibling clarification-file
- * JSON-parse-failure branch a few lines below, which intentionally DOES
- * degrade to absent because `resolveIntakeStep` re-prompts for it downstream;
- * `intake-summary.json` has no such re-synthesis path, so silence there would
- * strand the run on unvalidated data instead).
+ * {@link IntakeSummarySchema}: the summary, or the refusal naming each bad
+ * field — the read-time refusal for CP-NODE-2 invariants[11]'s 'unvalidated
+ * intake artifacts' defect class. Before it, a structurally malformed summary —
+ * e.g. `ready: "yes"` (a truthy STRING, so `Boolean(summary.ready)` accepted
+ * it) or a non-array `goals` — was trusted verbatim. A refused summary is never
+ * read as a summary: `resolveIntakeStep` re-issues synthesize_intake with the
+ * refusal named, so the host rewrites the file the step asked for.
  */
-export function validateIntakeSummary(raw: unknown, path: string): IntakeSummary {
+export function validateIntakeSummary(
+  raw: unknown,
+): { summary: IntakeSummary } | { refusal: string } {
   const parsed = IntakeSummarySchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .map((issue) => `\`${issue.path.length > 0 ? issue.path.join(".") : "(root)"}\`: ${issue.message}`)
       .join("; ");
-    throw new Error(
-      `Malformed intake summary at ${path}: ${issues}. Fix the file to match the ` +
-        "IntakeSummary contract (schema_version, ready:boolean, source_type, " +
-        "goals/non_goals/constraints:string[], affected_files:{path,reason?}[], " +
-        "open_questions:{id,question,category?,blocking?}[]) and rerun next-step.",
-    );
+    return { refusal: `The previous intake summary was refused: ${issues}.` };
   }
-  return parsed.data;
+  return { summary: parsed.data };
+}
+
+/**
+ * Render `remediation-brief.md` from the summary — the human render of the one
+ * intake file the host writes (JSON is the source of truth). The brief used to
+ * be a second host-authored file restating the summary, so the two could
+ * disagree, and each consumer read only one of them.
+ */
+export function renderRemediationBrief(summary: IntakeSummary): string {
+  const list = (items: readonly string[]): string =>
+    items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- None";
+  const files = summary.affected_files.map((file) =>
+    file.reason ? `\`${file.path}\` — ${file.reason}` : `\`${file.path}\``,
+  );
+  const questions = summary.open_questions.map(
+    (q) => `**${q.id}**${q.blocking === true ? " (blocking)" : ""}: ${q.question}`,
+  );
+  return [
+    "# Remediation Brief",
+    "",
+    "## Source Summary",
+    "",
+    summary.source_summary,
+    "",
+    "## Scope",
+    "",
+    summary.scope_summary,
+    "",
+    "## Intent",
+    "",
+    summary.intent_summary,
+    "",
+    "## Goals",
+    "",
+    list(summary.goals),
+    "",
+    "## Non-Goals",
+    "",
+    list(summary.non_goals),
+    "",
+    "## Constraints",
+    "",
+    list(summary.constraints),
+    "",
+    "## Affected Files",
+    "",
+    list(files),
+    "",
+    "## Acceptance Criteria",
+    "",
+    list(summary.acceptance_criteria),
+    "",
+    "## Open Questions",
+    "",
+    list(questions),
+    "",
+  ].join("\n");
+}
+
+/** Write the rendered brief, only when its content changed. */
+export async function writeRemediationBrief(
+  artifactsDir: string,
+  summary: IntakeSummary,
+): Promise<void> {
+  const path = intakePaths(artifactsDir).brief;
+  const content = renderRemediationBrief(summary);
+  if ((await readOptionalTextFile(path)) === content) return;
+  await writeTextFile(path, content);
 }
 
 export function intakePaths(artifactsDir: string): {
@@ -526,10 +600,24 @@ export async function readIntakeArtifacts(
    */
   resolvedQuestions: IntakeOpenQuestion[];
   clarificationResolution?: unknown;
-  brief?: string;
+  /**
+   * Set when `intake-summary.json` is present but refused (not JSON, or not
+   * the {@link IntakeSummarySchema} shape): `summary` is then absent, and the
+   * reason names each problem.
+   */
+  summaryRefusal?: string;
 }> {
   const paths = intakePaths(artifactsDir);
-  const rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
+  let rawSummary: unknown;
+  let summaryRefusal: string | undefined;
+  try {
+    rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
+  } catch (error) {
+    summaryRefusal =
+      `The previous intake summary is not valid JSON (${error instanceof Error ? error.message : String(error)}).`;
+  }
+  const validated = rawSummary === undefined ? undefined : validateIntakeSummary(rawSummary);
+  if (validated && "refusal" in validated) summaryRefusal = validated.refusal;
   const clarificationResolution = await (async (): Promise<unknown> => {
     try {
       return await readOptionalJsonFile<unknown>(paths.clarificationResolution);
@@ -540,17 +628,15 @@ export async function readIntakeArtifacts(
     }
   })();
   const reconciliation = reconcileIntakeQuestions(
-    rawSummary === undefined
-      ? undefined
-      : validateIntakeSummary(rawSummary, paths.summary),
+    validated && "summary" in validated ? validated.summary : undefined,
     clarificationResolution,
   );
   return {
     manifest: await readSourceManifest(paths.sourceManifest),
     conversationStart: await readOptionalTextFile(paths.conversationStart),
     // File absent → undefined (no summary yet, not a defect). File present →
-    // validated at read time (see validateIntakeSummary); malformed content
-    // throws rather than being trusted as a well-formed IntakeSummary.
+    // validated at read time (see validateIntakeSummary); malformed content is
+    // never trusted as an IntakeSummary — it is absent, with `summaryRefusal`.
     //
     // Applied through `reconcileIntakeQuestions` so the answered questions are
     // gone for EVERY consumer of this read — the decide loop's `isIntakeReady`
@@ -558,6 +644,6 @@ export async function readIntakeArtifacts(
     summary: reconciliation.summary,
     resolvedQuestions: reconciliation.resolvedQuestions,
     clarificationResolution,
-    brief: await readOptionalTextFile(paths.brief),
+    ...(summaryRefusal !== undefined ? { summaryRefusal } : {}),
   };
 }
