@@ -41,7 +41,11 @@ import {
   ConceptualJudgeSubmissionSchema,
   SubmittedDesignFindingSchema,
 } from "../../src/audit/types/conceptualAdjudication.js";
+import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
+import { systemicChallengeSchema } from "../../src/shared/decompose/systemicChallenge.js";
+import { repoPathUniverse } from "../../src/shared/validation/designFindingGrounding.js";
 import { CharterProvenanceSchema } from "../../src/shared/types/charter.js";
+import { FindingSeveritySchema } from "../../src/shared/types/finding.js";
 import {
   clarificationBundleFixture,
   promptContractRegistry,
@@ -508,6 +512,105 @@ describe(FAILURE_SIGNATURE, () => {
         "ConceptualJudgeSubmissionSchema — it is `.strict()`, so an omitted key and " +
         "an extra key both refuse the round",
     ).toBeNull();
+  });
+
+  it("renders a SECOND-ORDER ADVERSARY example its own grounding gate accepts", () => {
+    // The sixth instance of the same class. The example wrote both closed
+    // alternations into the field VALUES (`"severity": "low|medium|high"`, which
+    // also taught THREE of the five severities the tool ranks) and cited
+    // `<a real repo path>`. The path mattered more than it looked: the
+    // submission gate now refuses an improvement that names no manifest member,
+    // so the example copied verbatim was a refused round. The example takes its
+    // path from the call-site map the same prompt prints. (Owner review
+    // 2026-09-17, prompt 12.)
+    const repoManifest = {
+      repository: { name: "registry-fixture" },
+      generated_at: "2026-01-01T00:00:00.000Z",
+      files: [
+        { path: "src/scheduling/window.ts", language: "typescript", size_bytes: 100 },
+      ],
+    };
+    const bundle = { repo_manifest: repoManifest } as unknown as Parameters<
+      typeof renderSecondOrderAdversaryPrompt
+    >[0]["bundle"];
+
+    const prompt = renderSecondOrderAdversaryPrompt({
+      round: 2,
+      metrics: { rollups: [], max_fan_out: 0 } as unknown as Parameters<
+        typeof renderSecondOrderAdversaryPrompt
+      >[0]["metrics"],
+      submissionPath: ".audit-tools/audit/x/systemic-challenge.json",
+      bundle,
+      evidencePaths: [".audit-tools/audit/x/p1.json"],
+    });
+
+    const fences = [...prompt.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(
+      (match) => match[1]!,
+    );
+    const example = fences.find((fence) =>
+      fence.includes('"category": "systemic_improvement"'),
+    );
+    expect(
+      example,
+      "the adversary prompt must carry a fenced JSON example of the submission",
+    ).toBeDefined();
+
+    // The gate the round is actually judged by — the bare schema is not enough,
+    // because the grounding rule is what the example's path has to satisfy.
+    const parsed = systemicChallengeSchema(
+      repoPathUniverse(repoManifest),
+    ).safeParse(JSON.parse(example!));
+    expect(
+      parsed.success ? null : parsed.error.issues,
+      "a submission copied verbatim from the adversary prompt's own example must " +
+        "satisfy the BOUND systemic challenge schema — obedience has to be SUFFICIENT",
+    ).toBeNull();
+
+    expect(
+      example,
+      "the example must cite a path this run's manifest holds, never an invented one",
+    ).toContain("src/scheduling/window.ts");
+
+    // Every severity the tool ranks must be named. Teaching three of five hides
+    // `critical` and `info` from the one producer whose findings drive the loop.
+    for (const member of FindingSeveritySchema.options) {
+      expect(
+        prompt,
+        `the prompt must name severity '${member}' — the validator accepts it, and a ` +
+          "prompt that omits it teaches a smaller contract than the tool enforces",
+      ).toContain(member);
+    }
+
+    // The alternation is a FIELD RULE. In a value it is a refused submission.
+    expect(
+      example,
+      "a closed enum's alternation must never appear as an example VALUE",
+    ).not.toMatch(/":\s*"[a-z_]+\|/u);
+
+    // BOTH fences, not only the one that teaches a finding. The host-forced-stop
+    // example carried a `/* ... */` elision, which is not JSON: the one document
+    // a host copies when it is ALREADY out of budget was the one it could not
+    // parse. Every fenced example in this prompt is a document a host writes.
+    for (const [index, fence] of fences.entries()) {
+      const valid = ((): unknown => {
+        try {
+          return JSON.parse(fence);
+        } catch {
+          return undefined;
+        }
+      })();
+      expect(
+        valid,
+        `fenced example ${index} must be parseable JSON — a host copies it verbatim`,
+      ).toBeDefined();
+      const gated = systemicChallengeSchema(
+        repoPathUniverse(repoManifest),
+      ).safeParse(valid);
+      expect(
+        gated.success ? null : gated.error.issues,
+        `fenced example ${index} must satisfy the submission contract it illustrates`,
+      ).toBeNull();
+    }
   });
 
   it("states the element shape of excluded_scope in the confirm-intent template", async () => {

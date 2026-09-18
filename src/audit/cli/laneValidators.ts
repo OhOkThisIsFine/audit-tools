@@ -27,6 +27,7 @@ import {
   SynthesisNarrativeSchema,
   SystemicChallengeSubmissionSchema,
   isRecord,
+  systemicChallengeSchema,
   type CharterProvenance,
   type SubmissionIssue,
 } from "audit-tools/shared";
@@ -227,7 +228,15 @@ export function laneSubmissionValidator(
 ): ((value: unknown) => SubmissionIssue | null) | null {
   const systemicRound = lane.startsWith(SYSTEMIC_CHALLENGE_LANE_PREFIX)
     && /^[0-9a-f]{12}$/.test(lane.slice(SYSTEMIC_CHALLENGE_LANE_PREFIX.length));
-  const schema = LANE_SUBMISSION_SCHEMAS[systemicRound ? GATE_LANES.systemic_challenge : lane];
+  if (systemicRound || lane === GATE_LANES.systemic_challenge) {
+    // The systemic lane's contract is bound to THIS run's repository: an
+    // improvement naming no real component is refused here, so the adversary
+    // reads the reason and resubmits. See `systemicChallengeSchema` — the
+    // alternative was a downstream deletion that fabricated a quiet round.
+    const bound = systemicChallengeSchema(context.repoFiles);
+    return (value) => schemaIssue(bound, value);
+  }
+  const schema = LANE_SUBMISSION_SCHEMAS[lane];
   if (schema) return (value) => schemaIssue(schema, value);
 
   // The kind decides only that this IS an extraction lane; every extraction

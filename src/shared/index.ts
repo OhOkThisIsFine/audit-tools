@@ -271,6 +271,7 @@ export type {
   SystemicChallengeSubmission,
 } from "./decompose/systemicChallenge.js";
 export { SystemicChallengeSubmissionSchema } from "./decompose/systemicChallenge.js";
+export { systemicChallengeSchema } from "./decompose/systemicChallenge.js";
 export type { InterpretedIntent } from "./intent/freeFormIntentInterpreter.js";
 export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 
@@ -1177,6 +1178,7 @@ export {
 export {
   groundDesignFinding,
   groundDesignFindings,
+  repoPathUniverse,
 } from "./validation/designFindingGrounding.js";
 
 // Validation: per-type contract construction sites. The walk is shared because

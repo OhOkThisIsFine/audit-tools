@@ -1,10 +1,16 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/shared/prompt-renders-its-contract.test.ts
 // Phase E — SECOND-ORDER ADVERSARY prompt (host_delegation).
 //
 // The adversary is a SEPARATE agent and receives the evidence the earlier
 // design-review contributors actually produced. Aggregate metrics remain leads,
 // never a substitute for charters, candidate dispositions, prior findings, and
 // direct repository/source verification.
+
+import {
+  FindingConfidenceSchema,
+  FindingSeveritySchema,
+  LENSES,
+} from "audit-tools/shared";
 
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
@@ -13,8 +19,11 @@ import {
   summarizeCoveredThemes,
   type SystemicCoveredThemes,
 } from "./coveredThemes.js";
-import { buildReviewFileMap, renderReviewFileMap } from "./reviewFileMap.js";
-import { SYSTEMIC_FINDING_ID_PREFIX } from "./systemicChallengeLoop.js";
+import {
+  buildReviewFileMap,
+  renderReviewFileMap,
+  type ReviewFileMap,
+} from "./reviewFileMap.js";
 
 function priorFindings(bundle: ArtifactBundle): Finding[] {
   const candidates = [
@@ -177,6 +186,25 @@ function adversaryIdentityLines(): string[] {
 }
 
 /**
+ * The repo-relative path the worked example cites.
+ *
+ * The example used to cite `<a real repo path>`, and the submission gate now
+ * REFUSES a finding whose `affected_files` names nothing the run's repository
+ * manifest holds. A placeholder is therefore not merely unhelpful — copied
+ * verbatim it is a refused round. So the example takes its path from the
+ * call-site map this prompt already prints, falling back to the manifest the map
+ * itself derives from: a reader who copies the example cites a file the reader
+ * can also see named above.
+ */
+function examplePath(bundle: ArtifactBundle, fileMap: ReviewFileMap): string {
+  return (
+    fileMap.anchors[0]?.path ??
+    bundle.repo_manifest?.files?.[0]?.path ??
+    "src/index.ts"
+  );
+}
+
+/**
  * Render one systemic challenge round. `evidencePaths` are also granted in the
  * host step's read set; the prompt names them so the adversary can inspect the
  * full perspective artifacts and persisted judge adjudication rather than
@@ -196,17 +224,18 @@ export function renderSecondOrderAdversaryPrompt(opts: {
   const bankedFindings = priorFindings(opts.bundle);
   const evidencePaths = [...new Set(opts.evidencePaths)].sort();
   const fileMap = buildReviewFileMap(opts.bundle);
+  const exampleFilePath = examplePath(opts.bundle, fileMap);
 
   return [
     "# Design review — systemic improvement-seeking challenge (second-order adversary)",
     "",
     `You are a SEPARATE second-order adversary. This is challenge round ${opts.round}.`,
-    `The audit already banked ${bankedFindings.length} distinct finding(s). Push HARDER for what those findings and their contributors missed.`,
+    `The audit already banked ${bankedFindings.length} distinct finding(s). Find what those findings and their contributors missed.`,
     "",
     ...adversaryIdentityLines(),
     "## Mandate — optimization / better-way, NOT defect-finding",
     "",
-    "Do NOT hunt ordinary bugs (other lenses own that). Re-interrogate the system with human-grade pressure for SUPERIOR ALTERNATIVES to things that currently work:",
+    "Do NOT hunt ordinary bugs (other lenses own that). Press for SUPERIOR ALTERNATIVES to things that currently work:",
     "- What is **redundant** — done more than once or more than needed?",
     "- What is **serial that could be parallel**?",
     "- What is **duplicated** across places that should share one mechanism?",
@@ -224,7 +253,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     ...renderReviewFileMap(fileMap),
     "## Stated-purpose / goal / delta projection",
     "",
-    "This projection comes from `charter_register.json`, not `docs_digest.json`. Treat triangulated telos as a lead, preserve disagreement, and inspect the full artifact when the projection raises a question:",
+    "Treat a triangulated purpose as a lead. Preserve disagreement, and inspect the full artifact when the projection raises a question:",
     ...renderCharterProjection(opts.bundle),
     "",
     "## Conceptual contributors, dispositions, and attribution",
@@ -260,45 +289,55 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Aggregate metrics (supporting evidence — necessary, NOT sufficient)",
     "",
-    "These abstract, language-neutral counts are leads only:",
+    "Language-neutral counts are leads only, never proof:",
     ...metricLines,
     "",
-    "## True lens (required)",
+    "## Lens and evidence (required)",
     "",
-    "Tag each finding with its TRUE lens — for example, test parallelization is `tests` or `performance`, and operational simplification is `operability`. Do not default everything to `architecture`.",
+    "- Tag each finding with the lens it genuinely belongs to. Test parallelization is `tests` or " +
+      "`performance`; operational simplification is `operability`. Do not default everything to " +
+      "`architecture`.",
+    "- Every finding needs at least one `evidence` entry: write down what your source verification " +
+      "actually found. A finding submitted without one is REFUSED.",
+    "- Cite SYMBOLS, not line numbers — a function, type, or exported name, with the file that " +
+      "holds it. A line number is wrong after the next edit; a symbol name survives. Aggregate " +
+      "counts are not evidence on their own; name the thing you read.",
     "",
-    "## Evidence (required, at least one entry per finding)",
+    "## Grounding — every improvement names a real file (required)",
     "",
-    "Write down what your source verification actually found. Every finding needs at least one `evidence` entry, and a finding submitted without one is REFUSED — not quietly downgraded. This is not bureaucracy: a finding with no evidence cannot be remediated later, so an unevidenced improvement is discarded downstream and your round's work is lost.",
+    "Each finding's `affected_files` must name at least one file THIS repository holds, written " +
+      "repo-relative and spelled as the call-site map above spells it. A submission carrying an " +
+      "improvement that names no such file is REFUSED as a whole, and the refusal names the " +
+      "finding: correct the path and resubmit. An improvement pointing at nothing cannot be " +
+      "verified, dispatched, or remediated.",
     "",
-    "Cite SYMBOLS, not line numbers — a function, type, or exported name, with the file that holds it. A line number is wrong after the next edit; a symbol name survives. Aggregate counts are not evidence on their own; name the thing you read.",
+    "## Closed field vocabularies",
+    "",
+    `- \`severity\`: ${FindingSeveritySchema.options.join(" | ")}`,
+    `- \`confidence\`: ${FindingConfidenceSchema.options.join(" | ")}`,
+    `- \`lens\`: ${LENSES.join(" | ")}`,
+    "",
+    "Each list is closed. A value outside it refuses the submission — write one member, never the " +
+      "list itself.",
     "",
     "## Loop-until-dry",
     "",
-    "The review is done only when consecutive rounds yield NOTHING NEW. If genuine source-backed " +
-      "pressure finds no new improvement this round, submit an empty `findings` array — that is a " +
-      "QUIET round, and quiet rounds are how this loop ends. Do NOT manufacture a finding to look " +
-      "productive, and do NOT withhold a real one to end the loop sooner: either turns the dry " +
-      "signal into noise, and the dry signal is the loop's only evidence that the work is done. " +
-      "Otherwise submit only new improvements, each anchored to at least one real component.",
+    "The review is done only when consecutive rounds yield NOTHING NEW. The tool also bounds this " +
+      "loop at a fixed number of rounds, so it ends whether or not it is dry.",
     "",
-    "The tool also bounds this loop at a fixed number of rounds, so the loop ends whether or not " +
-      "it is dry. Stopping early by hand is still yours to do, and it is RECORDED as yours:",
-    "",
-    "- **If this round reaches nothing new** — submit `\"findings\": []` and stop normally.",
-    "- **If you are stopping before the loop is dry** (budget spent, no further yield available, " +
-      "the remaining ground genuinely exhausted by judgment) — say so explicitly with a top-level " +
-      "`stop` object (see Output below) and state the reason. That ending is recorded as a " +
-      "HOST-FORCED stop, distinct from convergence. Never submit an empty `findings` array to " +
-      "mean \"I am stopping\": an empty array asserts the round found nothing new, and if that is " +
-      "not true you have corrupted the loop's only convergence evidence.",
+    "- **If this round found nothing new** — submit `\"findings\": []` and stop normally. Quiet " +
+      "rounds are how this loop ends. Do NOT manufacture a finding to look productive, and do NOT " +
+      "withhold a real one to end the loop sooner: either one turns the dry signal into noise, and " +
+      "that signal is the loop's only evidence that the work is done.",
+    "- **If you are stopping before the loop is dry** (budget spent, no further yield available) — " +
+      "say so with a top-level `stop` object (shape below) and state the reason. That ending is " +
+      "recorded as a HOST-FORCED stop, distinct from convergence. Never submit an empty `findings` " +
+      "array to mean \"I am stopping\": an empty array asserts the round found nothing new.",
     "",
     "## Finding ids",
     "",
-    "Finding ids are MINTED BY THE TOOL, not by you: whatever you write is namespaced into " +
-      `\`${SYSTEMIC_FINDING_ID_PREFIX}<round>-<your id>\`, so the same id in two different rounds ` +
-      "can never stand for two different findings. Supply a short, stable id of your own only to " +
-      "keep your own submission legible; it will be prefixed.",
+    "Supply a short, stable `id` of your own per finding. The tool namespaces it per round, so the " +
+      "same id in two rounds can never stand for two different improvements.",
     "",
     "## Output",
     "",
@@ -307,25 +346,25 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "```json",
     "{",
     '  "findings": [{',
-    '    "id": "<your short id; the tool prefixes it with the round>",',
+    '    "id": "<your short id>",',
     '    "title": "<the improvement>",',
     '    "category": "systemic_improvement",',
-    '    "severity": "low|medium|high",',
-    '    "confidence": "low|medium|high",',
-    '    "lens": "<the TRUE lens: tests|performance|operability|...>",',
+    '    "severity": "medium",',
+    '    "confidence": "high",',
+    '    "lens": "performance",',
     '    "summary": "<what to do, why it is better, which axis it departs on, and source verification>",',
     '    "evidence": ["<symbol you read, the file holding it, and what you found there>"],',
-    '    "affected_files": [{ "path": "<a real repo path>" }]',
+    `    "affected_files": [{ "path": ${JSON.stringify(exampleFilePath)} }]`,
     "  }]",
     "}",
     "```",
     "",
-    "To stop the loop early — include this ALONGSIDE any findings you are submitting, so the work " +
-      "you did deliver is still banked:",
+    "To stop the loop early, add the `stop` key to that same document. Keep in `findings` whatever " +
+      "this round did deliver — a stop never discards delivered work:",
     "",
     "```json",
     "{",
-    '  "findings": [ /* ... */ ],',
+    '  "findings": [],',
     '  "stop": { "forced": true, "reason": "<why the loop is being stopped before it is dry>" }',
     "}",
     "```",

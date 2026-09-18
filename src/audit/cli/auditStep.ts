@@ -12,7 +12,9 @@ import {
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
   ClarificationAnswersSubmissionSchema,
-  SystemicChallengeSubmissionSchema,
+  repoPathUniverse,
+  systemicChallengeSchema,
+  type SystemicChallengeSubmission,
 } from "audit-tools/shared";
 import {
   loadArtifactBundle,
@@ -309,9 +311,11 @@ async function executeAdvance(
       )
     : undefined;
   const systemicChallenge = options.systemicChallengePath
-    ? SystemicChallengeSubmissionSchema.parse(
+    ? (systemicChallengeSchema(
+        repoPathUniverse(bundle.repo_manifest),
+      ).parse(
         await readJsonFile<unknown>(options.systemicChallengePath),
-      )
+      ) as SystemicChallengeSubmission)
     : undefined;
   const result = await advanceAudit(bundle, {
     root: options.root,

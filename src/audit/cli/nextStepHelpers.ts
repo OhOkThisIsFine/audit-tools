@@ -43,6 +43,8 @@ import {
 import {
   auditReportPath,
   groundDesignFindings,
+  repoPathUniverse,
+  systemicChallengeSchema,
   laneAssetsDir,
   promotedAuditReportPath,
 } from "audit-tools/shared";
@@ -2301,7 +2303,12 @@ export async function handleSystemicChallengeBranch(
     {
       kind: "systemic_challenge",
       lane,
-      schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.systemic_challenge]!,
+      // Bound to THIS run's repository, not the bare shape: an improvement that
+      // names no real component is REFUSED here — the one boundary that
+      // quarantines the submission, appends the ledger event, and hands the
+      // adversary a reason it can act on. Accepting it and deleting it in the
+      // fold emptied the round, and an emptied round reads as a quiet one.
+      schema: systemicChallengeSchema(repoPathUniverse(bundle.repo_manifest)),
       apply: (_value, path, p, foldBundle, staged) =>
         runAuditStepUnlocked(
           {

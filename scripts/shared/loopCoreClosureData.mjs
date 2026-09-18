@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loop-core-closure.test.ts
 // Modules reachable ONLY through loop-core that are deliberately NOT in
 // `LOOP_CORE_PATTERNS`, each with a CHECKED claim and a reason.
 //
@@ -59,6 +60,7 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/audit/extractors/fsIntake.ts", claim: "reads-only", reason: "filesystem intake extraction; it reads the audited tree and the executor owns the write" },
   { module: "src/audit/extractors/ignore.ts", claim: "reads-only", reason: "ignore-rule parsing; it reads ignore files and returns rules" },
   { module: "src/audit/extractors/risk.ts", claim: "pure", reason: "risk-signal extraction over already-loaded inputs; the executor owns the write" },
+  { module: "src/audit/systemic/systemicChallengeLoop.ts", claim: "pure", reason: "the systemic challenge round FOLD — it grounds, namespaces, dedupes and blast-ranks one round's submitted improvements and returns the register; `systemicChallengeExecutor.ts` owns the write, the round counter and the convergence decision. It became closure-visible only when the adversary prompt stopped naming SYSTEMIC_FINDING_ID_PREFIX (owner review 2026-09-17, prompt 12: id-namespacing is tooling internals the reader cannot act on), which removed its one non-core importer" },
 
   // ── Remediate: contract-pipeline stages and phase bodies ──────────────────
   // Same argument on the remediate draw: `steps/contractPipeline.ts` and

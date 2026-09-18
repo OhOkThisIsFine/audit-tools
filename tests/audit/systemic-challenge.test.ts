@@ -16,7 +16,11 @@ import {
 // Through the published subpath, not the source path: importing the source
 // module gives this file a SECOND `Finding` identity and the two are unrelated
 // to the typechecker.
-import { SystemicChallengeSubmissionSchema } from "audit-tools/shared";
+import {
+  LENSES,
+  SystemicChallengeSubmissionSchema,
+  systemicChallengeSchema,
+} from "audit-tools/shared";
 import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
 import { mergeFindings } from "../../src/audit/reporting/mergeFindings.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
@@ -228,6 +232,23 @@ describe("foldChallengeRound", () => {
     expect(folded.findings).toHaveLength(0);
     expect(folded.new_finding_ids).toHaveLength(0);
     expect(folded.validation_issues.some((i) => i.includes("ungrounded"))).toBe(true);
+  });
+
+  // A DROP must never read as a quiet round. `dry` counted new findings alone, so
+  // a round whose every improvement was removed by the grounding pass produced the
+  // exact signal the loop treats as proof it is finished — two of them converge the
+  // register with `stop_reason: "converged"`. The adversary prompt spends two
+  // paragraphs forbidding the reader to report a dry round they did not have, while
+  // the fold manufactured one on their behalf.
+  test("a round the grounding pass emptied is NOT dry — a drop must not fabricate convergence", () => {
+    const folded = foldChallengeRound({
+      round: 1,
+      prior: [],
+      submitted: [mkFinding("x1", "tests", "Points at nothing", ["src/ghost.ts"])],
+      repoManifest,
+    });
+    expect(folded.new_finding_ids).toHaveLength(0);
+    expect(folded.dry).toBe(false);
   });
 
   test("blast radius refines from the goal DAG (reuses the Phase D primitive)", () => {
@@ -1003,7 +1024,15 @@ describe("renderSecondOrderAdversaryPrompt", () => {
     expect(prompt).toMatch(/at least one `evidence` entry/i);
     // Symbols, not line numbers: a line number is wrong after the next edit.
     expect(prompt).toMatch(/SYMBOLS, not line numbers/);
-    expect(prompt).toMatch(/true lens/i);
+    // The lens the finding genuinely belongs to, never a default `architecture`.
+    // "True lens" was the old heading, and pleading for a TRUE value taught the
+    // reader nothing it could act on; the vocabulary now renders from
+    // `LensSchema`, so the prompt cannot teach a smaller set than the tool
+    // accepts (owner review 2026-09-17, prompt 12).
+    expect(prompt).toMatch(/lens it genuinely belongs to/i);
+    for (const lens of LENSES) {
+      expect(prompt, `the prompt must name lens '${lens}'`).toContain(lens);
+    }
     // The metrics are flagged as supporting-but-not-sufficient evidence.
     expect(prompt).toMatch(/necessary, NOT sufficient/i);
     expect(prompt).toContain("/x/p1.json");
@@ -1271,6 +1300,66 @@ describe("SystemicChallengeSubmissionSchema evidence requirement", () => {
     const parsed = SystemicChallengeSubmissionSchema.safeParse({
       findings: [],
       stop: { forced: false, reason: "not really" },
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+describe("systemicChallengeSchema — the manifest-membership gate", () => {
+  // The gate the owner asked for: an improvement that names no real file is
+  // REFUSED at the lane boundary, with a message the reader can act on, instead
+  // of parsing cleanly and disappearing inside the fold's grounding pass.
+  const cited = (path: string) => ({
+    id: "SYS-1",
+    title: "Parallelize the serial verification legs",
+    category: "systemic_improvement",
+    severity: "medium",
+    confidence: "high",
+    lens: "performance",
+    summary: "The legs are independent and run serially.",
+    evidence: ["`runVerifyLegs` in scripts/verify.mjs awaits each leg in turn"],
+    affected_files: [{ path }],
+  });
+
+  const manifest = new Set(["scripts/verify.mjs"]);
+
+  test("refuses an improvement whose affected_files names no manifest member", () => {
+    const parsed = systemicChallengeSchema(manifest).safeParse({
+      findings: [cited("src/ghost.ts")],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  test("blames the field the reader must fix, not the submission as a whole", () => {
+    const parsed = systemicChallengeSchema(manifest).safeParse({
+      findings: [cited("src/ghost.ts")],
+    });
+    expect(parsed.success).toBe(false);
+    const paths = parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => issue.path.join("."));
+    expect(paths).toContain("findings.0.affected_files");
+  });
+
+  test("accepts the same improvement once it names a manifest member", () => {
+    const parsed = systemicChallengeSchema(manifest).safeParse({
+      findings: [cited("scripts/verify.mjs")],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("an EMPTY manifest grounds nothing — the bare schema still applies", () => {
+    // No manifest is a missing input, not proof the improvement is unreal.
+    // Refusing everything here would break the loop on the tool's own gap.
+    const parsed = systemicChallengeSchema(new Set<string>()).safeParse({
+      findings: [cited("src/ghost.ts")],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("an empty manifest still enforces the rest of the submission contract", () => {
+    const parsed = systemicChallengeSchema(new Set<string>()).safeParse({
+      findings: [{ ...cited("scripts/verify.mjs"), evidence: [] }],
     });
     expect(parsed.success).toBe(false);
   });

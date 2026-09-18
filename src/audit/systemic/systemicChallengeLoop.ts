@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/systemic-challenge.test.ts
 // Phase E — the SYSTEMIC IMPROVEMENT-SEEKING CHALLENGE LOOP (audit-side assembly).
 //
 // A second-order adversary (a SEPARATE agent) re-interrogates the whole system with
@@ -198,8 +199,10 @@ export function foldChallengeRound(params: {
   };
 
   const new_finding_ids: string[] = [];
+  let droppedCount = 0;
   for (const [index, finding] of grounded.entries()) {
     if (finding.grounding?.status === "ungrounded") {
+      droppedCount += 1;
       validation_issues.push(
         `Dropped ungrounded improvement "${finding.title}" (${finding.grounding.reason ?? "no component"}).`,
       );
@@ -254,7 +257,16 @@ export function foldChallengeRound(params: {
   // A round is DRY when it surfaced nothing the prior set lacked — an empty
   // submission is trivially dry. `new_finding_ids` already captures the newness.
   // Convergence over consecutive dry rounds is the executor's decision.
-  const dry = new_finding_ids.length === 0;
+  //
+  // A REMOVAL is not nothing, and must never read as one. Dryness counted new
+  // findings alone, so a round whose every improvement the grounding pass deleted
+  // produced the exact signal the executor treats as proof the loop is finished —
+  // two of them converge the register with `stop_reason: "converged"`, on work the
+  // adversary did deliver. The submission gate now refuses an ungrounded
+  // improvement outright (`systemicChallengeSchema`), so this is the backstop for
+  // any door that reaches the fold without it, and it is what makes the quiet
+  // signal a statement about what the reader FOUND rather than about what survived.
+  const dry = new_finding_ids.length === 0 && droppedCount === 0;
 
   return { findings, new_finding_ids, dry, validation_issues };
 }

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/systemic-challenge.test.ts, tests/shared/prompt-renders-its-contract.test.ts
 // Phase E — the systemic improvement-seeking challenge submission (shared schema).
 //
 // The second-order adversary runs as a SEPARATE agent (host_delegation); each
@@ -13,8 +14,10 @@
 // PURE schema module: no IO, no LLM. Kept in shared so both orchestrators (and the
 // audit executor + its tests) validate against one source and cannot drift.
 
-import { z } from "zod";
+import { z, type ZodTypeAny } from "zod";
 import { FindingSchema } from "../types/finding.js";
+import { groundDesignFinding } from "../validation/designFindingGrounding.js";
+import { normalizeRepoPath } from "../validation/findingGrounding.js";
 
 // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
@@ -102,3 +105,53 @@ export type SystemicChallengeStop = z.infer<typeof SystemicStopSchema>;
 export type SystemicChallengeSubmission = z.infer<
   typeof SystemicChallengeSubmissionSchema
 >;
+
+/**
+ * The submission contract WITH the grounding rule bound to this run's repository
+ * — the same argument `055d0804` settled for `evidence`, applied to the second
+ * field the lane could get wrong.
+ *
+ * `evidence` and `affected_files` were on OPPOSITE mechanisms. A finding with no
+ * evidence was REFUSED here, so the adversary read the reason and resubmitted. A
+ * finding whose `affected_files` named no real component was accepted here and
+ * DELETED downstream by `foldChallengeRound`, which recorded a line in the
+ * register's validation issues and nothing else. That deletion is worse than a
+ * lost finding: dryness counts new findings, so a round the grounding pass
+ * emptied became a QUIET round, and two quiet rounds converge the register with
+ * `stop_reason: "converged"`. The adversary prompt spends two paragraphs
+ * forbidding the reader to report a dry round they did not have; the tool
+ * manufactured one on their behalf (owner decision, 2026-09-17: a finding may be
+ * dropped only explicitly, and a reader whose finding lacks grounding must be
+ * TOLD to add it — the schema must not pass).
+ *
+ * It reuses {@link groundDesignFinding} rather than restating the membership
+ * test, so the gate and the fold can never disagree about what grounds. It also
+ * NORMALIZES the incoming set: `groundDesignFindings` builds its own set through
+ * `normalizeRepoPath` (which lowercases and forward-slashes), while the recovery
+ * verb's `repoFileUniverse` hands over the manifest paths verbatim — two sets
+ * that would differ on win32 and on any capitalized path.
+ *
+ * An EMPTY set skips the rule and returns the bare schema, mirroring
+ * `groundDesignFindings`: with no manifest nothing can be grounded, and refusing
+ * every finding on a missing input is a false red, not a guarantee.
+ */
+export function systemicChallengeSchema(
+  repoFiles: ReadonlySet<string>,
+): ZodTypeAny {
+  if (repoFiles.size === 0) return SystemicChallengeSubmissionSchema;
+  const known = new Set([...repoFiles].map(normalizeRepoPath));
+  return SystemicChallengeSubmissionSchema.superRefine((submission, ctx) => {
+    submission.findings.forEach((finding, index) => {
+      const grounding = groundDesignFinding(finding, known);
+      if (grounding.status !== "ungrounded") return;
+      ctx.addIssue({
+        code: "custom",
+        path: ["findings", index, "affected_files"],
+        message:
+          `improvement "${finding.title}" ${grounding.reason} — every improvement must name at ` +
+          "least one file this run's repository manifest holds, written as a repo-relative path " +
+          "exactly as the manifest spells it; add the grounding and resubmit",
+      });
+    });
+  });
+}

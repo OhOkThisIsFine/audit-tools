@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/design-review-item-contract.test.ts, tests/audit/s8-conceptual-review.test.ts, tests/audit/systemic-challenge.test.ts, tests/shared/prompt-renders-its-contract.test.ts
 /**
  * Grounding for design-review findings (S8 = S7 applied to the reviewer).
  *
@@ -109,11 +110,31 @@ export function groundDesignFindings(
     ...finding,
     evidence_lane: "design-review-lane" as const,
   }));
-  const files = repoManifest?.files ?? [];
-  if (files.length === 0) return marked;
-  const known = new Set(files.map((f) => normalizeRepoPath(f.path)));
+  const known = repoPathUniverse(repoManifest);
+  if (known.size === 0) return marked;
   return marked.map((finding) => ({
     ...finding,
     grounding: groundDesignFinding(finding, known),
   }));
+}
+
+/**
+ * The normalized path set a repo manifest describes — the ONE way a caller turns
+ * a manifest into the `knownPaths` {@link groundDesignFinding} tests against.
+ *
+ * It exists because a second caller built that set by hand and got it wrong:
+ * the recovery verb's own universe passed the manifest paths through verbatim,
+ * while this module has always run them through `normalizeRepoPath` (which
+ * lowercases and forward-slashes). Two sets, one membership test, and a
+ * disagreement visible only on win32 or on a capitalized path — so a submission
+ * one boundary accepted the next one could still call ungrounded.
+ */
+export function repoPathUniverse(
+  repoManifest: { files?: Array<{ path: string }> } | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    (repoManifest?.files ?? [])
+      .map((file) => normalizeRepoPath(file?.path ?? ""))
+      .filter((path) => path.length > 0),
+  );
 }
