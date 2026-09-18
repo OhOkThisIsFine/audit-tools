@@ -32,9 +32,14 @@
   finding candidate against its source slices; only `supported` records become findings. The
   delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
   discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
-  §"The estimator charters". The host prompts for lanes 11–20 in
-  `docs/reviews/prompt-refinement-2026-09-13.md` are still PROPOSED and wait for the owner's
-  one-at-a-time review.
+  §"The estimator charters".
+- **The host-prompt review reached prompt 15.** In
+  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 15 read APPROVED (owner,
+  2026-09-17); rows 16 through 20 are still PROPOSED and wait for the owner's one-at-a-time
+  review. Row 15 became a redesign, not a wording fix: a lens steward now receives every file its
+  lens was applied to, with per-file metrics, and the two file-count caps are deleted. The axis is
+  `coverage_policy` on `AuditTask`, and all three coverage-completeness gates read it. Design of
+  record: `docs/reviews/lens-steward-redesign-2026-09-17.md`.
 - **The findings contract records what the audit read.** `audit-findings.json` (contract
   `v1alpha2`) carries the required, nullable `audit_read` — the commit plus the paths that were
   uncommitted — and the remediator's close-phase evidence leg reads it from `state.plan`, so
@@ -44,11 +49,15 @@
 
 ## Immediate next
 
-**Nothing is pinned** (the generated roadmap below). Watch the next backlog triage sweep: the shared
-dispatch-lane reader now unwraps the CLI-lane reply envelope and polls a running job to its end, so
-its coverage stamp should no longer depend on which rung the relay picked.
+**Open prompt 16** — `clarify_remediation_target` in `src/remediate/steps/prompts.ts`, specs 16a
+through 16c. Render the live prompt text. Measure its defects against the schema that consumes the
+submission. Then ask the owner. Prompt 20 is loop-core: it needs `/design-check` plus a staged-tree
+attestation.
 
-**Live owner decision:** none.
+**Live owner decision:** whether to land this lap's branch
+`lap/2026-09-17-track-down-and-finish-the-interrupted-ho-hya3` to `main` now, or after prompts 16
+through 20. The branch has no upstream, so commits `751cf340` through `dedf1cd2` are invisible on
+`origin/main`.
 
 ## Deliberate state, not bugs
 
