@@ -514,15 +514,15 @@
       "final_gate_profile": "whole-repository-v1",
       "required_guarantees": [
         "all_eligible_host_work_emission",
-        "commit_evidence_validation",
         "dependency_and_phase_safety",
         "host_owned_execution_choices",
+        "landed_commit_validation",
         "not_configured_uses_approved_defaults",
         "prompt_binding_validation",
         "provider_neutral_work_items",
+        "required_test_rerun_validation",
         "self_contained_host_handoff",
         "strict_current_state_schema",
-        "test_evidence_validation",
         "unsupported_retired_state_rejection",
         "worktree_binding_validation"
       ],

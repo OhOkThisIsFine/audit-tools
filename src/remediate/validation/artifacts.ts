@@ -264,24 +264,18 @@ function validateHostSubmission(value: unknown, path: string): ValidationIssue[]
     }
     return issues;
   }
-  validateStringArray(value.changed_files, `${path}.changed_files`, issues);
-  if (Array.isArray(value.changed_files) && value.changed_files.length === 0) {
+  if (typeof value.landed_commit !== "string" || value.landed_commit.length === 0) {
     pushValidationIssue(
       issues,
-      `${path}.changed_files`,
-      `${path}.changed_files must be non-empty for a landed result.`,
+      `${path}.landed_commit`,
+      `${path}.landed_commit must be a non-empty string.`,
     );
   }
-  for (const key of ["commit_evidence", "worktree_evidence", "acceptance", "merge"]) {
-    if (!isRecord(value[key])) {
-      pushValidationIssue(issues, `${path}.${key}`, `${path}.${key} must be an object.`);
-    }
-  }
-  if (!Array.isArray(value.test_evidence)) {
+  if (!Array.isArray(value.obligation_evidence)) {
     pushValidationIssue(
       issues,
-      `${path}.test_evidence`,
-      `${path}.test_evidence must be an array.`,
+      `${path}.obligation_evidence`,
+      `${path}.obligation_evidence must be an array.`,
     );
   }
   return issues;

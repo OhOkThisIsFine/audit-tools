@@ -20,6 +20,7 @@ import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import {
   currentPromptPath,
   currentStepPath,
+  deriveResultId,
   writeStepContract,
 } from "audit-tools/shared";
 
@@ -116,34 +117,36 @@ async function landAcceptedWork(work: RunnableWork): Promise<void> {
   git(["commit", "-m", "land the work"]);
   const landed = git(["rev-parse", "HEAD"]);
 
+  // The fixture's landing descends from the run's own baseline.
+  expect(item.baseline_commit).toBe(state.host_handoff.baseline_commit);
+
   await mkdir(dirname(work.resultPath), { recursive: true });
   await writeFile(
     work.resultPath,
-    JSON.stringify({
-      contract_version: RESULT_VERSION,
-      result_id: `result-${item.id}`,
-      run_id: "RUN-1",
-      work_item_id: item.id,
-      prompt_sha256: item.prompt.sha256,
-      changed_files: [changedFile],
-      commit_evidence: {
-        before: state.host_handoff.baseline_commit,
-        after: landed,
-      },
-      test_evidence: item.required_tests.map((command) => ({
-        command,
-        status: "passed",
-      })),
-      obligation_evidence: [],
-      worktree_evidence: {
-        baseline_commit: item.baseline_commit,
-        changed_files: [changedFile],
-      },
-      acceptance: { status: "accepted" },
-      merge: { status: "merged" },
-    }),
+    JSON.stringify(landedResult("RUN-1", item, landed)),
     "utf8",
   );
+}
+
+/**
+ * THE landed-result builder for this file: the identity is derived from the
+ * work item (`deriveResultId` over its prompt digest), never hand-copied, and
+ * the host states only the landed commit and the obligation evidence.
+ */
+function landedResult(
+  runId: string,
+  item: { readonly id: string; readonly prompt: { readonly sha256: string } },
+  landedCommit: string,
+): Record<string, unknown> {
+  return {
+    contract_version: RESULT_VERSION,
+    result_id: deriveResultId(item.id, item.prompt.sha256),
+    run_id: runId,
+    work_item_id: item.id,
+    prompt_sha256: item.prompt.sha256,
+    landed_commit: landedCommit,
+    obligation_evidence: [],
+  };
 }
 
 describe("recover-ingest action branch", () => {
@@ -423,29 +426,7 @@ describe("recovery verbs invalidate the persisted step contract", () => {
     const payloadPath = join(REPO_DIR, "operator-fixed.json");
     await writeFile(
       payloadPath,
-      JSON.stringify({
-        contract_version: RESULT_VERSION,
-        result_id: `result-${item.id}`,
-        run_id: workload.run_id,
-        work_item_id: item.id,
-        prompt_sha256: item.prompt.sha256,
-        changed_files: item.allowed_files,
-        commit_evidence: {
-          before: item.baseline_commit,
-          after: git(["rev-parse", "HEAD"]),
-        },
-        test_evidence: item.required_tests.map((command) => ({
-          command,
-          status: "passed",
-        })),
-        obligation_evidence: [],
-        worktree_evidence: {
-          baseline_commit: item.baseline_commit,
-          changed_files: item.allowed_files,
-        },
-        acceptance: { status: "accepted" },
-        merge: { status: "merged" },
-      }),
+      JSON.stringify(landedResult(workload.run_id, item, git(["rev-parse", "HEAD"]))),
       "utf8",
     );
 

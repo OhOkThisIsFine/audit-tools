@@ -13,12 +13,19 @@ export const REMEDIATION_STEP_CONTRACT_VERSION =
 // v1alpha2 (obligation evidence-coverage floor): the work item BINDS the
 // block's contract obligation ids (`obligation_ids`), and the result must cite
 // evidence per bound obligation (`obligation_evidence`), coverage-validated at
-// ingestion. A v1alpha1 document refuses closed as stale — re-prepare.
+// ingestion.
+//
+// v1alpha3 (owner review of prompt 20, 2026-09-18): each worker prompt ends
+// with the result template the tool fills in, and the landed result carries
+// only `landed_commit` and `obligation_evidence` beside its identity — the tool
+// derives the changed files from git and reruns the required tests itself. A
+// persisted workload of an earlier version is reported `workload_stale`, and
+// the next prepare re-mints its digest under the same binding.
 export const REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION =
-  "remediation-host-workload/v1alpha2" as const;
+  "remediation-host-workload/v1alpha3" as const;
 
 export const REMEDIATION_HOST_RESULT_CONTRACT_VERSION =
-  "remediation-host-result/v1alpha2" as const;
+  "remediation-host-result/v1alpha3" as const;
 
 export const REMEDIATION_HOST_DECISION_CONTRACT_VERSION =
   "remediation-host-decision/v1alpha1" as const;

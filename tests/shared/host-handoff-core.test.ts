@@ -19,6 +19,7 @@ import {
 import {
   bindingIdentity,
   contentSha256,
+  deriveResultId,
   describeIdentityFailure,
   firstDuplicateIdentity,
   firstFailedIdentityComponent,
@@ -61,6 +62,8 @@ async function tempRoot(): Promise<string> {
 
 const SHA_A = "a".repeat(64);
 const SHA_B = "b".repeat(64);
+/** The result id the template in the bound prompt (wi-1, SHA_A) states. */
+const RES_1 = deriveResultId("wi-1", SHA_A);
 
 describe("resolveHostHandoffPaths", () => {
   it("resolves the flat layout deterministically", async () => {
@@ -237,7 +240,7 @@ describe("result identity binding", () => {
     expect(
       firstFailedIdentityComponent(
         {
-          result_id: "res-1",
+          result_id: RES_1,
           run_id: "run-1",
           work_item_id: "wi-1",
           prompt_sha256: SHA_A,
@@ -249,6 +252,9 @@ describe("result identity binding", () => {
 
   it.each([
     ["empty result_id", { result_id: "" }, "result_id"],
+    // Prompt 20: the result id is the one the template states, never one the
+    // worker chose.
+    ["a result_id other than the template's", { result_id: "res-1" }, "result_id"],
     ["wrong run", { run_id: "run-2" }, "run_id"],
     ["wrong work item", { work_item_id: "wi-9" }, "work_item_id"],
     ["wrong prompt digest", { prompt_sha256: SHA_B }, "prompt_sha256"],
@@ -256,7 +262,7 @@ describe("result identity binding", () => {
     expect(
       firstFailedIdentityComponent(
         {
-          result_id: "res-1",
+          result_id: RES_1,
           run_id: "run-1",
           work_item_id: "wi-1",
           prompt_sha256: SHA_A,
@@ -297,25 +303,25 @@ describe("result identity binding", () => {
     // Drop the first failure and the next in the order surfaces, not the last.
     expect(
       firstFailedIdentityComponent(
-        { result_id: "res-1", run_id: "run-2", work_item_id: "wi-9", prompt_sha256: SHA_B },
+        { result_id: RES_1, run_id: "run-2", work_item_id: "wi-9", prompt_sha256: SHA_B },
         bound,
       ),
     ).toBe("run_id");
     expect(
       firstFailedIdentityComponent(
-        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-9", prompt_sha256: SHA_B },
+        { result_id: RES_1, run_id: "run-1", work_item_id: "wi-9", prompt_sha256: SHA_B },
         bound,
       ),
     ).toBe("work_item_id");
     expect(
       firstFailedIdentityComponent(
-        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_B },
+        { result_id: RES_1, run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_B },
         bound,
       ),
     ).toBe("prompt_sha256");
     expect(
       firstFailedIdentityComponent(
-        { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
+        { result_id: RES_1, run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
         bound,
       ),
     ).toBeNull();
@@ -341,10 +347,10 @@ describe("result identity binding", () => {
 
   it("renders one diagnostic per broken submission, keyed to the first failure", () => {
     for (const value of [
-      { result_id: "res-1", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
+      { result_id: RES_1, run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
       { result_id: "", run_id: "run-1", work_item_id: "wi-1", prompt_sha256: SHA_A },
-      { result_id: "res-1", run_id: "run-2", work_item_id: "wi-1", prompt_sha256: SHA_A },
-      { result_id: "res-1" },
+      { result_id: RES_1, run_id: "run-2", work_item_id: "wi-1", prompt_sha256: SHA_A },
+      { result_id: RES_1 },
       {},
     ]) {
       const component = firstFailedIdentityComponent(value, bound);
@@ -572,13 +578,9 @@ describe("F6: both draws render the core's identity diagnostic", () => {
 
   it("the audit draw no longer carries an unreachable per-component branch", () => {
     const source = readFileSync(AUDIT, "utf8");
-    // `result_id` cannot be the FIRST failure on the audit draw: the envelope
-    // check above the walk already requires a non-empty string, so a branch for
-    // it is dead — and a dead branch in the vocabulary is how the two draws
-    // drifted apart in the first place.
-    expect(source).not.toContain('identityFailure === "result_id"');
-    // Neither draw names a component in a conditional any more; the core's
-    // description is the only place a component's name is rendered.
+    // Neither draw names a component in a conditional; the core's description
+    // is the only place a component's name is rendered. A per-component branch
+    // in one draw is how the two draws drifted apart in the first place.
     for (const component of IDENTITY_COMPONENTS) {
       expect(source, `audit branch for '${component}'`).not.toContain(
         `identityFailure === "${component}"`,

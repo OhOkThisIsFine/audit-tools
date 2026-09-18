@@ -291,38 +291,13 @@
       ],
       "positive_event": "bound-remediation-result-validated",
       "payload": {
-        "contract_version": "remediation-host-result/v1alpha2",
-        "result_id": "remediation-result-001",
+        "contract_version": "remediation-host-result/v1alpha3",
+        "result_id": "remediation-item-001-bbbbbbbbbbbb",
+        "run_id": "remediation-run-fixture",
         "work_item_id": "remediation-item-001",
         "prompt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "changed_files": [
-          "src/a.ts",
-          "tests/a.test.ts"
-        ],
-        "commit_evidence": {
-          "before": "1111111111111111111111111111111111111111",
-          "after": "2222222222222222222222222222222222222222"
-        },
-        "test_evidence": [
-          {
-            "command": "npx vitest run tests/a.test.ts",
-            "status": "passed"
-          }
-        ],
-        "obligation_evidence": [],
-        "worktree_evidence": {
-          "baseline_commit": "1111111111111111111111111111111111111111",
-          "changed_files": [
-            "src/a.ts",
-            "tests/a.test.ts"
-          ]
-        },
-        "acceptance": {
-          "status": "accepted"
-        },
-        "merge": {
-          "status": "merged"
-        }
+        "landed_commit": "2222222222222222222222222222222222222222",
+        "obligation_evidence": []
       }
     },
     {
@@ -332,7 +307,7 @@
       ],
       "positive_event": "complete-remediation-frontier-emitted",
       "payload": {
-        "contract_version": "remediation-host-workload/v1alpha2",
+        "contract_version": "remediation-host-workload/v1alpha3",
         "run_id": "remediation-run-fixture",
         "work_items": [
           {

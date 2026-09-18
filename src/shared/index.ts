@@ -562,6 +562,7 @@ export type {
 } from "./submission/submissionClassifier.js";
 export {
   SUBMISSION_ISSUE_CODES,
+  WORKLOAD_ISSUE_CODES,
   classifyRead,
   readSubmissionDocument,
 } from "./submission/submissionClassifier.js";
@@ -619,6 +620,15 @@ export type {
   SubmissionScanOutcome,
 } from "./submission/submissionScan.js";
 export { scanBoundSubmission } from "./submission/submissionScan.js";
+// THE ingest-report renderer both draws render through, each with its own
+// remedy map.
+export { renderIngestReportLines } from "./submission/ingestReport.js";
+// THE worker-prompt binding both draws share: body digest + tool-filled
+// result template.
+export {
+  bindWorkerPrompt,
+  workerPromptBindingHolds,
+} from "./submission/workerPromptBinding.js";
 export type {
   HostResultOutcomes,
   IssueRemedy,
@@ -635,6 +645,7 @@ export {
   enrichMissingSubmissionIssues,
   isMissingObservation,
   SUBMISSION_ISSUE_REMEDY,
+  WORKLOAD_ISSUE_REMEDY,
   WORK_ITEM_OUTCOMES,
   eventSignature,
   readSubmissionIngestHistory,
@@ -656,6 +667,7 @@ export { normalizeRepoRelPath, toPosixPath } from "./paths.js";
 export {
   bindingIdentity,
   contentSha256,
+  deriveResultId,
   describeIdentityFailure,
   firstDuplicateIdentity,
   firstFailedIdentityComponent,

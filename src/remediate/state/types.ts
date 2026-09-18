@@ -389,10 +389,10 @@ export interface RemediationItemState {
   host_result_evidence?: string[];
   /**
    * WHAT LANDED for this item, persisted at acceptance — the corroborated
-   * worktree outcome, not the host's claim. `commit_evidence.after` was verified
-   * reachable from HEAD and its diff-tree was verified to equal
-   * {@link host_landed_files} and to lie inside the item's prompt-bound write
-   * scope, so this is ground truth by the time it is written.
+   * worktree outcome, not the host's claim. The result's `landed_commit` was
+   * verified reachable from HEAD, and its diff-tree — persisted as
+   * {@link host_landed_files} — was verified to lie inside the item's
+   * prompt-bound write scope, so this is ground truth by the time it is written.
    *
    * It is persisted PER ITEM so a later boundary — the outcomes contract, the
    * report — can attribute the landing to this item without re-running the

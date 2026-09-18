@@ -169,7 +169,7 @@ describe(FAILURE_SIGNATURE, () => {
       published.resultPath,
       JSON.stringify({
         contract_version: "audit-host-result/v1alpha1",
-        result_id: "result-audit-task-a",
+        result_id: `${published.item.id}-${published.item.prompt.sha256.slice(0, 12)}`,
         run_id: published.runId,
         work_item_id: published.item.id,
         prompt_sha256: published.item.prompt.sha256,
@@ -325,7 +325,7 @@ describe(FAILURE_SIGNATURE, () => {
       published.resultPath,
       JSON.stringify({
         contract_version: "audit-host-result/v1alpha1",
-        result_id: "result-audit-task-a",
+        result_id: `${published.item.id}-${published.item.prompt.sha256.slice(0, 12)}`,
         run_id: published.runId,
         work_item_id: published.item.id,
         prompt_sha256: published.item.prompt.sha256,
@@ -372,7 +372,7 @@ describe(FAILURE_SIGNATURE, () => {
       published.resultPath,
       JSON.stringify({
         contract_version: "audit-host-result/v1alpha1",
-        result_id: "result-audit-task-a-2",
+        result_id: `${published.item.id}-${published.item.prompt.sha256.slice(0, 12)}`,
         run_id: published.runId,
         work_item_id: published.item.id,
         prompt_sha256: published.item.prompt.sha256,
@@ -426,7 +426,7 @@ describe(FAILURE_SIGNATURE, () => {
         published.resultPath,
         JSON.stringify({
           contract_version: "audit-host-result/v1alpha1",
-          result_id: `result-audit-task-a-${JSON.stringify(affectedFiles)}`,
+          result_id: `${published.item.id}-${published.item.prompt.sha256.slice(0, 12)}`,
           run_id: published.runId,
           work_item_id: published.item.id,
           prompt_sha256: published.item.prompt.sha256,

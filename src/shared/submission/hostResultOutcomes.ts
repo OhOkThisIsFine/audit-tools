@@ -21,6 +21,7 @@ import {
 import type {
   SubmissionIssue,
   SubmissionIssueCode,
+  WorkloadIssueCode,
 } from "./submissionClassifier.js";
 
 /** The accepted/rejected pair supplied by either host-result boundary. */
@@ -65,17 +66,22 @@ export async function readTrailingSubmissionRefusals(
  * WHAT THE READER OF A REFUSAL MUST DO ABOUT IT — the one thing a rendered
  * ingest report is for.
  *
- * Three answers, because there are three:
+ * Four answers, because there are four:
  *
- *  - `wait`   — nothing was written yet. The remedy is patience.
- *  - `repair` — something WAS written and refused. The remedy is a corrected
- *               result at the bound path.
- *  - `none`   — the submission is settled and no work remains. The item is
- *               finished (a concurrent ingest accepted it), or the refusal is
- *               about the run's own persisted documents rather than about any
- *               result, and the tool repairs it itself.
+ *  - `wait`     — nothing was written yet. The remedy is patience.
+ *  - `repair`   — something WAS written and refused. The remedy is a corrected
+ *                 result at the bound path.
+ *  - `none`     — the submission is settled and no work remains. The item is
+ *                 finished (a concurrent ingest accepted it), or the refusal is
+ *                 about the run's own persisted documents rather than about any
+ *                 result, and the tool repairs it itself.
+ *  - `operator` — no worker can fix it: the plan, the run's recorded state or
+ *                 the tool's own limit is at fault. The remedy is to stop the
+ *                 item and report it (owner review of prompt 20, 2026-09-18 —
+ *                 before this, such a refusal rendered as a repair the worker
+ *                 could never make).
  *
- * The third answer is the one that was missing. `duplicate_submission_id` and
+ * The third answer is the one that was missing first. `duplicate_submission_id` and
  * the audit draw's `workload_stale` were rendered beside the repairable
  * refusals, under one paragraph telling the reader to repair the result and
  * write it again — so a reader who obeyed went looking for a work item the
@@ -91,7 +97,7 @@ export async function readTrailingSubmissionRefusals(
  * The code is authoritative, never the message: a draw's prose may be reworded
  * at any time and the answer must not move with it.
  */
-export type IssueRemedy = "wait" | "repair" | "none";
+export type IssueRemedy = "wait" | "repair" | "none" | "operator";
 
 /**
  * The remedy of every SHARED submission code. A draw that adds its own codes
@@ -110,6 +116,18 @@ export const SUBMISSION_ISSUE_REMEDY: Readonly<
   // The work item was ALREADY ACCEPTED by a concurrent ingest of this run, so
   // it is not pending, it is not republished, and there is nothing to write.
   duplicate_submission_id: "none",
+};
+
+/**
+ * The remedy of every shared WORKLOAD code — spread beside
+ * {@link SUBMISSION_ISSUE_REMEDY} by each draw.
+ */
+export const WORKLOAD_ISSUE_REMEDY: Readonly<Record<WorkloadIssueCode, IssueRemedy>> = {
+  // Not about any one result: the run's own persisted workload carries a
+  // contract version this build no longer mints. The ingest returns it so the
+  // same call walks on to the re-prepare, which rewrites the document. Nothing
+  // is asked of the host.
+  workload_stale: "none",
 };
 
 /**

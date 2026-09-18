@@ -25,7 +25,7 @@ import {
   RemediationHostHandoffRecordSchema,
   type RemediationHostHandoffRecord,
 } from "../../src/remediate/state/types.js";
-import { readSubmissionLedger } from "audit-tools/shared";
+import { deriveResultId, readSubmissionLedger } from "audit-tools/shared";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
 const cleanupRoots: string[] = [];
@@ -386,31 +386,25 @@ async function persistBoundState(
   );
 }
 
+/**
+ * THE landed-result builder for this file (v1alpha3): the identity is DERIVED
+ * from the work item — `deriveResultId` over its prompt digest — and the host
+ * states only the landed commit and the obligation evidence. The changed files
+ * are the tool's to derive from git, and the tests the tool's to rerun.
+ */
 function resultFor(
-  value: Fixture,
-  after: string,
-  changedFiles: string[] = ["src/a.ts"],
+  value: Pick<Fixture, "runId" | "item">,
+  landedCommit: string,
   item: RemediationHostWorkItem = value.item,
 ): Record<string, unknown> {
   return {
     contract_version: RESULT_VERSION,
-    result_id: `result-${item.id}-${after.slice(0, 12)}`,
+    result_id: deriveResultId(item.id, item.prompt.sha256),
     run_id: value.runId,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
-    changed_files: changedFiles,
-    commit_evidence: { before: value.baseline, after },
-    test_evidence: item.required_tests.map((command) => ({
-      command,
-      status: "passed",
-    })),
+    landed_commit: landedCommit,
     obligation_evidence: [],
-    worktree_evidence: {
-      baseline_commit: value.baseline,
-      changed_files: changedFiles,
-    },
-    acceptance: { status: "accepted" },
-    merge: { status: "merged" },
   };
 }
 
@@ -421,12 +415,28 @@ function decisionFor(
 ): Record<string, unknown> {
   return {
     contract_version: "remediation-host-decision/v1alpha1",
-    result_id: `decision-${item.id}`,
+    // Decisions pass the same identity walk: the id is the tool's derivation.
+    result_id: deriveResultId(item.id, item.prompt.sha256),
     run_id: value.runId,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
     outcome,
   };
+}
+
+/**
+ * The write-scope refusal, pinned by code, check AND the file it names: the
+ * corroboration message lists the git-derived files outside `allowed_files`,
+ * so a refusal for some other reason cannot pass for this one.
+ */
+function expectWriteScopeRefusal(
+  issues: readonly { code: string; check?: string; message: string }[],
+  outOfScopeFile: string,
+): void {
+  const refusal = issues.find((issue) => issue.code === "changed_files_mismatch");
+  expect(refusal, "the write-scope refusal must be raised").toBeDefined();
+  expect(refusal!.check).toBe("write_scope");
+  expect(refusal!.message).toContain(outOfScopeFile);
 }
 
 async function writeResult(
@@ -816,7 +826,7 @@ describe("remediation host handoff repository corroboration", () => {
     const landedB = await landB(value);
     await writeResult(
       value,
-      resultFor(value, landedB, ["src/b.ts"], value.workItems[1]!),
+      resultFor(value, landedB, value.workItems[1]!),
       value.workItems[1]!,
     );
     const second = await ingestRemediationHostResults({
@@ -934,19 +944,10 @@ describe("remediation host handoff repository corroboration", () => {
       const state = legacyBoundState(value);
       await persistBoundState(value, state);
       const after = await landA(value);
-      const result = resultFor(value, after);
-      const binding = await remediationSubmissionBinding({
-        root: value.root,
-        artifactsDir: value.artifactsDir,
-        runId: value.runId,
-        workItemId: value.item.id,
-      });
-      expect(binding).not.toBeNull();
-      expect(binding!.validate(result)).toMatchObject({
-        code: "submission_contract_invalid",
-      });
-
-      await writeResult(value, result);
+      // v1alpha3: the host states no file list, so the write scope is judged on
+      // the files git says the landed commit changed — at corroboration, not
+      // at the shape gate. The unrecovered exact scope `src` refuses there.
+      await writeResult(value, resultFor(value, after));
       const ingested = await ingestRemediationHostResults({
         root: value.root,
         artifactsDir: value.artifactsDir,
@@ -956,6 +957,7 @@ describe("remediation host handoff repository corroboration", () => {
       expect(ingested).not.toBe("unsupported_retired_state");
       if (ingested === "unsupported_retired_state") continue;
       expect(ingested.accepted_count).toBe(0);
+      expectWriteScopeRefusal(ingested.issues, "src/a.ts");
     }
   });
 
@@ -971,19 +973,8 @@ describe("remediation host handoff repository corroboration", () => {
     const state = legacyBoundState(value);
     await persistBoundState(value, state);
     const after = await landA(value);
-    const result = resultFor(value, after);
-    const binding = await remediationSubmissionBinding({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      workItemId: value.item.id,
-    });
-    expect(binding).not.toBeNull();
-    expect(binding!.validate(result)).toMatchObject({
-      code: "submission_contract_invalid",
-    });
-
-    await writeResult(value, result);
+    // Judged at corroboration on the git-derived file set (see above).
+    await writeResult(value, resultFor(value, after));
     const ingested = await ingestRemediationHostResults({
       root: value.root,
       artifactsDir: value.artifactsDir,
@@ -993,6 +984,10 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested).not.toBe("unsupported_retired_state");
     if (ingested === "unsupported_retired_state") return;
     expect(ingested.accepted_count).toBe(0);
+    expectWriteScopeRefusal(
+      ingested.issues.filter((issue) => issue.work_item_id === value.item.id),
+      "src/a.ts",
+    );
   });
 
   it("does not recover legacy directory scope from an unbound persisted state", async () => {
@@ -1002,15 +997,15 @@ describe("remediation host handoff repository corroboration", () => {
         { path: "src/", hash_at_plan_time: "d".repeat(64) },
       ],
     });
-    await persistBoundState(
-      value,
-      legacyBoundState(value, {
-        ...value.handoff.handoff_record,
-        workload_sha256: "e".repeat(64),
-      }),
-    );
+    const unbound = legacyBoundState(value, {
+      ...value.handoff.handoff_record,
+      workload_sha256: "e".repeat(64),
+    });
+    await persistBoundState(value, unbound);
     const after = await landA(value);
     const result = resultFor(value, after);
+    // v1alpha3: the shape gate the recovery verb draws from is scope-blind (the
+    // host states no file list), so it passes a well-shaped result...
     const binding = await remediationSubmissionBinding({
       root: value.root,
       artifactsDir: value.artifactsDir,
@@ -1018,9 +1013,20 @@ describe("remediation host handoff repository corroboration", () => {
       workItemId: value.item.id,
     });
     expect(binding).not.toBeNull();
-    expect(binding!.validate(result)).toMatchObject({
-      code: "submission_contract_invalid",
+    expect(binding!.validate(result)).toBeNull();
+    // ...and the unbound state still cannot widen the exact scope into an
+    // acceptance: the ingest under it accepts nothing.
+    await writeResult(value, result);
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: unbound,
     });
+    expect(ingested).not.toBe("unsupported_retired_state");
+    if (ingested === "unsupported_retired_state") return;
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.state.items.F1!.status).toBe("pending");
   });
 
   it("marks new scope semantics and never reinterprets a future exact scope", async () => {
@@ -1037,20 +1043,9 @@ describe("remediation host handoff repository corroboration", () => {
     const state = boundState(value);
     await persistBoundState(value, state);
     const after = await landA(value);
-    const result = resultFor(value, after);
-
-    const binding = await remediationSubmissionBinding({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      workItemId: value.item.id,
-    });
-    expect(binding).not.toBeNull();
-    expect(binding!.validate(result)).toMatchObject({
-      code: "submission_contract_invalid",
-    });
-
-    await writeResult(value, result);
+    // Judged at corroboration on the git-derived file set: under v1alpha2
+    // semantics the exact `src` is a FILE, never reinterpreted as a directory.
+    await writeResult(value, resultFor(value, after));
     const ingested = await ingestRemediationHostResults({
       root: value.root,
       artifactsDir: value.artifactsDir,
@@ -1060,42 +1055,46 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested).not.toBe("unsupported_retired_state");
     if (ingested === "unsupported_retired_state") return;
     expect(ingested.accepted_count).toBe(0);
+    expectWriteScopeRefusal(ingested.issues, "src/a.ts");
   });
 
-  it("keeps directory write scopes component-aware and result paths normalized", async () => {
+  it("keeps directory write scopes component-aware", async () => {
+    // v1alpha3: the landed files are git's, so they are always normalized
+    // repo-relative paths; what remains to pin is that `src/` authorizes the
+    // `src` COMPONENT, not every path that merely starts with those letters.
     const directory = await fixture({ allowedFiles: ["src/"] });
-    const directoryBinding = await remediationSubmissionBinding({
+    await mkdir(join(directory.root, "src2"), { recursive: true });
+    await writeFile(join(directory.root, "src2", "a.ts"), "export const sibling = 1;\n");
+    git(directory.root, ["add", "src2/a.ts"]);
+    git(directory.root, ["commit", "-m", "land outside the src component"]);
+    await writeResult(
+      directory,
+      resultFor(directory, git(directory.root, ["rev-parse", "HEAD"])),
+    );
+    const directoryIngest = await ingestRemediationHostResults({
       root: directory.root,
       artifactsDir: directory.artifactsDir,
       runId: directory.runId,
-      workItemId: directory.item.id,
+      state: boundState(directory),
     });
-    expect(directoryBinding).not.toBeNull();
-    for (const candidate of [
-      "src2/a.ts",
-      "src/../src/a.ts",
-      "src\\a.ts",
-    ]) {
-      expect(
-        directoryBinding!.validate(
-          resultFor(directory, "f".repeat(40), [candidate]),
-        ),
-      ).toMatchObject({ code: "submission_contract_invalid" });
-    }
+    expect(directoryIngest).not.toBe("unsupported_retired_state");
+    if (directoryIngest === "unsupported_retired_state") return;
+    expect(directoryIngest.accepted_count).toBe(0);
+    expectWriteScopeRefusal(directoryIngest.issues, "src2/a.ts");
 
+    // An exact entry with no trailing "/" authorizes that one path only.
     const exact = await fixture({ allowedFiles: ["src"] });
-    const exactBinding = await remediationSubmissionBinding({
+    await writeResult(exact, resultFor(exact, await landA(exact)));
+    const exactIngest = await ingestRemediationHostResults({
       root: exact.root,
       artifactsDir: exact.artifactsDir,
       runId: exact.runId,
-      workItemId: exact.item.id,
+      state: boundState(exact),
     });
-    expect(exactBinding).not.toBeNull();
-    expect(
-      exactBinding!.validate(
-        resultFor(exact, "f".repeat(40), ["src/a.ts"]),
-      ),
-    ).toMatchObject({ code: "submission_contract_invalid" });
+    expect(exactIngest).not.toBe("unsupported_retired_state");
+    if (exactIngest === "unsupported_retired_state") return;
+    expect(exactIngest.accepted_count).toBe(0);
+    expectWriteScopeRefusal(exactIngest.issues, "src/a.ts");
   });
 
   it("rejects fabricated and unlanded commit evidence", async () => {
@@ -1110,6 +1109,9 @@ describe("remediation host handoff repository corroboration", () => {
     expect(missing).not.toBe("unsupported_retired_state");
     if (missing === "unsupported_retired_state") return;
     expect(missing.issues.map((issue) => issue.code)).toContain("commit_missing");
+    expect(
+      missing.issues.find((issue) => issue.code === "commit_missing")!.check,
+    ).toBe("landed_commit");
 
     const unlanded = await fixture();
     git(unlanded.root, ["checkout", "-b", "side"]);
@@ -1210,10 +1212,12 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested.state_changed).toBe(false);
   });
 
-  it("rejects reported files that differ from the landed commit and files dirty at run start", async () => {
-    const mismatch = await fixture({ allowedFiles: ["src/a.ts", "src/b.ts"] });
+  it("rejects a landed commit that changes files outside allowed_files, and files dirty at run start", async () => {
+    // v1alpha3: no host-reported file list exists to disagree with git, so the
+    // mismatch property is the git-derived change set against the bound scope.
+    const mismatch = await fixture({ allowedFiles: ["src/b.ts"] });
     const after = await landA(mismatch);
-    await writeResult(mismatch, resultFor(mismatch, after, ["src/b.ts"]));
+    await writeResult(mismatch, resultFor(mismatch, after));
     const mismatched = await ingestRemediationHostResults({
       root: mismatch.root,
       artifactsDir: mismatch.artifactsDir,
@@ -1222,9 +1226,8 @@ describe("remediation host handoff repository corroboration", () => {
     });
     expect(mismatched).not.toBe("unsupported_retired_state");
     if (mismatched === "unsupported_retired_state") return;
-    expect(mismatched.issues.map((issue) => issue.code)).toContain(
-      "changed_files_mismatch",
-    );
+    expect(mismatched.accepted_count).toBe(0);
+    expectWriteScopeRefusal(mismatched.issues, "src/a.ts");
 
     const dirty = await fixture({ runStartDirty: ["src/a.ts"] });
     const dirtyAfter = await landA(dirty);
@@ -1240,6 +1243,9 @@ describe("remediation host handoff repository corroboration", () => {
     expect(dirtyRejected.issues.map((issue) => issue.code)).toContain(
       "run_start_dirty_overlap",
     );
+    expect(
+      dirtyRejected.issues.find((issue) => issue.code === "run_start_dirty_overlap")!.check,
+    ).toBe("run_start_dirt");
   });
 
   it("reruns required tests and reports malformed result JSON explicitly", async () => {
@@ -1259,6 +1265,9 @@ describe("remediation host handoff repository corroboration", () => {
     expect(failed.issues.map((issue) => issue.code)).toContain(
       "required_test_failed",
     );
+    expect(
+      failed.issues.find((issue) => issue.code === "required_test_failed")!.check,
+    ).toBe("required_tests");
     expect(failed.state.items.F1!.status).toBe("pending");
 
     const malformed = await fixture();
@@ -1492,7 +1501,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(noChange.allowed_files).toEqual(["src/b.ts"]);
 
     const after = await landA(shared);
-    await writeResult(shared, resultFor(shared, after, ["src/a.ts"], landing), landing);
+    await writeResult(shared, resultFor(shared, after, landing), landing);
     await writeResult(
       shared,
       decisionFor(
@@ -1607,9 +1616,13 @@ describe("remediation host handoff repository corroboration", () => {
     });
     expect(normal).not.toBe("unsupported_retired_state");
     if (normal === "unsupported_retired_state") return;
+    // A TRULY orphaned baseline is a fault in the run, not the work: its own
+    // code, naming the recovery verb as the repair.
     expect(normal.issues.map((issue) => issue.code)).toEqual([
-      "baseline_not_ancestor",
+      "baseline_orphaned",
     ]);
+    expect(normal.issues[0]!.check).toBe("landed_commit");
+    expect(normal.issues[0]!.message).toContain("recover-ingest");
     expect(normal.accepted_count).toBe(0);
     expect(normal.state.items.F1!.status).toBe("pending");
 
@@ -1852,7 +1865,7 @@ describe("remediation host handoff repository corroboration", () => {
     await writeResult(normal, resultFor(normal, normalA));
     await writeResult(
       normal,
-      resultFor(normal, normalB, ["src/b.ts"], normal.workItems[1]!),
+      resultFor(normal, normalB, normal.workItems[1]!),
       normal.workItems[1]!,
     );
     const ingested = await ingestRemediationHostResults({
@@ -1876,7 +1889,7 @@ describe("remediation host handoff repository corroboration", () => {
     await writeResult(recovery, resultFor(recovery, recoveryA));
     await writeResult(
       recovery,
-      resultFor(recovery, recoveryB, ["src/b.ts"], recovery.workItems[1]!),
+      resultFor(recovery, recoveryB, recovery.workItems[1]!),
       recovery.workItems[1]!,
     );
     const recovered = await ingestRemediationHostResults({
@@ -2135,7 +2148,7 @@ describe("remediation host handoff repository corroboration", () => {
     await writeResult(value, resultFor(value, landedA));
     await writeResult(
       value,
-      resultFor(value, landedB, ["src/b.ts"], value.workItems[1]!),
+      resultFor(value, landedB, value.workItems[1]!),
       value.workItems[1]!,
     );
     const { contract_version: _contractVersion, ...persistable } =
@@ -2245,7 +2258,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.accepted_count).toBe(0);
     expect(refused.state.items.F1!.status).toBe("pending");
     expect(refused.issues.map((issue) => issue.code)).toEqual([
-      "submission_contract_invalid",
+      "work_item_not_eligible",
     ]);
     expect(refused.issues[0]!.message).toContain(
       "no longer dependency/phase eligible",
@@ -2257,7 +2270,7 @@ describe("remediation host handoff repository corroboration", () => {
       submission_id: value.item.id,
       lane: value.item.id,
       kind: "rejected",
-      issue_code: "submission_contract_invalid",
+      issue_code: "work_item_not_eligible",
     });
   });
 
@@ -2321,26 +2334,7 @@ describe("remediation host handoff repository corroboration", () => {
     await mkdir(dirname(resultPath), { recursive: true });
     await writeFile(
       resultPath,
-      JSON.stringify({
-        contract_version: RESULT_VERSION,
-        result_id: "result-B1",
-        run_id: runId,
-        work_item_id: item.id,
-        prompt_sha256: item.prompt.sha256,
-        changed_files: ["src/a.ts"],
-        commit_evidence: { before: item.baseline_commit, after: "2".repeat(40) },
-        test_evidence: item.required_tests.map((command) => ({
-          command,
-          status: "passed",
-        })),
-        obligation_evidence: [],
-        worktree_evidence: {
-          baseline_commit: item.baseline_commit,
-          changed_files: ["src/a.ts"],
-        },
-        acceptance: { status: "accepted" },
-        merge: { status: "merged" },
-      }),
+      JSON.stringify(resultFor({ runId, item }, "2".repeat(40))),
       "utf8",
     );
 

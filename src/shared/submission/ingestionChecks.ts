@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/ingestion-checks-drift.test.ts, tests/remediate/host-handoff-corroboration.test.ts
 /**
  * The ONE declared list of checks result ingestion performs before it accepts a
  * host result — the source `docs/audit-pkg/contracts.md`'s check block is
@@ -119,23 +120,23 @@ export const INGESTION_CHECKS = [
     cited_by: "draw",
   },
   {
+    id: "landed_commit",
+    verifies:
+      "`landed_commit` is a full commit id that exists, is not the workload baseline, changes at least one file, descends from the baseline (waived only under a genuinely orphaned baseline in recovery), and is reachable from HEAD.",
+    draws: ["remediate"],
+    cited_by: "draw",
+  },
+  {
     id: "write_scope",
     verifies:
-      "`changed_files` is non-empty, sorted, unique and normalized, lies within the prompt-bound `allowed_files`, and equals the files the landed commit actually changed.",
+      "Every file the landed commit changed, as git reports it, lies within the prompt-bound `allowed_files`.",
     draws: ["remediate"],
     cited_by: "draw",
   },
   {
-    id: "commit_evidence",
+    id: "required_tests",
     verifies:
-      "`commit_evidence` binds the workload baseline to a distinct landed commit; both exist, the baseline is an ancestor of the landed commit (waived only under a genuinely orphaned baseline in recovery), and the landed commit is reachable from HEAD.",
-    draws: ["remediate"],
-    cited_by: "draw",
-  },
-  {
-    id: "test_evidence",
-    verifies:
-      "`test_evidence` carries exactly one passed entry per required test echoing the bound command, and the tool's own mechanical rerun of those tests passes.",
+      "The tool's own rerun of every prompt-bound required test passes on the tree that holds the landed commit.",
     draws: ["remediate"],
     cited_by: "draw",
   },
@@ -147,15 +148,8 @@ export const INGESTION_CHECKS = [
     cited_by: "draw",
   },
   {
-    id: "worktree_evidence",
-    verifies:
-      "`worktree_evidence` binds the workload baseline and the same changed-file list, and no landed file overlaps dirt that pre-dated the run.",
-    draws: ["remediate"],
-    cited_by: "draw",
-  },
-  {
-    id: "landing_attestation",
-    verifies: "`acceptance` and `merge` both attest a completed landing.",
+    id: "run_start_dirt",
+    verifies: "No file the landed commit changed overlaps dirt that pre-dated the run.",
     draws: ["remediate"],
     cited_by: "draw",
   },

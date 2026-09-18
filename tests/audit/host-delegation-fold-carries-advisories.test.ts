@@ -303,7 +303,7 @@ describe("contract:host-delegation-fold-carries-advisories-to-the-next-emission"
       resultPath,
       JSON.stringify({
         contract_version: "audit-host-result/v1alpha1",
-        result_id: `result-${item.id}`,
+        result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
         run_id: first.run_id,
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,

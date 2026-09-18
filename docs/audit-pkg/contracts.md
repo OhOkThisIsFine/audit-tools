@@ -75,12 +75,11 @@ advance the run.
 | `result_schema` | The bound result converts to the persisted `AuditResult` schema (`schemas/audit_result.schema.json`). | `audit` |
 | `result_validation` | The per-result content rules hold before acceptance (evidence present, line spans inside the file, line counts matching disk); warnings ride an advisory channel and never refuse. | `audit` |
 | `outcome_shape` | A decision result's `outcome` carries exactly the fields its status requires (`resolved_no_change` evidence, `blocked` failure reason, `needs_clarification` question). | `remediate` |
-| `write_scope` | `changed_files` is non-empty, sorted, unique and normalized, lies within the prompt-bound `allowed_files`, and equals the files the landed commit actually changed. | `remediate` |
-| `commit_evidence` | `commit_evidence` binds the workload baseline to a distinct landed commit; both exist, the baseline is an ancestor of the landed commit (waived only under a genuinely orphaned baseline in recovery), and the landed commit is reachable from HEAD. | `remediate` |
-| `test_evidence` | `test_evidence` carries exactly one passed entry per required test echoing the bound command, and the tool's own mechanical rerun of those tests passes. | `remediate` |
+| `landed_commit` | `landed_commit` is a full commit id that exists, is not the workload baseline, changes at least one file, descends from the baseline (waived only under a genuinely orphaned baseline in recovery), and is reachable from HEAD. | `remediate` |
+| `write_scope` | Every file the landed commit changed, as git reports it, lies within the prompt-bound `allowed_files`. | `remediate` |
+| `required_tests` | The tool's own rerun of every prompt-bound required test passes on the tree that holds the landed commit. | `remediate` |
 | `obligation_evidence` | `obligation_evidence` cites non-empty evidence for every prompt-bound obligation, none twice, and none the work item does not bind. | `remediate` |
-| `worktree_evidence` | `worktree_evidence` binds the workload baseline and the same changed-file list, and no landed file overlaps dirt that pre-dated the run. | `remediate` |
-| `landing_attestation` | `acceptance` and `merge` both attest a completed landing. | `remediate` |
+| `run_start_dirt` | No file the landed commit changed overlaps dirt that pre-dated the run. | `remediate` |
 | `no_change_corroboration` | A `resolved_no_change` claim is corroborated against git and the persisted write-scope binding; attestation-only acceptance is refused. | `remediate` |
 | `duplicate_result` | `result_id` has not already been accepted this run: a byte-identical replay is a no-op, a different body under an accepted id is refused. | `audit`, `remediate` |
 

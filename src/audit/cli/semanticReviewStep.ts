@@ -16,13 +16,16 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { derivePendingTaskPartition } from "../orchestrator/pendingTasks.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import type { AuditTask } from "../types.js";
-import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
+import {
+  auditIngestRemedy,
+  type AuditHostIngestIssue,
+} from "../validation/ingestIssueCodes.js";
+import { renderIngestReportLines } from "audit-tools/shared";
 import {
   prepareAuditHostHandoff,
   type AuditHostTask,
   type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
-import { renderIngestReportLines } from "./ingestIssueSections.js";
 import { nextStepCommand } from "./prompts.js";
 import { writeCurrentStep } from "./steps.js";
 
@@ -171,8 +174,9 @@ export async function renderSemanticReviewStep(params: {
       "",
       ...renderIngestReportLines({
         issues,
-        validationWarnings,
-        workloadFollows: true,
+        remedy: auditIngestRemedy,
+        workload: "follows",
+        advisories: validationWarnings,
       }),
       `Read the workload at: ${handoff.workload_path}`,
       "",

@@ -108,7 +108,7 @@ async function setup() {
         // Deliberately the SAME result_id across both ingests: a rejected item
         // never entered the ledger, so re-landing the corrected bytes under the
         // same identity must be accepted, not refused as a duplicate.
-        result_id: `result-${item.id}`,
+        result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
         run_id: RUN_ID,
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,

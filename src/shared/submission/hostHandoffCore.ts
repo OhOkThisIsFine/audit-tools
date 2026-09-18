@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/host-handoff-core.test.ts, tests/audit/host-handoff.test.ts
 /**
  * The ONE host-handoff boundary both orchestrators draw from.
  *
@@ -177,6 +178,16 @@ export function promptSha256(promptText: string): string {
   return hashContent(promptText);
 }
 
+/**
+ * The result id of one work item, derived from its id and its prompt digest.
+ * Both draws fill it into the result template the worker prompt ends with,
+ * and the identity walk below accepts no other value — so two results for one
+ * item under one prompt share an id, and an id is never a host's choice.
+ */
+export function deriveResultId(workItemId: string, promptDigest: string): string {
+  return `${workItemId}-${promptDigest.slice(0, 12)}`;
+}
+
 /** Content digest of one canonical JSON rendering. */
 export function contentSha256(value: unknown): string {
   return hashContent(stableStringify(value));
@@ -294,7 +305,11 @@ const IDENTITY_COMPONENT_HOLDS: Readonly<
     (value: Record<string, unknown>, params: IdentityBindingParams) => boolean
   >
 > = {
-  result_id: (value) => typeof value.result_id === "string" && value.result_id.length > 0,
+  // The tool fills this value into the result template at the end of the
+  // worker prompt, so the one value it accepts is the one it derived. A
+  // host-chosen id is refused (owner review of prompt 20, 2026-09-18).
+  result_id: (value, params) =>
+    value.result_id === deriveResultId(params.workItemId, params.promptSha256),
   run_id: (value, params) => value.run_id === params.runId,
   work_item_id: (value, params) => value.work_item_id === params.workItemId,
   prompt_sha256: (value, params) => value.prompt_sha256 === params.promptSha256,
@@ -336,7 +351,7 @@ export function firstFailedIdentityComponent(
 const IDENTITY_COMPONENT_DESCRIPTIONS: Readonly<
   Record<IdentityComponent, string>
 > = {
-  result_id: "result_id is not a non-empty string",
+  result_id: "result_id is not the value the result template in the prompt states",
   run_id: "run_id is not the run that issued this workload",
   work_item_id: "work_item_id is not the work item this result was read for",
   prompt_sha256: "prompt_sha256 is not the digest of the prompt this work item was issued with",

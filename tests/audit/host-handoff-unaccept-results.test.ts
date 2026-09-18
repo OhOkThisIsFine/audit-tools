@@ -81,7 +81,7 @@ async function setup() {
       resultPath,
       JSON.stringify({
         contract_version: "audit-host-result/v1alpha1",
-        result_id: `result-${item.id}`,
+        result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
         run_id: RUN_ID,
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,

@@ -33,10 +33,13 @@
   delta-miner, the triangulated telos and `charter-register/v4` are gone (a v4 register on disk is
   discarded and re-derived). Design of record: `spec/conceptual-design-review-design.md`
   §"The estimator charters".
-- **The host-prompt review reached prompt 19.** In
-  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 19 read APPROVED (owner,
-  2026-09-17 and 2026-09-18); row 20 is still PROPOSED and waits for the owner's review.
-  Row 19 has no verify prompt (the tool checks each result itself); its change is a plainer
+- **The host-prompt review is complete.** In
+  `docs/reviews/prompt-refinement-2026-09-13.md`, rows 8 through 20 read APPROVED (owner,
+  2026-09-17 and 2026-09-18). Row 20 slimmed the remediate result to `v1alpha3` (the host names
+  only `landed_commit` and `obligation_evidence`; the tool derives the rest from git and its own
+  test rerun), ends every worker prompt in both draws with a tool-filled result template, and
+  renders both draws' ingest reports through one shared renderer with a fourth remedy,
+  `operator`. Row 19 has no verify prompt (the tool checks each result itself); its change is a plainer
   `final_gate_red` pause. Its review found that the repository-wide suite gate runs only on
   audit-tools itself — logged in `docs/backlog/open-bugs.md`. Row 18 gave each contract-pipeline role its own read scope and Field
   Rules, and moved three asks into tooling: a shim-only decomposition scope re-emits
@@ -61,14 +64,10 @@
 
 ## Immediate next
 
-**Open prompt 20** — `host_handoff` (remediate worker item prompt,
-`src/remediate/steps/dispatch/hostHandoff.ts`). It is loop-core: run `/design-check` before the
-code, and attest the staged tree. The open-bugs entry on `SUBMISSION_ISSUE_REMEDY` touches the
-same file. After row 20 is approved, land the branch once (`--no-ff`, both attester classes, the
-adopted suite stamp).
+**Land the lap branch** once: `--no-ff`, both attester classes, the adopted suite stamp. Then
+`/ship`.
 
-**Live owner decision:** none. The owner decided on 2026-09-17 to hold this lap's branch unpushed
-until prompt 20 is approved, and to land it in one ceremony then.
+**Live owner decision:** none.
 
 ## Deliberate state, not bugs
 

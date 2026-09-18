@@ -154,8 +154,10 @@ import {
   ingestAuditHostResults,
   type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
-import type { AuditHostIngestIssue } from "../validation/ingestIssueCodes.js";
-import { renderIngestReportLines } from "./ingestIssueSections.js";
+import {
+  auditIngestRemedy,
+  type AuditHostIngestIssue,
+} from "../validation/ingestIssueCodes.js";
 import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   AUDIT_GATE_SUBMISSION_SCOPE,
@@ -168,7 +170,7 @@ import {
   recordLaneOutcome,
   systemicChallengeLane,
 } from "./laneSubmissions.js";
-import { recordHostResultOutcomes } from "audit-tools/shared";
+import { recordHostResultOutcomes, renderIngestReportLines } from "audit-tools/shared";
 
 // ── Gate submission helper ────────────────────────────────────────────────────
 
@@ -3402,14 +3404,15 @@ async function withFoldAdvisories(
  * the bullet format and the headings, and the copy had already gone stale
  * against the section it claimed to match.
  *
- * `workloadFollows` is FALSE here: this report rides a step of another kind,
+ * The workload is `next_call` here: this report rides a step of another kind,
  * so no workload is published below it.
  */
 function renderCarriedAdvisoryLines(carried: FoldAdvisories): string[] {
   return renderIngestReportLines({
     issues: carried.ingestIssues,
-    validationWarnings: carried.validationWarnings,
-    workloadFollows: false,
+    remedy: auditIngestRemedy,
+    workload: "next_call",
+    advisories: carried.validationWarnings,
   });
 }
 

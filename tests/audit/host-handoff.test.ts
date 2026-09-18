@@ -73,7 +73,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "audit-host-workload/v1alpha3";
+  readonly contract_version: "audit-host-workload/v1alpha4";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -345,7 +345,9 @@ function boundResult(
 ): Record<string, unknown> {
   return {
     contract_version: "audit-host-result/v1alpha1",
-    result_id: `result-${item.id}`,
+    // The id the result template in the prompt states: the tool derives it
+    // from the work item id and the prompt digest.
+    result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
     run_id: runId,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
@@ -561,7 +563,7 @@ describe(FAILURE_SIGNATURE, () => {
       tasks,
     });
     expect(first.workload.contract_version).toBe(
-      "audit-host-workload/v1alpha3",
+      "audit-host-workload/v1alpha4",
     );
     expect(first.result_map.contract_version).toBe(
       "audit-host-result-map/v1alpha1",
@@ -588,7 +590,11 @@ describe(FAILURE_SIGNATURE, () => {
         token_estimate: source.token_estimate,
       });
       expect(item.prompt.text.length).toBeGreaterThan(0);
-      expect(item.prompt.sha256).toBe(sha256(item.prompt.text));
+      // The digest covers the BODY: the text above the result template the
+      // prompt ends with (prompt 20).
+      const templateAt = item.prompt.text.indexOf("\n\nWhen you finish, write this JSON to");
+      expect(templateAt).toBeGreaterThan(0);
+      expect(item.prompt.sha256).toBe(sha256(item.prompt.text.slice(0, templateAt)));
       expect(item.scope.files).toEqual([...source.file_paths].sort());
       expect(item.scope.unit_ids).toEqual([source.unit_id]);
       expect(isAbsolute(item.result_path)).toBe(false);
@@ -892,7 +898,7 @@ describe(FAILURE_SIGNATURE, () => {
     // It names BOTH versions — the one found and the one this build mints — and
     // the one repair, so the host is not left to infer any of the three.
     expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
-    expect(refusal!.message).toContain("audit-host-workload/v1alpha3");
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha4");
     expect(refusal!.message).toContain("re-prepare");
 
     // RUN-SCOPED, deliberately: the refusal is about the workload DOCUMENT, not
@@ -1750,5 +1756,56 @@ describe(FAILURE_SIGNATURE, () => {
     };
     expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha3");
     expect(reparsed.entries[0]!.tags).toEqual([]);
+  });
+});
+
+/**
+ * Prompt 20 (owner review, 2026-09-18), audit draw: the worker prompt ENDS with
+ * the result template, its identity values filled in by the tool from the SAME
+ * shared helper the remediate draw uses. The digest covers the text above it.
+ */
+describe("prompt 20: tool-filled result template (audit draw)", () => {
+  const TEMPLATE_LEAD = "When you finish, write this JSON to";
+
+  it("ends each worker prompt with a template whose identity values the tool filled in", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-template-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-run-template";
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    const prepared = await boundary.prepareAuditHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      tasks: [
+        task(
+          "audit-task-a",
+          "security",
+          "src/a.ts",
+          { size: "medium", complexity: "deep", risk: "high" },
+          2400,
+        ),
+      ],
+    });
+    expect(prepared.workload.contract_version).toBe("audit-host-workload/v1alpha4");
+    for (const item of prepared.workload.work_items) {
+      const text = item.prompt.text;
+      const at = text.indexOf(TEMPLATE_LEAD);
+      expect(at, "the worker prompt must end with the result template").toBeGreaterThan(0);
+      expect(sha256(text.slice(0, at).replace(/\n\n$/u, ""))).toBe(item.prompt.sha256);
+      const json = /```json\n([\s\S]*?)\n```/u.exec(text.slice(at));
+      expect(json).not.toBeNull();
+      const template = JSON.parse(json![1]!) as Record<string, unknown>;
+      expect(template).toMatchObject({
+        contract_version: "audit-host-result/v1alpha1",
+        result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
+        run_id: runId,
+        work_item_id: item.id,
+        prompt_sha256: item.prompt.sha256,
+      });
+      expect(text.slice(at)).toContain(item.result_path);
+    }
   });
 });

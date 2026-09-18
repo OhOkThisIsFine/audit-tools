@@ -23,7 +23,9 @@ import {
   LaneDemandSchema,
   parseAllWorkloadItems,
   parseWorkloadEnvelope,
-  promptSha256,
+  bindWorkerPrompt,
+  deriveResultId,
+  workerPromptBindingHolds,
   enrichMissingSubmissionIssues,
   readTrailingSubmissionRefusals,
   readJsonFile,
@@ -98,7 +100,12 @@ import {
 // prompt prose would make the prompt digest a function of the surface's size
 // while telling the host nothing it could act on. A v1alpha2 document refuses
 // closed as stale — the same `next-step` re-prepares it.
-const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha3" as const;
+//
+// v1alpha4 (owner review of prompt 20, 2026-09-18): each worker prompt ENDS with
+// the result template, its identity values filled in by the tool, and the
+// prompt digest covers the text ABOVE that template. A v1alpha3 document refuses
+// closed as stale — the same `next-step` re-prepares it.
+const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha4" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 
@@ -621,6 +628,34 @@ function isVerificationLane(tags: readonly string[] | undefined): boolean {
   return tags?.includes(LENS_VERIFICATION_TAG) ?? false;
 }
 
+/**
+ * The result template every audit worker prompt ends with. The tool fills the
+ * identity values; the worker fills `file_coverage` and `findings`. The digest
+ * it states is the digest of the prompt text ABOVE it (see `bindWorkerPrompt`).
+ */
+function renderResultTemplate(
+  runId: string,
+  workItemId: string,
+  resultPath: string,
+  promptDigest: string,
+): string {
+  const template = {
+    contract_version: RESULT_CONTRACT_VERSION,
+    result_id: deriveResultId(workItemId, promptDigest),
+    run_id: runId,
+    work_item_id: workItemId,
+    prompt_sha256: promptDigest,
+    file_coverage: [],
+    findings: [],
+  };
+  return [
+    `When you finish, write this JSON to \`${resultPath}\`. Keep the five identity values as they are. Fill in \`file_coverage\` and \`findings\`:`,
+    "```json",
+    JSON.stringify(template, null, 2),
+    "```",
+  ].join("\n");
+}
+
 function buildPrompt(
   task: AuditHostTask,
   resultPath: string,
@@ -887,7 +922,10 @@ function buildWorkItem(
   const resultPath = resultPathFor(paths, task.task_id);
   // The SAME path the caller writes the workload to, so a selective lane is told
   // where its surface actually is rather than where it is expected to be.
-  const promptText = buildPrompt(task, resultPath, paths.workloadPath);
+  const prompt = bindWorkerPrompt(
+    buildPrompt(task, resultPath, paths.workloadPath),
+    (digest) => renderResultTemplate(paths.runId, task.task_id, resultPath, digest),
+  );
   return {
     id: task.task_id,
     lens: task.lens,
@@ -896,8 +934,8 @@ function buildWorkItem(
       token_estimate: task.token_estimate,
     },
     prompt: {
-      sha256: promptSha256(promptText),
-      text: promptText,
+      sha256: prompt.sha256,
+      text: prompt.text,
     },
     scope: {
       files: [...task.file_paths],
@@ -1107,7 +1145,7 @@ function isSurfaceFileMetrics(value: unknown): boolean {
   return AuditTaskSchema.shape.file_metrics.safeParse(value).success;
 }
 
-function parseWorkItem(value: unknown): AuditHostWorkItem | null {
+function parseWorkItem(value: unknown, runId: string): AuditHostWorkItem | null {
   // `file_metrics` is the ONE optional scope key: a selective (steward) lane
   // carries it, every complete lane omits it. It is added to the expected set
   // only when the document supplies it, exactly as the result envelope treats
@@ -1138,7 +1176,10 @@ function parseWorkItem(value: unknown): AuditHostWorkItem | null {
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     !isSha256(value.prompt.sha256) ||
     typeof value.prompt.text !== "string" ||
-    promptSha256(value.prompt.text) !== value.prompt.sha256 ||
+    !workerPromptBindingHolds(
+      { text: value.prompt.text, sha256: value.prompt.sha256 },
+      (digest) => renderResultTemplate(runId, value.id as string, value.result_path as string, digest),
+    ) ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, [
       "files",
@@ -1259,7 +1300,9 @@ function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
     }
     throw bindingFailure("workload_binding", "Invalid audit host workload");
   }
-  const workItems = parseAllWorkloadItems(envelope.rawItems, parseWorkItem);
+  const workItems = parseAllWorkloadItems(envelope.rawItems, (raw) =>
+    parseWorkItem(raw, runId),
+  );
   if (workItems === null) {
     throw bindingFailure("workload_binding", "Invalid audit host work item");
   }

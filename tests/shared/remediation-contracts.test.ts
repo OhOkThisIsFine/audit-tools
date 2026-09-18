@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, test } from "vitest";
-import { compareCodeUnits, stableStringify } from "audit-tools/shared";
+import { compareCodeUnits, deriveResultId, stableStringify } from "audit-tools/shared";
 import {
   canonicalSha256 as harnessCanonicalSha256,
   closureSha256,
@@ -582,15 +582,15 @@ const FINALIZED_CONTRACT_ORACLES: Readonly<
   "remediation-zero-adapter-boundary": {
     required_guarantees: [
       "all_eligible_host_work_emission",
-      "commit_evidence_validation",
       "dependency_and_phase_safety",
       "host_owned_execution_choices",
+      "landed_commit_validation",
       "not_configured_uses_approved_defaults",
       "prompt_binding_validation",
       "provider_neutral_work_items",
+      "required_test_rerun_validation",
       "self_contained_host_handoff",
       "strict_current_state_schema",
-      "test_evidence_validation",
       "unsupported_retired_state_rejection",
       "worktree_binding_validation",
     ],
@@ -1337,26 +1337,42 @@ function replayPositiveFixture(
     }
     case "remediation-host-result": {
       const value = payload as {
+        readonly contract_version: string;
+        readonly result_id: string;
+        readonly run_id: string;
         readonly work_item_id: string;
         readonly prompt_sha256: string;
-        readonly commit_evidence: { readonly before: string };
-        readonly test_evidence: readonly { readonly command: string }[];
+        readonly landed_commit: string;
       };
       const workload = workloads.fixtures.find(
         (candidate) => candidate.id === "remediation-host-workload",
       )?.payload as {
+        readonly run_id: string;
         readonly work_items: readonly {
           readonly id: string;
           readonly baseline_commit: string;
           readonly prompt: { readonly sha256: string };
-          readonly required_tests: readonly string[];
         }[];
       };
-      const item = workload.work_items[0];
-      expect(value.work_item_id).toBe(item?.id);
-      expect(value.prompt_sha256).toBe(item?.prompt.sha256);
-      expect(value.commit_evidence.before).toBe(item?.baseline_commit);
-      expect(value.test_evidence[0]?.command).toBe(item?.required_tests[0]);
+      const item = workload.work_items[0]!;
+      // v1alpha3: EXACTLY the identity, the landed commit and the obligation
+      // evidence — the tool derives the changed files and reruns the tests.
+      expect(Object.keys(payload as Record<string, unknown>).sort()).toEqual([
+        "contract_version",
+        "landed_commit",
+        "obligation_evidence",
+        "prompt_sha256",
+        "result_id",
+        "run_id",
+        "work_item_id",
+      ]);
+      expect(value.contract_version).toBe("remediation-host-result/v1alpha3");
+      expect(value.run_id).toBe(workload.run_id);
+      expect(value.work_item_id).toBe(item.id);
+      expect(value.prompt_sha256).toBe(item.prompt.sha256);
+      expect(value.result_id).toBe(deriveResultId(item.id, item.prompt.sha256));
+      expect(value.landed_commit).toMatch(/^[0-9a-f]{40}$/u);
+      expect(value.landed_commit).not.toBe(item.baseline_commit);
       break;
     }
     case "submission-ledger-record": {

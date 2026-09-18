@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/ingest-report.test.ts, tests/remediate/host-handoff.test.ts
 /**
  * The ONE failure vocabulary for a host submission both orchestrators read.
  *
@@ -30,6 +31,24 @@ export const SUBMISSION_ISSUE_CODES = [
 ] as const;
 
 export type SubmissionIssueCode = (typeof SUBMISSION_ISSUE_CODES)[number];
+
+/**
+ * The workload codes both draws share. Not a submission code — it names no
+ * result — so it is a separate tuple each draw spreads into its own vocabulary.
+ */
+export const WORKLOAD_ISSUE_CODES = [
+  /**
+   * The persisted host workload was issued under a contract version this build
+   * no longer mints, so no submission can be accepted against it. RECOVERABLE
+   * BY EXACTLY ONE ACTION — re-prepare, which publishes a current workload — and
+   * the tool takes that action itself in the same call, so the code is
+   * distinct from a workload whose bytes are wrong. The trigger is a
+   * contract-version bump that changed the work item's shape or its prompt.
+   */
+  "workload_stale",
+] as const;
+
+export type WorkloadIssueCode = (typeof WORKLOAD_ISSUE_CODES)[number];
 
 /**
  * One classified failure. `TCode` widens for a draw that adds its own domain

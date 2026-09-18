@@ -197,7 +197,7 @@ path, and content-derived metadata. The host chooses sequential or parallel
 execution; audit-tools does not configure or infer host concurrency.
 
 **Deterministic Merge & Fallback:**
-Completed work is accepted in the workload's deterministic item order. Worktrees, merging, and test execution belong to the HOST: the tool emits the workload and, on ingestion, validates the evidence the host reports back (`src/remediate/steps/dispatch/hostHandoff.ts`). A landing is accepted only when the host attests `merge.status: "merged"` on an accepted result; anything else is refused, and the node is re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
+Completed work is accepted in the workload's deterministic item order. Worktrees, merging, and test execution belong to the HOST: the tool emits the workload and, on ingestion, checks the landing against git itself (`src/remediate/steps/dispatch/hostHandoff.ts`). The host names only the landed commit and the obligation evidence; a landing is accepted only when that commit descends from the baseline, is reachable from HEAD, changes only files in the item's write scope, and the tool's own rerun of the required tests passes. Anything else is refused, and the node is re-entered into the end-of-run triage window (retry vs. block) rather than merged — there is no category-sorted sequential fallback queue.
 
 Within a block, each item runs through:
 

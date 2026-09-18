@@ -11,6 +11,12 @@ import {
   commandLeavesDeclaredShape,
   FindingSchema,
   SUBMISSION_ISSUE_CODES,
+  SUBMISSION_ISSUE_REMEDY,
+  WORKLOAD_ISSUE_CODES,
+  WORKLOAD_ISSUE_REMEDY,
+  bindWorkerPrompt,
+  deriveResultId,
+  type IssueRemedy,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
   enrichMissingSubmissionIssues,
@@ -34,7 +40,6 @@ import {
   parseAllWorkloadItems,
   parseCommandString,
   parseWorkloadEnvelope,
-  promptSha256,
   readSubmissionDocument,
   readSubmissionLedger,
   readTrailingSubmissionRefusals,
@@ -63,7 +68,6 @@ import {
 } from "audit-tools/shared";
 import {
   REMEDIATION_STATE_CONTRACT_VERSION,
-  StateStore,
   type RemediationState,
 } from "../../state/store.js";
 import {
@@ -218,9 +222,82 @@ export const REMEDIATION_ISSUE_CODES = [
    * describe work that is no longer pending, so the whole recovery aborts.
    */
   "state_moved_between_phases",
+  /**
+   * The work item's baseline commit is not in this repository, so nothing can
+   * be corroborated against it. The run's recorded state is at fault, not the
+   * result.
+   */
+  "baseline_missing",
+  /**
+   * The work item's baseline commit exists but is no longer an ancestor of HEAD
+   * (history was rewritten under the run). The spawn-free `recover-ingest` verb
+   * is the named repair; no worker can make it.
+   */
+  "baseline_orphaned",
+  /**
+   * `landed_commit` names a commit that cannot be this item's landed work: the
+   * baseline itself, or a commit whose diff against the baseline is empty.
+   */
+  "landed_commit_invalid",
+  /**
+   * A result names a work item that the persisted workload binds but that is no
+   * longer pending (it settled, or its dependencies are not complete).
+   */
+  "work_item_not_eligible",
+  // `workload_stale` is shared with the audit draw: its meaning and its remedy
+  // live beside `WORKLOAD_ISSUE_CODES`.
+  ...WORKLOAD_ISSUE_CODES,
 ] as const;
 
 export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
+
+/**
+ * What the host must DO about each remediation ingest code (owner review of
+ * prompt 20, 2026-09-18). The `Record` over the whole union is the enforcement:
+ * a code added above with no remedy here is a type error. Read `IssueRemedy`
+ * for what the four remedies mean.
+ */
+const REMEDIATION_ISSUE_REMEDY: Readonly<Record<RemediationIssueCode, IssueRemedy>> = {
+  ...SUBMISSION_ISSUE_REMEDY,
+  ...WORKLOAD_ISSUE_REMEDY,
+  // Here a duplicate is two result files carrying one result_id in the same
+  // call, and NEITHER is accepted — so the item is still pending and the fix is
+  // a corrected file. (The audit draw raises it only after an acceptance, so
+  // there it stays settled.)
+  duplicate_submission_id: "repair",
+  // The run's own documents: the next prepare re-mints the workload and its
+  // binding in the same call, so nothing is asked of the host.
+  workload_missing: "none",
+  workload_invalid: "none",
+  trusted_binding_missing: "none",
+  // A fault in the landed work or in the result that describes it — a worker
+  // can make a new commit or correct the file.
+  commit_missing: "repair",
+  commit_not_landed: "repair",
+  baseline_not_ancestor: "repair",
+  changed_files_mismatch: "repair",
+  run_start_dirty_overlap: "repair",
+  required_test_failed: "repair",
+  required_test_timed_out: "repair",
+  landed_commit_invalid: "repair",
+  // The plan, the run's recorded state, or the tool's own limit is at fault.
+  required_test_output_overflow: "operator",
+  dependency_missing: "operator",
+  block_contract_invalid: "operator",
+  recovery_unrecorded: "operator",
+  tree_moved_between_phases: "operator",
+  state_moved_between_phases: "operator",
+  baseline_missing: "operator",
+  baseline_orphaned: "operator",
+  work_item_not_eligible: "operator",
+};
+
+/** The remedy for one classified remediation ingest failure. */
+export function remediationIssueRemedy(
+  issue: SubmissionIssue<RemediationIssueCode>,
+): IssueRemedy {
+  return REMEDIATION_ISSUE_REMEDY[issue.code];
+}
 
 export type RemediationHostIngestIssue = SubmissionIssue<RemediationIssueCode>;
 
@@ -261,15 +338,14 @@ interface RemediationHostResult {
   readonly run_id: string;
   readonly work_item_id: string;
   readonly prompt_sha256: string;
-  readonly changed_files: readonly string[];
-  readonly commit_evidence: {
-    readonly before: string;
-    readonly after: string;
-  };
-  readonly test_evidence: readonly {
-    readonly command: string;
-    readonly status: "passed";
-  }[];
+  /**
+   * The full id of the one commit that carries this item's edits, on HEAD.
+   * The ONLY fact about the work the host states (v1alpha3, owner review of
+   * prompt 20, 2026-09-18): the changed files come from git, the tests from the
+   * tool's own rerun of `required_tests`, and the landing from ancestry — so a
+   * host is never asked to restate what the tool derives and then checks.
+   */
+  readonly landed_commit: string;
   /**
    * Cited evidence per satisfied contract obligation — the evidence-coverage
    * floor between "received" and "accepted". Must cover exactly the work
@@ -282,12 +358,6 @@ interface RemediationHostResult {
     readonly obligation_id: string;
     readonly evidence: readonly string[];
   }[];
-  readonly worktree_evidence: {
-    readonly baseline_commit: string;
-    readonly changed_files: readonly string[];
-  };
-  readonly acceptance: { readonly status: "accepted" };
-  readonly merge: { readonly status: "merged" };
 }
 
 interface RemediationHostDecision {
@@ -431,7 +501,7 @@ function pathIsAllowedByWriteScope(
 ): boolean {
   let normalized: string;
   try {
-    normalized = repoRelativePath(root, candidate, "changed_files[]");
+    normalized = repoRelativePath(root, candidate, "landed file");
   } catch {
     return false;
   }
@@ -802,45 +872,13 @@ export async function remediationSubmissionBinding(params: {
       isRecord(item) && item.id === params.workItemId,
   );
   if (workItem === undefined) return null;
-  // Legacy directory recovery is privileged by the tool-owned state binding,
-  // not by prompt text or current filesystem shape. Exact-scope validation
-  // remains available when state is absent; only canonical bound state can
-  // widen the in-memory view.
-  let validationWorkItem = workItem;
-  try {
-    const storedState = await new StateStore(paths.artifactsDir).loadState();
-    // No version is supplied here. The store reads the state from disk and
-    // stamps the contract version it just VALIDATED, so `parseCurrentState`
-    // tests the value that was in the file. It used to be handed
-    // `STATE_CONTRACT_VERSION` from this line, which made the parser's version
-    // check compare a constant to itself and accept any state the store was
-    // willing to return.
-    const state = storedState ? parseCurrentState(storedState) : null;
-    const canonicalWorkload = state
-      ? parseWorkload(read.value, paths, params.runId, state)
-      : null;
-    const canonicalWorkItem = canonicalWorkload?.work_items.find(
-      (item) => item.id === params.workItemId,
-    );
-    if (state?.host_handoff && canonicalWorkItem) {
-      validationWorkItem = deriveLegacyDirectoryScopeRecovery(
-        state,
-        canonicalWorkItem,
-      ).workItem;
-    }
-  } catch {
-    // Invalid/missing state cannot authorize widening. The raw workload's
-    // exact scope remains the fail-closed validator for this recovery write.
-  }
+  // The shape gate reads only the item's identity (id and prompt digest). The
+  // write scope is checked at ingest against the landed commit, so no stored
+  // state can widen what this validator accepts.
   return {
     submissionDir: paths.resultDir,
     validate: (value: unknown): SubmissionIssue | null => {
-      const parsed = parseResult(
-        value,
-        params.runId,
-        validationWorkItem,
-        paths.root,
-      );
+      const parsed = parseResult(value, params.runId, workItem);
       return parsed.ok
         ? null
         : { code: "submission_contract_invalid", check: parsed.check, message: parsed.reason };
@@ -1050,28 +1088,89 @@ function buildPrompt(item: {
     required_tests: item.requiredTests,
     result_path: item.resultPath,
   });
+  // The BODY only. The result template is appended by `bindWorkerPrompt`, and
+  // the prompt digest covers exactly this text (owner review of prompt 20,
+  // 2026-09-18: plain language, rules as bullets, no word a worker cannot act
+  // on).
   return [
-    "Implement the bounded remediation work item below.",
-    "The host owns execution choices. For every assignment, apply the finding and item instructions exactly, including any clarified scope or retry context.",
-    "Keep every edit within allowed_files, run every required test, land one attributable commit whose changed-file set is exact, and write one JSON result at result_path.",
-    'An allowed_files entry ending in "/" authorizes normalized descendant files; every other entry authorizes only that exact file.',
+    `# Implement remediation work item \`${item.blockId}\``,
+    "",
+    "Assignment:",
+    "",
+    "```json",
+    assignment,
+    "```",
+    "",
+    "Rules:",
+    "",
+    '- Edit only the files in `allowed_files`. An entry that ends in "/" allows every file below that directory. Every other entry allows only that one file.',
+    "- Apply each finding in `assignments` exactly, with the clarified scope or the retry context it carries.",
     ...(item.moduleContracts.length > 0
       ? [
-          "module_contracts carries the APPROVED contract for each module this item implements. The implementation MUST conform to every declared input, output, invariant, side effect, validation boundary, failure mode, and seam adjustment. A locally plausible interface that contradicts them is a defect even when the build and the targeted tests pass — a conformance divergence propagates to every consumer of the module.",
+          "- Conform to each contract in `module_contracts`: every declared input, output, invariant, side effect, validation boundary, failure mode and seam adjustment. Code that breaks a contract is a defect, even when the build and the tests pass.",
         ]
       : []),
-    ...(item.hasLandingGates
+    ...(item.requiredTests.length > 0
       ? [
-          "This repository declares tree-wide LANDING GATES. They are not per-item commands and nothing in this item runs them: the CLOSE runs each of them once on the fully merged tree and reports what it finds. Keep your edits within allowed_files and conform to module_contracts — a gate refusing later is a defect in the merged tree, not a command for this item to run.",
+          "- Run each command in `required_tests` until it passes. The tool runs each command again before it accepts your result.",
         ]
       : []),
-    `Assignment: ${assignment}`,
-    `The result must use ${RESULT_CONTRACT_VERSION} and contain exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, changed_files, commit_evidence, test_evidence, obligation_evidence, worktree_evidence, acceptance, and merge.`,
-    item.obligationIds.length > 0
-      ? `obligation_evidence must contain exactly one entry per bound obligation id — ${item.obligationIds.join(", ")} — each an object {obligation_id, evidence} whose evidence array cites at least one non-empty string (file, symbol, or test) showing the landed implementation satisfies that obligation. Ingestion refuses the result when any bound obligation is uncovered.`
-      : "obligation_evidence must be an empty array — this item binds no contract obligations.",
-    "Bind commit_evidence.before and worktree_evidence.baseline_commit to baseline_commit; report only passed required tests; acceptance.status must be accepted and merge.status must be merged.",
-    `If no edit should land, write ${DECISION_CONTRACT_VERSION} instead with exactly contract_version, result_id, run_id, work_item_id, prompt_sha256, outcome. outcome must be one of: {status: resolved_no_change, evidence: [non-empty strings]}, {status: blocked, failure_reason: non-empty string}, or {status: needs_clarification, question: non-empty string, optional category}.`,
+    "- Make one commit on top of `baseline_commit`, with all your edits in it. Merge it so that HEAD contains it.",
+    ...(item.hasLandingGates
+      ? ["- Do not run the landing gates. The close phase runs them once, on the merged tree."]
+      : []),
+  ].join("\n");
+}
+
+/**
+ * The result template every remediation worker prompt ends with. The tool
+ * fills the identity values from the body digest; the worker changes only the
+ * marked values. The decision form follows for an item where no edit should
+ * land.
+ */
+function renderResultTemplate(item: {
+  readonly runId: string;
+  readonly blockId: string;
+  readonly resultPath: string;
+  readonly obligationIds: readonly string[];
+  readonly promptDigest: string;
+}): string {
+  const identity = {
+    result_id: deriveResultId(item.blockId, item.promptDigest),
+    run_id: item.runId,
+    work_item_id: item.blockId,
+    prompt_sha256: item.promptDigest,
+  };
+  const landed = {
+    contract_version: RESULT_CONTRACT_VERSION,
+    ...identity,
+    landed_commit: "<full id of your commit>",
+    obligation_evidence: item.obligationIds.map((obligationId) => ({
+      obligation_id: obligationId,
+      evidence: ["<a file, symbol or test that shows this obligation holds>"],
+    })),
+  };
+  const decision = {
+    contract_version: DECISION_CONTRACT_VERSION,
+    ...identity,
+    outcome: "<one of the three forms below>",
+  };
+  return [
+    `When HEAD contains your commit, write this JSON to \`${item.resultPath}\`. Change only the ${item.obligationIds.length > 0 ? "marked values" : "marked value"}:`,
+    "",
+    "```json",
+    JSON.stringify(landed, null, 2),
+    "```",
+    "",
+    `If no edit should land, write this JSON to \`${item.resultPath}\` instead. Replace \`outcome\` with one of the three forms below:`,
+    "",
+    "```json",
+    JSON.stringify(decision, null, 2),
+    "```",
+    "",
+    '- `{"status": "resolved_no_change", "evidence": ["<why the code needs no change>"]}`',
+    '- `{"status": "blocked", "failure_reason": "<what stops the work>"}`',
+    '- `{"status": "needs_clarification", "question": "<your question>"}` — you can also add a `"category"`.',
   ].join("\n");
 }
 
@@ -1167,6 +1266,7 @@ function buildFindingAssignments(
 
 function buildWorkItem(
   paths: BoundaryPaths,
+  runId: string,
   block: RemediationBlock,
   baselineCommit: string,
   state: CurrentRemediationHostState,
@@ -1210,7 +1310,7 @@ function buildWorkItem(
   //
   // The per-item required tests are the block's OWN commands, unchanged, which
   // is what this field meant before the gates were folded in and what the
-  // result's `test_evidence` is compared against index-for-index at ingestion.
+  // tool reruns at ingestion.
   //
   // ONE FACT still rides the emitted prompt: whether the target root declares
   // any landing gate at all, so the host knows a close will run them.
@@ -1230,7 +1330,7 @@ function buildWorkItem(
       ),
     ),
   ].sort(compareCodeUnits);
-  const promptText = buildPrompt({
+  const prompt = bindWorkerPrompt(buildPrompt({
     blockId: block.block_id,
     findingIds: block.items,
     assignments,
@@ -1241,14 +1341,22 @@ function buildWorkItem(
     hasLandingGates,
     resultPath,
     moduleContracts: block.module_contracts ?? [],
-  });
+  }), (promptDigest) =>
+    renderResultTemplate({
+      runId,
+      blockId: block.block_id,
+      resultPath,
+      obligationIds,
+      promptDigest,
+    }),
+  );
   return {
     id: block.block_id,
     finding_ids: [...block.items],
     allowed_files: allowedFiles,
     baseline_commit: baselineCommit,
     obligation_ids: obligationIds,
-    prompt: { text: promptText, sha256: promptSha256(promptText) },
+    prompt: { text: prompt.text, sha256: prompt.sha256 },
     required_tests: requiredTests,
     result_path: resultPath,
     demand: deriveLaneDemand({
@@ -1287,7 +1395,7 @@ function buildCanonicalWorkload(params: {
     contract_version: WORKLOAD_CONTRACT_VERSION,
     run_id: params.runId,
     work_items: blocks.map((block) =>
-      buildWorkItem(params.paths, block, params.baselineCommit, params.state),
+      buildWorkItem(params.paths, params.runId, block, params.baselineCommit, params.state),
     ),
   };
 }
@@ -1295,6 +1403,7 @@ function buildCanonicalWorkload(params: {
 function parseWorkItem(
   value: unknown,
   paths: BoundaryPaths,
+  runId: string,
   state: CurrentRemediationHostState,
   expectedBaselineCommit?: string,
 ): RemediationHostWorkItem | null {
@@ -1329,8 +1438,7 @@ function parseWorkItem(
     !isRecord(value.prompt) ||
     !hasExactKeys(value.prompt, ["sha256", "text"]) ||
     typeof value.prompt.text !== "string" ||
-    !isSha256(value.prompt.sha256) ||
-    promptSha256(value.prompt.text) !== value.prompt.sha256
+    !isSha256(value.prompt.sha256)
   ) {
     return null;
   }
@@ -1341,6 +1449,7 @@ function parseWorkItem(
   try {
     expected = buildWorkItem(
       paths,
+      runId,
       block,
       expectedBaselineCommit ?? value.baseline_commit,
       state,
@@ -1375,7 +1484,7 @@ function parseWorkload(
     return null;
   }
   const workItems = parseAllWorkloadItems(envelope.rawItems, (item) =>
-    parseWorkItem(item, paths, state, binding?.baseline_commit),
+    parseWorkItem(item, paths, runId, state, binding?.baseline_commit),
   );
   if (workItems === null) return null;
   const ids = workItems.map((item) => item.id);
@@ -1429,7 +1538,6 @@ function parseResult(
   value: unknown,
   runId: string,
   workItem: RemediationHostWorkItem,
-  root: string,
 ): ParsedHostResult {
   if (isRecord(value) && value.contract_version === DECISION_CONTRACT_VERSION) {
     // Envelope first, identity second: one message (the host repairs the same
@@ -1517,21 +1625,21 @@ function parseResult(
     };
   }
 
+  // v1alpha3 (owner review of prompt 20, 2026-09-18): the host states the
+  // landed commit and the obligation evidence, and nothing it could only
+  // restate. The changed files come from git, the tests from the tool's own
+  // rerun, and the landing from ancestry — `corroborateHostResult` derives and
+  // checks each of them, so an extra key here is a refusal, never a hint.
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
-      "acceptance",
-      "changed_files",
-      "commit_evidence",
       "contract_version",
-      "merge",
+      "landed_commit",
       "obligation_evidence",
       "prompt_sha256",
       "result_id",
       "run_id",
-      "test_evidence",
       "work_item_id",
-      "worktree_evidence",
     ]) ||
     value.contract_version !== RESULT_CONTRACT_VERSION
   ) {
@@ -1542,9 +1650,7 @@ function parseResult(
   }
   // The identity walk AND its vocabulary are the CORE's, so the same broken
   // submission is reported with the same named component whichever half of the
-  // pipeline reads it. Only the framing is this draw's — and the framing is the
-  // part that used to differ, producing two undifferentiated sentences that
-  // named no component at all.
+  // pipeline reads it. Only the framing is this draw's.
   const resultIdentityFailure = identityFailureDiagnostic(value, {
     runId,
     workItemId: workItem.id,
@@ -1557,56 +1663,11 @@ function parseResult(
     );
   }
 
-  const changedFiles = stringArray(value.changed_files);
-  if (
-    !changedFiles ||
-    changedFiles.length === 0 ||
-    new Set(changedFiles).size !== changedFiles.length ||
-    !sameStrings([...changedFiles].sort(compareCodeUnits), changedFiles) ||
-    changedFiles.some(
-      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
-    )
-  ) {
+  if (!isCommit(value.landed_commit)) {
     return invalidResult(
-      "write_scope",
-      "changed_files must be non-empty, sorted, unique, normalized paths within allowed_files",
+      "landed_commit",
+      "landed_commit must be the full id of the commit that carries this item's edits",
     );
-  }
-
-  if (
-    !isRecord(value.commit_evidence) ||
-    !hasExactKeys(value.commit_evidence, ["after", "before"]) ||
-    value.commit_evidence.before !== workItem.baseline_commit ||
-    !isCommit(value.commit_evidence.after) ||
-    value.commit_evidence.after === value.commit_evidence.before
-  ) {
-    return invalidResult(
-      "commit_evidence",
-      "commit_evidence must bind the workload baseline to a distinct full commit id",
-    );
-  }
-
-  if (
-    !Array.isArray(value.test_evidence) ||
-    value.test_evidence.length !== workItem.required_tests.length
-  ) {
-    return invalidResult(
-      "test_evidence",
-      "test_evidence must contain exactly one entry for every required test",
-    );
-  }
-  for (const [index, evidence] of value.test_evidence.entries()) {
-    if (
-      !isRecord(evidence) ||
-      !hasExactKeys(evidence, ["command", "status"]) ||
-      evidence.command !== workItem.required_tests[index] ||
-      evidence.status !== "passed"
-    ) {
-      return invalidResult(
-        "test_evidence",
-        `test_evidence[${index}] must echo the bound command with status passed`,
-      );
-    }
   }
 
   // The evidence-coverage floor: the cited obligation set must equal the
@@ -1666,38 +1727,6 @@ function parseResult(
     return invalidResult(
       "obligation_evidence",
       `obligation_evidence cites obligations the work item does not bind: ${unknown.join(", ")}`,
-    );
-  }
-
-  if (
-    !isRecord(value.worktree_evidence) ||
-    !hasExactKeys(value.worktree_evidence, ["baseline_commit", "changed_files"]) ||
-    value.worktree_evidence.baseline_commit !== workItem.baseline_commit
-  ) {
-    return invalidResult(
-      "worktree_evidence",
-      "worktree_evidence must bind the workload baseline and changed-file list",
-    );
-  }
-  const worktreeFiles = stringArray(value.worktree_evidence.changed_files);
-  if (!worktreeFiles || !sameStrings(worktreeFiles, changedFiles)) {
-    return invalidResult(
-      "worktree_evidence",
-      "worktree_evidence.changed_files must exactly equal changed_files",
-    );
-  }
-
-  if (
-    !isRecord(value.acceptance) ||
-    !hasExactKeys(value.acceptance, ["status"]) ||
-    value.acceptance.status !== "accepted" ||
-    !isRecord(value.merge) ||
-    !hasExactKeys(value.merge, ["status"]) ||
-    value.merge.status !== "merged"
-  ) {
-    return invalidResult(
-      "landing_attestation",
-      "acceptance and merge must both attest a completed landing",
     );
   }
 
@@ -2390,7 +2419,7 @@ function requiredTestIssue(
       : failures.some((failure) => failure.outcome === "output_overflow")
         ? "required_test_output_overflow"
         : "required_test_failed",
-    check: "test_evidence",
+    check: "required_tests",
     work_item_id: workItem.id,
     result_path: workItem.result_path,
     message: boundRequiredTestMessage(body),
@@ -2481,25 +2510,52 @@ async function corroborateHostResult(params: {
 }): Promise<CorroboratedHostResult> {
   const { root, state, workItem, result, verdicts } = params;
   const baseline = workItem.baseline_commit;
-  const landed = result.commit_evidence.after;
+  const landed = result.landed_commit;
   let usedRecovery = false;
-  if (
-    !(await gitCommitExists(root, baseline)) ||
-    !(await gitCommitExists(root, landed))
-  ) {
+  if (!(await gitCommitExists(root, baseline))) {
+    return {
+      ok: false,
+      code: "baseline_missing",
+      check: "landed_commit",
+      message: "the work item's baseline_commit is not in this repository",
+    };
+  }
+  if (!(await gitCommitExists(root, landed))) {
     return {
       ok: false,
       code: "commit_missing",
-      check: "commit_evidence",
-      message: "baseline_commit and commit_evidence.after must both resolve to real commits",
+      check: "landed_commit",
+      message: "landed_commit is not a commit in this repository",
+    };
+  }
+  if (landed === baseline) {
+    return {
+      ok: false,
+      code: "landed_commit_invalid",
+      check: "landed_commit",
+      message:
+        "landed_commit is the baseline commit; name the commit that carries this item's edits",
     };
   }
   if (!(await gitCommitIsAncestor(root, baseline, landed))) {
     if (!params.recovery) {
+      // An ORPHANED baseline (no ref contains it, HEAD cannot reach it) is a
+      // fault in the run, not in the work: no commit could ever descend from
+      // it. The spawn-free recovery verb is its named repair.
+      if (await gitCommitIsOrphaned(root, baseline)) {
+        return {
+          ok: false,
+          code: "baseline_orphaned",
+          check: "landed_commit",
+          message:
+            "the work item's baseline_commit is orphaned (history was rewritten under the run); " +
+            "the operator can run `recover-ingest` to accept the landed work",
+        };
+      }
       return {
         ok: false,
         code: "baseline_not_ancestor",
-        check: "commit_evidence",
+        check: "landed_commit",
         message: "the trusted workload baseline is not an ancestor of the claimed landed commit",
       };
     }
@@ -2516,7 +2572,7 @@ async function corroborateHostResult(params: {
       return {
         ok: false,
         code: "baseline_not_ancestor",
-        check: "commit_evidence",
+        check: "landed_commit",
         message:
           "the trusted workload baseline is not an ancestor of the claimed landed commit, " +
           "and the baseline is NOT orphaned (a ref still contains it, or it is reachable " +
@@ -2529,30 +2585,30 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "commit_not_landed",
-      check: "commit_evidence",
-      message: "commit_evidence.after is not reachable from the repository HEAD",
+      check: "landed_commit",
+      message: "landed_commit is not reachable from the repository HEAD",
     };
   }
   const actualFiles = await gitChangedFilesOfCommit(root, landed);
-  if (!actualFiles || !sameStrings(actualFiles, result.changed_files)) {
+  if (!actualFiles || actualFiles.length === 0) {
+    return {
+      ok: false,
+      code: "landed_commit_invalid",
+      check: "landed_commit",
+      message: "landed_commit changes no file; name the commit that carries this item's edits",
+    };
+  }
+  const outOfScope = actualFiles.filter(
+    (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
+  );
+  if (outOfScope.length > 0) {
     return {
       ok: false,
       code: "changed_files_mismatch",
       check: "write_scope",
       message:
-        "the landed commit's mechanically derived changed files do not exactly match changed_files",
-    };
-  }
-  if (
-    actualFiles.some(
-      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
-    )
-  ) {
-    return {
-      ok: false,
-      code: "changed_files_mismatch",
-      check: "write_scope",
-      message: "the landed commit changed a file outside the prompt-bound allowed_files",
+        "the landed commit changed files outside the prompt-bound allowed_files: " +
+        outOfScope.join(", "),
     };
   }
   const runStartDirty = new Set(
@@ -2565,7 +2621,7 @@ async function corroborateHostResult(params: {
     return {
       ok: false,
       code: "run_start_dirty_overlap",
-      check: "worktree_evidence",
+      check: "run_start_dirt",
       message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
     };
   }
@@ -2576,9 +2632,27 @@ async function corroborateHostResult(params: {
   );
   if (failedTests.length > 0) {
     const issue = requiredTestIssue(workItem, failedTests);
-    return { ok: false, code: issue.code, check: "test_evidence", message: issue.message };
+    return { ok: false, code: issue.code, check: "required_tests", message: issue.message };
   }
   return { ok: true, changedFiles: actualFiles, usedRecovery };
+}
+
+/**
+ * Was this persisted workload written under an earlier workload contract
+ * version? Only a document that NAMES a different version counts: a document
+ * with no version, or not an object at all, is invalid, not stale.
+ */
+function persistedWorkloadIsStale(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.contract_version === "string" &&
+    value.contract_version !== WORKLOAD_CONTRACT_VERSION
+  );
+}
+
+async function persistedWorkloadFileIsStale(workloadPath: string): Promise<boolean> {
+  const read = await readSubmissionDocument(workloadPath);
+  return read.kind === "value" && persistedWorkloadIsStale(read.value);
 }
 
 export async function prepareRemediationHostHandoff(params: {
@@ -2644,16 +2718,27 @@ export async function prepareRemediationHostHandoff(params: {
     );
   }
   const workloadDigest = contentSha256(workload);
+  // A binding whose workload file an earlier contract version wrote is
+  // re-minted in place: same run, baseline and work item ids, new digest. Only
+  // the DIGEST moves — anything else that no longer matches is still a refusal.
+  const remintStaleDigest =
+    existingRecord !== undefined &&
+    existingRecord.workload_sha256 !== workloadDigest &&
+    (await persistedWorkloadFileIsStale(paths.workloadPath));
   if (
     existingRecord &&
-    existingRecord.workload_sha256 !== workloadDigest
+    existingRecord.workload_sha256 !== workloadDigest &&
+    !remintStaleDigest
   ) {
     throw new Error(
       "Trusted remediation host workload no longer matches the persisted state binding",
     );
   }
-  const handoffRecord: RemediationHostHandoffRecord =
-    existingRecord ?? {
+  const handoffRecord: RemediationHostHandoffRecord = existingRecord
+    ? remintStaleDigest
+      ? { ...existingRecord, workload_sha256: workloadDigest }
+      : existingRecord
+    : {
       contract_version: REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
       scope_semantics: REMEDIATION_HOST_SCOPE_SEMANTICS,
       run_id: params.runId,
@@ -2692,8 +2777,8 @@ export async function prepareRemediationHostHandoff(params: {
  * remote ref) also fails the ancestry test when work lands elsewhere, and that
  * is the ordinary stale-worker case — recovery refuses it. Every other
  * corroboration check runs unchanged (the landed commit exists and is reachable
- * from HEAD; its mechanically derived changed files exactly equal
- * `changed_files` and lie within the prompt-bound `allowed_files`; no overlap
+ * from HEAD; its mechanically derived changed files lie within the
+ * prompt-bound `allowed_files`; no overlap
  * with run-start dirt; the required tests rerun green), `parseResult` stays
  * fully strict, and dependency/phase eligibility is enforced exactly as on the
  * normal lane.
@@ -2874,8 +2959,8 @@ type HostItemVerdict =
       /**
        * The CORROBORATED landing — read from the result only after
        * `corroborateHostResult` verified the commit resolves, is reachable from
-       * HEAD, and that its mechanically derived diff exactly equals
-       * `changedFiles` within the item's write scope. Persisted onto each
+       * HEAD, and that its mechanically derived diff (`changedFiles`) lies
+       * within the item's write scope. Persisted onto each
        * settled item (see `RemediationItemState.host_landed_commit`), which
        * `hasLandedCommitFor` reads back below to separate partial progress
        * from unfinished work.
@@ -3017,6 +3102,31 @@ async function validateHostResultBundle(input: {
     };
   }
 
+  // A workload an EARLIER contract version wrote is not a defect in it: the
+  // tool changed underneath a live binding. It is reported as stale — no host
+  // action — and `prepareRemediationHostHandoff` re-mints the digest and
+  // rewrites the file on the same step, under the same work item ids.
+  if (state.host_handoff && persistedWorkloadIsStale(workloadRead.value)) {
+    issues.push({
+      code: "workload_stale",
+      check: "workload_binding",
+      message:
+        "the workload file was written under an earlier contract version; the tool writes it again",
+    });
+    return {
+      kind: "summary",
+      summary: {
+        accepted_count: 0,
+        completed_work_item_ids: [],
+        pending_work_item_ids: state.host_handoff.work_item_ids,
+        issues,
+        work_item_outcomes: new Map(),
+        state_changed: false,
+        state: nextState,
+      },
+    };
+  }
+
   const workload = parseWorkload(workloadRead.value, paths, input.runId, state);
   if (!workload) {
     // Accumulated, not replaced: when a block-contract defect is WHY the
@@ -3084,8 +3194,8 @@ async function validateHostResultBundle(input: {
  *
  * Ground truth, not a claim: `host_landed_commit` is written only after
  * `corroborateHostResult` verified the commit resolves, is reachable from HEAD,
- * and that its mechanically derived diff equals the result's `changed_files`
- * within the item's write scope. Anything less is not a landing.
+ * and that its mechanically derived diff lies within the item's write scope.
+ * Anything less is not a landing.
  *
  * ANY finding of the item counts, because the commit is attributed per FINDING
  * and a work item is a bundle of them: a commit for one of its findings is work
@@ -3116,7 +3226,7 @@ async function executeHostVerificationReruns(
     if (pendingItems.length === 0) continue;
     if (!ctx.eligibleIds.has(workItem.id)) {
       acc.issues.push({
-        code: "submission_contract_invalid",
+        code: "work_item_not_eligible",
         work_item_id: workItem.id,
         result_path: workItem.result_path,
         message: "the work item is no longer dependency/phase eligible",
@@ -3130,7 +3240,7 @@ async function executeHostVerificationReruns(
       workItemId: workItem.id,
       resultPath: workItem.result_path,
       parse: (value) => {
-        const result = parseResult(value, ctx.runId, workItem, paths.root);
+        const result = parseResult(value, ctx.runId, workItem);
         return result.ok
           ? { ok: true, parsed: result }
           : { ok: false, check: result.check, detail: result.reason };
@@ -3272,7 +3382,7 @@ async function executeHostVerificationReruns(
         // landed commit is carried on the event as `landed_commit` and read
         // back through `recoveryMarkMatches` — prose is not an identity, and a
         // message reworded by any later edit silently un-deduped the mark.
-        const landedCommit = result.commit_evidence.after;
+        const landedCommit = result.landed_commit;
         const alreadyMarked = acc.recordedRecoveryMarks.some(
           (event) =>
             event.run_id === ctx.runId &&
@@ -3319,7 +3429,7 @@ async function executeHostVerificationReruns(
       workItem,
       pendingItems,
       at: new Date().toISOString(),
-      landedCommit: result.commit_evidence.after,
+      landedCommit: result.landed_commit,
       changedFiles: corroborated.changedFiles,
     });
     for (const changedFile of corroborated.changedFiles) {

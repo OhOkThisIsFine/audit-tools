@@ -29,6 +29,7 @@ import {
 import {
   LaneDemandSchema,
   SEVERITIES,
+  deriveResultId,
 } from "../../src/shared/index.js";
 
 const FAILURE_SIGNATURE =
@@ -71,7 +72,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "remediation-host-workload/v1alpha2";
+  readonly contract_version: "remediation-host-workload/v1alpha3";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -319,9 +320,10 @@ async function initGitRoot(root: string): Promise<string> {
 /**
  * Land a real commit touching EXACTLY `file`, and return its sha.
  *
- * Exactly one file, because corroboration compares the commit's mechanically
- * derived change set against the result's `changed_files` for equality — a
- * commit that swept in anything else would be refused for the wrong reason.
+ * Exactly one file, and one inside the item's `allowed_files`, because
+ * corroboration derives the commit's change set from git and refuses any file
+ * outside the write scope — a commit that swept in anything else would be
+ * refused for the wrong reason.
  */
 let landedCounter = 0;
 async function landCommit(root: string, file: string): Promise<string> {
@@ -409,7 +411,12 @@ function requireIngested(
 }
 
 /**
- * The result document for `item` claiming `after` as its landed commit.
+ * THE landed-result builder for this file: the result document for `item`
+ * naming `landedCommit` as its landed commit. The identity is DERIVED from the
+ * work item (`deriveResultId` over its prompt digest) and never hand-copied;
+ * the host states only the landed commit and the obligation evidence
+ * (v1alpha3 — the tool derives the changed files from git and reruns the
+ * required tests itself).
  *
  * Split from {@link validResult} so a test that only needs a REJECTION can
  * build many variants over ONE landed commit — the variants are refused on
@@ -419,37 +426,48 @@ function requireIngested(
 function resultShape(
   runId: string,
   item: HostWorkItem,
-  after: string,
+  landedCommit: string,
   overrides: Readonly<Record<string, unknown>> = {},
 ): Record<string, unknown> {
-  const changedFiles = [item.allowed_files[0]!];
   return {
     contract_version: RESULT_VERSION,
-    result_id: `result-${item.id}-${after.slice(0, 8)}`,
+    result_id: deriveResultId(item.id, item.prompt.sha256),
     run_id: runId,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
-    changed_files: changedFiles,
-    commit_evidence: { before: item.baseline_commit, after },
-    test_evidence: item.required_tests.map((command) => ({
-      command,
-      status: "passed",
-    })),
+    landed_commit: landedCommit,
     obligation_evidence: [],
-    worktree_evidence: {
-      baseline_commit: item.baseline_commit,
-      changed_files: changedFiles,
-    },
-    acceptance: { status: "accepted" },
-    merge: { status: "merged" },
     ...overrides,
+  };
+}
+
+/** The lead line of the result template every worker prompt ends with. */
+const TEMPLATE_LEAD = "When HEAD contains your commit, write this JSON to";
+
+/**
+ * A worker prompt split into the BODY the digest covers and the first JSON
+ * block of the result template the tool appended below it.
+ */
+function splitPrompt(item: HostWorkItem): {
+  readonly body: string;
+  readonly template: Record<string, unknown>;
+} {
+  const text = item.prompt.text;
+  const at = text.indexOf(TEMPLATE_LEAD);
+  expect(at, "the worker prompt must end with the result template").toBeGreaterThan(0);
+  const tail = text.slice(at);
+  const json = /```json\n([\s\S]*?)\n```/u.exec(tail);
+  expect(json, "the template must carry a fenced JSON block").not.toBeNull();
+  return {
+    body: text.slice(0, at).replace(/\n\n$/u, ""),
+    template: JSON.parse(json![1]!) as Record<string, unknown>,
   };
 }
 
 /**
  * A result backed by a REAL landed commit, for the paths that must be ACCEPTED:
- * corroboration resolves both commits, checks baseline→landed→HEAD ancestry,
- * and compares the commit's own change set against `changed_files`.
+ * corroboration resolves the commit, checks baseline→landed→HEAD ancestry, and
+ * derives the commit's own change set, which must lie within `allowed_files`.
  */
 async function validResult(
   root: string,
@@ -585,7 +603,7 @@ describe(FAILURE_SIGNATURE, () => {
       .sort();
     expect(expected).toEqual(["block-a", "block-b"]);
     expect(handoff.workload.contract_version).toBe(
-      "remediation-host-workload/v1alpha2",
+      "remediation-host-workload/v1alpha3",
     );
     expect(handoff.workload.run_id).toBe(runId);
     expect(handoff.workload.work_items.map((entry) => entry.id)).toEqual(expected);
@@ -603,7 +621,9 @@ describe(FAILURE_SIGNATURE, () => {
       expect(item.required_tests).toEqual(source.targeted_commands);
       expect(item.token_estimate).toBe(source.token_estimate);
       expect(item.baseline_commit).toBe(baselineCommit);
-      expect(item.prompt.sha256).toBe(sha256(item.prompt.text));
+      // The digest binds the prompt BODY — the text above the tool-filled
+      // result template, which cannot carry its own digest.
+      expect(item.prompt.sha256).toBe(sha256(splitPrompt(item).body));
       expect(item.prompt.text).toContain(item.id);
       expect(item.prompt.text).toContain(item.allowed_files[0]);
       // The command is embedded inside the JSON-stringified assignment, so it
@@ -631,7 +651,7 @@ describe(FAILURE_SIGNATURE, () => {
     );
   });
 
-  it("accepts only complete run/block/prompt/worktree/commit/test/scope/merge evidence", async () => {
+  it("accepts only a complete run/block/prompt/landed-commit/obligation result", async () => {
     const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } =
       await prepareFixture();
     const [first, second] = handoff.workload.work_items;
@@ -659,49 +679,59 @@ describe(FAILURE_SIGNATURE, () => {
     expect(malformed.completed_work_item_ids).toEqual([]);
 
     // ONE real landed commit, reused by every variant below: each is refused on
-    // its OWN defect, so landing a commit per variant would spawn git fourteen
+    // its OWN defect, so landing a commit per variant would spawn git a dozen
     // times without changing a single verdict.
     const landed = await landCommit(root, first!.allowed_files[0]!);
+    const { landed_commit: _noLanded, ...withoutLandedCommit } = resultShape(
+      runId,
+      first!,
+      landed,
+    );
+    const { obligation_evidence: _noEvidence, ...withoutObligationEvidence } =
+      resultShape(runId, first!, landed);
     const invalidResults: Record<string, unknown>[] = [
       resultShape(runId, first!, landed, { contract_version: "retired/v0" }),
+      // The previous result contract version is not this one.
+      resultShape(runId, first!, landed, {
+        contract_version: "remediation-host-result/v1alpha2",
+      }),
       resultShape(runId, first!, landed, { run_id: "wrong-run" }),
       resultShape(runId, first!, landed, { work_item_id: second!.id }),
       resultShape(runId, first!, landed, { prompt_sha256: "0".repeat(64) }),
-      resultShape(runId, first!, landed, { changed_files: ["src/outside.ts"] }),
+      // result_id is the tool's derivation, never the host's choice.
+      resultShape(runId, first!, landed, { result_id: `result-${first!.id}` }),
+      // landed_commit must be a FULL commit id, and must be present.
+      resultShape(runId, first!, landed, { landed_commit: landed.slice(0, 8) }),
+      resultShape(runId, first!, landed, { landed_commit: "" }),
+      withoutLandedCommit,
+      withoutObligationEvidence,
+      // Every v1alpha2 attestation the tool now derives itself is an extra key,
+      // refused — a host can no longer restate (and so misstate) the changed
+      // files, the test outcomes, the worktree, or the landing.
+      resultShape(runId, first!, landed, { changed_files: [first!.allowed_files[0]] }),
       resultShape(runId, first!, landed, {
-        commit_evidence: { before: "0".repeat(40), after: AFTER_COMMIT },
+        commit_evidence: { before: baselineCommit, after: landed },
       }),
-      resultShape(runId, first!, landed, {
-        // The REAL baseline on both sides, so this is refused for the reason
-        // it is here to pin — a landed commit that did not move — and not
-        // merely for naming a commit the repository never had.
-        commit_evidence: { before: baselineCommit, after: baselineCommit },
-      }),
-      resultShape(runId, first!, landed, { test_evidence: [] }),
       resultShape(runId, first!, landed, {
         test_evidence: first!.required_tests.map((command) => ({
           command,
-          status: "failed",
+          status: "passed",
         })),
       }),
       resultShape(runId, first!, landed, {
         worktree_evidence: {
-          baseline_commit: "0".repeat(40),
+          baseline_commit: baselineCommit,
           changed_files: [first!.allowed_files[0]],
         },
       }),
-      resultShape(runId, first!, landed, {
-        worktree_evidence: {
-          // Real baseline, empty change set: the EMPTY list is the defect under
-          // test, not the baseline identity.
-          baseline_commit: baselineCommit,
-          changed_files: [],
-        },
-      }),
-      resultShape(runId, first!, landed, { acceptance: { status: "rejected" } }),
-      resultShape(runId, first!, landed, { merge: { status: "pending" } }),
+      resultShape(runId, first!, landed, { acceptance: { status: "accepted" } }),
+      resultShape(runId, first!, landed, { merge: { status: "merged" } }),
       resultShape(runId, first!, landed, { unexpected_legacy_field: true }),
     ];
+    // The landing-level defects the v1alpha2 variants pinned here (a landed
+    // commit equal to the baseline, an empty change set) are no longer
+    // SUBMISSION-shape defects: corroboration classifies them
+    // `landed_commit_invalid`, pinned in the prompt-20 describe below.
     for (const invalid of invalidResults) {
       await writeFile(firstPath, JSON.stringify(invalid), "utf8");
       const rejected = requireIngested(
@@ -714,7 +744,7 @@ describe(FAILURE_SIGNATURE, () => {
       // "not accepted" would stay green if a variant started being rejected by
       // some SHARED downstream reason — a git-ancestry or changed-files
       // corroboration that fires for every variant alike — at which point the
-      // fourteen cases would all be pinning the same thing. Each of these is a
+      // cases would all be pinning the same thing. Each of these is a
       // malformed SUBMISSION, so each must be caught by the contract
       // validation, before any repository probe.
       expect(
@@ -1733,28 +1763,21 @@ describe("an empty scan is not a pass", () => {
     const { root, artifactsDir, runId, submissionDir, accepted } =
       await acceptThenReprepare();
     const item = accepted.state.plan.blocks[0]!;
+    // A well-formed result for a prompt no workload ever issued: the unknown
+    // digest is what makes it reference nothing.
+    const unissued: HostWorkItem = {
+      id: item.block_id,
+      finding_ids: [...item.items],
+      allowed_files: [...item.touched_files],
+      baseline_commit: BASELINE_COMMIT,
+      prompt: { sha256: "0".repeat(64), text: "" },
+      required_tests: [...(item.targeted_commands ?? [])],
+      result_path: "",
+      token_estimate: item.token_estimate,
+    };
     await writeFile(
       join(submissionDir, `${"a".repeat(64)}.json`),
-      JSON.stringify({
-        contract_version: RESULT_VERSION,
-        result_id: `result-${item.block_id}`,
-        run_id: runId,
-        work_item_id: item.block_id,
-        prompt_sha256: "0".repeat(64),
-        changed_files: [...item.touched_files],
-        commit_evidence: { before: BASELINE_COMMIT, after: AFTER_COMMIT },
-        test_evidence: (item.targeted_commands ?? []).map((command) => ({
-          command,
-          status: "passed",
-        })),
-        obligation_evidence: [],
-        worktree_evidence: {
-          baseline_commit: BASELINE_COMMIT,
-          changed_files: [...item.touched_files],
-        },
-        acceptance: { status: "accepted" },
-        merge: { status: "merged" },
-      }),
+      JSON.stringify(resultShape(runId, unissued, AFTER_COMMIT)),
       "utf8",
     );
 
@@ -1834,10 +1857,13 @@ describe("work items carry the approved module contracts (open-bugs.md:474)", ()
     // interface it must conform to, and the binding covers what it saw.
     expect(bound.prompt.text).toContain("module_contracts");
     expect(bound.prompt.text).toContain("INV-1: sessions survive refresh");
-    expect(bound.prompt.text).toContain("MUST conform");
+    const CONFORM_RULE = "Conform to each contract in `module_contracts`";
+    expect(bound.prompt.text).toContain(CONFORM_RULE);
+    // The rule sits in the digest-bound BODY, not only in the appended template.
+    expect(splitPrompt(bound).body).toContain(CONFORM_RULE);
     // A block with no owning module carries no contract section.
     const unbound = handoff.workload.work_items.find((item) => item.id === "block-b")!;
-    expect(unbound.prompt.text).not.toContain("MUST conform");
+    expect(unbound.prompt.text).not.toContain(CONFORM_RULE);
   });
 });
 
@@ -2025,9 +2051,9 @@ describe("landing gates", () => {
     const state = currentState();
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
     const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
-    // The item's required tests are ITS OWN commands, exactly — the per-item
-    // `test_evidence` is compared against this list index-for-index at
-    // ingestion, and a tree-wide gate here is one no in-scope edit can satisfy.
+    // The item's required tests are ITS OWN commands, exactly — the tool
+    // reruns this list at ingestion, and a tree-wide gate here is one no
+    // in-scope edit can satisfy.
     expect(item.required_tests).toEqual([...(source.targeted_commands ?? [])]);
     for (const gate of [
       "npm run check:deadcode",
@@ -2056,7 +2082,7 @@ describe("landing gates", () => {
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
     // ONE line, naming the boundary that runs them.
     expect(item.prompt.text).toMatch(
-      /the CLOSE runs each of them once on the fully merged tree/i,
+      /Do not run the landing gates\. The close phase runs them once, on the merged tree\./i,
     );
     // The Linux-CI instruction is gone: no mechanism enforced it, and Linux CI
     // is the host's concern, not an instruction this tool can back.
@@ -2131,3 +2157,132 @@ describe("landing gates", () => {
   });
 });
 
+
+/**
+ * Prompt 20 (owner review, 2026-09-18). The worker prompt ENDS with the result
+ * the tool expects, its identity values filled in by the tool; the digest
+ * covers the text ABOVE that template (a text cannot carry its own digest); the
+ * landed result is SLIM — the tool derives the changed files, the tests and the
+ * landing itself from git and its own rerun, so the host states only the commit
+ * and the obligation evidence.
+ */
+describe("prompt 20: tool-filled result template and slim landed result", () => {
+  const SLIM_KEYS = [
+    "contract_version",
+    "landed_commit",
+    "obligation_evidence",
+    "prompt_sha256",
+    "result_id",
+    "run_id",
+    "work_item_id",
+  ];
+  // The result builder, the prompt splitter and the template lead are the
+  // file-level `resultShape`, `splitPrompt` and `TEMPLATE_LEAD`.
+
+  it("ends each worker prompt with a template whose identity values the tool filled in", async () => {
+    const { runId, handoff } = await prepareFixture();
+    expect(handoff.workload.contract_version).toBe(
+      "remediation-host-workload/v1alpha3",
+    );
+    for (const item of handoff.workload.work_items) {
+      const { body, template } = splitPrompt(item);
+      // The digest covers the text above the template, exactly.
+      expect(sha256(body)).toBe(item.prompt.sha256);
+      expect(item.prompt.text.startsWith(`# Implement remediation work item \`${item.id}\``)).toBe(true);
+      expect(Object.keys(template).sort()).toEqual(SLIM_KEYS);
+      expect(template).toMatchObject({
+        contract_version: "remediation-host-result/v1alpha3",
+        result_id: deriveResultId(item.id, item.prompt.sha256),
+        run_id: runId,
+        work_item_id: item.id,
+        prompt_sha256: item.prompt.sha256,
+        obligation_evidence: [],
+      });
+      expect(item.prompt.text).toContain(item.result_path);
+      expect(item.prompt.text).not.toMatch(/frontier|later dependency level|digest/iu);
+    }
+  });
+
+  it("accepts a slim result for a real landed commit", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const item = handoff.workload.work_items[0]!;
+    const landed = await landCommit(root, item.allowed_files[0]!);
+    await writeFile(
+      expectContained(root, item.result_path, "result"),
+      JSON.stringify(resultShape(runId, item, landed)),
+      "utf8",
+    );
+    const summary = requireIngested(
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+    );
+    expect(summary.issues.filter((issue) => issue.work_item_id === item.id)).toEqual([]);
+    expect(summary.completed_work_item_ids).toContain(item.id);
+  });
+
+  it("refuses the old fields, a host-chosen result_id, the baseline as landed_commit, and an empty commit", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } =
+      await prepareFixture();
+    const item = handoff.workload.work_items[0]!;
+    const path = expectContained(root, item.result_path, "result");
+    const ingestCodes = async (value: Record<string, unknown>): Promise<string[]> => {
+      await writeFile(path, JSON.stringify(value), "utf8");
+      const summary = requireIngested(
+        await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
+      );
+      expect(summary.completed_work_item_ids).not.toContain(item.id);
+      return summary.issues
+        .filter((issue) => issue.work_item_id === item.id)
+        .map((issue) => issue.code);
+    };
+    const landed = await landCommit(root, item.allowed_files[0]!);
+    expect(
+      await ingestCodes(resultShape(runId, item, landed, { changed_files: [item.allowed_files[0]] })),
+    ).toEqual(["submission_contract_invalid"]);
+    expect(
+      await ingestCodes(resultShape(runId, item, landed, { result_id: "host-chosen" })),
+    ).toEqual(["submission_contract_invalid"]);
+    expect(await ingestCodes(resultShape(runId, item, baselineCommit))).toEqual([
+      "landed_commit_invalid",
+    ]);
+    await git(root, ["commit", "--allow-empty", "-m", "empty"]);
+    expect(await ingestCodes(resultShape(runId, item, await headOf(root)))).toEqual([
+      "landed_commit_invalid",
+    ]);
+  });
+
+  it("re-mints the binding of a workload written by an older build instead of wedging the run", async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const workloadPath = expectContained(root, handoff.workload_path, "workload");
+    // The older build wrote a v1alpha2 document under a digest this build can
+    // no longer reproduce, because the prompt text changed.
+    await writeFile(
+      workloadPath,
+      JSON.stringify({ ...handoff.workload, contract_version: "remediation-host-workload/v1alpha2" }),
+      "utf8",
+    );
+    const staleState: CurrentState = {
+      ...state,
+      host_handoff: { ...handoff.handoff_record, workload_sha256: "0".repeat(64) },
+    };
+    const ingested = requireIngested(
+      await boundary.ingestRemediationHostResults({
+        root,
+        artifactsDir,
+        runId,
+        state: staleState,
+      }),
+    );
+    expect(ingested.issues.map((issue) => issue.code)).toContain("workload_stale");
+    const reminted = requirePrepared(
+      await boundary.prepareRemediationHostHandoff({
+        root,
+        artifactsDir,
+        runId,
+        baselineCommit: await headOf(root),
+        state: staleState,
+      }),
+    );
+    expect(reminted.workload.contract_version).toBe("remediation-host-workload/v1alpha3");
+    expect(reminted.handoff_record).toEqual(handoff.handoff_record);
+  });
+});

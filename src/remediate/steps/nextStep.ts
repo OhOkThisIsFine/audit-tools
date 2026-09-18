@@ -26,8 +26,8 @@ import {
   auditReadOf,
   type AuditRead,
   formatValidationIssues,
-  isMissingObservation,
   isRecord,
+  renderIngestReportLines,
   withFsRetry,
   RunLogger,
   coerceJsonObjectArg,
@@ -80,9 +80,9 @@ import {
   permanentlyDeadPendingBlocks,
   precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
+  remediationIssueRemedy,
   workloadBindingIdentity,
   type CurrentRemediationHostState,
-  type RemediationHostIngestIssue,
   type RemediationHostIngestSummary,
 } from "./dispatch/hostHandoff.js";
 import {
@@ -1301,59 +1301,26 @@ export async function recoverIngestHostResults(options: {
 }
 
 /**
- * Render the host-facing result status for an ingest, split by outcome.
+ * The ingest report for the implement-dispatch prompt, as prompt lines.
  *
- * Takes the whole summary rather than just its issues, because the split needs
- * BOTH halves: which items were refused (from the issues) and which landed
- * without a result (from `work_item_outcomes`, where the run's corroborated
- * commit for the item is what separates that case from plain unfinished work).
+ * Takes the whole summary rather than just its issues, because the report needs
+ * BOTH halves: the classified issues, and the items that landed without a
+ * result (from `work_item_outcomes`, where the run's corroborated commit for
+ * the item is what separates that case from plain unfinished work). The
+ * sections are the shared renderer's; only the remedy map is this draw's.
  */
-function remediationResultDiagnostics(
+function remediationIngestReportLines(
   ingested: RemediationHostIngestSummary,
-): string {
-  const describe = (issue: RemediationHostIngestIssue): string =>
-    `- ${issue.work_item_id ? `\`${issue.work_item_id}\`: ` : ""}${issue.message}${issue.result_path ? ` (\`${issue.result_path}\`)` : ""}`;
-  const section = (heading: string, lines: readonly string[]): string =>
-    lines.length === 0 ? "" : `\n${heading}\n\n${lines.join("\n")}\n`;
-
-  const rejected = ingested.issues.filter(
-    (issue) => !isMissingObservation(issue),
-  );
-  const landedWithoutResult = [...ingested.work_item_outcomes]
-    .filter(([, outcome]) => outcome === "missing_result_with_commit")
-    .map(([id]) => id)
-    .sort(compareCodeUnits);
-  const notYetWritten = ingested.issues.filter((issue) =>
-    isMissingObservation(issue),
-  );
-
-  const body =
-    section(
-      "## Results already landed, whose result file is missing",
-      landedWithoutResult.map(
-        (id) =>
-          `- \`${id}\`: this item's edits are IN this repository — a corroborated commit landed ` +
-          `for it and its changed files are recorded — but no result file exists at its bound ` +
-          `\`result_path\`. This is PARTIAL PROGRESS, not absent work: write the result for the ` +
-          `commit that is already there rather than redoing the edit.`,
-      ),
-    ) +
-    section(
-      "## Result status requiring attention",
-      rejected.map(describe),
-    ) +
-    section(
-      "## Results not yet written",
-      notYetWritten.map(describe),
-    );
-
-  if (body === "") return "";
-  return (
-    body +
-    "\nThe workload was restored from its tool-owned digest when necessary. Repair or\n" +
-    "complete only the named result files; do not rewrite the workload or its\n" +
-    "baseline.\n"
-  );
+): string[] {
+  return renderIngestReportLines({
+    issues: ingested.issues,
+    remedy: remediationIssueRemedy,
+    workload: "named_above",
+    landedWithoutResult: [...ingested.work_item_outcomes]
+      .filter(([, outcome]) => outcome === "missing_result_with_commit")
+      .map(([id]) => id)
+      .sort(compareCodeUnits),
+  });
 }
 
 async function buildImplementDispatchStep(ctx: {
@@ -1452,18 +1419,30 @@ async function buildImplementDispatchStep(ctx: {
   // RENDER — a channel that survives exactly as long as the host reads this one
   // step, and that is reached only when nothing was accepted.
   //
-  // THREE STATES, THREE SECTIONS, because they have three different remedies and
-  // a reader must not have to parse prose to tell them apart (the measured
-  // friction: a host parser special-casing "no result file exists"):
-  //   rejected               — something was written and refused; repair it.
-  //   missing + commit       — the edits LANDED but no result exists; write the
-  //                            result FOR THE COMMIT THAT IS ALREADY THERE.
-  //   missing, no commit     — nothing yet; write it when the work is done.
-  // The classification is on CODES, never message text, so rewording a message
-  // cannot move an item between sections.
-  const diagnostics = remediationResultDiagnostics(ingested);
+  // Each issue lands under the section its CODE's remedy names, never under one
+  // its message text suggests, so rewording a message cannot move an item
+  // between sections (the measured friction: a host parser special-casing "no
+  // result file exists").
+  const report = remediationIngestReportLines(ingested);
 
   const nextCommand = loaderCommand("next-step");
+  const promptLines = [
+    "# Implement the remediation work items",
+    "",
+    "Read the workload file:",
+    "",
+    `\`${handoff.workload_path}\``,
+    "",
+    "The file lists every work item that is ready now. Give each item's prompt to a worker. You choose the order, the groups, and how many run at the same time.",
+    "",
+    ...report,
+    ...(report.length > 0 ? ["Change only the result files named above.", ""] : []),
+    "Do not edit the workload file.",
+    "",
+    "When each item has its commit on HEAD and its result file, run:",
+    "",
+    `\`${nextCommand}\``,
+  ];
   return {
     kind: "emit",
     step: await writeCurrentStep({
@@ -1472,23 +1451,7 @@ async function buildImplementDispatchStep(ctx: {
       runId,
       repoRoot: root,
       artifactsDir,
-      prompt: `
-# Implement the Eligible Remediation Workload
-
-Read the generated workload at:
-
-\`${handoff.workload_path}\`
-
-It contains the complete, dependency-safe current frontier. Complete every work
-item and write its exact prompt-bound result contract to its \`result_path\`.
-The host owns execution choices, grouping, and concurrency; audit-tools performs
-no launch, routing, or quota decision. Do not start a later dependency level.
-${diagnostics}
-
-After all completed changes are merged and their result files exist, run:
-
-\`${nextCommand}\`
-`,
+      prompt: `\n${promptLines.join("\n")}\n`,
       allowedCommands: [
         ...new Set(
           handoff.workload.work_items.flatMap((item) => item.required_tests),

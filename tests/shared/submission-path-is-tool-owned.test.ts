@@ -50,6 +50,7 @@ import {
   RunLogger,
   submissionPathFor,
   deriveLaneDemand,
+  deriveResultId,
 } from "audit-tools/shared";
 import {
   ingestAuditHostResults,
@@ -337,7 +338,7 @@ function auditSubmission(
 ): Record<string, unknown> {
   return {
     contract_version: "audit-host-result/v1alpha1",
-    result_id: `result-${item.id}`,
+    result_id: deriveResultId(item.id, item.prompt.sha256),
     run_id: AUDIT_RUN_ID,
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
@@ -701,14 +702,19 @@ describe("the audit accepted-results ledger", () => {
     expect(invalid!.message).not.toMatch(/prompt binding|identity binding/u);
   });
 
-  it("refuses a second submission that reuses an accepted result id", async () => {
+  // The result id is DERIVED from the work item and its prompt digest, so a
+  // second item that reuses the first item's id fails the identity check at
+  // `result_id` — before the duplicate check could see it.
+  it("refuses a second submission that reuses another item's result id", async () => {
     const fixture = await auditFixture(["T1", "T2"]);
     const [first, second] = fixture.items;
     await submit(fixture, first!, auditSubmission(first!));
     await submit(
       fixture,
       second!,
-      auditSubmission(second!, { result_id: `result-${first!.id}` }),
+      auditSubmission(second!, {
+        result_id: deriveResultId(first!.id, first!.prompt.sha256),
+      }),
     );
 
     const summary = await ingestAuditHostResults({
@@ -718,7 +724,8 @@ describe("the audit accepted-results ledger", () => {
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
       });
     expect(summary.accepted_count).toBe(1);
-    expect(summary.issues.map((issue) => issue.code)).toEqual(["duplicate_submission_id"]);
+    expect(summary.issues.map((issue) => issue.code)).toEqual(["submission_contract_invalid"]);
+    expect(summary.issues[0]!.message).toMatch(/result_id/u);
     expect(summary.completed_work_item_ids).toEqual([first!.id]);
   });
 

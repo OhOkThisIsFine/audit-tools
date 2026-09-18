@@ -16,6 +16,7 @@ export const DISPATCH_BARREL_EXPORTS = [
   "precomputeRecoveryTestVerdicts",
   "prepareRemediationHostHandoff",
   "remediationHostResultFilePath",
+  "remediationIssueRemedy",
   "remediationSubmissionBinding",
   "runRequiredTest",
   "severityRiskWeight",

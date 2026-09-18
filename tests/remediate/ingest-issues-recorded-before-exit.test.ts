@@ -27,6 +27,9 @@ import { describe, expect, it } from "vitest";
 const SOURCE = fileURLToPath(
   new URL("../../src/remediate/steps/nextStep.ts", import.meta.url),
 );
+const RENDERER = fileURLToPath(
+  new URL("../../src/shared/submission/ingestReport.ts", import.meta.url),
+);
 
 function bodyOfBuildImplementDispatchStep(): string[] {
   const lines = readFileSync(SOURCE, "utf8").split(/\r?\n/);
@@ -99,16 +102,27 @@ describe("host ingest issues are recorded before any exit path", () => {
     // The durable half moving earlier must not cost the rendered half, which is
     // what the host reads when nothing was accepted.
     //
-    // The render now lives in `remediationResultDiagnostics` — it grew a
-    // missing/rejected split, which is more than this function should carry —
-    // so this asserts the PROPERTY (the step's prompt is fed the diagnostics)
-    // rather than the heading's presence in this one function's body. Pinning
-    // the heading here made a correct extraction read as a regression.
-    const body = bodyOfBuildImplementDispatchStep().join("\n");
-    expect(body).toContain("remediationResultDiagnostics(ingested)");
-    const helper = readFileSync(SOURCE, "utf8");
-    expect(helper).toContain("## Result status requiring attention");
+    // The render lives in `remediationIngestReportLines`, which feeds the
+    // shared `renderIngestReportLines` this draw's remedy map — so this asserts
+    // the PROPERTY (the step's prompt is fed the report, and the report is the
+    // shared renderer's) rather than a heading's presence in this one
+    // function's body. Pinning the heading here made a correct extraction read
+    // as a regression.
+    const body = bodyOfBuildImplementDispatchStep();
+    const reportIndex = body.findIndex((line) =>
+      line.includes("remediationIngestReportLines(ingested)"),
+    );
+    expect(reportIndex, "the step's prompt is fed the ingest report").toBeGreaterThan(-1);
+    expect(
+      body.slice(reportIndex).some((line) => line.includes("...report")),
+      "the rendered report is spliced into the prompt lines",
+    ).toBe(true);
+    const source = readFileSync(SOURCE, "utf8");
+    expect(source).toContain("renderIngestReportLines({");
+    expect(source).toContain("remedy: remediationIssueRemedy");
+    const renderer = readFileSync(RENDERER, "utf8");
     // Both sections the host needs to tell patience from a repair.
-    expect(helper).toContain("## Results not yet written");
+    expect(renderer).toContain("## Results not yet written");
+    expect(renderer).toContain("## Results to repair and write again");
   });
 });

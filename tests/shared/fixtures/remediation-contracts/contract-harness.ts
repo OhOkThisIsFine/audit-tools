@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { compareCodeUnits, stableStringify } from "audit-tools/shared";
+import { compareCodeUnits, deriveResultId, stableStringify } from "audit-tools/shared";
 
 export type JsonRecord = Record<string, unknown>;
 export type ByteSource = string | Uint8Array;
@@ -945,11 +945,23 @@ export function replayProviderNeutralFixture(
       const items = workload.payload.work_items;
       assertCondition(Array.isArray(items) && isRecord(items[0]), "remediation work item");
       assertCondition(isRecord(items[0].prompt), "remediation prompt");
-      assertCondition(isRecord(fixture.payload.commit_evidence), "commit evidence");
+      // v1alpha3: the host states the landed commit and nothing it could only
+      // restate; the tool derives the rest. The result id is the tool's
+      // derivation over the bound prompt digest.
+      assertCondition(
+        typeof fixture.payload.landed_commit === "string" &&
+          /^[0-9a-f]{40}$/u.test(fixture.payload.landed_commit) &&
+          fixture.payload.landed_commit !== items[0].baseline_commit,
+        "landed commit",
+      );
       assertCondition(
         fixture.payload.work_item_id === items[0].id &&
+          fixture.payload.run_id === workload.payload.run_id &&
+          typeof items[0].id === "string" &&
+          typeof items[0].prompt.sha256 === "string" &&
           fixture.payload.prompt_sha256 === items[0].prompt.sha256 &&
-          fixture.payload.commit_evidence.before === items[0].baseline_commit,
+          fixture.payload.result_id ===
+            deriveResultId(items[0].id, items[0].prompt.sha256),
         "remediation result binding mismatch",
       );
       replacementOutput = { accepted: true, work_item_id: fixture.payload.work_item_id };

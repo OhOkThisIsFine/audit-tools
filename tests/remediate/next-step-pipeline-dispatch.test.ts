@@ -557,7 +557,7 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     );
 
     expect(step.step_kind).toBe("dispatch_implement");
-    expect(workload.contract_version).toBe("remediation-host-workload/v1alpha2");
+    expect(workload.contract_version).toBe("remediation-host-workload/v1alpha3");
     expect(workload.work_items).toHaveLength(2);
   });
 
