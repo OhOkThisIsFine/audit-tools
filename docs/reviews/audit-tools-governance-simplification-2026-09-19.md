@@ -42,7 +42,7 @@ This is also confirmed.
 
 In `scripts/release-and-publish.mjs`, `main()` computes:
 
-`expectedTag = v\${nextVersion(packageBefore.version, bump)}`
+`expectedTag = v${nextVersion(packageBefore.version, bump)}`
 
 before asking `planReleaseResume()` whether the existing journal should resume.
 
