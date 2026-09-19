@@ -4,7 +4,7 @@
 
 ## Baseline and execution rules
 
-**Preparation update:** packet 1's plan and inventory are saved. Packet 2 completed on 2026-09-19: the existing v0.52.3 publication run succeeded, registry availability was checked, and global installation, host assets, and both binaries passed. Do not publish or bump again for that packet. Start implementation at packet 3. The unfinished triage edits were preserved at stash commit `8442913f83e8818c3f3a878ce45b9c0a79b31cea`, with independent backups and restoration instructions in `C:/Code/docs/audit-tools-recovery-2026-09-19/README.md`. The baseline statements below describe the planning snapshot, not a request to restore its dirty state.
+**Preparation update:** packet 1's plan and inventory are saved. Packet 2 completed on 2026-09-19: the existing v0.52.3 publication run succeeded, registry availability was checked, and global installation, host assets, and both binaries passed. Do not publish or bump again for that packet. Start implementation at packet 3. The unfinished triage edits were preserved at stash commit `8442913f83e8818c3f3a878ce45b9c0a79b31cea`, with independent backups and restoration instructions in `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`. The baseline statements below describe the planning snapshot, not a request to restore its dirty state.
 
 This plan covers **203 backlog entries**, **four unresolved nightly items**, and **52 older decision records**. GitHub currently has no open issues or pull requests.
 

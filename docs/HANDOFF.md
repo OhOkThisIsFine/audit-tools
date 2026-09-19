@@ -8,7 +8,7 @@
 The backlog has an owner-approved implementation sequence and frozen entry inventory in
 [`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
 Existing unfinished edits are preserved separately; recovery details are in
-`C:/Code/docs/audit-tools-recovery-2026-09-19/README.md`.
+`C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`.
 
 ## Immediate next
 
