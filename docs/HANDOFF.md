@@ -5,24 +5,15 @@
 
 ## Current state
 
-The first prompt-consistency and governance-simplification slice is implemented:
-
-- Audit workers no longer author the tool-owned clean-result flag. Intent confirmation derives
-  required fields and disposition choices from the schemas.
-- The second-order adversary requires an independent context; an unavailable reviewer stops the
-  step without a fabricated result or continuation.
-- Release retries bind to the already-bumped version and commit. Missing or mismatched tags and
-  incomplete publication creation stop explicitly; registry observation allows ten minutes.
-- Gate enumeration is removed. The executable verification gate remains authoritative; the
-  remaining checks retain their order.
+The backlog has an owner-approved implementation sequence and frozen entry inventory in
+[`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
+Existing unfinished edits are preserved separately; recovery details are in
+`C:/Code/docs/audit-tools-recovery-2026-09-19/README.md`.
 
 ## Immediate next
 
-Continue Prompt Contract v1 primitives and P1 evidence/path corrections in
-`docs/reviews/prompt-contract-standard-2026-09-19.md`, then the executable gate catalog and remaining
-consolidations in `docs/reviews/audit-tools-governance-simplification-2026-09-19.md`.
-The arbitrary-repository final-gate gap remains in `docs/backlog/open-bugs.md`; audit mutation
-policy remains a separate owner decision before changing that default.
+Start at packet 3; preparation and release recovery are complete. Include the M09 intake packet after packet 4.
+Audit source changes are opt-in; analyzer consent is per-run. Preserve these settled choices.
 
 **Live owner decision for the completed slice:** none.
 
