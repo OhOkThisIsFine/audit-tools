@@ -15,6 +15,8 @@
 | [`backlog/deferred.md`](backlog/deferred.md) | Blocked on data, a live run, creds or a toolchain |
 | [`backlog/durable-traps.md`](backlog/durable-traps.md) | Standing environment reference + doc-set hygiene |
 
+**Current cross-cutting review:** [`Verified repository review and governance simplification plan — 2026-09-19`](reviews/audit-tools-governance-simplification-2026-09-19.md) is the single source for the verified repository-level recommendations and governance-reduction sequence. Existing bug/track entries remain the issue-level work records.
+
 <!-- BEGIN GENERATED SEEK INDEX — scripts/shared/generate-backlog-index.mjs — DO NOT EDIT BY HAND -->
 
 > **Seek index — GENERATED from [`docs/backlog/`](backlog/); do not hand-edit it.**
