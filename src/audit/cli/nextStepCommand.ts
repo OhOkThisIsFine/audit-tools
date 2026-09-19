@@ -1175,6 +1175,7 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
   },
 );
 
+// sites-pinned: tests/audit/systemic-round-identity.test.ts
 const emitSystemicChallenge = emissionRow<"systemic_challenge">(
   async ({ root, artifactsDir }, result) => {
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
@@ -1227,7 +1228,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. Two consecutive rounds with no new findings converge the loop.",
+        "Execute the second-order-adversary lane prompt (a separate agent from the one that drove this audit), write its findings to the results path, then run next-step. If no independent context is available, stop and report that the review could not be performed; do not write results or advance. Two consecutive rounds with no new findings converge the loop.",
       repoRoot: root,
     artifactPaths: {
       systemic_challenge_prompt: fanout.lanes[0]!.promptPath,
@@ -1245,6 +1246,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
           leadIn:
             "This round's adversary lane challenges the audit process itself (optimization/better-way mandate). The adversary must NOT be the agent that drove this audit.",
           executionLines: renderFanoutExecutionLines({
+            independenceRequired: true,
             lanes: fanout.pendingLanes.map((lane) => ({
               label: lane.label,
               promptPath: lane.promptPath,

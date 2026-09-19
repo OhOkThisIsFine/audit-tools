@@ -713,8 +713,8 @@ function buildPrompt(
       // Required is the honest reading: a steward returns `findings: []`, so a
       // steward with no `verification` carries no answer at all and is
       // indistinguishable from a lane that failed.
-      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, reviewed_clean, and verification in addition to contract_version. On this lane verification is REQUIRED."
-      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version, plus reviewed_clean when findings is empty.",
+      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, and verification in addition to contract_version. On this lane verification is REQUIRED."
+      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
     "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines.",
     // The finding contract is CARRIED, not referenced: it is rendered from the
     // very schema ingestion enforces, so a host never has to remember or fetch it.

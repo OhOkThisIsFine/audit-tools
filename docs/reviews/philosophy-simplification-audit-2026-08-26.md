@@ -193,7 +193,9 @@ the host-result bindings at the product boundary.
 plane over executable source:
 
 - `package.json:54` owns the executable gate sequence. `STEP_GLOSS` in
+  <!-- doc-citation-exempt: historical finding; gate-enumeration subsystem subsequently removed -->
   `scripts/gate-enumeration-data.mjs` keeps a parallel membership-keyed description set,
+  <!-- doc-citation-exempt: historical finding; gate-enumeration subsystem subsequently removed -->
   while `scripts/check-gate-enumeration.mjs` correctly derives order from the executable
   source. The shipping workflow still renders the duplicate enumeration.
 - Guard reach mixes derivable identity and wiring with declarations that source inspection cannot

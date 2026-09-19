@@ -105,8 +105,7 @@ const IS_CLI = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(pro
 // The one positional is an output PATH, so a flag in that slot is never one.
 // Unguarded, `--help` BECAME the filename: the sweep started and wrote `--help`
 // and `--help-coverage.json` into the repo root instead of printing usage — a
-// wrong argument doing silent work rather than failing. Same shape of guard as
-// scripts/check-gate-enumeration.mjs, which is where this was fixed once already.
+// wrong argument doing silent work rather than failing.
 const OUT_ARG = process.argv[2];
 const USAGE = 'Usage: node scripts/shared/triage-backlog.mjs [outPath]';
 if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {

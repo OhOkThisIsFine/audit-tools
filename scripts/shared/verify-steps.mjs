@@ -1,11 +1,7 @@
 // The `verify:checks` step list, read from package.json — ONE parser.
 //
-// WHY THIS EXISTS. Two gates need the same fact: `check-gate-enumeration`
-// renders the step list into its target docs, and `check-guard-reach` asks
-// whether a gate was actually wired into the chain. Both used to carry their own
-// reading of the `profile-run.mjs verify-checks <step> <step> …` command line,
-// which is the shape a derived literal takes right before the two copies
-// disagree about what the gate runs.
+// `check-guard-reach` uses this parser to determine whether a gate is wired
+// into the executable `profile-run.mjs verify-checks <step> <step> …` chain.
 //
 // The step list is the executable gate. It is READ here, never declared — so no
 // caller can disagree with package.json about membership or order.

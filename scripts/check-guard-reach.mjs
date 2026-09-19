@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/guard-reach-gate.test.ts
 //
 // Guard-reach reconciliation gate (nightly determination ec64d159).
 //
@@ -177,9 +178,8 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
         gaps
           .map((g) => `  - ${g.id}\n` + g.missing.map((m) => `      missing: ${m}`).join('\n'))
           .join('\n') +
-        `\n  → the two generated artifacts follow from these homes and must be re-rendered in the ` +
-        `same change: \`node scripts/shared/generate-ci-trigger-paths.mjs\` (from the REACH rows) and ` +
-        `\`node scripts/check-gate-enumeration.mjs --write\` (from the verify:checks step list).`,
+        `\n  → re-render CI trigger paths from the REACH rows in the same change: ` +
+        `\`node scripts/shared/generate-ci-trigger-paths.mjs\`.`,
     );
   }
 

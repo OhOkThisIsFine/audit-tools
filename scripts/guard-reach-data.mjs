@@ -369,16 +369,6 @@ export const GUARDS = [
       '(2026-08-18; extension-census source narrowed 2026-09-10)',
   },
   {
-    id: 'check:gate-enumeration',
-    kind: 'gate',
-    impl: 'check:gate-enumeration',
-    preCommit: 'reach',
-    fix:
-      'a registered enumeration target is stale against package.json — re-render with ' +
-      '`node scripts/check-gate-enumeration.mjs --write`; step order and membership are READ from ' +
-      'package.json, so fix the gate wiring rather than a rendered copy',
-  },
-  {
     id: 'check:philosophy-brief',
     kind: 'gate',
     impl: 'check:philosophy-brief',
@@ -2079,7 +2069,6 @@ export const REACH = [
       'scripts/check-*.mjs',
       'scripts/doc-manifest-data.mjs',
       'scripts/guard-reach-data.mjs',
-      'scripts/gate-enumeration-data.mjs',
       'scripts/shared/generate-*.mjs',
       'scripts/attest-constitutional-doc-change.mjs',
       'scripts/render-closeout.mjs',
@@ -2093,10 +2082,8 @@ export const REACH = [
       'check:lint',
       'check:dup',
       // Area-granular citations (existing precedent in this row): each gate
-      // READS its own data module here — doc-manifest-data.mjs,
-      // gate-enumeration-data.mjs, guard-reach-data.mjs respectively.
+      // READS its own data module here — doc-manifest-data.mjs and guard-reach-data.mjs.
       'check:doc-manifest',
-      'check:gate-enumeration',
       'check:ci-trigger-paths',
       // Parity over its own generator (scripts/shared/generate-runtime-artifact-names.mjs --check).
       'check:runtime-artifact-names',
@@ -2441,12 +2428,6 @@ export const REACH = [
       'a renderer heading/bullet change reds it instead of silently drifting the README sample',
   },
   {
-    area: 'gate-enumeration render target',
-    files: ['.claude/skills/ship/SKILL.md'],
-    guardedBy: ['check:gate-enumeration'],
-    note: 'the one rendered enumeration block (ENUMERATION_TARGETS); step membership/order come from package.json',
-  },
-  {
     area: 'HANDOFF',
     files: ['docs/HANDOFF.md'],
     guardedBy: ['check:handoff-roadmap'],
@@ -2587,12 +2568,6 @@ export const GENERATED = [
     generator: 'scripts/check-doc-manifest.mjs',
     authority: 'check',
     npmScript: 'check:doc-manifest',
-    checkMode: 'default',
-  },
-  {
-    generator: 'scripts/check-gate-enumeration.mjs',
-    authority: 'check',
-    npmScript: 'check:gate-enumeration',
     checkMode: 'default',
   },
   {

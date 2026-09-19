@@ -302,12 +302,16 @@ describe(FAILURE_SIGNATURE, () => {
     }
 
     // The non-schema rules live in ONE registry; the prompt carries each
-    // statement verbatim and the validator emits it verbatim.
+    // worker-owned statement verbatim and the validator emits it verbatim.
     const { AUDIT_RESULT_RULES } = await import(
       "../../src/audit/validation/auditResults.js"
     );
     expect(AUDIT_RESULT_RULES.length, "the rule registry must be non-empty").toBeGreaterThan(0);
     for (const rule of AUDIT_RESULT_RULES as readonly { id: string; statement: string }[]) {
+      if (rule.id === "reviewed_clean_affirmation") {
+        expect(prompt).not.toContain(rule.statement);
+        continue;
+      }
       expect(
         prompt,
         `the dispatch prompt must carry rule '${rule.id}' verbatim`,

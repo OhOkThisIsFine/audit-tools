@@ -1,4 +1,5 @@
-import { LENSES } from "audit-tools/shared";
+// sites-pinned: tests/audit/intent-checkpoint.test.ts
+import { LENSES, IntentCheckpointSchema, FileDispositionStatusSchema } from "audit-tools/shared";
 import { MANDATORY_LENSES } from "../orchestrator/lensSelection.js";
 import {
   CONCEPTUAL_PERSPECTIVES,
@@ -339,8 +340,10 @@ export function renderConfirmIntentPrompt(
     "",
     `  ${opts.intentCheckpointPath}`,
     "",
-    "Use this shape (only `scope_summary` and `intent_summary` are required; add",
-    "the optional fields to constrain the run):",
+    `Required fields: ${Object.entries(IntentCheckpointSchema.shape)
+      .filter(([, field]) => !field.isOptional())
+      .map(([key]) => `\`${key}\``).join(", ")}.`,
+    "Use this shape; add the optional fields to constrain the run:",
     "",
     "```json",
     "{",
@@ -353,7 +356,7 @@ export function renderConfirmIntentPrompt(
     '  "constraint_clauses": [{ "clause_id": "<the clause_id above>", "text": "<unencodable clause>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply it>" }],',
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
-    '  "disposition_overrides": [{ "path": "<path>", "status": "<generated|vendor|excluded|...>", "reason": "<why>" }],',
+    `  "disposition_overrides": [{ "path": "<path>", "status": "<${FileDispositionStatusSchema.options.join("|")}>", "reason": "<why>" }],`,
     '  "lens_selection": { "include": ["<lens>"], "exclude": ["<lens>"] },',
     '  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',
     "}",

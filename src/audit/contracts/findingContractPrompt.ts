@@ -66,7 +66,7 @@ let renderedContract: readonly string[] | undefined;
 /**
  * The finding contract as prompt lines: required fields (with their shapes),
  * min-length facts, the closed vocabularies, the optional fields with their own
- * `.describe()` text, and every non-schema rule statement verbatim.
+ * `.describe()` text, and every worker-owned non-schema rule statement verbatim.
  *
  * Memoized: the derivation is pure and the result is embedded in every
  * work-item prompt (and therefore in every prompt hash), so it must be both
@@ -139,9 +139,11 @@ export function findingContractPromptLines(): readonly string[] {
     // exactly shipped no quote and every finding grounded `ungrounded`. The
     // sentence is the constant both doors refuse with.
     `Rule: ${AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE}`,
-    // Every cross-record rule the downstream validator enforces, verbatim from
-    // the registry the validator itself reads — not a paraphrase.
-    ...AUDIT_RESULT_RULES.map((rule) => `Rule: ${rule.statement}`),
+    // Ingest derives the clean-result affirmation; workers cannot supply it in
+    // the strict host envelope. Only worker-owned rules belong in this prompt.
+    ...AUDIT_RESULT_RULES
+      .filter((rule) => rule.id !== "reviewed_clean_affirmation")
+      .map((rule) => `Rule: ${rule.statement}`),
   ];
   renderedContract = lines;
   return renderedContract;

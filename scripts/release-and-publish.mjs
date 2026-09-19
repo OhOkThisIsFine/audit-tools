@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/audit/release-resume-main.test.ts
 // Single-package release helper for `audit-tools`. Bumps the version, tags `vX.Y.Z`,
 // pushes, creates a GitHub Release (which triggers the OIDC trusted-publishing
 // workflow), then waits for the publish run + npm registry propagation.
@@ -34,7 +35,9 @@ const noWait = process.argv.includes("--no-wait");
 const skipCiGreen = process.argv.includes("--skip-ci-green");
 const pollIntervalMs = 5_000;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
-const registryTimeoutMs = 2 * 60 * 1000;
+// Registry propagation has exceeded two minutes after a successful publish.
+// This observation window is separate from GitHub release-event delivery.
+const registryTimeoutMs = 10 * 60 * 1000;
 // Tag-trigger watch: the publish-package run for a just-pushed tag must be
 // DETECTED within this window, or the trigger itself is broken — never silently
 // keep waiting the full releaseRunTimeoutMs for a run that will never appear, and
@@ -504,27 +507,6 @@ export async function ensureCiGreenOnHeadSha(
     );
   }
   return { headSha, successfulRuns: verdict.successfulRuns };
-}
-
-/**
- * The version `npm version <bump>` would produce, computed locally so the
- * resumption check can name the tag this checkout implies BEFORE anything
- * destructive runs. Prerelease/build metadata is dropped the same way `npm
- * version` drops it, and any "next" field is dropped rather than carried.
- *
- * A shape this cannot parse returns null, which makes the resumption check
- * report "no resume" — the safe direction, since a resume skips the bump.
- * @param {string} version @param {string} kind
- * @returns {string | null}
- */
-export function nextVersion(version, kind) {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(String(version ?? "").trim());
-  if (!match) return null;
-  const [major, minor, patch] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  if (![major, minor, patch].every(Number.isInteger)) return null;
-  if (kind === "major") return `${major + 1}.0.0`;
-  if (kind === "minor") return `${major}.${minor + 1}.0`;
-  return `${major}.${minor}.${patch + 1}`;
 }
 
 function bumpVersionAndTag(npm) {
@@ -1053,12 +1035,15 @@ function openReleaseJournal(root, identity) {
  * (which would silently skip the bump and re-tag an old commit).
  *
  * Pure over the two facts, so the rule is unit-testable without a repository.
- * @param {{tag?: string, commit?: string} | null} journal
+ * @param {{tag?: string, commit?: string, phases?: Record<string, unknown>} | null} journal
  * @param {{tag?: string, headSha?: string|null}} [current]
  */
 export function planReleaseResume(journal, { tag, headSha } = {}) {
   if (!journal || typeof journal.tag !== "string" || journal.tag.length === 0) {
     return { resume: false, reason: "no release journal" };
+  }
+  if (journal.phases?.["reinstall+smoke"]) {
+    return { resume: false, reason: "the recorded release is complete" };
   }
   if (typeof headSha !== "string" || headSha.length === 0) {
     return { resume: false, reason: "HEAD could not be resolved" };
@@ -1157,7 +1142,8 @@ async function finishGlobalInstall(npm, packageName) {
   }
 }
 
-async function main() {
+// sites-pinned: tests/audit/release-resume-main.test.ts
+export async function main() {
   const npm = commandName("npm");
   const repoSlug = getRepoSlug();
   const packageBefore = readPackageJson();
@@ -1220,14 +1206,22 @@ async function main() {
   // half is idempotent and always safe to re-enter; the bump is not, so a
   // resume skips it and re-verifies the refs it already produced instead of
   // re-deriving which phases happened by hand.
-  const expectedTag = `v${nextVersion(packageBefore.version, bump)}`;
+  // The journal records the POST-bump package version. Predicting the next
+  // version here would turn every observation retry into a second release.
   const headAtStart = tryGitSha("HEAD");
-  const resume = planReleaseResume(readReleaseJournal(repoRoot), {
-    tag: expectedTag,
+  const journal = readReleaseJournal(repoRoot);
+  const resume = planReleaseResume(journal, {
+    tag: `v${packageBefore.version}`,
     headSha: headAtStart,
   });
 
   if (resume.resume) {
+    if (tryGitSha(`${resume.tag}^{commit}`) !== headAtStart) {
+      throw new Error(`Cannot resume ${resume.tag}: its local tag is missing or does not name the recorded release commit. Restore the recorded tag before retrying; no new release was started.`);
+    }
+    if (!journal?.phases?.["tag+release"]) {
+      throw new Error(`Cannot resume ${resume.tag}: publication creation did not finish. Verify the branch push, tag and GitHub Release before continuing; no new release was started.`);
+    }
     console.log(`[release] ${resume.reason} — skipping the pre-tag gate and the bump (both already ran).`);
   } else {
     // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
@@ -1251,7 +1245,7 @@ async function main() {
   const remoteName = getRemoteName();
   const pushRefspec = resolveReleasePushRefspec(releaseGate);
   let packageAfter = packageBefore;
-  let tag = expectedTag;
+  let tag = `v${packageBefore.version}`;
   let headSha = null;
   let tagPushedAtMs = Date.now();
 

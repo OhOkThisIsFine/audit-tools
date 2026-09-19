@@ -96,11 +96,12 @@ Produce the review from a context that did not author the work and cannot see th
  * Capability-neutral fan-out execution instruction (design resolution 2,
  * 2026-08-05): every fan-out step materializes its lane prompt files and hands
  * the host ONE instruction that reads identically in every environment —
- * subagents when a facility exists, sequential self-execution when not. Only
- * the concurrency hint is capability-sensitive. Lane prompt files are
+ * sequential self-execution is available unless the lane requires independence.
+ * Only the concurrency hint is capability-sensitive. Lane prompt files are
  * ADVANCE-FREE (no continue-command inside them); the step prompt owns the
  * advance. Single-sourced so audit-code and remediate-code stay in parity.
  */
+// sites-pinned: tests/shared/prompts.test.ts tests/audit/systemic-round-identity.test.ts
 export function renderFanoutExecutionLines(params: {
   /**
    * Human label + prompt path (+ optional explicit result path) per lane. A
@@ -117,6 +118,8 @@ export function renderFanoutExecutionLines(params: {
   }[];
   /** Host-declared max concurrent subagents, when known. */
   concurrencyHint?: number | null;
+  /** A driver cannot execute these lanes itself; unavailable independence stops the step. */
+  independenceRequired?: boolean;
 }): string[] {
   const n = params.lanes.length;
   // Defensive coherence: emitters gate on pending work before rendering, so a
@@ -137,7 +140,9 @@ export function renderFanoutExecutionLines(params: {
         ]
       : [];
   return [
-    `Execute the ${n} lane prompt file${plural} below: dispatch one subagent per file if a subagent facility exists, else read and follow each file sequentially yourself. The same files and result paths apply either way.`,
+    params.independenceRequired
+      ? `Execute the ${n} lane prompt file${plural} below in an independent context that did not drive this audit. The host chooses how to obtain that context. If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.`
+      : `Execute the ${n} lane prompt file${plural} below: dispatch one subagent per file if a subagent facility exists, else read and follow each file sequentially yourself. The same files and result paths apply either way.`,
     "",
     ...concurrency,
     ...(params.lanes.some((lane) => lane.demand !== undefined)
@@ -155,7 +160,9 @@ export function renderFanoutExecutionLines(params: {
         (lane.resultPath ? ` → write results to ${lane.resultPath}` : ""),
     ),
     "",
-    "When dispatching a lane to a subagent, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
+    params.independenceRequired
+      ? "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once the independently produced lane results exist."
+      : "When dispatching a lane to a subagent, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
   ];
 }
 

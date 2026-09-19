@@ -73,16 +73,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
      allowed**, the deferred-postinstall check, and both binary smokes (`audit-code --version` +
      `remediate-code --version`). MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
   Nothing destructive is ever retried; every observation phase is idempotent and safe to re-enter.
-- That workflow runs the gate as
-  parallel jobs — `gate`, whose steps are generated from `package.json`:
-
-<!-- BEGIN gate-enumeration — generated from package.json by scripts/check-gate-enumeration.mjs -->
-
-`verify:checks` = `check:control-bytes` + `check:shared-primitives` + `check:agents-region` + `check:loader-fragments` + `check:version-gates` + `check:guard-reach` + `check:guard-reach-paths` + `check:pin-obligations` + `check:sites-pinned` + `check:contract-sites` + `check:generated-artifacts` + `check:invariant-glossary` + `check:nightly-inbox` + `check:ci-trigger-paths` + `check:loop-core-patterns` + `check:loop-core-closure` + `check:constitutional-doc-paths` + `check:runtime-artifact-names` + `check:friction-categories` + `check:executor-producers` + `check:spec-mirrors` + `check:cli-surface` + `check:ingestion-checks` + `check:deadcode` + `check:orphan-modules` + `check:lint` + `check:dup` + `check:depgraph` + `check:doc-manifest` + `check:doc-links` + `check:doc-code-citations` + `check:gate-enumeration` + `check:philosophy-brief` + `check:readme-sample-report` + `check:proposal-red-at` + `check:handoff-roadmap` + `check:retired-infrastructure` + `check:backlog-index` + `check:memory-citations` + `check:review-routing` + `check:doc-test-consumers` + `check:backlog-budget` + `check:backlog-status` + `check:backlog-line-numbers` + `check:backlog-friction-tags` + `check:tests` + `build` + `check:scripts` + `verify:hosts` + `verify:remediate-hosts` + `pack:smoke` + `smoke:packaged-audit-code` + `smoke:packaged-remediate-code` + `smoke:remediate-gate`
-
-<!-- END gate-enumeration -->
-
-  plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
+- That workflow runs parallel jobs: `gate` runs `npm run verify:checks`, the authoritative gate
+  defined in `package.json`, plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
   (`needs: [gate, test]`)
   uploads. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.

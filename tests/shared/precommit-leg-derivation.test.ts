@@ -123,10 +123,6 @@ describe('every retired hand-coded trigger is reproduced', () => {
     expect(triggeredIds(['docs/HANDOFF.md'])).not.toContain('check:philosophy-brief');
   });
 
-  it('the gate-enumeration render target fires check:gate-enumeration', () => {
-    expect(triggeredIds(['.claude/skills/ship/SKILL.md'])).toContain('check:gate-enumeration');
-  });
-
   it('ci.yml fires check:ci-trigger-paths; the registry data file fires it too (gate-scripts row)', () => {
     expect(triggeredIds(['.github/workflows/ci.yml'])).toContain('check:ci-trigger-paths');
     expect(triggeredIds(['scripts/guard-reach-data.mjs'])).toContain('check:ci-trigger-paths');

@@ -134,6 +134,16 @@ async function submit(path: string, findings: readonly unknown[]): Promise<void>
 const emptyState: AuditState = { status: "active", obligations: [] };
 
 describe("systemic challenge round identity", () => {
+  test("the adversary dispatch preserves independence when no independent context is available", async () => {
+    const { root, artifactsDir } = await makeRoot();
+    const step = await emitSystemicStep(root, artifactsDir, systemicBundle(openRegister()));
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain("independent context");
+    expect(prompt).toMatch(/stop and report/i);
+    expect(prompt).toContain("Do not write a result or run the continue command");
+    expect(prompt).not.toMatch(/follow each file sequentially yourself|When executing a lane yourself/);
+  });
+
   test("the recovery validator recognizes issued systemic lanes and preserves their schema", () => {
     const validate = laneSubmissionValidator(systemicChallengeLane([]), { repoFiles: new Set() });
     expect(validate).not.toBeNull();

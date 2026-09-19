@@ -30,7 +30,6 @@ const {
   classifyCiInFlight,
   ensureCiGreenOnHeadSha,
   waitForReleaseRun,
-  nextVersion,
   planReleaseResume,
 } = await import("../../scripts/release-and-publish.mjs");
 
@@ -140,19 +139,6 @@ test("evaluateCiGreenForSha: a cancelled-only run is neither red nor a satisfyin
 });
 
 // ── resumption: the bump is destructive, the observation half is not ────────
-
-test("nextVersion: computes the version `npm version <bump>` would produce", () => {
-  expect(nextVersion("0.51.7", "patch")).toBe("0.51.8");
-  expect(nextVersion("0.51.7", "minor")).toBe("0.52.0");
-  expect(nextVersion("0.51.7", "major")).toBe("1.0.0");
-  // A prerelease or build suffix is dropped, as `npm version` drops it.
-  expect(nextVersion("1.2.3-rc.1", "patch")).toBe("1.2.4");
-  expect(nextVersion("1.2.3+build.4", "minor")).toBe("1.3.0");
-  // An unparseable version yields null, which the resume check reads as
-  // "no resume" — the safe direction, since a resume skips the bump.
-  expect(nextVersion("not-a-version", "patch")).toBeNull();
-  expect(nextVersion("", "patch")).toBeNull();
-});
 
 test("planReleaseResume: resumes only on the SAME tag at the SAME commit", () => {
   const sha = "a".repeat(40);

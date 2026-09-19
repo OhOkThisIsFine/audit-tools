@@ -1,5 +1,6 @@
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
+import { IntentCheckpointSchema, FileDispositionStatusSchema } from "../../src/shared/index.js";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
 import { computeScopePreDigest } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
@@ -318,6 +319,13 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
   expect(prompt).toMatch(/intent_checkpoint\.json/);
   expect(prompt).toMatch(/"excluded_scope"/);
   expect(prompt).toMatch(/audit-code next-step/);
+  const required = Object.entries(IntentCheckpointSchema.shape)
+    .filter(([, field]) => !field.isOptional())
+    .map(([key]) => key);
+  const requiredLine = prompt.split("\n").find((line) => line.startsWith("Required fields:"));
+  expect.soft(requiredLine?.match(/`([^`]+)`/g)?.map((key) => key.slice(1, -1))).toEqual(required);
+  const statusChoices = prompt.match(/"status": "<([^>]+)>"/)?.[1]?.split("|");
+  expect(statusChoices).toEqual(FileDispositionStatusSchema.options);
 });
 
 await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDATORY_LENSES, not hardcoded (MNT-df8c4551)", async () => {

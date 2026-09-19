@@ -486,7 +486,6 @@
     "tests/shared/freeFormIntentInterpreter.test.ts": 620,
     "tests/shared/friction-derived-observations.test.ts": 327,
     "tests/shared/friction-step-boundary-capture.test.ts": 292,
-    "tests/shared/gate-enumeration-gate.test.ts": 243,
     "tests/shared/git.test.ts": 1893,
     "tests/shared/gitignore-artifacts.test.ts": 1013,
     "tests/shared/grounding-corpus-nul-delimited.test.ts": 1882,

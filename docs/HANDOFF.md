@@ -63,9 +63,11 @@
 
 ## Immediate next
 
-**Fix the release resume** (`docs/backlog/open-bugs.md`, "A release re-run after a
-registry-propagation timeout cuts a SECOND release"): it cut a duplicate release twice, and the
-cause is now known.
+**Continue prompt consistency and governance simplification.** The initial slice fixes
+post-bump release resumption and the four P0 prompt contradictions, and removes gate enumeration.
+Next: Prompt Contract v1 primitives and P1 evidence/path corrections in
+`docs/reviews/prompt-contract-standard-2026-09-19.md`; executable gate catalog and the remaining
+consolidations in `docs/reviews/audit-tools-governance-simplification-2026-09-19.md`.
 
 **Live owner decision:** none.
 

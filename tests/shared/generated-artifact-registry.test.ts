@@ -88,7 +88,6 @@ describe('generated-artifact freshness registry', () => {
         'scripts/render-closeout.mjs',
         'scripts/nightly/render-inbox.mjs',
         'scripts/check-doc-manifest.mjs',
-        'scripts/check-gate-enumeration.mjs',
         'scripts/check-philosophy-brief.mjs',
         'scripts/check-readme-sample-report.mjs',
       ]),

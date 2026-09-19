@@ -106,7 +106,9 @@ There is one enumeration target. The ship skill already tells the operator to ru
 
 Delete:
 
+<!-- doc-citation-exempt: historical deletion target, removed by this plan -->
 - `scripts/gate-enumeration-data.mjs`
+<!-- doc-citation-exempt: historical deletion target, removed by this plan -->
 - `scripts/check-gate-enumeration.mjs`
 - its dedicated contract test
 - its npm-script and guard/reach registrations

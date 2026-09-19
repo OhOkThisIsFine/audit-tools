@@ -989,6 +989,9 @@ describe(FAILURE_SIGNATURE, () => {
       // and legitimately appears in both lanes' finding contracts.
       expect(base.prompt.text).not.toMatch(/carry a `verification` object/u);
       expect(base.prompt.text).not.toMatch(/verification[^.]*followup_tasks/u);
+      for (const item of [base, steward]) {
+        expect(item.prompt.text).not.toContain("reviewed_clean");
+      }
     });
 
     it("admits a steward submission carrying verification and threads it to the AuditResult", async () => {

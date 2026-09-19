@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { buildCacheablePrompt } from "../../src/shared/prompts.js";
+import { buildCacheablePrompt, renderFanoutExecutionLines } from "../../src/shared/prompts.js";
+
+describe("fanout fallback preserves lane requirements", () => {
+  const lanes = [{ label: "Review", promptPath: "/run/review.md", resultPath: "/run/result.json" }];
+
+  it("keeps sequential execution available for ordinary lanes", () => {
+    expect(renderFanoutExecutionLines({ lanes }).join("\n")).toContain("follow each file sequentially yourself");
+  });
+
+  it("does not ask for independent work when no lane remains pending", () => {
+    expect(renderFanoutExecutionLines({ lanes: [], independenceRequired: true }).join("\n")).toContain("nothing to execute");
+  });
+});
 
 describe("buildCacheablePrompt assembles shared prefix before per-agent payload", () => {
   it("result starts with the sharedPrefix string", () => {
