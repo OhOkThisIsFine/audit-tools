@@ -1,0 +1,38 @@
+GREEN observed on 2026-09-23, after the nightly run applied this proposal under
+the owner's settled answer for subject 98f93995eb770e05.
+
+The test moved from this directory to tests/shared/triage-finish-record.test.ts.
+Command, run from the repository root:
+
+    npx vitest run tests/shared/triage-unprobed-counted.test.ts \
+                   tests/shared/triage-finish-record.test.ts
+
+Result (log: .audit-tools/nightly/green-p67-p68-0923.log):
+
+    ✓ tests/shared/triage-finish-record.test.ts (3 tests) 2ms
+    ✓ tests/shared/triage-unprobed-counted.test.ts (3 tests) 2ms
+     Test Files  2 passed (2)
+          Tests  6 passed (6)
+
+THE DEFECT WAS RE-CONFIRMED AT 317c83c1 BEFORE THE FIX, not taken from the
+proposal's own word. `grep -n downgradeUnearnedShippedVerdict
+scripts/shared/triage-backlog.mjs` returned line 251 (the definition) and line
+408 (a comment describing the call), and no call — on a file that had been
+rewritten between the proposal and tonight by the port from llm-relay to
+agent-dispatch. So the missing call survived a substantial rewrite of the module
+it lives in, which is the proposal's own argument for extracting the fold rather
+than adding a call.
+
+WHAT LANDED. `finishTriageRecord(rec, { lane, servedBy, root })` is exported and
+is the single fold both paths run: it owns the identity fields, stamps the
+premise, resolves the code paths, and ends with `downgradeUnearnedShippedVerdict`
+reading the premise that same call just computed. `buildRecord` is now one call
+to it. `reviveRecord` keeps only its genuinely revive-only step — restoring
+`code_paths_unresolved` into `code_paths` before the fold — and then calls it.
+
+ONE DEPARTURE FROM THE SKETCH. The sketch carries no type annotation, and
+`npm run check:tests` refused it with four TS2353 errors: the destructured
+options parameter inferred a type holding only `root`, so every call passing
+`lane` was rejected. Vitest does not typecheck, so the three tests above were
+green against a red tree. The parameter now carries an explicit JSDoc `@param`,
+and `npm run verify:checks` is green (.audit-tools/nightly/checks2-0923.log).

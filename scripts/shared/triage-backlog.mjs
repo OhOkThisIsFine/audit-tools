@@ -218,6 +218,48 @@ function resolveProbes(raw, root) {
  */
 export const UNVERIFIED_SHIPPED_VERDICT = 'shipped_claim_unverified';
 
+/**
+ * Every premise stamp `premiseVerdict` can put on a record.
+ *
+ * DECLARED, so the coverage stamp cannot silently omit one. `unprobed` was
+ * split out of `probes_unusable` on 2026-08-09 precisely so an honestly
+ * unprobed row would be "counted in the coverage stamp" — and then only
+ * `probes_unusable` was wired to a counter, so it was not. On the 2026-09-17
+ * sweep that hid 20 of 48 rows: a reader of the stamp saw `probes_unusable: 8`
+ * and had no way to learn that 20 more verdicts rested on no premise check at
+ * all.
+ *
+ * A new class added to `premiseVerdict` and not added here fails the contract
+ * test in tests/shared/, which is what stops the omission recurring.
+ */
+export const PREMISE_STAMP_CLASSES = Object.freeze([
+  'holds',
+  'partial',
+  'premise_unconfirmed',
+  'probes_unusable',
+  'unprobed',
+]);
+
+/** The coverage stamp's caller-owned counters, before the first row. */
+export const TRIAGE_STAMP_INIT = Object.freeze({
+  ...Object.fromEntries(PREMISE_STAMP_CLASSES.map((c) => [c, 0])),
+  lanes: {},
+});
+
+/**
+ * Fold ONE finished record into the coverage stamp: its premise class, and the
+ * tier that answered it.
+ *
+ * Pure and exported so the counter has a name a test can reach; it was an
+ * anonymous closure passed inline to `dispatchBoundedItems`, which is why the
+ * missing counter was invisible to the suite for 30 sweeps.
+ */
+export function countTriageStamp(stamp, rec) {
+  if (PREMISE_STAMP_CLASSES.includes(rec?.premise)) stamp[rec.premise] += 1;
+  if (typeof rec?.lane === 'string') stamp.lanes[rec.lane] = (stamp.lanes[rec.lane] ?? 0) + 1;
+  return stamp;
+}
+
 /** Premise stamps that establish nothing about the tree. */
 const UNEARNED_PREMISES = new Set(['unprobed', 'probes_unusable', 'premise_unconfirmed']);
 
@@ -369,6 +411,42 @@ function applyCodePathResolution(rec, tracked) {
   rec.code_paths = resolved;
   if (unresolved.length > 0) rec.code_paths_unresolved = unresolved;
   return recovered;
+}
+
+/**
+ * Finish ONE record: own its identity fields, stamp its premise, resolve its
+ * paths, then apply the P65 downgrade LAST.
+ *
+ * ONE fold, used by BOTH the dispatch path and the load path (P68). It was
+ * duplicated as two anonymous inline closures inside the `dispatchBoundedItems`
+ * options object, and a step missing from BOTH was therefore invisible to every
+ * gate: `downgradeUnearnedShippedVerdict` was defined, unit-tested, documented
+ * as running "LAST, after the premise is re-derived" — and called from neither
+ * path, so it wrote 0 downgrades across 30 sweeps while the pairing it forbids
+ * appeared in 30 rows. `check:deadcode` could not see it, because its own unit
+ * test counted as the consumer.
+ *
+ * The downgrade runs LAST by construction, not by convention: it reads the
+ * `premise` this call just computed, never the one a stored record carried in.
+ *
+ * Idempotent on the load path, which re-finishes every stored row on every
+ * invocation: the downgrade only ever reads `already_shipped_or_stale`, so a
+ * row already downgraded to `shipped_claim_unverified` passes through untouched
+ * and is never re-upgraded.
+ *
+ * @param {Record<string, any>} rec the record to finish, mutated in place
+ * @param {{lane?: string, servedBy?: string, root?: string}} [opts]
+ * @returns {Record<string, any>}
+ */
+export function finishTriageRecord(rec, { lane, servedBy, root = ROOT } = {}) {
+  if (lane) rec.lane = lane;
+  if (servedBy) rec.served_by = servedBy;
+  const { stamp: premise, recovered } = premiseVerdict(rec, root);
+  rec.premise = premise;
+  if (recovered.length > 0) rec.premise_probes_recovered = recovered;
+  const pathsRecovered = applyCodePathResolution(rec, (args) => trackedMatches(root, args));
+  if (pathsRecovered.length > 0) rec.code_paths_recovered = pathsRecovered;
+  return downgradeUnearnedShippedVerdict(rec);
 }
 
 function chunk(file) {
@@ -582,24 +660,24 @@ async function main() {
       outPath: OUT,
       concurrency: CONCURRENCY,
       stampSeed: { model: 'agent-dispatch dispatch' },
-      // Counted so "the sweep covered 121 entries" cannot hide how many of
-      // those carried probes that could not be evaluated at all. 30 of 121 did
-      // on 2026-08-09, indistinguishable from an honest `unprobed` until now.
+      // Counted so "the sweep covered 61 entries" cannot hide how many of those
+      // verdicts rest on no premise check. The full class list is declared
+      // beside `countTriageStamp`, so a new premise class cannot enter the
+      // records without entering the stamp.
+      //
       // `lanes` counts which TIER answered each row — every row currently
       // reads `litellm/medium` alike, since OpenCode echoes the requested
       // tier alias, not the concrete endpoint LiteLLM actually routed to
-      // (see the module header).
-      stampInit: { probes_unusable: 0, lanes: {} },
-      stampExtra: (s, rec) => {
-        if (rec.premise === 'probes_unusable') s.probes_unusable += 1;
-        if (typeof rec.lane === 'string') s.lanes[rec.lane] = (s.lanes[rec.lane] ?? 0) + 1;
-      },
+      // (see the module header). `TRIAGE_STAMP_INIT` is frozen, so it is
+      // SPREAD into a fresh stamp and its `lanes` map is replaced with a fresh
+      // one — never mutated in place.
+      stampInit: { ...TRIAGE_STAMP_INIT, lanes: {} },
+      stampExtra: countTriageStamp,
       // Re-evaluate the premise of every stored record on load: running this
       // script IS the presentation event for triage verdicts, so a record
       // whose quoted code vanished since the last run must read as
       // unconfirmed now, not carry last week's stamp.
       reviveRecord: (rec) => {
-        const { stamp: premise, recovered } = premiseVerdict(rec);
         // `code_paths` is a claim about the TREE, so it is re-resolved on load
         // for the same reason the probes are re-evaluated: running the sweep is
         // the presentation event for its records, and a path that no longer
@@ -607,19 +685,15 @@ async function main() {
         // resolution. The model's original words are re-taken from
         // `code_paths_unresolved` so a revived record is not resolved from an
         // already-filtered list (which would lose the unresolved half forever).
-        const revived = { ...rec, code_paths: [...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)] };
-        const pathsRecovered = applyCodePathResolution(revived, (args) => trackedMatches(ROOT, args));
-        // P65 LAST, after the premise is re-derived: the downgrade reads the
-        // stamp this call just computed, never the one the record carried in.
-        // A row that claimed `already_shipped_or_stale` while its probes were
-        // unusable leaves revive as `shipped_claim_unverified` — a claim that
-        // was not checked, which is what it is, and never a deletion lead.
-        return {
-          ...revived,
-          premise,
-          ...(recovered.length > 0 ? { premise_probes_recovered: recovered } : {}),
-          ...(pathsRecovered.length > 0 ? { code_paths_recovered: pathsRecovered } : {}),
+        //
+        // That restore is genuinely revive-only, so it stays HERE; everything
+        // after it is the shared fold (P68), which ends with the P65 downgrade
+        // reading the premise it just re-derived.
+        const revived = {
+          ...rec,
+          code_paths: [...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)],
         };
+        return finishTriageRecord(revived);
       },
       preflight: async () => {
         // 2 min: carried over unchanged from the retired llm-relay lane's
@@ -659,6 +733,9 @@ async function main() {
         // finished cleanly (checked above) reaches it, so a truncated body can
         // never be laundered into a valid-looking record.
         const rec = buildTriageRecord(e, raw);
+        // The SAME fold the load path runs (P68): provenance, premise stamp,
+        // path resolution, then the P65 downgrade last.
+        //
         // Provenance: the record names the TIER the bridge applied
         // (`<providerID>/<modelID>`, e.g. `litellm/medium`) — LiteLLM still
         // chooses the concrete endpoint within that tier, but which one
@@ -666,16 +743,7 @@ async function main() {
         // `served_by` (a llm-relay answer-mode deployment name) has no
         // opencode_fire/opencode_wait analogue and is never set going forward
         // — `rec.served_by` stays the optional field it already was.
-        rec.lane = laneId;
-        const { stamp: premise, recovered } = premiseVerdict(rec);
-        rec.premise = premise;
-        if (recovered.length > 0) rec.premise_probes_recovered = recovered;
-        // The path column is resolved against the tree the same way, and for the
-        // same reason: the model cannot see the repo, so an unresolvable path is
-        // recorded as the guess it is rather than printed as evidence.
-        const pathsRecovered = applyCodePathResolution(rec, (args) => trackedMatches(ROOT, args));
-        if (pathsRecovered.length > 0) rec.code_paths_recovered = pathsRecovered;
-        return rec;
+        return finishTriageRecord(rec, { lane: laneId });
       },
       onProgress: (e, rec) => {
         process.stderr.write(
@@ -699,7 +767,8 @@ async function main() {
 
   process.stderr.write(
     `leg-2 coverage: ${stamp.classified_total} classified total (${stamp.classified} this pass) / ` +
-      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable of ` +
+      `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable / ` +
+      `${stamp.unprobed} unprobed of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
       `${stamp.retried} transport retr(y/ies) — ` +
       `lanes ${JSON.stringify(stamp.lanes)} — ${stampPath}\n`,

@@ -18,6 +18,11 @@ Audit source changes are opt-in; analyzer consent is per-run. Preserve these set
 **Live owner decision for the completed slice:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
+
+- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+  - `retired-infra-gate-claims-repo-wide-reach` — The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence?
+  - `one-call-is-not-the-whole-persistence-contract` — The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence?
+
 <!-- END GENERATED LIVE STATUS -->
 
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

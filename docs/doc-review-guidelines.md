@@ -390,10 +390,9 @@ When a raw backlog item looks ripe to become a spec:
 ## Output contract
 
 Escalations from this rubric are **leg-1 items in the nightly routine's shared
-output** — `.audit-tools/nightly/open-items.json`, rendered to the HTML digest.
-The item shape, the subject key that makes an answer stick, and the digest and
-notification contract all live in [`nightly-routine.md`](nightly-routine.md);
-they are not restated here.
+output** — `.audit-tools/nightly/open-items.json`. The item shape, the subject
+key that makes an answer stick, and where an item is surfaced all live in
+[`nightly-routine.md`](nightly-routine.md); they are not restated here.
 
 What this rubric owes each escalated item:
 
@@ -402,15 +401,15 @@ What this rubric owes each escalated item:
   investigation.
 - `question` — what the owner is being asked, with the relevant prose quoted
   verbatim.
-- `evidence[]` — what was verified against code, and how. The digest collapses
-  this behind a disclosure, so length here is cheap; length in `title` is not.
+- `evidence[]` — what was verified against code, and how. Length here is cheap;
+  length in `title` is not.
 - The **subject** the key is computed from is the doc prose in question — never
   the wording of the question. An answer must survive the routine rephrasing
   itself next run, or it does not stick.
 
 The three escalation classes this rubric produces (proposed instruction-file
-edits, design decisions, doc-set condensation) are all leg-1 items; the digest
-groups by leg, not by class, so lead the `title` with the class where it matters
+edits, design decisions, doc-set condensation) are all leg-1 items. Nothing
+groups them by class, so lead the `title` with the class where it matters
 (e.g. "instruction-file edit:").
 
 ## Hard invariants

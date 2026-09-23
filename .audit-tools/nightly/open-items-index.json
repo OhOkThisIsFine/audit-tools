@@ -1,5 +1,28 @@
 {
-  "run": "2026-09-17",
-  "count": 0,
-  "items": []
+  "run": "2026-09-23",
+  "count": 2,
+  "items": [
+    {
+      "id": "retired-infra-gate-claims-repo-wide-reach",
+      "leg": "solutions",
+      "path": "scripts/check-retired-infrastructure.mjs",
+      "title": "The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence?",
+      "subject_key": "ffe82b1369ef6e9b",
+      "nights_open": 1,
+      "target": {
+        "path": "scripts/check-retired-infrastructure.mjs"
+      }
+    },
+    {
+      "id": "one-call-is-not-the-whole-persistence-contract",
+      "leg": "docs",
+      "path": "docs/nightly-routine.md",
+      "title": "The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence?",
+      "subject_key": "057c8bbc29b5db67",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/nightly-routine.md"
+      }
+    }
+  ]
 }

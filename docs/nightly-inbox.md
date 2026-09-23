@@ -30,16 +30,109 @@ records them in the tracked ledger, and does the work.
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Documentation
+
+
+<!-- nightly:item key=057c8bbc29b5db67 -->
+
+## `one-call-is-not-the-whole-persistence-contract` — The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/nightly-routine.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Each nightly run writes its list of open questions to a machine-readable file, and the routine tells the run to do that through a single function called writeOpenItems. The document then says, in bold terms, that this one call IS the whole persistence contract. That sentence is not quite true, and tonight it cost a step. writeOpenItems writes the queue, the small index beside it, and the generated block inside docs/HANDOFF.md. It does NOT write docs/nightly-inbox.md — the tracked markdown file the owner actually ticks boxes in. That file is rendered by a different function, writeInbox, in a different module, reached through "npm run nightly:inbox". So tonight the run wrote its queue, saw the writer report one open item, and the inbox on disk still showed the previous week’s content with no item in it. Nothing was lost, because a gate called check:nightly-inbox refuses a commit whose inbox does not match the queue, and the run then rendered it. But the gate catches the mistake at the END, and the sentence invites it at the START. The document is not simply wrong — an earlier paragraph names both functions together, "through writeOpenItems() / writeInbox()" — so the two passages disagree with each other rather than with the code. The question is which passage should move.
+
+### The question
+
+docs/nightly-routine.md states "That ONE call is the whole persistence contract, because it also writes the two artifacts derived from the queue", where the call is writeOpenItems(). writeOpenItems() does not render docs/nightly-inbox.md; writeInbox() in scripts/nightly/render-inbox.mjs does, and an earlier paragraph of the same document names both. Should the sentence name the second call?
+
+### Your answer
+
+- [ ] **1. Name both calls** — Correct the sentence so it names both calls: writeOpenItems() persists the queue, its index and the generated HANDOFF block, and writeInbox() renders the answering surface. State plainly that a run which calls only the first leaves docs/nightly-inbox.md stale until the commit gate refuses it.
+- [ ] **2. Make one call do both** — Fix the code rather than the prose: have writeOpenItems() render the inbox as its last step, so the sentence becomes true and the answering surface cannot lag the queue at all. The separate npm run nightly:inbox entrypoint stays for re-rendering after an ingest.
+- [ ] **3. Leave it** — Leave the sentence. The paragraph immediately below it enumerates exactly which artifacts the call writes and the inbox is not among them, the earlier paragraph names writeInbox() explicitly, and check:nightly-inbox refuses any commit where the render has drifted from the queue.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- docs/nightly-routine.md line 353: "That ONE call is the whole persistence contract, because it also writes the two artifacts derived from the queue — do not write either by hand:". Read at HEAD 317c83c1.
+- scripts/nightly/items.mjs: writeOpenItems() is defined at line 667 and INBOX_RELPATH is declared at line 57, but writeOpenItems contains no call that renders it. git grep for writeInbox across scripts/, src/ and tests/ returns its definition at scripts/nightly/render-inbox.mjs:259 and its callers — scripts/nightly/ingest-answers.mjs:135, render-inbox.mjs:361 and two tests — and items.mjs is not among them.
+- Observed tonight, not inferred: after node .audit-tools/nightly/write-items-0923.mjs reported "partition: open=1", git status --porcelain listed open-items.json, open-items-index.json and docs/HANDOFF.md as modified and docs/nightly-inbox.md as UNCHANGED, still carrying the 2026-09-17 skipped list. npm run nightly:inbox then reported "nightly inbox: 1 open item(s) → docs/nightly-inbox.md" and the file changed.
+- The counter-evidence, stated because it is the strongest argument for leaving the sentence alone: docs/nightly-routine.md line 256 already writes "through `writeOpenItems()` / `writeInbox()`", so the document names both functions elsewhere, and npm run check:nightly-inbox reported "✓ nightly inbox: 1 open item(s), tracked render is current" once the render was run, confirming the gate is real and is wired into verify:checks. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- NO ADVERSARY REVIEWED THIS ITEM. It is escalated rather than auto-applied for exactly that reason: the rubric forbids an auto-apply resting on one reviewer’s verdict, codex is quota-exhausted to 2026-09-26, and the dispatch-cwd guard correctly refused a repository-reading lane in the main checkout.
+
+</details>
+
+---
+
+
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=ffe82b1369ef6e9b -->
+
+## `retired-infra-gate-claims-repo-wide-reach` — The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `scripts/check-retired-infrastructure.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When a piece of infrastructure is shut down, this project keeps a register of it so that no document can go on telling a reader to use the dead thing. A gate reads that register and refuses any document that still names retired infrastructure without saying it retired. The gate works. The problem is how far it reaches. Its own header says, in one sentence, that it "scans every tracked markdown file". Eleven lines later the same header says the opposite: the scan list is a single file, docs/backlog/durable-traps.md, and nothing else. Both sentences are in the same comment block, so a reader of the top of the file learns something the bottom of the file contradicts. The practical effect showed up tonight. llm-relay was retired on 2026-09-22. The gate reported the whole corpus clean. Two files outside its one-file scan still name llm-relay with no retirement marker: .claude/skills/design-check/SKILL.md, which tells a reader which lane to use, and docs/backlog/forward-tracks.md. The skills file does mention the retirement in its own prose, so a human reading it is not misled today — but the gate deliberately does not read prose, only markers, so nothing is holding that line. The header also gives a reason for staying narrow: widening the scan would redden two files that other work packets owned at the time. That reason has expired. Those files now carry exemption markers, so widening today would redden two different files, and the fix for each is a one-line marker. So the choice is real and it is yours: make the gate as wide as its first sentence claims, or narrow the sentence to match the gate.
+
+### The question
+
+The header of scripts/check-retired-infrastructure.mjs states "This gate is the half that runs: it scans every tracked markdown file for each row’s literal identifiers", while SCANNED_DOCS eleven lines below is the single-element list ["docs/backlog/durable-traps.md"]. Which half should change?
+
+### Your answer
+
+- [ ] **1. Widen the scan** — Widen the gate to every tracked markdown file, as its header already claims. Add the two retired-infrastructure-exempt markers the widened scan needs (.claude/skills/design-check/SKILL.md and docs/backlog/forward-tracks.md), and delete the "coordination rather than principle" paragraph, whose stated blocker no longer describes the tree.
+- [ ] **2. Correct the sentence** — Keep the gate at one file and fix the prose: rewrite the opening sentence so it states the declared single-file scope, and refresh the "coordination rather than principle" paragraph so the reason it gives for staying narrow is the reason that is true today.
+- [ ] **3. Widen to live-instruction docs only** — Widen the scan to the documents that carry live instructions to a reader (the skills files, CLAUDE.md, the routine and rubric docs) and leave the record-shaped documents out, then state that boundary in the header instead of the current contradiction.
+- [ ] **4. Leave it** — Leave both halves as they are. The header declares its narrowness explicitly further down, which satisfies the repository rule that a partly-enforced trap must state its uncovered half, and the opening sentence is close enough to be read as intent rather than as a claim.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (5) — what was verified against code, and how</summary>
+
+- scripts/check-retired-infrastructure.mjs line 7 reads "This gate is the half that runs: it scans every tracked markdown file for each row’s literal identifiers"; line 133 reads export const SCANNED_DOCS = ["docs/backlog/durable-traps.md"]. Both verified by reading the file at HEAD 317c83c1.
+- The gate’s own run output states its scope out loud: "check-retired-infrastructure: 1 doc(s) scanned [docs/backlog/durable-traps.md] against 2 retired-infrastructure row(s) [freellmapi, llm-relay] — no mention without a retirement statement". Captured in .audit-tools/nightly/retired-0923.log, exit 0.
+- git grep for llm-relay across tracked markdown, excluding docs/reviews and the nightly proposal records, returns unexempted mentions in .claude/skills/design-check/SKILL.md (line 54) and docs/backlog/forward-tracks.md (line 13). docs/backlog.md and docs/backlog/open-bugs.md carry retired-infrastructure-exempt markers already.
+- The header’s stated reason for narrowness — that a repo-wide scan "would redden two files that other packets own (the entry itself is deleted by the backlog-reconciliation pass, the index is regenerated from it)" — no longer matches the tree: those backlog mentions now carry exemption markers, and the two files a widened scan would redden today are different ones.
+- scripts/shared/retired-infrastructure-data.mjs repeats the wide claim in its own header: "scripts/check-retired-infrastructure.mjs then finds every doc still carrying it, at the commit that retired it." So the overstatement lives in both halves of the mechanism, not in one comment.
+
+</details>
+
+---
 
 
 <details>
 <summary>What the last run changed on its own</summary>
 
 
-- Nothing was auto-applied. The one stale-factual finding tonight is in docs/doc-review-guidelines.md, which its own first paragraph excludes from this review ("the routine reads it, never rewrites it"), so it is escalated instead. The generated leg-1 coverage stamp, the leg-2 sweep output, the two leg-3 proposal records and this queue are the run's own output, not edits derived from the review.
+- Applied the settled answer for subject 3684f87dc7e59c32: removed the three surfacing sentences from docs/doc-review-guidelines.md that still described a deleted HTML digest. Where an item is surfaced is now stated only in docs/nightly-routine.md.
+
+- Applied the settled answer for subject 1fb2934333c59d31: docs/nightly-routine.md now states the CAPABILITY an adversary lane must have (independent of the reviewer; able to judge from quoted evidence; a repository-reading lane preferred for a whole-document pass) and names no first lane. It also states what the skipped list must record when no lane meets the requirement. The answer’s closing clause "Lane choice stays with llm-relay" was NOT implemented: llm-relay was retired on 2026-09-22, after that answer was recorded, so implementing it verbatim would have written a dead dependency into the contract.
+
+- Applied P67 (settled subject 2eefa66ab7c9bd64): scripts/shared/triage-backlog.mjs now exports PREMISE_STAMP_CLASSES, TRIAGE_STAMP_INIT and countTriageStamp, the coverage stamp counts all five premise classes rather than probes_unusable alone, the stderr coverage line reports the unprobed count, and the read-verbatim field list in docs/nightly-routine.md names every counter. tests/shared/triage-unprobed-counted.test.ts landed with it.
+
+- Applied P68 (settled subject 98f93995eb770e05): extracted finishTriageRecord as the one fold both sweep paths use, ending with downgradeUnearnedShippedVerdict. That function was defined, unit-tested and documented as running, and was called from neither path, so it wrote zero downgrades across 30 sweeps. tests/shared/triage-finish-record.test.ts landed with it, including the load-path idempotency case.
+
+- Both proposal tests were verified RED at HEAD in their recorded RED-AT.txt and GREEN after the patches (.audit-tools/nightly/green-p67-p68-0923.log, 6 passed).
 
 
 </details>
@@ -49,17 +142,21 @@ No open propositions. The next run will refill this file if it finds any.
 <summary>What the last run could NOT cover</summary>
 
 
-- Adversary lane (Codex) — UNAVAILABLE. `codex exec` returned "You've hit your usage limit ... try again at Sep 19th, 2026 8:29 AM"; the same lane was quota-exhausted on 2026-09-16 and 2026-09-10. Coverage was routed to the relay dispatch lane (agy-gemini) instead, which answered three adversary dispatches from quoted evidence; a repo-SEARCHING adversary pass therefore did not run tonight. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- NOTHING WAS AUTO-APPLIED FROM THE REVIEW ITSELF. Both documentation edits tonight execute owner answers settled on 2026-09-17, where the owner is the authority and no adversary is owed. The one stale-factual finding the review produced on its own — the persistence-contract sentence — is ESCALATED rather than applied, because the rubric forbids an auto-apply resting on one reviewer’s verdict and no adversary lane could run.
 
-- Leg 1, per-item reviewer pass — PARTIAL by design, not full-corpus. Item-level review covered the documents that changed since the last real ledger stamp plus the three read end to end; 52 documents and 1,600 items are in scope and the coverage stamp reports exactly what was examined. The philosophy-conformance pass ran as a corpus-wide mechanical smell scan (44 timeless documents) plus a targeted read of the newest specs, NOT as a per-item judgment pass over all 52.
+- Adversary lane, repository-reading capability — UNMET. codex exec returned "You’ve hit your usage limit ... try again at Sep 26th, 2026 8:34 AM"; the same lane was quota-exhausted on 2026-09-10, -09-16 and -09-17, so this is the fourth consecutive run without it. The agent-dispatch bridge was saturated by the leg-2 sweep for the whole run. CONSEQUENCE, stated as the routine now requires: leg 1 ran with a reviewer pass and no independent adversary, so tonight’s doc coverage carries no second opinion at all — neither on the items surfaced nor, more importantly, on the items skimmed and passed, which is the false-negative half the adversary exists to cover.
 
-- Leg 1, doc-set condensation pass (perspective 2) — NOT RUN at depth. Corpus sizes were measured (docs/backlog/durable-traps.md is the largest tracked doc at 84.7 KB of its 120 KB ceiling) but no fold/retire/merge proposal was formed, and no overlap analysis across the 52 documents was performed.
+- Leg 1, per-item reviewer pass — PARTIAL by design. 52 documents and 1,592 items are in scope (leg1 plan at HEAD 317c83c1). This pass covered the documents changed since the last stamp plus the two it edited, the corpus-level condensation review, a corpus-wide status-noise smell scan over spec/ and docs/audit-pkg/, and the retirement sweep driven by llm-relay’s 2026-09-22 retirement. It was NOT a per-item judgment pass over all 52 documents.
 
-- Leg 2 sweep — 59 of 61 entries classified, 2 errored on malformed JSON from the lane (open-bugs#d82a3ae1: "Bad escaped character in JSON at position 382"; forward-tracks#8a12fe47: "Bad control character in string literal"). Coverage stamp: .audit-tools/nightly/triage-2026-09-17-coverage.json. Its premise mix is itself tonight's P67 finding: 25 of the 59 verdicts rest on no premise check, which the stamp does not report.
+- Leg 1, doc-set condensation pass — RAN, and found nothing to propose. Two candidates were examined and both dissolved on inspection: docs/backlog.md at 34.5 KB is almost entirely its own GENERATED seek index (199 entries) rather than accreted prose, and the Live-validation guide inside it is a 27-line generated matrix bound to the backlog entries that carry a watch line, so it is in its correct home. No fold, retire, merge or split proposal was formed. The two largest tracked documents are docs/backlog/durable-traps.md (81.9 KB) and docs/backlog/open-bugs.md (51.4 KB).
 
-- The weekly /insights pass — NOT DUE (stamp .audit-tools/nightly/insights-last-run.json ran_at 2026-09-11, six days old; due at seven). This is not a skipped leg.
+- Leg 2 sweep — PARTIAL. Read the coverage stamp at .audit-tools/nightly/triage-2026-09-23-coverage.json for what it actually reached; it was still running when this queue was written and its finished_at is the honest record. The sweep ran at roughly two minutes per entry against 61 entries, which does not fit the run. Its stamp carries the OLD field shape (probes_unusable alone), because node had already loaded scripts/shared/triage-backlog.mjs before tonight’s P67 patch was applied; the five-class counters take effect from the next sweep.
 
-- One machine-wide finding could not be filed as a queue item because its premise is in an untracked file outside this repository: the nightly loader prompt at ~/.claude/scheduled-tasks/nightly-maintenance/ still instructs the run to "surface owner decisions through the HTML digest as the contract specifies". It is routed to the machine-wide backlog (C:/Code/docs/backlog.md) instead, and named in the run report.
+- The weekly /insights pass — RAN (stamp was 12 days old, due at seven). Ten suggestions triaged against HEAD: five already shipped, three debatable, two genuinely open. The single most important triage fact is a retirement-direction hit of exactly the kind the routine warns about: the report’s window reaches back to 2026-07-19, so its three most ambitious recommendations are all built on llm-relay and its mcp__llm-relay__dispatch_status tool, which were retired on 2026-09-22. Every llm-relay-shaped suggestion is dead on arrival and none became a proposal.
+
+- Two genuinely-open /insights findings are MACHINE-WIDE, not this repository, so they are routed to C:/Code/docs/backlog.md rather than filed here: (1) a mechanism that refuses a numeric claim in a closeout narrative unless a separate command re-derived it in the same session — buggy_code is the top friction at 267 instances and incorrect counts recur; (2) a resumable, budget-governed nightly autopilot, since laps keep dying on spend and context limits with work stranded mid-flight.
+
+- The machine-wide static-analysis sweep ran and found two items, BOTH in C:/Code/llm-relay — "eslint + sonarjs: exit 1" and "knip: exit 1". They are surfaced, not fixed: that repository was not in scope tonight and was itself retired on 2026-09-22. Twelve of the thirteen repositories under C:/Code, audit-tools included, declare no .claude/static-analysis.json and were skipped, which is the runner’s normal behaviour. For audit-tools that skip is arguably correct — it owns equivalent checks under npm run verify:checks — but no one has decided that on purpose.
 
 
 </details>

@@ -20,12 +20,19 @@ At the start of every run:
 3. Load the prior `.audit-tools/nightly/open-items.json` so `first_seen` and
    `nights_open` carry forward through `writeOpenItems()`.
 
-Use independent lanes wherever they preserve coverage:
+Use independent lanes wherever they preserve coverage. This doc states the
+CAPABILITY each lane must have and never an order to try them in: a named first
+lane becomes a quota cliff the moment that lane is exhausted, and the run then
+reports the fallback's coverage as if it were the first lane's. Which lane meets
+the requirement on a given night is the run's call.
 
-- **Codex** has repo access and performs its own source inspection:
-  `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
-  load-bearing; an open stdin makes the process wait indefinitely.
-- **The second independent lane** is dispatched through
+- **The adversary lane** must be INDEPENDENT of the reviewer (a separate process
+  and a separate context, not the same agent asked twice) and must be able to
+  judge from quoted evidence. A lane that can READ THE REPOSITORY ITSELF is
+  preferred for any whole-document pass, because a lane judging only from quoted
+  fragments cannot catch what the reviewer never quoted — the false-negative half
+  the adversary exists to cover.
+- **Dispatching one** goes through
   [`scripts/shared/mcp-dispatch-lane.mjs`](../scripts/shared/mcp-dispatch-lane.mjs), the same
   helper leg 2 uses, against the agent-dispatch bridge's own default capability tier
   (`litellm/medium`) — tiers put free endpoints first but may spend paid credit once free
@@ -34,9 +41,10 @@ Use independent lanes wherever they preserve coverage:
   session. The bridge owns the routing mechanics (endpoint, model, env), so this doc never
   restates them and cannot drift from them. Treat every reply as an advisory lead and verify it
   against source; quoted evidence is especially fallible.
-- If a lane is unavailable, route the work elsewhere. A dead lane may not
-  silently shrink coverage; any coverage that still could not run belongs in
-  the inbox's `skipped` list.
+- **When no lane meets the requirement**, route the work elsewhere. A dead lane
+  may not silently shrink coverage. The `skipped` list must then record which
+  capability went unmet, which pass ran without it, and what that pass could
+  therefore not have caught — never merely that a lane was unavailable.
 
 ## The three legs
 
@@ -99,8 +107,9 @@ sweep aborts before entry 0 with that failure's own message, an aborted coverage
 and no attempt made), retries a call that died in
 transport once within the same invocation (so a partial sweep is the lane's
 verdict, not a hand-run's to recover), and writes `<out>-coverage.json`
-— model, attempted, classified, errored, aborted, retried, and a per-lane count
-— beside the JSONL as it runs. Report leg-2 coverage from that
+— model, attempted, classified, errored, aborted, retried, a per-lane count, and
+one count per premise class (`holds`, `partial`, `premise_unconfirmed`,
+`probes_unusable`, `unprobed`) — beside the JSONL as it runs. Report leg-2 coverage from that
 stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
 and saying so is the honest sentence three partial runs had to reconstruct by
 hand (P11, sol-4 decision 2026-08-06; transport retry 2026-08-22).

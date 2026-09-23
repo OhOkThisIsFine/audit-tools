@@ -1,0 +1,30 @@
+GREEN observed on 2026-09-23, after the nightly run applied this proposal under
+the owner's settled answer for subject 2eefa66ab7c9bd64.
+
+The test moved from this directory to tests/shared/triage-unprobed-counted.test.ts.
+Command, run from the repository root:
+
+    npx vitest run tests/shared/triage-unprobed-counted.test.ts \
+                   tests/shared/triage-finish-record.test.ts
+
+Result (log: .audit-tools/nightly/green-p67-p68-0923.log):
+
+    ✓ tests/shared/triage-finish-record.test.ts (3 tests) 2ms
+    ✓ tests/shared/triage-unprobed-counted.test.ts (3 tests) 2ms
+     Test Files  2 passed (2)
+          Tests  6 passed (6)
+
+WHAT CHANGED FROM THE PATCH AS WRITTEN. The patch was authored against HEAD
+ae7e09a9 and applied at 317c83c1, after the sweep was ported from llm-relay to
+agent-dispatch. The exported symbols, the class list and the counter body landed
+verbatim. Three comment passages were rewritten rather than applied as written,
+because the tree they described is gone: the patch's comments say "rung" and
+"the relay chose it", and the lane surface is now a capability TIER alias
+(litellm/medium) that OpenCode echoes back in place of the endpoint LiteLLM
+actually routed to. The `lanes` counter itself is unchanged.
+
+ONE DEFECT THE VITEST RUN DID NOT CATCH. `npm run check:tests` went red on the
+sibling P68 change with four TS2353 errors, because a destructured options
+parameter carried no JSDoc type. Vitest does not typecheck, so the six green
+tests above were green while the tree was red. The parameter is now annotated
+and `npm run verify:checks` is green (.audit-tools/nightly/checks2-0923.log).
