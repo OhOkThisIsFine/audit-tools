@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/retired-infrastructure.test.ts
 // The register of RETIRED infrastructure — held as data, so a retirement is a
 // one-line edit here rather than a sweep somebody has to remember.
 //
@@ -49,8 +50,7 @@ export const RETIRED_INFRASTRUCTURE = [
     id: "freellmapi",
     label: "the FreeLLMAPI router",
     retired: "2026-08-29",
-    replacedBy:
-      "llm-relay on `127.0.0.1:8791` (`llm-relay dispatch`; liveness `GET /telemetry`)",
+    replacedBy: "agent-dispatch (`opencode_fire`/`agy_fire`) — its own successor, llm-relay, is retired too",
     patterns: [
       { name: "its product name", pattern: /\bfreellmapi\b/i },
       { name: "its launcher", pattern: /\bclaude\.ps1\b/i },
@@ -58,6 +58,19 @@ export const RETIRED_INFRASTRUCTURE = [
       { name: "its port", pattern: /127\.0\.0\.1:3001/ },
       { name: "its MCP tool prefix", pattern: /mcp__freellmapi__offload_/ },
       { name: "its credential prefix", pattern: /\bfreellmapi-/ },
+    ],
+  },
+  {
+    id: "llm-relay",
+    label: "llm-relay (the MCP dispatch proxy)",
+    retired: "2026-09-22",
+    replacedBy:
+      "agent-dispatch — `opencode_fire` through the bridge MCP (capability tiers, not a hand-picked " +
+      "model) for general work, `agy_fire` for AGY runs; see CLAUDE.md's machine rules",
+    patterns: [
+      { name: "its product name", pattern: /\bllm-relay\b/i },
+      { name: "its port", pattern: /127\.0\.0\.1:8791/ },
+      { name: "its MCP tool prefix", pattern: /mcp__llm-relay__/ },
     ],
   },
 ];

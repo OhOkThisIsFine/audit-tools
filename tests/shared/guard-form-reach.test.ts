@@ -101,7 +101,6 @@ function scrubbedEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith("AUDIT_TOOLS_")) delete env[key];
-    if (key === "LLM_RELAY_DISPATCH_DEPTH") delete env[key]; // a relay lane child marker; see isDispatchedChildEnv
     // Agent-session markers: a hook that judges only an agent session exits 0 without one, so a form
     // that passes here on the ambient marker fails in CI. A form that needs one declares it in `env`.
     if (key === "CLAUDE_CODE_SESSION_ID" || key === "CLAUDE_PID") delete env[key];

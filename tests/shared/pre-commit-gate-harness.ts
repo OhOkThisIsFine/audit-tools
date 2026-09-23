@@ -49,7 +49,6 @@ export function runGate(
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
-  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   return spawnSync(process.execPath, [GATE], {
     input: JSON.stringify({
       tool_name: "Bash",
@@ -72,8 +71,8 @@ export const COMMIT_GATE = resolve(HERE, "../../.claude/hooks/commit-gate.mjs");
 // on it from the environment there — and is DELETED when omitted, so a test
 // that says nothing about sessions is not accidentally this dev shell's
 // session; CLAUDE_PID is deleted for the same reason (it marks "inside a
-// Claude process" for the session-less announcement). The two dispatch vars are
-// scrubbed as in runGate.
+// Claude process" for the session-less announcement). The child-session
+// marker is scrubbed as in runGate.
 export function runCommitGate(
   repo: string,
   { sessionId, env = {}, hook = "pre-commit" }: { sessionId?: string; env?: NodeJS.ProcessEnv; hook?: string } = {},
@@ -81,7 +80,6 @@ export function runCommitGate(
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
-  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   delete inherited.GIT_INDEX_FILE;
   delete inherited.CLAUDE_CODE_SESSION_ID;
   delete inherited.CLAUDE_PID;

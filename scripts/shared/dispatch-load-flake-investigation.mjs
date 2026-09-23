@@ -75,6 +75,9 @@ export async function main(argv = process.argv.slice(2)) {
         "Identify a concrete hermeticity, contention, timeout, or shared-state mechanism and propose the smallest TEST repair.",
         "Return evidence, patch shape, and focused verification commands; name any missing measurement.",
       ].join("\n"),
+      // 30 min: carried over unchanged from the retired llm-relay lane's
+      // ceiling for this investigation — a labelled existing value, not a
+      // number this port picked.
       { mode: "agent", cwd: snapshot, timeoutMs: 30 * 60 * 1000 },
     );
     mkdirSync(dirname(reportPath), { recursive: true });

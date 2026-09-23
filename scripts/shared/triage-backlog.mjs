@@ -47,24 +47,34 @@
 // strongest verdict belongs only to probe evaluation in the nightly writer,
 // whose probes are authored to be checkable against the tree.
 //
-//   TRIAGE_CONCURRENCY=<n>     default 3 — one `llm-relay mcp` child each
+//   TRIAGE_CONCURRENCY=<n>     default 3 — N concurrent opencode_fire/opencode_wait
+//                              pairs on ONE shared agent-dispatch bridge process
 //
 // THE SWEEP NAMES NO MODEL (ledger 133f4f815b608ea4, owner decision
-// 2026-09-03). Each entry goes to llm-relay's own `dispatch` tool through the
-// stdio MCP lane (scripts/shared/mcp-dispatch-lane.mjs); the relay owns lane
-// choice end to end, and every record carries the lane that answered it. This
-// script never reads a roster, never picks an alias, and has no model env var:
-// a hand-held copy of the relay's roster went stale twice, and the fallback
-// that replaced it chose the one passthrough needing a real API key and killed
-// leg 2 at preflight with zero entries attempted.
+// 2026-09-03; ported off llm-relay by the switch/agent-dispatch lap,
+// 2026-09-22). Each entry goes to the agent-dispatch bridge's own
+// `opencode_fire`/`opencode_wait` tools through the stdio MCP lane
+// (scripts/shared/mcp-dispatch-lane.mjs); the bridge's own default capability
+// tier (litellm/medium) applies, and LiteLLM chooses the concrete endpoint
+// within it — but that concrete endpoint is NOT visible here: OpenCode's SDK
+// sets `result.info.providerID`/`modelID` to the TIER ALIAS the call
+// requested ("litellm"/"medium"), not to whichever real provider LiteLLM
+// routed to, so every record's `lane` field reads `litellm/medium` alike.
+// This script never reads a roster, never picks an alias or a tier, and has no
+// model env var: a hand-held copy of a roster went stale twice under the
+// retired transport, and the fallback that replaced it chose the one
+// passthrough needing a real API key and killed leg 2 at preflight with zero
+// entries attempted.
 //
 // HEALTH CONTRACT (P11, owner decision sol-4 2026-08-06). Three consecutive
 // nights degraded silently to a partial sweep, each for a different transport
-// fault. Now: (1) one PREFLIGHT dispatch runs before the sweep — a dead lane
-// (no relay, no `llm-relay` on PATH, no servable rung) fails loudly at entry 0
-// with the relay's own message, not silently at entry 154 (single attempt — the
-// preflight asks "is the lane up at all", which is a question the relay answers,
-// so a retry there would only delay the honest abort); (2) a per-ENTRY transport
+// fault. Now: (1) opening the lane itself (a missing agent-dispatch checkout,
+// too old a Node) and, failing that, one PREFLIGHT dispatch before the sweep
+// — a dead lane fails loudly BEFORE entry 0 with the checkout/bridge's own
+// message, an aborted coverage stamp, and the operator remedy, not silently
+// at entry 154 (single attempt — the preflight asks "is the lane up at all",
+// which the bridge answers directly, so a retry there would only delay the
+// honest abort); (2) a per-ENTRY transport
 // retry (2026-08-22 entry): a call that dies before the lane answers is retried
 // ONCE inside the same invocation, and a lane that ANSWERED unusably is not —
 // see the driver header for the line and its reason; (3) a COVERAGE
@@ -80,9 +90,12 @@
 // ⚠ The schema is shaped to THIS task (a verdict enum plus an action), not the
 // lane's generic {summary, findings[], open_questions[]} container. A misfitting
 // schema does not error; it returns valid JSON full of placeholders that reads as
-// model incapacity. It is passed twice on purpose: as the dispatch `schema`,
-// which a relay lane answers through a forced tool call, and inline in the task
-// text, which is all a CLI agent lane ever sees.
+// model incapacity. It travels ONLY inline in the task text now: `opencode_fire`
+// has no forced-JSON-schema equivalent this lane depends on, so the `schema`
+// option `callLane` still passes below is accepted and silently ignored by
+// scripts/shared/mcp-dispatch-lane.mjs (kept so the call site still type-checks;
+// see that module's header) — the prompt text is the only channel that reaches
+// the model.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -91,6 +104,7 @@ import {
   coverageStampPath,
   dispatchBoundedItems,
   LanePreflightError,
+  writeCoverageStamp,
 } from './lane-dispatch.mjs';
 import { openDispatchLane } from './mcp-dispatch-lane.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
@@ -111,8 +125,8 @@ const USAGE = 'Usage: node scripts/shared/triage-backlog.mjs [outPath]';
 if (IS_CLI && (OUT_ARG === '-h' || OUT_ARG === '--help')) {
   console.log(USAGE);
   console.log('  outPath                  default .audit-tools/backlog-triage.jsonl');
-  console.log('  TRIAGE_CONCURRENCY=<n>   default 3; one llm-relay mcp child each');
-  console.log('  Lane choice belongs to llm-relay dispatch; there is no model setting.');
+  console.log('  TRIAGE_CONCURRENCY=<n>   default 3; N concurrent calls on one agent-dispatch bridge');
+  console.log('  No model or tier is named; the agent-dispatch bridge\'s own default tier applies.');
   process.exit(0);
 }
 if (IS_CLI && OUT_ARG?.startsWith('-')) {
@@ -127,8 +141,10 @@ const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
   : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
-// Ceiling on one entry's dispatch. The lane the relay picks may be a heavy
-// reasoner; the previous HTTP transport allowed the same twenty minutes.
+// Ceiling on one entry's dispatch — carried over unchanged from the retired
+// llm-relay lane (agent-dispatch enforces no job timeout of its own; this
+// module's own deadline is what cancels a runaway call — see
+// scripts/shared/mcp-dispatch-lane.mjs).
 const ENTRY_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** Tracked files matching a git query, or null when git cannot answer. */
@@ -496,9 +512,11 @@ Three rules about the TARGET, each of which made a third of the previous run's p
   against the tree and anything that does not resolve is recorded as unresolved, so an invented
   directory is not a helpful guess — it is a fabricated line in a column a reader routes on.`;
 
-// The whole brief travels in the task text, schema included: a relay lane
-// answers through the forced `schema` tool call, but a CLI agent rung sees
-// nothing but the task, so the task must stand alone.
+// The whole brief travels in the task text, schema included: `opencode_fire`
+// has no forced-JSON-schema equivalent this lane depends on (its `schema`
+// option is accepted and ignored — see scripts/shared/mcp-dispatch-lane.mjs),
+// so the schema reaches the model only through this prompt text, for both the
+// no-tool `answer` agent and the full `dispatch` agent alike.
 function triageTask(e) {
   return (
     `${SYS}\n\n` +
@@ -513,15 +531,49 @@ function triageTask(e) {
 // backlog chunking, the schema, premise probing, path resolution, and the
 // binding of one entry to one dispatch.
 //
-// WHICH RUNG answers a dispatch is still entirely the relay's: the driver
-// retries the SAME call once when it dies in transport, and never re-routes —
-// duplicating the relay's failover in the caller would hide a relay defect. The
-// retry exists because the recovery that worked (the 2026-08-22 re-run that
-// recovered 20 of 22) was the OPERATOR's to remember, and a single-pass stamp
-// reporting 74/96 reads as the ceiling rather than as a partial sweep.
+// WHICH CONCRETE ENDPOINT answers a dispatch is still LiteLLM's, within the
+// bridge's own default tier: the driver retries the SAME call once when it
+// dies in transport, and never re-routes or names a tier itself — duplicating
+// LiteLLM's failover in the caller would hide a bridge defect. The retry
+// exists because the recovery that worked (the 2026-08-22 re-run that
+// recovered 20 of 22, under the retired llm-relay transport) was the
+// OPERATOR's to remember, and a single-pass stamp reporting 74/96 reads as
+// the ceiling rather than as a partial sweep.
 async function main() {
   const stampPath = coverageStampPath(OUT);
-  const lane = openDispatchLane({ size: CONCURRENCY, cwd: ROOT });
+  let lane;
+  try {
+    lane = openDispatchLane({ size: CONCURRENCY, cwd: ROOT });
+  } catch (err) {
+    // openDispatchLane() itself can throw a DispatchLaneError SYNCHRONOUSLY —
+    // a missing agent-dispatch checkout, too old a Node — before
+    // dispatchBoundedItems' own preflight machinery below ever runs. Give it
+    // the SAME aborted-stamp-plus-remedy treatment as a dispatch-based
+    // preflight failure, rather than letting it escape as an uncaught stack
+    // with no stamp written at all.
+    const aborted = `preflight failed: ${String(/** @type {any} */ (err).message || err)}`;
+    writeCoverageStamp(stampPath, {
+      model: 'agent-dispatch dispatch',
+      started_at: new Date().toISOString(),
+      finished_at: null,
+      aborted,
+      total_entries: entries.length,
+      prior_classified: 0,
+      attempted: 0,
+      classified: 0,
+      classified_total: 0,
+      errored: 0,
+      retried: 0,
+      probes_unusable: 0,
+      lanes: {},
+    });
+    process.stderr.write(
+      `${aborted}\nThe lane is DEAD, not slow — nothing was attempted. ` +
+        `Check the agent-dispatch worker (\`node C:/Code/agent-dispatch/src/cli.ts status\`) and re-run.\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   let stamp;
   try {
@@ -529,12 +581,14 @@ async function main() {
       items: entries,
       outPath: OUT,
       concurrency: CONCURRENCY,
-      stampSeed: { model: 'llm-relay dispatch' },
+      stampSeed: { model: 'agent-dispatch dispatch' },
       // Counted so "the sweep covered 121 entries" cannot hide how many of
       // those carried probes that could not be evaluated at all. 30 of 121 did
       // on 2026-08-09, indistinguishable from an honest `unprobed` until now.
-      // `lanes` counts which rung answered each row — the relay chose it, so
-      // the stamp says what it chose.
+      // `lanes` counts which TIER answered each row — every row currently
+      // reads `litellm/medium` alike, since OpenCode echoes the requested
+      // tier alias, not the concrete endpoint LiteLLM actually routed to
+      // (see the module header).
       stampInit: { probes_unusable: 0, lanes: {} },
       stampExtra: (s, rec) => {
         if (rec.premise === 'probes_unusable') s.probes_unusable += 1;
@@ -568,8 +622,12 @@ async function main() {
         };
       },
       preflight: async () => {
+        // 2 min: carried over unchanged from the retired llm-relay lane's
+        // preflight ceiling — a labelled existing value, not a number this
+        // port picked. `maxTokens`/`schema` are dropped here, not passed as
+        // ignored dead arguments: mcp-dispatch-lane.mjs's `dispatch()` has no
+        // opencode_fire equivalent for either (see that module's header).
         const r = await lane.dispatch('Reply with the single word: ok', {
-          maxTokens: 16,
           timeoutMs: 2 * 60 * 1000,
         });
         if (r.status !== 'completed') {
@@ -577,17 +635,18 @@ async function main() {
         }
       },
       callLane: async (e) => {
+        // `schema`/`maxTokens` dropped for the same reason as the preflight
+        // call above — opencode_fire has no equivalent field for either; the
+        // schema already travels inline in `triageTask(e)`'s prompt text.
         const r = await lane.dispatch(triageTask(e), {
-          schema: SCHEMA,
-          maxTokens: 4000,
           timeoutMs: ENTRY_TIMEOUT_MS,
         });
         // A terminal failure is returned, not thrown, so the driver records
         // the output size beside it — the truncation diagnostic (P28:
         // near-zero = dialect death, large-but-truncated = a cap to raise).
-        return { raw: r.raw, finishReason: r.status, lane: r.lane, servedBy: r.servedBy, error: r.error };
+        return { raw: r.raw, finishReason: r.status, lane: r.lane, error: r.error };
       },
-      buildRecord: (e, { raw, finishReason, lane: laneId, servedBy, error }) => {
+      buildRecord: (e, { raw, finishReason, lane: laneId, error }) => {
         // A job that did not complete is the lane's verdict on itself, so it
         // is judged HERE, never in the lane-agnostic driver — but AFTER the
         // lane returned, so the error row still carries finish_reason and
@@ -600,9 +659,14 @@ async function main() {
         // finished cleanly (checked above) reaches it, so a truncated body can
         // never be laundered into a valid-looking record.
         const rec = buildTriageRecord(e, raw);
-        // Provenance: the relay chose the lane, so the record names it.
+        // Provenance: the record names the TIER the bridge applied
+        // (`<providerID>/<modelID>`, e.g. `litellm/medium`) — LiteLLM still
+        // chooses the concrete endpoint within that tier, but which one
+        // answered is not visible on this surface (see the module header).
+        // `served_by` (a llm-relay answer-mode deployment name) has no
+        // opencode_fire/opencode_wait analogue and is never set going forward
+        // — `rec.served_by` stays the optional field it already was.
         rec.lane = laneId;
-        if (servedBy) rec.served_by = servedBy;
         const { stamp: premise, recovered } = premiseVerdict(rec);
         rec.premise = premise;
         if (recovered.length > 0) rec.premise_probes_recovered = recovered;
@@ -623,7 +687,7 @@ async function main() {
     if (err instanceof LanePreflightError) {
       process.stderr.write(
         `${err.message}\nThe lane is DEAD, not slow — nothing was attempted. ` +
-          `Start the relay (llm-relay autostarts at logon; liveness is GET /telemetry) and re-run.\n`,
+          `Check the agent-dispatch worker (\`node C:/Code/agent-dispatch/src/cli.ts status\`) and re-run.\n`,
       );
       process.exitCode = 1;
       return;

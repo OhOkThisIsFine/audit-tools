@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/session-registry.test.ts
 // Session registry + the `-z` porcelain identity the session-scoped gates
 // share. Consumers: session-start-guards (registration + baseline capture),
 // closeout-challenge-gate (partition read + child skip), and the friction-stop /
@@ -283,17 +284,19 @@ export function enforcementArmed(root) {
   }
 }
 
-// A dispatched child announces itself by ENVIRONMENT, and both spellings are
-// honoured: the explicit `AUDIT_TOOLS_CHILD_SESSION=1` a hand-launched lane sets,
-// and `LLM_RELAY_DISPATCH_DEPTH` (a positive integer) that llm-relay `dispatch`
-// sets in EVERY lane child it spawns. Measured 2026-09-10 (probe job-0011): a
-// relay lane in a fresh worktree carried only the depth marker, registered itself
-// as an owner session, and was recruited by the closeout Stop gate — its report
-// came back as a gate answer. Recognizing the relay's own marker is what lets the
-// child split hold without the dispatcher remembering a flag.
+// A dispatched child announces itself by ENVIRONMENT: the explicit
+// `AUDIT_TOOLS_CHILD_SESSION=1` a hand-launched lane sets.
+//
+// Retired 2026-09-22 (switch/agent-dispatch lap): this used to also recognize
+// `LLM_RELAY_DISPATCH_DEPTH` (a positive integer llm-relay `dispatch` set in
+// every lane child it spawned — measured 2026-09-10, probe job-0011: a relay
+// lane in a fresh worktree carried only the depth marker, registered itself as
+// an owner session, and was recruited by the closeout Stop gate). llm-relay is
+// retired and its successor, agent-dispatch, spawns no Claude Code session at
+// all — its workers are OpenCode or AGY, neither of which fires SessionStart —
+// so there is no marker for this function to read any more.
 export function isDispatchedChildEnv(env = process.env) {
-  if (env.AUDIT_TOOLS_CHILD_SESSION === '1') return true;
-  return /^[1-9]\d*$/.test(env.LLM_RELAY_DISPATCH_DEPTH ?? '');
+  return env.AUDIT_TOOLS_CHILD_SESSION === '1';
 }
 
 // One-call read for every Stop/PreToolUse gate. An EMPTY sessionId is never

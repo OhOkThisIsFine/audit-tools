@@ -414,13 +414,6 @@
   only fields a production path writes; delete `themes`, or wire the writer and its consumer in one
   change.
 
-- **The dispatch-lane reader leaves a FAILED CLI lane's envelope wrapped (2026-09-17, low, friction:
-  tool_should_decide).** `unwrapCliEnvelope` in `scripts/shared/mcp-dispatch-lane.mjs` parses the
-  whole body; when no lane answered, the relay appends its ladder advice after the body, so the
-  parse fails and `raw` keeps the envelope plus the advice. Only a non-completed job is affected,
-  and no caller reads that body as an answer. **Property:** the body of a failed job is the lane's
-  own text too, with the relay's advice returned beside it like `lanesTried` and `notice`.
-
 - **The in-scan `duplicate_submission_id` branch may now be unreachable (2026-09-18, low, friction:
   tool_should_decide).** Prompt 20 made every result id tool-derived (`deriveResultId` over the
   work item id and its prompt digest), and each item has one result path. So the `seen` check in

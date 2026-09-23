@@ -25,12 +25,15 @@ Use independent lanes wherever they preserve coverage:
 - **Codex** has repo access and performs its own source inspection:
   `codex exec --skip-git-repo-check "<prompt>" < /dev/null`. Closing stdin is
   load-bearing; an open stdin makes the process wait indefinitely.
-- **The second independent lane** is a separate free-provider session dispatched
-  through [`scripts/shared/mcp-dispatch-lane.mjs`](../scripts/shared/mcp-dispatch-lane.mjs),
-  the same helper leg 2 uses. The relay owns the routing mechanics (lane order,
-  endpoint, model, env), so this doc never restates them and cannot drift from
-  them. Treat every reply as an advisory lead and verify it against source;
-  quoted evidence is especially fallible.
+- **The second independent lane** is dispatched through
+  [`scripts/shared/mcp-dispatch-lane.mjs`](../scripts/shared/mcp-dispatch-lane.mjs), the same
+  helper leg 2 uses, against the agent-dispatch bridge's own default capability tier
+  (`litellm/medium`) — tiers put free endpoints first but may spend paid credit once free
+  capacity is exhausted <!-- doc-citation-exempt: docs/design.md is a path in the agent-dispatch repo, not this tree -->
+  (agent-dispatch's `docs/design.md` §4), so this is not a "free-provider"
+  session. The bridge owns the routing mechanics (endpoint, model, env), so this doc never
+  restates them and cannot drift from them. Treat every reply as an advisory lead and verify it
+  against source; quoted evidence is especially fallible.
 - If a lane is unavailable, route the work elsewhere. A dead lane may not
   silently shrink coverage; any coverage that still could not run belongs in
   the inbox's `skipped` list.
@@ -85,10 +88,15 @@ against its own prose. Deletion requires the same code anchor a doc auto-apply
 requires.
 
 *Coverage is read from the stamp, never eyeballed.* The mechanical sweep
-(`scripts/shared/triage-backlog.mjs`) names no model: it hands each entry to
-llm-relay's `dispatch` tool over MCP stdio, so the relay owns lane choice and
-each record names the lane that answered it. It preflights once (a dead lane
-aborts at entry 0 with the relay's own error), retries a call that died in
+(`scripts/shared/triage-backlog.mjs`) names no model or tier: it hands each entry to the
+agent-dispatch worker's `opencode_fire` tool over MCP stdio at the bridge's own default
+capability tier, so LiteLLM owns concrete-endpoint choice within that tier — but that
+concrete endpoint is not visible here: OpenCode echoes back the requested TIER ALIAS, not
+the real provider LiteLLM routed to, so each record names the tier (`litellm/medium`), not
+which endpoint answered it. It preflights once (opening the agent-dispatch bridge or its
+first call can fail — a missing checkout, an old Node, an unreachable worker — and the
+sweep aborts before entry 0 with that failure's own message, an aborted coverage stamp,
+and no attempt made), retries a call that died in
 transport once within the same invocation (so a partial sweep is the lane's
 verdict, not a hand-run's to recover), and writes `<out>-coverage.json`
 — model, attempted, classified, errored, aborted, retried, and a per-lane count

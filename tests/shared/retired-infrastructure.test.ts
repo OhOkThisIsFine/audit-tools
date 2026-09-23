@@ -55,7 +55,7 @@ describe('retired-infrastructure — the register is well-formed data', () => {
   it('matches the retired identifiers and nothing else', () => {
     // The live replacement must NOT trip the register, or the gate reds every
     // doc that documents the thing that replaced the retired one.
-    expect(findRetiredMentions('llm-relay on `127.0.0.1:8791` serves the lanes')).toEqual([]);
+    expect(findRetiredMentions('agent-dispatch opencode_fire serves the lanes now')).toEqual([]);
     expect(findRetiredMentions('Post to https://example.invalid/3001/x')).toEqual([]);
 
     const found = findRetiredMentions('Probe 127.0.0.1:3001 before the fan-out');
@@ -73,7 +73,7 @@ describe('retired-infrastructure — the register is well-formed data', () => {
 
 describe('retired-infrastructure — the exemption is explicit and keyed', () => {
   it('a marker on the line above or the same line exempts that line — and exactly that line', () => {
-    const marker = '<!-- retired-infrastructure-exempt: freellmapi — llm-relay on 8791 replaced it -->';
+    const marker = '<!-- retired-infrastructure-exempt: freellmapi — replaced by agent-dispatch -->';
     // The line BELOW the marker (which is how a wrapped paragraph carries it):
     expect(findRetiredMentions('Requests went to 127.0.0.1:3001', marker)).toEqual([]);
     // …and the marker's own line:
@@ -97,9 +97,50 @@ describe('retired-infrastructure — the exemption is explicit and keyed', () =>
   it('the marker pattern is the one the refusal text teaches', () => {
     // The refusal prints the syntax; if the two drift, following the message
     // stops working. Pin the exact shape the refusal shows.
-    expect('<!-- retired-infrastructure-exempt: freellmapi — llm-relay on 8791 -->').toMatch(
+    expect('<!-- retired-infrastructure-exempt: freellmapi — replaced by agent-dispatch -->').toMatch(
       EXEMPT_MARKER,
     );
+  });
+});
+
+describe('retired-infrastructure — llm-relay (added 2026-09-22; a hyphenated id)', () => {
+  it('matches its product name, its port, and its MCP tool prefix', () => {
+    const byName = findRetiredMentions('the llm-relay MCP server owns lane choice');
+    expect(byName).toHaveLength(1);
+    expect(byName[0].id).toBe('llm-relay');
+
+    const byPort = findRetiredMentions('POST 127.0.0.1:8791/telemetry before a long fan-out');
+    expect(byPort).toHaveLength(1);
+    expect(byPort[0].id).toBe('llm-relay');
+
+    // `\bllm-relay\b` alone does NOT match inside a double-underscore MCP tool
+    // name (no word boundary between `_` and `l`) — the same reason the
+    // freellmapi row carries its own dedicated MCP-prefix pattern.
+    const byToolPrefix = findRetiredMentions('call mcp__llm-relay__dispatch directly');
+    expect(byToolPrefix).toHaveLength(1);
+    expect(byToolPrefix[0].id).toBe('llm-relay');
+  });
+
+  it('a hyphenated id can be named in an exemption marker and exempts that line', () => {
+    // This is the property EXEMPT_MARKER's widened id class exists for: the
+    // old `[^\s—>-]+` class stopped capturing at the first `-`, so an id
+    // containing one (`llm-relay`) could never be named.
+    const marker = '<!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->';
+    expect(findRetiredMentions('the llm-relay MCP server owns lane choice', marker)).toEqual([]);
+    expect(findRetiredMentions(`the llm-relay MCP server owns lane choice ${marker}`)).toEqual([]);
+    // A marker naming the WRONG id (freellmapi) does not exempt an llm-relay mention.
+    const wrongId = '<!-- retired-infrastructure-exempt: freellmapi — unrelated -->';
+    expect(findRetiredMentions(`the llm-relay MCP server owns lane choice ${wrongId}`)).toHaveLength(1);
+  });
+
+  it('the live replacement (agent-dispatch) does not trip this row', () => {
+    expect(findRetiredMentions('agent-dispatch opencode_fire replaces the retired llm-relay proxy')).toHaveLength(1);
+    // …and once the retirement is stated, it is exempt.
+    expect(
+      findRetiredMentions(
+        'agent-dispatch opencode_fire replaces the retired llm-relay proxy <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->',
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -135,7 +176,7 @@ describe('retired-infrastructure — the live tree', () => {
     // …and the same lines, once the replacement is stated, are exempt — which
     // is the answer the refusal teaches and the one the tree now uses.
     for (const line of preCorrection) {
-      expect(findRetiredMentions(`${line} <!-- retired-infrastructure-exempt: freellmapi — llm-relay on 127.0.0.1:8791 -->`)).toEqual([]);
+      expect(findRetiredMentions(`${line} <!-- retired-infrastructure-exempt: freellmapi — replaced by agent-dispatch -->`)).toEqual([]);
     }
   });
 

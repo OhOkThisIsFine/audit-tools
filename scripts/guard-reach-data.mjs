@@ -2189,7 +2189,7 @@ export const REACH = [
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
       "(triage-backlog's sweep driver is shared lane-dispatch.mjs, gate-executed via " +
-      "tests/shared/lane-dispatch.test.ts, and its llm-relay dispatch lane is mcp-dispatch-lane.mjs, " +
+      "tests/shared/lane-dispatch.test.ts, and its agent-dispatch bridge lane is mcp-dispatch-lane.mjs, " +
       'gate-executed against a fake MCP server via tests/shared/triage-lane-health.test.ts — the ' +
       "uncovered half is triage-backlog's task/record binding + CLI shell only). " +
       'derived-file-preflight refuses only when the worktree tree equals the staged ' +

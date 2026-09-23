@@ -202,17 +202,16 @@ describe('readSessionRegistry: the one predicate every gate imports (Build 1 con
     const root = scratchRoot(); // NOT armed: a fresh worktree holds no owner record
     const child = (env: NodeJS.ProcessEnv) => readSessionRegistry(root, 'lane', env).isUnregisteredChild;
     expect(child({ AUDIT_TOOLS_CHILD_SESSION: '1' })).toBe(true);
-    // llm-relay `dispatch` sets the depth in every lane child (measured 2026-09-10).
-    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '1' })).toBe(true);
-    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '3' })).toBe(true);
-    // Not a positive integer, or the wrong value → no marker.
-    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '0' })).toBe(false);
-    expect(child({ LLM_RELAY_DISPATCH_DEPTH: 'yes' })).toBe(false);
     expect(child({ AUDIT_TOOLS_CHILD_SESSION: '0' })).toBe(false);
     expect(child({})).toBe(false);
+    // Retired 2026-09-22: llm-relay is gone and agent-dispatch spawns no
+    // Claude Code session at all, so this marker must never be recognized
+    // again — a regression here is exactly the old llm-relay branch coming
+    // back (the `sites-pinned` header on sessionRegistry.mjs binds it here).
+    expect(child({ LLM_RELAY_DISPATCH_DEPTH: '1' })).toBe(false);
     // Even a REGISTERED resident is a child under the marker: a delegated lane is never recruited.
     writeSessionRecord(root, record('resident'));
-    expect(readSessionRegistry(root, 'resident', { LLM_RELAY_DISPATCH_DEPTH: '1' }).isUnregisteredChild).toBe(true);
+    expect(readSessionRegistry(root, 'resident', { AUDIT_TOOLS_CHILD_SESSION: '1' }).isUnregisteredChild).toBe(true);
   });
 });
 
@@ -237,11 +236,10 @@ describe('readSessionStartingHead: the derivable starting point, fail-soft', () 
     // simply find nothing, fail soft, and the closeout would quietly go back to
     // an author-supplied sha.
     const root = gitRepo();
-    // The two child markers are STRIPPED: this lane runs as a dispatched child,
-    // and a child skips registration entirely — so leaving either set would make
-    // the case pass without the hook ever writing a record.
+    // The child marker is STRIPPED: this lane runs as a dispatched child, and
+    // a child skips registration entirely — so leaving it set would make the
+    // case pass without the hook ever writing a record.
     const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PROJECT_DIR: root };
-    delete env.LLM_RELAY_DISPATCH_DEPTH;
     delete env.AUDIT_TOOLS_CHILD_SESSION;
     const r = spawnSyncHidden(process.execPath, [GUARDS], {
       cwd: root,
@@ -389,7 +387,6 @@ function runGuards(
   // must not flip the registration cases. Re-added only by the case testing it.
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
-  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   const r = spawnSyncHidden(process.execPath, [GUARDS], {
     input: payload === undefined ? '' : JSON.stringify(payload),
     encoding: 'utf8',
@@ -439,16 +436,6 @@ describe('session-start-guards: the registration leg (end-to-end)', () => {
     const pass = runGuards(root, startPayload(sid), { AUDIT_TOOLS_CHILD_SESSION: '1' });
     expect(pass.code).toBe(0);
     expect(pass.stdout).toMatch(/NOT registered/);
-    expect(existsSync(join(sessionsDir(root), `${sid}.json`))).toBe(false);
-  });
-
-  it('refuses to register a relay lane child (LLM_RELAY_DISPATCH_DEPTH=1) and names the marker', () => {
-    const root = gitRepo();
-    const sid = `lane-${process.pid}`;
-    const pass = runGuards(root, startPayload(sid), { LLM_RELAY_DISPATCH_DEPTH: '1' });
-    expect(pass.code).toBe(0);
-    expect(pass.stdout).toMatch(/NOT registered/);
-    expect(pass.stdout).toMatch(/LLM_RELAY_DISPATCH_DEPTH=1/);
     expect(existsSync(join(sessionsDir(root), `${sid}.json`))).toBe(false);
   });
 

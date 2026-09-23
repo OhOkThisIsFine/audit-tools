@@ -127,8 +127,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the repo root when you intend to commit, and read "the gates passed" as a claim about the commit
   gate only.
 
-- **A mid-session llm-relay death needs a hand restart — its autostart only covers LOGON (2026-08-21, corrected 2026-09-10).** <!-- retired-infrastructure-exempt: freellmapi — the retirement of its predecessor is the correction this entry records --> A dropped connection took the relay down; every offloaded child then failed with `API Error: 502 backend unreachable` until it was restarted by hand. The machine-wide `CLAUDE.md` and `Startup\llm-relay.vbs` settle the lifetime half: the relay AUTOSTARTS AT LOGON (that `.vbs` has existed since 2026-08-27), so it does not die with the dispatching session and is back after any reboot — what is NOT covered is the window between a mid-session death and the next logon, which is the one a long fan-out can fall into. Probe `127.0.0.1:8791/telemetry` before and during a long fan-out, and restart through `wscript.exe` on that `.vbs`.
-
 - **A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit
   (2026-08-20).** The commit gate materializes the STAGED tree — untracked files vanish — before
   running `check:doc-links`, so a link from a tracked doc to an untracked target resolves to
@@ -378,36 +376,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   part of its output, not the most — the opposite of the intuition that a quote is checkable proof.
   ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
   failure — confident output with fake support.)
-
-- **The free offload lane is a local router — it must be RUNNING, and callers should request the
-  `auto` alias.** ⚠ **RETIRED (2026-08-29): this router is stopped and its autostart removed —
-  the free lane is llm-relay on `127.0.0.1:8791` (`llm-relay dispatch`; liveness `GET /telemetry`
-  — `/health` is 403 BY DESIGN).
-  <!-- retired-infrastructure-exempt: freellmapi — the retirement statement IS this paragraph -->
-  The record below stands.** Requests went to `127.0.0.1:3001`. ⚠ This lane has now outlived THREE
-  transports — two earlier local brokers on other ports were each retired within weeks — so treat
-  any endpoint, port or model name written down here as stale until probed. Three consequences:
-  (a) there is no standalone fallback — every offload call goes to that one endpoint, so a failing
-  offload means "start the router", not "the backend is broken".
-  (b) Address the `auto` alias, not a concrete model. The router owns candidate selection and
-  failover. Ask the router's own `/v1/models` for the live roster rather than trusting any written
-  list, this one included.
-  A listed model may still fail at work time, so probe it with a real `/v1/chat/completions`
-  round-trip after a router upgrade; endpoint-alive is not model-alive.
-  ⚠ **`/health` is NOT a health check on this router — it has no such route, and the SPA catch-all
-  answers `200` for ANY unmatched path** (verified 2026-08-18: `/health` → 200,
-  `/this-path-does-not-exist-xyz` → 200, `/v1/models` → 401). So a status-only probe of `/health`
-  passes whenever *a web server is listening*, including when the inference surface is dead. Probe
-  `/v1/models` instead and treat `200` or `401` as up — `401` is "router up, key wrong", which is a
-  different failure with a different fix. The session-start guard and its reconciler now enforce
-  this probe shape mechanically (P36: the hook may not carry `/health` or any hardcoded lane URL);
-  this paragraph remains for AD-HOC callers probing by hand.
-  (c) `--model <spec>` is the *worker/provider* invocation form (claude-worker, codex, agy).
-  Offloading to *Claude Haiku* is a separate lane (Agent tool `model: haiku`), unrelated to the proxy.
-  (d) a hand-written agy model pin goes stale against the installed agy roster (2026-08-05:
-  `claude-sonnet-5` pinned, agy only offers `Claude Sonnet 4.6 (Thinking)`; also `--effort` is
-  rejected for the Claude models). On an "invalid model selection" error, re-run with a roster model
-  name from the error's own list, and read the roster rather than hand-typing it.
 
 - **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance
   routine runs as a local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`) and lands
@@ -662,11 +630,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `.claude/hooks/.state/`) = pre-feature behavior. Uncovered halves, stated outright:
   - A NESTED `claude -p` with this repo as cwd DOES fire SessionStart and self-registers as an
     owner — observed 2026-08-18: the child self-registered and Stop closeout-challenge REPLACED
-    the final answer. FIXED (2026-09-10): a relay lane child carries `LLM_RELAY_DISPATCH_DEPTH`
-    and `isDispatchedChildEnv` reads it, so this no longer rests on the dispatcher remembering
-    `AUDIT_TOOLS_CHILD_SESSION=1` per dispatch. Still uncovered: any OTHER nested `claude -p`
-    worker (the nightly `/insights` invocation, an ad-hoc lane) registers as an owner unless its
-    dispatcher sets that flag by hand.
+    the final answer. The 2026-09-10 depth-marker mechanism is moot since the switch/agent-dispatch
+    lap (2026-09-22) <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->:
+    its workers are OpenCode/AGY, never a Claude Code session, so none fires SessionStart. Still
+    uncovered: any OTHER nested `claude -p` worker (the nightly `/insights` invocation, an ad-hoc
+    lane) registers as an owner unless its dispatcher sets `AUDIT_TOOLS_CHILD_SESSION=1` by hand.
   - Script-mediated commits: `node scripts/release-and-publish.mjs` and `npm version` run git in
     a child process the PreToolUse hook never sees.
   - The refusal is a footgun guard, not an adversary gate: the allow token and recovery CLI are
@@ -732,21 +700,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   which is the same shape the shell-trap guard already forces on suite commands for the exit-code
   reason.
 
-- **A trivial peer-CLI `-p` prompt did not return in 5 min while the relay answered in 0.4s
-  (2026-08-09).** The cost is nested Claude Code **session startup**, not the lane, so a hung lane
-  command is not evidence the pool is down. It compounds with the nested-session trap above:
-  launched from the repo cwd it is a full session in the SHARED checkout. For bounded recon,
-  `POST 127.0.0.1:8791/telemetry` and skip the nested agent entirely — that probe distinguishes a
-  slow lane from a dead one without paying session startup.
-
 - **An external-delegation directive and the Workflow tool are in tension — Workflow has no external
-  lane (2026-08-27).** Workflow's agents run on the session's own model; `opts.model` selects an
-  Anthropic tier, and no `agentType` reaches `agy`, `codex`, or a relay lane. So "delegate to
-  external agents" and "use a Workflow for every substantive task" cannot both be honoured by one
-  call: the external lanes are reachable only through the relay's `dispatch` tools, driven
-  by hand. When the owner asks for external delegation, the relay tools are the instrument and
-  Workflow is not — reaching for Workflow spends Anthropic quota on exactly the bulk recon the
-  directive was routing away.
+  lane (2026-08-27; reworded 2026-09-22 for the switch/agent-dispatch lap
+  <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->).** Workflow's
+  agents run on the session's own model; `opts.model` selects an Anthropic tier, and no `agentType`
+  reaches `agy`, `codex`, or the agent-dispatch worker. So "delegate to external agents" and "use a
+  Workflow for every substantive task" cannot both be honoured by one call: the external lanes are
+  reachable only through agent-dispatch's `opencode_fire` (a capability tier, not a hand-picked
+  model) and `agy_fire`, driven by hand. When the owner asks for external delegation, those MCP
+  tools are the instrument and Workflow is not — reaching for Workflow spends Anthropic quota on
+  exactly the bulk recon the directive was routing away.
 
 - **agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run
   (2026-08-27).** An `agy` offload job buffers its entire answer and emits it at exit, so

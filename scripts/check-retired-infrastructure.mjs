@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/retired-infrastructure.test.ts
 // Retirement register gate: no tracked doc may name RETIRED infrastructure
 // without saying so.
 //
@@ -51,7 +52,11 @@ import { RETIRED_INFRASTRUCTURE } from "./shared/retired-infrastructure-data.mjs
 
 const root = process.cwd();
 
-export const EXEMPT_MARKER = /<!--\s*retired-infrastructure-exempt:\s*([^\s—>-]+)[^>]*-->/;
+// The id class excludes whitespace, the em-dash and `>` — never `-`: an id
+// like `llm-relay` must be captured whole. The marker's own grammar always
+// puts whitespace before the em-dash (`id — reason`), so dropping `-` from
+// the exclusion set does not let the id swallow the reason that follows it.
+export const EXEMPT_MARKER = /<!--\s*retired-infrastructure-exempt:\s*([^\s—>]+)[^>]*-->/;
 
 /**
  * Every mention of retired infrastructure on one line.

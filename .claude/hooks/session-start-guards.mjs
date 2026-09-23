@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/session-registry.test.ts, tests/shared/hook-session-start-guards.test.ts
 // SessionStart probe for the two lap-opening traps. Reports on stdout (the
 // agent reads it as session context) and, for the stale-main case, records a
 // marker that `tool-input-guard.mjs` turns into a deny-once on the first source
@@ -79,14 +80,8 @@ const notes = [];
 try {
   const sessionId = sanitizeSessionId(payload?.session_id);
   if (isDispatchedChildEnv()) {
-    // Name the marker that classified this session: the explicit hand-launched
-    // one, or the depth llm-relay `dispatch` sets in every lane child.
-    const marker =
-      process.env.AUDIT_TOOLS_CHILD_SESSION === '1'
-        ? 'AUDIT_TOOLS_CHILD_SESSION=1'
-        : `LLM_RELAY_DISPATCH_DEPTH=${process.env.LLM_RELAY_DISPATCH_DEPTH}`;
     notes.push(
-      `session registry: ${marker} — this session is a dispatched child and was ` +
+      'session registry: AUDIT_TOOLS_CHILD_SESSION=1 — this session is a dispatched child and was ' +
         'NOT registered; repo Stop gates will not recruit it.',
     );
   } else if (!sessionId) {
@@ -351,7 +346,10 @@ try {
 // The delegation lanes are DECLARED DATA in the MACHINE registry
 // (~/.agent-config/offload-lane-data.mjs — moved out of the repo 2026-08-29,
 // owner decision F10: lane inventory is machine-scoped; llm-relay is the
-// eventual owner) and this leg probes every probeable row CONCURRENTLY, each
+// eventual owner — llm-relay itself retired 2026-09-22 by the switch/agent-dispatch
+// lap, superseded by agent-dispatch <!-- retired-infrastructure-exempt: llm-relay
+// — the owner's F10 decision is quoted verbatim; this note dates its retirement -->)
+// and this leg probes every probeable row CONCURRENTLY, each
 // bounded by its own timeout, so a dead lane is a named constraint at session
 // start rather than a mid-lap stall. An ABSENT registry means this machine
 // declares no lanes: both lane legs skip silently (fresh machine, CI).

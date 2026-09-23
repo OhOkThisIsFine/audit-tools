@@ -1,17 +1,21 @@
 // The leg-2 triage lane's health contract (P11, owner decision sol-4
-// 2026-08-06; re-based on llm-relay dispatch by ledger 133f4f815b608ea4,
-// owner decision 2026-09-03).
+// 2026-08-06; ported off llm-relay onto agent-dispatch by the
+// switch/agent-dispatch lap, 2026-09-22).
 //
-// The sweep NAMES NO MODEL. It hands each entry to `llm-relay mcp`'s
-// `dispatch` tool and reads back the answer plus the lane that produced it —
-// best-lane selection belongs to the relay. These tests pin the stdio MCP
-// client (scripts/shared/mcp-dispatch-lane.mjs) against a FAKE server that
-// speaks the same newline-delimited JSON-RPC, so every behavior is reachable
-// with no relay, no network, and no model: the handshake order, the argument
-// binding, terminal statuses returned rather than thrown, transport deaths
-// thrown, and the one-child-one-request pool. The coverage-stamp helpers keep
-// their read-verbatim contract. Importing the sweep module must not start a
-// sweep (the run is guarded behind direct invocation).
+// The sweep NAMES NO MODEL. It hands each entry to the agent-dispatch
+// bridge's `opencode_fire`/`opencode_wait`/`opencode_job_cancel` tools and
+// reads back the answer plus the provider/model that produced it — the
+// bridge's own default capability tier (litellm/medium) is what applies when
+// no tier is named, and nothing here picks one. These tests pin the stdio
+// MCP client (scripts/shared/mcp-dispatch-lane.mjs) against a FAKE bridge
+// that speaks the same newline-delimited JSON-RPC and the same
+// structuredContent shapes opencode-mcp actually returns, so every behavior
+// is reachable with no real bridge, no worker, and no model: the handshake
+// order, the argument binding, terminal statuses returned rather than
+// thrown, transport deaths thrown, a client-owned timeout that cancels and
+// RETURNS rather than throwing, and one shared bridge process serving
+// concurrent calls matched by JSON-RPC id. Importing the sweep module must
+// not start a sweep (the run is guarded behind direct invocation).
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DispatchLaneError,
   openDispatchLane,
-  parseDispatchAnswer,
+  satisfiesAgentDispatchNode,
 } from "../../scripts/shared/mcp-dispatch-lane.mjs";
 import {
   coverageStampPath,
@@ -38,30 +42,94 @@ function tmp(): string {
   return d;
 }
 
-// A stand-in for `llm-relay mcp`: JSON-RPC 2.0, one message per line. It
-// refuses `tools/call` until `notifications/initialized` has arrived (the
-// handshake order the real server relies on), and it answers by TASK TEXT so a
-// test can pick the terminal shape it wants: an echo of the arguments plus its
-// own pid (completed), a failed job (`FAIL`), a still-running job to poll
-// (`RUNNING`, `STUCK`, `VANISH`, `LATEFAIL`), an RPC refusal (`REFUSE`), or a
-// process death (`DIE`). It serves `dispatch_status` and `dispatch_result` too.
+// A stand-in for the agent-dispatch bridge: JSON-RPC 2.0, one message per
+// line. It refuses `tools/call` until `notifications/initialized` has
+// arrived (the handshake order the real bridge relies on), and it answers
+// `opencode_fire`/`opencode_wait`/`opencode_job_cancel` with opencode-mcp's
+// REAL structuredContent shape — {text, isError, sessionId, jobId, directory,
+// status, result?, error?} — rather than a rendered text envelope. A job's
+// scenario is selected by its fired PROMPT text; `SLOW a`/`SLOW b` answer
+// their `opencode_wait` calls on a reversed delay, so the second-fired job's
+// reply arrives first — proving replies are matched by id, not by send order.
 const FAKE_SERVER = String.raw`
 let buffer = "";
 let initialized = false;
 let initDone = false;
-// A dispatch that comes back STILL RUNNING (the relay clamps the blocking wait
-// to routing.mcp.maxWaitMs). Each task names the job it starts; a job reports
-// "running" for its first "runningPolls" status polls, then its terminal state.
-// VANISH starts a job the server then denies knowing.
-const RUNNING_TASKS = { RUNNING: "job-0003", STUCK: "job-0004", VANISH: "job-0005", LATEFAIL: "job-0006" };
-const JOBS = {
-  "job-0003": { polls: 0, runningPolls: 2, ends: "completed" },
-  "job-0004": { polls: 0, runningPolls: Infinity, ends: "completed" },
-  "job-0006": { polls: 0, runningPolls: 1, ends: "failed" },
+const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
+
+let seq = 0;
+const nextJobId = () => "job-" + String(++seq).padStart(4, "0");
+
+// Each scenario: how many "running" opencode_wait replies precede the
+// terminal one ("waits"), and what the terminal reply carries.
+const SCENARIOS = {
+  RUNNING: { waits: 2, status: "completed" },
+  STUCK: { waits: Infinity },
+  // The deadline race: the job never answers a wait before the caller's
+  // deadline, but upstream JobService.cancel() returns the TERMINAL snapshot
+  // unchanged when the job already finished between the last wait and the
+  // cancel call — simulated by having THIS scenario's cancel reply itself
+  // carry a completed answer rather than status "cancelled".
+  FINISHES_AT_DEADLINE: { waits: Infinity, cancelReturnsCompleted: true },
+  LATEFAIL: { waits: 1, status: "failed", error: { name: "SessionError", message: "session reported an error" } },
+  INPUT: { waits: 0, status: "input_required" },
+  UNKNOWN_EARLY: { waits: 1, status: "completed", earlyUnknown: true },
+  FAIL: { waits: 0, status: "failed", error: { name: "ProviderAuthError", data: { providerID: "litellm", message: "no credential" } } },
+  REASONING_BRACE: { waits: 0, status: "completed", reasoningBrace: true },
+  "SLOW a": { waits: 0, status: "completed", slowMs: 40 },
+  "SLOW b": { waits: 0, status: "completed", slowMs: 5 },
 };
-const send =(m) => process.stdout.write(JSON.stringify(m) + "\n");
-const answer = (id, text, isError) =>
-  send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], isError } });
+
+const jobs = new Map();
+
+function partsFor(scenario, prompt, args, job) {
+  if (scenario.reasoningBrace) {
+    return [
+      { type: "reasoning", text: "thinking about { not json at all } here" },
+      { type: "text", text: JSON.stringify({ verdict: "actionable_now" }) },
+      { type: "step-finish", cost: 0.001, tokens: { input: 10, output: 4 } },
+    ];
+  }
+  // waitAt lets a test PROVE the retry pause actually happened (the gap
+  // between the two receive timestamps), rather than measuring wall time
+  // from before dispatch() — which also includes the handshake and is
+  // already past any reasonable retry-interval floor on its own.
+  if (scenario.earlyUnknown) {
+    return [{ type: "text", text: JSON.stringify({ prompt, args, waitAt: job.waitAt }) }];
+  }
+  return [{ type: "text", text: JSON.stringify({ prompt, args }) }];
+}
+
+function renderText(snapshot) {
+  const lines = [
+    snapshot.directory ? "Directory: " + snapshot.directory : "",
+    snapshot.sessionId ? "Session: " + snapshot.sessionId : "",
+    snapshot.jobId ? "Job: " + snapshot.jobId : "",
+    "Status: " + snapshot.status,
+  ].filter(Boolean);
+  if (snapshot.status === "completed") lines.push("Session completed.");
+  if (snapshot.status === "input_required") lines.push("Input required. Inspect pending permissions and questions before continuing.");
+  if (snapshot.error) lines.push("Error: " + (typeof snapshot.error === "string" ? snapshot.error : JSON.stringify(snapshot.error)));
+  if (snapshot.note) lines.push(snapshot.note);
+  return lines.join("\n\n");
+}
+
+// withStructuredText() upstream: structuredContent.text is the SAME text as
+// the rendered content — never a separate, unrendered "raw answer" field.
+function respond(id, snapshot) {
+  const text = renderText(snapshot);
+  const isError = snapshot.status === "failed";
+  send({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text }],
+      isError,
+      structuredContent: { ...snapshot, text, isError },
+    },
+  });
+}
+
 function handle(msg) {
   if (msg.id === undefined) {
     if (msg.method === "notifications/initialized" && initDone) initialized = true;
@@ -69,7 +137,7 @@ function handle(msg) {
   }
   if (msg.method === "initialize") {
     initDone = true;
-    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: msg.params.protocolVersion, serverInfo: { name: "fake", version: "0" } } });
+    send({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: msg.params.protocolVersion, serverInfo: { name: "fake-bridge", version: "0" } } });
     return;
   }
   if (msg.method !== "tools/call") {
@@ -80,47 +148,93 @@ function handle(msg) {
     send({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "tools/call before notifications/initialized" } });
     return;
   }
+  const name = msg.params.name;
   const a = msg.params.arguments;
-  if (msg.params.name === "dispatch_status" || msg.params.name === "dispatch_result") {
-    const job = JOBS[a.jobId];
+
+  if (name === "opencode_fire") {
+    if (a.prompt === "DIE") process.exit(3);
+    if (a.prompt === "REFUSE") {
+      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "boom" } });
+      return;
+    }
+    const scenario = SCENARIOS[a.prompt] ?? { waits: 0, status: "completed" };
+    const jobId = nextJobId();
+    jobs.set(jobId, { prompt: a.prompt, args: a, scenario, polls: 0 });
+    respond(msg.id, {
+      jobId,
+      sessionId: "ses_" + jobId,
+      directory: a.directory,
+      status: "accepted",
+      note: "Task dispatched. Use opencode_check or opencode_wait.",
+    });
+    return;
+  }
+
+  if (name === "opencode_wait") {
+    const job = jobs.get(a.jobId);
     if (!job) {
-      answer(msg.id, "unknown jobId: " + a.jobId, true);
+      respond(msg.id, { jobId: a.jobId, status: "unknown", error: "unknown jobId: " + a.jobId });
       return;
     }
-    if (msg.params.name === "dispatch_status") {
-      job.polls += 1;
-      const status = job.polls > job.runningPolls ? job.ends : "running";
-      answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: " + status + "\nelapsed: 6s", false);
+    job.waitAt = job.waitAt || [];
+    job.waitAt.push(Date.now());
+    const { scenario } = job;
+    const emit = () => {
+      if (job.polls < scenario.waits) {
+        job.polls += 1;
+        const earlyUnknown = scenario.earlyUnknown && job.polls === 1;
+        respond(
+          msg.id,
+          earlyUnknown
+            ? { jobId: a.jobId, sessionId: "ses_" + a.jobId, directory: job.args.directory, status: "unknown", error: { name: "MessageHistoryUnavailable", message: "transient read fault" } }
+            : { jobId: a.jobId, sessionId: "ses_" + a.jobId, directory: job.args.directory, status: "running", timedOut: true },
+        );
+        return;
+      }
+      const parts = partsFor(scenario, job.prompt, job.args, job);
+      respond(msg.id, {
+        jobId: a.jobId,
+        sessionId: "ses_" + a.jobId,
+        directory: job.args.directory,
+        status: scenario.status,
+        error: scenario.error,
+        result: scenario.status === "input_required" ? undefined : { info: { providerID: "litellm", modelID: "medium" }, parts },
+      });
+    };
+    if (scenario.slowMs) setTimeout(emit, scenario.slowMs);
+    else emit();
+    return;
+  }
+
+  if (name === "opencode_job_cancel") {
+    const job = jobs.get(a.jobId);
+    if (!job) {
+      respond(msg.id, { jobId: a.jobId, status: "unknown", error: "unknown jobId: " + a.jobId });
       return;
     }
-    if (job.ends === "failed") {
-      answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: failed\nelapsed: 7s\nerror: lane exited 1\n\nThe lane returned NO output.", true);
+    job.cancelled = true;
+    // A marker on stderr a test can observe from the OUTSIDE (the fake bridge
+    // runs as a real subprocess, so its in-memory job map is not otherwise
+    // readable) — proof the deadline path actually reaches
+    // opencode_job_cancel, not just that the client labels its own answer
+    // timed_out.
+    process.stderr.write("CANCEL " + a.jobId + "\n");
+    if (job.scenario.cancelReturnsCompleted) {
+      const parts = partsFor(job.scenario, job.prompt, job.args, job);
+      respond(msg.id, {
+        jobId: a.jobId,
+        sessionId: "ses_" + a.jobId,
+        directory: job.args.directory,
+        status: "completed",
+        result: { info: { providerID: "litellm", modelID: "medium" }, parts },
+      });
       return;
     }
-    answer(msg.id, "job: " + a.jobId + "\nlane: agy-gemini\nstatus: completed\nelapsed: 7s\nexit: 0\n\n" + JSON.stringify({ polls: job.polls }), false);
+    respond(msg.id, { jobId: a.jobId, sessionId: "ses_" + a.jobId, directory: job.args.directory, status: "cancelled" });
     return;
   }
-  if (msg.params.name !== "dispatch") {
-    answer(msg.id, "unknown tool: " + msg.params.name, true);
-    return;
-  }
-  if (a.task in RUNNING_TASKS) {
-    const jobId = RUNNING_TASKS[a.task];
-    answer(msg.id, "job: " + jobId + "\nlane: agy-gemini\nstatus: running\nelapsed: 5s\n\nwaited 5 s (waitMs 1805000 clamped to routing.mcp.maxWaitMs 5000)\nStill running after 5s. Poll dispatch_status with jobId \"" + jobId + "\", then call dispatch_result.", false);
-    return;
-  }
-  if (a.task === "DIE") process.exit(3);
-  if (a.task === "REFUSE") {
-    send({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "boom" } });
-    return;
-  }
-  if (a.task === "FAIL") {
-    answer(msg.id, "job: job-0002\nlane: free-pool (pool/medium)\nstatus: failed\nelapsed: 1s\nerror: relay answered HTTP 429\n\nThe lane returned NO output.", true);
-    return;
-  }
-  const echo = JSON.stringify({ pid: process.pid, args: a });
-  const delay = a.task.startsWith("SLOW") ? 300 : 0;
-  setTimeout(() => answer(msg.id, "job: job-0001\nlane: free-pool (pool/medium)\nstatus: completed\nelapsed: 0s\nexit: 0\nserved-by: fake/model\r\n\r\n" + echo, false), delay);
+
+  respond(msg.id, { status: "failed", error: "unknown tool: " + name });
 }
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -135,168 +249,233 @@ process.stdin.on("data", (chunk) => {
 process.stdin.on("end", () => process.exit(0));
 `;
 
-function fakeLane(size = 1) {
+function fakeLane(overrides: Record<string, unknown> = {}) {
   const dir = tmp();
-  const script = join(dir, "fake-mcp.mjs");
+  const script = join(dir, "fake-bridge.mjs");
   writeFileSync(script, FAKE_SERVER);
   return openDispatchLane({
-    size,
-    // A running job is polled every 10 ms, and given up 200 ms past its timeout.
-    pollMs: 10,
-    graceMs: 200,
     command: process.execPath,
     args: [script],
     cwd: dir,
     onStderr: () => {},
+    // A short retry interval so the "returned early" test does not burn the
+    // real 2-second upstream default. Production callers never pass this.
+    waitRetryMs: 15,
+    ...overrides,
   });
 }
 
-describe("parseDispatchAnswer", () => {
-  it("splits the provenance header from the body and names lane and spec", () => {
-    const parsed = parseDispatchAnswer(
-      "job: job-0007\nlane: free-pool (pool/medium)\nstatus: completed\nserved-by: nim/x\n\n{\"a\":1}\n",
+describe("openDispatchLane: preflight", () => {
+  it("fails loudly, before spawning anything, when the agent-dispatch checkout is missing", () => {
+    const missingRepo = tmp();
+    expect(() => openDispatchLane({ env: { AGENT_DISPATCH_REPO: missingRepo } })).toThrow(
+      /agent-dispatch checkout not found/,
     );
-    expect(parsed.header).toEqual({ job: "job-0007", lane: "free-pool (pool/medium)", status: "completed", "served-by": "nim/x" });
-    expect(parsed.lane).toBe("free-pool");
-    expect(parsed.spec).toBe("pool/medium");
-    expect(parsed.body).toBe('{"a":1}');
   });
 
-  it("tolerates CRLF, a lane with no spec, and a header with no body", () => {
-    const parsed = parseDispatchAnswer("lane: agy-gemini\r\nstatus: failed\r\nerror: x\r\n");
-    expect(parsed.lane).toBe("agy-gemini");
-    expect(parsed.spec).toBeUndefined();
-    expect(parsed.header.error).toBe("x");
-    expect(parsed.body).toBe("");
+  it("checks the exact Node floor agent-dispatch's package.json declares (>=22.18)", () => {
+    expect(satisfiesAgentDispatchNode("22.17.0")).toBe(false);
+    expect(satisfiesAgentDispatchNode("22.18.0")).toBe(true);
+    expect(satisfiesAgentDispatchNode("23.0.0")).toBe(true);
+  });
+
+  it("skips both checks when the caller supplies its own command (a test's fake bridge)", async () => {
+    // No throw, and no real agent-dispatch checkout is required — every other
+    // test in this file relies on exactly this.
+    let lane: ReturnType<typeof fakeLane>;
+    expect(() => {
+      lane = fakeLane();
+    }).not.toThrow();
+    // The fake bridge child's cwd sits inside the temp dir `afterEach` removes
+    // — leaving it open makes that removal fail EPERM on Windows.
+    await lane!.close();
   });
 });
 
-describe("openDispatchLane", () => {
-  it("handshakes before the first call and binds task, answer mode, schema, cwd and a wait past the timeout", async () => {
+describe("openDispatchLane: dispatch", () => {
+  it("handshakes before the first call, fires with the mode-selected agent and a directory, and omits providerID/modelID", async () => {
     const lane = fakeLane();
     try {
-      const schema = { type: "object", properties: { v: { type: "string" } } };
-      const r = await lane.dispatch("classify me", { schema, maxTokens: 50, timeoutMs: 1_000 });
+      const r = await lane.dispatch("classify me", { timeoutMs: 5_000 });
       expect(r.status).toBe("completed");
-      expect(r.lane).toBe("free-pool");
-      expect(r.spec).toBe("pool/medium");
-      expect(r.servedBy).toBe("fake/model");
-      expect(r.error).toBeUndefined();
       const echoed = JSON.parse(r.raw);
-      expect(echoed.args.task).toBe("classify me");
-      expect(echoed.args.mode).toBe("answer");
-      expect(echoed.args.schema).toEqual(schema);
-      expect(echoed.args.maxTokens).toBe(50);
-      expect(echoed.args.timeoutMs).toBe(1_000);
-      expect(echoed.args.waitMs).toBeGreaterThan(1_000);
-      expect(typeof echoed.args.cwd).toBe("string");
+      expect(echoed.prompt).toBe("classify me");
+      expect(echoed.args.agent).toBe("answer"); // default mode
+      expect(typeof echoed.args.directory).toBe("string");
+      expect(echoed.args.providerID).toBeUndefined();
+      expect(echoed.args.modelID).toBeUndefined();
+
+      const agentMode = await lane.dispatch("classify me", { timeoutMs: 5_000, mode: "agent" });
+      expect(JSON.parse(agentMode.raw).args.agent).toBe("dispatch");
     } finally {
       await lane.close();
     }
   });
 
-  it("returns a failed job as a terminal status with its reason, never throwing", async () => {
+  it("requires timeoutMs — agent-dispatch enforces no job timeout of its own", async () => {
     const lane = fakeLane();
     try {
-      const r = await lane.dispatch("FAIL");
-      expect(r.status).toBe("failed");
-      expect(r.lane).toBe("free-pool");
-      expect(r.error).toBe("relay answered HTTP 429");
-      expect(r.raw).toContain("NO output");
+      // @ts-expect-error — exercising the missing-required-option runtime guard
+      await expect(lane.dispatch("classify me", {})).rejects.toBeInstanceOf(DispatchLaneError);
     } finally {
       await lane.close();
     }
   });
 
-  // Nightly proposal P66 (owner decision 2026-09-16). The relay CLAMPS the
-  // blocking wait to routing.mcp.maxWaitMs, so a `running` reply is ordinary:
-  // 9 of 62 entries on the 2026-09-16 sweep were thrown away as transport faults.
-  it("polls a running job to its terminal state and takes the answer from dispatch_result", async () => {
+  it("extracts only the result's text parts — reasoning (even with a brace) and step-finish are dropped", async () => {
+    const lane = fakeLane();
+    try {
+      const r = await lane.dispatch("REASONING_BRACE", { timeoutMs: 5_000 });
+      expect(r.status).toBe("completed");
+      expect(r.raw).toBe(JSON.stringify({ verdict: "actionable_now" }));
+      expect(r.lane).toBe("litellm/medium");
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("polls a running job to its terminal state across several waits", async () => {
     const lane = fakeLane();
     try {
       const r = await lane.dispatch("RUNNING", { timeoutMs: 5_000 });
       expect(r.status).toBe("completed");
-      expect(r.lane).toBe("agy-gemini");
-      expect(r.header.job).toBe("job-0003");
-      // Two polls answered `running`; the third named the terminal state.
-      expect(JSON.parse(r.raw)).toEqual({ polls: 3 });
+      expect(r.lane).toBe("litellm/medium");
     } finally {
       await lane.close();
     }
   });
 
-  it("returns a job that ends FAILED after the poll as a terminal status, never throwing", async () => {
+  it("retries a non-terminal reply that did NOT use its full time budget after the upstream poll interval, not in a tight loop", async () => {
+    // A retry interval generous enough that a tight loop (no sleep at all —
+    // the two opencode_wait calls landing back to back) is unmistakably
+    // distinguishable from it, without the test itself burning that time:
+    // the gap is measured SERVER-SIDE (the fake's own receive timestamps,
+    // echoed back in the answer), never against wall time from before
+    // dispatch() — which already exceeds a small interval on handshake
+    // overhead alone, the defect this replaces.
+    const lane = fakeLane({ waitRetryMs: 150 });
+    try {
+      const r = await lane.dispatch("UNKNOWN_EARLY", { timeoutMs: 5_000 });
+      expect(r.status).toBe("completed");
+      const { waitAt } = JSON.parse(r.raw);
+      expect(waitAt).toHaveLength(2);
+      expect(waitAt[1] - waitAt[0]).toBeGreaterThanOrEqual(100);
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("returns an immediate failure as a terminal status with its reason, never throwing", async () => {
+    const lane = fakeLane();
+    try {
+      const r = await lane.dispatch("FAIL", { timeoutMs: 5_000 });
+      expect(r.status).toBe("failed");
+      expect(r.error).toBe("ProviderAuthError: no credential");
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("returns a job that ends FAILED after a poll as a terminal status, never throwing", async () => {
     const lane = fakeLane();
     try {
       const r = await lane.dispatch("LATEFAIL", { timeoutMs: 5_000 });
       expect(r.status).toBe("failed");
-      expect(r.error).toBe("lane exited 1");
+      expect(r.error).toBe("SessionError: session reported an error");
     } finally {
       await lane.close();
     }
   });
 
-  it("gives up on a job still running past its timeout, naming the job and the elapsed time", async () => {
+  it("cancels and returns a non-completed result on input_required — a headless sweep must never stall on a question", async () => {
     const lane = fakeLane();
     try {
-      const error = await lane.dispatch("STUCK", { timeoutMs: 50 }).catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(DispatchLaneError);
-      expect((error as Error).message).toMatch(/job-0004 .*still running after \d+ ms/);
-      // The slot was released: the lane still serves the next call.
-      expect((await lane.dispatch("after stuck")).status).toBe("completed");
+      const r = await lane.dispatch("INPUT", { timeoutMs: 5_000 });
+      expect(r.status).toBe("cancelled");
+      expect(r.error).toMatch(/asked for input/);
     } finally {
       await lane.close();
     }
   });
 
-  it("throws when the server no longer knows the job it said was running", async () => {
+  it("gives up on a job still running past its timeout — cancels and RETURNS timed_out, never throwing", async () => {
+    const stderrChunks: string[] = [];
+    const lane = fakeLane({ onStderr: (chunk: string) => { stderrChunks.push(chunk); } });
+    try {
+      const r = await lane.dispatch("STUCK", { timeoutMs: 50 });
+      expect(r.status).toBe("timed_out");
+      expect(r.error).toMatch(/job-\d+ .*still running after \d+ ms/);
+      // The deadline path must actually call opencode_job_cancel on the
+      // runaway job, not just label the client's own answer timed_out — the
+      // fake bridge's cancel handler marks its stderr, observable only from
+      // outside the (real, subprocess) fake since its job map is not
+      // otherwise readable here.
+      const [, jobId] = /(job-\d+)/.exec(r.error ?? "") ?? [];
+      expect(jobId).toBeTruthy();
+      expect(stderrChunks.join("")).toContain(`CANCEL ${jobId}`);
+      // A throw here is what lane-dispatch.mjs retries once; a RETURN must
+      // not run the same 20-minute call twice.
+      // The lane still serves the next call afterwards.
+      const after = await lane.dispatch("classify me", { timeoutMs: 5_000 });
+      expect(after.status).toBe("completed");
+    } finally {
+      await lane.close();
+    }
+  });
+
+  it("a job that COMPLETES between the last poll and the deadline cancel keeps its real answer, never relabeled timed_out", async () => {
+    // Upstream JobService.cancel() returns the terminal snapshot UNCHANGED
+    // when the job already finished — the deadline race this pins: the fake
+    // answers the cancel call itself as if the job had already completed
+    // (upstream's own behavior for a cancel on a terminal job), and the
+    // caller must surface that real answer, never discard it as timed_out.
     const lane = fakeLane();
     try {
-      await expect(lane.dispatch("VANISH", { timeoutMs: 5_000 })).rejects.toThrow(
-        /dispatch_status for job-0005 .*unknown jobId: job-0005/,
-      );
+      const r = await lane.dispatch("FINISHES_AT_DEADLINE", { timeoutMs: 50 });
+      expect(r.status).toBe("completed");
+      expect(r.error).toBeUndefined();
+      expect(JSON.parse(r.raw).prompt).toBe("FINISHES_AT_DEADLINE");
     } finally {
       await lane.close();
     }
   });
 
-  it("throws on an RPC refusal and a server death — no answer exists", async () => {
+  it("throws on an RPC refusal and a bridge death — no answer exists", async () => {
     const lane = fakeLane();
     try {
-      await expect(lane.dispatch("REFUSE")).rejects.toThrow(/dispatch refused: boom/);
-      await expect(lane.dispatch("DIE")).rejects.toBeInstanceOf(DispatchLaneError);
-      // Every slot is dead: the pool refuses rather than hanging.
-      await expect(lane.dispatch("after death")).rejects.toThrow(/exited/);
+      await expect(lane.dispatch("REFUSE", { timeoutMs: 5_000 })).rejects.toThrow(/opencode_fire refused: boom/);
+      await expect(lane.dispatch("DIE", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(DispatchLaneError);
+      // The one shared bridge process is dead: every later call fails fast.
+      await expect(lane.dispatch("after death", { timeoutMs: 5_000 })).rejects.toThrow(/exited/);
     } finally {
       await lane.close();
     }
   });
 
-  it("runs concurrent dispatches on distinct children, one request per child", async () => {
-    const lane = fakeLane(2);
+  it("runs concurrent dispatch() calls on ONE shared bridge process, matched by id — even when replies arrive out of order", async () => {
+    const lane = fakeLane();
     try {
-      const [a, b] = await Promise.all([lane.dispatch("SLOW a"), lane.dispatch("SLOW b")]);
-      expect(JSON.parse(a.raw).pid).not.toBe(JSON.parse(b.raw).pid);
-    } finally {
-      await lane.close();
-    }
-  });
-
-  it("serializes on one child when the pool has one slot", async () => {
-    const lane = fakeLane(1);
-    try {
-      const [a, b] = await Promise.all([lane.dispatch("SLOW a"), lane.dispatch("SLOW b")]);
-      expect(JSON.parse(a.raw).pid).toBe(JSON.parse(b.raw).pid);
+      // "SLOW a" answers its opencode_wait after 40ms, "SLOW b" after 5ms:
+      // b's reply reaches the client first even though a was fired first. A
+      // client that demuxed by SEND ORDER rather than JSON-RPC id would
+      // resolve a's promise with b's payload.
+      const [a, b] = await Promise.all([
+        lane.dispatch("SLOW a", { timeoutMs: 5_000 }),
+        lane.dispatch("SLOW b", { timeoutMs: 5_000 }),
+      ]);
+      expect(JSON.parse(a.raw).prompt).toBe("SLOW a");
+      expect(JSON.parse(b.raw).prompt).toBe("SLOW b");
     } finally {
       await lane.close();
     }
   });
 });
 
-describe("the sweep names no model target", () => {
-  // The ledger item's property, pinned at the source: lane choice is the
-  // relay's. A roster read, a model env var, or a first-entry fallback here
-  // would be the 2026-09-03 failure coming back.
+describe("the sweep names no model or tier", () => {
+  // The ledger item's property, pinned at the source: the bridge's own
+  // default tier applies when none is named. A roster read, a model env var,
+  // an explicit tier, or a first-entry fallback here would be the 2026-09-03
+  // failure coming back in a new shape.
   it("routes through the dispatch lane and carries no roster, model env var, or chat endpoint", () => {
     const src = readFileSync(join(process.cwd(), "scripts", "shared", "triage-backlog.mjs"), "utf8");
     expect(src).toContain("openDispatchLane");
@@ -314,7 +493,7 @@ describe("coverage stamp", () => {
   it("round-trips the stamp shape the routine reads", () => {
     const path = coverageStampPath(join(tmp(), "t.jsonl"));
     const stamp = {
-      model: "llm-relay dispatch",
+      model: "agent-dispatch dispatch",
       started_at: "2026-08-06T00:00:00.000Z",
       finished_at: null,
       aborted: "preflight failed: HTTP 400",

@@ -7,7 +7,8 @@
 // the sweep cover the input" is a number a routine reads, never a wc -l.
 //
 // LANE-AGNOSTIC BY CONSTRUCTION. A lane is any `async (item) => ({ raw,
-// finishReason?, ...meta })` — the sole live caller posts to an HTTP router,
+// finishReason?, ...meta })` — the sole live caller dispatches through the
+// agent-dispatch bridge's stdio MCP client (scripts/shared/mcp-dispatch-lane.mjs),
 // and a shell lane (peer-CLI dispatch: `codex exec` / `agy -p` one item at a
 // time) is the intended SECOND adapter, deliberately not shipped until its
 // first caller migrates (an unconsumed adapter is the tested-but-unwired
@@ -27,9 +28,10 @@
 //
 // WHAT IS NOT RETRIED, deliberately, and this is the whole reason the retry is
 // here and not in the caller: a lane that ANSWERED and produced an unusable
-// payload. That answer is the lane's verdict on itself — a different rung may
-// answer better, and picking one is the relay's job, so retrying the same way
-// would burn a second full-timeout attempt to relearn the same dialect death.
+// payload. That answer is the lane's verdict on itself — a different concrete
+// endpoint may answer better, and picking one within the bridge's tier is
+// LiteLLM's job, so retrying the same way would burn a second full-timeout
+// attempt to relearn the same dialect death.
 // The line is `callLane` threw vs. `buildRecord` threw: a throw from the LATTER
 // means the lane spoke, so the item lands as an error row immediately.
 //

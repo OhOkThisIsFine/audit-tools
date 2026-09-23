@@ -52,8 +52,13 @@
 - **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
   friction: tool_should_decide).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
   its `claude.ps1` launcher, and the `mcp__freellmapi__offload_*` tools. FreeLLMAPI was retired
-  2026-08-29 and llm-relay on `127.0.0.1:8791` replaced it; the machine-wide `CLAUDE.md` warns that running
-  `claude.ps1` RESURRECTS the retired service. A ninth entry says the relay "dies with the
+  2026-08-29; at the time this entry was written, llm-relay on `127.0.0.1:8791` had replaced it, but
+  llm-relay was itself retired 2026-09-22 by the switch/agent-dispatch lap
+  <!-- retired-infrastructure-exempt: llm-relay — historical record of what replaced FreeLLMAPI in
+  2026-08-29, before llm-relay's own retirement; the register in
+  `scripts/shared/retired-infrastructure-data.mjs` is the current source --> — the machine-wide
+  `CLAUDE.md` warns that running `claude.ps1` RESURRECTS the retired FreeLLMAPI service. A ninth
+  entry says the relay "dies with the
   dispatching session, and nothing restarts it", which the same file contradicts — it autostarts at
   logon. This file is a standing REFERENCE, so a stale entry costs a future session a wrong action,
   not merely a wasted read. Found incidentally by a scope audit looking for something else, which is

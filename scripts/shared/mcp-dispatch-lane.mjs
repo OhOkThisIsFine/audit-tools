@@ -1,175 +1,222 @@
-// sites-pinned: tests/shared/triage-lane-health.test.ts, tests/shared/dispatch-lane-envelope.test.ts
-// The llm-relay dispatch lane — a stdio MCP client to `llm-relay mcp`, ONE
-// answer per call.
+// sites-pinned: tests/shared/triage-lane-health.test.ts
+// The agent-dispatch dispatch lane — a stdio MCP client to the agent-dispatch
+// bridge (`node <repo>/src/cli.ts bridge`), ONE bridge process, N concurrent
+// fire/wait pairs matched by JSON-RPC id.
 //
-// WHY THIS EXISTS (ledger 133f4f815b608ea4, owner decision 2026-09-03). The
-// leg-2 sweep used to NAME a model target: it read the relay's /v1/models
-// roster and picked an alias, and when the alias it wanted was absent it fell
-// back to the roster's first entry — the one passthrough that needs a real API
-// key — and died 401 with zero entries attempted while four free pool lanes sat
-// unused. Best-lane selection belongs to llm-relay (owner answer P49): this
-// module hands each task to the relay's own `dispatch` tool and reads back the
-// answer plus the lane that produced it. Nothing here chooses, ranks, or names
-// a model.
+// WHY THIS EXISTS (ledger 133f4f815b608ea4, owner decision 2026-09-03; ported
+// off llm-relay by the switch/agent-dispatch lap, 2026-09-22). Best-lane
+// selection never belonged to this module: it belonged to llm-relay's own
+// `dispatch` tool, and llm-relay is retired. The successor is agent-dispatch's
+// worker: the caller names a capability TIER, and LiteLLM auto-selects/fails
+// over the concrete endpoint within it. The bridge's own stated system default
+// tier is `litellm/medium` (agent-dispatch src/setup/opencode.ts workerConfig(),
+// src/bridge/command.ts bridgeEnv()) — this module omits providerID/modelID on
+// every call, so the sweep still names no model or tier and ledger
+// 133f4f815b608ea4 stays literally true.
 //
-// TRANSPORT. `llm-relay mcp` speaks JSON-RPC 2.0 over stdio, one JSON message
-// per line (CRLF tolerated). The surface used is `initialize`,
-// `notifications/initialized`, and `tools/call` on `dispatch`. That is four
-// message shapes over newline-delimited JSON — the same "own only the tiny
-// bit" call llm-relay itself made when it hand-rolled the server side.
+// TRANSPORT. The agent-dispatch bridge speaks JSON-RPC 2.0 (MCP) over stdio,
+// one JSON message per line (CRLF tolerated). The surface used is
+// `initialize`, `notifications/initialized`, and `tools/call` on
+// `opencode_fire`, `opencode_wait`, and `opencode_job_cancel`.
 //
-// ⚠ ONE CHILD ANSWERS ONE REQUEST AT A TIME. The server reads stdin with
-// `for await (chunk) { await ingest(chunk) }`, so a second request written
-// while the first is in flight is not even read until the first answers. A
-// caller that wants N concurrent dispatches therefore gets a POOL of N
-// children (`size`), each with its own handshake, handed out to idle slots.
+// ⚠ ONE BRIDGE PROCESS, MANY CONCURRENT CALLS. The retired llm-relay client
+// spawned one CHILD PER CONCURRENT DISPATCH because that server read stdin
+// with `for await (chunk)`, one request at a time. The agent-dispatch bridge
+// is different: it relays host lines to the wrapped worker process and only
+// serializes its own WRITES (agent-dispatch src/bridge/command.ts: a `queue`
+// wraps `child.stdin.write`, never a read), so replies can arrive out of
+// order relative to sends. JSON-RPC responses are demultiplexed by id
+// regardless of order — the same thing the retired client already assumed
+// per child — so N concurrent `dispatch()` calls share ONE bridge process,
+// proven by a test that answers two calls OUT OF ORDER.
 //
-// ONE CALL, ONE TERMINAL ANSWER. The server's `dispatch` blocks for `waitMs`
-// and then hands back a job handle to poll. This lane asks for a wait past
-// `timeoutMs`, but the server CLAMPS it to its own `routing.mcp.maxWaitMs`, so
-// a `running` reply is ordinary (nightly proposal P66: 9 of 62 sweep entries
-// on 2026-09-16 were thrown away as "cannot happen"). The lane then polls
-// `dispatch_status` on the SAME child until the job is terminal and takes the
-// answer from `dispatch_result`. So every call still returns a TERMINAL job —
-// completed, failed, timed_out — and the caller decides what a non-completed
-// status means. A terminal failure is RETURNED, not thrown, so the driver can
-// still record what the lane did (finish reason, output size) on the error
-// row. What throws: a transport death (the child exited, the RPC itself was
-// refused), a job the server no longer knows, and a job still running past
-// `timeoutMs` plus the grace — the server enforces `timeoutMs` itself, so that
-// last one is a server fault, and the error names the job and the elapsed time.
+// NO SERVER-SIDE TIMEOUT. `opencode_fire` has no timeout parameter and
+// OpenCode enforces none on the task itself; the bridge clamps a single
+// `opencode_wait` to at most 45 seconds (agent-dispatch src/bridge/proxy.ts
+// MAX_WAIT_SECONDS). This module owns the ceiling: it polls `opencode_wait`
+// with whatever time is left (never more than 45s per call), and on ITS OWN
+// `timeoutMs` deadline it calls `opencode_job_cancel` and RETURNS rather than
+// throwing — a throw is exactly what `lane-dispatch.mjs` retries once, and a
+// timeout must never run the same call twice. The RETURN is usually a
+// non-completed result (status `timed_out`, naming the job and the elapsed
+// time), but not always: upstream `JobService.cancel()` returns the terminal
+// snapshot UNCHANGED when the job already finished between the last wait and
+// the cancel call, so a completed/failed answer that lands exactly there is
+// returned as-is — never discarded and relabeled `timed_out`. A wait that
+// comes back non-terminal WITHOUT using its full time budget (e.g. a
+// transient worker-read fault reporting `unknown` at once — opencode-mcp dist/
+// tools/workflow.js waitForSnapshot()'s catch path) is retried after upstream
+// opencode_wait's own default poll interval (2000 ms), not in a tight loop.
 //
-// PROVENANCE RIDES EVERY ANSWER. The relay's rule is that dispatch "never
-// pretends a CLI answered": the result header names the lane and, in answer
-// mode, the deployment that served it. Both are parsed out and returned so a
-// record can say which lane classified it.
+// TERMINAL STATUSES. `completed`, `failed`, and `cancelled` are returned as
+// terminal. `input_required` cannot happen for the `answer` agent (mode
+// "answer", the default — every permission denied, agent-dispatch
+// src/setup/opencode.ts). It CAN happen for `dispatch` (mode "agent"):
+// DISPATCH_PERMISSION sets `question: 'allow'`, `external_directory: 'ask'`,
+// and asks on `git commit`/`git push`/`rm -rf`/`Remove-Item -Recurse` among
+// others — a caller in mode "agent" (only dispatch-load-flake-investigation.mjs
+// today, against a disposable snapshot) can genuinely stall there. Handled the
+// same way regardless: cancel the job and return it as a non-completed
+// result, never leave a session waiting on a question nobody will answer.
 //
-// THE BODY IS THE LANE'S OWN ANSWER. Between the header and the lane's output
-// the relay may render a `lanes tried:` paragraph, and after it a version
-// notice; a CLI rung's output is a conversation envelope around the answer.
-// `parseDispatchAnswer` recognizes those three declared shapes and nothing else.
+// THE ANSWER. `structuredContent.text` is the tool's RENDERED text —
+// Directory/Session/Job/Status lines, "Session completed.", then EVERY part's
+// text including reasoning and a `_cost | tokens_` line from step-finish
+// (opencode-mcp dist/helpers.js formatMessageResponse). The job's own answer
+// is `structuredContent.result.parts`, filtered to `type === 'text'` and
+// joined — reasoning and step-finish parts are excluded, so a `{` inside a
+// reasoning part can never reach a caller's brace-scanning JSON salvage.
+// `result` is the assistant message `{info, parts}` whenever no forced JSON
+// schema was requested (dist/jobs.js observeSession(): `snapshot.result =
+// assistant.info.structured ?? assistant`) — this module never requests one
+// (see "DROPPED, NOT FAKED" below), so `result.parts` is always the shape to
+// read.
+//
+// PROVENANCE. `lane` is `<providerID>/<modelID>` off `result.info`, when the
+// job produced an assistant message; `agent-dispatch` otherwise (a job that
+// never got a turn — a preflight rejection, an immediate failure). There is
+// no `servedBy` any more: llm-relay's answer-mode deployment name has no
+// opencode_fire/opencode_wait/opencode_check analogue.
+//
+// DROPPED, NOT FAKED. `schema` (forced JSON output), `maxTokens`, and
+// `system` have no `opencode_fire` equivalent (opencode-mcp dist/job-contract.js
+// dispatchShape: prompt, sessionId, title, providerID, modelID, variant,
+// agent, directory, format — no maxTokens/system, and `format` needs an
+// unverified StructuredOutput tool permission this module does not depend
+// on). Callers may still pass them — accepted, silently ignored — because the
+// schema already travels in the prompt text for a CLI-agent caller and the
+// existing salvage-JSON parser in triage-backlog.mjs already tolerates
+// unschemaed prose.
 import { spawn } from 'node:child_process';
-import { platformCommand } from './smoke-process.mjs';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { resolveSpawn } from './spawn-shell.mjs';
 
 /** The MCP revision this client requests; the server echoes it when it serves it. */
 export const MCP_PROTOCOL_VERSION = '2025-11-25';
 
-/** Ceiling on one dispatch when the caller names none — the relay's own default. */
-export const DEFAULT_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
+/** Ceiling on one `opencode_wait` call — the bridge's own clamp. */
+const MAX_WAIT_SECONDS = 45;
 
 /**
- * How far past `timeoutMs` the requested wait is set, and how far past it a
- * still-running job is polled before the lane gives up on it.
+ * How long a wait that returned non-terminal WITHOUT using its full time
+ * budget is retried after — upstream `opencode_wait`'s own default
+ * `pollIntervalMs` (opencode-mcp dist/tools/workflow.js), a labelled existing
+ * default rather than a number this module picked.
  */
-const WAIT_GRACE_MS = 5_000;
+const WAIT_RETRY_MS = 2_000;
 
-/** How often a running job's `dispatch_status` is polled. */
-const DEFAULT_POLL_MS = 5_000;
-
-/** First words of the notice the server appends when it runs older code than is installed. */
-const VERSION_NOTICE_PREFIX = '⚠ This llm-relay MCP server process runs v';
-
-/** How long `close()` gives a child to exit on stdin end before killing it. */
+/** How long `close()` gives the bridge to exit on stdin end before killing it. */
 const CLOSE_GRACE_MS = 5_000;
+
+/** Statuses a poll stops on: an answer or an error exists, or input is needed. */
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'input_required']);
 
 /** The transport died or refused: no answer exists, terminal or otherwise. */
 export class DispatchLaneError extends Error {
   /**
    * @param {string} message
-   * @param {{ header?: Record<string, string>, body?: string, cause?: unknown }} [details]
+   * @param {{ cause?: unknown }} [details]
    */
   constructor(message, details = {}) {
     super(message, details.cause === undefined ? undefined : { cause: details.cause });
     this.name = 'DispatchLaneError';
-    this.header = details.header ?? {};
-    this.body = details.body ?? '';
   }
 }
 
 /**
- * Split a `dispatch` result text into its provenance header and the answer body.
+ * The checkout every host entry on this machine runs (agent-dispatch
+ * src/setup/hosts.ts hostEntries(): `process.execPath` + `<REPO_ROOT>/src/
+ * cli.ts bridge`, and setup registers `REPO_ROOT`) — override with
+ * `AGENT_DISPATCH_REPO` for another machine or a test fixture.
  *
- * The server renders `key: value` lines (job, lane, status, elapsed, exit,
- * error, served-by, …), a blank line, then the lane's output. The `lane:` value
- * is `<id>` or `<id> (<spec>)`; both halves are returned.
- *
- * `body` is the lane's OWN answer. Three relay-owned shapes are taken out of
- * it, each returned rather than dropped: a leading `lanes tried:` paragraph
- * (`lanesTried`), a trailing version notice (`notice`), and — for a CLI rung —
- * the conversation envelope around the answer, recognized ONLY as a JSON
- * object with a string `conversation_id` AND a string `response`. Any other
- * body, a JSON one included, passes through unchanged.
- *
- * @param {string} text
- * @returns {{ header: Record<string, string>, lane: string | undefined, spec: string | undefined,
- *   body: string, lanesTried: string | undefined, notice: string | undefined }}
+ * @param {NodeJS.ProcessEnv} env
  */
-export function parseDispatchAnswer(text) {
-  const normalized = String(text ?? '').replace(/\r\n/g, '\n');
-  const split = normalized.indexOf('\n\n');
-  const headText = split >= 0 ? normalized.slice(0, split) : normalized;
-  let body = split >= 0 ? normalized.slice(split + 2).trim() : '';
-  /** @type {string | undefined} */
-  let lanesTried;
-  if (body.startsWith('lanes tried:\n')) {
-    const end = body.indexOf('\n\n');
-    lanesTried = end >= 0 ? body.slice(0, end) : body;
-    body = end >= 0 ? body.slice(end + 2).trim() : '';
-  }
-  /** @type {string | undefined} */
-  let notice;
-  const noticeAt = body.lastIndexOf(VERSION_NOTICE_PREFIX);
-  if (noticeAt >= 0 && (noticeAt === 0 || body.slice(0, noticeAt).endsWith('\n\n')) && !body.slice(noticeAt).includes('\n')) {
-    notice = body.slice(noticeAt);
-    body = body.slice(0, noticeAt).trim();
-  }
-  body = unwrapCliEnvelope(body);
-  /** @type {Record<string, string>} */
-  const header = {};
-  for (const line of headText.split('\n')) {
-    const m = /^([a-z][a-z-]*): (.*)$/.exec(line);
-    if (m) header[m[1]] = m[2];
-  }
-  const laneLine = header.lane ?? '';
-  const laneMatch = /^(\S+)(?: \((.+)\))?$/.exec(laneLine);
-  return {
-    header,
-    lane: laneMatch ? laneMatch[1] : undefined,
-    spec: laneMatch?.[2],
-    body,
-    lanesTried,
-    notice,
-  };
+export function agentDispatchRepo(env) {
+  return env.AGENT_DISPATCH_REPO || 'C:/Code/agent-dispatch';
 }
 
 /**
- * A CLI rung's output is its harness's own record:
- * `{"conversation_id":…,"status":…,"response":"<the answer>",…}`. Return the
- * answer when `body` is exactly that record, and `body` itself otherwise.
+ * Whether a Node version string satisfies agent-dispatch's `engines.node`
+ * (`>=22.18`, package.json): its `src/cli.ts` entry runs unbuilt, and type
+ * stripping for a `.ts` file needs that floor.
  *
- * @param {string} body
+ * @param {string} version `process.versions.node` shape: `MAJOR.MINOR.PATCH`
  */
-function unwrapCliEnvelope(body) {
-  if (!body.startsWith('{')) return body;
-  let parsed;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return body;
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return body;
-  if (typeof parsed.conversation_id !== 'string' || typeof parsed.response !== 'string') return body;
-  return parsed.response.trim();
+export function satisfiesAgentDispatchNode(version) {
+  const [major, minor] = String(version).split('.').map(Number);
+  return Number.isFinite(major) && Number.isFinite(minor) && (major > 22 || (major === 22 && minor >= 18));
 }
 
 /**
- * One `llm-relay mcp` child with its handshake in flight.
+ * Fail loudly before spawning anything: a missing checkout or an old Node
+ * produces a `MODULE_NOT_FOUND` or a type-stripping error deep inside the
+ * bridge's own stdout, not a message that names the fix. Skipped when the
+ * caller supplies its own `command` (a test's fake bridge needs neither
+ * check — see `openDispatchLane`).
+ *
+ * @param {string} repo
+ */
+function checkPreflight(repo) {
+  const cli = join(repo, 'src', 'cli.ts');
+  if (!existsSync(cli)) {
+    throw new DispatchLaneError(
+      `agent-dispatch checkout not found: ${cli} does not exist. Set AGENT_DISPATCH_REPO to the ` +
+        `checkout, or run \`node <repo>/src/cli.ts status\` once one is configured.`,
+    );
+  }
+  if (!satisfiesAgentDispatchNode(process.versions.node)) {
+    throw new DispatchLaneError(
+      `agent-dispatch needs Node >= 22.18 for its unbuilt .ts entry (this process runs ` +
+        `${process.versions.node}).`,
+    );
+  }
+}
+
+/**
+ * The answer: `result.parts` entries of type `text` only, concatenated.
+ * Reasoning and step-finish parts are excluded — see the module header.
+ *
+ * @param {unknown} result
+ */
+export function extractAnswer(result) {
+  const parts = result && typeof result === 'object' ? /** @type {any} */ (result).parts : undefined;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .filter((p) => p && p.type === 'text' && typeof p.text === 'string')
+    .map((p) => p.text)
+    .join('');
+}
+
+/**
+ * `name: message`. The assistant's own `.info.error` union carries `message`
+ * directly on some members and `data.message` on others (OpenCode SDK
+ * AssistantMessage['error']); a job-level `requestError()` shape carries
+ * `message` directly. Try both before falling back to the whole value.
+ *
+ * @param {unknown} error
+ */
+function stringifyError(error) {
+  if (error === undefined || error === null) return undefined;
+  if (typeof error === 'string') return error;
+  const e = /** @type {any} */ (error);
+  const name = typeof e.name === 'string' ? e.name : 'Error';
+  const message =
+    typeof e.message === 'string' ? e.message : typeof e.data?.message === 'string' ? e.data.message : JSON.stringify(e);
+  return `${name}: ${message}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * One agent-dispatch bridge process with its handshake in flight.
  *
  * @param {{ command: string, args: string[], cwd: string, spawnImpl: typeof spawn,
  *   protocolVersion: string, onStderr: (chunk: string) => void }} opts
  */
-function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }) {
+function startBridge({ command, args, cwd, spawnImpl, protocolVersion, onStderr }) {
   const resolved = resolveSpawn(command, args);
   const child = spawnImpl(resolved.command, resolved.args, {
     cwd,
@@ -195,7 +242,7 @@ function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }
       try {
         message = JSON.parse(line);
       } catch {
-        continue; // Not protocol — a stray write the server itself warns against.
+        continue; // Not protocol — a stray write.
       }
       const waiter = message && message.id !== undefined ? pending.get(message.id) : undefined;
       if (!waiter) continue; // A notification, or a reply nobody is waiting for.
@@ -212,14 +259,14 @@ function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }
     for (const waiter of pending.values()) waiter.reject(new DispatchLaneError(reason));
     pending.clear();
   };
-  child.on('error', (err) => settle(`dispatch server failed to start: ${err.message}`));
-  child.on('exit', (code, signal) => settle(`dispatch server exited (${signal ?? code}) before answering`));
+  child.on('error', (err) => settle(`agent-dispatch bridge failed to start: ${err.message}`));
+  child.on('exit', (code, signal) => settle(`agent-dispatch bridge exited (${signal ?? code}) before answering`));
 
   const write = (/** @type {object} */ message) => {
     try {
       child.stdin.write(JSON.stringify(message) + '\n');
     } catch (err) {
-      settle(`dispatch server stdin closed: ${/** @type {any} */ (err)?.message ?? err}`);
+      settle(`agent-dispatch bridge stdin closed: ${/** @type {any} */ (err)?.message ?? err}`);
     }
   };
   const request = (/** @type {string} */ method, /** @type {unknown} */ params) =>
@@ -267,186 +314,216 @@ function startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }
           resolve(undefined);
         });
         try {
-          child.stdin.end(); // The server treats stdin end as its ordinary end of life.
+          child.stdin.end(); // The bridge treats stdin end as its own end of life.
         } catch {}
       }),
   };
 }
 
 /**
- * Call one of the server's tools and parse its text reply.
+ * Call one MCP tool and return its `structuredContent`.
  *
- * @param {ReturnType<typeof startChild>} slot
- * @param {'dispatch' | 'dispatch_status' | 'dispatch_result'} name
+ * @param {ReturnType<typeof startBridge>} bridge
+ * @param {'opencode_fire' | 'opencode_wait' | 'opencode_job_cancel'} name
  * @param {Record<string, unknown>} args
  */
-async function callTool(slot, name, args) {
-  const reply = await slot.request('tools/call', { name, arguments: args });
+async function callTool(bridge, name, args) {
+  const reply = await bridge.request('tools/call', { name, arguments: args });
   if (reply.error) {
     throw new DispatchLaneError(`${name} refused: ${reply.error.message}`);
   }
-  const content = Array.isArray(reply.result?.content) ? reply.result.content : [];
-  const text = content
-    .filter((/** @type {any} */ c) => c && c.type === 'text' && typeof c.text === 'string')
-    .map((/** @type {any} */ c) => c.text)
-    .join('');
-  const parsed = parseDispatchAnswer(text);
+  const sc = reply.result?.structuredContent;
+  if (!sc || typeof sc.status !== 'string') {
+    throw new DispatchLaneError(`${name} returned no status: ${JSON.stringify(reply.result ?? null).slice(0, 300)}`);
+  }
+  return sc;
+}
+
+/**
+ * Poll a job to a terminal status, respecting the CALLER's `deadline` — not
+ * the bridge's own 45-second-per-call clamp. On deadline, cancel and RETURN
+ * rather than throwing (see the module header) — usually a `timed_out`
+ * result, but the cancel snapshot's own completed/failed answer when the job
+ * finished right at the deadline.
+ *
+ * @param {ReturnType<typeof startBridge>} bridge
+ * @param {string} jobId
+ * @param {number} deadline epoch ms
+ * @param {number} startedAt epoch ms
+ * @param {number} waitRetryMs test seam for `WAIT_RETRY_MS` — see `openDispatchLane`
+ */
+async function pollUntilTerminal(bridge, jobId, deadline, startedAt, waitRetryMs) {
+  for (;;) {
+    if (Date.now() >= deadline) {
+      let cancelled;
+      try {
+        cancelled = await callTool(bridge, 'opencode_job_cancel', { jobId });
+      } catch (err) {
+        // The cancel itself failing after a deadline is a transport-level
+        // fault, not an ordinary timeout: throw, so the driver's one retry
+        // applies (a plain timed-out RETURN never reaches that retry).
+        throw new DispatchLaneError(
+          `opencode_job_cancel for ${jobId} failed after its deadline: ${/** @type {any} */ (err)?.message ?? err}`,
+          { cause: err },
+        );
+      }
+      // Upstream JobService.cancel() returns the TERMINAL snapshot unchanged
+      // when the job already finished between the last wait and this cancel
+      // call — a real completed/failed answer must never be discarded and
+      // relabeled timed_out just because it arrived on the cancel reply
+      // rather than a wait reply.
+      if (cancelled.status === 'completed' || cancelled.status === 'failed') return cancelled;
+      return {
+        ...cancelled,
+        status: 'timed_out',
+        error: `job ${jobId} still running after ${Date.now() - startedAt} ms, past its timeout — cancelled`,
+      };
+    }
+    const secondsLeft = Math.max(0, (deadline - Date.now()) / 1000);
+    const sc = await callTool(bridge, 'opencode_wait', {
+      jobId,
+      timeoutSeconds: Math.min(MAX_WAIT_SECONDS, secondsLeft),
+    });
+    if (TERMINAL_STATUSES.has(sc.status)) return sc;
+    if (sc.timedOut !== true) await sleep(waitRetryMs);
+  }
+}
+
+/**
+ * `input_required` cannot happen for the `answer` agent, but CAN for
+ * `dispatch` (mode "agent" — see the module header): handled rather than
+ * ignored, cancel the job and return it as a non-completed result instead of
+ * leaving a session waiting on a question nobody will answer.
+ *
+ * @param {ReturnType<typeof startBridge>} bridge
+ * @param {string} jobId
+ */
+async function cancelInputRequired(bridge, jobId) {
+  let cancelled;
+  try {
+    cancelled = await callTool(bridge, 'opencode_job_cancel', { jobId });
+  } catch (err) {
+    throw new DispatchLaneError(
+      `opencode_job_cancel for ${jobId} (input_required) failed: ${/** @type {any} */ (err)?.message ?? err}`,
+      { cause: err },
+    );
+  }
   return {
-    ...parsed,
-    text,
-    /** Absent on a reply that carries no job header at all (e.g. `unknown jobId`). */
-    statedStatus: parsed.header.status,
-    status: parsed.header.status ?? (reply.result?.isError ? 'failed' : 'completed'),
+    ...cancelled,
+    error: cancelled.error ?? `job ${jobId} asked for input; a headless sweep cannot answer it — cancelled`,
   };
 }
 
 /**
- * Poll a running job on its own child until the server names a terminal
- * state, then read its answer. The server enforces the job's `timeoutMs`
- * itself, so a job still running at `deadline` is a fault, not a slow lane.
- *
- * @param {ReturnType<typeof startChild>} slot
- * @param {Awaited<ReturnType<typeof callTool>>} running the `running` reply
- * @param {number} deadline epoch ms
- * @param {number} startedAt epoch ms
- * @param {number} pollMs
+ * @param {any} sc terminal structuredContent
+ * @returns {{ raw: string, status: string, lane: string, error: string | undefined }}
  */
-async function pollToTerminal(slot, running, deadline, startedAt, pollMs) {
-  const jobId = running.header.job;
-  if (!jobId) {
-    throw new DispatchLaneError('dispatch returned a running job with no job id to poll', running);
-  }
-  for (;;) {
-    if (Date.now() >= deadline) {
-      throw new DispatchLaneError(
-        `dispatch job ${jobId} (lane ${running.lane ?? 'unknown'}) still running after ${Date.now() - startedAt} ms, past its timeout plus the grace`,
-        running,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-    const polled = await callTool(slot, 'dispatch_status', { jobId });
-    if (polled.statedStatus === undefined) {
-      throw new DispatchLaneError(`dispatch_status for ${jobId} named no status: ${polled.text.slice(0, 300)}`, polled);
-    }
-    if (polled.statedStatus !== 'running') break;
-  }
-  const result = await callTool(slot, 'dispatch_result', { jobId });
-  if (result.statedStatus === undefined || result.statedStatus === 'running') {
-    throw new DispatchLaneError(
-      `dispatch_result for ${jobId} named no terminal status: ${result.text.slice(0, 300)}`,
-      result,
-    );
-  }
-  return result;
+function finalize(sc) {
+  const info = sc?.result && typeof sc.result === 'object' ? sc.result.info : undefined;
+  const lane =
+    info && typeof info.providerID === 'string' && typeof info.modelID === 'string'
+      ? `${info.providerID}/${info.modelID}`
+      : 'agent-dispatch';
+  return {
+    raw: extractAnswer(sc?.result),
+    status: typeof sc?.status === 'string' ? sc.status : 'unknown',
+    lane,
+    error: stringifyError(sc?.error),
+  };
 }
 
 /**
- * Open a dispatch lane: a pool of `size` `llm-relay mcp` children.
+ * Open a dispatch lane: ONE agent-dispatch bridge process, shared by every
+ * concurrent `dispatch()` call on this lane (matched by JSON-RPC id — see the
+ * module header for why one process is enough).
  *
  * @param {object} [opts]
- * @param {number} [opts.size] concurrent dispatches — one child each (default 1)
- * @param {string} [opts.command] the server executable (default the global `llm-relay` shim)
- * @param {string[]} [opts.args] its arguments (default `['mcp']`)
- * @param {string} [opts.cwd] working directory for the children AND the default
- *   `cwd` a dispatch names for an agent-mode lane
+ * @param {number} [opts.size] accepted and IGNORED — kept only so existing
+ *   callers written for the one-child-per-slot pool still type-check.
+ *   Concurrency is now N pending requests on one shared bridge process.
+ * @param {string} [opts.command] the bridge executable (default `process.execPath`)
+ * @param {string[]} [opts.args] its arguments (default `[<repo>/src/cli.ts, 'bridge']`)
+ * @param {string} [opts.cwd] working directory for the bridge process AND the
+ *   default `directory` a dispatch names when it supplies none of its own
  * @param {typeof spawn} [opts.spawnImpl] test seam
  * @param {string} [opts.protocolVersion]
- * @param {(chunk: string) => void} [opts.onStderr] the children's stderr (default: forwarded)
- * @param {number} [opts.pollMs] how often a running job is polled
- * @param {number} [opts.graceMs] how far past a dispatch's `timeoutMs` a running job is given up
+ * @param {(chunk: string) => void} [opts.onStderr] the bridge's stderr (default: forwarded)
+ * @param {NodeJS.ProcessEnv} [opts.env] resolves `AGENT_DISPATCH_REPO` when
+ *   `command`/`args` are not supplied (default `process.env`)
+ * @param {number} [opts.waitRetryMs] test seam for `WAIT_RETRY_MS` (default
+ *   2000, upstream `opencode_wait`'s own poll interval — see the module header)
  */
 export function openDispatchLane({
-  size = 1,
-  command = platformCommand('llm-relay'),
-  args = ['mcp'],
+  size: _size = 1,
+  command,
+  args,
   cwd = process.cwd(),
   spawnImpl = spawn,
   protocolVersion = MCP_PROTOCOL_VERSION,
   onStderr = (chunk) => process.stderr.write(chunk),
-  pollMs = DEFAULT_POLL_MS,
-  graceMs = WAIT_GRACE_MS,
+  env = process.env,
+  waitRetryMs = WAIT_RETRY_MS,
 } = {}) {
-  const slots = Array.from({ length: Math.max(1, size) }, () =>
-    startChild({ command, args, cwd, spawnImpl, protocolVersion, onStderr }),
-  );
-  const idle = [...slots];
-  /** @type {Array<(slot: ReturnType<typeof startChild>) => void>} */
-  const waiters = [];
+  const usingDefaultCommand = command === undefined && args === undefined;
+  const repo = agentDispatchRepo(env);
+  if (usingDefaultCommand) checkPreflight(repo);
+  const resolvedCommand = command ?? process.execPath;
+  const resolvedArgs = args ?? [join(repo, 'src', 'cli.ts'), 'bridge'];
 
-  const acquire = () =>
-    new Promise((resolve, reject) => {
-      const live = idle.findIndex((s) => !s.isDead());
-      if (live >= 0) {
-        resolve(idle.splice(live, 1)[0]);
-        return;
-      }
-      idle.length = 0; // Only dead slots were left; drop them.
-      if (slots.every((s) => s.isDead())) {
-        reject(new DispatchLaneError('every dispatch server process has exited'));
-        return;
-      }
-      waiters.push(resolve);
-    });
-  const release = (/** @type {ReturnType<typeof startChild>} */ slot) => {
-    const waiter = waiters.shift();
-    if (waiter) waiter(slot);
-    else idle.push(slot);
-  };
+  const bridge = startBridge({
+    command: resolvedCommand,
+    args: resolvedArgs,
+    cwd,
+    spawnImpl,
+    protocolVersion,
+    onStderr,
+  });
 
   return {
     /**
      * Dispatch ONE task and return its terminal answer.
      *
      * @param {string} task
-     * @param {object} [opts]
-     * @param {'answer' | 'agent'} [opts.mode] default `answer`: a relay lane is
-     *   POSTed directly, no harness; a CLI rung runs as an agent either way
-     * @param {string} [opts.system] answer mode only
-     * @param {Record<string, unknown>} [opts.schema] answer mode only: forces
-     *   the answer into one tool call whose input is returned JSON-stringified
-     * @param {number} [opts.maxTokens] answer mode only
-     * @param {number} [opts.timeoutMs] ceiling on the lane run
-     * @param {string} [opts.cwd] agent mode: where the lane runs (default the lane's `cwd`)
-     * @returns {Promise<{ raw: string, status: string, lane: string, spec: string | undefined,
-     *   servedBy: string | undefined, error: string | undefined, header: Record<string, string> }>}
+     * @param {object} opts
+     * @param {number} opts.timeoutMs REQUIRED — client-owned ceiling on the
+     *   whole call; agent-dispatch enforces none of its own (see the module
+     *   header). Label each caller value with where it came from.
+     * @param {'answer' | 'agent'} [opts.mode] default `answer` → the Track A
+     *   `answer` agent (every tool denied); `agent` → the full `dispatch` agent.
+     * @param {string} [opts.cwd] agent-dispatch's `directory` for this call
+     *   (default the lane's own `cwd`)
+     * @param {string} [opts.system] unused — see "DROPPED, NOT FAKED" above;
+     *   accepted so an existing caller's option object still type-checks.
+     * @param {Record<string, unknown>} [opts.schema] unused — see above.
+     * @param {number} [opts.maxTokens] unused — see above.
+     * @returns {Promise<{ raw: string, status: string, lane: string, error: string | undefined }>}
      */
-    async dispatch(task, opts = {}) {
-      const timeoutMs = opts.timeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS;
-      const slot = await acquire();
-      try {
-        await slot.ready;
-        const startedAt = Date.now();
-        let answer = await callTool(slot, 'dispatch', {
-          task,
-          mode: opts.mode ?? 'answer',
-          ...(opts.system !== undefined ? { system: opts.system } : {}),
-          ...(opts.schema !== undefined ? { schema: opts.schema } : {}),
-          ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
-          cwd: opts.cwd ?? cwd,
-          timeoutMs,
-          waitMs: timeoutMs + graceMs,
-        });
-        if (answer.status === 'running') {
-          answer = await pollToTerminal(slot, answer, startedAt + timeoutMs + graceMs, startedAt, pollMs);
-        }
-        const { header, lane, spec, body, status } = answer;
-        return {
-          raw: body,
-          status,
-          lane: lane ?? 'unknown',
-          spec,
-          servedBy: header['served-by'],
-          error: header.error,
-          header,
-        };
-      } finally {
-        release(slot);
+    async dispatch(task, opts) {
+      if (typeof opts?.timeoutMs !== 'number' || !(opts.timeoutMs > 0)) {
+        throw new DispatchLaneError('dispatch requires opts.timeoutMs (agent-dispatch enforces no job timeout of its own)');
       }
+      await bridge.ready;
+      const startedAt = Date.now();
+      const deadline = startedAt + opts.timeoutMs;
+      const agent = opts.mode === 'agent' ? 'dispatch' : 'answer';
+      let sc = await callTool(bridge, 'opencode_fire', {
+        prompt: task,
+        agent,
+        directory: opts.cwd ?? cwd,
+        // providerID/modelID intentionally omitted — see the module header.
+      });
+      if (!TERMINAL_STATUSES.has(sc.status)) {
+        sc = await pollUntilTerminal(bridge, sc.jobId, deadline, startedAt, waitRetryMs);
+      }
+      if (sc.status === 'input_required') {
+        sc = await cancelInputRequired(bridge, sc.jobId);
+      }
+      return finalize(sc);
     },
 
-    /** End every child; the pool is unusable afterwards. */
+    /** End the bridge process; the lane is unusable afterwards. */
     async close() {
-      await Promise.all(slots.map((s) => s.close()));
+      await bridge.close();
     },
   };
 }

@@ -31,7 +31,6 @@ function runHook(
   // re-adds it via `env`.
   const inherited = { ...process.env };
   delete inherited.AUDIT_TOOLS_CHILD_SESSION;
-  delete inherited.LLM_RELAY_DISPATCH_DEPTH;
   delete inherited.AUDIT_TOOLS_AGENT_GIT;
   const r = spawnSyncHidden(process.execPath, [hook], {
     input,
