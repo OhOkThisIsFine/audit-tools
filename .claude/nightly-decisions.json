@@ -2367,27 +2367,35 @@
     "answer": "Drop the surface sentences: delete the surfacing sentences from docs/doc-review-guidelines.md rather than rewriting them. The rubric owes each item its path/title/question/evidence; WHERE those render is docs/nightly-routine.md's concern alone. One home, not a corrected second one.",
     "subject": "The leg-1 rubric still says escalations are rendered to an HTML digest that was deleted — repoint it at the tracked inbox, or leave it?",
     "path": "docs/doc-review-guidelines.md",
-    "decided_at": "2026-09-17T18:12:56.190Z"
+    "decided_at": "2026-09-17T18:12:56.190Z",
+    "completed_at": "2026-09-23T09:26:55.751Z",
+    "completed_ref": "11b3ad63 (nightly 2026-09-23)"
   },
   "1fb2934333c59d31": {
     "disposition": "settled",
     "answer": "State the requirement, not an order: name no first lane in docs/nightly-routine.md. State the capability the adversary must have (independent of the reviewer; able to judge from quoted evidence; a repo-reading lane preferred for whole-document review), and state what the run must record in the skipped list when no lane meets it. Lane choice stays with llm-relay.",
     "subject": "The routine names a quota-limited CLI as its first review lane and the relay as the fallback — swap the order, or leave the run to choose nightly?",
     "path": "docs/nightly-routine.md",
-    "decided_at": "2026-09-17T18:13:00.494Z"
+    "decided_at": "2026-09-17T18:13:00.494Z",
+    "completed_at": "2026-09-23T09:26:55.898Z",
+    "completed_ref": "11b3ad63 (nightly 2026-09-23)"
   },
   "2eefa66ab7c9bd64": {
     "disposition": "settled",
     "answer": "Apply P67 in full: export PREMISE_STAMP_CLASSES and TRIAGE_STAMP_INIT, replace the anonymous stampExtra closure with the exported countTriageStamp, count all five premise classes, update the stderr coverage line and the read-verbatim field list in docs/nightly-routine.md, and land the three tests from the proposal directory.",
     "subject": "The backlog sweep's coverage stamp hides how many verdicts were never premise-checked — count every premise class (P67)?",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-09-17T18:13:04.562Z"
+    "decided_at": "2026-09-17T18:13:04.562Z",
+    "completed_at": "2026-09-23T09:26:56.067Z",
+    "completed_ref": "11b3ad63 (nightly 2026-09-23)"
   },
   "98f93995eb770e05": {
     "disposition": "settled",
     "answer": "Apply P68 (extract the fold): extract the identity + premise-stamp + path-resolution fold from buildRecord and reviveRecord into one exported finishTriageRecord whose last step is downgradeUnearnedShippedVerdict, and land the three tests from the proposal directory including the idempotency case for the load path.",
     "subject": "The approved unearned-shipped downgrade has never run — extract the record-finishing fold so both sweep paths must use it (P68)?",
     "path": "scripts/shared/triage-backlog.mjs",
-    "decided_at": "2026-09-17T18:13:08.426Z"
+    "decided_at": "2026-09-17T18:13:08.426Z",
+    "completed_at": "2026-09-23T09:26:56.205Z",
+    "completed_ref": "11b3ad63 (nightly 2026-09-23)"
   }
 }

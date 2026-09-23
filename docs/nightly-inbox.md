@@ -25,9 +25,6 @@ records them in the tracked ledger, and does the work.
 *Last run: unknown.*
 
 
-> **4 answered items not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
-
-
 ---
 
 
@@ -150,7 +147,7 @@ The header of scripts/check-retired-infrastructure.mjs states "This gate is the 
 
 - Leg 1, doc-set condensation pass — RAN, and found nothing to propose. Two candidates were examined and both dissolved on inspection: docs/backlog.md at 34.5 KB is almost entirely its own GENERATED seek index (199 entries) rather than accreted prose, and the Live-validation guide inside it is a 27-line generated matrix bound to the backlog entries that carry a watch line, so it is in its correct home. No fold, retire, merge or split proposal was formed. The two largest tracked documents are docs/backlog/durable-traps.md (81.9 KB) and docs/backlog/open-bugs.md (51.4 KB).
 
-- Leg 2 sweep — PARTIAL. Read the coverage stamp at .audit-tools/nightly/triage-2026-09-23-coverage.json for what it actually reached; it was still running when this queue was written and its finished_at is the honest record. The sweep ran at roughly two minutes per entry against 61 entries, which does not fit the run. Its stamp carries the OLD field shape (probes_unusable alone), because node had already loaded scripts/shared/triage-backlog.mjs before tonight’s P67 patch was applied; the five-class counters take effect from the next sweep.
+- Leg 2 sweep — PARTIAL, and it is the first sweep on the ported agent-dispatch lane. At the last reading it had classified 10 of 61 entries with 1 errored, at litellm/medium, over 78 minutes — roughly one entry every eight minutes of wall clock at concurrency 3. One job ran to the 20-minute per-entry ceiling before cancel (job_4fb8aa78d6a14f72a5d356587db53d2f, "still running after 1200343 ms"). The lane hangs rather than failing, so the ceiling is the only thing that ends a dead job. finished_at in .audit-tools/nightly/triage-2026-09-23-coverage.json is null and is the honest record; read that stamp, not this sentence, for what the sweep reached. CONSEQUENCE: about five sixths of the backlog was not classified tonight, so no entry outside those 10 was checked for shipped-ness or premise. The lane defect is filed machine-wide at C:/Code/docs/backlog.md, since agent-dispatch serves every repository. One further caveat: tonight’s stamp carries the OLD single-counter field shape, because node had already loaded scripts/shared/triage-backlog.mjs before the P67 patch landed — the five premise-class counters take effect from the next sweep.
 
 - The weekly /insights pass — RAN (stamp was 12 days old, due at seven). Ten suggestions triaged against HEAD: five already shipped, three debatable, two genuinely open. The single most important triage fact is a retirement-direction hit of exactly the kind the routine warns about: the report’s window reaches back to 2026-07-19, so its three most ambitious recommendations are all built on llm-relay and its mcp__llm-relay__dispatch_status tool, which were retired on 2026-09-22. Every llm-relay-shaped suggestion is dead on arrival and none became a proposal.
 
