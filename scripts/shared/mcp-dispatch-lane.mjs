@@ -373,10 +373,12 @@ async function pollUntilTerminal(bridge, jobId, deadline, startedAt, waitRetryMs
       // relabeled timed_out just because it arrived on the cancel reply
       // rather than a wait reply.
       if (cancelled.status === 'completed' || cancelled.status === 'failed') return cancelled;
+      // The error names what the cancel reply itself reported, so a reader
+      // (and a test) can see whether the cancel took effect.
       return {
         ...cancelled,
         status: 'timed_out',
-        error: `job ${jobId} still running after ${Date.now() - startedAt} ms, past its timeout — cancelled`,
+        error: `job ${jobId} still running after ${Date.now() - startedAt} ms, past its timeout — cancel reported ${cancelled.status}`,
       };
     }
     const secondsLeft = Math.max(0, (deadline - Date.now()) / 1000);

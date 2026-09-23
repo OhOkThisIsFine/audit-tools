@@ -213,12 +213,6 @@ function handle(msg) {
       return;
     }
     job.cancelled = true;
-    // A marker on stderr a test can observe from the OUTSIDE (the fake bridge
-    // runs as a real subprocess, so its in-memory job map is not otherwise
-    // readable) — proof the deadline path actually reaches
-    // opencode_job_cancel, not just that the client labels its own answer
-    // timed_out.
-    process.stderr.write("CANCEL " + a.jobId + "\n");
     if (job.scenario.cancelReturnsCompleted) {
       const parts = partsFor(job.scenario, job.prompt, job.args, job);
       respond(msg.id, {
@@ -399,20 +393,18 @@ describe("openDispatchLane: dispatch", () => {
   });
 
   it("gives up on a job still running past its timeout — cancels and RETURNS timed_out, never throwing", async () => {
-    const stderrChunks: string[] = [];
-    const lane = fakeLane({ onStderr: (chunk: string) => { stderrChunks.push(chunk); } });
+    const lane = fakeLane();
     try {
       const r = await lane.dispatch("STUCK", { timeoutMs: 50 });
       expect(r.status).toBe("timed_out");
       expect(r.error).toMatch(/job-\d+ .*still running after \d+ ms/);
       // The deadline path must actually call opencode_job_cancel on the
-      // runaway job, not just label the client's own answer timed_out — the
-      // fake bridge's cancel handler marks its stderr, observable only from
-      // outside the (real, subprocess) fake since its job map is not
-      // otherwise readable here.
-      const [, jobId] = /(job-\d+)/.exec(r.error ?? "") ?? [];
-      expect(jobId).toBeTruthy();
-      expect(stderrChunks.join("")).toContain(`CANCEL ${jobId}`);
+      // runaway job, not just label the client's own answer timed_out: only
+      // the fake's cancel reply carries status "cancelled", and it reaches
+      // the error text on the same ordered stdout channel. (A stderr marker
+      // was tried first; stderr has no order against stdout, and Linux CI
+      // read it empty on 2026-09-23.)
+      expect(r.error).toMatch(/cancel reported cancelled$/);
       // A throw here is what lane-dispatch.mjs retries once; a RETURN must
       // not run the same 20-minute call twice.
       // The lane still serves the next call afterwards.
