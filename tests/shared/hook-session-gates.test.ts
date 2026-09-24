@@ -31,6 +31,7 @@ interface HookPayload {
   session_id?: string | undefined;
   tool_input?: Record<string, unknown>;
   transcript_path?: string;
+  cwd?: string;
   stop_hook_active?: boolean;
   background_tasks?: Array<Record<string, unknown>>;
   session_crons?: Array<Record<string, unknown>>;
@@ -805,6 +806,118 @@ describe('closeout-challenge-gate: headMovedRecently is independently sufficient
     const root = isolatedRepo(24);
     const { code } = runHook(CLOSEOUT_GATE, { hook_event_name: 'Stop', session_id: sid('hermetic-backdated') }, { root });
     expect(code).toBe(0);
+  });
+});
+
+// A stop inside an open lap is a PAUSE. The gate asks the closeout skill's lap
+// signal (~/.claude/skills/closeout/stop-gate-lap-signal.mjs, outside this
+// repository) at the payload's cwd and at CLAUDE_PROJECT_DIR. CI has no such
+// file, so each case points HOME and USERPROFILE at a temporary home. The fixture
+// module there keeps the signal's contract: a lap-start record at the checkout
+// means "do not challenge". The real module is tested beside it.
+describe('closeout-challenge-gate: a stop inside an open lap is a pause', () => {
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* windows lock — leave it to the temp reaper */
+      }
+    }
+  });
+
+  // A fresh commit and no registry: the gate challenges on headMovedRecently.
+  function freshRepo(label: string): string {
+    const root = mkdtempSync(join(tmpdir(), `closeout-lap-${label}-`));
+    dirs.push(root);
+    const g = (args: string[]) =>
+      spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'test']);
+    g(['config', 'commit.gpgsign', 'false']);
+    writeFileSync(join(root, 'a.txt'), 'one\n');
+    g(['add', '.']);
+    g(['commit', '-qm', 'initial']);
+    return root;
+  }
+
+  function openLap(checkout: string): void {
+    mkdirSync(join(checkout, '.claude'), { recursive: true });
+    writeFileSync(join(checkout, '.claude', 'lap-start.json'), JSON.stringify({ lapId: 'test' }));
+  }
+
+  function emptyHome(): string {
+    const home = mkdtempSync(join(tmpdir(), 'closeout-lap-home-'));
+    dirs.push(home);
+    return home;
+  }
+
+  function homeWithSignal(): string {
+    const home = emptyHome();
+    const dir = join(home, '.claude', 'skills', 'closeout');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'stop-gate-lap-signal.mjs'),
+      [
+        "import { existsSync } from 'node:fs';",
+        "import { join } from 'node:path';",
+        'export function lapStopSignal(checkout) {',
+        "  const open = existsSync(join(checkout, '.claude', 'lap-start.json'));",
+        "  return { lapOpen: open, lapEnded: false, pause: open, challenge: !open, reason: 'fixture' };",
+        '}',
+        '',
+      ].join('\n'),
+    );
+    return home;
+  }
+
+  const homeEnv = (home: string): NodeJS.ProcessEnv => ({ HOME: home, USERPROFILE: home });
+
+  it('an open lap at CLAUDE_PROJECT_DIR stands the gate down', () => {
+    const root = freshRepo('root');
+    openLap(root);
+    const { code } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('lap-root') },
+      { root, env: homeEnv(homeWithSignal()) },
+    );
+    expect(code).toBe(0);
+  });
+
+  it('an open lap at the payload cwd stands the gate down while CLAUDE_PROJECT_DIR names the main checkout', () => {
+    const root = freshRepo('main');
+    const worktree = freshRepo('worktree');
+    openLap(worktree);
+    const { code } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('lap-cwd'), cwd: worktree },
+      { root, env: homeEnv(homeWithSignal()) },
+    );
+    expect(code).toBe(0);
+  });
+
+  it('with no lap open the same home still challenges — the stand-down is the lap, not the fixture', () => {
+    const root = freshRepo('none');
+    const { code, stderr } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('lap-none'), cwd: root },
+      { root, env: homeEnv(homeWithSignal()) },
+    );
+    expect(code).toBe(2);
+    expect(stderr).toContain('are you sure that was all taken care of');
+  });
+
+  it('without the signal module the gate challenges, even with a lap open', () => {
+    const root = freshRepo('nosignal');
+    openLap(root);
+    const { code } = runHook(
+      CLOSEOUT_GATE,
+      { hook_event_name: 'Stop', session_id: sid('lap-nosignal'), cwd: root },
+      { root, env: homeEnv(emptyHome()) },
+    );
+    expect(code).toBe(2);
   });
 });
 

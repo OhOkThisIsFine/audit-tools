@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-session-gates.test.ts
 // The "are you sure that was all taken care of?" challenge, automated.
 //
 // Asking that question by hand at the end of a sprint reliably surfaces real
@@ -22,6 +23,9 @@
 //    scheduled session crons: that stop is a WAIT the harness resumes, not a
 //    closeout, and challenging there was exactly how both cap slots kept being
 //    burned mid-lap;
+//  - skips (spending nothing) while a lap is open at the checkout the session
+//    stops in, per the closeout skill's lap signal: a mid-lap stop is a PAUSE,
+//    and the evidence below holds the whole lap long;
 //  - only fires when the session actually did work (HEAD moved recently,
 //    SESSION-scoped tree dirt, or unpushed commits) — nothing to close out
 //    means nothing to ask. Dirt already present at session start (the
@@ -36,6 +40,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { latestFailedWorkflows } from '../../scripts/shared/ciRedWorkflows.mjs';
 import { closeoutReadinessFindings } from '../../scripts/shared/closeoutReadiness.mjs';
 import { liveSessionWorkReason } from '../../scripts/shared/liveSessionWork.mjs';
@@ -107,6 +112,41 @@ function branchUpstreamState(remoteName, branch) {
   };
 }
 
+// The closeout skill's lap signal: the machine's one definition of "is this stop
+// a mid-lap PAUSE or a sprint that ENDED?". It lives outside this repository, so
+// CI and other machines do not have it.
+const LAP_SIGNAL_MODULE = join(homedir(), '.claude', 'skills', 'closeout', 'stop-gate-lap-signal.mjs');
+
+// Is a lap open at any of these checkouts? A stop inside an open lap is a PAUSE:
+// this gate's own evidence (HEAD moved since registration, session dirt) holds
+// the whole lap long, so without this check every pause was challenged too.
+// Every fault answers "not open" (an absent or broken module, a checkout it
+// cannot read), so the gate asks, as the signal module itself fails open.
+/**
+ * @param {unknown[]} checkouts
+ * @returns {Promise<boolean>}
+ */
+async function lapIsOpen(checkouts) {
+  /** @type {((checkout: string) => { challenge?: unknown }) | undefined} */
+  let lapStopSignal;
+  try {
+    const mod = await import(pathToFileURL(LAP_SIGNAL_MODULE).href);
+    if (typeof mod?.lapStopSignal === 'function') lapStopSignal = mod.lapStopSignal;
+  } catch {
+    return false;
+  }
+  if (!lapStopSignal) return false;
+  for (const checkout of checkouts) {
+    if (typeof checkout !== 'string' || checkout.length === 0) continue;
+    try {
+      if (lapStopSignal(checkout)?.challenge === false) return true;
+    } catch {
+      /* this checkout cannot answer; ask the next one */
+    }
+  }
+  return false;
+}
+
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -167,6 +207,13 @@ if (liveReason) {
   }
   process.exit(0);
 }
+
+// A stop inside an open lap is a PAUSE, not a closeout (lapIsOpen above). The
+// signal is read at the checkout the session stops in (the payload's `cwd`: the
+// lap worktree after EnterWorktree, while CLAUDE_PROJECT_DIR still names the
+// main checkout) and at ROOT. Like the wait-skip, this exits BEFORE any
+// cap/state accounting.
+if (await lapIsOpen([payload?.cwd, ROOT])) process.exit(0);
 
 const sessionId = sanitizeSessionId(payload?.session_id);
 if (!sessionId) process.exit(0); // no session key → cannot cap → fail open
