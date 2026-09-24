@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-23T09:28:17.536Z",
-  "run": "2026-09-23",
+  "generated_at": "2026-09-24T09:21:48.961Z",
+  "run": "2026-09-24",
   "items": [
     {
       "id": "retired-infra-gate-claims-repo-wide-reach",
@@ -47,7 +47,7 @@
       ],
       "subject_key": "ffe82b1369ef6e9b",
       "first_seen": "2026-09-23",
-      "nights_open": 1
+      "nights_open": 2
     },
     {
       "id": "one-call-is-not-the-whole-persistence-contract",
@@ -86,24 +86,209 @@
       ],
       "subject_key": "057c8bbc29b5db67",
       "first_seen": "2026-09-23",
+      "nights_open": 2
+    },
+    {
+      "id": "workload-contract-version-pinned-stale-in-two-docs",
+      "leg": "docs",
+      "path": "spec/audit-workflow-design.md",
+      "subject": "`audit-host-workload/v1alpha1` artifact. Work items carry stable ids, lens and",
+      "title": "Two docs pin the host-workload contract version and both are wrong — stop pinning it, or bump both?",
+      "eli5": "When audit-code hands work to the host agent, it writes a workload file. That file carries a version label so a reader knows which shape to expect. The code sets that label in one place: WORKLOAD_CONTRACT_VERSION in src/audit/cli/dispatch/hostHandoff.ts, and today it reads \"audit-host-workload/v1alpha4\". Two documents also state the label, by hand, and neither agrees with the code or with the other. spec/audit-workflow-design.md says v1alpha1. docs/audit-pkg/contracts.md says v1alpha2. So a reader who consults either document builds against a shape that is two or three revisions behind, and a reader who consults both cannot tell which to believe. Bumping the two numbers would make them correct tonight and wrong again at the next revision, because nothing ties a hand-typed number to the constant. The alternative is to stop stating the literal in prose and point at the constant instead, which is what this project does elsewhere with enumerations it owns. That is a shape decision, not a typo fix, which is why it is being asked rather than applied.",
+      "question": "spec/audit-workflow-design.md states \"`audit-host-workload/v1alpha1` artifact\" and docs/audit-pkg/contracts.md states \"`audit-host-workload/v1alpha2` artifact\", while WORKLOAD_CONTRACT_VERSION in src/audit/cli/dispatch/hostHandoff.ts is \"audit-host-workload/v1alpha4\". Should the documents stop pinning the literal, or be bumped to match?",
+      "options": [
+        {
+          "label": "Stop pinning the literal",
+          "answer": "Remove the hand-typed version from both documents. Have each name the contract by its kind and point at WORKLOAD_CONTRACT_VERSION in src/audit/cli/dispatch/hostHandoff.ts as the one place the revision is stated, so a future bump cannot leave a document behind."
+        },
+        {
+          "label": "Bump both to v1alpha4",
+          "answer": "Bump both documents to audit-host-workload/v1alpha4 and leave the literal in prose. The version is part of what each document teaches, and the next drift will be caught by the same review that caught this one."
+        },
+        {
+          "label": "Gate it mechanically",
+          "answer": "Bump both now and add a check that reconciles any audit-host-workload/vN literal in a tracked document against WORKLOAD_CONTRACT_VERSION, so the pair can never drift again without reddening the build."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave both documents as they are. The version label is illustrative in these passages rather than normative, and a reader building an ingestion reads the schema, not the design prose."
+        }
+      ],
+      "evidence": [
+        "spec/audit-workflow-design.md line 309 reads \"`audit-host-workload/v1alpha1` artifact. Work items carry stable ids, lens and\". Read at HEAD 3c47eae5.",
+        "docs/audit-pkg/contracts.md line 36 reads \"`audit-host-workload/v1alpha2` artifact. Each work item contains:\". Read at HEAD 3c47eae5.",
+        "src/audit/cli/dispatch/hostHandoff.ts line 108 reads const WORKLOAD_CONTRACT_VERSION = \"audit-host-workload/v1alpha4\" as const; — grep over src/ returns this as the only occurrence of the literal in code.",
+        "Neither document is in the constitutional set: src/shared/constitutionalDocPaths.ts lists spec/audit/* and the two goals docs, and spec/audit-workflow-design.md sits at the spec/ root while docs/audit-pkg/contracts.md is a package doc.",
+        "Surfaced by an independent repository-reading lane reviewing four never-stamped spec documents, then verified against source by the primary session. The lane reported only the v1alpha1 instance; the second, disagreeing instance in docs/audit-pkg/contracts.md was found during that verification."
+      ],
+      "premise_probes": [
+        {
+          "file": "spec/audit-workflow-design.md",
+          "contains": "`audit-host-workload/v1alpha1` artifact"
+        },
+        {
+          "file": "docs/audit-pkg/contracts.md",
+          "contains": "`audit-host-workload/v1alpha2` artifact"
+        },
+        {
+          "file": "src/audit/cli/dispatch/hostHandoff.ts",
+          "contains": "const WORKLOAD_CONTRACT_VERSION = \"audit-host-workload/v1alpha4\" as const;"
+        }
+      ],
+      "subject_key": "263eb495b16ee23b",
+      "first_seen": "2026-09-24",
+      "nights_open": 1
+    },
+    {
+      "id": "routine-never-says-a-dispatched-lane-needs-its-own-worktree",
+      "leg": "docs",
+      "path": "docs/nightly-routine.md",
+      "subject": "A lane that can READ THE REPOSITORY ITSELF is preferred for any whole-document pass",
+      "title": "The routine asks for a repository-reading lane but never says how to give it one — state the worktree step, or leave it?",
+      "eli5": "The routine tells each run to prefer an adversary lane that can read the repository itself, because a lane judging only from quoted fragments cannot catch what the reviewer never quoted. That guidance is right. What the routine never says is that a dispatched worker is not allowed to run inside the main checkout at all. A machine-wide guard refuses it, because a worker with write access pointed at the tree another session is editing has already caused a fabricated file to be written into a live repository root. So the only way to obey the routine is to create a separate git worktree first, dispatch the lane there, and remove it afterwards. Tonight that was discovered by hitting the refusal, and two worktrees were created by hand. Nothing in the routine says to create them, and nothing says to remove them, so the residue of a failed run is a leftover worktree that a later session is told not to touch. This is the shape the repository calls a latent failure mode: the routine works only because the run happened to know a step the contract never states.",
+      "question": "docs/nightly-routine.md states \"A lane that can READ THE REPOSITORY ITSELF is preferred for any whole-document pass\", but the word worktree does not appear in the document, and a dispatched worker is refused in the main checkout. Should the routine state the worktree step and its teardown?",
+      "options": [
+        {
+          "label": "State the step in the routine",
+          "answer": "Add to the lane section that a dispatched repository-reading lane runs in its own git worktree, created before the dispatch and removed by the same run, and say that a leftover worktree belongs to the run that made it."
+        },
+        {
+          "label": "Put it in a script",
+          "answer": "Do not document the step — remove it. Have the dispatch helper create and tear down its own throwaway worktree, so a run cannot reach the refusal and cannot leave residue, and state only the guarantee in the routine."
+        },
+        {
+          "label": "Name it as a durable trap",
+          "answer": "Leave the routine as it is and record the refusal and its remedy in docs/backlog/durable-traps.md, where standing environment gotchas live, so a run meets it as reference rather than as a surprise."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave it. The guard states its own remedy when it fires, which is enough for any run that meets it, and adding process prose to the routine repeats what the guard already says."
+        }
+      ],
+      "evidence": [
+        "docs/nightly-routine.md contains the preference for a repository-reading lane; grep -c -i worktree over that file returns 0 at HEAD 3c47eae5.",
+        "Dispatching an adversary lane at the main checkout was refused tonight by the machine-wide dispatch-cwd guard, whose message states that the directory is inside the main checkout and that a worker that can write must run in its own worktree, citing a measured 2026-09-06 incident in which a lane wrote a fabricated closeout file into a live repository root.",
+        "Two worktrees were created by hand to complete tonight’s passes (an adversary lane and a periodic-sweep lane) and removed by the same run. No script in the repository creates or removes them, and the routine does not mention them.",
+        "The repository’s own standard for this class is stated in CLAUDE.md: a place the workflow only works because a capable host folded in guidance is a latent failure mode, and \"be careful\" is never a fix."
+      ],
+      "premise_probes": [
+        {
+          "file": "docs/nightly-routine.md",
+          "contains": "A lane that can READ THE REPOSITORY ITSELF is"
+        },
+        {
+          "file": "docs/nightly-routine.md",
+          "absent": "worktree"
+        }
+      ],
+      "subject_key": "f78305ac08246ae5",
+      "first_seen": "2026-09-24",
+      "nights_open": 1
+    },
+    {
+      "id": "leg2-lane-loses-entries-to-unparseable-prose",
+      "leg": "solutions",
+      "path": "scripts/shared/mcp-dispatch-lane.mjs",
+      "subject": "`format` needs an unverified StructuredOutput tool permission this module does not depend on",
+      "title": "The backlog sweep has lost 258 entries to unparseable replies, and the fix costs the lane its toolless safety — which trade?",
+      "eli5": "Every night a sweep asks a worker to classify each backlog entry and to answer in JSON. The worker answers in ordinary prose, and the sweep parses that prose. When the reply is not valid JSON, or is cut off, or does not match the expected shape, the entry is simply lost for that night. The sweep retries only a call that died in transport, and a badly shaped reply is not a transport death, so nothing retries it. Counted across the sweep logs, that has cost 258 entries on 24 different nights, and it took one entry again tonight. There is a mechanism that would end it: the bridge can force the worker to answer in a given JSON shape. The lane deliberately does not use it, and its own comment gives the reason — that the feature needs a permission the module had never verified. That reason was tested tonight, twice, with the same question and the same shape. With the full worker it succeeded in three seconds and returned the answer already parsed. With the toolless worker it failed outright, because forcing a shape is itself done by a tool. The toolless worker is not an accident: it is what makes it safe to point the sweep at the repository, because a worker with no tools cannot write to the tree it is reading. So the two safety properties are in tension and the choice is yours.",
+      "question": "scripts/shared/mcp-dispatch-lane.mjs drops a caller’s schema because \"`format` needs an unverified StructuredOutput tool permission this module does not depend on\". The permission is verified to work for the tooled agent and to fail for the toolless one. Which trade should the leg-2 sweep take?",
+      "options": [
+        {
+          "label": "Tooled agent in a throwaway worktree",
+          "answer": "Move the sweep to the tooled dispatch agent and wire the schema through to the bridge’s json_schema format, and point that lane at a throwaway worktree rather than the main checkout so the added tool access has nowhere harmful to land. Keep the prose path as a fallback for a provider that cannot serve a forced shape."
+        },
+        {
+          "label": "Retry a malformed reply",
+          "answer": "Keep the lane toolless and leave the schema dropped. Instead extend the sweep’s retry so that a reply which fails to parse or fails the shape is retried once, the way a transport death already is. This is smaller, and it reduces the loss rather than ending it."
+        },
+        {
+          "label": "Correct the comment only",
+          "answer": "Take no behaviour change, but correct the module comment so it states the real reason the schema is dropped: forcing a shape requires a tool, and this lane is deliberately toolless. Record the measurement so the premise is not re-tested every time someone reads it."
+        },
+        {
+          "label": "Leave it",
+          "answer": "Leave the lane and the sweep as they are. A lost entry is retried on a later night because the sweep resumes, so the standing cost is delay rather than lost coverage, and the toolless boundary is worth more than the entries."
+        }
+      ],
+      "evidence": [
+        "Counted from the sweep logs under .audit-tools/nightly/: 54 \"no JSON object in response\", 48 and 40 schema-mismatch, 26 finish_reason=length, and 49 JSON position errors — 258 lost entries across 24 distinct sweep dates, peaking at 40 on 2026-08-07. The class took entry open-bugs#b3ac555e tonight.",
+        "docs/nightly-routine.md states the sweep \"retries a call that died in transport once within the same invocation\"; a malformed reply is not a transport death, so it is never retried.",
+        "Measured on the live bridge tonight at litellm/medium, same prompt and same schema: agent \"dispatch\" completed in 3 seconds and returned the parsed object {\"verdict\":\"yes\",\"why\":\"7 is greater than 3.\"}; agent \"answer\" failed with {\"name\":\"StructuredOutputError\",\"data\":{\"message\":\"Model did not produce structured output\",\"retries\":0}}.",
+        "dispatch() in scripts/shared/mcp-dispatch-lane.mjs defaults to mode \"answer\" (the agent with every tool denied), and scripts/shared/triage-backlog.mjs takes that default at both its preflight and its per-entry call site, dropping schema at each with a comment citing the module header.",
+        "The full analysis, including the false-positive surface, is in .audit-tools/nightly/proposals/P69-structured-output-vs-toolless-lane/PROPOSAL.md."
+      ],
+      "premise_probes": [
+        {
+          "file": "scripts/shared/mcp-dispatch-lane.mjs",
+          "contains": "unverified StructuredOutput tool permission"
+        }
+      ],
+      "proposal": "P69-structured-output-vs-toolless-lane",
+      "patch_path": ".audit-tools/nightly/proposals/P69-structured-output-vs-toolless-lane/PROPOSAL.md",
+      "subject_key": "8f03bcab52363d29",
+      "first_seen": "2026-09-24",
+      "nights_open": 1
+    },
+    {
+      "id": "removal-narrative-on-a-rejected-design",
+      "leg": "docs",
+      "path": "spec/self-scaling-pipeline-design.md",
+      "subject": "That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted",
+      "title": "Two spec docs narrate when a rejected design was removed — keep the rejection, drop the removal story?",
+      "eli5": "This project keeps design documents timeless: they state the architecture, not what changed and when. Naming a design that was considered and rejected is allowed, because naming it stops the same proposal coming back. What is not allowed is narrating the removal as news. Two documents mix the two. spec/self-scaling-pipeline-design.md opens by saying it carries no dated status, then a few lines later tells the reader that the rejected fork \"is GONE\", that its parts \"were deleted\", and that every run \"now enters the pipeline\" — all of which describe a transition rather than the design. spec/conceptual-design-review-design.md names a rejected idea and attaches the date it was dropped. In both cases the rejected idea should stay, because naming it is what prevents re-proposal; it is the removal story and the date that read as a changelog. Removing them is a judgment about what a document is for, so it is yours to make rather than the routine’s.",
+      "question": "spec/self-scaling-pipeline-design.md states \"That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted together, so every run now enters the pipeline\", and spec/conceptual-design-review-design.md dates a rejected option \"dropped 2026-09-15\". Should the removal narrative and the date go while the rejected designs stay named?",
+      "options": [
+        {
+          "label": "Drop the narrative, keep the rejection",
+          "answer": "Restate both passages as the design rather than as a transition: keep the rejected option named, with why it was rejected, and remove the wording that narrates the removal and the date it happened. Apply the same edit to both documents."
+        },
+        {
+          "label": "Keep the date, drop the narrative",
+          "answer": "Remove the removal narrative in spec/self-scaling-pipeline-design.md, but keep the drop date in spec/conceptual-design-review-design.md: a rejected option is easier to leave rejected when a reader can see how recently it was weighed."
+        },
+        {
+          "label": "Leave both",
+          "answer": "Leave both passages. Naming what was removed, and when, is part of what stops the proposal being raised again, which is the same reason the rejected option is named at all."
+        }
+      ],
+      "evidence": [
+        "spec/self-scaling-pipeline-design.md lines 21-23 read \"That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted together, so every run now enters the pipeline and the tier decides only how deeply it is traversed.\" Read at HEAD 3c47eae5.",
+        "The same document’s preamble, at lines 3-4, states \"Durable conceptual design; no dated status here\", so the document contradicts its own declared shape.",
+        "spec/conceptual-design-review-design.md line 419 reads \"A triangulated or unified telos authored by any reader — dropped 2026-09-15.\"",
+        "docs/documentation-philosophy.md names both shapes as status-noise: \"Changelog / progress creep\" and \"Pinned version / date / status strings\", and doc-review-guidelines.md classes every such smell as a design decision that is escalated, never auto-applied.",
+        "The rejected design itself is defensible under the same rubric: an entry naming a REJECTED option stays when naming it prevents the proposal being raised again, and spec/self-scaling-pipeline-design.md carries an explicit symbol-citation-exempt marker recording that leanFastPath was never implemented. Only the removal narrative and the date are in question.",
+        "Surfaced by an independent repository-reading lane over four never-stamped spec documents; the lane proposed removing the whole passage, and the primary session narrowed it to the removal narrative after checking the rejected-option rule."
+      ],
+      "premise_probes": [
+        {
+          "file": "spec/self-scaling-pipeline-design.md",
+          "contains": "That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted"
+        },
+        {
+          "file": "spec/conceptual-design-review-design.md",
+          "contains": "dropped 2026-09-15"
+        }
+      ],
+      "subject_key": "0cb4ac4295ee0539",
+      "first_seen": "2026-09-24",
       "nights_open": 1
     }
   ],
   "applied": [
-    "Applied the settled answer for subject 3684f87dc7e59c32: removed the three surfacing sentences from docs/doc-review-guidelines.md that still described a deleted HTML digest. Where an item is surfaced is now stated only in docs/nightly-routine.md.",
-    "Applied the settled answer for subject 1fb2934333c59d31: docs/nightly-routine.md now states the CAPABILITY an adversary lane must have (independent of the reviewer; able to judge from quoted evidence; a repository-reading lane preferred for a whole-document pass) and names no first lane. It also states what the skipped list must record when no lane meets the requirement. The answer’s closing clause \"Lane choice stays with llm-relay\" was NOT implemented: llm-relay was retired on 2026-09-22, after that answer was recorded, so implementing it verbatim would have written a dead dependency into the contract.",
-    "Applied P67 (settled subject 2eefa66ab7c9bd64): scripts/shared/triage-backlog.mjs now exports PREMISE_STAMP_CLASSES, TRIAGE_STAMP_INIT and countTriageStamp, the coverage stamp counts all five premise classes rather than probes_unusable alone, the stderr coverage line reports the unprobed count, and the read-verbatim field list in docs/nightly-routine.md names every counter. tests/shared/triage-unprobed-counted.test.ts landed with it.",
-    "Applied P68 (settled subject 98f93995eb770e05): extracted finishTriageRecord as the one fold both sweep paths use, ending with downgradeUnearnedShippedVerdict. That function was defined, unit-tested and documented as running, and was called from neither path, so it wrote zero downgrades across 30 sweeps. tests/shared/triage-finish-record.test.ts landed with it, including the load-path idempotency case.",
-    "Both proposal tests were verified RED at HEAD in their recorded RED-AT.txt and GREEN after the patches (.audit-tools/nightly/green-p67-p68-0923.log, 6 passed)."
+    "Leg 2, mechanical trim under the shipped-entry rule. The open-bugs entry 'Three code comments assert a shape the tree no longer has' named three instances, and all three are fixed at HEAD: the header of src/shared/continuityScore.ts now states the former claim in the past tense and calls it false at HEAD; the doc comment on renderConceptualReviewPrompt (src/audit/orchestrator/designReviewPrompt.ts) now reads 'Categories: see CONCEPTUAL_FINDING_CATEGORIES.'; the doc comment on conceptual_findings (src/audit/types/designAssessment.ts) now reads 'categories are CONCEPTUAL_FINDING_CATEGORIES'; and grep finds no 'combined' pass in designReviewPrompt.ts, its only occurrence at line 1002 being unrelated prose about share allocation. The entry's open remainder stands — no npm script matches /comment/, so nothing reconciles a comment against the code it describes — so the entry was TRIMMED to that remainder rather than deleted, per the partial-entry rule. The three named instances were reported by the independent adversary lane and re-verified against source by the primary session before the trim, so the edit does not rest on one reviewer's verdict.",
+    "docs/backlog.md's generated seek index and docs/HANDOFF.md's generated roadmap block were regenerated after that trim (generate-backlog-index.mjs, generate-handoff-roadmap.mjs), because a backlog edit stales both."
   ],
   "skipped": [
-    "NOTHING WAS AUTO-APPLIED FROM THE REVIEW ITSELF. Both documentation edits tonight execute owner answers settled on 2026-09-17, where the owner is the authority and no adversary is owed. The one stale-factual finding the review produced on its own — the persistence-contract sentence — is ESCALATED rather than applied, because the rubric forbids an auto-apply resting on one reviewer’s verdict and no adversary lane could run.",
-    "Adversary lane, repository-reading capability — UNMET. codex exec returned \"You’ve hit your usage limit ... try again at Sep 26th, 2026 8:34 AM\"; the same lane was quota-exhausted on 2026-09-10, -09-16 and -09-17, so this is the fourth consecutive run without it. The agent-dispatch bridge was saturated by the leg-2 sweep for the whole run. CONSEQUENCE, stated as the routine now requires: leg 1 ran with a reviewer pass and no independent adversary, so tonight’s doc coverage carries no second opinion at all — neither on the items surfaced nor, more importantly, on the items skimmed and passed, which is the false-negative half the adversary exists to cover.",
-    "Leg 1, per-item reviewer pass — PARTIAL by design. 52 documents and 1,592 items are in scope (leg1 plan at HEAD 317c83c1). This pass covered the documents changed since the last stamp plus the two it edited, the corpus-level condensation review, a corpus-wide status-noise smell scan over spec/ and docs/audit-pkg/, and the retirement sweep driven by llm-relay’s 2026-09-22 retirement. It was NOT a per-item judgment pass over all 52 documents.",
-    "Leg 1, doc-set condensation pass — RAN, and found nothing to propose. Two candidates were examined and both dissolved on inspection: docs/backlog.md at 34.5 KB is almost entirely its own GENERATED seek index (199 entries) rather than accreted prose, and the Live-validation guide inside it is a 27-line generated matrix bound to the backlog entries that carry a watch line, so it is in its correct home. No fold, retire, merge or split proposal was formed. The two largest tracked documents are docs/backlog/durable-traps.md (81.9 KB) and docs/backlog/open-bugs.md (51.4 KB).",
-    "Leg 2 sweep — PARTIAL, and it is the first sweep on the ported agent-dispatch lane. At the last reading it had classified 10 of 61 entries with 1 errored, at litellm/medium, over 78 minutes — roughly one entry every eight minutes of wall clock at concurrency 3. One job ran to the 20-minute per-entry ceiling before cancel (job_4fb8aa78d6a14f72a5d356587db53d2f, \"still running after 1200343 ms\"). The lane hangs rather than failing, so the ceiling is the only thing that ends a dead job. finished_at in .audit-tools/nightly/triage-2026-09-23-coverage.json is null and is the honest record; read that stamp, not this sentence, for what the sweep reached. CONSEQUENCE: about five sixths of the backlog was not classified tonight, so no entry outside those 10 was checked for shipped-ness or premise. The lane defect is filed machine-wide at C:/Code/docs/backlog.md, since agent-dispatch serves every repository. One further caveat: tonight’s stamp carries the OLD single-counter field shape, because node had already loaded scripts/shared/triage-backlog.mjs before the P67 patch landed — the five premise-class counters take effect from the next sweep.",
-    "The weekly /insights pass — RAN (stamp was 12 days old, due at seven). Ten suggestions triaged against HEAD: five already shipped, three debatable, two genuinely open. The single most important triage fact is a retirement-direction hit of exactly the kind the routine warns about: the report’s window reaches back to 2026-07-19, so its three most ambitious recommendations are all built on llm-relay and its mcp__llm-relay__dispatch_status tool, which were retired on 2026-09-22. Every llm-relay-shaped suggestion is dead on arrival and none became a proposal.",
-    "Two genuinely-open /insights findings are MACHINE-WIDE, not this repository, so they are routed to C:/Code/docs/backlog.md rather than filed here: (1) a mechanism that refuses a numeric claim in a closeout narrative unless a separate command re-derived it in the same session — buggy_code is the top friction at 267 instances and incorrect counts recur; (2) a resumable, budget-governed nightly autopilot, since laps keep dying on spend and context limits with work stranded mid-flight.",
-    "The machine-wide static-analysis sweep ran and found two items, BOTH in C:/Code/llm-relay — \"eslint + sonarjs: exit 1\" and \"knip: exit 1\". They are surfaced, not fixed: that repository was not in scope tonight and was itself retired on 2026-09-22. Twelve of the thirteen repositories under C:/Code, audit-tools included, declare no .claude/static-analysis.json and were skipped, which is the runner’s normal behaviour. For audit-tools that skip is arguably correct — it owns equivalent checks under npm run verify:checks — but no one has decided that on purpose."
+    "Leg 1, the adversary lane — MET tonight, for the first time in five runs. It ran as a separate Antigravity CLI process with its own context on claude-opus-4-6-thinking, reading its own git worktree of HEAD, so it had the repository-reading capability the routine prefers for a whole-document pass. The four consecutive nights without one (2026-09-10, -09-16, -09-17, -09-23) were all the same quota-exhausted lane; this run did not retry that lane at all, which is what the 2026-09-23 change to the routine — state the CAPABILITY, never an order of lanes — was for.",
+    "Leg 1, per-item reviewer pass — PARTIAL by design. 52 documents and 1,628 items are in scope (leg1 plan at HEAD 3c47eae5; 1,442 items carry an evidence window and 186 are cold). This pass covered: the six documents changed since the last stamp, read end to end by the adversary lane; four never-stamped spec documents (conceptual-design-review-design, audit/artifact-contract, audit-workflow-design, self-scaling-pipeline-design) read end to end by a second independent lane as the periodic sweep; a corpus-wide status-noise grep over spec/ and docs/audit-pkg/; the corpus-level condensation review; and fourteen mechanical documentation gates over the whole tracked corpus. It was NOT a per-item judgment pass over all 52 documents.",
+    "Leg 1, the periodic-sweep lane's findings carry NO independent adversary. That lane acted as a reviewer over four documents the adversary lane did not read, and its findings were re-verified against source by the primary session rather than by a third independent context. CONSEQUENCE: for those four documents there is a reviewer and a verifier but no second opinion on what the lane SKIMMED AND PASSED, which is the false-negative half. Nothing from those four documents was auto-applied — both findings are escalated — so no edit rests on one verdict.",
+    "Leg 1, doc-set condensation pass — RAN, and found nothing to propose. The tracked corpus is 228 markdown files. Excluding the runtime audit-report artifact, the six largest are five dated review records under docs/reviews/ (excluded from the manifest by construction and governed by the standing retirement rule, which ran tonight) and docs/backlog/durable-traps.md at 80 KB. No fold, merge, retire or split candidate was formed among the concept docs.",
+    "Leg 2 sweep — PARTIAL. Read the stamp at .audit-tools/nightly/triage-2026-09-24-coverage.json, not this sentence, for what it reached: finished_at is the honest record of whether it ran to the end. The lane is the ported agent-dispatch bridge at litellm/medium, run at concurrency 4 rather than 3, which roughly doubled throughput against 2026-09-23 (19 entries attempted in the first 40 minutes, against 12 in 78 minutes). CONSEQUENCE: every backlog entry the stamp does not count was not checked for shipped-ness or premise tonight. One entry was lost to an unparseable reply, which is the class tonight's leg-3 proposal is about.",
+    "Leg 2 found nothing to delete. Of the entries classified, one returned shipped_claim_unverified and none returned a confirmed shipped verdict, so no entry met the code-anchor bar for deletion. The one mechanical edit tonight came from the adversary lane, not from the sweep.",
+    "The weekly /insights pass — NOT DUE, and therefore not a skipped leg. The stamp at .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-23, one day old against a seven-day cadence.",
+    "The machine-wide static-analysis sweep RAN and found nothing. All thirteen repositories under C:/Code declare no .claude/static-analysis.json and were skipped, which is the runner's normal behaviour. Note the change from 2026-09-23: llm-relay, whose eslint and knip failures were the only findings that night, is no longer present under C:/Code at all, so those two items are gone rather than fixed. For audit-tools the skip is arguably correct, since it owns equivalent checks under npm run verify:checks, but no one has decided that on purpose — the same open question as last night.",
+    "Leg 3 remains propose-only and landed nothing. One proposal was raised (P69) and its premise was established by live measurement against the bridge rather than by a test at HEAD, so no RED-AT record was owed: the change it proposes is a call-site and agent-selection decision, not a hook or a gate.",
+    "SCOPE, stated rather than assumed: the repository half of P69 (scripts/shared/mcp-dispatch-lane.mjs and scripts/shared/triage-backlog.mjs) is filed here. Its machine-wide half — that the agent-dispatch bridge serves format: json_schema for a tooled agent and refuses it for the toolless answer agent — is a fact about agent-dispatch, which serves every repository, and is recorded in the proposal rather than written into this repository's durable stores by an unattended run."
   ]
 }

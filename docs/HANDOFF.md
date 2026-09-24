@@ -19,9 +19,13 @@ Audit source changes are opt-in; analyzer consent is per-run. Preserve these set
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **2 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **6 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `retired-infra-gate-claims-repo-wide-reach` — The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence?
   - `one-call-is-not-the-whole-persistence-contract` — The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence?
+  - `workload-contract-version-pinned-stale-in-two-docs` — Two docs pin the host-workload contract version and both are wrong — stop pinning it, or bump both?
+  - `routine-never-says-a-dispatched-lane-needs-its-own-worktree` — The routine asks for a repository-reading lane but never says how to give it one — state the worktree step, or leave it?
+  - `leg2-lane-loses-entries-to-unparseable-prose` — The backlog sweep has lost 258 entries to unparseable replies, and the fix costs the lane its toolless safety — which trade?
+  - `removal-narrative-on-a-rejected-design` — Two spec docs narrate when a rejected design was removed — keep the rejection, drop the removal story?
 
 <!-- END GENERATED LIVE STATUS -->
 
