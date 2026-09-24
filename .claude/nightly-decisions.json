@@ -2397,5 +2397,47 @@
     "decided_at": "2026-09-17T18:13:08.426Z",
     "completed_at": "2026-09-23T09:26:56.205Z",
     "completed_ref": "11b3ad63 (nightly 2026-09-23)"
+  },
+  "ffe82b1369ef6e9b": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Widen the scan. Widen the gate to every tracked markdown file, as its header already claims. Add the two retired-infrastructure-exempt markers the widened scan needs (.claude/skills/design-check/SKILL.md and docs/backlog/forward-tracks.md), and delete the \"coordination rather than principle\" paragraph, whose stated blocker no longer describes the tree.",
+    "subject": "The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence?",
+    "path": "scripts/check-retired-infrastructure.mjs",
+    "decided_at": "2026-09-24T23:24:36.788Z"
+  },
+  "057c8bbc29b5db67": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Make one call do both. Fix the code rather than the prose: have writeOpenItems() render the inbox as its last step, so the sentence becomes true and the answering surface cannot lag the queue at all. The separate npm run nightly:inbox entrypoint stays for re-rendering after an ingest.",
+    "subject": "The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence?",
+    "path": "docs/nightly-routine.md",
+    "decided_at": "2026-09-24T23:24:37.132Z"
+  },
+  "263eb495b16ee23b": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Stop pinning the literal. Remove the hand-typed version from both documents. Have each name the contract by its kind and point at WORKLOAD_CONTRACT_VERSION in src/audit/cli/dispatch/hostHandoff.ts as the one place the revision is stated, so a future bump cannot leave a document behind.",
+    "subject": "Two docs pin the host-workload contract version and both are wrong — stop pinning it, or bump both?",
+    "path": "spec/audit-workflow-design.md",
+    "decided_at": "2026-09-24T23:24:37.402Z"
+  },
+  "f78305ac08246ae5": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Put it in a script. Do not document the step — remove it. Have the dispatch helper create and tear down its own throwaway worktree, so a run cannot reach the refusal and cannot leave residue, and state only the guarantee in the routine.",
+    "subject": "The routine asks for a repository-reading lane but never says how to give it one — state the worktree step, or leave it?",
+    "path": "docs/nightly-routine.md",
+    "decided_at": "2026-09-24T23:24:37.637Z"
+  },
+  "8f03bcab52363d29": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Retry a malformed reply. Keep the lane toolless and leave the schema dropped. Instead extend the sweep’s retry so that a reply which fails to parse or fails the shape is retried once, the way a transport death already is. This is smaller, and it reduces the loss rather than ending it.",
+    "subject": "The backlog sweep has lost 258 entries to unparseable replies, and the fix costs the lane its toolless safety — which trade?",
+    "path": "scripts/shared/mcp-dispatch-lane.mjs",
+    "decided_at": "2026-09-24T23:24:37.778Z"
+  },
+  "0cb4ac4295ee0539": {
+    "disposition": "settled",
+    "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Drop the narrative, keep the rejection. Restate both passages as the design rather than as a transition: keep the rejected option named, with why it was rejected, and remove the wording that narrates the removal and the date it happened. Apply the same edit to both documents.",
+    "subject": "Two spec docs narrate when a rejected design was removed — keep the rejection, drop the removal story?",
+    "path": "spec/self-scaling-pipeline-design.md",
+    "decided_at": "2026-09-24T23:24:37.890Z"
   }
 }
