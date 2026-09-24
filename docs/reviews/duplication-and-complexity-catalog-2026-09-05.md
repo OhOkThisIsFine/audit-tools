@@ -3,7 +3,7 @@
 **Date:** 2026-09-05  
 **Sweep Scope:** 404 TypeScript modules in `src/`, 82 `.mjs` scripts/wrappers/bins, 126,231 lines of source code.  
 **Execution Context:** Isolated Git worktree `.claude/worktrees/analysis-sweep` (zero modification to `main`).  
-**Prior Art Context:** Extends [`analysis-tools-plan-2026-08-07.md`](file:///c:/Code/audit-tools/docs/reviews/analysis-tools-plan-2026-08-07.md), [`shared-helper-adoption-2026-08-25.md`](file:///c:/Code/audit-tools/docs/reviews/shared-helper-adoption-2026-08-25.md), and [`ceremony-complexity-review-2026-08-29.md`](file:///c:/Code/audit-tools/docs/reviews/ceremony-complexity-review-2026-08-29.md).
+**Prior Art Context:** Extends [`analysis-tools-plan-2026-08-07.md`](file:///c:/Code/audit-tools/docs/reviews/analysis-tools-plan-2026-08-07.md), `shared-helper-adoption-2026-08-25.md` (retired — in git history), and [`ceremony-complexity-review-2026-08-29.md`](file:///c:/Code/audit-tools/docs/reviews/ceremony-complexity-review-2026-08-29.md).
 
 ---
 
