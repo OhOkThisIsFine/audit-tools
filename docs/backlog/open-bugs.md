@@ -35,21 +35,12 @@
   completes within a bound the slowest supported runner meets, or fails naming what it waited on — a bare
   300s timeout with a live child names nothing.
 
-- **Three code comments assert a shape the tree no longer has, and nothing checks a comment
-  against the code it describes (2026-08-31, medium, friction: tool_should_decide).**
-  The header of `src/shared/continuityScore.ts` says audit "re-exports `computeContinuityScores` …
-  and biases review-packet ORDERING with it"; `grep` over `src/audit` finds no consumer at all, only
-  `access_memory.json` writers — and `spec/audit/dependency-map.md` separately calls that artifact
-  write-only, so the comment is what makes the spec look self-contradictory. The doc comments on
-  `renderConceptualReviewPrompt` (`src/audit/orchestrator/designReviewPrompt.ts`) and on
-  `conceptual_findings` (`src/audit/types/designAssessment.ts`) both list five conceptual-review
-  categories where `conceptualOutputFormat` has emitted eight since `e9b0ae77`, and
-  `findingsEnvelopeExample` names a "combined" pass that exists nowhere else in the tree. All three
-  were found by a doc-review lane
-  reading code to check a DOC, which is the point: the docs are gated by
-  `check:doc-code-citations`, and comments are gated by nothing. **Property:** a comment that names a
-  symbol, a workflow shape or an enumeration the code owns is reconciled against it mechanically, or
-  it does not state one.
+- **Nothing checks a code comment against the code it describes (2026-08-31, medium, friction:
+  tool_should_decide).** Documentation is gated by `check:doc-code-citations`; comments are gated by
+  nothing, so a comment that names a symbol, an enumeration or a workflow shape drifts silently and
+  is found only when a doc-review lane happens to read the code to check a DOC. **Property:** a
+  comment that names a symbol, a workflow shape or an enumeration the code owns is reconciled
+  against it mechanically, or it does not state one.
 
 - **`durable-traps.md` documents RETIRED infrastructure as though it were live (2026-08-30, medium,
   friction: tool_should_decide).** Eight entries describe the FreeLLMAPI router on `127.0.0.1:3001`,
