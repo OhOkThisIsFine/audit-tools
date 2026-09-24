@@ -120,7 +120,7 @@ Synthesis emits `audit-findings.json` (machine contract); `audit-report.md` is i
 
 **Schemas** (`schemas/`): `AuditResult` contract (`schemas/audit_result.schema.json`) — `task_id`, `unit_id`, `pass_id`, `lens` must match assigned task; `file_coverage[].total_lines` must match actual line counts.
 
-**Lenses:** the eleven-lens vocabulary is single-sourced in `src/shared/types/lens.ts` (`LensSchema`) — read it there, never from a copy. A hand copy of this list drifted once before and wrongly rejected a lens; that module's header records the incident.
+**Lenses:** the eleven-lens vocabulary is single-sourced in `src/shared/types/lens.ts` (`LensSchema`) — read it there, never from a copy.
 
 ## remediate-code architecture
 
@@ -139,9 +139,8 @@ pending → planning → implementing → closing → complete
   implement dispatch, a review-necessity gate (`runPlanningReviewGate`) surfaces findings tiered by
   review-need for a batched keep/decline (declined → recorded `ignored`) and an up-front ambiguity gate
   (`runPlanAmbiguityGate`) batches all scoping/judgment ambiguities into one `clarification_request`;
-  planning then transitions DIRECTLY to implementing. There is no per-item specification artifact —
-  `ItemSpec` was deleted outright (owner, 2026-08-25) after the N-R13 ratification, because nothing in
-  production ever wrote one. The enforced write scope is
+  planning then transitions DIRECTLY to implementing. There is no per-item specification artifact:
+  `ItemSpec` was deleted (N-R13) because nothing in production wrote one. The enforced write scope is
   `block.touched_files`, normalized into the work item's `allowed_files` by `buildWorkItem`
   (`src/remediate/steps/dispatch/hostHandoff.ts`) and re-checked against the landed diff at ingestion.
   `touched_files` is produced upstream two ways: the contract pipeline's `deriveNodeFiles` (node
@@ -150,7 +149,7 @@ pending → planning → implementing → closing → complete
   `normalizeExtractedPlan` (`src/remediate/steps/nextStep.ts`) — reached by a plan supplied from OUTSIDE
   the pipeline — copied straight from `finding.affected_files`. Both gates
   in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch/` (the
-  host-handoff module above — the re-export barrel was deleted, CY-03; import the submodules directly).
+  host-handoff module above; there is no re-export barrel, so import the submodules directly).
 - implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch/`
 - `src/remediate/phases/triage.ts` — failed items; retry vs. block
 - `close.ts` — closing actions (test suites, build, lint)
@@ -180,8 +179,7 @@ pending → planning → implementing → closing → complete
 
 Shipping is the `/ship` skill (`.claude/skills/ship/SKILL.md`) — it owns the full land-and-publish flow,
 the trap list (CRLF clean-tree guard, allow-scripts postinstall on global reinstall,
-release-CI-is-the-real-signal), the release-pipeline shape, and the always-on pipeline profiling. Never
-park at the push/publish boundary.
+release-CI-is-the-real-signal), the release-pipeline shape, and the always-on pipeline profiling.
 
 ## Before implementing
 
@@ -193,9 +191,8 @@ instead of a rewrite. Trivial mechanical edits skip it.
 
 ## Lap start
 
-The global `/start-lap` skill runs these after its own steps (nightly decision
-`docs-repo-start-lap-skill-is-shadowed-by-the-global-one`, 2026-09-10: the repository skill of the same
-name never ran, so its four repository-specific steps live here and the skill is deleted).
+The global `/start-lap` skill runs these after its own steps. A repository skill named `start-lap`
+would never run: the global one shadows it.
 
 1. **Released-vs-local delta.** `git log --oneline "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD`
    — any commit listed is un-released work on `main`; the lap plan states whether this lap ships it.
@@ -225,15 +222,13 @@ name never ran, so its four repository-specific steps live here and the skill is
 - **Host prompts are cwd-explicit.** Commands must be cwd-independent or state exact workdir. Prefer `workdir` on the tool over asking workers to `cd`.
 - **PowerShell JSON generation is statement-safe.** Assign `foreach` output to a var first, then pipe to `ConvertTo-Json`.
 - **Extractors emit stable, content-derived array order.** Any artifact array field must be ordered by a stable key derived from content (e.g. path-sort), never filesystem / `readdir` / iteration order. `stableStringify` preserves array order, so an incidentally-ordered array silently churns the artifact's content hash on every re-extraction → cascades phantom staleness down the dependency DAG → redundant (expensive) downstream LLM re-runs. Any new extractor emitting an incidentally-ordered array is a latent churn source.
-- **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits. **Scoped to `main` (owner, 2026-08-27, PH-04 accepted narrowly):** a temporary internal seam MAY exist between commits on a branch, provided every commit is green and the seam is gone before that branch merges. The endpoint and what lands on `main` are unchanged — this buys a large replace an intermediate review checkpoint, not a staged landing.
-- **A gate states the boundary it OWNS (owner, 2026-08-27, PH-05 accepted in part).** *Whatever can be
-  enforced in tooling must be* stands. What is added is an authority test, and only that: a new gate
-  names the boundary at which it is authoritative, and a gate that GUESSES at a boundary owned by
-  something else is moved to the boundary that owns it rather than left guessing. The named instance is
-  `pre-commit-gate.mjs` parsing arbitrary shell text to locate git's own boundary — since resolved by
-  P53, which moved the commit legs to `.githooks/` and left this hook only what git cannot see. The cost half of
-  PH-05 — a gate must also clear an avoided-defect-versus-false-positive bar — was NOT accepted: a
-  working gate's avoided defects are unobservable, so that test cannot be applied honestly.
+- **Atomic-replace ordering invariant.** Every destructive change — deleting a fast path, phase, scheduler, cap, or monolithic pass — ships as single atomic replace: new mechanism + deletion in one commit. Never add-then-delete across commits. **Scoped to `main`:** a temporary internal seam MAY exist between commits on a branch, provided every commit is green and the seam is gone before that branch merges. The endpoint and what lands on `main` are unchanged — this buys a large replace an intermediate review checkpoint, not a staged landing.
+- **A gate states the boundary it OWNS.** *Whatever can be enforced in tooling must be* stands. What is
+  added is an authority test, and only that: a new gate names the boundary at which it is
+  authoritative, and a gate that GUESSES at a boundary owned by something else is moved to the boundary
+  that owns it rather than left guessing. A cost bar (a gate must also clear an
+  avoided-defect-versus-false-positive bar) was NOT accepted: a working gate's avoided defects are
+  unobservable, so that test cannot be applied honestly.
 - **Durable traps are MECHANICALLY enforced, not remembered.** A trap that can be enforced is enforced,
   and its backlog entry is DELETED rather than restated (two copies decay independently; the mechanism
   states the trap and the fix when it fires). Enforcement is a **hook** when the trap is detectable at a
@@ -253,7 +248,7 @@ name never ran, so its four repository-specific steps live here and the skill is
   excludes `.claude/**`, so a test beside a hook never runs in CI). **Adding a hook:** register it in `.claude/settings.json` (or, for a gate at git's own boundary, in a tracked `.githooks/<name>` that execs it) AND add the
   `!.claude/hooks/<name>` line to `.gitignore` in the SAME commit — the commit gate blocks a settings.json
   that references a hook the commit would not carry.
-- **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced at GIT's own boundary (P53, owner decision 2026-09-05): the tracked `.githooks/pre-commit` (and `pre-merge-commit`, `pre-applypatch`) run `.claude/hooks/commit-gate.mjs`, which blocks the commit until check is green, plus the pre-commit leg set — the legs and their staged-set triggers are DERIVED from the guard registry (`scripts/guard-reach-data.mjs`, via `buildPreCommitLegs` in `scripts/shared/derived-file-preflight.mjs`); read the registry, never a list here — it is what catches the checks that otherwise fail only in release CI and burn a tag. Async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`). A commit whose staged set touches a loop-core path (`src/shared/loopCorePaths.ts` — orchestrator, planning, host-handoff, and result-ingestion substrate) is additionally blocked until a fresh, staged-tree-bound review attestation exists (`node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> --attester-class <agent|human> --checked "<...>"`); the gate enforces attestation existence+freshness+binding, not review quality. The attestation is an attributable, tree-bound audit record — it RECORDS the attester's class (agent or human; required, plus detected agent-session env markers) and the reviewing identities, it does not and cannot enforce that a human reviewed. Destination-keyed: a `concerns` verdict without an override blocks only a commit that can land on `main`; on any other branch it is accepted (WIP preservation must not train the override into a reflex).
+- **Green-at-every-commit.** Before any push: `npm run build && npm run check` → zero errors. Hook-enforced at git's own boundary: the tracked `.githooks/pre-commit` (and `pre-merge-commit`, `pre-applypatch`) run `.claude/hooks/commit-gate.mjs`, which blocks the commit until check is green, plus the pre-commit leg set — the legs and their staged-set triggers are DERIVED from the guard registry (`scripts/guard-reach-data.mjs`, via `buildPreCommitLegs` in `scripts/shared/derived-file-preflight.mjs`); read the registry, never a list here — it is what catches the checks that otherwise fail only in release CI and burn a tag. Async PostToolUse typechecks edited package after TS edits (`.claude/hooks/`). A commit whose staged set touches a loop-core path (`src/shared/loopCorePaths.ts` — orchestrator, planning, host-handoff, and result-ingestion substrate) is additionally blocked until a fresh, staged-tree-bound review attestation exists (`node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> --attester-class <agent|human> --checked "<...>"`); the gate enforces attestation existence+freshness+binding, not review quality. The attestation is an attributable, tree-bound audit record — it RECORDS the attester's class (agent or human; required, plus detected agent-session env markers) and the reviewing identities, it does not and cannot enforce that a human reviewed. Destination-keyed: a `concerns` verdict without an override blocks only a commit that can land on `main`; on any other branch it is accepted (WIP preservation must not train the override into a reflex).
 - **End-of-sprint cleanup — run it every sprint, unprompted.** A *sprint* = any coherent stretch of
   work that ends at a pause, handoff, or milestone (a shipped item, "wrap up here", switching
   windows). **The steps, their order and their count live in ONE place — *Closing out work* in
@@ -305,11 +300,10 @@ name never ran, so its four repository-specific steps live here and the skill is
   restatement: `README.md`'s Philosophy section is GENERATED from its *Product* half
   (`npm run check:philosophy-brief -- --write`, gated in `verify:release`) and the
   `question-philosophy-gate` hook extracts the whole brief at runtime. Edit a conviction in the brief and
-  both follow. The README block was previously a hand-maintained restatement kept honest by an instruction
-  to *remember* to update it — a drift test made of memory, which is the thing this project bans.
+  both follow.
 - **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
-- **audit-tools does NOT route — it reports task metadata and the HOST dispatches** (owner directive,
-  2026-08-09: ZERO execution adapters, metadata only). The tool characterizes work — per-task risk,
+- **audit-tools does NOT route — it reports task metadata and the HOST dispatches** (ZERO execution
+  adapters, metadata only). The tool characterizes work — per-task risk,
   complexity, local token estimates, scope, lens — and partitions on **content coherence**; choosing
   which backend runs it, and every provider, quota, sizing, and launch fact behind that choice, is
   the host's. A backend's context or output cap is transport config and never enters the tool, so
@@ -317,13 +311,11 @@ name never ran, so its four repository-specific steps live here and the skill is
   claim. What stays is result **ingestion** (consumption, not execution) and the right to faithfully
   RECORD what the host says ran — *not routing does not mean not knowing*.
   ⚠ The old provider, quota, routing, backend-sizing, and launch substrate was retired as ONE
-  architectural cut; do not recreate it. Provenance (the three same-day supersessions): git log,
-  2026-08-09.
+  architectural cut (2026-08-09); do not recreate it.
 - **A needed manual flag is a bug signal.** Fix canonical root/state resolution; do not document a workflow flag. Execution choices are host-owned inputs to neither CLI.
 - **Resolve toward durable contract.** LLM-vs-deterministic → deterministic; graph/language → language-neutral contract.
 - **Budget context before LLM dispatch.** Small obligation-specific packets; expand only when genuinely needed.
 - **Split design assessment into two named modes.** *Contract assessment* (invariants/boundaries/obligations) vs. *conceptual design critique* (philosophy/alternatives/better directions). Bare "design assessment" = too ambiguous.
-- **Caveman mode (full) active globally.** Ultra-compressed telegraphic prose across all responses and agents. the owner toggles off when clarity needed.
 - **Redesign before scheduled autonomy.** Architecture stabilizes first; then build scheduled audit→remediate→PR loop once on new architecture.
 - **Token/context policy lives in `~/.claude/CLAUDE.md`.** Don't duplicate here.
 - **Token estimates stay local and deterministic.** Never API-call token counting in planning or host-handoff generation. No tokenizer dependency — shared `estimateTokensFromBytes` is the standard. An estimate describes content size only; it is never a backend-fit claim.
@@ -341,17 +333,15 @@ name never ran, so its four repository-specific steps live here and the skill is
   (code exercised only by its own tests, never wired into a real call path) is instead worked as a
   periodic **manual audit**: `knip --production` → filter to symbols with zero *grep-detectable*
   production callers (grep finds the dispatch/alias cases knip misses, so a grep-zero is a reliable dead
-  signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule. (`runPlanPhase`
-  was exactly this class — call-graph-verified dead, then deleted with its orphaned helpers + tests.)
+  signal) → delete symbol + orphaned tests. Re-run when worthwhile, not on a schedule.
 - **Dead-code stays leads-not-verdicts — no "sound" signal (audit-code side).** Deliberately not pursuing a
   sound dead-code detector (entrypoint provenance + dynamic-import tracing) inside the *acquired-product*
   analyzer: true soundness is undecidable in a language-neutral static auditor (dynamic / dispatch /
   reflection wiring), and it fights the leads-not-verdicts architecture the per-file lens implements. knip's
   `files` / `dependencies` / unused-export output are LEADS the lens confirms or refutes against source,
   never direct findings. (Distinct from the release-gate bullet above, which gates *our own* tree.)
-- **Three analyzer convictions have ONE home — here (nightly decision
-  `docs-audit-pkg-language-convictions-two-homes`, 2026-09-10; `docs/audit-pkg/product.md` and
-  `development.md` point here).** (1) Language-agnostic semantic affinity (shared unusual domain terms,
+- **Three analyzer convictions have ONE home — here** (`docs/audit-pkg/product.md` and
+  `development.md` point here). (1) Language-agnostic semantic affinity (shared unusual domain terms,
   nearby paths, identifier overlap, embeddings) stays LOW-AUTHORITY: it ranks `boundary_files` and
   explains candidate context, and it never merges packets on token frequency alone — common tokens
   (`user`, `request`, `client`, `config`, `error`) connect unrelated code — unless a deterministic edge
@@ -367,7 +357,7 @@ name never ran, so its four repository-specific steps live here and the skill is
 Tracked in the split backlog — index [`docs/backlog.md`](docs/backlog.md), with one file per section so
 each is ONE bounded read: [`open-bugs.md`](docs/backlog/open-bugs.md) (fixable defects + friction, at
 high/medium severity or untagged), [`minor-bugs.md`](docs/backlog/minor-bugs.md) (the same thing at LOW
-severity — split off 2026-08-28 on size alone, not on standard; re-tagging an entry moves it),
+severity; re-tagging an entry moves it),
 [`forward-tracks.md`](docs/backlog/forward-tracks.md) (design directions),
 [`deferred.md`](docs/backlog/deferred.md) (blocked on data/env),
 [`durable-traps.md`](docs/backlog/durable-traps.md) (standing reference, not work). Add an entry when
@@ -375,8 +365,6 @@ deferring; remove it when shipped.
 
 **Log friction the moment you hit it** — non-obvious traps, misbehaving tools, missing affordances, shell/env quirks. One line to `docs/backlog/open-bugs.md` if it's a fixable defect, or `docs/backlog/durable-traps.md` if it's a standing environment/tooling gotcha — before moving on. 30-second note now = fix a future session can pick up.
 
-**Entries carry a size budget** (`npm run check:backlog-budget`, in `verify:release`). Entries earn
-their length, but the growth driver is post-mortem narrative accreting after the fact — that is what
-pushed the single file past 1,700 lines and made every pass navigate it blind. Condense at write
-time: the mechanism and the open property belong in the entry, the story belongs in `git log` or a
-`docs/reviews/` record.
+**Entries carry a size budget** (`npm run check:backlog-budget`, in `verify:release`). Condense at
+write time: the mechanism and the open property belong in the entry, the story belongs in `git log`
+or a `docs/reviews/` record.

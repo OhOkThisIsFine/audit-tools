@@ -181,8 +181,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   read the trace before writing the scope off.** The 2026-08-10 lane had already emitted 24 findings
   into its transcript before wedging; the run that assumed a wedge meant no output would have
   discarded them. Redirect to a file, and on a wedge `awk '/^FINDING:/,0'` the trace. Mitigation is
-  the standing one ([[nim-offload-reliable-unit-is-one-entry]]): one bounded scope per dispatch, not
-  seven files in one prompt. ⚠ **A bounded scope is NOT sufficient — the prompt must also FORCE THE
+  one bounded scope per dispatch, not seven files in one prompt. ⚠ **A bounded scope is NOT sufficient — the prompt must also FORCE THE
   FINISH (2026-08-21, three more deaths in one night).** Three doc-review batches of 3, 6 and 9 files
   each ran 45+ minutes, emitted 400KB-900KB of tool trace, and ended with NO answer at **exit code 0**
   — a masked failure that reads as success. Two ended on `collab: Wait`; one on `ERROR
@@ -228,8 +227,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   Not yet mechanically enforced: a prompt-length refusal in `shell-trap-guard.mjs` would catch it at
   the call, and that is the fix if this recurs — one occurrence is under the recurrence bar, so it is
   recorded rather than proposed. Sibling of the workspace-trust trap below (same fabrication hazard,
-  reached through the caller's transport instead), and of the wider caller-not-callee class in
-  memory: `offload-lane-failures-are-usually-the-caller`.
+  reached through the caller's transport instead), and of the wider caller-not-callee class (the offload-lane entry
+  below).
 
 - **A lane that lost its tools FABRICATES a confident answer instead of failing — but workspace
   trust is NOT what takes them away (2026-08-15, premise corrected by measurement 2026-08-29).**
@@ -255,18 +254,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   [[pool-lane-fabricates-when-untrusted]]
 
 - **The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look
-  identical to a weak or dead model** ([[offload-lane-failures-are-usually-the-caller]], twice over).
+  identical to a weak or dead model** (both are the caller's request shape, not the model).
   Separate failures, separate remedies; decide which axis you are on before changing anything.
   **SIZE:** failure is size-correlated (48KB+ single calls: no first byte in 28 min; 105KB:
   `ECONNRESET`; 1–3KB per item: 94/101). Split to the natural per-item unit and size `max_tokens` to the
-  per-item output — [[nim-offload-reliable-unit-is-one-entry]].
+  per-item output.
   **CONCURRENCY — a per-BACKEND limit, NOT a property of the lane.** The fan-outs that degraded at 3, 10
   and 12 (429s, schema-valid empty documents, or never returning) were all NIM-routed. Serialize
   NIM-routed work (≤2 concurrent per model, escalating backoff, **resumable** driver — two writers to one
   output file clobber each other); do NOT serialize the lane, and do not assume another provider inherits
   the limit. ⚠ This has been wrong in BOTH directions (first "pool ~6-wide", then a blanket lane-wide
   ceiling), which is why the fact is stated per-backend. `finish_reason` is `undefined`, not `length`.
-  [[nim-offload-reliable-unit-is-one-entry]]
   Scope is ad-hoc development scripts only; audit-tools does not schedule these calls. Record:
   [`worker-kind-pool-class-rule-2026-07-23.md`](../reviews/worker-kind-pool-class-rule-2026-07-23.md).
   ⚠ **Never hand-rotate `model` per batch/retry** — the proxy owns retries and same-tier fallbacks
@@ -289,7 +287,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (a big offload call, a full suite, a release wait) must use `run_in_background: true`, not a
   larger timeout. A 10-minute kill on a call the caller believed had 30 minutes reads exactly like
   a hung backend, which is the same misdiagnosis class as
-  [[offload-lane-failures-are-usually-the-caller]].
+  the offload-lane entry above: the caller, not the backend.
   **The same trap has a shell half (2026-08-26).** A `timeout 540 codex exec …` written INSIDE the
   command is invisible to the tool, which applies its own DEFAULT 120000ms and kills at 2m00s. The
   shell's number never governs; only the tool's `timeout` parameter does, and only up to the clamp.
@@ -374,8 +372,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   verbatim supporting quote that exists nowhere. The lane's structural analysis was worth the
   call; every citation in it was worthless. Treat quoted evidence from the lane as the LEAST reliable
   part of its output, not the most — the opposite of the intuition that a quote is checkable proof.
-  ([[offload-lane-failures-are-usually-the-caller]] is about weak-looking output; this is the inverse
-  failure — confident output with fake support.)
+  (The offload-lane entry above is about weak-looking output; this is the inverse failure —
+  confident output with fake support.)
 
 - **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance
   routine runs as a local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`) and lands

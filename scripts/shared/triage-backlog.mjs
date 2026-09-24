@@ -85,7 +85,7 @@
 //
 // ⚠ Some lanes prepend prose before the JSON despite the schema, which is why
 // the extractor below salvages the object rather than trusting the body to be
-// bare JSON. [[offload-lane-failures-are-usually-the-caller]]
+// bare JSON.
 //
 // ⚠ The schema is shaped to THIS task (a verdict enum plus an action), not the
 // lane's generic {summary, findings[], open_questions[]} container. A misfitting
