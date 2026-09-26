@@ -43,7 +43,7 @@ describe('generated-artifact freshness registry', () => {
     const common = {
       generators: ['scripts/shared/generate-one.mjs'],
       trackedFiles: new Set(['scripts/shared/generate-one.mjs']),
-      packageScripts: { 'verify:checks': 'node runner.mjs' },
+      packageScripts: { 'verify:checks': 'node scripts/shared/run-release-gates.mjs' },
     };
     expect(
       validateGeneratedRegistry({
@@ -58,11 +58,11 @@ describe('generated-artifact freshness registry', () => {
           { generator: common.generators[0]!, authority: 'check', npmScript: 'check:one' },
         ],
         packageScripts: {
-          'verify:checks': 'node runner.mjs',
+          'verify:checks': 'node scripts/shared/run-release-gates.mjs',
           'check:one': 'node scripts/shared/generate-one.mjs --check',
         },
       }).join('\n'),
-    ).toMatch(/not inside verify:checks/);
+    ).toMatch(/not inside the release gate sequence/);
   });
 
   it('rejects a capability-declared generator omitted from the registry', () => {

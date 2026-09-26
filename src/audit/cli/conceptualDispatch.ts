@@ -2,6 +2,8 @@
 import {
   type DesignReviewBinding,
   type IntentCheckpoint,
+  type LaneReviewRecord,
+  SHARED_SEMANTIC_DEMAND_FLOORS,
   charterReviewDisposition,
   readTrailingSubmissionRefusals,
   resolveDesignReviewBinding,
@@ -10,10 +12,11 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
   type DesignReviewOptions,
+  type ConceptualPerspective,
   renderConceptualReviewPrompt,
   renderConceptualPerspectivePrompt,
   renderConceptualJudgePrompt,
-  selectPerspectives,
+  resolvePerspectiveSet,
 } from "../orchestrator/designReviewPrompt.js";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import type { FanoutLaneSpec } from "./fanoutLanes.js";
@@ -37,7 +40,20 @@ import {
 export interface ConceptualReviewSettings {
   max_units?: number;
   conceptual_depth: "shallow" | "deep";
-  perspectives?: number;
+  /**
+   * The confirmed perspective SELECTION, exactly as the checkpoint records it:
+   * a legacy integer count, or an explicit list of perspective names (built-in
+   * names, `custom_perspectives` names, or a mix). An explicit list is honored
+   * verbatim at dispatch — never widened with injected defaults — and it is
+   * carried here even when the depth is shallow so the choice survives the
+   * shallow default and resumed runs instead of disappearing into it.
+   */
+  perspectives?: number | string[];
+  /**
+   * Caller-authored perspective definitions the `perspectives` list may
+   * reference. Carried alongside the selection for the same survival reason.
+   */
+  custom_perspectives?: ConceptualPerspective[];
   /**
    * True when any confirmed charter is low-confidence (Phase A conceptual spine):
    * a review depending on a low-confidence charter must "flag for human intent
@@ -130,8 +146,18 @@ export function renderIgnoredReviewNotice(
 }
 
 /**
- * Resolve the conceptual-review depth and perspective count from confirmed
- * intent. Absent an explicit choice, the default is a shallow review.
+ * Resolve conceptual-review depth and perspective selection from confirmed
+ * intent. A named list implies deep review when depth is omitted; otherwise
+ * the existing shallow default applies. An explicit depth always wins.
+ *
+ * THROWS when the bound block carries a perspective selection nothing can
+ * honor (unknown names, duplicates, custom-name collisions — see
+ * `resolvePerspectiveSet`). The checkpoint passed shape validation, so the
+ * defect is semantic: the run halts naming the value rather than fanning out
+ * a quieter substitute set. Validation runs at EVERY depth — including
+ * shallow, where the selection is otherwise unused — so an invalid choice is
+ * caught at confirmation time instead of surfacing only when a later deep
+ * pass finally reads it.
  */
 export function resolveConceptualReviewSettings(
   bundle: ArtifactBundle,
@@ -156,7 +182,8 @@ export function resolveConceptualReviewSettings(
     lane.nodes.some((node) => charterReviewDisposition(node) === "flag_for_human"),
   );
   const conceptualDepth =
-    checkpoint?.conceptual_depth ?? "shallow";
+    checkpoint?.conceptual_depth ??
+    (Array.isArray(checkpoint?.perspectives) ? "deep" : "shallow");
   // Surface a notice only when the CONFIRMED block drives the workload. The
   // notice is purely informational — it is derived AFTER the decision fields
   // above so it can never change them (the resolution stays identical with and
@@ -171,9 +198,21 @@ export function resolveConceptualReviewSettings(
         conceptualDepth,
       )
     : undefined;
+  // Fail fast on a selection nothing can honor — see the doc comment above.
+  // The resolved list itself is recomputed at dispatch; what matters here is
+  // that an invalid explicit choice throws at confirmation time.
+  if (checkpoint?.perspectives !== undefined || checkpoint?.custom_perspectives !== undefined) {
+    resolvePerspectiveSet(
+      checkpoint?.perspectives,
+      checkpoint?.custom_perspectives,
+    );
+  }
   return {
     conceptual_depth: conceptualDepth,
     perspectives: checkpoint?.perspectives,
+    ...(checkpoint?.custom_perspectives
+      ? { custom_perspectives: [...checkpoint.custom_perspectives] }
+      : {}),
     ...(flagForHuman ? { flag_for_human: true } : {}),
     ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
     ...(ignoredReviewNotice ? { ignored_review_notice: ignoredReviewNotice } : {}),
@@ -191,12 +230,14 @@ export interface ConceptualDispatch {
   instructionLines: string[];
   /** Contributions to the step's `artifactPaths`. */
   artifactPaths: Record<string, string>;
-  /** Prompt files the host's subagents read. */
+  /** Prompt files the host's workers read. */
   readPaths: string[];
-  /** Result files the host's subagents write. */
+  /** Result files the host's workers write. */
   writePaths: string[];
   /** What a previous emission of this pass's lanes is still owed. */
   shortfall: LaneSubmissionShortfall;
+  /** Declared review modes for bound transport metadata. */
+  laneReviews: LaneReviewRecord[];
 }
 
 /**
@@ -261,6 +302,16 @@ export async function prepareConceptualDispatch(opts: {
     });
   };
 
+  const unitFiles = new Set(
+    (bundle.unit_manifest?.units ?? []).flatMap((u) => u.files),
+  );
+  const fileCount = unitFiles.size > 0
+    ? unitFiles.size
+    : (bundle.unit_manifest?.units?.length ?? 1);
+  const manifestBytes = bundle.unit_manifest
+    ? Buffer.byteLength(JSON.stringify(bundle.unit_manifest), "utf8")
+    : 0;
+
   if (settings.conceptual_depth !== "deep") {
     const fanout = await materializeFanoutLanes({
       artifactsDir,
@@ -272,6 +323,18 @@ export async function prepareConceptualDispatch(opts: {
           promptFilename: "design-review-conceptual-prompt.md",
           promptText:
             renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
+          fileCount,
+          riskScore: SHARED_SEMANTIC_DEMAND_FLOORS.riskScore,
+          complexityFloor: SHARED_SEMANTIC_DEMAND_FLOORS.complexity,
+          riskFloor: SHARED_SEMANTIC_DEMAND_FLOORS.risk,
+          grantedContentBytes: manifestBytes > 0 ? manifestBytes : undefined,
+          // A bounded semantic review over work the host authored — an
+          // independent context is preferred, but a degraded inline fallback
+          // that records itself is an explicitly accepted path (unlike the
+          // contract pass, which must never self-review).
+          reviewMode: "degraded_permitted",
+          reviewReason:
+            "conceptual review of planning artifacts the host authored — independent context preferred, self-recorded degraded fallback accepted",
         },
       ],
     });
@@ -284,7 +347,7 @@ export async function prepareConceptualDispatch(opts: {
       instructionLines: [
         ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
         ...(settings.reuse_notice ? [settings.reuse_notice] : []),
-        "**Conceptual review** (generative): dispatch a subagent that reads the prompt at the conceptual prompt path and writes findings to the conceptual results path.",
+        "**Conceptual review** (generative): execute the prompt at the conceptual prompt path in an independent context (or inline as degraded fallback) and write findings to the conceptual results path.",
       ],
       artifactPaths: {
         conceptual_prompt: conceptualPromptPath,
@@ -293,15 +356,25 @@ export async function prepareConceptualDispatch(opts: {
       readPaths: [conceptualPromptPath],
       writePaths: [conceptualResultsPath],
       shortfall: fanout.shortfall,
+      laneReviews: fanout.laneReviews,
     };
   }
 
-  // Deep: real fan-out — N perspective subagents + an independent judge.
+  // Deep: real fan-out — N perspective lanes + an independent judge.
   // Every one of them is a LANE through the same materializer the rest of the
   // audit uses; this pass used to mint its own filenames, which is precisely how
   // a second naming convention (and a second way for a host to mistype one)
   // came to exist.
-  const perspectives = selectPerspectives(settings.perspectives);
+  //
+  // The reviewer set is the operator's EXPLICIT list when one was confirmed —
+  // exactly those reviewers, no injected defaults — and the legacy count draw
+  // otherwise. Both arrive through the one production reader
+  // (`resolvePerspectiveSet`), so the dispatch cannot honor a selection the
+  // settings resolver refused.
+  const perspectives = resolvePerspectiveSet(
+    settings.perspectives,
+    settings.custom_perspectives,
+  );
   const total = perspectives.length;
   const perspectiveTexts = perspectives.map((p, i) =>
     renderConceptualPerspectivePrompt(bundle, p, i, total, reviewOptions),
@@ -366,6 +439,18 @@ export async function prepareConceptualDispatch(opts: {
       // so the tool is owed nothing here and must not record an expectation it
       // will never satisfy. The bound path is still minted and declared below.
       expected: false,
+      fileCount,
+      riskScore: SHARED_SEMANTIC_DEMAND_FLOORS.riskScore,
+      complexityFloor: SHARED_SEMANTIC_DEMAND_FLOORS.complexity,
+      riskFloor: SHARED_SEMANTIC_DEMAND_FLOORS.risk,
+      grantedContentBytes: manifestBytes > 0 ? manifestBytes : undefined,
+      // Each perspective reviews only through its own value system and must NOT
+      // see the others' output — its independence is the whole point of a
+      // multi-perspective fan-out, so it requires a context that shares no
+      // authorship with the other perspectives.
+      reviewMode: "independence_required" as const,
+      reviewReason:
+        "blind perspective lane — must not share authorship with or see the output of the other perspectives",
     })),
     {
       // The judge PRODUCES the conceptual submission, so it is that lane — a
@@ -374,6 +459,17 @@ export async function prepareConceptualDispatch(opts: {
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",
       promptText: judgePromptText,
+      fileCount: Math.max(1, perspectiveFiles.length),
+      riskScore: SHARED_SEMANTIC_DEMAND_FLOORS.riskScore,
+      complexityFloor: SHARED_SEMANTIC_DEMAND_FLOORS.complexity,
+      riskFloor: SHARED_SEMANTIC_DEMAND_FLOORS.risk,
+      // The judge merges perspectives it did not author; the instruction lets it
+      // run inline only as an EXPLICITLY-degraded fallback that sets the
+      // perspectives' reasoning aside and merges their written findings — so a
+      // degraded fallback is permitted, but must record its degradation.
+      reviewMode: "degraded_permitted" as const,
+      reviewReason:
+        "judge is independent of the perspectives it merges — inline merging is the explicitly-degraded fallback, not the self-review of authored findings",
     },
   ];
   await closePriorRound(roundToken);
@@ -427,8 +523,13 @@ export async function prepareConceptualDispatch(opts: {
   const deliveredCount = perspectivePrompts.length - pendingCount;
 
   const perspectiveLines = pendingPerspectives.map(
-    ({ ordinal, f }) =>
-      `   - Perspective ${ordinal} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
+    ({ ordinal, f }) => {
+      const lane = fanout.lanes.find((l) => l.id === f.lane);
+      const demandTag = lane?.demand
+        ? ` [demand: size=${lane.demand.size}, complexity=${lane.demand.complexity}, risk=${lane.demand.risk}]`
+        : "";
+      return `   - Perspective ${ordinal} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\`${demandTag}`;
+    },
   );
 
   const artifactPaths: Record<string, string> = {
@@ -462,17 +563,17 @@ export async function prepareConceptualDispatch(opts: {
         : []),
       ...(pendingCount > 0
         ? [
-            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
+            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — in an independent context per lane (**in parallel** if concurrent execution is supported, else sequentially). Each lane reviews only through its own value system and must NOT see the others' output. If independent contexts are unavailable, pause and report that independent perspective review could not be performed; do not self-conduct or advance:`,
             ...perspectiveLines,
           ]
         : [
             `1. All ${total} perspective lanes have already delivered a submission this round — nothing to execute here.`,
           ]),
-      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
+      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — an independent context that did not author any of the perspectives; if no independent context is available, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
       "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
     ],
     artifactPaths,
-    // Perspective result files must be in readPaths: the judge subagent reads
+    // Perspective result files must be in readPaths: the judge reads
     // them to merge and synthesise the final output (COR-60ca1f72).
     readPaths: [
       ...perspectivePrompts.map((f) => f.promptPath),
@@ -484,5 +585,6 @@ export async function prepareConceptualDispatch(opts: {
       conceptualResultsPath,
     ],
     shortfall: fanout.shortfall,
+    laneReviews: fanout.laneReviews,
   };
 }

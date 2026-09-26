@@ -183,6 +183,11 @@ describe("backlog friction-tag vocabulary", () => {
     const result = evaluateFrictionTags(files);
     expect(result.violations, result.violations.join("\n")).toEqual([]);
     // A vacuous pass would be a gate guarding nothing: the corpus DOES carry tags.
-    expect(result.tags).toBeGreaterThan(20);
+    // Recalibrated 2026-09-19: the backlog-implementation lap deleted shipped
+    // entries outright (the standing "remove once it ships" rule), so the corpus
+    // carries a handful of tags rather than dozens. The tripwire guards
+    // non-vacuity (a broken corpus reader reads zero), not corpus size — the
+    // form-level cases above carry the recognition logic.
+    expect(result.tags).toBeGreaterThan(0);
   });
 });

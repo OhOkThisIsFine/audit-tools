@@ -84,10 +84,10 @@ describe('the write-time leg set is drawn from the guard registry', () => {
     expect(writeTimeIds('docs/backlog/open-bugs.md')).toEqual([
       'check:doc-code-citations',
       'check:retired-infrastructure',
-      'check:backlog-budget',
-      'check:backlog-friction-tags',
-      'check:backlog-line-numbers',
       'check:memory-citations',
+      'check:backlog-budget',
+      'check:backlog-line-numbers',
+      'check:backlog-friction-tags',
     ]);
   });
 
@@ -102,10 +102,10 @@ describe('the write-time leg set is drawn from the guard registry', () => {
       expect(writeTimeIds(file), `${file} must draw the backlog family`).toEqual([
         'check:doc-code-citations',
         'check:retired-infrastructure',
-        'check:backlog-budget',
-        'check:backlog-friction-tags',
-        'check:backlog-line-numbers',
         'check:memory-citations',
+        'check:backlog-budget',
+        'check:backlog-line-numbers',
+        'check:backlog-friction-tags',
       ]);
     }
   });

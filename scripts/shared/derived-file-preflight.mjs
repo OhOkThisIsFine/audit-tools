@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/attest-derived-file-preflight.test.ts, tests/shared/precommit-leg-derivation.test.ts
 // Single source for the pre-commit gate's DERIVED leg set — imported by
 // `.claude/hooks/pre-commit-gate.mjs` AND both attest scripts (P19, owner
 // decision sol-1, 2026-08-12; leg DERIVATION P34+P26, owner decision
@@ -34,7 +35,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
 import { GUARDS, REACH } from '../guard-reach-data.mjs';
 import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
-import { DOC_TEST_CONSUMERS } from '../doc-test-consumers-data.mjs';
+import { SOURCE_TEST_OWNERSHIP } from './source-test-ownership-data.mjs';
 import { worktreeTree } from './worktree-tree.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -160,35 +161,34 @@ export function handoffStateTriggered({ root, staged, git = (args) => gitRun(roo
 // graph can only cover subjects someone declared.
 /** @type {Map<string, string[]>} */
 const PINS = new Map([
-  // `loop-core-gate-parity`, not `loop-core-paths`: the latter imports the
-  // package subpath (`audit-tools/shared`), which resolves through dist/, and
-  // the gate's legs run against a staged snapshot with no dist/ in a fresh
-  // worktree. The parity test reads the TS source by RELATIVE path and the
-  // generated hook sibling, so it is build-free — and it is the stronger pin
-  // anyway: it is the one that asserts the generated list equals the source.
-  ['src/shared/loopCorePaths.ts', ['tests/shared/loop-core-gate-parity.test.ts']],
-  [
-    'scripts/guard-reach-data.mjs',
-    [
-      'tests/shared/precommit-leg-derivation.test.ts',
-      'tests/shared/attest-derived-file-preflight.test.ts',
-      'tests/shared/guard-form-reach.test.ts',
-      'tests/shared/guard-reach-gate.test.ts',
-    ],
-  ],
-  ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
-  // The DECLARED doc → test consumer map, projected into the pin graph. The map
-  // and this graph answer the same question — "which test asserts this doc's
-  // content?" — so they are ONE declaration rather than two that drift: staging
-  // a mapped doc obliges exactly the tests the map names, and
-  // `check:pin-obligations` reconciles every row against the tracked tree.
-  //
-  // WHY THE MAP HAS TO BE PROJECTED HERE AT ALL. The map's own gate
-  // (`check:doc-test-consumers`) runs at CONFIGURATION time and only checks the
-  // rows' SHAPE; it cannot oblige a test, because a repo-wide check has no
-  // staged subject. The pin graph is what has a subject, and a subject is what
-  // "before it ships" requires. Without this projection the map is a comment.
-  ...DOC_TEST_CONSUMERS.map((row) => /** @type {[string, string[]]} */ ([row.doc, row.tests])),
+  // The PRODUCT source → test ownership map is single-sourced in
+  // `scripts/shared/source-test-ownership-data.mjs`, consulted by BOTH the pin
+  // graph here (build-freedom reconciled by `reconcilePinObligations` below) and
+  // the `check:source-test-ownership` gate (which verifies each bound test
+  // executes + asserts on its subject through the shared `source-test-reach.mjs`
+  // runtime-coverage classifier) — one fact, one home, so the two "which test asserts this
+  // source" answers cannot drift (O11).
+  ...SOURCE_TEST_OWNERSHIP.map((row) => /** @type {[string, string[]]} */ ([row.source, row.tests])),
+  // The DECLARED doc → test consumer rows, lived once in their own
+  // `scripts/doc-test-consumers-data.mjs` registry beside a SHAPE-only checker
+  // (`scripts/check-doc-test-consumers.mjs`) that could never OBLIGE a test —
+  // a repo-wide check has no staged subject. They are folded here, into the pin
+  // graph that has one, so "which test asserts this doc's content?" is ONE
+  // declaration and staging a mapped doc obliges exactly the tests it names
+  // (reconciled against the tracked tree by `check:pin-obligations`). The `what`
+  // each test pins is kept as a one-line comment so a reader can judge whether an
+  // edit touches the asserted content — the same shape SOURCE_TEST_OWNERSHIP
+  // carries for product sources, one home apart.
+  ['docs/HANDOFF.md', ['tests/shared/handoff-roadmap.test.ts', 'tests/shared/closeout-render.test.ts']],
+  ['docs/project-philosophy.md', ['tests/shared/philosophy-brief-gate.test.ts', 'tests/shared/glossary-citations-backticked.test.ts']],
+  ['docs/glossary-ids.md', ['tests/shared/glossary-citations-backticked.test.ts']],
+  ['docs/nightly-routine.md', ['tests/shared/lane-dispatch.test.ts']],
+  ['docs/backlog.md', ['tests/shared/backlog-index.test.ts', 'tests/shared/backlog-budget-unit.test.ts']],
+  ['docs/doc-review-guidelines.md', ['tests/shared/doc-manifest-gate.test.ts']],
+  ['docs/documentation-philosophy.md', ['tests/shared/doc-manifest-gate.test.ts']],
+  ['CLAUDE.md', ['tests/shared/agents-region-gate.test.ts', 'tests/shared/doc-manifest-gate.test.ts']],
+  ['AGENTS.md', ['tests/shared/agents-region-gate.test.ts']],
+  ['README.md', ['tests/shared/philosophy-brief-gate.test.ts', 'tests/shared/generated-artifact-registry.test.ts']],
 ]);
 
 /** Repo-relative path with backslashes normalized and any leading `./` dropped. */
@@ -297,6 +297,22 @@ export function scriptWired(root, script) {
 export function legRunnable(root, leg) {
   if (leg.testPath) return existsSync(join(root, leg.testPath));
   return scriptWired(root, leg.script);
+}
+
+// The attestation preflight and commit gate must judge each derived leg under
+// the same execution policy. A 60-second per-leg timeout used to kill the
+// source-test-ownership gate even when green (measured at 76–91 seconds on the
+// recovered staged tree). The leg itself owns any meaningful timeout; the
+// wrapper has no measured universal deadline to impose on all gates.
+/** @param {{ root: string, env?: NodeJS.ProcessEnv }} options */
+export function derivedLegExecutionOptions({ root, env }) {
+  return {
+    cwd: root,
+    ...(env === undefined ? {} : { env }),
+    shell: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  };
 }
 
 // The first repo-relative .mjs path in an npm-script command string —
@@ -513,13 +529,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
     // advisory the operator wants, and short-circuiting would create a second
     // code path that can drift from the gate's leg set.
     try {
-      execSync(legCommand(leg).command, /** @type {any} */ ({
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      }));
+      execSync(legCommand(leg).command, /** @type {any} */ (derivedLegExecutionOptions({ root })));
       executed.push({ id: leg.id, script: leg.script, fix: leg.fix, tail: '', outcome: 'passed' });
     } catch (err) {
     const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');

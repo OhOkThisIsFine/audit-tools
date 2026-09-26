@@ -248,6 +248,56 @@ describe("StateStore — the write hook refuses what the read gate would reject"
       "planning",
     );
   });
+
+  it("saveState refuses a state with lifecycle when status is not paused or cancelled", async () => {
+    const store = new StateStore(TEST_DIR);
+    await expect(
+      store.saveState({
+        status: "planning",
+        lifecycle: {
+          contract_version: "remediate-code-lifecycle/v1alpha1",
+          action: "pause",
+          phase: "planning",
+          continuation: "paused",
+          at: new Date().toISOString(),
+        },
+      } as RemediationState),
+    ).rejects.toThrow(/lifecycle is only valid while status is "paused" or "cancelled"/i);
+  });
+
+  it("saveState refuses a state with lifecycle naming an invalid phase", async () => {
+    const store = new StateStore(TEST_DIR);
+    await expect(
+      store.saveState({
+        status: "paused",
+        lifecycle: {
+          contract_version: "remediate-code-lifecycle/v1alpha1",
+          action: "pause",
+          phase: "nonexistent_phase",
+          continuation: "paused",
+          at: new Date().toISOString(),
+        },
+      } as RemediationState),
+    ).rejects.toThrow(/lifecycle\.phase.*is not a valid run status/i);
+  });
+
+  it("saveState accepts a valid lifecycle record on paused status", async () => {
+    const store = new StateStore(TEST_DIR);
+    await store.saveState({
+      status: "paused",
+      lifecycle: {
+        contract_version: "remediate-code-lifecycle/v1alpha1",
+        action: "pause",
+        phase: "planning",
+        continuation: "paused in planning",
+        at: new Date().toISOString(),
+      },
+    });
+    const loaded = await store.loadState();
+    expect(loaded?.status).toBe("paused");
+    expect(loaded?.lifecycle?.action).toBe("pause");
+    expect(loaded?.lifecycle?.phase).toBe("planning");
+  });
 });
 
 // ---------------------------------------------------------------------------

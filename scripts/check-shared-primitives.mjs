@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/check-shared-primitives.test.ts
 //
 // check:shared-primitives — the single-source gate for tiny shared primitives.
 //
@@ -96,7 +97,13 @@ export const SINGLE_DEFINITION_RULES = [
   { name: 'normalizeRepoRelPath', home: 'src/shared/paths.ts' },
   { name: 'defaultReadFileText', home: 'src/audit/extractors/readFileText.ts' },
   { name: 'getExternalSignalPaths', home: 'src/audit/orchestrator/requeueUtils.ts' },
+  { name: 'isLens', home: 'src/shared/types/lens.ts' },
+  { name: 'VALID_SEVERITIES', home: 'src/shared/types/lens.ts' },
+  { name: 'VALID_CONFIDENCES', home: 'src/shared/types/lens.ts' },
+  { name: 'collectFilesSorted', home: 'src/shared/io/collectFiles.ts' },
+  { name: 'projectUnencodableConstraintClauses', home: 'src/shared/intent/constraintClauses.ts' },
   // Deleted-fork names, banned outright: the canonical helper replaced them.
+  { name: 'collectFiles', home: null },
   { name: 'isPlainObject', home: null },
   { name: 'isSubmissionObjectMap', home: null },
   { name: 'compareIds', home: null },
@@ -352,11 +359,16 @@ export function staleDataRows(trackedSrc) {
 
 function main() {
   // win32: suppress the console-window flash on every gate run — INV-WH.
-  const tracked = execFileSync('git', ['ls-files', '-z', ...SCAN_PATHSPECS], {
-    encoding: 'utf8',
-    windowsHide: true,
-  })
-    .split('\0')
+  const tracked = [
+    ...execFileSync('git', ['ls-files', '-z', ...SCAN_PATHSPECS], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).split('\0'),
+    ...execFileSync('git', ['ls-files', '-z', '--others', '--exclude-standard', ...SCAN_PATHSPECS], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).split('\0'),
+  ]
     .filter(Boolean)
     // win32: `git ls-files` emits `/`, but normalize defensively so a hand-typed
     // rule row and a tracked path compare equal.

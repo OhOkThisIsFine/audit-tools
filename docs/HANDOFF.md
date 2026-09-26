@@ -5,15 +5,22 @@
 
 ## Current state
 
-The backlog has an owner-approved implementation sequence and frozen entry inventory in
-[`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
-Existing unfinished edits are preserved separately; recovery details are in
-`C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`.
+Recovered implementation changes have been reconciled with the later source tree. Finding-field
+preservation, named review selection, native subset intake, durable lifecycle controls, conformance
+review policy, and repository gate repairs are in place.
+The backlog records verified-property closure candidates and narrows incomplete features; recovered
+historical completion claims and ledger backfills were not treated as acceptance evidence.
 
 ## Immediate next
 
-Start at packet 3; preparation and release recovery are complete. Include the M09 intake packet after packet 4.
-Audit source changes are opt-in; analyzer consent is per-run. Preserve these settled choices.
+Use the current [backlog](backlog.md), not the frozen packet order, to choose remaining work.
+The tool-owned capability preflight remains in [open bugs](backlog/open-bugs.md). Gate-registration consolidation
+remains in [forward tracks](backlog/forward-tracks.md); real downstream staleness-cost measurement
+remains [deferred](backlog/deferred.md). [Live validation](reviews/packet-36-live-validation-2026-09-20.md)
+still needs its missing completed runs and external checks.
+
+The [September 19 plan](reviews/backlog-implementation-2026-09-19.md) is the historical ID map,
+not an instruction to restart packets already represented in the source.
 
 **Live owner decision for the completed slice:** none.
 

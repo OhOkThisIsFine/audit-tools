@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/remediate/final-gate-arbitrary-repo.test.ts
 // Gate-boundary smoke: the tool-owned final gate, executed for real, against a
 // fixture repository — so a gate that cannot pass on a clean tree (or cannot
 // FAIL on a broken one) fails the RELEASE, not a dogfood run.
@@ -25,9 +26,9 @@
 //   2. RED, with the failing command NAMED and the floor SHORT-CIRCUITED, on a
 //      broken tree. A gate that always passes is the false green the floor
 //      exists to prevent; a red gate that names nothing is unattributable.
-//   3. SCOPED OUT — not vacuously passed — when the target is not this monorepo.
-//      `passed: true` with `outcome: scoped_out` is a declared scope; the two
-//      must never be confusable (the all-terminal funnel's easiest misread).
+//   3. NEEDS COMMAND when the target declares no executable gate, never a
+//      vacuous green. A non-monorepo with build/check scripts still executes
+//      those scripts even when the audit-tools-specific Vitest gate is absent.
 import "../shared/hermetic-state-dir.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -69,8 +70,8 @@ const { runToolOwnedFinalGate, toolOwnedFinalGateCommands } = await import(
 /**
  * A repository shaped exactly like the audit-tools monorepo — the five layout
  * markers `isAuditToolsMonorepo` looks for, plus the vitest gate script it also
- * checks for (a five-marker tree WITHOUT the script must scope out, not run a
- * missing path — see the negative case below).
+ * checks for (a five-marker tree WITHOUT the script still derives its generic
+ * package commands, but must not run a missing audit-tools-specific path).
  *
  * The four gate commands are stubs driven by `state.json`, so this smoke decides
  * which layer fails without a real tsc/vitest ever running.
@@ -151,7 +152,6 @@ try {
   await check("a HEALTHY tree goes green — a gate that cannot pass on a clean tree fails the release", () => {
     assert(green.passed === true, `expected a green gate, got passed=${green.passed}`);
     assert(green.outcome === "executed", `expected outcome "executed", got "${green.outcome}"`);
-    assert(green.scoped_out === false, "an audit-tools-shaped tree must not scope out");
     assert(
       green.results.length === specs.length,
       `expected all ${specs.length} commands to run, got ${green.results.length}`,
@@ -222,33 +222,33 @@ try {
     );
   });
 
-  // ── 4. a non-monorepo target SCOPES OUT rather than passing vacuously ──────
+  // ── 4. a target with no derivable command BLOCKS rather than passing vacuously ──
   const bare = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-bare-"));
   try {
     writeFileSync(join(bare, "README.md"), "# not a monorepo\n");
-    const scoped = await runToolOwnedFinalGate(bare);
-    await check("a non-monorepo target is scoped_out, never a vacuous green", () => {
-      assert(scoped.outcome === "scoped_out", `expected scoped_out, got "${scoped.outcome}"`);
-      assert(scoped.scoped_out === true, "scoped_out must be stated");
-      assert(scoped.results.length === 0, "a scoped-out gate runs nothing");
+    const noCommand = await runToolOwnedFinalGate(bare);
+    await check("a target with no gate command needs an operator decision, never a vacuous green", () => {
+      assert(noCommand.outcome === "needs_command", `expected needs_command, got "${noCommand.outcome}"`);
+      assert(noCommand.passed === false, "no derivable command must block");
+      assert(noCommand.results.length === 0, "a gate with no command runs nothing");
     });
   } finally {
     rmSync(bare, { recursive: true, force: true });
   }
 
-  // A five-marker tree with NO gate script must ALSO scope out: judging it
-  // in-scope would run `node <missing path>`, exit 1, and report a whole-repo RED
-  // on a healthy repository — the false-red class this predicate exists to avoid.
+  // A five-marker tree with NO audit-tools gate script still has its declared
+  // package commands. It must execute those and omit the absent Vitest path.
   const partial = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-partial-"));
   try {
     writeFixture(partial);
     rmSync(join(partial, "scripts"), { recursive: true, force: true });
     const missingScript = await runToolOwnedFinalGate(partial);
-    await check("a marker-complete tree WITHOUT the gate script scopes out instead of reporting a false red", () => {
-      assert(
-        missingScript.outcome === "scoped_out",
-        `expected scoped_out, got "${missingScript.outcome}" (a missing gate script must not be a red)`,
-      );
+    await check("a marker-complete tree WITHOUT the Vitest gate executes its generic commands", () => {
+      assert(missingScript.outcome === "executed", `expected executed, got "${missingScript.outcome}"`);
+      assert(missingScript.passed === true, "the remaining healthy package commands must pass");
+      assert(missingScript.results.length > 0, "generic package commands must actually run");
+      assert(missingScript.results.every((result) => !result.argv.join(" ").includes("run-vitest-gate.mjs")),
+        "an absent Vitest gate path must not be invoked");
     });
   } finally {
     rmSync(partial, { recursive: true, force: true });

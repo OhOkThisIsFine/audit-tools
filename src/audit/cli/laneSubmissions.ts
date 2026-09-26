@@ -645,26 +645,36 @@ export async function recordLaneOutcome(
   // repair failed again), then re-enters the fold has an accepted behind it; a
   // trailing-only test would read the rejection, decide nothing had landed, and
   // append a SECOND accepted for one staged submission.
-  if (outcome.kind === "accepted") {
-    const ledger =
-      history ??
-      (await readSubmissionIngestHistory(artifactsDir, { runId }));
-    if (ledger.accepted.has(submissionId)) return;
+  //
+  // ONLY THE APPEND is suppressed on a duplicate — the expected-set removal
+  // below still runs. The two halves are not atomic in the other direction
+  // either: the first attempt can append the `accepted`, then throw BEFORE the
+  // drop, so a re-entry that merely skips on "already accepted" would leave the
+  // lane owed forever (a stale expected item that the next shortfall reports as
+  // missing even though its submission was consumed). The removal is idempotent,
+  // so performing it even when the accepted already exists costs nothing and
+  // closes that retry window.
+  const duplicateAccepted =
+    outcome.kind === "accepted"
+      ? (history ?? (await readSubmissionIngestHistory(artifactsDir, { runId })))
+          .accepted.has(submissionId)
+      : false;
+  if (!duplicateAccepted) {
+    await appendSubmissionEvent(artifactsDir, {
+      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+      run_id: runId,
+      submission_id: submissionId,
+      lane,
+      kind: outcome.kind,
+      ...(outcome.kind === "rejected"
+        ? { issue_code: outcome.issueCode, message: outcome.message }
+        : {}),
+      ...(outcome.kind === "accepted" && outcome.message
+        ? { message: outcome.message }
+        : {}),
+      recorded_at: new Date().toISOString(),
+    });
   }
-  await appendSubmissionEvent(artifactsDir, {
-    contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-    run_id: runId,
-    submission_id: submissionId,
-    lane,
-    kind: outcome.kind,
-    ...(outcome.kind === "rejected"
-      ? { issue_code: outcome.issueCode, message: outcome.message }
-      : {}),
-    ...(outcome.kind === "accepted" && outcome.message
-      ? { message: outcome.message }
-      : {}),
-    recorded_at: new Date().toISOString(),
-  });
   if (outcome.kind !== "accepted") return;
   // Keep the caller's shared view consistent with what just landed, so the
   // next lane in the same batch (and a re-entry that re-walks the register)
@@ -672,6 +682,9 @@ export async function recordLaneOutcome(
   history?.accepted.add(submissionId);
   // The drop runs under the store's lock, so it cannot race a concurrent
   // emission's merge (which would otherwise re-add the lane being closed out).
+  // Performed UNCONDITIONALLY — even when the accepted above was a duplicate —
+  // so a crash between the append and this drop on the prior attempt cannot
+  // leave a consumed lane still owed.
   await expectedSetStore(artifactsDir).mutate((current) =>
     current === undefined
       ? SKIP_WRITE

@@ -1,4 +1,5 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -8,6 +9,7 @@ import {
   SchemaVersionMismatchError,
   SKIP_WRITE,
   assertNotNodeWorktreeCwd,
+  assertSubmissionRunId,
 } from "audit-tools/shared";
 import {
   RemediationPlan,
@@ -17,6 +19,12 @@ import {
   CoverageLedger,
   RemediationHostHandoffRecord,
   RemediationHostHandoffRecordSchema,
+  LifecycleRecord,
+  LifecycleRecordSchema,
+  ConformanceReviewPolicySchema,
+  type ConformanceReviewPolicy,
+  PlanOnlyRequestSchema,
+  type PlanOnlyRequest,
 } from "./types.js";
 import { validateRemediationBlock } from "../validation/remediationState.js";
 import {
@@ -26,15 +34,8 @@ import {
 } from "./runStatus.js";
 
 /**
- * The schema version stamped on every persisted `state.json`.
- *
- * The VALUE is unchanged from the literal three modules already spelled out
- * (the host-handoff parser, the state-shaping helper in `nextStep.ts`, and the
- * test fixtures). What changes is that it is now ONE declaration that the store
- * actually writes and reads back, rather than a constant a reader FABRICATED
- * onto the loaded value to satisfy its own parser — see `parseCurrentState`'s
- * call site in `steps/dispatch/hostHandoff.ts`. An identity that the reader
- * supplies itself is not a check; it is the check's answer written in advance.
+ * The schema version stamped on every new `state.json` write. The host-handoff
+ * parser reads this identity from the state rather than fabricating it.
  *
  * A run's state is COSTLY / AUTHORED state in the sense
  * `audit-tools/shared/io/schemaVersion.ts` names: it records work an operator
@@ -43,21 +44,16 @@ import {
  * discarding a state would read as "this run never started" and destroy the
  * plan, the item ledger and every recorded acceptance with it.
  *
- * ABSENT IS NOT A MISMATCH, and the distinction is deliberate here rather than
- * inherited. Every run already in flight when this field was introduced has a
- * `state.json` with no `contract_version`; treating its absence as a mismatch
- * would refuse to load exactly the runs this field exists to protect. An
- * unstamped state is read under the CURRENT version's semantics (it was written
- * by a release whose shape this one still admits — that is what makes the field
- * safe to add), and the next write stamps it. A stamped-but-DIFFERENT version
- * is the case that throws, because at that point the file positively claims
- * another release's semantics rather than merely predating the field.
- *
- * Same asymmetry as `intent_checkpoint` (absent ⇒ nothing to check; present
- * and different ⇒ refuse loudly), inverted for a version that is newly added
- * rather than newly REQUIRED.
+ * v1alpha2 requires the primary conformance policy even before a plan exists:
+ * losing that field must fail load rather than turn an opted-in run default-off.
+ * Unstamped and v1alpha1 states remain readable as legacy. Reads project a
+ * conservative policy; their next write persists v1alpha2 with recorded dispatch
+ * history for a bound plan; an old sidecar cannot silently migrate to off.
+ * Unknown stamped versions still throw before any state-machine decision.
  */
 export const REMEDIATION_STATE_CONTRACT_VERSION =
+  "remediate-code-state/v1alpha2" as const;
+export const LEGACY_REMEDIATION_STATE_CONTRACT_VERSION =
   "remediate-code-state/v1alpha1" as const;
 
 /** The file this store owns, named once so the version error can name it too. */
@@ -65,11 +61,10 @@ const STATE_FILENAME = "state.json";
 
 export interface RemediationState {
   /**
-   * Schema version of this persisted state. Optional on the TYPE because a
-   * state written before the field existed is a legal input; see
-   * {@link REMEDIATION_STATE_CONTRACT_VERSION} for how it reads.
+   * Optional on the type to admit a legacy unstamped read. New writes stamp
+   * v1alpha2 and require the primary review policy.
    */
-  contract_version?: typeof REMEDIATION_STATE_CONTRACT_VERSION;
+  contract_version?: typeof REMEDIATION_STATE_CONTRACT_VERSION | typeof LEGACY_REMEDIATION_STATE_CONTRACT_VERSION;
   status: RemediationRunStatus;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
@@ -125,6 +120,19 @@ export interface RemediationState {
    * ingestion requires this record before it trusts any host-written file.
    */
   host_handoff?: RemediationHostHandoffRecord;
+  /**
+   * The persisted operator-lifecycle continuation (O31 / packet 14). Present on
+   * a run parked by `plan-only`/`pause` (status `paused`) or terminally
+   * cancelled (`cancel`, status `cancelled`), carrying the phase to restore, the
+   * workload binding, the exact continuation, and any host-reported worktree
+   * location/outcome. Consumed and cleared by `resume`; stamped terminal by
+   * `cancel`. Absent on an ordinary in-flight run.
+   */
+  lifecycle?: LifecycleRecord;
+  /** State-owned choice and irreversible first-dispatch evidence for this plan. */
+  conformance_review_policy?: ConformanceReviewPolicy;
+  /** A request to park when planning finishes; may precede the first plan. */
+  plan_only_request?: PlanOnlyRequest;
 }
 
 /**
@@ -157,7 +165,8 @@ function validateState(value: unknown): string[] {
   // unrebuildable work.
   if (
     obj["contract_version"] !== undefined &&
-    obj["contract_version"] !== REMEDIATION_STATE_CONTRACT_VERSION
+    obj["contract_version"] !== REMEDIATION_STATE_CONTRACT_VERSION &&
+    obj["contract_version"] !== LEGACY_REMEDIATION_STATE_CONTRACT_VERSION
   ) {
     throw new SchemaVersionMismatchError(
       STATE_FILENAME,
@@ -181,6 +190,27 @@ function validateState(value: unknown): string[] {
     return errors;
   }
   const status = obj["status"];
+
+  if (obj["conformance_review_policy"] !== undefined) {
+    const parsed = ConformanceReviewPolicySchema.safeParse(obj["conformance_review_policy"]);
+    if (!parsed.success) {
+      errors.push(`conformance_review_policy failed schema validation: ${parsed.error.message}`);
+    } else if (obj["plan"] &&
+      (obj["plan"] as Record<string, unknown>)["plan_id"] !== parsed.data.plan_id) {
+      errors.push("conformance_review_policy.plan_id must match plan.plan_id");
+    }
+  } else if (obj["contract_version"] === REMEDIATION_STATE_CONTRACT_VERSION) {
+    errors.push("conformance_review_policy is required for every v1alpha2 state");
+  }
+  if (obj["plan_only_request"] !== undefined) {
+    const parsed = PlanOnlyRequestSchema.safeParse(obj["plan_only_request"]);
+    if (!parsed.success) {
+      errors.push(`plan_only_request failed schema validation: ${parsed.error.message}`);
+    } else if (parsed.data.plan_id !== undefined && obj["plan"] &&
+      (obj["plan"] as Record<string, unknown>)["plan_id"] !== parsed.data.plan_id) {
+      errors.push("plan_only_request.plan_id does not match plan.plan_id");
+    }
+  }
 
   // Status-conditional completeness (INV-RSM-STATE-COMPLETE): every field the
   // status's decision path reads must be present, or the load fails loudly
@@ -259,6 +289,31 @@ function validateState(value: unknown): string[] {
       );
     } else if (status !== "implementing") {
       errors.push('host_handoff is only valid while status is "implementing"');
+    }
+  }
+  // Operator lifecycle record (O31 / packet 14): only a parked (`paused`) or
+  // terminally cancelled (`cancelled`) run carries one, and the field is
+  // validated against its schema so a hand-written or drifted continuation is
+  // refused rather than read back as "resume to nowhere". The phase must name a
+  // real run status (from the same single-sourced array `status` derives from).
+  if (obj["lifecycle"] !== undefined) {
+    const parsed = LifecycleRecordSchema.safeParse(obj["lifecycle"]);
+    if (!parsed.success) {
+      errors.push(
+        `lifecycle failed schema validation: ${parsed.error.issues
+          .map((issue) => `${issue.path.join(".") || "lifecycle"}: ${issue.message}`)
+          .join("; ")}`,
+      );
+    } else if (status !== "paused" && status !== "cancelled") {
+      errors.push('lifecycle is only valid while status is "paused" or "cancelled"');
+    } else if (
+      !REMEDIATION_RUN_STATUSES.includes(
+        parsed.data.phase as (typeof REMEDIATION_RUN_STATUSES)[number],
+      )
+    ) {
+      errors.push(
+        `lifecycle.phase "${String(parsed.data.phase)}" is not a valid run status`,
+      );
     }
   }
   return errors;
@@ -429,22 +484,17 @@ export class StateStore {
         // with another release's contract version; that propagates out of the
         // read exactly as the policy requires (see the constant's doc).
         const adopted = adoptLegacyClarifications(raw);
+        assertNoLegacyReviewSelection(artifactsDir, adopted);
         const errors = validateState(adopted);
         if (errors.length > 0) {
           throw new Error(
             `state.json failed schema validation: ${errors.join("; ")}`,
           );
         }
-        // Returned as READ. The version is stamped on the way IN (the write
-        // hook below), so a state that has been through this store carries it
-        // on disk and this read is byte-faithful: what `loadState` returns is
-        // what the file says, with no field conjured at read time. A state
-        // written before the field existed has none until its next write, and
-        // `validateState` admits that (see the constant's doc) — which is the
-        // whole reason the field is optional on the type rather than required.
-        // The one exception is the retired clarification shape, translated by
-        // `adoptLegacyClarifications`; a current state is returned unchanged.
-        return adopted as RemediationState;
+        // Project legacy state into the conservative v1alpha2 policy before
+        // any decision path can read it. The next write persists that same
+        // projection atomically. Current v1alpha2 state is byte-faithful.
+        return stampedState(adopted as RemediationState, artifactsDir);
       },
       // The WRITE hook. Without it the store's own `persist` wrote whatever a
       // caller handed it — the load gate was the only validation on the path,
@@ -512,7 +562,7 @@ export class StateStore {
       // unstamped file. The value RESOLVED to the caller is the newly stamped
       // state (matching what `saveState` put on disk); the SKIP_WRITE arm below
       // still resolves with what was READ.
-      next = produced === SKIP_WRITE ? SKIP_WRITE : stampedState(produced);
+      next = produced === SKIP_WRITE ? SKIP_WRITE : stampedState(produced, this.artifactsDir);
       return next;
     });
     if (next !== SKIP_WRITE) return next;
@@ -537,25 +587,59 @@ export class StateStore {
     // Same node-worktree guard as `mutate` — the unconditional-write recovery
     // path must not be the one door a worker-context write can still use.
     assertNotNodeWorktreeCwd("a remediation state.json write");
-    await this.store.replace(stampedState(state));
+    await this.store.replace(stampedState(state, this.artifactsDir));
   }
 }
 
 /**
- * The state as it goes to disk: its own `contract_version` when it has one,
- * else the current constant.
- *
- * Stamping here — at the two write doors, not in the read path — is what keeps
- * `loadState` byte-faithful. A version conjured at READ time would make
- * `loadState()` return a key the file does not contain, so the round trip
- * `saveState(x)` → `loadState()` would not equal `x`, and a caller comparing
- * states (the ingress's `state_changed`, the tests) would see a change that
- * never happened. A state that already carries a DIFFERENT version is left
- * alone: the write hook's validator refuses it loudly rather than this helper
- * silently overwriting the caller's claim.
+ * A current state is preserved. Legacy or unstamped state is projected to
+ * v1alpha2 with a conservative review policy before decisions, then persisted
+ * on its next write. A different future version is left alone for validation
+ * to reject. A still-present legacy review sidecar refuses migration because
+ * default-off would discard its opted-in meaning.
  */
-function stampedState(state: RemediationState): RemediationState {
-  return state.contract_version === undefined
-    ? { ...state, contract_version: REMEDIATION_STATE_CONTRACT_VERSION }
-    : state;
+function stampedState(state: RemediationState, artifactsDir: string): RemediationState {
+  if (state.contract_version === REMEDIATION_STATE_CONTRACT_VERSION) return state;
+  if (
+    state.contract_version !== undefined &&
+    state.contract_version !== LEGACY_REMEDIATION_STATE_CONTRACT_VERSION
+  ) return state;
+  assertNoLegacyReviewSelection(artifactsDir, state);
+  const policy = state.conformance_review_policy ?? (state.plan?.plan_id
+    ? {
+        plan_id: state.plan.plan_id,
+        choice: "off" as const,
+        first_dispatch_recorded: true,
+      }
+    : state.contract_version === undefined && state.status === "pending" &&
+        Object.keys(state.items ?? {}).length === 0
+      ? { choice: "undecided" as const, first_dispatch_recorded: false }
+      : { choice: "off" as const, first_dispatch_recorded: false });
+  return {
+    ...state,
+    contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
+    conformance_review_policy: policy,
+  };
+}
+
+/** A legacy opted-in sidecar cannot be silently migrated as default-off. */
+function assertNoLegacyReviewSelection(artifactsDir: string, value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const state = value as Record<string, unknown>;
+  if (state.contract_version === REMEDIATION_STATE_CONTRACT_VERSION ||
+    state.conformance_review_policy !== undefined) return;
+  const plan = state.plan;
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return;
+  const planId = (plan as Record<string, unknown>).plan_id;
+  if (typeof planId !== "string") return;
+  assertSubmissionRunId(planId, "legacy remediation plan id");
+  const selectionPath = join(artifactsDir, "runs", planId, "implement", "conformance-review", "selection.json");
+  if (existsSync(selectionPath)) {
+    throw new Error(
+      "legacy conformance-review selection exists without a primary state policy; " +
+      "start a new remediation run from the original input in a fresh artifacts directory " +
+      "(next-step --input <source> --artifacts-dir <new-directory> --conformance-review), " +
+      "and preserve these artifacts rather than accepting results under default-off review",
+    );
+  }
 }

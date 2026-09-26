@@ -20,6 +20,7 @@ import {
 import type { AuditTask } from "../../src/audit/types.js";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { stableStringify } from "../../src/shared/stableStringify.js";
+import { compareCodeUnits } from "../../src/shared/compareCodeUnits.js";
 
 const RED_SIGNATURE =
   "contract:stable-task-affinity-artifacts:not-yet-satisfied";
@@ -27,10 +28,6 @@ const missingProjectRoot = join(
   dirname(fileURLToPath(import.meta.url)),
   "__missing_task_affinity_project__",
 );
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function compareEdges(left: TaskAffinityEdge, right: TaskAffinityEdge): number {
   for (const [leftValue, rightValue] of [

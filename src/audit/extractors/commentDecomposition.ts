@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/structure-decomposition.test.ts
 // Comment-decomposition extractor (Phase B intent-declared source; design of
 // record spec/conceptual-design-review-design.md §"Structure decomposition
 // sources" rule 2: "Comments are their own delta — comments are stated intent
@@ -196,7 +197,7 @@ export function extractCommentText(source: string, path: string): string {
  * failure the packet contract exists to close. `stripCommentText` keeps its
  * signature and its collapse for its own consumers.
  */
-function maskCommentSpans(source: string, path: string): string {
+export function maskCommentSpans(source: string, path: string): string {
   const spans = scanCommentSpans(source, path);
   if (spans.length === 0) return source;
   // SLICE-based, exactly like `stripCommentText` — so the mask and the strip

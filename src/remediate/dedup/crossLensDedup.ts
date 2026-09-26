@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/cross-lens-dedup.test.ts, tests/remediate/finding-filter.test.ts
 import { crossLensDedupe, wordJaccard } from "audit-tools/shared";
 import type { CrossLensDedupeResult } from "audit-tools/shared";
 import type { Finding, RemediationBlock } from "../state/types.js";
@@ -5,8 +6,6 @@ import type { Finding, RemediationBlock } from "../state/types.js";
 // Re-exported: tests/remediate/cross-lens-dedup.test.ts imports wordJaccard
 // directly from this module.
 export { wordJaccard };
-
-export type CrossLensDedupResult = CrossLensDedupeResult;
 
 /**
  * Remediate's DRAW of the shared cross-lens dedup core (`crossLensDedupe`): the
@@ -18,7 +17,7 @@ export type CrossLensDedupResult = CrossLensDedupeResult;
  */
 export function deduplicateCrossLensFindings(
   findings: Finding[],
-): CrossLensDedupResult {
+): CrossLensDedupeResult {
   return crossLensDedupe(findings, {
     categoryGate: "hard",
     exactIdentityShortCircuit: true,

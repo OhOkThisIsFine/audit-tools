@@ -8,16 +8,7 @@
 
 - **A settled nightly answer overtaken by a later decision has no stated handling, so the run decides alone (2026-09-23, medium, friction: ambiguous_direction).** `docs/nightly-routine.md` says a recorded `subject_key` is settled, is never re-raised, and that a run executes the unambiguous work its answer implies. It says nothing about an answer whose text names something a LATER owner decision retired. Subject `1fb2934333c59d31`, settled 2026-09-17, ends "Lane choice stays with llm-relay"; llm-relay was retired 2026-09-22. The 2026-09-23 run implemented the answer's substance and dropped that clause on its own judgment — the right call, but host discretion standing in for a contract, which is the thing this repository bans. Re-asking is equally wrong: the subject is settled and the rule that keeps a settled subject settled is load-bearing. **Property:** the routine states what a run does when a settled answer conflicts with a later decision — it executes the compatible remainder, records the dropped clause and the decision that overtook it in `applied`, and never silently reinstates the retired thing nor re-raises the settled subject.
 
-- **Outside the audit-tools repository, no repository-wide suite gate runs during remediation (2026-09-18, high, friction: tool_should_decide).** `toolOwnedFinalGateCommands` (`src/remediate/steps/gateCommands.ts`) returns no commands unless the target is the audit-tools repository, so `runToolOwnedFinalGate` (`src/remediate/steps/finalGate.ts`) records `scoped_out` at every phase boundary and before close, and lets the run continue. The only whole-repository suite left is the close phase's `plan.test_command` (`runCombinedTestSuite`, `src/remediate/phases/close.ts`), which runs once, after all work, and records `ran:false` when the plan has none. So a run on any other repository can finish with no build, typecheck or suite run at all, and a break from an early phase reaches later phases unseen. Found in the owner's review of prompt row 19 ([prompt refinement](../reviews/prompt-refinement-2026-09-13.md)); deferred from that lap for scope and the design gate (the gate is loop-core). **Property:** every target repository gets a real repository-wide gate at each phase boundary and before close, derived from the repository's own declared commands, and a target with no derivable command is surfaced to the operator, never passed as `scoped_out`.
-
-- **The push gate judges a lap-worktree push against the MAIN checkout's suite stamp (2026-09-15, medium, friction: tool_should_decide).** `.claude/hooks/push-gate.mjs` resolves its root from `CLAUDE_PROJECT_DIR`, which the hook runner binds to the primary checkout, while the `/ship` flow pushes from the lap worktree — so a full-suite green stamped in the worktree (`suiteGreenStampPath` is per worktree by design) is invisible to the gate, which then names the primary checkout's stale tree id and refuses a push the worktree's suite certified. **Property:** the gate judges the tree the push actually sends — the worktree the command runs in (its `cwd`, or `git rev-parse --show-toplevel` from it) — and reads that worktree's stamp; the primary checkout's stamp is consulted only when the push runs there.
-- **Host loader and workflow dispatch prompts leak internal mechanics and conflate prompt requests with tooling enforcement (2026-09-13, medium, friction: tool_should_decide).** `skills/audit-code/audit-code.prompt.md` and `skills/remediate-code/remediate-code.prompt.md` contain several defects where internal implementation trivia and unenforceable invariants are pushed onto the host orchestrator. The development instruction (`When developing audit-tools itself, use node audit-code.mjs...`) appears unconditionally during third-party repository audits instead of being scoped strictly to runs inside the `audit-tools` repository root. Implementation commentary about shared markdown fragments is leaked directly into the LLM context. Instructions plead with the model not to add provider or machine fields rather than mechanically rejecting unrecognized arguments in tooling (`guardArgv`), tell the orchestrator to read JSON only far enough to find `prompt_path` when the full payload has already entered context, and refer to abstract, cryptic 'capability preflights' and 'unavailable servers' rather than clear functional criteria (such as cross-file call-hierarchy navigation versus flat keyword search). **Property:** workflow prompts follow Prompt Contract v1: the immediate actor/action is explicit, every required fact is rendered or bound at an exact readable path, closed vocabularies and required fields agree with their validators, tool-owned fields stay out of worker contracts, lane fallbacks preserve lane semantics, and loaders remain thin rather than becoming parallel workflow engines. Canonical implementation target: [Prompt Contract Standard and Verified Prompt Review](../reviews/prompt-contract-standard-2026-09-19.md). Historical inventory: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
-
-- **Missing or mismatched `design_review.answered_at` provenance silently downgrades review depth to defaults (2026-09-13, medium, friction: tool_should_decide).** When an intent checkpoint carries a `design_review` block with a missing or mismatched `answered_at` timestamp, `resolveConceptualReviewSettings` in `src/audit/cli/conceptualDispatch.ts` treats the block as unbound and falls back to `"shallow"` conceptual review. While an informational notice is attached to the next step, the workflow advances anyway with downgraded execution rather than failing fast or requiring explicit operator re-confirmation. If an operator requested deep conceptual review or specific perspectives, this silent fallback executes a degraded pass contrary to user intent. **Property:** a missing or mismatched provenance timestamp on `design_review` causes `confirm_intent` to halt or re-prompt for confirmation rather than silently falling back to shallow defaults. Evidence: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
-
-- **`design_review` schema restricts perspectives to an integer count, preventing selection of specific or custom named perspectives (2026-09-13, low, friction: tool_should_decide).** `IntentCheckpointSchema.design_review` in `src/shared/types/intentCheckpoint.ts` specifies `perspectives: z.number().int().min(1).optional()`. This prevents the operator and orchestrator from selecting specific named perspectives (e.g. `["Adversary", "Minimalist"]`) or proposing domain-tailored `custom_perspectives`. **Property:** `IntentCheckpointSchema.design_review` supports both integer counts and named perspective arrays, alongside an optional `custom_perspectives` definition array. Evidence: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
-
-- **`IntentEquivalenceVerdictSchema` lacks a `rationale` field, precluding reasoning explanations in equivalence verdicts (2026-09-13, low, friction: tool_should_decide).** `IntentEquivalenceVerdictSchema` in `src/audit/orchestrator/intentEquivalenceExecutor.ts` is `.strict()` and only accepts `verdict` and `judged_pair`. Adding a `rationale` field to the prompt's verdict contract to capture the judge's reasoning causes validation rejection until the schema is updated to support it. **Property:** `IntentEquivalenceVerdictSchema` permits an optional `rationale` string field. Evidence: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
+- **Host capability preflight still depends on loader instructions rather than a tool-owned step (2026-09-13, medium, friction: tool_should_decide).** The recovered loader cleanup removed the structural-capability check before its replacement existed. Reconciliation retains a functional preflight and explicit degraded-run reflection in all four audit loaders. **Remaining property:** packet 9 of [the approved implementation plan](../reviews/backlog-implementation-2026-09-19.md) needs an emitted step that names the required symbol/call/cross-file capability, consumes the host's evidence, and stops or offers only an explicitly chosen supported fallback when unavailable. Prompt instructions alone cannot enforce this. The broader [Prompt Contract Standard](../reviews/prompt-contract-standard-2026-09-19.md) remains the review standard for that replacement.
 
 - **Analyzer consent decisions (`declined`) should not persist across runs (2026-09-13, medium, friction: tool_should_decide).** Currently, `src/audit/cli/nextStepHelpers.ts` persists `declined` analyzer consent decisions to `.audit-tools/audit/analyzer-policy.json` (`AnalyzerConsentDecisionSchema` in `src/shared/analyzerPolicy.ts`), vetoing future runs without re-asking. Per operator directive, neither declines nor grants should persist across runs; all analyzer consent decisions must be per-run so that the operator is prompted fresh on every run. **Property:** `analyzer_consent` decisions (both grants and declines) are strictly ephemeral for the current run, and `persistAnalyzerConsent` is retired from writing durable declines. Evidence: [prompt refinement and workflow prompt inventory](../reviews/prompt-refinement-2026-09-13.md).
 
@@ -306,14 +297,6 @@
   polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then
   the vitest-gate tolerance is the guard, and raw `npx vitest run` full runs still read red.
 
-- **Remediation pause/recovery is not durable (2026-08-03, medium).** A plan-only stop left
-  `.audit-tools/remediation/state.json` at `status: implementing`; the host work and its worktree
-  had to be found and reconciled manually, while the worktree survived only because the operator
-  knew its path. The primary record is
-  [`graph-derived-findings-remediation-process-review-2026-08-03.md`](../reviews/graph-derived-findings-remediation-process-review-2026-08-03.md).
-  **Property:** `plan_only`, pause, cancel, and resume persist the work item, workload binding,
-  worktree outcome, and exact continuation action; resume must not re-run or discard accepted work.
-
 - **Graph heuristics are promoted to findings without a semantic lead boundary (2026-08-03, medium).**
   Generic cut-edge detection labels ordinary test/asset/manifest bridges as systemic fragility; absolute
   co-change counts overstate broad migration commits; and whole-document file co-mentions masquerade as
@@ -406,17 +389,6 @@
   `worktreeTree` to learn whether the baseline was green. Its home is `C:\Code\docs\backlog.md`,
   because the declaration schema and its reader are machine-wide.
 
-- **The per-result LLM conformance review — the opt-in depth dial half of the owner decision — is
-  unbuilt, so semantic conformance to the carried module contracts is still judged by nothing
-  (2026-08-09, narrowed 2026-08-29, medium).** The mechanical floor half is enforced: the work item
-  binds `obligation_ids`, the result cites evidence per bound obligation (`obligation_evidence`,
-  `remediation-host-result/v1alpha3`), and ingestion refuses uncovered, unknown, duplicated, or
-  uncited obligations (`parseResult`, src/remediate/steps/dispatch/hostHandoff.ts). What remains is
-  the decision's second half: a bounded per-result LLM conformance review as an opt-in per-run
-  depth dial (per-run choices are never persisted) that judges whether the cited evidence actually
-  demonstrates conformance to the carried contracts — coverage is mechanical, sufficiency is not.
-  [[enforce-robustness-in-tooling-not-host-discretion]]
-
 - **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
   ambiguous-direction, low-medium).** The defect was found BY the run, and committing its fix changed
   the audited tree → staleness correctly marked the planning chain stale and restarted from
@@ -471,26 +443,6 @@
   remain pending rather than being rebound heuristically. **Still open:** confirmation on a real run
   that every `deepening:*` task converges in bounded rounds and the audit reaches synthesis without
   `force-synthesis`.
-
-- **The dispatch boundary strips every per-node field the contract pipeline writes onto a promoted
-  finding but `FindingSchema` does not declare (2026-08-27, medium).**
-  `promoteImplementationDagToExtractedPlan` (`src/remediate/steps/contractPipeline.ts`) writes
-  `concrete_change`, `preconditions`, `expected_changes`, and `addresses_counterexamples` onto each
-  promoted finding. `FindingSchema` (`src/shared/types/finding.ts`) is a bare `z.object` declaring
-  none of them, so zod's default strip removes all four at the `FindingSchema.parse` inside
-  `buildFindingAssignments` (`src/remediate/steps/dispatch/hostHandoff.ts`) — and that parse result
-  IS the per-item payload handed to the host, the last hop before the implementer prompt.
-  `targeted_commands`, which IS declared, survives the same parse, so the loss is silent and
-  field-selective rather than a visibly broken payload. `tests/remediate/contract-pipeline.test.ts`
-  pins the producer for `preconditions` and `expected_changes`, so the producer half is guarded and
-  the consumer half is not; no code reads any of the four off a finding, because their only intended
-  consumer is the host payload the parse empties. The implementer works from `summary`/`evidence`
-  without the node's stated precondition or expected change.
-  **Property:** a field the pipeline computes onto a finding reaches its consumer or is not computed
-  — it is declared on the finding contract, or the producer and the tests pinning it go. Same class
-  as the write-only remediate submission-ledger entry, at a different boundary.
-  [[write-only-data-looks-authoritative]] Trace:
-  [`n-r13-and-lean-fast-path-trace-2026-08-25.md`](../reviews/n-r13-and-lean-fast-path-trace-2026-08-25.md).
 
 - **The masked-exit guard keyed on TEST RUNNERS, not on whether the exit status is load-bearing —
   NARROWED to its curated-list half (2026-08-27, narrowed 2026-08-29, medium, friction:

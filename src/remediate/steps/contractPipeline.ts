@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts
+// sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts, tests/shared/packet-3-contracts.test.ts
 //   contract-pipeline: the promotion computes no finding field FindingSchema would drop.
 //   dc3: the fan-out wording (needs, not mechanism) and the TRANSPORT report for a
 //   partially returned wave.
@@ -1212,6 +1212,57 @@ function blockingCritiqueIds(critique: unknown): string[] {
     .filter((item) => item.severity === "blocking")
     .map((item) => (typeof item.id === "string" ? item.id : ""))
     .filter((id) => id.length > 0);
+}
+
+/**
+ * The canonical module SET a `finalized_module_contracts` repair must preserve,
+ * read from the DRAFTED `module_contracts` in drafting order. This is the
+ * identity INV-CO-13 pins: the same `module_contracts[].name` values the
+ * deterministic finalization maps 1:1, so a repair prompt that carries them can
+ * order "keep exactly these" rather than "rewrite in full" (T70).
+ */
+async function draftedModuleContractNames(
+  artifactsDir: string,
+): Promise<string[] | undefined> {
+  const drafted = await readContractArtifact(artifactsDir, "module_contracts");
+  const payload = envelopePayload(drafted);
+  const modules = isRecord(payload) ? payload.module_contracts : undefined;
+  if (!Array.isArray(modules)) return undefined;
+  const names: string[] = [];
+  for (const moduleEntry of modules) {
+    if (isRecord(moduleEntry) && typeof moduleEntry.name === "string" && moduleEntry.name.length > 0) {
+      names.push(moduleEntry.name);
+    }
+  }
+  return names.length > 0 ? names : undefined;
+}
+
+// Decomposition-owned facts a critique repair dispatched to
+// `finalized_module_contracts` CANNOT change — an interface contract cannot
+// widen a module's `file_scope`, add/remove a module, or re-cut the
+// decomposition, because those live in `module_decomposition` (and its derived
+// `module_contracts`). A blocking concern that prescribes one of these is not
+// reachable from the finalized-contracts repair the critique gate would
+// otherwise emit, so the repair routes up to `decomposition` (T71): the owning
+// step, not an impossible local edit in the opposite direction.
+const DECOMPOSITION_OWNED_REMEDY_PATTERN =
+  /\bfile_scope\b|\bfile scope\b|module decomposition|\bdecomposition\b|add (a )?module|\bremove (a )?module|\bmerge module|\bsplit module|\bre-?cut/i;
+
+/** The blocking concern descriptions that prescribe a decomposition-owned remedy. */
+function decompositionOwnedBlockingConcerns(critique: unknown): string[] {
+  const items =
+    isRecord(critique) && Array.isArray(critique.items) ? critique.items : [];
+  const concerns: string[] = [];
+  for (const item of items) {
+    if (!isRecord(item)) continue;
+    if (item.severity !== "blocking") continue;
+    const description = typeof item.description === "string" ? item.description : "";
+    if (description.length === 0) continue;
+    if (DECOMPOSITION_OWNED_REMEDY_PATTERN.test(description)) {
+      concerns.push(typeof item.id === "string" ? item.id : "?");
+    }
+  }
+  return concerns;
 }
 
 /**
@@ -2913,6 +2964,35 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
   if (!contractArtifactExists(ctx.artifactsDir, "conceptual_design_critique")) return null;
   const gate = await evaluateCritiqueGate(ctx.artifactsDir);
   if (gate.kind === "repair") {
+    // T71: a blocking concern that prescribes a decomposition-owned fact
+    // (widening a module's `file_scope`, adding/removing/merging a module, or
+    // re-cutting the decomposition) is NOT reachable from the finalized-contracts
+    // repair this gate would otherwise emit — those facts live in
+    // `module_decomposition`, and editing `finalized_module_contracts` cannot move
+    // them. Route up to the owning step rather than instruct an impossible local
+    // edit in the opposite direction. `decomposition` re-derives the drafts, which
+    // re-stales every downstream contract artifact, so the blocking concern is
+    // genuinely re-addressable there.
+    const critique = envelopePayload(
+      await readContractArtifact(ctx.artifactsDir, "conceptual_design_critique"),
+    );
+    const decompositionConcerns = decompositionOwnedBlockingConcerns(critique);
+    if (decompositionConcerns.length > 0) {
+      return {
+        via: "phase",
+        phase: "decomposition",
+        extraSection: `## Blocking Concerns Own the Decomposition
+
+The conceptual design critique raised blocking concern(s) — ${decompositionConcerns
+          .map((id) => `\`${id}\``)
+          .join(", ")} — whose remedy changes the module DECOMPOSITION (a module's
+file scope, the module set, or the decomposition itself). That is not resolvable
+from the finalized module contracts: this repair routes to the decomposition
+phase, the step that owns those facts. Re-cut the decomposition to resolve each
+concern; the drafted and finalized contracts re-derive from it.`,
+      };
+    }
+
     const repairState = await readRepairState(ctx.artifactsDir);
     const critiqueRepairs = repairState.critique_repairs ?? [];
     if (!critiqueRepairs.some((repair) => repair.critique_hash === gate.critiqueHash)) {
@@ -2930,16 +3010,17 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
       instruction:
         "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
         `(${gate.blockingIds.join(", ")}). Read conceptual_design_critique.json for each concern's ` +
-        "description, then rewrite the finalized module contracts so the blocking concerns no longer apply.",
+        "description, then edit the finalized module contracts so the blocking concerns no longer apply.",
       artifactPaths: ctx.artifactPaths,
       repoRoot: ctx.root,
+      canonicalModuleNames: await draftedModuleContractNames(ctx.artifactsDir),
     });
     return {
       via: "step",
       prompt: rendered.prompt,
       outputPath: rendered.outputPath,
       stopCondition:
-        "Stop after rewriting finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
+        "Stop after editing finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
     };
   }
   if (gate.kind === "escalate") {
@@ -4713,6 +4794,7 @@ export async function promoteImplementationDagToExtractedPlan(
       id: string;
       title: string;
       description: string;
+      concrete_change?: string;
       satisfies_obligations?: string[];
       addresses_counterexamples?: string[];
       verification_obligation_ids?: string[];
@@ -4888,24 +4970,22 @@ export async function promoteImplementationDagToExtractedPlan(
         obligationEvidence.length > 0
           ? obligationEvidence
           : [node.description ?? node.title ?? `Contract-pipeline task ${id}`],
-      // NO `concrete_change`. It was `node.description` a second time — `summary`
-      // above already carries exactly that — and no consumer ever read it:
-      // `FindingSchema` never declared it, so the dispatch boundary's
-      // `FindingSchema.parse` stripped it, and no reader recovered it from the
-      // plan in between. A field the pipeline computes onto a finding that
-      // reaches no consumer is not computed.
+      // The four per-node facts below are declared on `FindingSchema` (see
+      // `src/shared/types/finding.ts`), so they survive the dispatch boundary's
+      // `FindingSchema.parse` and reach the host implementer prompt — the ONE
+      // consumer that reads them off a finding. `concrete_change` names what the
+      // fix does (distinct from `summary`, which names the defect); the rest are
+      // the DAG node's own facts (`preconditions`, `expected_changes`,
+      // `addresses_counterexamples`), copied verbatim. The counterexample ids
+      // additionally reach the finding as `evidence` (the consumed projection).
+      concrete_change: node.concrete_change ?? node.description ?? "",
       contract_goal_id: dag?.goal_id,
       contract_obligation_ids: contractObligations,
       verification_obligation_ids: verificationObligations,
       targeted_commands: node.targeted_commands ?? [],
-      // NO `addresses_counterexamples`, `preconditions`, or `expected_changes`.
-      // Each is a DAG-node fact whose only readers are the node-side gates
-      // (`validateImplementationDAGIntegrity` and `validateCounterexampleThreading`
-      // in `src/remediate/validation/contractPipelineGates.ts`) — they read it
-      // off the NODE, never off a finding. Copied onto the finding they were
-      // declared on no schema, read by no consumer, and dropped by the dispatch
-      // boundary's `FindingSchema.parse`. The counterexample ids still reach the
-      // finding where they ARE consumed: folded into `evidence` above.
+      addresses_counterexamples: addressedCounterexamples,
+      preconditions: node.preconditions ?? [],
+      expected_changes: node.expected_changes ?? "",
     };
   });
 
@@ -4934,8 +5014,14 @@ export async function promoteImplementationDagToExtractedPlan(
           contract_obligation_ids: contractObligations,
           verification_obligation_ids: verificationObligations,
           targeted_commands: [...(node.targeted_commands ?? [])],
-          // The node-only fields are deliberately NOT copied here — see the
-          // sibling block above for why.
+          // Explicit DAG facts take precedence; an omitted DAG fact preserves
+          // the approved source finding instead of replacing it with a default.
+          concrete_change: node.concrete_change ?? finding.concrete_change ?? node.description ?? "",
+          addresses_counterexamples: [
+            ...new Set(node.addresses_counterexamples ?? finding.addresses_counterexamples ?? []),
+          ],
+          preconditions: [...(node.preconditions ?? finding.preconditions ?? [])],
+          expected_changes: node.expected_changes ?? finding.expected_changes ?? "",
         };
       });
   }

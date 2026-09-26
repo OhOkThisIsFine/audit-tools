@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/outcomes-roundtrip.test.ts
 // Phase 7B — per-finding remediation outcome capture. The remediator emits one
 // of these per finding into `remediation-outcomes.json` at close time. This is
 // capture/surface only: it records what happened so a human (or a later
@@ -140,7 +141,15 @@ export function mechanismContradictsOutcome(
  *
  * `executed`   — the command list ran; `passed` is a real verdict.
  * `scoped_out` — the suite does not apply to this target; zero commands ran.
+ *                RETIRED as an emission: the arbitrary-repository gate (O01)
+ *                replaced the audit-tools-only exemption with real derivation,
+ *                so no current writer produces this — it remains readable so an
+ *                old record still parses, and it must never be served as a pass.
  * `disabled`   — a gate was DUE but did not run.
+ * `needs_command` — no executable gate command is derivable from the target's
+ *                declared commands: the run pauses for an operator decision
+ *                (declare a command, or stop), and the gate blocks rather than
+ *                reporting a vacuous pass.
  * `history`    — a verdict for this exact tree content was already recorded, so
  *                the floor was NOT re-spawned; `passed` is that recorded verdict
  *                and `commands_run` counts the commands the RECORD held, never
@@ -155,6 +164,7 @@ export const FinalGateOutcomeKindSchema = z.enum([
   "executed",
   "scoped_out",
   "disabled",
+  "needs_command",
   "history",
 ]);
 export type FinalGateOutcomeKind = z.infer<typeof FinalGateOutcomeKindSchema>;
@@ -341,8 +351,16 @@ export const RemediationOutcomeSchema = z
      * still tell which module closed which id.
      */
     recorded_by_module: z.string().optional(),
-  })
-  .strict();
+  });
+// NOT `.strict()`: the on-disk `remediation-outcomes.json` outcome is a SUPERSET
+// of this shared per-finding subset — `RemediationOutcomeItem` adds `finding`,
+// `block_id`, `block_dependencies`, `final_status`, and `original_state` so the
+// file is retryable on its own. A strict schema here would reject every real
+// outcome the close phase emits (packet 20 boundary enforcement surfaced this
+// drift: the REPORT level was documented non-strict, but the nested outcome had
+// been left strict in contradiction). Unknown keys are therefore tolerated at
+// BOTH levels, so the owning schema actually owns the produced shape; a
+// missing/malformed REQUIRED field is still refused.
 export type RemediationOutcome = z.infer<typeof RemediationOutcomeSchema>;
 
 // Full count keyed by every status (not Partial): built by summing all 7

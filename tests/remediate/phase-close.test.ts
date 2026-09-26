@@ -1668,6 +1668,124 @@ describe("closing spawns refuse a command that leaves the declared single-invoca
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A genuinely DISCOVERABLE e2e command + a spawn seam. The sibling e2e-refusal
+// test above drives a hand-fed `e2e_command` through the EXPLICIT branch
+// (`runTrackedAsync`), which has no injectable seam. This closes the gap the
+// backlog names: the e2e leg's `project_facts` branch (the DISCOVERED-command
+// admission path) is now reachable through an injected spawn seam, so the shape
+// gate's refusal can be proven red-green against a command `discoverProjectCommands`
+// actually emits — the guard refuses BEFORE the seam runs, and inverting the
+// guard lets the seam run and reach the canary.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("e2e shape gate refuses a genuinely discoverable command before its spawn seam runs", () => {
+  it("refuses the discovered e2e command before the injectable spawn seam is reached", async () => {
+    // A package.json whose `e2e` script is genuinely discoverable AND leaves the
+    // shape — so `discoverProjectCommands(root).e2e` emits it, but the shape gate
+    // must refuse it before the (here, injected) admission spawn ever runs.
+    writeFileSync(
+      join(REPO_DIR, "package.json"),
+      JSON.stringify({ name: "e2e-fixture", scripts: { e2e: SHAPE_LEAVING_CANARY_COMMAND } }),
+    );
+
+    // The generated e2e command is the discovered `["npm","run","e2e"]` vector —
+    // genuinely discoverable, not a hand-fed string.
+    const { discoverProjectCommands } = await import(
+      "../../src/shared/tooling/testCommand.js"
+    );
+    expect(discoverProjectCommands(REPO_DIR).e2e).toEqual(["npm", "run", "e2e"]);
+
+    // The seam records whether it was reached and would write the canary if it
+    // ran — so a refusal that never spawned leaves no canary.
+    let reachable = false;
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [{ block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["src/e1.ts"] }],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        e2e_command: SHAPE_LEAVING_CANARY_COMMAND,
+        e2e_command_source: "project_facts",
+      },
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+
+    const next = await runClosePhase(state, {
+      ...BASE_OPTIONS,
+      e2eVerifyOverrides: {
+        run: async () => {
+          reachable = true;
+          writeFileSync(join(REPO_DIR, "canary.txt"), "ran");
+          return {
+            admitted: true,
+            exit_code: 0,
+            timed_out: false,
+            truncated: false,
+            output: "",
+          };
+        },
+      },
+    });
+
+    // The shape guard refused: the seam was never reached, the canary never
+    // written, and the refusal failed the close (resolved item re-blocked).
+    expect(reachable, "the shape guard must refuse before the spawn seam runs").toBe(false);
+    expect(existsSync(join(REPO_DIR, "canary.txt"))).toBe(false);
+    expect(next.status).toBe("triage");
+    expect(next.items?.F1?.status).toBe("blocked");
+  });
+
+  it("inverting the guard (a clean discovered command) reaches the seam and the canary", async () => {
+    // Same discoverable script, but a CLEAN e2e_command — no single quotes — so
+    // the shape gate does not refuse and the injected seam IS reached, writing
+    // the canary. This is the red half of the red-green pair above: delete the
+    // `commandLeavesDeclaredShape` guard and the refusal test's canary appears
+    // exactly as it does here on the admitted path.
+    writeFileSync(
+      join(REPO_DIR, "package.json"),
+      JSON.stringify({ name: "e2e-fixture", scripts: { e2e: "node -e \"process.exit(0)\"" } }),
+    );
+
+    const state = makeState({
+      plan: {
+        plan_id: "P1",
+        findings: [],
+        blocks: [{ block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: ["src/e1.ts"] }],
+        project_type: "unknown",
+        candidate_closing_actions: ["none"],
+        e2e_command: "npm run e2e",
+        e2e_command_source: "project_facts",
+      },
+      items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      closing_plan: { action: "none", pre_authorized: true },
+    });
+
+    let reachable = false;
+    await runClosePhase(state, {
+      ...BASE_OPTIONS,
+      e2eVerifyOverrides: {
+        run: async () => {
+          reachable = true;
+          writeFileSync(join(REPO_DIR, "canary.txt"), "ran");
+          return {
+            admitted: true,
+            exit_code: 0,
+            timed_out: false,
+            truncated: false,
+            output: "",
+          };
+        },
+      },
+    });
+
+    expect(reachable, "a clean discovered command must reach the injected seam").toBe(true);
+    expect(existsSync(join(REPO_DIR, "canary.txt")), "the seam reaches the canary — proof the refusal test is not vacuous").toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OBL-impl-block-1296-inv-2 — the closing spawns are AWAITED, not synchronous.
 // The close phase holds the state lock across them, and every liveness
 // heartbeat in the process (the advance heartbeat, each held lock's mtime

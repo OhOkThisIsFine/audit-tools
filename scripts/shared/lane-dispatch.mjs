@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/lane-dispatch.test.ts, tests/shared/triage-finish-and-count.test.ts
 // One-item-per-call lane dispatch driver (P28 wrapper half, nightly sol-3).
 //
 // Extracted from scripts/shared/triage-backlog.mjs, which grew the correct
@@ -145,6 +146,7 @@ export async function dispatchBoundedItems({
   // retried nothing and exited 0 — a false green.) Kept rows pass through
   // `reviveRecord` so the rewritten file reflects the tree as of THIS run.
   const done = new Set();
+  const revived = [];
   if (fs.existsSync(outPath)) {
     const kept = [];
     for (const l of fs.readFileSync(outPath, 'utf8').split('\n')) {
@@ -153,7 +155,9 @@ export async function dispatchBoundedItems({
         const rec = JSON.parse(l);
         if (rec.error) continue;
         done.add(rec.id);
-        kept.push(reviveRecord ? reviveRecord(rec) : rec);
+        const revivedRec = reviveRecord ? reviveRecord(rec) : rec;
+        kept.push(revivedRec);
+        revived.push(revivedRec);
       } catch {}
     }
     fs.writeFileSync(outPath, kept.map((r) => JSON.stringify(r)).join('\n') + (kept.length ? '\n' : ''));
@@ -179,6 +183,16 @@ export async function dispatchBoundedItems({
     retried: 0,
     ...stampInit,
   };
+  // Caller-owned per-record counters (e.g. the triage premise classes) must
+  // describe the COMPLETE persisted population, not only this pass's new rows —
+  // a resumed run folds its retained (revived) records through the SAME
+  // `stampExtra` so a class counter sums to `classified_total`, the revived and
+  // the newly produced each counted exactly once. Attempts stay separate: this
+  // runs before the sweep, and `attempted`/`classified` below count only what
+  // THIS invocation actually dispatched.
+  for (const rec of revived) {
+    if (stampExtra) stampExtra(stamp, rec);
+  }
   stampSafe(stamp);
 
   // Preflight: one call before the sweep, SINGLE attempt (matching the

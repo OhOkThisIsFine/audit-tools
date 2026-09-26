@@ -45,7 +45,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isGlob, globToRegExp } from './check-doc-manifest.mjs';
 import { GUARDS, REACH } from './guard-reach-data.mjs';
-import { verifyChecksSteps } from './shared/verify-steps.mjs';
+import { releaseGatePhases } from './shared/run-release-gates.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_FILE = 'scripts/guard-reach-data.mjs';
@@ -58,44 +58,21 @@ const matcherFor = (pattern) => (isGlob(pattern) ? globToRegExp(pattern) : null)
 const matches = (pattern, matcher, file) => (matcher ? matcher.test(file) : pattern === file);
 
 /**
- * Expand the npm-script reachability closure from `verify:release`: follow
- * `npm run <name>` references and the gate names listed as arguments to
- * profile-run.mjs. Returns the visited script names.
- */
-function reachableScripts(packageScripts, root = 'verify:release') {
-  const visited = new Set();
-  const stack = [root];
-  while (stack.length) {
-    const name = /** @type {string} */ (stack.pop());
-    if (visited.has(name) || !(name in packageScripts)) continue;
-    visited.add(name);
-    const cmd = packageScripts[name];
-    for (const m of cmd.matchAll(/npm run ([A-Za-z0-9:._-]+)/g)) stack.push(m[1]);
-    if (cmd.includes('profile-run.mjs')) {
-      // `profile-run.mjs <label> <script> <script> …` — every arg after the
-      // label that names a package script is an edge.
-      for (const token of cmd.split(/\s+/)) {
-        if (token in packageScripts) stack.push(token);
-      }
-    }
-  }
-  return visited;
-}
-
-/**
  * Every home a gate is missing from, named in ONE report.
  *
  * The defect this closes (backlog 2026-08-30): registering ONE new gate took
- * edits in five separate homes — the `package.json` script, the `verify:checks`
- * step list, a GUARDS row, a REACH row, and (then) a `STEP_GLOSS` entry — and
- * nothing stated the SET, so each one was discovered by failing the next check
- * in turn. Every guard below is doing its job; what was missing was a single
- * reading that names the whole remainder at once.
+ * edits in five separate homes. That ended when the step list became DERIVED
+ * from the declaration (packet 22, 2026-09-20): a gate's release step and its
+ * wiring are both properties of its GUARDS row. Two homes remain outside the
+ * row — the `package.json` script that wraps the `check:*`/`verify:*` command
+ * into an `npm run` target, and (for a `reach`/`final` pre-commit gate) a REACH
+ * row whose staged-path union gives the leg its trigger. This aggregate names
+ * both at once when the remainder is more than one.
  *
  * Scope: gates that FOLLOW the npm-script convention (`impl === id`), which is
- * the registration procedure the five-home walk describes. A path-impl gate
- * (`vitest-gate`, invoked by path from a reachable script) has a different
- * procedure and is reconciled by the wiring rules below, not here.
+ * the registration procedure the walk describes. A path-impl gate
+ * (`vitest-gate`, invoked by path) has a different procedure and is reconciled
+ * by the wiring rules below, not here.
  *
  * A gate missing exactly ONE home is left to the precise message that already
  * describes it — aggregating one item would only duplicate that text. The
@@ -106,14 +83,6 @@ function reachableScripts(packageScripts, root = 'verify:release') {
  * @returns {{id: string, missing: string[]}[]}
  */
 export function gateHomeGaps({ guards, reach, packageScripts }) {
-  let steps;
-  try {
-    steps = new Set(verifyChecksSteps(packageScripts));
-  } catch {
-    // verify:checks is unrunnable — the wiring rules below report that loudly
-    // and this aggregate has no step list to reconcile against.
-    steps = new Set();
-  }
   const cited = new Set(reach.flatMap((row) => (row.guardedBy === 'declared-gap' ? [] : row.guardedBy)));
   const gateRows = guards.filter((g) => g.kind === 'gate' && g.impl === g.id);
 
@@ -124,7 +93,6 @@ export function gateHomeGaps({ guards, reach, packageScripts }) {
   for (const id of [...ids].sort()) {
     const missing = [];
     if (!(id in packageScripts)) missing.push(`package.json scripts["${id}"]`);
-    if (steps.size > 0 && !steps.has(id)) missing.push('the verify:checks step list');
     const row = gateRows.find((g) => g.id === id);
     if (!row) missing.push('a GUARDS row (kind "gate")');
     else if ((row.preCommit === 'reach' || row.preCommit === 'final') && !cited.has(id)) {
@@ -269,18 +237,40 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
   }
 
   // ── wiring: every guard is enforced somewhere ──────────────────────────────
-  const reachable = reachableScripts(packageScripts);
-  const reachableCmds = [...reachable].map((name) => norm(packageScripts[name]));
+  // The release step is DERIVED from the declaration (releaseGatePhases), so a
+  // gate is "in the release chain" when its row exists — there is no separate
+  // verify:checks list to reconcile against. What must still be checked is that
+  // its COMMAND is real: a `check:`/gate impl must name a package.json script,
+  // and the release runner's profile renderer is reachable.
+  const releaseImpls = new Set(
+    [...releaseGatePhases(guards).default, ...releaseGatePhases(guards).tail].map(norm),
+  );
+  const runnerReachable = Object.values(packageScripts).some((cmd) =>
+    norm(cmd).includes('run-release-gates.mjs'),
+  );
+  if (!runnerReachable) {
+    errors.push(
+      'the release runner (scripts/shared/run-release-gates.mjs) is not wired into any package.json ' +
+        'script — wire verify:checks / verify:release to it, or the gate catalog has no executor.',
+    );
+  }
   for (const g of guards) {
     const impl = norm(g.impl);
     if (g.kind === 'gate') {
-      const wired = impl.includes('/')
-        ? reachableCmds.some((cmd) => cmd.includes(impl))
-        : reachable.has(impl);
+      // An impl carrying no `/` is an npm-script name; the release leg runs it
+      // via `npm run`, so it must exist in package.json. A path impl (e.g.
+      // vitest-gate) is a file the release runner invokes by name — it must be
+      // a tracked file, and (like every gate) it is a release step because its
+      // row declares it, so no separate "wire into the chain" edit exists.
+      const isScript = !impl.includes('/');
+      const wired = isScript
+        ? impl in packageScripts && releaseImpls.has(impl)
+        : files.includes(impl) && releaseImpls.has(impl);
       if (!wired) {
         errors.push(
-          `Gate guard "${g.id}" is not reachable from verify:release — a script in no gate is not a ` +
-            `gate. impl: ${g.impl}\n  → wire it into the verify chain (package.json) or remove the row.`,
+          `Gate guard "${g.id}" is not executable by the release runner — a script in no gate is not a ` +
+            `gate. impl: ${g.impl}\n  → a script impl must name a package.json script and a path impl ` +
+            `must name a tracked file; either way its own GUARDS row is what places it in the release sequence.`,
         );
       }
     } else if (g.kind === 'hook') {

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-path-utils.test.ts
 /**
  * Shared bootstrap heuristics for the extractor layer. These rules run before
  * richer graph/unit analysis exists, so they intentionally favor recall over
@@ -171,12 +172,50 @@ function baseName(normalized: string): string {
 }
 
 export function pathTokens(normalized: string): string[] {
-  return normalized.split(/[^a-z0-9]+/).filter(Boolean);
+  const tokens: string[] = [];
+  const len = normalized.length;
+  let i = 0;
+  while (i < len) {
+    while (i < len) {
+      const code = normalized.charCodeAt(i);
+      if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57)) break;
+      i++;
+    }
+    if (i >= len) break;
+    const start = i;
+    while (i < len) {
+      const code = normalized.charCodeAt(i);
+      if (!((code >= 97 && code <= 122) || (code >= 48 && code <= 57))) break;
+      i++;
+    }
+    tokens.push(normalized.slice(start, i));
+  }
+  return tokens;
 }
 
 function hasToken(normalized: string, values: readonly string[]): boolean {
-  const tokens = new Set(pathTokens(normalized));
-  return values.some((value) => tokens.has(value));
+  if (values.length === 0) return false;
+  const targetSet = new Set(values);
+  const len = normalized.length;
+  let i = 0;
+  while (i < len) {
+    while (i < len) {
+      const code = normalized.charCodeAt(i);
+      if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57)) break;
+      i++;
+    }
+    if (i >= len) break;
+    const start = i;
+    while (i < len) {
+      const code = normalized.charCodeAt(i);
+      if (!((code >= 97 && code <= 122) || (code >= 48 && code <= 57))) break;
+      i++;
+    }
+    if (targetSet.has(normalized.slice(start, i))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function isNodeModulesOrGit(normalized: string): boolean {

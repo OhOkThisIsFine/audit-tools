@@ -76,6 +76,11 @@ export function runCharterFidelityExecutor(
   const findings = groundDesignFindings(
     differenceFindings(differences, register.correspondences, register.lanes),
     bundle.repo_manifest,
+    // `differenceFindings` output is TOOL-minted (deterministic charter-delta
+    // leads), so its `lead_lineage` is the producer's own stamp, not a host
+    // forgery — preserve it through grounding so the report gate can hold the
+    // lead for semantic confirmation.
+    { preserveLeadLineage: true },
   );
 
   const updated: CharterRegister = {

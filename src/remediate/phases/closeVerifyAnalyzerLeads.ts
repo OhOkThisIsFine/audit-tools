@@ -79,14 +79,15 @@ export async function verifyAnalyzerLeads(params: {
   if (targets.length === 0) return NO_OP;
 
   const persistedAnalyzerPolicy = await loadAnalyzerPolicy(root);
+  // Packet 5 / O07: consent is strictly per-run and never durable, so there is
+  // no persisted consent to merge — only the durable per-analyzer resolution
+  // settings ride the re-run. A consent-gated analyzer simply re-runs as
+  // `skipped` here (recorded per-item, never silent) unless this invocation's
+  // overrides admit it.
   const analyzerPolicy: AnalyzerPolicy = {
     analyzers: {
       ...persistedAnalyzerPolicy.analyzers,
       ...overrides?.analyzerPolicy?.analyzers,
-    },
-    analyzer_consent: {
-      ...persistedAnalyzerPolicy.analyzer_consent,
-      ...overrides?.analyzerPolicy?.analyzer_consent,
     },
   };
 
@@ -103,7 +104,6 @@ export async function verifyAnalyzerLeads(params: {
   const candidates = overrides?.candidates ?? EXTERNAL_ANALYZER_CANDIDATES;
   const engineOptions = {
     analyzers: analyzerPolicy.analyzers,
-    analyzerConsent: analyzerPolicy.analyzer_consent,
     ...(overrides?.run ? { run: overrides.run } : {}),
   };
 

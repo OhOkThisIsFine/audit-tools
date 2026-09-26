@@ -12,6 +12,9 @@ import {
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
+const { GATE_LANES, laneSubmissionPath } = await import(
+  "../../src/audit/cli/laneSubmissions.js"
+);
 
 interface WrapperStep {
   step_kind: string;
@@ -99,17 +102,34 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
     await writeFixtureRepo(root);
     await persistSynthesisReadyState(root, artifactsDir);
     // This fixture has no local `typescript`; skip the optional analyzer so the
-    // resume does not pause on the graph-enrichment install prompt.
+    // resume does not pause on the graph-enrichment install prompt. Consent is
+    // strictly per-run (packet 5 / O07) and has no durable shape, so there is
+    // nothing to pre-record for the consent offer: answer this run's offer at
+    // the lane's tool-owned bound path instead, so the resume reaches the
+    // narrative pause under test rather than the consent pause.
     await writeFile(
       join(artifactsDir, "analyzer-policy.json"),
       JSON.stringify(
         {
           analyzers: { typescript: "skip" },
-          analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
         },
         null,
         2,
       ) + "\n",
+    );
+    await mkdir(dirname(laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_consent)), {
+      recursive: true,
+    });
+    await writeFile(
+      laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_consent),
+      JSON.stringify({
+        semgrep: "declined",
+        eslint: "declined",
+        knip: "declined",
+        jscpd: "declined",
+        "osv-scanner": "declined",
+      }) + "\n",
+      "utf8",
     );
 
     // First next-step lands on the narrative pause.

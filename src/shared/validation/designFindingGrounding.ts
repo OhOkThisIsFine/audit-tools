@@ -75,7 +75,7 @@ export function groundDesignFinding(
  * provenance the ingest owns, and a separate call is a call a future ingest site
  * can forget.
  *
- * The `lead_lineage` STRIP is unconditional for the same reason, and it is the
+ * The `lead_lineage` STRIP is unconditional by default for the same reason, and it is the
  * same "a separate call is a call someone forgets" argument. Without it, a
  * submission carrying `{producer: "host-forged", …}` lands verbatim in
  * `contract_findings` / `conceptual_findings` and thereafter reads as a
@@ -88,13 +88,22 @@ export function groundDesignFinding(
  * `SubmittedDesignFindingSchema` and REFUSES a supplied tool-owned verdict by
  * name, which is strictly better than a silent strip. The strip stays because
  * three callers never pass through that door — the charter clarification and
- * charter fidelity executors, and the systemic challenge loop — and each of them
- * ingests host-authored findings the same way.
+ * charter fidelity executors, and the systemic challenge loop. Two of them
+ * (clarification, systemic) ingest host-authored findings and keep the strip;
+ * the charter fidelity executor instead opt in to preserving its tool-minted
+ * `differenceFindings` lineage (see `preserveLeadLineage` below).
  *
  * A host that legitimately re-emits a lead is unaffected in substance: the
  * provenance it could not have verified is exactly the part the tool refuses to
  * take on its word, and its own `evidence` and `affected_files` ride through
  * unchanged.
+ *
+ * `preserveLeadLineage` opts a caller out of the strip — for findings the TOOL
+ * itself produced (a deterministic producer stamping its own lineage), which are
+ * not host forgery candidates. It is off by default so host-authored doors keep
+ * the strip; the charter-fidelity executor is the one production caller that
+ * passes it, because `differenceFindings` output is tool-minted, not host-
+ * authored.
  *
  * The GROUNDING verdict is conditional. When no repo manifest is available the
  * findings cannot be grounded against a known file set, so they are returned
@@ -105,10 +114,14 @@ export function groundDesignFinding(
 export function groundDesignFindings(
   findings: Finding[],
   repoManifest: { files?: Array<{ path: string }> } | undefined,
+  options: { preserveLeadLineage?: boolean } = {},
 ): Finding[] {
-  const marked = findings.map(({ lead_lineage: _forged, ...finding }) => ({
+  const marked = findings.map(({ lead_lineage, ...finding }) => ({
     ...finding,
     evidence_lane: "design-review-lane" as const,
+    ...(options.preserveLeadLineage && lead_lineage !== undefined
+      ? { lead_lineage }
+      : {}),
   }));
   const known = repoPathUniverse(repoManifest);
   if (known.size === 0) return marked;

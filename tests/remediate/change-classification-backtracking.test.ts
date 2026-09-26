@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assertionPolarity } from "../../src/remediate/contractPipeline/changeClassification.js";
+import {
+  assertionPolarity,
+  extractSymbolTokens,
+  negativeAssertionIsScoped,
+} from "../../src/remediate/contractPipeline/changeClassification.js";
 
 /**
  * Super-linear backtracking at the analyzer-sweep sites
@@ -94,5 +98,54 @@ describe("assertion polarity masking is linear on adversarial assertions", () =>
     expect(assertionPolarity("a-")).toBe("none");
     expect(assertionPolarity("-")).toBe("none");
     expect(assertionPolarity("")).toBe("none");
+  });
+});
+
+describe("affirmative global scan clause scanning is linear on repeated-clause inputs", () => {
+  it("scans thousands of repeated negated clauses without prefix-splitting blowup", () => {
+    // Pre-correction, each match sliced assertion.slice(0, match.index) and called
+    // .split(/[.;,]|—|--/), causing quadratic Θ(N²) runtime on repeated clauses.
+    const repeated = "not repo-wide; ".repeat(10_000) + "scoped to auth";
+    let isScoped = false;
+    const elapsed = elapsedMsOf(() => {
+      isScoped = negativeAssertionIsScoped(repeated, ["auth"]);
+    });
+
+    expect(isScoped).toBe(true);
+    expect(
+      elapsed,
+      `scanning repeated clauses took ${elapsed.toFixed(1)}ms`,
+    ).toBeLessThan(150);
+  });
+
+  it("correctly identifies affirmative scans across repeated clauses with bounded time", () => {
+    const repeatedWithAffirmative =
+      "not repo-wide; ".repeat(10_000) + "entire codebase and auth";
+    let isScoped = false;
+    const elapsed = elapsedMsOf(() => {
+      isScoped = negativeAssertionIsScoped(repeatedWithAffirmative, ["auth"]);
+    });
+
+    expect(isScoped).toBe(false);
+    expect(
+      elapsed,
+      `scanning affirmative scan after repeated clauses took ${elapsed.toFixed(1)}ms`,
+    ).toBeLessThan(150);
+  });
+});
+
+describe("classification token edge trimming is linear on punctuation runs", () => {
+  it("trims token edges with two pointers without regex backtracking", () => {
+    const input = "-./".repeat(15_000) + "AuthHandler" + "-./".repeat(15_000);
+    let tokens: string[] = [];
+    const elapsed = elapsedMsOf(() => {
+      tokens = extractSymbolTokens(input);
+    });
+
+    expect(tokens).toEqual(["authhandler"]);
+    expect(
+      elapsed,
+      `trimming token edges took ${elapsed.toFixed(1)}ms`,
+    ).toBeLessThan(150);
   });
 });

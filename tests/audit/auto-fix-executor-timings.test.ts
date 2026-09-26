@@ -62,7 +62,8 @@ test("keeps tool_timings aligned with executed_tools", async () => {
     const bundle: ArtifactBundle = {
       file_disposition: { files: [{ path: "src/index.js", status: "included" }] },
     };
-    const result = await runAutoFixExecutor(bundle, root);
+    // Opted in: the alignment property only exists when a formatter runs.
+    const result = await runAutoFixExecutor(bundle, root, { autoFix: { enabled: true } });
     const applied = result.updated.auto_fixes_applied;
     if (!isAutoFixesAppliedTimings(applied)) {
       throw new TypeError("auto_fixes_applied did not match the executor contract");

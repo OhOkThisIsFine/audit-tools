@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/grounding.test.ts, tests/remediate/finding-filter.test.ts
 /**
  * Deterministic grounding for LLM-extracted findings (free-form input only).
  *
@@ -124,11 +125,6 @@ export function evidenceCitesRealPath(
   return checks.some((check) => check.verdict === "ok");
 }
 
-export interface EvidenceGrounding {
-  /** IDs of findings with no evidence entry citing a real repo path. */
-  ungroundedFindingIds: string[];
-}
-
 /**
  * Mark each extracted finding `evidence_grounded` and downgrade ungrounded
  * findings to low confidence in place. Ungrounded findings are flagged for the
@@ -139,7 +135,7 @@ export function groundEvidence(
   root: string,
   findings: Finding[],
   corpus: ReadonlySet<string>,
-): EvidenceGrounding {
+): { ungroundedFindingIds: string[] } {
   const ungroundedFindingIds: string[] = [];
   for (const finding of findings) {
     const grounded = (finding.evidence ?? []).some((entry) =>

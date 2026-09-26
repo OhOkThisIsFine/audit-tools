@@ -651,6 +651,15 @@ export interface ContractRepairRenderInput {
   artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
   /** Repository root path — passed to workers for cwd anchoring. */
   repoRoot?: string;
+  /**
+   * The canonical module SET the `finalized_module_contracts` target must
+   * preserve, in drafting order. Carried so the repair prompt can NAME the
+   * identity a rewrite must keep — a repair that drops, renames, or merges a
+   * module is the defect INV-CO-13 exists to refuse (T70: the prompt used to
+   * order "rewrite in full", inviting exactly that collapse). Absent on the
+   * non-finalization targets, where there is no module set to preserve.
+   */
+  canonicalModuleNames?: readonly string[];
 }
 
 /**
@@ -704,7 +713,7 @@ const REPAIR_TRIGGER_CONTRACT: Record<
   },
   critique: {
     lead: (target) =>
-      `The conceptual design critique raised blocking concerns. Rewrite \`${target}\` in full so that no blocking concern still applies.`,
+      `The conceptual design critique raised blocking concerns. Edit \`${target}\` to resolve every blocking concern without changing its module set — drop no module, rename none, and merge none.`,
     instructionHeading: "Blocking Concerns",
     // The critique gate runs BEFORE any downstream artifact is derived, so the
     // judge-side artifacts do not exist yet. Listing them is what sent workers
@@ -755,6 +764,26 @@ export function renderContractRepairPrompt(
   }
   const role = REPAIR_TARGET_ROLE[input.target];
 
+  const moduleSetPreservation =
+    input.target === "finalized_module_contracts" &&
+    input.canonicalModuleNames !== undefined &&
+    input.canonicalModuleNames.length > 0
+      ? [
+          "",
+          `Preserve the canonical module set EXACTLY — the ${input.canonicalModuleNames.length} modules ` +
+            "drafted in `module_contracts`, in this order, and no others:",
+          "",
+          ...input.canonicalModuleNames.map((name) => `- \`${name}\``),
+          "",
+          "Deleting, renaming, or merging any module here is a rejected rewrite, not a repair.",
+        ].join("\n")
+      : "";
+
+  const taskDirective =
+    input.target === "finalized_module_contracts" && input.canonicalModuleNames !== undefined
+      ? "Edit the existing finalized contracts to address what the instruction names below, keeping every module listed:"
+      : "Write the complete artifact, not a diff, to exactly:";
+
   const prompt = `# Contract Repair: ${input.target}
 
 ${contract.lead(input.target)}
@@ -766,10 +795,10 @@ ${input.instruction}
 ## Required Inputs
 
 ${requiredInputs.map((key) => `- \`${input.artifactPaths[key]}\` (${key})`).join("\n")}
-
+${moduleSetPreservation}
 ## Your Task
 
-Read the inputs above. Attend to ${contract.readingNote}. Write the complete artifact, not a diff, to exactly:
+Read the inputs above. Attend to ${contract.readingNote}. ${taskDirective}
 
 \`${outputPath}\`
 

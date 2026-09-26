@@ -1,5 +1,7 @@
+// sites-pinned: tests/audit/graph-route-backtracking.test.ts, tests/audit/graph-framework-routes.test.ts
 import type { GraphEdge, RouteEdge } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
+import { maskCommentSpans } from "./commentDecomposition.js";
 import {
   graphEdge,
   normalizeGraphPath,
@@ -314,7 +316,7 @@ function isIdentifier(value: string | undefined): value is string {
   return typeof value === "string" && IDENTIFIER_PATTERN.test(value);
 }
 
-interface ImportBinding {
+export interface ImportBinding {
   target: string;
   specifier: string;
 }
@@ -330,15 +332,87 @@ function addImportBinding(
 }
 
 function parseNamedImportLocal(rawName: string): string | undefined {
-  const normalized = rawName.trim().replace(/^type\s+/i, "").trim();
-  if (!normalized) {
+  let i = 0;
+  const len = rawName.length;
+
+  // 1. Skip leading whitespace
+  while (i < len && WHITESPACE_CHARACTER.test(rawName[i]!)) i++;
+
+  // 2. Skip optional `type\s+`
+  if (
+    rawName.startsWith("type", i) &&
+    i + 4 < len &&
+    WHITESPACE_CHARACTER.test(rawName[i + 4]!)
+  ) {
+    i += 4;
+    while (i < len && WHITESPACE_CHARACTER.test(rawName[i]!)) i++;
+  }
+
+  // 3. Scan first identifier
+  const firstStart = i;
+  while (i < len && (isWordCharacterAt(rawName, i) || rawName[i] === "$")) {
+    i++;
+  }
+  const firstIdent = rawName.slice(firstStart, i);
+  if (!isIdentifier(firstIdent)) {
     return undefined;
   }
-  const [, aliasedName] = normalized.split(/\s+as\s+/i);
-  const localName = (aliasedName ?? normalized.split(/\s*:\s*/).at(-1) ?? "")
-    .trim()
-    .replace(/=.*$/, "")
-    .trim();
+
+  let localName = firstIdent;
+
+  // 4. Scan the rest of the binding in a single pass
+  while (i < len) {
+    const ch = rawName[i]!;
+
+    if (WHITESPACE_CHARACTER.test(ch)) {
+      i++;
+      continue;
+    }
+
+    if (ch === "=") {
+      break;
+    }
+
+    if (ch === ":") {
+      i++;
+      while (i < len && WHITESPACE_CHARACTER.test(rawName[i]!)) i++;
+      const nextStart = i;
+      while (i < len && (isWordCharacterAt(rawName, i) || rawName[i] === "$")) {
+        i++;
+      }
+      const nextIdent = rawName.slice(nextStart, i);
+      if (isIdentifier(nextIdent)) {
+        localName = nextIdent;
+      } else {
+        return undefined;
+      }
+      continue;
+    }
+
+    if (
+      (ch === "a" || ch === "A") &&
+      i + 1 < len &&
+      (rawName[i + 1] === "s" || rawName[i + 1] === "S") &&
+      (i + 2 >= len || WHITESPACE_CHARACTER.test(rawName[i + 2]!))
+    ) {
+      i += 2;
+      while (i < len && WHITESPACE_CHARACTER.test(rawName[i]!)) i++;
+      const aliasStart = i;
+      while (i < len && (isWordCharacterAt(rawName, i) || rawName[i] === "$")) {
+        i++;
+      }
+      const aliasIdent = rawName.slice(aliasStart, i);
+      if (isIdentifier(aliasIdent)) {
+        localName = aliasIdent;
+      } else {
+        return undefined;
+      }
+      continue;
+    }
+
+    i++;
+  }
+
   return isIdentifier(localName) ? localName : undefined;
 }
 
@@ -352,7 +426,7 @@ function addNamedImportBindings(
   }
 }
 
-function extractImportBindings(
+export function extractImportBindings(
   fromPath: string,
   content: string,
   pathLookup: Map<string, string>,
@@ -462,6 +536,138 @@ function addRouteEvidence(params: {
   }
 }
 
+const COMPONENT_EXTENSION_PATTERN = /\.(?:vue|svelte|astro)$/i;
+
+function stripHtmlComments(content: string): string {
+  let result = "";
+  let cursor = 0;
+  while (cursor < content.length) {
+    const open = content.indexOf("<!--", cursor);
+    if (open === -1) {
+      result += content.slice(cursor);
+      break;
+    }
+    result += content.slice(cursor, open);
+    const close = content.indexOf("-->", open + 4);
+    if (close === -1) {
+      break;
+    }
+    cursor = close + 3;
+  }
+  return result;
+}
+
+function findTagEnd(content: string, fromIndex: number): number {
+  let quote: string | undefined;
+  for (let i = fromIndex; i < content.length; i++) {
+    const char = content[i];
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else if (char === "\\") {
+        i++;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function extractScriptTags(content: string): string[] {
+  const regions: string[] = [];
+  const lower = content.toLowerCase();
+  let searchFrom = 0;
+
+  while (searchFrom < content.length) {
+    const scriptIndex = lower.indexOf("<script", searchFrom);
+    if (scriptIndex === -1) break;
+
+    const charAfter = lower[scriptIndex + 7];
+    if (
+      charAfter !== undefined &&
+      charAfter !== ">" &&
+      !/\s/.test(charAfter) &&
+      charAfter !== "/"
+    ) {
+      searchFrom = scriptIndex + 7;
+      continue;
+    }
+
+    const tagEnd = findTagEnd(content, scriptIndex + 7);
+    if (tagEnd === -1) break;
+
+    if (content.slice(scriptIndex, tagEnd + 1).trimEnd().endsWith("/>")) {
+      searchFrom = tagEnd + 1;
+      continue;
+    }
+
+    const closeIndex = lower.indexOf("</script>", tagEnd + 1);
+    if (closeIndex === -1) {
+      regions.push(content.slice(tagEnd + 1));
+      break;
+    }
+
+    regions.push(content.slice(tagEnd + 1, closeIndex));
+    searchFrom = closeIndex + 9;
+  }
+
+  return regions;
+}
+
+function extractAstroFrontmatter(content: string): string | undefined {
+  const trimmed = content.trimStart();
+  if (!trimmed.startsWith("---")) return undefined;
+
+  const firstNl = trimmed.indexOf("\n");
+  if (firstNl === -1) return undefined;
+  const afterFirstFence = trimmed.slice(firstNl + 1);
+
+  let searchPos = 0;
+  while (searchPos < afterFirstFence.length) {
+    const nextFence = afterFirstFence.indexOf("\n---", searchPos);
+    if (nextFence === -1) {
+      if (afterFirstFence.startsWith("---")) {
+        return "";
+      }
+      return undefined;
+    }
+    const fenceEnd = nextFence + 4;
+    const nextNl = afterFirstFence.indexOf("\n", fenceEnd);
+    const lineRemainder = afterFirstFence
+      .slice(fenceEnd, nextNl === -1 ? undefined : nextNl)
+      .trim();
+    if (lineRemainder === "" || lineRemainder === "\r") {
+      return afterFirstFence.slice(0, nextFence);
+    }
+    searchPos = fenceEnd;
+  }
+  return undefined;
+}
+
+export function extractComponentScriptRegions(
+  filePath: string,
+  content: string,
+): string[] {
+  const normalized = filePath.toLowerCase();
+  const withoutHtmlComments = stripHtmlComments(content);
+  const regions: string[] = [];
+
+  if (normalized.endsWith(".astro")) {
+    const frontmatter = extractAstroFrontmatter(withoutHtmlComments);
+    if (frontmatter) {
+      regions.push(frontmatter);
+    }
+  }
+
+  regions.push(...extractScriptTags(withoutHtmlComments));
+  return regions;
+}
+
 export function extractRegisteredRouteEvidence(
   fromPath: string,
   content: string,
@@ -469,36 +675,27 @@ export function extractRegisteredRouteEvidence(
 ): { calls: GraphEdge[]; routes: RouteEdge[] } {
   const calls: GraphEdge[] = [];
   const routes: RouteEdge[] = [];
+  const normalized = normalizeGraphPath(fromPath).toLowerCase();
 
-  // The registration patterns below are JS/TS syntax — `app.get(…)`,
-  // `router.route({…})`. Read over any file at all, they fire on PROSE: a
-  // `router.post("/users", createUser)` line in docs/api.md became a route edge
-  // with the markdown file as its handler. Extension is the marker that fits
-  // this branch's semantics; the path-literal gate in `addRouteEvidence` is the
-  // other half.
-  //
-  // KNOWN FALSE NEGATIVE, accepted (CP-NODE-19): that same gate SKIPS route
-  // registration living inside a `.vue` / `.svelte` / `.astro` script block. The
-  // extension list is the TS-family set, and those three are deliberately absent
-  // from it — adding them would read the whole single-file-component as if it
-  // were a module, and the surrounding markup is exactly the prose class this
-  // gate exists to keep out (`<template>` carries literal tag soup, not routes).
-  // Closing it properly means extracting the `<script>` block first and gating on
-  // THAT, which is a real parsing job rather than an extension addition — so the
-  // gap is stated here rather than half-closed into fabricated markup routes.
-  // Missing evidence over fabricated evidence: these are LEADS the lens confirms
-  // or refutes, never findings, and a dropped route is a lead not surfaced rather
-  // than a claim made. Pinned by graph-framework-routes.test.ts ("a .vue script
-  // block contributes no route — the accepted gap"), so closing it must be a
-  // deliberate act that updates that test rather than a silent side effect.
-  if (!TS_LIKE_EXTENSION_PATTERN.test(normalizeGraphPath(fromPath).toLowerCase())) {
+  let scriptContent: string;
+  if (TS_LIKE_EXTENSION_PATTERN.test(normalized)) {
+    scriptContent = maskCommentSpans(content, fromPath);
+  } else if (COMPONENT_EXTENSION_PATTERN.test(normalized)) {
+    const regions = extractComponentScriptRegions(fromPath, content);
+    if (regions.length === 0) {
+      return { calls, routes };
+    }
+    scriptContent = regions
+      .map((region) => maskCommentSpans(region, "component.ts"))
+      .join("\n;\n");
+  } else {
     return { calls, routes };
   }
 
-  const bindings = extractImportBindings(fromPath, content, pathLookup);
+  const bindings = extractImportBindings(fromPath, scriptContent, pathLookup);
 
   ROUTE_REGISTRATION_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(ROUTE_REGISTRATION_PATTERN)) {
+  for (const match of scriptContent.matchAll(ROUTE_REGISTRATION_PATTERN)) {
     const method = match[1];
     const routePath = match[2];
     const handlerExpression = match[3];
@@ -515,7 +712,7 @@ export function extractRegisteredRouteEvidence(
   }
 
   ROUTE_OBJECT_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(ROUTE_OBJECT_PATTERN)) {
+  for (const match of scriptContent.matchAll(ROUTE_OBJECT_PATTERN)) {
     const body = match[1];
     if (!body) continue;
     const method = body.match(/\bmethod\s*:\s*["'`]([A-Za-z]+)["'`]/i)?.[1];
@@ -639,9 +836,9 @@ const NEST_CONTROLLER_PATTERN = /@Controller\s*\(([\s\S]{0,200}?)\)/g;
 const NEST_METHOD_DECORATOR_PATTERN =
   /@(Get|Post|Put|Patch|Delete|Options|Head|All)\s*\(\s*(?:["'`]([^"'`]*)["'`])?/g;
 const PY_DECORATOR_METHOD_PATTERN =
-  /@\s*[A-Za-z_]\w*\s*\.\s*(get|post|put|patch|delete|options|head|trace|websocket)\s*\(\s*["']([^"']+)["']/g;
+  /@\s*([A-Za-z_]\w*)\s*\.\s*(get|post|put|patch|delete|options|head|trace|websocket)\s*\(\s*["']([^"']+)["']/g;
 const PY_ROUTE_DECORATOR_PATTERN =
-  /@\s*[A-Za-z_]\w*\s*\.\s*(api_route|route)\s*\(\s*["']([^"']+)["']([\s\S]{0,200}?)\)/g;
+  /@\s*([A-Za-z_]\w*)\s*\.\s*(api_route|route)\s*\(\s*["']([^"']+)["']([\s\S]{0,200}?)\)/g;
 const PY_METHODS_LIST_PATTERN = /methods\s*=\s*\[([^\]]*)\]/;
 const PY_METHOD_LITERAL_PATTERN = /["']([A-Za-z]+)["']/g;
 /**
@@ -649,20 +846,93 @@ const PY_METHOD_LITERAL_PATTERN = /["']([A-Za-z]+)["']/g;
  * above run behind. `@<object>.<verb>("literal")` is not a route shape on its
  * own: the ubiquitous test idiom `@mock.patch("os.environ")` matches it exactly,
  * so scanning every `.py` file fabricated a route (and a route node) out of every
- * patched test in a repo (COR-74363fa8). A file therefore qualifies only by
- * importing a web framework or by constructing one of its app/router objects —
- * the same positive-marker rule the NestJS and Angular branches already use.
+ * patched test in a repo (COR-74363fa8). A file therefore qualifies by
+ * importing a web framework, by constructing one of its app/router objects, or
+ * by importing a router from a sibling module.
  * Extension alone is never a marker.
- *
- * This gate is FILE-scoped, so it cannot separate a framework's routes from a
- * framework's own tests; {@link isAbsoluteRoutePathLiteral} is the per-decorator
- * half that does. KNOWN FALSE NEGATIVE, accepted: a routes module that imports
- * its router from a sibling (`from .deps import router`) carries no marker, so
- * its real routes are dropped — the leads-not-verdicts trade, missing evidence
- * over fabricated evidence.
  */
 const PY_FRAMEWORK_MARKER_PATTERN =
   /\b(?:from|import)\s+(?:fastapi|flask|starlette|quart|sanic|litestar|falcon|bottle|tornado|aiohttp|django)\b|\b(?:FastAPI|APIRouter|Flask|Blueprint|Starlette|Quart|Sanic|Litestar)\s*\(/;
+
+function isPythonRouterName(name: string): boolean {
+  return (
+    /^(?:.*_)?(?:router|app|bp|blueprint)(?:_.*)?$/i.test(name) ||
+    /^(?:api|server)$/i.test(name)
+  );
+}
+
+function parsePythonBindings(
+  rawBindings: string,
+  identities: Set<string>,
+): void {
+  for (const rawBinding of rawBindings.split(",")) {
+    const item = rawBinding.trim();
+    if (!item) continue;
+    const bindingMatch = /^([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?$/.exec(
+      item,
+    );
+    if (!bindingMatch) continue;
+    const importedName = bindingMatch[1]!;
+    const localName = bindingMatch[2] ?? importedName;
+    if (isPythonRouterName(importedName)) {
+      identities.add(localName);
+    }
+  }
+}
+
+function resolvePythonRouterIdentities(content: string): Set<string> {
+  const identities = new Set<string>();
+
+  const PY_INSTANTIATION_PATTERN =
+    /\b([A-Za-z_]\w*)\s*=\s*(?:FastAPI|APIRouter|Flask|Blueprint|Starlette|Quart|Sanic|Litestar)\s*\(/g;
+  for (const match of content.matchAll(PY_INSTANTIATION_PATTERN)) {
+    if (match[1]) {
+      identities.add(match[1]);
+    }
+  }
+
+  if (PY_FRAMEWORK_MARKER_PATTERN.test(content)) {
+    identities.add("app");
+    identities.add("router");
+    identities.add("bp");
+    identities.add("blueprint");
+    identities.add("api");
+    identities.add("server");
+  }
+
+  // Scan line by line for sibling imports: `from .<spec> import ...`
+  const lines = content.split(/\r?\n/);
+  let inSiblingImport = false;
+  let collectedBindings = "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!inSiblingImport) {
+      const fromMatch = /^from\s+(\.+[\w.]*)\s+import\s*(.*)$/.exec(trimmed);
+      if (fromMatch && fromMatch[1]?.startsWith(".")) {
+        const rest = fromMatch[2]?.trim() ?? "";
+        if (rest.startsWith("(") && !rest.includes(")")) {
+          inSiblingImport = true;
+          collectedBindings = rest.slice(1);
+        } else {
+          parsePythonBindings(rest.replace(/[()]/g, ""), identities);
+        }
+      }
+    } else {
+      if (trimmed.includes(")")) {
+        inSiblingImport = false;
+        const beforeParen = trimmed.slice(0, trimmed.indexOf(")"));
+        collectedBindings += " " + beforeParen;
+        parsePythonBindings(collectedBindings, identities);
+        collectedBindings = "";
+      } else {
+        collectedBindings += " " + trimmed;
+      }
+    }
+  }
+
+  return identities;
+}
 const ANGULAR_FILE_MARKER_PATTERN =
   /\b(?:RouterModule|provideRouter|loadChildren|loadComponent)\b|:\s*Routes\b/;
 const ANGULAR_ROUTE_OBJECT_PATTERN =
@@ -687,10 +957,23 @@ const ANGULAR_COMPONENT_PATTERN =
 const ANGULAR_LAZY_IMPORT_PATTERN =
   /\b(?:loadChildren|loadComponent)\s*:[\s\S]{0,200}?import\s*\(\s*["']([^"']+)["']\s*\)/;
 
+function trimRouteEdgeSlashes(segment: string): string {
+  const trimmed = segment.trim();
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed.charCodeAt(start) === 47 /* '/' */) {
+    start++;
+  }
+  while (end > start && trimmed.charCodeAt(end - 1) === 47 /* '/' */) {
+    end--;
+  }
+  return start === 0 && end === trimmed.length ? trimmed : trimmed.slice(start, end);
+}
+
 /** Join route segments (controller prefix + method path) into one clean path. */
 function joinRouteSegments(...segments: string[]): string {
   return segments
-    .map((segment) => segment.trim().replace(/^\/+|\/+$/g, ""))
+    .map(trimRouteEdgeSlashes)
     .filter((segment) => segment.length > 0)
     .join("/");
 }
@@ -752,23 +1035,24 @@ function pythonRouteMethods(args: string): string[] {
   );
 }
 
-function collectPythonFrameworkRoutes(
+export function collectPythonFrameworkRoutes(
   fromPath: string,
   content: string,
   routes: RouteEdge[],
 ): void {
-  if (!PY_FRAMEWORK_MARKER_PATTERN.test(content)) {
+  const maskedContent = maskCommentSpans(content, fromPath);
+  const routerIdentities = resolvePythonRouterIdentities(maskedContent);
+  if (routerIdentities.size === 0) {
     return;
   }
 
   // FastAPI / Starlette: @app.get("/x"), @router.post("/y"), @router.websocket("/ws")
   PY_DECORATOR_METHOD_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(PY_DECORATOR_METHOD_PATTERN)) {
-    const verb = match[1];
-    const routePath = match[2];
-    // The marker gate is FILE-scoped, so a framework's own TEST file passes it
-    // while still being full of `@mock.patch("app.service.get_user")`. The path
-    // literal is the per-DECORATOR discriminator: a real route path is absolute.
+  for (const match of maskedContent.matchAll(PY_DECORATOR_METHOD_PATTERN)) {
+    const objectName = match[1];
+    const verb = match[2];
+    const routePath = match[3];
+    if (!objectName || !routerIdentities.has(objectName)) continue;
     if (!verb || !isAbsoluteRoutePathLiteral(routePath)) continue;
     const method = verb.toUpperCase();
     routes.push({
@@ -780,10 +1064,12 @@ function collectPythonFrameworkRoutes(
 
   // FastAPI api_route + Flask route: @app.route("/x", methods=["GET","POST"])
   PY_ROUTE_DECORATOR_PATTERN.lastIndex = 0;
-  for (const match of content.matchAll(PY_ROUTE_DECORATOR_PATTERN)) {
-    const routePath = match[2];
+  for (const match of maskedContent.matchAll(PY_ROUTE_DECORATOR_PATTERN)) {
+    const objectName = match[1];
+    const routePath = match[3];
+    if (!objectName || !routerIdentities.has(objectName)) continue;
     if (!isAbsoluteRoutePathLiteral(routePath)) continue;
-    const methods = pythonRouteMethods(match[3] ?? "");
+    const methods = pythonRouteMethods(match[4] ?? "");
     const path = normalizeRoutePath(routePath);
     if (methods.length === 0) {
       routes.push({ path, handler: fromPath, method: "GET" });
@@ -861,31 +1147,59 @@ export function extractFrameworkRouteEvidence(
 
   if (normalized.endsWith(".py")) {
     collectPythonFrameworkRoutes(fromPath, content, routes);
-  } else if (TS_LIKE_EXTENSION_PATTERN.test(normalized)) {
-    collectNestRoutes(fromPath, content, routes);
-    collectAngularRoutes(fromPath, content, pathLookup, calls, routes);
+  } else if (
+    TS_LIKE_EXTENSION_PATTERN.test(normalized) ||
+    COMPONENT_EXTENSION_PATTERN.test(normalized)
+  ) {
+    const scriptContent = COMPONENT_EXTENSION_PATTERN.test(normalized)
+      ? extractComponentScriptRegions(fromPath, content).join("\n;\n")
+      : content;
+    collectNestRoutes(fromPath, scriptContent, routes);
+    collectAngularRoutes(fromPath, scriptContent, pathLookup, calls, routes);
   }
 
   return { calls, routes };
 }
 
+function isRouteSegmentName(segment: string): boolean {
+  if (!segment.startsWith("route")) return false;
+  let i = 5;
+  if (segment.charCodeAt(i) === 115 /* 's' */) {
+    i++;
+  }
+  if (i === segment.length) return true;
+  if (segment.charCodeAt(i) === 46 /* '.' */) {
+    return i + 1 < segment.length && segment.indexOf(".", i + 1) === -1;
+  }
+  return false;
+}
+
 export function fallbackRouteEdge(filePath: string): RouteEdge | undefined {
   const normalized = filePath.toLowerCase();
-  // Match an `api/` path segment, or a file/dir segment named exactly
-  // `route`/`routes` (the Next.js App Router convention). A bare "route"
-  // substring match over-fired on unrelated identifiers like `router.ts`,
-  // `graphRoutes.ts`, or `reroute-helper.ts` (COR-c5438ac1), fabricating GET
-  // route edges for non-route files.
-  const hasApiSegment = /(^|\/)api\//.test(normalized);
-  const hasRouteSegment = normalized
-    .split("/")
-    .some((segment) => /^routes?(\.[^.]+)?$/.test(segment));
-  if (hasApiSegment || hasRouteSegment) {
-    return {
-      path: `/${filePath.replaceAll("/", "_")}`,
-      handler: filePath,
-      method: "GET",
-    };
+  const len = normalized.length;
+  let start = 0;
+
+  while (start < len) {
+    while (start < len && normalized.charCodeAt(start) === 47 /* '/' */) {
+      start++;
+    }
+    if (start >= len) break;
+    let end = start;
+    while (end < len && normalized.charCodeAt(end) !== 47 /* '/' */) {
+      end++;
+    }
+    const segment = normalized.slice(start, end);
+    const hasApi = segment === "api" && end < len;
+    const hasRoute = isRouteSegmentName(segment);
+
+    if (hasApi || hasRoute) {
+      return {
+        path: `/${filePath.replaceAll("/", "_")}`,
+        handler: filePath,
+        method: "GET",
+      };
+    }
+    start = end + 1;
   }
   return undefined;
 }

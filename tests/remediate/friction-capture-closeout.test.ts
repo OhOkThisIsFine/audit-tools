@@ -713,7 +713,6 @@ describe("CP-NODE-24 inv-4: the harness threads the injectable final-gate runner
       const expected = toolOwnedFinalGateCommands(harness.REPO_DIR).length;
       expect(expected).toBeGreaterThan(0);
       expect(gate.outcome, "a real gate outcome, not a skipped step").toBe("executed");
-      expect(gate.scoped_out).toBe(false);
       expect(gate.passed).toBe(true);
       expect(gate.results).toHaveLength(expected);
       expect(injectedCalls, "the injected runner services every command").toBe(

@@ -80,10 +80,20 @@ advance the run.
 | `required_tests` | The tool's own rerun of every prompt-bound required test passes on the tree that holds the landed commit. | `remediate` |
 | `obligation_evidence` | `obligation_evidence` cites non-empty evidence for every prompt-bound obligation, none twice, and none the work item does not bind. | `remediate` |
 | `run_start_dirt` | No file the landed commit changed overlaps dirt that pre-dated the run. | `remediate` |
+| `conformance_review` | When the per-run conformance-review option is enabled, a bounded independent review of the result's obligation evidence against the carried module contracts has passed, bound to the result, obligation set, and contract content — coverage is mechanical, but sufficiency is judged by the review. | `remediate` |
 | `no_change_corroboration` | A `resolved_no_change` claim is corroborated against git and the persisted write-scope binding; attestation-only acceptance is refused. | `remediate` |
 | `duplicate_result` | `result_id` has not already been accepted this run: a byte-identical replay is a no-op, a different body under an accepted id is refused. | `audit`, `remediate` |
 
 <!-- END GENERATED INGESTION CHECKS -->
+
+For remediation, the optional `conformance_review` check follows the review
+choice recorded in the run's primary state. The choice is fixed by the first
+implementation dispatch and remains in force on bare continuation and recovery
+ingestion. A current state with a missing or mismatched review policy is
+refused, not interpreted as review-off. Older states without that policy are
+treated conservatively; an old selection sidecar cannot authorize or override
+acceptance. Mechanical `obligation_evidence` coverage and `required_tests`
+remain mandatory regardless of the review choice or verdict.
 
 Per-result audit-results validation runs at acceptance, before the accepted
 pair is written: a failing result is classified-rejected (warnings ride a

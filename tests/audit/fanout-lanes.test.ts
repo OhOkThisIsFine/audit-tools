@@ -9,6 +9,9 @@ const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
 const { laneAssetsDir } = await import("../../src/shared/io/auditToolsPaths.js");
+const { LaneReviewRecordSchema } = await import(
+  "../../src/shared/types/stepContract.js"
+);
 
 // Always-materialized fan-out lanes (design resolution 2, 2026-08-05).
 // Constraint 6 (K-of-N resume) pinned at the unit: a lane whose SUBMISSION
@@ -114,6 +117,102 @@ describe("materializeFanoutLanes", () => {
         "# alpha lane",
       );
       expect(await readFile(alphaSubmission, "utf8")).toBe('{"done":true}');
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("captures laneReviews from declared reviewMode and reviewReason", async () => {
+    const artifactsDir = await mkdtemp(join(os.tmpdir(), "audit-fanout-reviews-"));
+    try {
+      const fanout = await materializeFanoutLanes({
+        artifactsDir,
+        runId: AUDIT_GATE_SUBMISSION_SCOPE,
+        lanes: [
+          {
+            id: "lane-req",
+            label: "Required lane",
+            promptFilename: "lane-req-prompt.md",
+            promptText: "# lane req",
+            reviewMode: "independence_required",
+            reviewReason: "must be independent",
+          },
+          {
+            id: "lane-deg",
+            label: "Degraded lane",
+            promptFilename: "lane-deg-prompt.md",
+            promptText: "# lane deg",
+            reviewMode: "degraded_permitted",
+            reviewReason: "degraded ok",
+          },
+          {
+            id: "lane-ord",
+            label: "Ordinary lane",
+            promptFilename: "lane-ord-prompt.md",
+            promptText: "# lane ord",
+            reviewMode: "ordinary",
+          },
+        ],
+      });
+
+      expect(fanout.laneReviews).toHaveLength(3);
+      expect(fanout.laneReviews).toEqual([
+        {
+          lane: "lane-req",
+          mode: "independence_required",
+          reason: "must be independent",
+        },
+        {
+          lane: "lane-deg",
+          mode: "degraded_permitted",
+          reason: "degraded ok",
+        },
+        {
+          lane: "lane-ord",
+          mode: "ordinary",
+        },
+      ]);
+      for (const r of fanout.laneReviews) {
+        expect(LaneReviewRecordSchema.safeParse(r).success).toBe(true);
+      }
+    } finally {
+      await rm(artifactsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("materializeFanoutLanes forwards complexityFloor, riskFloor, and grantedContentBytes to deriveLaneDemand", async () => {
+    const artifactsDir = await mkdtemp(join(os.tmpdir(), "audit-fanout-floors-"));
+    try {
+      const fanout = await materializeFanoutLanes({
+        artifactsDir,
+        runId: AUDIT_GATE_SUBMISSION_SCOPE,
+        lanes: [
+          {
+            id: "floored-lane",
+            label: "Floored lane",
+            promptFilename: "floored-prompt.md",
+            // Short prompt: would naturally be small / focused / low
+            promptText: "# floored prompt\n",
+            complexityFloor: "standard",
+            riskFloor: "high",
+          },
+          {
+            id: "large-granted-lane",
+            label: "Large granted lane",
+            promptFilename: "large-granted-prompt.md",
+            promptText: "# short prompt\n",
+            grantedContentBytes: 150_000,
+          },
+        ],
+      });
+
+      const flooredLane = fanout.lanes.find((l) => l.id === "floored-lane")!;
+      expect(flooredLane.demand.complexity).toBe("standard");
+      expect(flooredLane.demand.risk).toBe("high");
+      expect(flooredLane.demand.size).toBe("small");
+
+      const largeLane = fanout.lanes.find((l) => l.id === "large-granted-lane")!;
+      expect(largeLane.demand.size).toBe("large");
     } finally {
       await rm(artifactsDir, { recursive: true, force: true });
     }

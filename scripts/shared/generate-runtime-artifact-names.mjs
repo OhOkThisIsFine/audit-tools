@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/runtime-artifact-names-drift.test.ts
 // Regenerate `scripts/shared/runtime-artifact-names.generated.mjs` — the set of
 // RUN-artifact basenames (`repo_manifest.json`, `state.json`, `host-workload.json`,
 // …) that the doc-citation gate must treat as runtime layout, not repo files.
@@ -57,6 +58,7 @@ export const RUNTIME_NAME_SOURCES = [
   { file: "src/audit/types/conceptualAdjudication.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/droppedFindingsRecord.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/steps/dispatch/hostHandoff.ts", rules: ["joinLiterals"] },
+  { file: "src/remediate/steps/dispatch/conformanceReview.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/intake.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/state/store.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/steps/nextStep.ts", rules: ["joinLiterals", "filenameConstants"] },

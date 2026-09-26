@@ -26,6 +26,7 @@ import {
   runAdmittedProjectTestCommand,
   runAdmittedProjectE2eCommand,
   readSubmissionLedger,
+  assertValidRemediationOutcomesReport,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -1370,7 +1371,12 @@ async function runE2eTests(
 
   console.log("Running end-to-end tests on combined post-remediation state...");
   if (state.plan.e2e_command_source === "project_facts") {
-    const admitted = await runAdmittedProjectE2eCommand(parseCommandString(state.plan.e2e_command), options.root, {
+    // The SAME admission path a discovered test / landing-gate command uses,
+    // with a test-only seam for the spawn (production passes nothing — see
+    // `e2eVerifyOverrides`). A declared command that leaves the single-
+    // invocation shape was already refused above, before any spawn is reached.
+    const runE2e = options.e2eVerifyOverrides?.run ?? runAdmittedProjectE2eCommand;
+    const admitted = await runE2e(parseCommandString(state.plan.e2e_command), options.root, {
       timeoutMs: CLOSING_CHILD_DEADLINE_MS,
     });
     if (!admitted.admitted) return { ran: false, passed: false, output: admitted.refusal_reason ?? "refused" };
@@ -2396,6 +2402,13 @@ export async function runClosePhase(
     },
     ...(outcomeCoverage ? { plan_coverage: outcomeCoverage } : {}),
   };
+
+  // Serialized-output boundary: the close phase is the producer of
+  // `remediation-outcomes.json`, so it runs its own finished value through the
+  // owning schema before persisting it. The on-disk shape is a superset of the
+  // shared subset, so the non-strict schema tolerates the run-level extras and
+  // refuses only a missing/malformed REQUIRED field of the owning contract.
+  assertValidRemediationOutcomesReport(outcomesFile);
 
   const outputDir = dirname(options.artifactsDir);
 

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/staleness.test.ts, tests/audit/staleness-cascade-cost.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import {
@@ -8,10 +9,14 @@ import {
 import { present } from "./artifactMetadata.js";
 import { isMetadataManifestCurrent } from "./resultBaseline.js";
 import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { stableStringify } from "../../shared/stableStringify.js";
+import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { computeDirectedReachability, estimateTokensFromBytes } from "audit-tools/shared";
 import {
   computeDependencySliceHash,
   hasDependencySliceProjection,
 } from "./dependencySlices.js";
+import { normalizeCheckpointForms } from "./intentCheckpointGate.js";
 
 function computeContentHash(
   artifactName: string,
@@ -258,16 +263,51 @@ export function resetStalenessDedup(): void {
  * dogfood case that is `repo_manifest.json`, the artifact that actually
  * noticed the tool's source change.
  */
+export interface UpstreamChangeSummary {
+  /** The upstream artifact whose change initiated the cascade. */
+  artifact: string;
+  /** Classification of the change nature. */
+  change_kind: "prose" | "structural" | "manifest_churn" | "presence" | "unknown";
+  /** Byte difference (current - previous) if determinable. */
+  byte_delta?: number;
+  /** Previous content size in bytes if known. */
+  previous_bytes?: number;
+  /** Current content size in bytes if known. */
+  current_bytes?: number;
+  /** Human-readable explanation of what moved. */
+  detail?: string;
+}
+
+export interface CascadeContextVolume {
+  /** Serialized bytes of invalidated bodies already present; NOT supplied prompt context. */
+  actual_context_bytes: number;
+  /** Estimated token count based on byte volume (~4 bytes per token). */
+  estimated_tokens: number;
+  /** Explicit flag declaring estimated_tokens is an estimate, not a direct measurement. */
+  is_estimate: true;
+}
+
 export interface StalenessRecovery {
   /** The upstream artifact(s) whose change triggered this cascade, sorted. */
   caused_by: string[];
   /** How many artifacts are being re-derived, including the causes. */
   rederiving: number;
+  /** The concrete artifacts being re-derived, sorted. */
+  rederived_artifacts?: string[];
+  /** The directed dependency edges traversed by this cascade: [{ from, to }]. */
+  affected_edges?: Array<{ from: string; to: string }>;
+  /** Upstream changes that initiated the cascade. */
+  upstream_changes?: UpstreamChangeSummary[];
+  /** Inventory of existing artifact bodies; no downstream execution or prompt usage is observed. */
+  context_volume?: CascadeContextVolume;
+  /** Elapsed work in milliseconds if measured. */
+  elapsed_work_ms?: number;
 }
 
 export function describeStalenessRecovery(
   stale: ReadonlySet<string>,
   bundle: ArtifactBundle,
+  options?: { elapsed_work_ms?: number },
 ): StalenessRecovery | undefined {
   // Only work that was already done is a recovery; a first pass is not.
   const alreadyWritten = [...stale].filter((name) => present(bundle, name));
@@ -307,9 +347,115 @@ export function describeStalenessRecovery(
   };
   for (const name of alreadyWritten) walk(name, new Set());
 
+  // Traversed dependency edges: (upstream -> downstream) where downstream is in alreadyWritten
+  // and upstream moved or is missing
+  const affectedEdges: Array<{ from: string; to: string }> = [];
+  for (const name of alreadyWritten) {
+    for (const upstream of ARTIFACT_DEPENDENCIES_MAP[name] ?? []) {
+      if (staleSet.has(upstream) || !present(bundle, upstream) || causes.has(upstream)) {
+        affectedEdges.push({ from: upstream, to: name });
+      }
+    }
+  }
+  const edgeKey = (e: { from: string; to: string }) => `${e.from}->${e.to}`;
+  const seenEdgeKeys = new Set<string>();
+  const sortedAffectedEdges = affectedEdges
+    .filter((e) => {
+      const k = edgeKey(e);
+      if (seenEdgeKeys.has(k)) return false;
+      seenEdgeKeys.add(k);
+      return true;
+    })
+    .sort((a, b) => compareCodeUnits(edgeKey(a), edgeKey(b)));
+
+  // Supplied context volume: actual byte sizes of re-derived artifacts present in bundle
+  let actualContextBytes = 0;
+  for (const name of alreadyWritten) {
+    const val = getArtifactValue(bundle, name);
+    if (val !== undefined && val !== null) {
+      try {
+        actualContextBytes += Buffer.byteLength(stableStringify(val), "utf8");
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // Upstream changes classification
+  const upstreamChanges: UpstreamChangeSummary[] = [];
+  for (const cause of [...causes].sort()) {
+    const currentVal = getArtifactValue(bundle, cause);
+    const isPresent = present(bundle, cause);
+    let currentBytes: number | undefined;
+    if (currentVal !== undefined && currentVal !== null) {
+      try {
+        currentBytes = Buffer.byteLength(stableStringify(currentVal), "utf8");
+      } catch {
+        // ignore
+      }
+    }
+
+    let changeKind: UpstreamChangeSummary["change_kind"] = "unknown";
+    let detail = `${cause} content changed`;
+
+    if (!isPresent) {
+      changeKind = "presence";
+      detail = `${cause} is absent or removed`;
+    } else if (cause === "intent_checkpoint.json" && bundle.intent_checkpoint) {
+      const baseline = bundle.artifact_metadata?.intent_baseline;
+      if (baseline) {
+        const forms = normalizeCheckpointForms(bundle.intent_checkpoint);
+        if (forms.structured !== baseline.normalized_structured) {
+          changeKind = "structural";
+          detail = "intent structured fields changed (deterministic changed under DD-9)";
+        } else if (forms.prose !== baseline.normalized_prose) {
+          changeKind = "prose";
+          detail = "intent prose-only reword (candidate for DD-9 equivalence)";
+        } else {
+          changeKind = "prose";
+          detail = "intent provenance-only or whitespace change";
+        }
+      } else {
+        changeKind = "prose";
+        detail = "intent checkpoint updated";
+      }
+    } else if (cause === "repo_manifest.json") {
+      changeKind = "manifest_churn";
+      detail = "repository manifest files or hashes changed";
+    } else if (cause === "design_assessment.json") {
+      changeKind = "prose";
+      detail = "design assessment prose/findings updated";
+    } else if (
+      cause === "charter_register.json" ||
+      cause === "charter_clarification.json" ||
+      cause === "systemic_challenge.json"
+    ) {
+      changeKind = "prose";
+      detail = `${cause} conceptual review text updated`;
+    }
+
+    upstreamChanges.push({
+      artifact: cause,
+      change_kind: changeKind,
+      ...(currentBytes !== undefined ? { current_bytes: currentBytes } : {}),
+      detail,
+    });
+  }
+
   return {
     caused_by: [...causes].sort(),
     rederiving: alreadyWritten.length,
+    rederived_artifacts: [...alreadyWritten].sort(),
+    affected_edges: sortedAffectedEdges,
+    upstream_changes: upstreamChanges,
+    context_volume: {
+      actual_context_bytes: actualContextBytes,
+      estimated_tokens: estimateTokensFromBytes(actualContextBytes),
+      is_estimate: true,
+    },
+    ...(options?.elapsed_work_ms !== undefined
+      ? { elapsed_work_ms: options.elapsed_work_ms }
+      : {}),
   };
 }
 
@@ -317,6 +463,7 @@ export function emitStalenessRecord(
   stale: Set<string>,
   reason?: string,
   bundle?: ArtifactBundle,
+  options?: { elapsed_work_ms?: number },
 ): void {
   // INV-SSP-DEFERRED-SET-REPORTED: a stale set computed by this module carries
   // its deferred downstreams; a bare `Set` (a caller reporting a hand-built set,
@@ -327,7 +474,7 @@ export function emitStalenessRecord(
   // and `undefined` for anything else.
   const deferred = [...(deferredArtifactsOf(stale) ?? [])].sort();
   if (stale.size === 0 && deferred.length === 0) return;
-  const recovery = bundle ? describeStalenessRecovery(stale, bundle) : undefined;
+  const recovery = bundle ? describeStalenessRecovery(stale, bundle, options) : undefined;
   const key = JSON.stringify([
     [...stale].sort(),
     deferred,
@@ -347,6 +494,21 @@ export function emitStalenessRecord(
             recovery: {
               caused_by: recovery.caused_by,
               rederiving: recovery.rederiving,
+              ...(recovery.rederived_artifacts
+                ? { rederived_artifacts: recovery.rederived_artifacts }
+                : {}),
+              ...(recovery.affected_edges && recovery.affected_edges.length > 0
+                ? { affected_edges: recovery.affected_edges }
+                : {}),
+              ...(recovery.upstream_changes && recovery.upstream_changes.length > 0
+                ? { upstream_changes: recovery.upstream_changes }
+                : {}),
+              ...(recovery.context_volume
+                ? { context_volume: recovery.context_volume }
+                : {}),
+              ...(recovery.elapsed_work_ms !== undefined
+                ? { elapsed_work_ms: recovery.elapsed_work_ms }
+                : {}),
               // The one message, at the moment it happens: this is not a wedge,
               // it is a correct re-derivation, and here is what invalidated it.
               message:
@@ -359,6 +521,66 @@ export function emitStalenessRecord(
       ts: new Date().toISOString(),
     }) + "\n",
   );
+}
+
+export interface CascadeCostMeasurement {
+  upstream_artifact: string;
+  change_kind: "prose" | "structural" | "manifest_churn" | "presence" | "unknown";
+  affected_edges: Array<{ from: string; to: string }>;
+  rederived_artifacts: string[];
+  actual_context_bytes: number;
+  estimated_tokens: number;
+  classification_elapsed_ms: number;
+  /** No downstream executors or semantic equivalence judge run in this measurement. */
+  unnecessary_invalidation: null;
+  rationale: string;
+}
+
+/**
+ * Compare invalidation classifications before and after a change. Timing covers
+ * classification only; listed artifacts are candidates for rederivation, not
+ * completed work. Body bytes and their heuristic token estimate are an inventory,
+ * not measured prompts or model usage. This cannot establish cascade execution
+ * cost or whether a semantic change made an invalidation unnecessary.
+ */
+export function measureCascadeCost(
+  baselineBundle: ArtifactBundle,
+  modifiedBundle: ArtifactBundle,
+  changedArtifact: string,
+  changeKindOverride?: "prose" | "structural" | "manifest_churn" | "presence" | "unknown",
+): CascadeCostMeasurement {
+  const baselineStale = computeStaleArtifacts(baselineBundle, { emit: false });
+  const t0 = performance.now();
+  const modifiedStale = computeStaleArtifacts(modifiedBundle, { emit: false });
+  const tElapsed = performance.now() - t0;
+  const newlyStale = new Set([...modifiedStale].filter((name) => !baselineStale.has(name)));
+  const recovery = describeStalenessRecovery(newlyStale, modifiedBundle);
+
+  const rederived = recovery?.rederived_artifacts ?? [];
+  const edges = recovery?.affected_edges ?? [];
+  const actualBytes = recovery?.context_volume?.actual_context_bytes ?? 0;
+  const estimatedTokens = recovery?.context_volume?.estimated_tokens ?? 0;
+
+  const detectedKind =
+    changeKindOverride ??
+    recovery?.upstream_changes?.find((u) => u.artifact === changedArtifact)?.change_kind ??
+    "unknown";
+
+  const rationale = newlyStale.size === 0
+    ? "No additional artifacts invalidated relative to the baseline. Downstream execution and semantic necessity were not measured."
+    : "Additional invalidation classified relative to the baseline. Downstream execution, supplied prompt context, and semantic necessity were not measured.";
+
+  return {
+    upstream_artifact: changedArtifact,
+    change_kind: detectedKind,
+    affected_edges: edges,
+    rederived_artifacts: rederived,
+    actual_context_bytes: actualBytes,
+    estimated_tokens: estimatedTokens,
+    classification_elapsed_ms: tElapsed,
+    unnecessary_invalidation: null,
+    rationale,
+  };
 }
 
 /**
@@ -534,49 +756,41 @@ export function computeStaleArtifacts(
     }
   }
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [upstream, downstreamList] of Object.entries(
-      ARTIFACT_DEPENDENTS_MAP,
-    )) {
-      if (!downstreamList) continue;
-      if (!stale.has(upstream)) {
-        continue;
+  // Transitive staleness propagation (CY-11): downstream artifacts reachable
+  // from stale upstreams along un-sliced edges become stale. A slice-protected
+  // edge blocks TRANSITIVE propagation too: the downstream's staleness across
+  // this edge is decided by the slice compare AFTER the upstream re-derives,
+  // not pre-emptively while the upstream is merely pending (the pre-emptive
+  // mark was the live re-fire chain: manifest churn → structure stale → charter
+  // re-fired over a byte-identical subsystem set). Safe under PRIORITY ordering:
+  // every slice-projected upstream's obligation runs before the downstream's,
+  // and staleness re-derives each drain iteration, so a slice moved by the
+  // upstream's re-derivation still fires the per-edge compare before the
+  // downstream's obligation is reached.
+  //
+  // That deferral is a DECISION POSTPONED, not a verdict of "fresh", so it
+  // is REPORTED rather than silent: the downstream is recorded as deferred
+  // and rides out on the result (INV-SSP-DEFERRED-SET-REPORTED). This
+  // module states the ordering it is safe under; it does not police it —
+  // the PRIORITY-ordering guarantee is the CALLER's precondition, owned and
+  // tested there. What this module owes the caller is that a held-back
+  // downstream is never mistaken for a decided-clean one.
+  computeDirectedReachability(
+    stale,
+    (upstream) => ARTIFACT_DEPENDENTS_MAP[upstream],
+    (upstream, downstream) => {
+      if (!present(bundle, downstream)) return false;
+      const entry = metadata?.artifacts[downstream];
+      if (
+        entry?.dependency_slices?.[upstream] !== undefined &&
+        hasDependencySliceProjection(downstream, upstream)
+      ) {
+        deferred.add(downstream);
+        return false;
       }
-      for (const downstream of downstreamList) {
-        if (!present(bundle, downstream) || stale.has(downstream)) continue;
-        // A slice-protected edge blocks TRANSITIVE propagation too: the
-        // downstream's staleness across this edge is decided by the slice
-        // compare AFTER the upstream re-derives, not pre-emptively while the
-        // upstream is merely pending (the pre-emptive mark was the live
-        // re-fire chain: manifest churn → structure stale → charter re-fired
-        // over a byte-identical subsystem set). Safe under PRIORITY ordering:
-        // every slice-projected upstream's obligation runs before the
-        // downstream's, and staleness re-derives each drain iteration, so a
-        // slice moved by the upstream's re-derivation still fires the per-edge
-        // compare before the downstream's obligation is reached.
-        //
-        // That deferral is a DECISION POSTPONED, not a verdict of "fresh", so it
-        // is REPORTED rather than silent: the downstream is recorded as deferred
-        // and rides out on the result (INV-SSP-DEFERRED-SET-REPORTED). This
-        // module states the ordering it is safe under; it does not police it —
-        // the PRIORITY-ordering guarantee is the CALLER's precondition, owned and
-        // tested there. What this module owes the caller is that a held-back
-        // downstream is never mistaken for a decided-clean one.
-        const entry = metadata?.artifacts[downstream];
-        if (
-          entry?.dependency_slices?.[upstream] !== undefined &&
-          hasDependencySliceProjection(downstream, upstream)
-        ) {
-          deferred.add(downstream);
-          continue;
-        }
-        stale.add(downstream);
-        changed = true;
-      }
-    }
-  }
+      return true;
+    },
+  );
 
   const result = new StaleArtifactSet(stale, deferred);
   if (emit) emitStalenessRecord(result);

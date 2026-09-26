@@ -11,6 +11,7 @@ import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 import { LENS_VERIFICATION_TAG } from "../orchestrator/selectiveDeepening/shared.js";
 import {
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
+  contentSha256,
   describeValue,
   findingLocationLineIssues,
   formatValidationIssues,
@@ -1119,6 +1120,77 @@ function normalizeValidationInputs(
 }
 
 /**
+ * One in-process validation receipt, minted only after a result validates with
+ * ZERO error-severity issues. A receipt is a pure cache of the produced issues:
+ * it carries no authority of its own and is never read from disk or from host
+ * input — the host cannot submit a receipt, only the tool mints one here, so a
+ * claim of "already validated" that does not reduce to these exact bytes
+ * (result content, canonical task manifest, effective line index, boundary) is
+ * simply a different key and re-validates.
+ */
+interface ValidationReceipt {
+  /**
+   * The produced issues, with `result_index` NORMALIZED to a sentinel: the same
+   * result validated through the per-result door (`validateOneAuditResult`,
+   * index 0) and the batch door (`validateAuditResults`, index i) yields
+   * identical issues except for that caller-specific index, so the receipt
+   * stores the issues once and each reuse re-stamps the caller's index. Every
+   * other issue field is content-derived (task_id, field paths, messages use
+   * per-finding/per-file array indices from the result itself).
+   */
+  issues: AuditResultIssue[];
+}
+
+// In-process receipt store, keyed by the exact content hash of the validated
+// (result, canonical task manifest, effective line index, boundary). It is
+// MODULE state so the host-accept door and the batch gate — two separate
+// `next-step` call sites in the SAME fold (one process) — can share one minted
+// receipt; a fresh process (a later fold, the raw `validate-results` CLI, a
+// `dispatch/*.mjs` script) starts empty, so old ledger entries and raw CLI input
+// always re-validate. Bounded in practice: a fold validates at most one wave of
+// results, and the keys are 64-char hashes of already-in-memory objects.
+const validationReceipts = new Map<string, ValidationReceipt>();
+
+// Test seam: how many rule-walk executions actually ran (vs. were skipped by a
+// receipt reuse). Exposed only so tests can assert "validates once" / "validate
+// again" directly; it has no production consumer.
+let auditResultValidationRuns = 0;
+
+/**
+ * Test seam: clear the in-process receipt store and reset the run counter.
+ * Tests run many folds in one process, so a receipt minted by one `it` block
+ * must not leak a "validate once" skip into the next.
+ */
+export function __resetValidationReceiptsForTests(): void {
+  validationReceipts.clear();
+  auditResultValidationRuns = 0;
+}
+
+/**
+ * Test seam: how many single-result rule walks actually executed since the last
+ * {@link __resetValidationReceiptsForTests}. A receipt reuse does NOT increment
+ * this — that is exactly what distinguishes "validated once" from "validated
+ * again".
+ */
+export function __auditResultValidationRunCountForTests(): number {
+  return auditResultValidationRuns;
+}
+
+/** The receipt identity: canonical hash of the exact validation inputs. */
+function validationReceiptKey(
+  result: unknown,
+  tasks: readonly AuditTask[],
+  options: ValidateAuditResultOptions,
+): string {
+  return contentSha256({
+    result,
+    tasks,
+    lineIndex: options.lineIndex ?? null,
+    boundaryPaths: options.boundaryPaths ?? null,
+  });
+}
+
+/**
  * The PER-RESULT half of {@link validateAuditResults}, exported for callers
  * that must apply exactly the same rules to ONE result before admitting it —
  * the host-handoff ingest validates each converted result BEFORE writing it to
@@ -1151,6 +1223,7 @@ export function validateOneAuditResult(
     tasks,
     normLineIndex,
     normBoundary,
+    validationReceiptKey(result, tasks, options),
     issues,
   );
   return issues;
@@ -1171,6 +1244,7 @@ function validateSingleAuditResult(
   allTasks: AuditTask[],
   normLineIndex: Map<string, number>,
   normBoundary: Set<string>,
+  receiptKey: string,
   issues: AuditResultIssue[],
 ): void {
   if (!isRecord(result)) {
@@ -1185,6 +1259,24 @@ function validateSingleAuditResult(
 
   const taskId = issueTaskId(result, rootLabel);
   const task = taskMap.get(taskId);
+
+  // Reuse a minted receipt ONLY on an exact key match. The key hashes the
+  // result content together with the canonical task manifest, the effective
+  // line index, and the boundary, so a receipt is returned only for the
+  // byte-identical context whose successful validation minted it. Only
+  // successful validations reach the store (see the mint below), so a receipt
+  // always describes a zero-error result; its warnings ride here too, and are
+  // re-stamped with THIS caller's result index — warnings appear once per
+  // validation render, never duplicating a rule run.
+  const existing = validationReceipts.get(receiptKey);
+  if (existing) {
+    for (const stored of existing.issues) {
+      pushIssue(issues, { ...stored, result_index: resultIndex });
+    }
+    return;
+  }
+
+  auditResultValidationRuns += 1;
 
   // The assigned set enters the join already normalized — an un-normalized
   // `file_paths` entry (the shape `selectiveDeepening`'s `pathsForFinding`
@@ -1202,6 +1294,7 @@ function validateSingleAuditResult(
 
   const ctx: ResultValidationContext = { result, task, taskId, resultIndex, taskAssignedPaths, normLineIndex, allTasks, normBoundary };
 
+  const start = issues.length;
   validateResultIdentityFields(ctx, issues);
 
   const { normalizedFileCoverage, declaredAssignedCoveragePaths } = validateResultFileCoverage(ctx, issues);
@@ -1210,6 +1303,21 @@ function validateSingleAuditResult(
   if (!findingsOk) return;
 
   validateVerification(result.verification, result, task, normalizedFileCoverage, normBoundary, taskId, resultIndex, issues);
+
+  // MINT only a SUCCESSFUL validation: zero error-severity issues. A failed
+  // validation (any error) never writes a receipt, so a corrected resubmission
+  // at the same bound path is re-validated from its new bytes rather than
+  // reusing the refusal. The stored issues are cloned with `result_index`
+  // normalized away from the caller's index — the other door may reuse this
+  // receipt with a different index, so the field is re-stamped on reuse, never
+  // carried across doors.
+  const resultIssues = issues.slice(start);
+  if (!resultIssues.some((issue) => issue.severity === "error")) {
+    validationReceipts.set(
+      receiptKey,
+      { issues: resultIssues.map((issue) => ({ ...issue, result_index: -1 })) },
+    );
+  }
 }
 
 export function validateAuditResults(
@@ -1235,7 +1343,17 @@ export function validateAuditResults(
   );
 
   for (let i = 0; i < results.length; i++) {
-    validateSingleAuditResult(results[i], i, `results[${i}]`, taskMap, tasks, normLineIndex, normBoundary, issues);
+    validateSingleAuditResult(
+      results[i],
+      i,
+      `results[${i}]`,
+      taskMap,
+      tasks,
+      normLineIndex,
+      normBoundary,
+      validationReceiptKey(results[i], tasks, options),
+      issues,
+    );
   }
 
   if (issues.length > 0) {

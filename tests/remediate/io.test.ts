@@ -177,8 +177,13 @@ describe("isFileMissingError", () => {
     expect(isFileMissingError({ code: "ENOENT" })).toBe(true);
   });
 
+  it("returns true for ENOTDIR (the POSIX spelling of a path traversing a file)", () => {
+    expect(isFileMissingError({ code: "ENOTDIR" })).toBe(true);
+  });
+
   it("returns false for other errors", () => {
     expect(isFileMissingError({ code: "EACCES" })).toBe(false);
+    expect(isFileMissingError({ code: "EISDIR" })).toBe(false);
     expect(isFileMissingError(new Error("something else"))).toBe(false);
     expect(isFileMissingError(null)).toBe(false);
   });

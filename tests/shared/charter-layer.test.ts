@@ -404,6 +404,54 @@ describe("step 4 — fidelity", () => {
     expect(findings[0]?.affected_files.map((f) => f.path)).toEqual(["src/a.ts"]);
   });
 
+  test("differenceFindings stamps every surfaced lead with producer lineage and a content-derived source hash", () => {
+    const pre = precheckFidelity(out.differences, (p) => p.quote !== "missing quote");
+    // Support EVERY difference so several leads surface (not just the one the
+    // pre-check left for the lane) — the stamp must hold for all of them.
+    const applied = applyFidelity(
+      pre.differences,
+      CharterFidelitySubmissionSchema.parse({
+        verdicts: pre.pendingLane.concat(pre.differences
+          .filter((d) => d.fidelity?.decided_by === "tool")
+          .map((d) => d.difference_id))
+          .map((difference_id) => ({
+            difference_id,
+            verdict: "supported" as const,
+            rationale: "both sources say so",
+          })),
+      }),
+    );
+    const findings = differenceFindings(applied.differences, out.correspondences, graphs);
+    expect(findings.length, "the fixture must surface at least one charter lead").toBeGreaterThan(0);
+    for (const finding of findings) {
+      expect(finding.lead_lineage, "an unlineaged charter lead is an unconfirmed verdict").toBeDefined();
+      expect(finding.lead_lineage!.producer).toBe("differenceFindings");
+      expect(finding.lead_lineage!.confirmation).toBe("lead");
+      expect(finding.lead_lineage!.source_hash.length).toBeGreaterThan(0);
+    }
+    // Same supported records re-derived → same hash (the lead is re-checkable).
+    const again = differenceFindings(applied.differences, out.correspondences, graphs);
+    for (let i = 0; i < findings.length; i += 1) {
+      expect(again[i]!.lead_lineage!.source_hash).toBe(findings[i]!.lead_lineage!.source_hash);
+    }
+  });
+
+  test("a moved difference generation yields a different source hash", () => {
+    const pre = precheckFidelity(out.differences, (p) => p.quote !== "missing quote");
+    const pending = pre.pendingLane[0]!;
+    const supported = applyFidelity(pre.differences, {
+      verdicts: [{ difference_id: pending, verdict: "supported", rationale: "both sources say so" }],
+    });
+    const first = differenceFindings(supported.differences, out.correspondences, graphs)[0]!;
+    // The same difference with a different gap claim is a different signal.
+    const changed = differenceFindings(
+      supported.differences.map((d) => (d.difference_id === pending ? { ...d, gap: "a different gap" } : d)),
+      out.correspondences,
+      graphs,
+    )[0]!;
+    expect(first.lead_lineage!.source_hash === changed.lead_lineage!.source_hash).toBe(false);
+  });
+
   test("an interpretation verdict must name the over-read side", () => {
     expect(CharterFidelitySubmissionSchema.safeParse({ verdicts: [{ difference_id: "d", verdict: "interpretation", rationale: "r" }] }).success).toBe(false);
   });

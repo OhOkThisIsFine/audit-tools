@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/prompt-renders-its-contract.test.ts
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   buildFrictionTriageBlock,
@@ -45,23 +46,23 @@ export function renderAnalyzerConsentPrompt(params: {
 }): string {
   const rows = params.pending
     .map((candidate) => {
-      const why: string[] = [];
+      const risks: string[] = [];
       if (candidate.safetyProfile.config_execution === "executable") {
-        why.push("its config can execute repo code");
+        risks.push("Arbitrary code execution during config evaluation");
       }
       if (candidate.safetyProfile.network_egress) {
-        why.push("it makes network requests");
+        risks.push("Outbound network requests");
       }
       if (candidate.safetyProfile.version_pinning !== "pinned") {
-        why.push(
-          `its version is ${candidate.safetyProfile.version_pinning}`,
+        risks.push(
+          `Unpinned version (${candidate.safetyProfile.version_pinning})`,
         );
       }
       return [
         `### \`${candidate.id}\` (${candidate.runner}: \`${candidate.spec}\`)`,
         "",
         `- Detects: ${candidate.purpose ?? "(no purpose recorded)"}`,
-        `- Consent-gated because ${why.join("; ") || "it is heavier than the default set"}.`,
+        `- Security & execution risks: ${risks.join("; ") || "heavier resource profile than the default set"}.`,
       ].join("\n");
     })
     .join("\n\n");
@@ -77,16 +78,23 @@ export function renderAnalyzerConsentPrompt(params: {
   );
   return `# External Analyzer Consent
 
-This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
-decision. Present EACH candidate below to the operator and record their choices —
-\`declined\` persists across runs; \`granted\` covers this run only, and the next run re-offers.
-Do not decide on the operator's behalf.
+This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no decision
+recorded for this run. All decisions are strictly per-run and do not persist across runs —
+the next run asks again, whatever is decided here.
+
+Ask the operator directly using your host's question/confirmation mechanism. For EACH
+candidate below, ask whether to fetch/install and run \`<spec>\` via \`<runner>\` in this
+run. Do not make assumptions or answer on the operator's behalf.
+
+A \`granted\` answer authorizes an observe-only run: consent-gated analyzers never modify
+source files. The audit's only source-mutating phase (the opt-in auto-fix formatters) is
+a separate per-run decision, never implied by this one.
 
 ${rows}
 
 ## Record the decisions
 
-Write ONE JSON object covering every candidate above to:
+Write ONE JSON object mapping every candidate ID above to either \`"granted"\` or \`"declined"\` (no other value is accepted) to:
 
 \`${params.decisionsPath}\`
 
@@ -200,11 +208,22 @@ export function renderAnalyzerInstallPrompt(params: {
     "",
     ...analyzerLines,
     "",
-    "Choose `ephemeral`, `permanent`, or `skip` for each analyzer and write the",
-    "JSON object below. These choices persist in the provider-neutral analyzer policy.",
+    "Ask the operator using your host's question mechanism to choose an install",
+    "option for each analyzer. Do not make package installation decisions",
+    "without operator confirmation.",
+    "",
+    "Allowed values: `\"ephemeral\"` | `\"permanent\"` | `\"skip\"`. These choices persist",
+    "in the provider-neutral analyzer policy.",
+    "",
+    "## Record the decisions",
+    "",
+    "Write ONE JSON object mapping every analyzer ID above to your choice:",
     "",
     `Decisions path: ${params.decisionsPath}`,
-    `Example: ${exampleObject}`,
+    "",
+    "```json",
+    `${exampleObject}`,
+    "```",
     "",
     `Then run: ${params.continueCommand}`,
     "",

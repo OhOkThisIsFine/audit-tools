@@ -29,3 +29,13 @@ test.each(["--help", "-h"])(
     }
   },
 );
+
+test("retired backend selection is refused before help routing", async () => {
+  const result = await captureConsole(() =>
+    runCli(["node", "cli.js", "next-step", "--model", "retired", "--help"]),
+  );
+
+  expect(result.code).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toMatch(/retired argument\(s\) rejected: model selection/);
+});

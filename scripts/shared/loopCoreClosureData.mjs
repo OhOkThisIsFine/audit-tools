@@ -68,7 +68,6 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   // they call.
   { module: "src/remediate/contractPipeline/cyclicSeamResolution.ts", claim: "pure", reason: "seam-cycle resolution; pure over the pipeline's own input" },
   { module: "src/remediate/contractPipeline/phaseCutArtifact.ts", claim: "reads-only", reason: "phase-cut rendering; it reads pipeline envelopes and returns text — the pipeline owns the write" },
-  { module: "src/remediate/contractPipeline/reviewSnapshot.ts", claim: "mutates", reason: "review-snapshot shaping; it WRITES review-snapshots/<name>.json and mkdirs the snapshots dir, but every location derives from an artifactsDir its CALLER supplies (reviewSnapshotDir(artifactsDir)) — it never chooses where, so it holds no write-boundary decision the boundary itself should own" },
   { module: "src/remediate/contractPipeline/testPlanCarry.ts", claim: "mutates", reason: "test-plan carry-forward; it WRITES test-plan-carry.json under the contract-pipeline dir, again derived entirely from a caller-supplied artifactsDir (testPlanCarryPath(artifactsDir)), and it carries state between pipeline stages rather than deciding what the pipeline does next" },
   { module: "src/remediate/findingFilter.ts", claim: "reads-only", reason: "finding filtering; it reads findings input and returns a filter result" },
   { module: "src/remediate/intent/intentOrdering.ts", claim: "pure", reason: "intent ordering; pure" },

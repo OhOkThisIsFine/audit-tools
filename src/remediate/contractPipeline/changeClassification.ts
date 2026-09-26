@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/change-classification-backtracking.test.ts, tests/remediate/dc5.test.ts
 // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * DC-5 — obligation change-vs-addition classification + paired/scoped negative
@@ -49,12 +50,34 @@ const SYMBOL_STOPWORDS = new Set([
   "obligation", "behavior", "behaviour", "existing", "new", "add", "change",
 ]);
 
+function trimSymbolTokenEdges(token: string): string {
+  let start = 0;
+  let end = token.length;
+  while (start < end) {
+    const code = token.charCodeAt(start);
+    if (code === 46 /* . */ || code === 47 /* / */ || code === 45 /* - */) {
+      start++;
+    } else {
+      break;
+    }
+  }
+  while (end > start) {
+    const code = token.charCodeAt(end - 1);
+    if (code === 46 /* . */ || code === 47 /* / */ || code === 45 /* - */) {
+      end--;
+    } else {
+      break;
+    }
+  }
+  return token.slice(start, end);
+}
+
 /** Extract candidate symbol/file tokens from free text (lowercased, de-noised). */
 export function extractSymbolTokens(text: string): string[] {
   if (typeof text !== "string" || text.length === 0) return [];
   const out = new Set<string>();
   for (const raw of text.match(SYMBOL_TOKEN_PATTERN) ?? []) {
-    const token = raw.toLowerCase().replace(/^[./-]+|[./-]+$/g, "");
+    const token = trimSymbolTokenEdges(raw.toLowerCase());
     if (token.length < 3) continue;
     if (SYMBOL_STOPWORDS.has(token)) continue;
     // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
@@ -166,12 +189,20 @@ const SCAN_NEGATION_CUE =
  * structural read of the assertion's action, not a bare keyword veto on the words.
  */
 function usesAffirmativeGlobalScan(assertion: string): boolean {
-  const re = new RegExp(UNSCOPED_GLOBAL_SCAN_PATTERN.source, "gi");
+  const scanRe = new RegExp(UNSCOPED_GLOBAL_SCAN_PATTERN.source, "gi");
+  const boundaryRe = /[.;,]|—|--/g;
+  let clauseStart = 0;
+  let boundaryMatch: RegExpExecArray | null = boundaryRe.exec(assertion);
   let match: RegExpExecArray | null;
-  while ((match = re.exec(assertion)) !== null) {
-    const clause = assertion.slice(0, match.index).split(/[.;,]|—|--/).pop() ?? "";
+
+  while ((match = scanRe.exec(assertion)) !== null) {
+    while (boundaryMatch !== null && boundaryMatch.index < match.index) {
+      clauseStart = boundaryMatch.index + boundaryMatch[0].length;
+      boundaryMatch = boundaryRe.exec(assertion);
+    }
+    const clause = assertion.slice(clauseStart, match.index);
     if (!SCAN_NEGATION_CUE.test(clause)) return true;
-    if (match.index === re.lastIndex) re.lastIndex++; // zero-width guard
+    if (match.index === scanRe.lastIndex) scanRe.lastIndex++; // zero-width guard
   }
   return false;
 }

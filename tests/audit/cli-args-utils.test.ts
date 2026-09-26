@@ -7,6 +7,7 @@ import { AUDIT_TOOLS_CALLER_CWD_ENV } from "audit-tools/shared";
 
 const {
   getArtifactsDir,
+  getAutoFixOptions,
   getRootDir,
 } = await import("../../src/audit/cli/args.js");
 
@@ -149,4 +150,28 @@ test("CLI args code has no `.audit-tools` path-join literal beyond the single de
   // The one allowed occurrence is the default-value sentinel, not a join() arg.
   expect(code).toMatch(/artifactsDir:\s*"\.audit-tools\/audit"/);
   expect(code, "No join()/resolve() call in CLI args code may take a '.audit-tools' literal — use the shared auditToolsPaths helpers.").not.toMatch(/(?:join|resolve)\([^)]*\.audit-tools/);
+});
+
+// ---------------------------------------------------------------------------
+// getAutoFixOptions — packet 5 / F03: the phase-1 auto-fix opt-in.
+// Absent both flags ⇒ undefined, and the executor skips the phase ("not opted
+// in"). `--allow-auto-fix` enables the current run; `--auto-fix-dry-run`
+// keeps precedence over the opt-in.
+// ---------------------------------------------------------------------------
+
+test("getAutoFixOptions: no flags ⇒ undefined (the read-only default)", () => {
+  expect(getAutoFixOptions([])).toBe(undefined);
+  expect(getAutoFixOptions(["--root", "/repo"])).toBe(undefined);
+});
+
+test("getAutoFixOptions: --allow-auto-fix opts the run in", () => {
+  expect(getAutoFixOptions(["--allow-auto-fix"])).toEqual({ enabled: true });
+});
+
+test("getAutoFixOptions: --auto-fix-dry-run alone refuses (dry run keeps precedence)", () => {
+  expect(getAutoFixOptions(["--auto-fix-dry-run"])).toEqual({ dryRun: true });
+  expect(getAutoFixOptions(["--allow-auto-fix", "--auto-fix-dry-run"])).toEqual({
+    enabled: true,
+    dryRun: true,
+  });
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-budget-unit.test.ts
 // Size budget for the split backlog.
 //
 // WHY. The backlog grew past 1,700 lines in one file, so every pass navigated it
@@ -56,15 +57,21 @@
 //   node scripts/check-backlog-budget.mjs --update-baseline  # re-record after condensing
 //   node scripts/check-backlog-budget.mjs --update-baseline --raise-ceiling
 //                                                            # …and accept a HIGHER ceiling
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { splitBacklogEntries } from "./shared/backlog-entry-grammar.mjs";
 import { compareCodeUnits } from './shared/primitives.mjs';
+import { BACKLOG_DIR, REPO_ROOT, listBacklogFiles, readBacklogCorpus } from "./shared/backlog-corpus.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
+// The enumeration (git index, not disk) and the per-file parse (entries via
+// `splitBacklogEntries`) are single-sourced in `backlog-corpus.mjs` — the one
+// representation the four backlog validators and the seek-index generator share
+// (packet 23). This gate keeps only its OWN refusal text and its
+// `--update-baseline` WRITE mode.
+const repoRoot = REPO_ROOT;
+const backlogDir = BACKLOG_DIR;
 const baselinePath = join(backlogDir, ".size-baseline.json");
 
 /** UTF-8 byte length — the ONE measurement function, so no caller can drift to `.length`. */
@@ -172,13 +179,14 @@ export function prescribedFixShapes(body) {
 const PROPERTY_MARKER = /\*\*Property:\*\*/;
 
 /**
- * Split a backlog file into its top-level entries and meter each one. Entry
- * boundaries come from the shared grammar; the TITLE stays local because it is a
- * persisted identity (see entryKey / .size-baseline.json) whose 78-char
- * truncation the recorded keys already carry.
+ * Derive the budget gate's per-entry fields from ONE shared-parsed entry — the
+ * `{line, headline, body}` shape `splitBacklogEntries` (and therefore
+ * `backlog-corpus.mjs`) produces. The entry BOUNDARIES come from that shared
+ * grammar; only the budget-specific measurement is local: the byte size, the
+ * persisted 78-char title, and the two states-the-property flags.
  */
-export function parseEntries(text) {
-  return splitBacklogEntries(text).map(({ line, headline, body }) => ({
+function deriveEntry({ line, headline, body }) {
+  return {
     line,
     bytes: sizeOf(body.replace(/\s+$/, "")),
     title: headline.replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78),
@@ -190,7 +198,21 @@ export function parseEntries(text) {
     // gate never re-scans the body it already holds.
     statesProperty: PROPERTY_MARKER.test(body),
     prescribedFix: prescribedFixShapes(body),
-  }));
+  };
+}
+
+/**
+ * Split a backlog file into its top-level entries and meter each one. Entry
+ * boundaries come from the shared grammar; the TITLE stays local because it is a
+ * persisted identity (see entryKey / .size-baseline.json) whose 78-char
+ * truncation the recorded keys already carry.
+ *
+ * Kept as a text→entries convenience for the unit tests, which drive
+ * `evaluateBacklog` with `{file, text}` alone; the CLI path passes the entries
+ * the shared corpus parse already produced instead of re-splitting.
+ */
+export function parseEntries(text) {
+  return splitBacklogEntries(text).map(deriveEntry);
 }
 
 /** Stable identity for an entry — its title, not its line (lines shift constantly). */
@@ -322,9 +344,12 @@ function loadBaseline() {
  * `staleAmnesty` (the `--report` list) rather than refused, because the amnesty
  * carries no recorded size and is inert while the entry is small.
  *
- * @param {{file: string, text: string, previousText?: string}[]} files
- *   `previousText` is the file as HEAD holds it, or omitted when HEAD's copy is
- *   unreadable. It only ever ADDS a "bytes since HEAD" line to a refusal.
+ * @param {{file: string, text: string, entries?: {line: number, headline: string, body: string}[], previousText?: string}[]} files
+ *   `entries` is the shared corpus parse (`readBacklogCorpus`), consumed when the
+ *   caller already split the file; omitted by pure callers, in which case this
+ *   function derives it from `text` with the SAME boundary grammar. `previousText`
+ *   is the file as HEAD holds it, or omitted when HEAD's copy is unreadable. It
+ *   only ever ADDS a "bytes since HEAD" line to a refusal.
  * @param {{fileCeilings: Record<string, number>, entriesOverBudget: Set<string>,
  *   entriesPrescribingMechanism: Set<string>}} baseline
  */
@@ -342,8 +367,12 @@ export function evaluateBacklog(files, baseline) {
   const distribution = [];
   const presentFiles = new Set(files.map((f) => f.file));
 
-  for (const { file, text, previousText } of files) {
-    const entries = parseEntries(text);
+  for (const { file, text, entries: sharedEntries, previousText } of files) {
+    // The shared corpus parse when the CLI supplied it; re-derived from `text`
+    // by the SAME grammar when a pure caller drives `{file, text}` alone. The
+    // derivation path shares `deriveEntry` with `parseEntries`, so the budget
+    // fields never fork between the two entry sources (packet 23).
+    const entries = sharedEntries !== undefined ? sharedEntries.map(deriveEntry) : parseEntries(text);
     totalEntries += entries.length;
     const fileBytes = sizeOf(text);
     const sinceHead = sinceHeadLine(previousText === undefined ? null : sizeOf(previousText), fileBytes);
@@ -596,14 +625,17 @@ function main() {
     process.exit(1);
   }
 
-  const files = readdirSync(backlogDir)
-    .filter((f) => f.endsWith(".md"))
-    .sort()
-    .map((file) => ({
+  // The corpus is enumerated from the git INDEX and parsed once by the shared
+  // `backlog-corpus.mjs`, so this gate cannot enumerate the disk and drift from
+  // the other three validators on which files/entries exist (packet 23).
+  const files = readBacklogCorpus(listBacklogFiles(repoRoot), repoRoot).map(
+    ({ file, text, entries }) => ({
       file,
-      text: readFileSync(join(backlogDir, file), "utf8"),
+      text,
+      entries,
       previousText: headText(file),
-    }));
+    }),
+  );
 
   const baseline = loadBaseline();
   const result = evaluateBacklog(files, baseline);

@@ -82,6 +82,14 @@ export const WORKER_REFUSED_FINDING_VERDICTS = {
     "evidence_lane is tool-derived at ingest and must not be supplied",
   lead_lineage:
     "lead_lineage is stamped by the deterministic producer and must not be supplied",
+  concrete_change:
+    "concrete_change is computed by the remediation contract-pipeline producer and must not be supplied",
+  preconditions:
+    "preconditions is computed by the remediation contract-pipeline producer and must not be supplied",
+  expected_changes:
+    "expected_changes is computed by the remediation contract-pipeline producer and must not be supplied",
+  addresses_counterexamples:
+    "addresses_counterexamples is computed by the remediation contract-pipeline producer and must not be supplied",
 } as const;
 
 export const WorkerFindingSchema = FindingSchema.omit({
@@ -90,6 +98,10 @@ export const WorkerFindingSchema = FindingSchema.omit({
   severity_downgraded_from: true,
   evidence_lane: true,
   lead_lineage: true,
+  concrete_change: true,
+  preconditions: true,
+  expected_changes: true,
+  addresses_counterexamples: true,
 })
   .extend({
     category: z.string().min(1),
@@ -220,6 +232,10 @@ export const CONTRACT_SCHEMA_PRODUCERS: Record<
       "severity_downgraded_from",
       "evidence_lane",
       "lead_lineage",
+      "concrete_change",
+      "preconditions",
+      "expected_changes",
+      "addresses_counterexamples",
     ],
     requiredOverride: ["evidence", "affected_files"],
     added: [],

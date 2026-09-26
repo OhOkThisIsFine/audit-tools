@@ -48,9 +48,9 @@ import { parseBulletEntries, parseTrackEntries, sectionText } from "./generate-h
 import { runGeneratedArtifactCli, spliceGeneratedBlock } from "./generatedArtifacts.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 import { findEntryBoundaryDamage, renderEntryBoundaryDamage } from "./backlog-entry-grammar.mjs";
+import { listBacklogFiles, readBacklogCorpus } from "./backlog-corpus.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
 const indexPath = join(repoRoot, "docs", "backlog.md");
 
 export const BEGIN_MARKER =
@@ -295,8 +295,10 @@ export function spliceWatchMatrix(indexText, block) {
 }
 
 function readSources() {
-  const files = [...new Set(INDEX_SOURCES.map((s) => s.file))];
-  return new Map(files.map((f) => [f, readFileSync(join(backlogDir, f), "utf8")]));
+  // Enumerated from the git INDEX and parsed by the SHARED corpus module — the
+  // same `backlog-corpus.mjs` the four backlog validators read, so "which files
+  // exist" has one definition across the index and the validation side (packet 23).
+  return new Map(readBacklogCorpus(listBacklogFiles(), repoRoot).map(({ file, text }) => [file, text]));
 }
 
 /**

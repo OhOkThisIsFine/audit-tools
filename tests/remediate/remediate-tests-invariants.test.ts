@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { barrelSpyViolations } from "../helpers/barrelSpy.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TESTS_DIR = __dirname;
@@ -395,35 +396,6 @@ describe("INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-expor
   // console.*) and relative source-module imports (import * as x from "../../src
   // /…") are a different mechanism and are allowed.
   const THIS_FILE = "remediate-tests-invariants.test.ts";
-
-  /** Variables bound to the audit-tools/shared barrel as a full namespace object. */
-  function barrelNamespaceVars(src: string): string[] {
-    const names = new Set<string>();
-    // `const NS = await import("audit-tools/shared…")` — a `{`-destructure never
-    // matches (no identifier after `const`), so only namespace bindings are caught.
-    for (const m of src.matchAll(
-      /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+import\(\s*["']audit-tools\/shared/g,
-    )) {
-      names.add(m[1]);
-    }
-    // `import * as NS from "audit-tools/shared…"`
-    for (const m of src.matchAll(
-      /\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']audit-tools\/shared/g,
-    )) {
-      names.add(m[1]);
-    }
-    return [...names];
-  }
-
-  function barrelSpyViolations(src: string): string[] {
-    const nonComment = src
-      .split("\n")
-      .filter((l) => !l.trim().startsWith("//"))
-      .join("\n");
-    return barrelNamespaceVars(nonComment).filter((name) =>
-      new RegExp(`vi\\.spyOn\\(\\s*${name}\\b`).test(nonComment),
-    );
-  }
 
   it("the detector flags a barrel-namespace spy but not destructures / relative-module spies (non-vacuous self-check)", () => {
     const bad = [

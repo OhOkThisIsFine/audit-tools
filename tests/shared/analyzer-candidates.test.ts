@@ -1174,35 +1174,36 @@ test("inv-18: upsertExternalToolResults is the single merge helper — same tool
 
 // ───────────────────────────────────────────────────────────────────────────
 // inv-15 / fail-10 / fail-11: the durable policy merge is lock-guarded and an
-// invalid artifact fails CLOSED. A lost decline is an unenforceable veto — exactly
-// what the admission ladder above exists to enforce.
+// invalid artifact fails CLOSED. Packet 5 / O07: consent is strictly per-run
+// and has no durable shape, so the merge covers the per-analyzer resolution
+// settings only — a lost `skip` is an unenforceable opt-out, exactly what the
+// admission ladder above exists to enforce.
 // ───────────────────────────────────────────────────────────────────────────
 
 const {
   loadAnalyzerPolicy,
-  persistAnalyzerConsent,
   persistAnalyzerSettings,
   getAnalyzerPolicyPath,
 } = await import("../../src/shared/analyzerPolicy.js");
 
-test("inv-15 / fail-11: concurrent consent + settings writes both land, neither is lost or torn", async () => {
+test("inv-15 / fail-11: concurrent settings writes both land, neither is lost or torn", async () => {
   const root = await mkdtemp(join(tmpdir(), "cp1-policy-"));
   try {
     await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
     // Interleave many writers against the one artifact. Without the locked
-    // read-modify-write, a plain write drops whichever decision it did not read.
+    // read-modify-write, a plain write drops whichever setting it did not read.
     await Promise.all([
       ...["eslint", "knip", "semgrep", "jscpd"].map((id) =>
-        persistAnalyzerConsent(root, { [id]: "declined" }),
+        persistAnalyzerSettings(root, { [id]: "ephemeral" }),
       ),
       ...["clippy", "rubocop"].map((id) => persistAnalyzerSettings(root, { [id]: "skip" })),
     ]);
     const policy = await loadAnalyzerPolicy(root);
     for (const id of ["eslint", "knip", "semgrep", "jscpd"]) {
       expect(
-        policy.analyzer_consent?.[id],
-        `${id}'s decline must survive concurrent writers`,
-      ).toBe("declined");
+        policy.analyzers?.[id],
+        `${id}'s setting must survive concurrent writers`,
+      ).toBe("ephemeral");
     }
     for (const id of ["clippy", "rubocop"]) {
       expect(policy.analyzers?.[id], `${id}'s setting must survive concurrent writers`).toBe("skip");
@@ -1216,14 +1217,14 @@ test("fail-10: a malformed policy artifact throws — it never degrades to an em
   const root = await mkdtemp(join(tmpdir(), "cp1-policy-bad-"));
   try {
     await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
-    // A value outside the decision vocabulary. Degrading to `{}` here would silently
-    // discard every recorded decline, which the chokepoint could then never enforce.
+    // A value outside the settings vocabulary. Degrading to `{}` here would silently
+    // discard every recorded choice, which the chokepoint could then never enforce.
     await writeFile(
       getAnalyzerPolicyPath(root),
-      JSON.stringify({ analyzer_consent: { eslint: "maybe" } }),
+      JSON.stringify({ analyzers: { eslint: "maybe" } }),
       "utf8",
     );
-    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/analyzer_consent/);
+    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/analyzers/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

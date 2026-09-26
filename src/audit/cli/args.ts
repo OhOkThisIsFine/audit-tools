@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/cli-args-utils.test.ts
 import { createReadStream, existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -45,6 +46,25 @@ export function getFlag(
 
 export function hasFlag(argv: string[], name: string): boolean {
   return argv.includes(name);
+}
+
+/**
+ * The phase-1 deterministic auto-fix opt-in (packet 5 / F03: audits leave the
+ * audited tree unchanged by default). `--allow-auto-fix` enables the phase for
+ * the current run only; `--auto-fix-dry-run` reports what it would do without
+ * spawning a formatter and keeps precedence over the opt-in. Absent both ⇒
+ * `undefined`, and the executor skips the phase ("not opted in").
+ */
+export function getAutoFixOptions(
+  argv: string[],
+): { enabled?: boolean; dryRun?: boolean } | undefined {
+  const enabled = hasFlag(argv, "--allow-auto-fix");
+  const dryRun = hasFlag(argv, "--auto-fix-dry-run");
+  if (!enabled && !dryRun) return undefined;
+  return {
+    ...(enabled ? { enabled: true as const } : {}),
+    ...(dryRun ? { dryRun: true as const } : {}),
+  };
 }
 
 export { digestId, safeArtifactStem } from "audit-tools/shared";

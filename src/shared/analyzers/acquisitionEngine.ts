@@ -1,5 +1,7 @@
+// sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 import {
   resolveSpawnDeadline,
   runTrackedAsync,
@@ -274,13 +276,19 @@ export interface AcquisitionRunner {
 }
 
 /**
- * A recorded, durable operator decision for one analyzer. DECLINE ONLY — a grant
- * binds one run and rides the per-run {@link AnalyzerConsentTokenGrant}, so it
- * has no durable form to be recorded in.
+ * An operator decision for one analyzer, binding the run that was asked.
+ * DECLINE ONLY — a grant binds one run and rides the per-run
+ * {@link AnalyzerConsentTokenGrant}, so it has no durable form to be recorded
+ * in. And since packet 5 / O07 a decline is per-run too: it vetoes every later
+ * spawn of that tool for the rest of the run, and the next run re-offers it.
  */
-export type AnalyzerConsentDecision = "declined";
+export const AnalyzerConsentDecisionSchema = z.enum(["declined"]);
+export type AnalyzerConsentDecision = z.infer<
+  typeof AnalyzerConsentDecisionSchema
+>;
+export const ANALYZER_CONSENT_DECISIONS = AnalyzerConsentDecisionSchema.options;
 
-/** The recorded decisions, keyed by candidate id, as loaded from the durable policy. */
+/** This run's consent decisions, keyed by candidate id (folded in from the `analyzer_consent` lane). Nothing durable is ever read for consent: the next run is asked again. */
 export type AnalyzerConsentDecisions = Record<string, AnalyzerConsentDecision>;
 
 /**
@@ -319,12 +327,13 @@ export interface AcquisitionEngineOptions {
   /** Per-analyzer settings (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
-   * CALLER OBLIGATION (declared here, not left to prose): the durable analyzer
-   * policy is loaded and BOTH `analyzers` and `analyzerConsent` are passed on EVERY
-   * acquisition call; an unreadable policy blocks the step rather than degrading to
-   * an empty one; and a consent token is never synthesized on the operator's behalf.
-   * Omitting this map leaves a recorded decline UNREPRESENTABLE at the chokepoint —
-   * the decision cannot be enforced because it never arrives.
+   * CALLER OBLIGATION (declared here, not left to prose): the durable
+   * per-analyzer `analyzers` settings are passed on EVERY acquisition call —
+   * omitting them leaves a `skip` unrepresentable at the chokepoint — and this
+   * run's `analyzerConsent` map carries the decisions the operator made on
+   * this run's `analyzer_consent` lane. Consent is strictly per-run (packet 5
+   * / O07): nothing durable is ever read for it, and a consent token is never
+   * synthesized on the operator's behalf.
    */
   analyzerConsent?: AnalyzerConsentDecisions;
   /** Injectable command runner; defaults to the shared runTracked. */

@@ -319,6 +319,10 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
   expect(prompt).toMatch(/intent_checkpoint\.json/);
   expect(prompt).toMatch(/"excluded_scope"/);
   expect(prompt).toMatch(/audit-code next-step/);
+  // Packet 9: the driver prompt leads with the immediate responsibility (Do
+  // Now) rather than burying it under the deterministic scope presentation.
+  expect(prompt).toMatch(/## Do Now/);
+  expect(prompt).toMatch(/## Continue/);
   const required = Object.entries(IntentCheckpointSchema.shape)
     .filter(([, field]) => !field.isOptional())
     .map(([key]) => key);

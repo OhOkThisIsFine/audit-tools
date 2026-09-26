@@ -1,11 +1,13 @@
 /**
- * CP-NODE-7 (OBL-impl-block-5-inv-2, -fail-2) — the phase-1 auto-fix gate.
+ * Packet 5 / F03 (CP-NODE-7, OBL-impl-block-5-inv-2, -fail-2) — the phase-1
+ * auto-fix gate.
  *
- * Two obligations, one property: auto-fix must mutate NOTHING when the host
- * opts out or asks for a dry run, and the check must happen BEFORE the first
- * formatter is invoked. A dry run implemented as a post-hoc revert is
- * explicitly rejected — by the time a revert runs, the formatter has already
- * rewritten the tree, and a crash between the two leaves the mutation behind.
+ * Two obligations, one property: auto-fix must mutate NOTHING unless the
+ * current run explicitly opts in, and never on a dry run — and the check must
+ * happen BEFORE the first formatter is invoked. A dry run implemented as a
+ * post-hoc revert is explicitly rejected — by the time a revert runs, the
+ * formatter has already rewritten the tree, and a crash between the two leaves
+ * the mutation behind.
  *
  * "Mutated nothing" is therefore asserted at the SPAWN, not at the file
  * contents: the fixture plants a repo-local `prettier.cjs` whose only job is to
@@ -21,7 +23,7 @@
 
 import { describe, it, expect } from "vitest";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileDispositionStatus } from "audit-tools/shared";
 import { advanceAudit } from "../../src/audit/orchestrator/advance.js";
@@ -68,21 +70,48 @@ async function prepareRepo(root: string): Promise<string> {
   return plantMarkerFormatter(root);
 }
 
-describe("phase-1 auto-fix opt-out and dry-run gate", () => {
-  it("the ungated run DOES spawn the formatter (the control that keeps the gate tests honest)", async () => {
-    await withTempDir("auto-fix-ungated-", async (root: string) => {
+describe("phase-1 auto-fix opt-in and dry-run gate", () => {
+  it("the opted-in run DOES spawn the formatter (the control that keeps the gate tests honest)", async () => {
+    await withTempDir("auto-fix-optin-", async (root: string) => {
       const marker = await prepareRepo(root);
+
+      const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
+        root,
+        preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
+      });
+
+      expect(result.selected_executor).toBe("auto_fix_executor");
+      expect(
+        existsSync(marker),
+        "an opted-in auto-fix must run the formatter — otherwise the gate assertions below prove nothing",
+      ).toBe(true);
+    });
+  });
+
+  it("default (no opt-in): no formatter is spawned and fixture source bytes are unchanged", async () => {
+    await withTempDir("auto-fix-default-", async (root: string) => {
+      const marker = await prepareRepo(root);
+      const sourcePath = join(root, "src", "api", "auth.ts");
+      const before = await readFile(sourcePath, "utf8");
 
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
       });
 
-      expect(result.selected_executor).toBe("auto_fix_executor");
       expect(
         existsSync(marker),
-        "without a gate the formatter must run — otherwise the gate assertions below prove nothing",
-      ).toBe(true);
+        "a default (not opted-in) auto-fix must never reach a formatter spawn",
+      ).toBe(false);
+      expect(
+        await readFile(sourcePath, "utf8"),
+        "a default audit leaves fixture source bytes unchanged",
+      ).toBe(before);
+      const applied = result.updated_bundle.auto_fixes_applied as AutoFixesApplied;
+      expect(applied.executed_tools).toEqual([]);
+      expect(applied.failed_tools, "a gate is not a formatter failure").toEqual([]);
+      expect(result.progress_summary.toLowerCase()).toContain("not opted in");
     });
   });
 
@@ -123,6 +152,27 @@ describe("phase-1 auto-fix opt-out and dry-run gate", () => {
       const applied = result.updated_bundle.auto_fixes_applied as AutoFixesApplied;
       expect(applied.executed_tools).toEqual([]);
       expect(applied.failed_tools).toEqual([]);
+    });
+  });
+
+  it("dry-run keeps precedence over an explicit opt-in: no formatter is spawned", async () => {
+    await withTempDir("auto-fix-dryrun-optin-", async (root: string) => {
+      const marker = await prepareRepo(root);
+
+      const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
+        root,
+        preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true, dryRun: true },
+      });
+
+      expect(
+        existsSync(marker),
+        "a dry run must be a REFUSAL to spawn even when the run opted in, not a spawn followed by a revert",
+      ).toBe(false);
+      const applied = result.updated_bundle.auto_fixes_applied as AutoFixesApplied;
+      expect(applied.executed_tools).toEqual([]);
+      expect(applied.failed_tools).toEqual([]);
+      expect(result.progress_summary.toLowerCase()).toContain("dry run");
     });
   });
 

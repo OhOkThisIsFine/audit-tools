@@ -45,12 +45,20 @@ human-readable render (markdown):
   shared core, almost never a reason to fork it.
 - Auditing produces findings, remediation consumes them and fixes. The machine contract is the source of
   truth; the human report is its render.
+- Audits leave source files unchanged by default: formatting is an explicit per-run opt-in,
+  a dry run never formats, and analyzer consent — grants and declines alike — binds only
+  the run that was asked, so every run asks again.
 - Nothing runs to completion in a single call. Each invocation does a bounded, persisted piece of work,
   so a run is resumable, parallelizable and failure-isolated.
 - Scale the process to the work — depth and granularity are dials on one pipeline, never a separate
   lighter path.
 - Artifacts are continuity: staleness propagates along an explicit dependency map, never ad-hoc
   freshness checks.
+- The tool splits multi-goal scope into bounded parallel units — each owning its source and its tests —
+  with boundary tests and scheduling dependencies; the host never phases work by hand.
+- Parallel host execution over overlapping files is optimistic: two units may touch one file, the
+  serialized accept-time write-scope binding decides collisions, and a wrongly-admitted pair conflicts
+  at rebase and quarantines for retry.
 
 <!-- END philosophy-brief -->
 

@@ -4,6 +4,7 @@
 import type { AnalyzerLeadVerifyOverrides } from "../phases/closeVerifyAnalyzerLeads.js";
 import type { LandingGateVerifyOverrides } from "../phases/closeVerifyLandingGates.js";
 import type { HeadEvidenceOverrides } from "../phases/closeVerifyHeadEvidence.js";
+import type { ProjectTestAdmissionOutcome } from "audit-tools/shared";
 
 export interface OrchestratorOptions {
   root: string;
@@ -26,4 +27,17 @@ export interface OrchestratorOptions {
    * withholds every candidate rather than fabricating a verdict.
    */
   headEvidenceOverrides?: HeadEvidenceOverrides;
+  /**
+   * Test-only seam for the close phase's e2e-leg spawn (see
+   * `runE2eTests`). Production passes nothing, so a discovered e2e command goes
+   * through the shared admission path (`runAdmittedProjectE2eCommand`) like a
+   * discovered test or landing-gate command.
+   */
+  e2eVerifyOverrides?: {
+    run?: (
+      command: string[],
+      root: string,
+      options: { timeoutMs: number },
+    ) => Promise<ProjectTestAdmissionOutcome>;
+  };
 }

@@ -111,41 +111,54 @@ test("verify:hosts can keep its artifacts for inspection (keepArtifacts)", async
   }
 });
 
-// ── (4) release-gate wiring: verify:release invokes verify:hosts ahead of publish
+// ── (4) release-gate wiring: verify:hosts ahead of the publish smoke steps
+//
+// Packet 22 made the release sequence DERIVED from the gate declaration
+// (scripts/guard-reach-data.mjs GUARDS → scripts/shared/run-release-gates.mjs),
+// so these properties are asserted against the derivation, not a hand-listed
+// package.json string. The load-bearing ordering — verify:hosts before the
+// packaged smokes, and the linked-install smokes in the release tail — is the
+// same; only its home moved.
 
-test("verify:release runs verify:hosts ahead of the publish smoke steps", () => {
+import { GUARDS } from "../../scripts/guard-reach-data.mjs";
+import { releaseGatePhases } from "../../scripts/shared/run-release-gates.mjs";
+
+test("verify:hosts runs ahead of the publish smoke steps", () => {
   const pkg = readPackageJson();
-  const verifyRelease = pkg.scripts["verify:release"];
-  expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
-  // The cheap deterministic chain (check/deadcode/doc-manifest/build/hosts/smokes)
-  // lives in verify:checks; verify:release composes it with the vitest suite, and CI
-  // runs verify:checks + a sharded vitest matrix as parallel jobs. The hosts-ahead-of
-  // -smokes ordering therefore lives in verify:checks.
-  expect(verifyRelease, "verify:release must compose the verify:checks gate").toMatch(/\bnpm run verify:checks\b/);
   const verifyChecks = pkg.scripts["verify:checks"];
-  expect(verifyChecks, "package.json must define a verify:checks script").toBeTruthy();
-  // verify:checks runs its sub-steps through the profiled runner
-  // (scripts/shared/profile-run.mjs), which invokes each named npm script in order,
-  // so the gate lists `verify:hosts` as a bare step token rather than `npm run …`.
-  expect(verifyChecks, "verify:checks must invoke verify:hosts").toMatch(/\bverify:hosts\b/);
+  const verifyRelease = pkg.scripts["verify:release"];
+  expect(verifyChecks, "verify:checks must run through the declared gate catalog").toMatch(
+    /\brun-release-gates\.mjs\b/,
+  );
+  expect(verifyRelease, "verify:release must run the catalog with the release tail").toMatch(
+    /\brun-release-gates\.mjs\b/,
+  );
+  const { default: sequence } = releaseGatePhases();
   // verify:hosts must gate BEFORE the publish smoke steps, not after.
-  const hostsIdx = verifyChecks.indexOf("verify:hosts");
-  const smokeIdx = verifyChecks.indexOf("smoke:packaged-audit-code");
-  expect(smokeIdx >= 0, "verify:checks must still run the packaged smoke step").toBeTruthy();
-  expect(hostsIdx < smokeIdx, "verify:hosts must run ahead of the publish smoke steps").toBeTruthy();
+  expect(sequence, "the release sequence must still run the packaged smoke step").toContain(
+    "smoke:packaged-audit-code",
+  );
+  expect(sequence.indexOf("verify:hosts")).toBeLessThan(sequence.indexOf("smoke:packaged-audit-code"));
 
   // The script itself must exist and point at the real runner.
   expect(pkg.scripts["verify:hosts"], "verify:hosts must invoke the verify-hosts runner script").toBe("node scripts/audit/verify-hosts.mjs");
 });
 
-test("verify:release retains both linked-install smoke contracts", () => {
+test("verify:release retains both linked-install smoke contracts in the tail", () => {
   const pkg = readPackageJson();
   const verifyRelease = pkg.scripts["verify:release"];
   expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
-  expect(verifyRelease, "verify:release must run the linked audit-code smoke").toMatch(
-    /\bnpm run smoke:linked-audit-code\b/,
-  );
-  expect(verifyRelease, "verify:release must run the linked remediate-code smoke").toMatch(
-    /\bnpm run smoke:linked-remediate-code\b/,
-  );
+  // The two linked-install smokes are release-tail gates: they run only under
+  // verify:release, after the whole default sequence. Their membership is a
+  // property of the declaration (release:'tail'), not of the package.json string.
+  const { tail } = releaseGatePhases();
+  expect(tail, "the release tail must run the linked audit-code smoke").toContain("smoke:linked-audit-code");
+  expect(tail, "the release tail must run the linked remediate-code smoke").toContain("smoke:linked-remediate-code");
+  // And the catalog marks them tail, never default — a linked smoke folded into
+  // verify:checks would run at commit/pre-tag, which the design forbids.
+  for (const g of GUARDS) {
+    if (g.kind === "gate" && (g.id === "smoke:linked-audit-code" || g.id === "smoke:linked-remediate-code")) {
+      expect(g.release, `${g.id} must be a release-tail gate`).toBe("tail");
+    }
+  }
 });

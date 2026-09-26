@@ -71,7 +71,7 @@ describe("discoverLandingGates", () => {
     const root = await repoWithScripts({
       test: "vitest run",
       "verify:guards": "node scripts/shared/run-vitest-gate.mjs",
-      "verify:checks": "node scripts/shared/profile-run.mjs verify-checks",
+      "verify:checks": "node scripts/shared/run-release-gates.mjs",
       "check:depgraph": "depcruise --config .dependency-cruiser.cjs src",
       "check:deadcode": "knip --no-config-hints",
       "check:lint": "eslint .",

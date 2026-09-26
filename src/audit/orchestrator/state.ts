@@ -9,6 +9,8 @@ import type {
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
 import { deriveIntentEquivalenceStatus } from "./intentEquivalenceExecutor.js";
+import { resolveDesignReviewBinding } from "audit-tools/shared";
+import type { DesignReviewSettings } from "audit-tools/shared";
 import { derivePendingTaskPartition } from "./pendingTasks.js";
 import {
   unresolvedConstraintClauses,
@@ -37,6 +39,25 @@ function staleOrSatisfied(
 ): ObligationState {
   if (!present) return "missing";
   return deps.some((dep) => staleArtifacts.has(dep)) ? "stale" : "satisfied";
+}
+
+/**
+ * True when a `design_review` block carries at least one per-run CHOICE dial —
+ * the dials `resolveRunBoundDesignReview` gates on provenance. `ceiling` is
+ * deliberately NOT in this set: it is read unbound by design (see
+ * `resolveCharterCeiling`), so a ceiling-only block must never hold the
+ * checkpoint open. `answered_at` is provenance, not a choice.
+ */
+function carriesDesignReviewChoice(
+  block: DesignReviewSettings | undefined,
+): boolean {
+  if (!block) return false;
+  return (
+    block.conceptual_depth !== undefined ||
+    block.perspectives !== undefined ||
+    block.custom_perspectives !== undefined ||
+    block.attention !== undefined
+  );
 }
 
 /**
@@ -248,13 +269,34 @@ export function deriveAuditState(
     intentCheckpointBase === "satisfied"
       ? unresolvedConstraintClauses(bundle.intent_checkpoint)
       : [];
+  // A PRESENT `design_review` block that carries a per-run CHOICE but does not
+  // bind to this confirmation (missing or mismatched `answered_at`) keeps this
+  // obligation unmet for the same reason: the conceptual dispatch would
+  // otherwise fall back to the shallow default and execute a degraded pass the
+  // operator never chose. The run returns to `confirm_intent` instead, which
+  // re-asks the depth question the block claims to answer. NARROW ON PURPOSE:
+  // only the run-bound CHOICE dials (`conceptual_depth`, `perspectives`,
+  // `custom_perspectives`, `attention`) trigger it — a block carrying only
+  // `ceiling` is read unbound BY DESIGN (see `resolveCharterCeiling`) and must
+  // not hold the checkpoint open, and an absent block claims nothing at all.
+  const designReviewBinding =
+    intentCheckpointBase === "satisfied"
+      ? resolveDesignReviewBinding(bundle.intent_checkpoint)
+      : null;
+  const designReviewChoiceUnbound =
+    designReviewBinding?.kind === "unbound" &&
+    carriesDesignReviewChoice(bundle.intent_checkpoint?.design_review);
   obligations.push(
     obligation(
       "intent_checkpoint_current",
-      unresolvedClauses.length > 0 ? "missing" : intentCheckpointBase,
+      unresolvedClauses.length > 0 || designReviewChoiceUnbound
+        ? "missing"
+        : intentCheckpointBase,
       unresolvedClauses.length > 0
         ? `${unresolvedClauses.length} free_form_intent clause(s) could not be encoded as planning signals and need a host answer in constraint_clauses before planning proceeds.`
-        : undefined,
+        : designReviewChoiceUnbound
+          ? `The intent checkpoint carries a design_review block that is not this run's answer (${designReviewBinding.kind === "unbound" ? designReviewBinding.reason : "unbound"}); re-run confirm_intent to answer the conceptual-review dials for this run instead of falling back to shallow defaults.`
+          : undefined,
     ),
   );
 

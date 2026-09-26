@@ -1,18 +1,28 @@
 /**
- * Contract: an acquisition consent token authorizes ONE run and is never a
- * persisted capability.
+ * Contract: analyzer consent authorizes ONE run and is never a persisted
+ * capability.
  *
- * The token rides `AcquisitionEngineOptions` / `ExternalAcquisitionAdvanceOptions`
- * in memory and is consumed by `admitSpawn`. The two artifacts a run may durably
- * write in that neighborhood are the canonical repository session intent
+ * A grant rides `AcquisitionEngineOptions` / `ExternalAcquisitionAdvanceOptions`
+ * in memory as the scoped {@link AnalyzerConsentTokenGrant} and is consumed by
+ * `admitSpawn`; a decline rides the same options' in-flight `analyzerConsent`
+ * map for the rest of the run. The two artifacts a run may durably write in
+ * that neighborhood are the canonical repository session intent
  * (`.audit-tools/audit/session-config.json`) and the durable analyzer policy
- * (`.audit-tools/audit/analyzer-policy.json`). This suite pins the guarantee the
- * code provides TODAY: BOTH persisted schemas are strict and admit no
- * token-shaped field, the analyzer-policy store re-validates on WRITE (so a
- * token cannot be merged in through the mutate path), and the persisted bytes
- * carry decisions only.
+ * (`.audit-tools/audit/analyzer-policy.json`). This suite pins the guarantee
+ * the code provides TODAY:
  *
- * Adding a token-shaped field to either persisted schema turns this suite red.
+ * - BOTH persisted schemas are strict and admit no token-shaped field;
+ * - the analyzer-policy schema has NO consent shape at all — neither a grant
+ *   nor a decline is representable in it (packet 5 / O07: the retired
+ *   `persistAnalyzerConsent` is gone);
+ * - the store re-validates on WRITE (so nothing consent-shaped can be merged
+ *   in through the mutate path) and strips a LEGACY `analyzer_consent` key on
+ *   READ (so a policy file left by an older release loads — preserving its
+ *   unrelated `analyzers` choices — while its consent can neither authorize
+ *   nor veto the new run).
+ *
+ * Adding a token- or consent-shaped field to either persisted schema turns
+ * this suite red.
  */
 import { describe, expect, it } from "vitest";
 import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
@@ -20,11 +30,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   AnalyzerPolicySchema,
-  AnalyzerConsentDecisionSchema,
   SessionIntentV1Schema,
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
-  persistAnalyzerConsent,
   persistAnalyzerSettings,
 } from "audit-tools/shared";
 
@@ -73,7 +81,7 @@ describe("persisted schemas admit no acquisition consent token", () => {
     "the analyzer-policy schema rejects a %s field",
     (key) => {
       const parsed = AnalyzerPolicySchema.safeParse({
-        analyzer_consent: { eslint: "declined" },
+        analyzers: { eslint: "permanent" },
         [key]: "tok",
       });
       expect(parsed.success).toBe(false);
@@ -92,11 +100,10 @@ describe("persisted schemas admit no acquisition consent token", () => {
   );
 });
 
-describe("the analyzer-policy store never lets a token become durable", () => {
-  it("persists decisions and settings without any token-shaped key", async () => {
+describe("the analyzer-policy store never lets consent become durable", () => {
+  it("persists settings without any token-shaped key", async () => {
     const root = await makeRoot();
     await persistAnalyzerSettings(root, { eslint: "permanent" });
-    await persistAnalyzerConsent(root, { eslint: "declined" });
 
     const raw = await readFile(getAnalyzerPolicyPath(root), "utf8");
     expect(raw).not.toMatch(TOKEN_KEY_PATTERN);
@@ -107,7 +114,6 @@ describe("the analyzer-policy store never lets a token become durable", () => {
     }
     expect(parsed).toEqual({
       analyzers: { eslint: "permanent" },
-      analyzer_consent: { eslint: "declined" },
     });
   });
 
@@ -118,7 +124,7 @@ describe("the analyzer-policy store never lets a token become durable", () => {
     await writeFile(
       policyPath,
       JSON.stringify({
-        analyzer_consent: { eslint: "declined" },
+        analyzers: { eslint: "permanent" },
         consentToken: "tok",
       }),
       "utf8",
@@ -130,38 +136,65 @@ describe("the analyzer-policy store never lets a token become durable", () => {
 
 /**
  * The sibling guarantee, and the one an operator's egress exposure actually
- * rests on: a GRANT is not persistable either.
+ * rests on: a consent decision — grant OR decline — is not durable either.
  *
- * A decline is durable — it vetoes every later spawn of that tool. A grant binds
- * the run that was asked (owner directive, 2026-08-21). A durable grant keeps
- * granting itself to runs whose operator never saw the offer, which for a
- * network-egress analyzer converts one consent into standing consent.
+ * A decline vetoes spawns and a grant admits them, but both bind the run that
+ * was asked (packet 5 / O07). A durable decline vetoes runs whose operator
+ * never saw the offer; a durable grant keeps granting itself to runs whose
+ * operator never saw the offer, which for a network-egress analyzer converts
+ * one consent into standing consent.
  *
- * That rule is enforced by the SCHEMA, not by a caller remembering it:
- * `AnalyzerConsentDecisionSchema` is a one-member enum, and the analyzer-policy
- * store re-validates on write. Re-widening it to accept "granted" turns this red.
+ * That rule is enforced by the ABSENCE of a shape: the analyzer-policy schema
+ * has no consent field, so neither decision is representable in it. A legacy
+ * `analyzer_consent` key left by an older release is stripped on READ — the
+ * file loads, the unrelated settings survive, and the consent authorizes
+ * nothing and vetoes nothing.
  */
-describe("a consent GRANT is not durable either", () => {
-  it("refuses to persist a granted decision, and leaves the prior policy intact", async () => {
-    const root = await makeRoot();
-    await persistAnalyzerConsent(root, { knip: "declined" });
-
-    await expect(
-      // `as never` defeats the compile-time half deliberately: the point is that
-      // the RUNTIME schema refuses it too, so a JS caller or a hand-edited
-      // artifact cannot smuggle a standing grant in.
-      persistAnalyzerConsent(root, { eslint: "granted" as never }),
-    ).rejects.toThrow();
-
-    const policy = await loadAnalyzerPolicy(root);
-    expect(
-      policy.analyzer_consent,
-      "the refused write must not partially land",
-    ).toEqual({ knip: "declined" });
+describe("a consent decision is not durable either", () => {
+  it("the analyzer-policy schema has no consent shape to be written into", () => {
+    for (const decisions of [
+      { eslint: "declined" },
+      { eslint: "granted" },
+    ]) {
+      const parsed = AnalyzerPolicySchema.safeParse({
+        analyzer_consent: decisions,
+      });
+      expect(parsed.success).toBe(false);
+    }
+    expect(schemaKeys(AnalyzerPolicySchema)).not.toContain("analyzer_consent");
   });
 
-  it("the decision schema admits declines only", () => {
-    expect(AnalyzerConsentDecisionSchema.safeParse("declined").success).toBe(true);
-    expect(AnalyzerConsentDecisionSchema.safeParse("granted").success).toBe(false);
+  it("a legacy analyzer_consent key loads but is stripped, never enforced", async () => {
+    const root = await makeRoot();
+    const policyPath = getAnalyzerPolicyPath(root);
+    await mkdir(dirname(policyPath), { recursive: true });
+    await writeFile(
+      policyPath,
+      JSON.stringify({
+        analyzers: { eslint: "permanent" },
+        analyzer_consent: { knip: "declined", semgrep: "declined" },
+      }),
+      "utf8",
+    );
+
+    const policy = await loadAnalyzerPolicy(root);
+    // Unrelated analyzer configuration survives the tolerant read ...
+    expect(policy).toEqual({ analyzers: { eslint: "permanent" } });
+    // ... while the legacy consent authorizes nothing and vetoes nothing.
+    expect("analyzer_consent" in policy).toBe(false);
+  });
+
+  it("a legacy granted decision loads but is stripped, never enforced", async () => {
+    const root = await makeRoot();
+    const policyPath = getAnalyzerPolicyPath(root);
+    await mkdir(dirname(policyPath), { recursive: true });
+    await writeFile(
+      policyPath,
+      JSON.stringify({ analyzer_consent: { eslint: "granted" } }),
+      "utf8",
+    );
+
+    const policy = await loadAnalyzerPolicy(root);
+    expect(policy).toEqual({});
   });
 });

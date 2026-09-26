@@ -1,8 +1,10 @@
+// sites-pinned: tests/shared/analyzer-provenance.test.ts
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { createLockedJsonStore, type LockedJsonStore } from "./io/lockedJsonStore.js";
 import { assertWithinRoot } from "./io/pathContainment.js";
 import { formatSchemaFailure } from "./validation/schemaFailure.js";
+import { isRecord } from "./validation/basic.js";
 
 /** Per-analyzer resolution policy, independent of any execution backend. */
 export const ANALYZER_SETTINGS = [
@@ -22,34 +24,16 @@ const ANALYZER_POLICY_LOCK_RELATIVE_PATH =
   ".audit-tools/audit/analyzer-policy.lock" as const;
 
 /**
- * The DURABLE analyzer decision. Deliberately a one-member enum: a decline is
- * the only analyzer answer that outlives the run that was asked.
- *
- * An operator's grant binds THE RUN THAT WAS ASKED and nothing else (owner
- * directive, 2026-08-21). A durable grant silently keeps granting itself to
- * later runs whose operator never saw the offer — and for a network-egress
- * analyzer that converts one consent into standing consent. A grant therefore
- * travels on the per-run consent TOKEN, which the strict schema below cannot
- * hold; there is no shape here for it to be written into, so the rule is
- * enforced by the type rather than remembered.
- */
-export const AnalyzerConsentDecisionSchema = z.enum(["declined"]);
-export type AnalyzerConsentDecision = z.infer<
-  typeof AnalyzerConsentDecisionSchema
->;
-
-/**
  * Durable analyzer choices live apart from the canonical repository session
- * intent. The strict top-level shape deliberately has no place for an
- * acquisition consent token: tokens authorize one run and must never become a
- * persisted capability.
+ * intent. The strict top-level shape holds ONLY per-analyzer resolution policy
+ * (`analyzers`): analyzer consent — grants AND declines — is strictly per-run
+ * (packet 5 / O07) and is never a persisted capability, so there is no consent
+ * shape here at all. A legacy `analyzer_consent` key written by an older
+ * release is stripped on load: it can neither authorize nor veto the new run.
  */
 export const AnalyzerPolicySchema = z
   .object({
     analyzers: z.record(z.string(), AnalyzerSettingSchema).optional(),
-    analyzer_consent: z
-      .record(z.string(), AnalyzerConsentDecisionSchema)
-      .optional(),
   })
   .strict();
 
@@ -77,7 +61,19 @@ function parseAnalyzerPolicy(
   raw: unknown | undefined,
   policyPath: string,
 ): AnalyzerPolicy {
-  const parsed = AnalyzerPolicySchema.safeParse(raw ?? {});
+  // Legacy tolerance, one key only: releases before packet 5 persisted
+  // `analyzer_consent` (grants and/or declines). The new run must neither be
+  // authorized nor vetoed by it, so it is dropped BEFORE validation — the
+  // strict schema below still rejects every other unknown key (including any
+  // token-shaped field). Stripping rather than rejecting keeps the unrelated
+  // `analyzers` resolution choices in the same file loadable.
+  const tolerated =
+    isRecord(raw) && "analyzer_consent" in raw
+      ? (({ analyzer_consent: _dropped, ...rest }) => rest)(
+          raw as Record<string, unknown>,
+        )
+      : raw;
+  const parsed = AnalyzerPolicySchema.safeParse(tolerated ?? {});
   if (!parsed.success) {
     throw new Error(
       `Invalid ${policyPath}: ${formatSchemaFailure(parsed.error)}`,
@@ -111,6 +107,13 @@ export async function loadAnalyzerPolicy(
 /**
  * Durably merge per-analyzer resolution choices without losing concurrent
  * writers or changing the repository's canonical session-intent bytes.
+ *
+ * <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
+ *
+ * This is the ONLY durable analyzer-policy write (packet 5 / O07): consent
+ * decisions — grants and declines alike — are strictly per-run and are never
+ * written here. The retired `persistAnalyzerConsent` is gone; there is no
+ * durable consent shape to write into.
  */
 export async function persistAnalyzerSettings(
   repositoryRoot: string,
@@ -119,19 +122,5 @@ export async function persistAnalyzerSettings(
   return await analyzerPolicyStore(repositoryRoot).mutate((current) => ({
     ...current,
     analyzers: { ...current.analyzers, ...settings },
-  }));
-}
-
-/**
- * Durably merge consent DECLINES. Neither a grant nor a per-run consent token is
- * accepted or representable here — see {@link AnalyzerConsentDecisionSchema}.
- */
-export async function persistAnalyzerConsent(
-  repositoryRoot: string,
-  decisions: Readonly<Record<string, AnalyzerConsentDecision>>,
-): Promise<AnalyzerPolicy> {
-  return await analyzerPolicyStore(repositoryRoot).mutate((current) => ({
-    ...current,
-    analyzer_consent: { ...current.analyzer_consent, ...decisions },
   }));
 }

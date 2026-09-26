@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/intent-constraint-clauses.test.ts
 /**
  * Constraint-clause resolution — the SHARED half of the blocking-escalation
  * gate for unencodable free_form_intent clauses.
@@ -52,4 +53,29 @@ export function unresolvedFromClauses(
       !answeredIds.has(clause.clause_id) &&
       !answeredQuestions.has(clause.checkpoint_question),
   );
+}
+
+/**
+ * Project unencodable clauses from an interpreted intent clause list into
+ * {@link ConstraintClauseRecord}s. Unencodable clauses with a blocking
+ * checkpoint question become records; encodable or question-less clauses are skipped.
+ */
+export function projectUnencodableConstraintClauses(
+  clauses: readonly {
+    clause_id: string;
+    text: string;
+    encodable: boolean;
+    checkpoint_question?: string;
+  }[],
+): ConstraintClauseRecord[] {
+  const records: ConstraintClauseRecord[] = [];
+  for (const clause of clauses) {
+    if (clause.encodable || !clause.checkpoint_question) continue;
+    records.push({
+      clause_id: clause.clause_id,
+      text: clause.text,
+      checkpoint_question: clause.checkpoint_question,
+    });
+  }
+  return records;
 }

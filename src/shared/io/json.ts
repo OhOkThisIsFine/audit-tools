@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/json-io.test.ts, tests/shared/io-json-retry.test.ts
 import {
   mkdir,
   readFile,
@@ -123,13 +124,24 @@ export async function writeFileAtomic(
   }
 }
 
+/**
+ * Whether an error means "the path is unavailable there is no file" rather than
+ * a real IO failure. Two codes, because the same filesystem state — a path that
+ * traverses a FILE where a DIRECTORY belongs — reports `ENOENT` on win32 and
+ * `ENOTDIR` on POSIX (measured on Node 26). Classifying only `ENOENT` made the
+ * classifier platform-asymmetric: `readOptionalJsonFile` returned `undefined`
+ * on one platform and threw `Failed to read <path>` on the other, turning a
+ * green Windows suite red in Linux CI. A permission (`EACCES`/`EPERM`), a
+ * directory-where-a-file-belongs (`EISDIR`), or any other errno is a REAL error
+ * and stays out: an optional read must degrade only on a genuinely absent path,
+ * never on a path that is present but unreadable.
+ */
 export function isFileMissingError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  const code = error.code;
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 /**

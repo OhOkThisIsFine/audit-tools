@@ -1,6 +1,7 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import type {
   ClarificationRequest,
+  Finding,
   RemediationItemState,
 } from "../state/types.js";
 import type { RemediationState } from "../state/store.js";
@@ -143,35 +144,64 @@ Then run \`${loaderCommand("next-step")}\`.
  *
  * If, after reviewing with repo access, there is nothing genuinely ambiguous, the
  * host writes an empty array to proceed — no user round is forced on a clean plan.
+ *
+ * Packet 8: a candidate carries a finding id and a CATEGORY, not the finding
+ * itself. When `packetPath` and `findings` are supplied (the gate always does at
+ * halt), each candidate is rendered beside its finding's title, confidence,
+ * evidence, and cited files, and the prompt names `packetPath` — the review
+ * packet the step grants read access to, so a host judging whether a candidate is
+ * a genuine scoping/judgment ambiguity has the facts it needs. Without them the
+ * prompt renders exactly as before (the bare candidate list).
  */
 export function ambiguityReviewPrompt(
   candidates: ClarificationRequest[],
   resolutionPath: string,
   validFindingIds: readonly string[] = [],
   refusal?: string,
+  packetPath?: string,
+  findings: readonly Finding[] = [],
 ): string {
+  const byId = new Map(findings.map((f) => [f.id, f]));
   const count = candidates.length;
   const intro = count
     ? `The tool found ${count} candidate ambigu${count === 1 ? "ity" : "ities"} in the remediation plan. A candidate is a
 starting point, not a final list.`
     : `The tool found no candidate ambiguity in the remediation plan. Still review
 the findings in the set below yourself.`;
+  const packetLine = packetPath
+    ? `\nThe complete review packet — every finding's description, evidence files, and
+confidence — is at:
+
+\`${packetPath}\`
+
+Read it before judging each candidate.\n`
+    : "";
   const candidateBlock = candidates
-    .map(
-      (item) => `
-## ${item.finding_id}
+    .map((item) => {
+      const finding = byId.get(item.finding_id);
+      const evidenceLines =
+        finding && (finding.evidence ?? []).length > 0
+          ? `\n- Evidence: ${finding.evidence!.join("; ")}`
+          : "";
+      const confidenceLine = finding ? `\n- Confidence: ${finding.confidence}` : "";
+      const filesLine =
+        finding && (finding.affected_files ?? []).length > 0
+          ? `\n- Cited files: ${finding.affected_files.map((f) => f.path).join(", ")}`
+          : "";
+      return `
+## ${item.finding_id}${finding ? ` — ${finding.title}` : ""}
 
 - Category: ${item.category}
-- Candidate: ${item.description}
-`,
-    )
+- Candidate: ${item.description}${confidenceLine}${evidenceLines}${filesLine}
+`;
+    })
     .join("");
   const firstId = candidates[0]?.finding_id ?? validFindingIds[0] ?? "F-001";
 
   return `
 # Resolve ambiguity in the plan before implementation
 ${refusalBanner(refusal, "applied")}
-${intro}
+${intro}${packetLine}
 ${candidateBlock}
 Do these steps:
 
@@ -295,6 +325,7 @@ Then run \`${loaderCommand("next-step")}\`.
 
 export function triagePrompt(state: RemediationState, resolutionPath: string): string {
   const blocked = blockedItems(state);
+  const ids = blocked.map((item) => item.finding_id);
   return `
 # Resolve Remediation Triage
 
@@ -302,6 +333,12 @@ Ask the user for one decision per blocked item: \`retry\`, \`ignore\`, or \`halt
 Use \`retry\` for blocked, deferred, retry-later, or prerequisite-dependent work.
 Use \`ignore\` only when the user explicitly says the finding should not be
 remediated.
+
+\`halt\` stops the WHOLE run, not just the item it is written on: every item left
+undecided is abandoned and the run closes with a partial report. A blocked item
+you OMIT from the file stays unresolved and is re-presented for a decision — it is
+never silently dropped. Decide \`retry\`, \`ignore\`, or \`halt\` for each item
+below; leave no item for a later step if the user has an answer.
 
 ${blocked
   .map((item) => {
@@ -323,13 +360,16 @@ After the user answers, write JSON to exactly:
 {
   "items": [
     {
-      "finding_id": "...",
+      "finding_id": "${ids[0] ?? "F-001"}",
       "action": "retry",
       "rationale": "..."
     }
   ]
 }
 \`\`\`
+
+\`finding_id\` MUST be drawn from this closed set (copy, never retype):
+${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;
@@ -369,22 +409,17 @@ The extracted plan was read and could not be used, so it was removed. **This is
 not a missing input** — an input was supplied and parsed. Do not go looking for
 one.
 
-## Why it was rejected
+## Facts
+
+### Why it was rejected
 
 ${reason}
 
-## The original
+### The original
 
 ${archiveNote}
 
-## What to do
-
-Correct the cause named above, then write a corrected plan to exactly:
-
-\`${paths.extractedPlan}\`
-
-and run next-step again. Re-extracting without changing anything reproduces this
-exact rejection: the failure is in the plan's content, not in the reading of it.
+### The corrections that clear it
 
 Two causes account for most rejections, and they need different corrections:
 
@@ -392,6 +427,21 @@ Two causes account for most rejections, and they need different corrections:
   paths, relative to the repository root.
 - **A finding carried no evidence.** Give each finding at least one concrete
   citation — name a symbol and the file that holds it, not a line number.
+
+## Do Now
+
+Correct the cause named above, then write the corrected plan to exactly:
+
+\`${paths.extractedPlan}\`
+
+Re-extracting without changing anything reproduces this exact rejection: the
+failure is in the plan's content, not in the reading of it.
+
+## Continue
+
+Run:
+
+\`${loaderCommand("next-step")}\`
 `;
 }
 

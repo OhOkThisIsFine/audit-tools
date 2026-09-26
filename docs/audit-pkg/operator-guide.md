@@ -125,9 +125,72 @@ Durable external-analyzer choices live separately at:
 .audit-tools/audit/analyzer-policy.json
 ```
 
-That strict artifact may contain `analyzers` resolution choices and
-`analyzer_consent` decisions. Per-run consent tokens are deliberately not
+That strict artifact holds `analyzers` resolution choices only (`repo`, `ephemeral`,
+`permanent`, `skip`, `auto`). Analyzer consent — grants and declines alike — is
+strictly per-run: the `analyzer_consent` offer step asks the operator fresh on every
+run, and a legacy `analyzer_consent` key left by an older release is ignored (it can
+neither authorize nor veto the new run). Per-run consent tokens are deliberately not
 persistable.
+
+## Audit mutation is opt-in
+
+An audit leaves the audited tree unchanged by default. The phase-1 deterministic
+auto-fix (formatters such as prettier, black, sqlfluff, gofmt over the audited
+in-scope files) runs only when the current run explicitly opts in:
+
+```text
+audit-code next-step --allow-auto-fix
+```
+
+`--auto-fix-dry-run` reports what the phase would do without spawning a formatter
+and keeps precedence over the opt-in. The plan draw (`audit-code plan`) honors the
+same flags.
+
+## Remediation planning and review choices
+
+To complete planning and stop before the first implementation handoff, start
+from the target repository with:
+
+```bash
+remediate-code plan-only --input <path>
+```
+
+Follow the emitted prompts and use bare `remediate-code next-step` calls through
+the normal intake, clarification, and planning gates. The tool saves the
+completed plan as a paused run before dispatching implementation work. Later,
+run `remediate-code resume`, then `remediate-code next-step` to continue from
+that plan without repeating accepted work. `plan-only` also accepts
+`--worktree-location` and `--worktree-outcome` to record the host's worktree
+information with the pause; the tool does not create or remove that worktree.
+
+An independent per-result review of cited contract evidence is optional. To
+choose it for a new remediation run, use:
+
+```bash
+remediate-code next-step --input <path> --conformance-review
+```
+
+The choice may also be made during planning, before the first implementation
+dispatch. It then persists across bare `next-step` calls and `recover-ingest`;
+there is no need to repeat the flag. The default is off, and a first-time
+opt-in after dispatch is refused. This review judges whether cited evidence
+demonstrates conformance to the carried contracts. It never replaces the
+mechanical obligation-coverage or required-test checks.
+
+For a run created by an older release without the current review policy, the
+tool conservatively treats the choice as off and does not allow late opt-in.
+If an old selection sidecar remains without a primary review policy, ingestion
+refuses regardless of that sidecar's contents. A current run whose review
+policy is missing or does not match its plan is also refused. To opt in after
+either refusal, start a fresh run from the original source in a **new**
+artifacts directory:
+
+```bash
+remediate-code next-step --input <source> --artifacts-dir <new-directory> --conformance-review
+```
+
+Keep the older artifacts directory intact as the record of the interrupted
+run. Do not edit its state or selection sidecar to make it pass.
 
 ## Generated deliverables
 

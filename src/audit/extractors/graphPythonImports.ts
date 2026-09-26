@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-python-imports.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { scanStringAware, compareCodeUnits } from "audit-tools/shared";
@@ -84,29 +85,53 @@ function pythonLogicalLines(content: string): string[] {
   return logicalLines;
 }
 
+function isPythonWhitespaceAt(value: string, index: number): boolean {
+  const code = value.charCodeAt(index);
+  return code <= 32 || code === 160 || /\s/.test(value[index]!);
+}
+
 function unwrapPythonImportList(value: string): string {
-  let trimmed = value.trim();
-  if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
-    trimmed = trimmed.slice(1, -1).trim();
+  let start = 0;
+  let end = value.length;
+  while (start < end && isPythonWhitespaceAt(value, start)) {
+    start++;
   }
-  return trimmed;
+  while (end > start && isPythonWhitespaceAt(value, end - 1)) {
+    end--;
+  }
+  if (
+    start < end &&
+    value.charCodeAt(start) === 40 /* '(' */ &&
+    value.charCodeAt(end - 1) === 41 /* ')' */
+  ) {
+    start++;
+    end--;
+    while (start < end && isPythonWhitespaceAt(value, start)) {
+      start++;
+    }
+    while (end > start && isPythonWhitespaceAt(value, end - 1)) {
+      end--;
+    }
+  }
+  return value.slice(start, end);
 }
 
 function splitPythonImportList(value: string): string[] {
+  const unwrapped = unwrapPythonImportList(value);
   const items: string[] = [];
-  let current = "";
+  const len = unwrapped.length;
   let quote: "'" | '"' | undefined;
   let escaped = false;
   let parenDepth = 0;
+  let itemStart = 0;
 
-  for (const char of unwrapPythonImportList(value)) {
+  for (let i = 0; i < len; i++) {
+    const char = unwrapped[i]!;
     if (escaped) {
-      current += char;
       escaped = false;
       continue;
     }
     if (quote) {
-      current += char;
       if (char === "\\") {
         escaped = true;
       } else if (char === quote) {
@@ -115,40 +140,102 @@ function splitPythonImportList(value: string): string[] {
       continue;
     }
     if (char === "'" || char === '"') {
-      current += char;
       quote = char;
       continue;
     }
     if (char === "(") {
       parenDepth += 1;
-      current += char;
       continue;
     }
     if (char === ")") {
       parenDepth -= 1;
-      current += char;
       continue;
     }
     if (char === "," && parenDepth === 0) {
-      const item = current.trim();
+      const item = unwrapped.slice(itemStart, i).trim();
       if (item.length > 0) {
         items.push(item);
       }
-      current = "";
-      continue;
+      itemStart = i + 1;
     }
-    current += char;
   }
 
-  const item = current.trim();
+  const item = unwrapped.slice(itemStart).trim();
   if (item.length > 0) {
     items.push(item);
   }
   return items;
 }
 
+function isPythonIdentChar(code: number): boolean {
+  return (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 95 // _
+  );
+}
+
+function isPythonIdentStart(code: number): boolean {
+  return (
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 95 // _
+  );
+}
+
 function stripPythonAlias(value: string): string {
-  return value.replace(/\s+as\s+[A-Za-z_]\w*$/i, "").trim();
+  let i = value.length - 1;
+  // 1. Skip trailing whitespace
+  while (i >= 0 && isPythonWhitespaceAt(value, i)) {
+    i--;
+  }
+  if (i < 0) {
+    return "";
+  }
+
+  // 2. Scan backward over identifier characters for alias name [A-Za-z_]\w*
+  const identEnd = i;
+  while (i >= 0 && isPythonIdentChar(value.charCodeAt(i))) {
+    i--;
+  }
+  const identStart = i + 1;
+  const hasValidIdent =
+    identStart <= identEnd && isPythonIdentStart(value.charCodeAt(identStart));
+
+  if (hasValidIdent) {
+    // 3. Must have whitespace before alias identifier
+    const wsAfterAsEnd = i;
+    while (i >= 0 && isPythonWhitespaceAt(value, i)) {
+      i--;
+    }
+    const hasWsAfterAs = i < wsAfterAsEnd;
+
+    // 4. Must have `as` (case-insensitive)
+    if (hasWsAfterAs && i >= 1) {
+      const sChar = value.charCodeAt(i);
+      const aChar = value.charCodeAt(i - 1);
+      const isAs =
+        (sChar === 115 || sChar === 83) && // 's' | 'S'
+        (aChar === 97 || aChar === 65); // 'a' | 'A'
+
+      if (isAs) {
+        // 5. Must have whitespace before `as`
+        i -= 2;
+        const wsBeforeAsEnd = i;
+        while (i >= 0 && isPythonWhitespaceAt(value, i)) {
+          i--;
+        }
+        const hasWsBeforeAs = i < wsBeforeAsEnd;
+        if (hasWsBeforeAs) {
+          // Matched \s+as\s+[A-Za-z_]\w*$
+          return value.slice(0, i + 1).trim();
+        }
+      }
+    }
+  }
+
+  return value.trim();
 }
 
 function isPythonIdentifier(value: string): boolean {
@@ -174,11 +261,19 @@ function pythonModulePath(specifier: string): string {
   return specifier.split(".").filter(Boolean).join("/");
 }
 
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* '/' */) {
+    end--;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 function resolvePythonPathCandidate(
   candidate: string,
   pathLookup: Map<string, string>,
 ): string | undefined {
-  const normalized = normalizeGraphPath(candidate).replace(/\/+$/, "");
+  const normalized = trimTrailingSlashes(normalizeGraphPath(candidate));
   if (normalized.length === 0 || normalized === "." || normalized === "..") {
     return undefined;
   }

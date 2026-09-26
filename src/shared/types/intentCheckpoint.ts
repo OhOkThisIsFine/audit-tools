@@ -19,6 +19,29 @@ export const IntentFiltersSchema = z
   .strict();
 
 /**
+ * A caller-defined conceptual-review perspective: a deliberately narrow value
+ * system one independent reviewer adopts, alongside the built-in roster (see
+ * `CONCEPTUAL_PERSPECTIVES` in the audit orchestrator's design-review prompt
+ * module). The roster lives in the audit layer so this shared contract cannot
+ * name it without a layer inversion — which is why a custom name that collides
+ * with a built-in name, and a perspective name that names neither a built-in
+ * nor a custom definition, are refused at resolution (the production reader)
+ * rather than here: this schema owns SHAPE (non-empty names, no duplicates),
+ * the resolver owns VOCABULARY.
+ */
+export const CustomConceptualPerspectiveSchema = z
+  .object({
+    /** The name `design_review.perspectives` lists to select this reviewer. */
+    name: z.string().min(1),
+    /** The value system this reviewer judges the codebase through. */
+    lens: z.string().min(1),
+  })
+  .strict();
+export type CustomConceptualPerspective = z.infer<
+  typeof CustomConceptualPerspectiveSchema
+>;
+
+/**
  * The retired `confirmed_by` value of the remediate intake worker's draft
  * checkpoint. The intake summary now carries the proposal, and a legacy draft
  * file on disk reads as ABSENT (not confirmed) through every reader below.
@@ -149,7 +172,14 @@ export const IntentCheckpointSchema = z
      * - `conceptual_depth: "deep"` — fan out `perspectives` independent reviewers
      *   with maximally dissimilar perspectives, then compile via an independent
      *   judge.
-     * `perspectives` bounds the deep fan-out count; ignored when shallow.
+     * `perspectives` bounds the deep fan-out: either a legacy integer COUNT
+     * (the first-N selection the tool derives, still accepted) or an EXPLICIT
+     * list of perspective names — built-in names, `custom_perspectives` names,
+     * or a mix. An explicit list selects EXACTLY those reviewers, in the listed
+     * order; the tool injects no additional defaults. Ignored when shallow, but
+     * never dropped: the selection survives the shallow default and resumed
+     * runs so a later deep pass still honors it. `custom_perspectives` defines
+     * caller-authored reviewers (`{name, lens}`) the list may reference.
      */
     design_review: z
       .object({
@@ -177,7 +207,13 @@ export const IntentCheckpointSchema = z
          */
         answered_at: z.string().optional(),
         conceptual_depth: z.enum(["shallow", "deep"]).optional(),
-        perspectives: z.number().int().min(1).optional(),
+        perspectives: z
+          .union([z.number().int().min(1), z.array(z.string().min(1)).min(1)])
+          .optional(),
+        custom_perspectives: z
+          .array(CustomConceptualPerspectiveSchema)
+          .min(1)
+          .optional(),
         /**
          * The premise-height consent dial (how far up a finding may reach),
          * captured at `confirm_intent`. Optional and additive — a legacy
@@ -203,6 +239,40 @@ export const IntentCheckpointSchema = z
         attention: z.union([z.number().int().min(0), z.literal("all")]).optional(),
       })
       .strict()
+      .superRefine((block, ctx) => {
+        // SHAPE-LEVEL duplicates live here so a malformed explicit selection
+        // fails CLOSED at parse time. Vocabulary (unknown names, custom names
+        // colliding with built-ins) belongs to the resolver, which owns the
+        // built-in roster — see CustomConceptualPerspectiveSchema.
+        if (Array.isArray(block.perspectives)) {
+          const seen = new Set<string>();
+          for (const name of block.perspectives) {
+            if (seen.has(name)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["perspectives"],
+                message: `duplicate perspective ${JSON.stringify(name)}: list each perspective once`,
+              });
+              break;
+            }
+            seen.add(name);
+          }
+        }
+        if (block.custom_perspectives !== undefined) {
+          const seen = new Set<string>();
+          for (const custom of block.custom_perspectives) {
+            if (seen.has(custom.name)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["custom_perspectives"],
+                message: `duplicate custom perspective ${JSON.stringify(custom.name)}: each custom name must be unique`,
+              });
+              break;
+            }
+            seen.add(custom.name);
+          }
+        }
+      })
       .optional(),
   })
   .strict();

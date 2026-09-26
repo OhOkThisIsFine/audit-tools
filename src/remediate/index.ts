@@ -5,7 +5,8 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { decideNextStep, recoverIngestHostResults } from "./steps/nextStep.js";
+import { decideNextStep } from "./steps/nextStep.js";
+import { recoverIngestHostResults } from "./steps/recovery.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import { evaluateContractPipelineCrossGateOutcomes } from "./validation/contractPipelineGates.js";
@@ -26,6 +27,7 @@ import type { ValidationIssue } from "audit-tools/shared";
 import {
   applyGuidanceFile,
   assertCliCommandAllowedFromCwd,
+  assertNoRetiredHostSelectionArgs,
   callerWorkingDirectory,
   discoverRepoRoot,
   remediationArtifactsDir,
@@ -41,6 +43,12 @@ import {
   remediationSubmissionBinding,
   type RemediationHostIngestSummary,
 } from "./steps/dispatch/hostHandoff.js";
+import {
+  pauseVerb,
+  resumeVerb,
+  cancelVerb,
+  type LifecycleVerbResult,
+} from "./steps/lifecycle.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -87,6 +95,11 @@ const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 program.hook("preAction", (_thisCommand, actionCommand) => {
+  // Refuse retired backend-selection arguments before any command action runs.
+  // Commander rejects genuinely unknown options on its own, but these retired
+  // axes deserve a targeted refusal naming what was removed — and the hook is
+  // the single chokepoint every subcommand passes through (packet 9).
+  assertNoRetiredHostSelectionArgs(process.argv);
   const opts = actionCommand.opts() as { root?: string };
   assertCliCommandAllowedFromCwd({
     cliName: "remediate-code",
@@ -126,12 +139,28 @@ program
     "Single-step bootstrap: write this file's contents to intake/conversation-start.md (sole, idempotent writer) before deciding the step",
   )
   .option(
+    "--intake-severity <severity>",
+    "Select structured audit findings by severity (repeatable; unioned with finding IDs)",
+    (value: string, previous: string[] | undefined) => (previous ?? []).concat(value),
+    [] as string[],
+  )
+  .option(
+    "--intake-finding-id <id>",
+    "Select structured audit findings by ID (repeatable; unioned with severities)",
+    (value: string, previous: string[] | undefined) => (previous ?? []).concat(value),
+    [] as string[],
+  )
+  .option(
     "--finalize-closing",
     "Finalize a closing remediation state from a generated close_run step",
   )
   .option(
     "--force-replan",
     "Rebuild the remediation plan from the existing intake artifacts",
+  )
+  .option(
+    "--conformance-review",
+    "On an implementing run, hold each landed result until a bound independent review passes (opt-in retained for that run)",
   )
   .action(async (options) => {
     const root = resolveRootOption(options.root);
@@ -154,9 +183,12 @@ program
             root,
             artifactsDir,
             input: options.input,
+            intakeSeverities: options.intakeSeverity,
+            intakeFindingIds: options.intakeFindingId,
             guidanceFileSupplied: Boolean(options.guidanceFile),
             finalizeClosing: options.finalizeClosing === true,
             forceReplan: options.forceReplan === true,
+            conformanceReview: options.conformanceReview === true,
           }),
         );
       },
@@ -284,6 +316,147 @@ program
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.status === "ok" ? 0 : 1);
   });
+
+// ── Operator lifecycle verbs (O31 / packet 14) ──────────────────────────────
+//
+// plan-only / pause / resume / cancel are the first-class persisted surface for
+// stopping and restarting a run across process boundaries. Each is a thin
+// argv→call→print shim over a `*Verb` body that mutates state through the store
+// and writes a `lifecycle` record; the real decisions are exported for direct
+// test call without spawning the CLI (same shape as the recovery verbs above).
+// They are deliberately NOT worker-safe: a dispatched worker must never run a
+// lifecycle verb against the driving run, and `WORKER_SAFE_COMMANDS` denies them
+// by default.
+
+/** The shared option surface `runLifecycleVerb` reads from a parsed command. */
+interface LifecycleCliOptions {
+  root?: string;
+  artifactsDir?: string;
+  input?: string[];
+  worktreeLocation?: string;
+  worktreeOutcome?: string;
+}
+
+/** Options a lifecycle verb body consumes (post root/artifactsDir resolution). */
+interface ResolvedLifecycleOptions {
+  root: string;
+  artifactsDir: string;
+  worktree?: { location: string; outcome?: string };
+}
+
+/**
+ * The `--worktree-*` flags shared by the four lifecycle verbs — a host-reported
+ * location/outcome the tool RECORDS but never owns. It does not create the
+ * branch/worktree and does not delete it; the flags only persist what the host
+ * says so resume (or a later operator) knows where the work lives.
+ */
+function attachLifecycleOptions(command: ReturnType<typeof program.command>): ReturnType<typeof program.command> {
+  return command
+    .option("--root <path>", ROOT_OPTION_DESCRIPTION)
+    .option(
+      "--artifacts-dir <path>",
+      "Artifacts directory",
+      ".audit-tools/remediation",
+    )
+    .option(
+      "--worktree-location <path>",
+      "Host-reported worktree/branch location to record; the tool never creates or deletes it",
+    )
+    .option(
+      "--worktree-outcome <text>",
+      "Host-reported outcome of the worktree work (e.g. unmerged, merged, discarded)",
+    );
+}
+
+/** Common argv→resolve→run→print→exit for the four lifecycle verbs. */
+async function runLifecycleVerb(
+  options: LifecycleCliOptions,
+  run: (opts: ResolvedLifecycleOptions) => Promise<LifecycleVerbResult>,
+): Promise<void> {
+  const root = resolveRootOption(options.root);
+  const artifactsDir = resolveArtifactsDirOption(
+    root,
+    options.artifactsDir ?? ".audit-tools/remediation",
+  );
+  const worktree =
+    options.worktreeLocation !== undefined
+      ? {
+          location: options.worktreeLocation,
+          ...(options.worktreeOutcome !== undefined
+            ? { outcome: options.worktreeOutcome }
+            : {}),
+        }
+      : undefined;
+  const result = await run({ root, artifactsDir, ...(worktree ? { worktree } : {}) });
+  if (result.status === "unrunnable") {
+    console.error(result.message);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(result.body, null, 2));
+}
+
+attachLifecycleOptions(
+  program
+    .command("plan-only")
+    .description("Finish intake and planning, then pause before implementation dispatch")
+    .option(
+      "--input <path>",
+      "Path to audit report or feedback document (repeatable; unioned into intake)",
+      (value: string, previous: string[] | undefined) =>
+        (previous ?? []).concat([value]),
+      [] as string[],
+    ),
+).action(async (options: LifecycleCliOptions) => {
+  const root = resolveRootOption(options.root);
+  const artifactsDir = resolveArtifactsDirOption(
+    root,
+    options.artifactsDir ?? ".audit-tools/remediation",
+  );
+  const worktree = options.worktreeLocation !== undefined
+    ? {
+        location: options.worktreeLocation,
+        ...(options.worktreeOutcome !== undefined
+          ? { outcome: options.worktreeOutcome }
+          : {}),
+      }
+    : undefined;
+  const step = await runWithBlockedStepBackstop(
+    () => withBackendLogsOnStderr(() =>
+      decideNextStep({
+        root,
+        artifactsDir,
+        input: options.input,
+        planOnly: true,
+        ...(worktree ? { planOnlyWorktree: worktree } : {}),
+      })),
+    (reason) => writeBlockedStep({ root, artifactsDir, reason }),
+  );
+  console.log(JSON.stringify(step, null, 2));
+});
+
+attachLifecycleOptions(
+  program
+    .command("pause")
+    .description("Pause the run, recording the current item, binding, phase, and exact continuation"),
+).action(async (options: LifecycleCliOptions) => {
+  await runLifecycleVerb(options, (opts) => pauseVerb(opts));
+});
+
+attachLifecycleOptions(
+  program
+    .command("resume")
+    .description("Resume a paused run from its saved continuation, skipping accepted work"),
+).action(async (options: LifecycleCliOptions) => {
+  await runLifecycleVerb(options, (opts) => resumeVerb(opts));
+});
+
+attachLifecycleOptions(
+  program
+    .command("cancel")
+    .description("Cancel the run, recording terminal cancellation and preserving artifacts"),
+).action(async (options: LifecycleCliOptions) => {
+  await runLifecycleVerb(options, (opts) => cancelVerb(opts));
+});
 
 export interface ValidateArtifactActionResult {
   status: "ok" | "error";

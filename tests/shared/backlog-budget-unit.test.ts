@@ -44,6 +44,7 @@ const BACKLOG_DIR = join(REPO_ROOT, "docs", "backlog");
 const SCRIPT = join(REPO_ROOT, "scripts", "check-backlog-budget.mjs");
 const ENTRY_GRAMMAR = join(REPO_ROOT, "scripts", "shared", "backlog-entry-grammar.mjs");
 const PRIMITIVES = join(REPO_ROOT, "scripts", "shared", "primitives.mjs"); // the script imports it since the primitives were single-sourced
+const BACKLOG_CORPUS = join(REPO_ROOT, "scripts", "shared", "backlog-corpus.mjs"); // the script enumerates the corpus through it since packet 23
 
 const {
   sizeOf,
@@ -736,10 +737,14 @@ describe("--update-baseline may lower a ceiling, never raise one", () => {
       script = join(dir, "scripts", "check-backlog-budget.mjs");
       baselineFile = join(dir, "docs", "backlog", ".size-baseline.json");
       copyFileSync(SCRIPT, script);
-      // The script imports the shared entry grammar; the skeleton has to carry it
-      // too, or the copy dies at import time instead of exercising the CLI.
+      // The script imports the shared entry grammar and the shared corpus module;
+      // the skeleton has to carry them too, or the copy dies at import time
+      // instead of exercising the CLI. `backlog-corpus.mjs` in turn imports the
+      // entry grammar (already copied) and reads the git index, so the skeleton
+      // must be a git repo for `listBacklogFiles` to resolve its backlog file.
       copyFileSync(ENTRY_GRAMMAR, join(dir, "scripts", "shared", "backlog-entry-grammar.mjs"));
       copyFileSync(PRIMITIVES, join(dir, "scripts", "shared", "primitives.mjs"));
+      copyFileSync(BACKLOG_CORPUS, join(dir, "scripts", "shared", "backlog-corpus.mjs"));
 
       const text = file(...bulk(60, 2000));
       measured = sizeOf(text);
@@ -750,6 +755,11 @@ describe("--update-baseline may lower a ceiling, never raise one", () => {
         JSON.stringify({ file_ceilings: { "big.md": recorded }, entries_over_budget: [] }, null, 2) + "\n",
         "utf8",
       );
+      // The corpus module enumerates the backlog from the git INDEX, not the disk
+      // (packet 23), so the skeleton must be a git repo with big.md in the index —
+      // `git ls-files` reads the staged set, so a commit is not required.
+      execFileSyncHidden("git", ["init", "-q"], { cwd: dir });
+      execFileSyncHidden("git", ["add", "docs/backlog/big.md"], { cwd: dir });
     });
 
     afterAll(() => rmSync(dir, { recursive: true, force: true }));

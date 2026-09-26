@@ -79,6 +79,12 @@ export interface RunAuditStepOptions {
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
+  /**
+   * Phase-1 deterministic auto-fix gate (packet 5 / F03: opt-in). Absent ⇒ the
+   * phase is skipped and the audited tree is left unchanged; `enabled: true`
+   * opts the current run in; `dryRun: true` keeps precedence over `enabled`.
+   */
+  autoFix?: { enabled?: boolean; dryRun?: boolean };
   since?: string;
   runLog?: boolean;
   /**
@@ -338,6 +344,7 @@ async function executeAdvance(
     analyzers: options.analyzers,
     graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
     externalAcquisition: options.externalAcquisition,
+    autoFix: options.autoFix,
     since: options.since,
     preferredExecutor: options.preferredExecutor,
     // The fold's probe cache rides through to every probe this dispatch makes

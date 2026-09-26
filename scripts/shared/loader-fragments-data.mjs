@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loader-fragments-gate.test.ts
 // Canonical loader-instruction fragments, declared as DATA so the shipped
 // loader assets can be reconciled against them mechanically.
 //
@@ -84,9 +85,17 @@ export const LOADER_FRAGMENTS = [
     // SKILL points at it. (The audit pair has no equivalent rule.)
     verbatimIn: [REMEDIATE_PROMPT],
     pointers: [{ path: REMEDIATE_SKILL, home: REMEDIATE_PROMPT }],
+    // Guidance-file creation and selection are TOOL-owned
+    // (`src/shared/intake/guidanceBootstrap.ts` is the sole writer; the
+    // starting-point prompt names the exact target), so the loader must NOT
+    // invite the host to invent its own guidance-file workflow — the old
+    // "write conversational feedback to a temporary file" wording did exactly
+    // that and was replaced.
     text:
-      "pass an existing path with `--input <path>`; write conversational feedback to a " +
-      "temporary file and pass it with `--guidance-file <path>`.",
+      "pass an existing path with `--input <path>`. `--guidance-file <path>` is " +
+      "available for the emitted prompt to direct; do not invent a guidance-file " +
+      "workflow of your own — the current prompt owns intake mechanics and names the " +
+      "exact file when one is needed.",
   },
 ];
 

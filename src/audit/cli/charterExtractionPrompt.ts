@@ -36,21 +36,106 @@ export function charterExtractionKindsForCeiling(
 }
 
 /**
- * The ONE provenance kind a lane's worked example carries. An example must be a
- * VALID submission: rendering the whole alternation into the example's `kind`
- * value taught the host a value the strict enum rejects. The literal is checked
- * against the schema here rather than trusted, so an enum rename cannot leave a
- * stale example behind.
+ * The provenance kind(s) a lane's worked example cites, per channel (P2.5):
+ * - **stated** (testimony) cites `doc` and `comment` only — README/doc/comment
+ *   testimony, never a code symbol or a class body.
+ * - **structural** (declarations) cites `code` refs naming declarations — a
+ *   `<path>#<symbol>` and a top-level declaration line, no bodies.
+ * - **revealed** (behavior) cites `code` refs naming behavior symbols and body
+ *   lines — what the code DOES.
+ *
+ * Every literal is checked against the schema here rather than trusted, so an
+ * enum rename cannot leave a stale example behind.
  */
-function exampleProvenanceKind(kind: EstimatorCharterKind): string {
-  const literal = kind === "stated" ? "doc" : "code";
+function exampleProvenanceKinds(kind: EstimatorCharterKind): string[] {
+  const literals: string[] = kind === "stated" ? ["doc", "comment"] : ["code"];
   const allowed: readonly string[] = CharterProvenanceSchema.shape.kind.options;
-  if (!allowed.includes(literal)) {
-    throw new Error(
-      `charter prompt example provenance kind "${literal}" is absent from CharterProvenanceSchema (${PROVENANCE_KINDS})`,
-    );
+  for (const literal of literals) {
+    if (!allowed.includes(literal)) {
+      throw new Error(
+        `charter prompt example provenance kind "${literal}" is absent from CharterProvenanceSchema (${PROVENANCE_KINDS})`,
+      );
+    }
   }
-  return literal;
+  return literals;
+}
+
+/**
+ * The worked JSON example for ONE lane, rendered lane-specifically so the host
+ * sees the evidence channel its own kind actually receives (P2.5). The example is
+ * a VALID submission: every node/edge/provenance literal is schema-admissible, so
+ * a host that copies it verbatim satisfies `CharterSubmissionSchema`.
+ */
+function exampleSubmission(opts: { kind: EstimatorCharterKind }): string {
+  const [docKind, commentKind] = exampleProvenanceKinds(opts.kind);
+  const stated = opts.kind === "stated";
+  // Stated cites testimony — a doc `ref` (node0 + edge) and a comment `ref`
+  // (node1). Structural cites code DECLARATIONS; revealed cites code BEHAVIOR.
+  // The difference between those two is WHAT the ref/quote names, not the kind.
+  const refs = stated
+    ? {
+        node0Ref: "docs/scheduling.md#promises",
+        node0Quote: "every delivery window we offer the customer, we will keep",
+        node1Ref: "src/scheduling/window.ts",
+        node1Quote: "DeliveryWindow exists so a dispatcher never over-promises",
+        edgeQuote: "the window a dispatcher arms is the promise the platform keeps",
+      }
+    : opts.kind === "structural"
+      ? {
+          node0Ref: "src/scheduling/promise.ts#Promise",
+          node0Quote: "class Promise {",
+          node1Ref: "src/scheduling/window.ts#DeliveryWindow",
+          node1Quote: "class DeliveryWindow {",
+          edgeQuote: "class DeliveryWindow {",
+        }
+      : {
+          node0Ref: "src/scheduling/rebook.ts#rebookOnMiss",
+          node0Quote: "function rebookOnMiss(",
+          node1Ref: "src/scheduling/rebook.ts#rebookOnMiss",
+          node1Quote: "function rebookOnMiss(",
+          edgeQuote: "rebookOnMiss(window)",
+        };
+  return JSON.stringify(
+    {
+      nodes: [
+        {
+          node_id: "promises-the-customer-can-trust",
+          purpose:
+            "Makes every commitment the service gives a customer one it can honour",
+          ...(stated ? {} : { files: ["src/scheduling/promise.ts"] }),
+          provenance: [
+            { kind: docKind, ref: refs.node0Ref, quote: refs.node0Quote },
+          ],
+          confidence: "medium",
+        },
+        {
+          node_id: "keepable-delivery-windows",
+          purpose:
+            "Lets a dispatcher promise a delivery window the fleet can actually keep",
+          ...(stated
+            ? {}
+            : { files: ["src/scheduling/window.ts", "src/scheduling/fleet.ts"] }),
+          provenance: [
+            {
+              kind: stated ? commentKind : docKind,
+              ref: refs.node1Ref,
+              quote: refs.node1Quote,
+            },
+          ],
+          confidence: "high",
+        },
+      ],
+      edges: [
+        {
+          from: "keepable-delivery-windows",
+          to: "promises-the-customer-can-trust",
+          provenance: [{ kind: docKind, ref: refs.node0Ref, quote: refs.edgeQuote }],
+        },
+      ],
+    },
+    null,
+    2,
+  );
 }
 
 /** Per-kind perspective line, packet description, and the `files` rule (scope follows the evidence). */
@@ -94,7 +179,6 @@ export function renderCharterKindLanePrompt(opts: {
   packetPath: string;
 }): string {
   const lane = KIND_LANE_TEXT[opts.kind];
-  const exampleKind = exampleProvenanceKind(opts.kind);
 
   return [
     `# Design review — charter extraction, the **${opts.kind}** lane`,
@@ -156,37 +240,7 @@ export function renderCharterKindLanePrompt(opts: {
     `Write your submission as JSON to \`${opts.submissionPath}\`:`,
     "",
     "```json",
-    "{",
-    '  "nodes": [',
-    "    {",
-    '      "node_id": "promises-the-customer-can-trust",',
-    '      "purpose": "Makes every commitment the service gives a customer one it can honour",',
-    ...(opts.kind === "stated"
-      ? []
-      : ['      "files": ["src/scheduling/promise.ts"],']),
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/promise.ts#Promise", "quote": "class Promise {" }],`,
-    '      "confidence": "medium"',
-    "    },",
-    "    {",
-    '      "node_id": "keepable-delivery-windows",',
-    '      "purpose": "Lets a dispatcher promise a delivery window the fleet can actually keep",',
-    ...(opts.kind === "stated"
-      ? []
-      : [
-          '      "files": ["src/scheduling/window.ts", "src/scheduling/fleet.ts"],',
-        ]),
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts#DeliveryWindow", "quote": "class DeliveryWindow {" }],`,
-    '      "confidence": "high"',
-    "    }",
-    "  ],",
-    '  "edges": [',
-    "    {",
-    '      "from": "keepable-delivery-windows",',
-    '      "to": "promises-the-customer-can-trust",',
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts", "quote": "canFleetKeep(window)" }]`,
-    "    }",
-    "  ]",
-    "}",
+    exampleSubmission({ kind: opts.kind }),
     "```",
     "",
     "- `nodes` and `edges` are the whole submission. Do not add a field the example does not show. The tool knows which lane you are from the path it gave you.",

@@ -60,6 +60,10 @@ import {
   type AuditTask,
 } from "../../types.js";
 import {
+  recordIgnoredRootLogsPreInventory,
+  readNewlyCreatedIgnoredRootLogs,
+} from "../../../shared/submission/ignoredRootLogs.js";
+import {
   validateOneAuditResult,
   formatAuditResultIssues,
   // THE ONE CONTAINMENT RULE, shared with the batch door: this boundary and
@@ -311,6 +315,7 @@ export interface AuditHostIngestSummary {
    * as one.
    */
   readonly validation_warnings: readonly AuditHostValidationWarning[];
+  readonly ignored_root_logs?: readonly string[];
 }
 
 interface HostCoverage {
@@ -407,23 +412,19 @@ interface ResolvedBoundaryPaths {
   readonly acceptedLedgerPath: string;
   readonly acceptedResultsPath: string;
   /**
-   * The ONE lock serializing every read-modify-write of the ACCEPTED-RESULTS
-   * PAIR. Both writers — prepare and ingest — acquire it before touching the
-   * ledger, so the read-merge-write race the ledger used to lose is closed for
-   * prepare-against-ingest as well as ingest-against-ingest.
+   * The ONE lock serializing every read and write of the publish-then-accept
+   * boundary. Both writers — prepare and ingest — acquire it before touching
+   * the ledger AND the published trio (`host-workload.json`,
+   * `host-result-map.json`, `host-task-bindings.json`), so:
+   *   - `ingestAuditHostResults` reads the trio and the ledger under the SAME
+   *     acquisition, so a concurrent prepare cannot rewrite any document
+   *     underneath a bindings parse that already read its sibling;
+   *   - `prepareAuditHostHandoff` writes the trio and the accepted-results pair
+   *     under the SAME acquisition, so the whole published set lands (or does
+   *     not land) as one coherent boundary rather than piecemeal.
    *
-   * IT COVERS THE LEDGER ONLY — state the uncovered half rather than let the
-   * covered half read as a close. The rest of the run directory is still
-   * unsynchronized in both directions:
-   *   - `ingestAuditHostResults` reads `host-workload.json`,
-   *     `host-result-map.json` and `host-task-bindings.json` BEFORE taking the
-   *     lock, so a concurrent prepare can rewrite any of the three underneath a
-   *     ledger merge that already parsed them;
-   *   - `prepareAuditHostHandoff` writes `host-task-bindings.json` outside the
-   *     lock entirely (only the workload and result-map writes are inside it),
-   *     so that file has no writer-side serialization at all.
-   * Closing the whole prepare/ingest race — the trio under the same acquisition
-   * as the ledger — is tracked as backlog work, not done here.
+   * The read-merge-write race the ledger used to lose is thereby closed for
+   * prepare-against-ingest as well as ingest-against-ingest.
    */
   readonly acceptedLockPath: string;
 }
@@ -470,8 +471,15 @@ function resolveBoundaryPaths(
  * predates the earlier writer's additions, and every duplicate-binding and
  * duplicate-result_id guard downstream derives from that stale snapshot.
  *
- * So the read, the merge and both writes happen inside ONE acquisition of the
- * shared lock substrate. No backoff, retry or stale-lock logic lives here — all
+ * The published trio (`host-workload.json`, `host-result-map.json`,
+ * `host-task-bindings.json`) is written and read under this SAME acquisition, so
+ * a reader never parses a workload against a result map or binding set that a
+ * concurrent prepare has already replaced — the binding set is coherent by
+ * construction rather than by three lucky file reads.
+ *
+ * So every read, merge and write of the boundary happens inside ONE acquisition
+ * of the shared lock substrate. No backoff, retry or stale-lock logic lives
+ * here — all
  * of it is `withFileLock`'s, and the caller's RunLogger is threaded straight
  * through so the primitive's heartbeat and stale-lock-reclaim events land in the
  * run log rather than vanishing.
@@ -1075,7 +1083,6 @@ export async function prepareAuditHostHandoff(params: {
   };
 
   await mkdir(paths.resultDir, { recursive: true });
-  await writeJsonFile(paths.taskBindingsPath, taskBindings);
 
   // Say out loud whether this wave has drained. The caller hands in the run's
   // still-OWED partition, so an EMPTY one is the wave's own statement that every
@@ -1120,9 +1127,14 @@ export async function prepareAuditHostHandoff(params: {
       })),
     };
 
+    // The trio and the accepted-results pair land under the ONE lock, so a
+    // concurrent ingest reads a coherent set — a workload never against a
+    // binding set that a later prepare has already rewritten out from under it.
+    await writeJsonFile(paths.taskBindingsPath, taskBindings);
     await writeAcceptedResults(paths, accepted);
     await writeJsonFile(paths.workloadPath, workload);
     await writeJsonFile(paths.resultMapPath, resultMap);
+    await recordIgnoredRootLogsPreInventory(paths);
     return {
       workload,
       result_map: resultMap,
@@ -1828,10 +1840,6 @@ export async function ingestAuditHostResults(params: {
   readonly logger?: RunLogger;
 }): Promise<AuditHostIngestSummary> {
   const paths = resolveBoundaryPaths(params);
-  const accepted = await loadAcceptedResults(
-    paths.acceptedLedgerPath,
-    params.runId,
-  );
   // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
   // throw. These are the refusals with a named repair — re-prepare, which this
   // fold performs on its way to the next emission — so they must reach the host
@@ -1846,11 +1854,14 @@ export async function ingestAuditHostResults(params: {
   // under the old bindings is therefore REFUSED as stale — it is never accepted
   // against the new contract, because the new contract's binding is what the
   // re-prepare mints, and the item is re-published under it.
-  const stale = (error: {
-    code: AuditIngestIssueCode;
-    check: IngestionCheckId;
-    message: string;
-  }): AuditHostIngestSummary => ({
+  const stale = (
+    error: {
+      code: AuditIngestIssueCode;
+      check: IngestionCheckId;
+      message: string;
+    },
+    accepted: AcceptedResultsLedger,
+  ): AuditHostIngestSummary => ({
     accepted_count: 0,
     accepted_results: accepted.entries.map((entry) => entry.audit_result),
     accepted_results_path: paths.acceptedResultsPath,
@@ -1860,37 +1871,58 @@ export async function ingestAuditHostResults(params: {
     issues: [error],
     raw_issues: [error],
     validation_warnings: [],
+    ignored_root_logs: [],
   });
-  let workload: AuditHostWorkload;
-  try {
-    workload = parseWorkload(
-      await readJsonFile<unknown>(paths.workloadPath),
-      params.runId,
-    );
-  } catch (error) {
-    if (!(error instanceof StaleAuditHostWorkloadError)) throw error;
-    return stale(error);
-  }
-  const resultMap = parseResultMap(
-    await readJsonFile<unknown>(paths.resultMapPath),
-    params.runId,
-  );
-  let taskBindings: Map<string, AuditHostTaskBinding>;
-  try {
-    taskBindings = parseTaskBindings(
-      await readJsonFile<unknown>(paths.taskBindingsPath),
-      params.runId,
-    );
-  } catch (error) {
-    if (!(error instanceof StaleAuditHostTaskBindingsError)) throw error;
-    return stale(error);
-  }
-  const items = validateHandoffBinding(
+  // THE COHERENT BINDING SET, read under the ONE lock the writer publishes it
+  // under. A concurrent prepare that rewrites the trio cannot do so in the
+  // middle of this: the accepted ledger, workload, result map and task bindings
+  // are read in one acquisition, so a workload parse is never tested against a
+  // result map or binding set from the write before it.
+  const loaded = await withAcceptedResultsLock(
     paths,
-    workload,
-    resultMap,
-    taskBindings,
+    params.logger,
+    async (accepted) => {
+      const workloadDocument = await readJsonFile<unknown>(paths.workloadPath);
+      let workload: AuditHostWorkload;
+      try {
+        workload = parseWorkload(workloadDocument, params.runId);
+      } catch (error) {
+        if (!(error instanceof StaleAuditHostWorkloadError)) throw error;
+        return { kind: "stale" as const, summary: stale(error, accepted) };
+      }
+      const resultMapDocument = await readJsonFile<unknown>(paths.resultMapPath);
+      const resultMap = parseResultMap(resultMapDocument, params.runId);
+      const taskBindingsDocument = await readJsonFile<unknown>(paths.taskBindingsPath);
+      let taskBindings: Map<string, AuditHostTaskBinding>;
+      try {
+        taskBindings = parseTaskBindings(taskBindingsDocument, params.runId);
+      } catch (error) {
+        if (!(error instanceof StaleAuditHostTaskBindingsError)) throw error;
+        return { kind: "stale" as const, summary: stale(error, accepted) };
+      }
+      const items = validateHandoffBinding(
+        paths,
+        workload,
+        resultMap,
+        taskBindings,
+      );
+      return {
+        kind: "ok" as const,
+        accepted,
+        workload,
+        resultMap,
+        taskBindings,
+        items,
+        publication: stableStringify({
+          workloadDocument,
+          resultMapDocument,
+          taskBindingsDocument,
+        }),
+      };
+    },
   );
+  if (loaded.kind === "stale") return loaded.summary;
+  const { accepted, resultMap, taskBindings, items, publication } = loaded;
   const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
   const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
   const additions: AcceptedResultEntry[] = [];
@@ -2023,15 +2055,25 @@ export async function ingestAuditHostResults(params: {
 
   // The submission reading, contract checking and grounding re-verification
   // above run UNLOCKED — they only read. The read-modify-write does not: the
-  // ledger is re-read under the lock and the additions are re-filtered against
-  // that fresh copy, so a concurrent writer's entries are merged rather than
-  // replaced, and a binding or result id it accepted in the meantime is not
-  // accepted a second time here.
+  // ledger and published binding trio are re-read under the lock. A concurrent
+  // prepare can replace that trio while the unlocked scan runs; an old result
+  // must not be appended under the new publication even if its IDs are unique.
+  // A concurrent ingest against the same publication still merges by ID.
   let landed: AcceptedResultEntry[] = [];
+  let publicationChanged = false;
   const ledger = await withAcceptedResultsLock(
     paths,
     params.logger,
     async (current) => {
+      const currentPublication = stableStringify({
+        workloadDocument: await readJsonFile<unknown>(paths.workloadPath),
+        resultMapDocument: await readJsonFile<unknown>(paths.resultMapPath),
+        taskBindingsDocument: await readJsonFile<unknown>(paths.taskBindingsPath),
+      });
+      if (currentPublication !== publication) {
+        publicationChanged = true;
+        return current;
+      }
       const currentBindings = new Set(current.entries.map(bindingIdentity));
       const currentResultIds = new Set(
         current.entries.map((entry) => entry.result_id),
@@ -2056,7 +2098,16 @@ export async function ingestAuditHostResults(params: {
       return next;
     },
   );
-  for (const addition of additions) {
+  if (publicationChanged) {
+    issues.push({
+      code: "workload_stale",
+      check: "workload_binding",
+      message:
+        "the audit host handoff was re-prepared while results were being checked; " +
+        "no result from the previous binding was accepted — ingest the newly published workload",
+    });
+  }
+  for (const addition of publicationChanged ? [] : additions) {
     if (landed.includes(addition)) continue;
     issues.push({
       code: "duplicate_submission_id",
@@ -2086,6 +2137,7 @@ export async function ingestAuditHostResults(params: {
     refusals,
     "submission_rejected",
   );
+  const ignored_root_logs = await readNewlyCreatedIgnoredRootLogs(paths);
 
   return {
     accepted_count: landed.length,
@@ -2097,6 +2149,7 @@ export async function ingestAuditHostResults(params: {
     ].sort(compareCodeUnits),
     issues: reportedIssues,
     raw_issues,
+    ignored_root_logs,
   };
 }
 

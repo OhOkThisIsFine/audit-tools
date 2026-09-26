@@ -53,32 +53,24 @@ So hand-writing the report instead is not a quiet way around the check. The beha
 
 ## What each section is for
 
-- **Verification** — input key `verification`, always renders — what was run, what it returned, and the clean pushed commit it
-  ran on.
-- **Cleanup** — input key `cleanup` — dead code, orphaned helpers, and stray debug/TODO removed. Any
-  intermediate state that is there on purpose belongs in this same section, worded so it does not
-  read as a bug. (There is no separate key for it — the input keys are exactly the ones named in this list.)
-- **Friction this sprint** — input key `friction`, an OBJECT keyed by bullet id, not a string — bullets keyed by the single-sourced friction vocabulary
-  (`FRICTION_CATEGORIES`, `src/shared/friction/frictionRecord.ts`), one taxonomy for sprint retros
-  and the product's mechanical capture. The named categories are seeds, not an exhaustive schema —
-  the open-ended bullet is load-bearing whenever it has content.
-- **Docs synced** — input key `docs` — HANDOFF / backlog / memory + index, only the ones that actually changed.
-- **Landed this sprint** — input key `landed`, always renders — what this sprint did and its outcome, with
-  commits/versions. "nothing — investigation/docs only" is a real answer; an empty section is not.
-- **Decisions needed from you** — input key `decisions` — every decision only the owner can make, posed as an actual
-  answerable question with its options spelled out, via AskUserQuestion where the harness offers it.
-  "Your decision: see queue X / run command Y" is a pointer, not a question, and does not satisfy
-  this section. Record each answer in its durable home once given.
-- **Remaining next steps, and where each lives** — input key `next_steps` — every remaining step WITH the document that will
-  hold it after the session ends: immediate-next → `docs/HANDOFF.md`; open bugs →
-  `docs/backlog/open-bugs.md`; forward tracks → `docs/backlog/forward-tracks.md`; durable
-  design/status → project memory + its index; durable how-to → `CLAUDE.md`. A step living only in
-  chat is lost.
+The sections, their input keys, and what each is for are declared in
+[`scripts/closeout-sections-data.mjs`](../scripts/closeout-sections-data.mjs) — the registry the renderer
+enforces. This document does not restate them, because a hand-copied list here would drift from the
+registry (and did). To see the authoritative list, ask the renderer:
+
+```bash
+node scripts/render-closeout.mjs --help     # each section id + its prompt
+node scripts/render-closeout.mjs --template # blank input, with each section's contract walked to stderr
+```
+
+`--template` prints the derived walk — one line per section — to stderr (so `--template > closeout.json`
+still yields valid JSON) and the blank JSON input to stdout. The walk is the same contract the renderer
+holds the matching section to, surfaced before the first render so the fixes land cheap.
 
 ## Notes
 
 - **Adding or removing a section is a registry edit**, not a prose edit — the renderer, the refusal
-  message, and this document's list all follow from `closeout-sections-data.mjs`.
+  message, and `--help`/`--template` output all follow from `closeout-sections-data.mjs`.
 - **Owner decisions are asked, not referenced.** The recurring failure that section exists to stop:
   hand-backs that say "your decision — item X" while the actual question (which the agent holds,
   options and all) never reaches the owner. If the owner would have to open a file or run a command

@@ -32,10 +32,11 @@ export interface HostInputPauseInputs {
   /** Item B: acquisition gate — the consent fold only fires when acquisition is live. */
   externalAcquisitionEnabled?: boolean;
   /**
-   * Item B: recorded per-candidate consent DECLINES, from the durable analyzer
-   * policy at `.audit-tools/audit/analyzer-policy.json` — NOT session config,
-   * whose schema is strict and holds only review_mode + observability. A grant
-   * is never here: it binds one run and rides the scoped consent token below.
+   * Item B: this run's per-candidate consent DECLINES, folded in from the
+   * `analyzer_consent` lane inside the fold — NOT durable storage (packet 5 /
+   * O07: consent is strictly per-run, so the next run re-offers every
+   * candidate). A grant is never here either: it binds one run and rides the
+   * scoped consent token below.
    */
   analyzerConsent?: AnalyzerConsentDecisions;
   /**
@@ -77,16 +78,18 @@ export function graphEnrichmentUnresolvedAnalyzers(
 
 /**
  * Item B (consent surfacing): the consent-gated analyzer candidates that are
- * APPLICABLE to this repo and have NO recorded decision AND are not admitted by
- * this run's consent grant — the set the operator is still owed a batched offer
- * on. The SINGLE source of the analyzer-consent fold, consumed by BOTH the
- * `next-step` fold (which relays the list as the offer step) and the drain stop
- * predicate (which halts before the acquisition executor would silently skip
- * them — the silent-fail-closed defect the mechanical-analyzer-layer program
- * exists to fix). Nothing is owed when acquisition is off, the candidate has a
- * recorded decision (declined is never re-offered), the setting is `skip`, or
- * THIS RUN's grant names the candidate. A grant that does not name a candidate
- * leaves it owed — scope is honored per candidate, never widened to the run.
+ * APPLICABLE to this repo and have NO decision yet this run AND are not
+ * admitted by this run's consent grant — the set the operator is still owed a
+ * batched offer on. The SINGLE source of the analyzer-consent fold, consumed
+ * by BOTH the `next-step` fold (which relays the list as the offer step) and
+ * the drain stop predicate (which halts before the acquisition executor would
+ * silently skip them — the silent-fail-closed defect the
+ * mechanical-analyzer-layer program exists to fix). Nothing is owed when
+ * acquisition is off, the candidate was decided earlier THIS RUN (a decline is
+ * honored for the rest of the run but never re-offered within it — and the
+ * NEXT run re-offers it, packet 5 / O07), the setting is `skip`, or THIS RUN's
+ * grant names the candidate. A grant that does not name a candidate leaves it
+ * owed — scope is honored per candidate, never widened to the run.
  */
 export function pendingAnalyzerConsent(
   inputs: HostInputPauseInputs,

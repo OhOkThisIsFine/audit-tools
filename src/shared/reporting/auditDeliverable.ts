@@ -19,6 +19,7 @@ import type {
   WorkBlock,
 } from "../types/finding.js";
 import { AUDIT_FINDINGS_CONTRACT_VERSION } from "../validation/findingsReport.js";
+import { assertValidAuditFindingsReport } from "../validation/producerBoundary.js";
 import { renderFindingBlockLines } from "./findingDisplay.js";
 import { countBy } from "../countBy.js";
 import {
@@ -30,8 +31,9 @@ import {
   ESTIMATED_ITEM_OVERHEAD_TOKENS,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
 } from "../tokens.js";
+import { SEVERITIES } from "../types/lens.js";
 
-const SEVERITY_KEYS: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
+const SEVERITY_KEYS: readonly FindingSeverity[] = SEVERITIES;
 
 /**
  * Every severity key is present (zero-filled) even when no finding carries
@@ -121,7 +123,7 @@ export function buildAuditFindingsDeliverable(
     runtime_validation_status_breakdown: {},
     lens_breakdown: lensBreakdown(findings),
   };
-  return {
+  const report: AuditFindingsReport = {
     contract_version: AUDIT_FINDINGS_CONTRACT_VERSION,
     audit_read: auditRead,
     summary,
@@ -134,6 +136,12 @@ export function buildAuditFindingsDeliverable(
     // blocks in parallel over the same write path.
     work_block_seams: deriveWorkBlockSeams(blocks),
   };
+  // Serialized-output boundary: the emitter is the producer, so it runs its own
+  // finished value through the owning schema before any caller persists it. A
+  // contract field added tomorrow that this emitter fails to carry breaks HERE,
+  // not in the consumer that re-reads the re-emitted pair next run.
+  assertValidAuditFindingsReport(report);
+  return report;
 }
 
 /**

@@ -500,6 +500,7 @@ describe("up-front ambiguity gate (note 3, part A)", () => {
   const ambiguityRequestPath = join(ARTIFACTS_DIR, "ambiguity_request.json");
   const ambiguityResolutionPath = join(ARTIFACTS_DIR, "ambiguity_resolution.json");
   const ambiguityDecisionPath = join(ARTIFACTS_DIR, "ambiguity_decision.json");
+  const ambiguityPacketPath = join(ARTIFACTS_DIR, "ambiguity_packet.json");
 
   async function writeAmbiguousPlan(): Promise<void> {
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
@@ -573,6 +574,70 @@ describe("up-front ambiguity gate (note 3, part A)", () => {
     expect(request.find((c: { finding_id: string }) => c.finding_id === AMBIG_ID).category).toBe(
       "scope_of_fix",
     );
+  });
+
+  it("halts with an ambiguity-review packet carrying each finding's description, evidence, and confidence, bound and read-granted", async () => {
+    await writeAmbiguousPlan();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("collect_clarifications");
+    // The packet is bound in the step contract at an exact path...
+    expect(step.artifact_paths.ambiguity_packet.replaceAll("\\", "/")).toBe(
+      ambiguityPacketPath.replaceAll("\\", "/"),
+    );
+    // ...and granted read access, with the resolution granted write access.
+    const readPaths = (step.access?.read_paths ?? []).map((p: string) => p.replaceAll("\\", "/"));
+    const writePaths = (step.access?.write_paths ?? []).map((p: string) => p.replaceAll("\\", "/"));
+    expect(readPaths).toContain(ambiguityPacketPath.replaceAll("\\", "/"));
+    expect(writePaths).toContain(ambiguityResolutionPath.replaceAll("\\", "/"));
+
+    // The packet file carries the finding facts the candidate's heuristic line
+    // alone cannot: title, summary, confidence, evidence, and cited files.
+    const packet = JSON.parse(await readFile(ambiguityPacketPath, "utf8"));
+    const am = packet.findings.find((f: { finding_id: string }) => f.finding_id === AMBIG_ID);
+    expect(am).toBeTruthy();
+    expect(am.title).toBe("Rework module boundaries");
+    expect(am.confidence).toBe("medium");
+    expect(am.evidence).toEqual(["obligation O-ARCH"]);
+    expect(am.affected_files).toEqual([]);
+    const clear = packet.findings.find((f: { finding_id: string }) => f.finding_id === CLEAR_ID);
+    expect(clear.affected_files).toEqual(["src/login.ts"]);
+    expect(clear.confidence).toBe("high");
+    // The candidate list rides beside the findings.
+    expect(packet.candidates.map((c: { finding_id: string }) => c.finding_id)).toContain(AMBIG_ID);
+
+    // The prompt points the reader at the packet's bound path.
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt.replaceAll("\\", "/")).toContain(ambiguityPacketPath.replaceAll("\\", "/"));
+  });
+
+  it("a refused resolution re-emits with the packet retained and the refusal reason added", async () => {
+    await writeAmbiguousPlan();
+    await decideNextStep({ root: REPO_DIR }); // halt + write packet/request
+
+    // A malformed resolution (empty rationale on clarified) refuses the whole file.
+    await writeFile(
+      ambiguityResolutionPath,
+      JSON.stringify([
+        { finding_id: AMBIG_ID, action: "clarified", rationale: "   " },
+      ]),
+      "utf8",
+    );
+    const step = await decideNextStep({ root: REPO_DIR }); // refuse + re-halt
+
+    expect(step.step_kind).toBe("collect_clarifications");
+    // The packet is still bound + granted at the same path...
+    expect(step.artifact_paths.ambiguity_packet.replaceAll("\\", "/")).toBe(
+      ambiguityPacketPath.replaceAll("\\", "/"),
+    );
+    const readPaths = (step.access?.read_paths ?? []).map((p: string) => p.replaceAll("\\", "/"));
+    expect(readPaths).toContain(ambiguityPacketPath.replaceAll("\\", "/"));
+    // ...and the refusal reason is added to the prompt.
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain("REFUSED");
+    expect(prompt).toContain("entry [0] `rationale`");
+    expect(prompt.replaceAll("\\", "/")).toContain(ambiguityPacketPath.replaceAll("\\", "/"));
   });
 
   it("explicit user deferral closes the item as ignored and the run proceeds", async () => {

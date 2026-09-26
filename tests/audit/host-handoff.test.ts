@@ -21,6 +21,7 @@ import {
   recordHostResultOutcomes,
   type IngestionCheckId,
 } from "../../src/shared/index.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import { existsSync } from "node:fs";
 import { writeCoreArtifacts } from "../../src/audit/io/artifacts.js";
 import { GATE_LANES, laneSubmissionPath } from "../../src/audit/cli/laneSubmissions.js";
@@ -28,7 +29,7 @@ import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
-import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
+import { skipDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
 import { LENS_VERIFICATION_TAG } from "../../src/audit/orchestrator/selectiveDeepening/shared.js";
 
 const FAILURE_SIGNATURE =
@@ -1621,12 +1622,12 @@ describe(FAILURE_SIGNATURE, () => {
     await writeFile(join(root, "package.json"), '{"name":"old-bindings"}\n', "utf8");
     await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
     // The CLI entry loads the analyzer policy from the session artifacts before
-    // it folds; declining the acquired set is the shape every other CLI-driving
-    // fixture uses, and keeps acquisition a hermetic no-op. The NON-default
-    // candidates are offered through the `analyzer_consent` lane, which fires
-    // ahead of the fold — answering it here is what lets this test reach the
-    // obligation under test rather than pausing on the offer.
-    await declineDefaultAcquiredAnalyzers(root);
+    // it folds; skipping the default acquired set is the shape every other
+    // CLI-driving fixture uses, and keeps acquisition a hermetic no-op. The
+    // NON-default candidates are offered through the `analyzer_consent` lane,
+    // which fires ahead of the fold — answering it here is what lets this test
+    // reach the obligation under test rather than pausing on the offer.
+    await skipDefaultAcquiredAnalyzers(root);
     await mkdir(submissionsDir(join(root, ".audit-tools", "audit")), {
       recursive: true,
     });
@@ -1759,6 +1760,182 @@ describe(FAILURE_SIGNATURE, () => {
     };
     expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha3");
     expect(reparsed.entries[0]!.tags).toEqual([]);
+  });
+
+  // ── Old WORKLOAD version: refuse, remint, idempotent re-prepare (packet 15) ─
+  //
+  // The sibling stale-workload test above stops at the classified refusal and
+  // the re-prepare is covered only through the BINDINGS-version path, not the
+  // WORKLOAD-version path. This closes that gap at the public boundary itself:
+  // a superseded `host-workload.json` is refused as `workload_stale`, the next
+  // prepare remints it under the current contract together with a COHERENT
+  // bindings set and result map, and repeating that prepare is idempotent — the
+  // same bytes on disk, no churn.
+  it("refuses an old-version workload, then remints a current contract plus coherent bindings, and repeat preparation is idempotent", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-old-workload-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-run-old-workload";
+    const tasks = [
+      task(
+        "audit-task-a",
+        "security",
+        "src/a.ts",
+        { size: "medium", complexity: "deep", risk: "high" },
+        2400,
+      ),
+    ];
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+
+    // Prepare the current workload once, then rewrite its persisted copy to the
+    // superseded version — the on-disk shape a live run holds when the tool is
+    // upgraded underneath it.
+    const prepared = await boundary.prepareAuditHostHandoff({
+      root, artifactsDir, runId, tasks,
+    });
+    const stale = JSON.parse(await readFile(prepared.workload_path, "utf8")) as {
+      contract_version: string;
+      work_items: Array<Record<string, unknown>>;
+    };
+    stale.contract_version = "audit-host-workload/v1alpha1";
+    for (const item of stale.work_items) {
+      delete item.metadata;
+      item.metadata = { complexity: "deep", risk: "high", token_estimate: 2400 };
+    }
+    await writeFile(prepared.workload_path, JSON.stringify(stale), "utf8");
+
+    // (1) The old input is REFUSED — never accepted against a contract this
+    //     build did not mint, and named as workload_stale with the repair.
+    const refused = await boundary.ingestAuditHostResults({
+      root, artifactsDir, runId, auditTasks: tasks,
+    });
+    expect(refused.accepted_count).toBe(0);
+    const refusal = refused.issues.find((issue) => issue.code === "workload_stale");
+    expect(refusal, `issues: ${JSON.stringify(refused.issues)}`).toBeDefined();
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
+    expect(refusal!.message).toContain("re-prepare");
+
+    // (2) Remint: the next prepare rewrites the workload at the current version
+    //     AND leaves a COHERENT trio — a workload, result map and task-bindings
+    //     set that validateHandoffBinding accepts as one boundary.
+    const reminted = await boundary.prepareAuditHostHandoff({
+      root, artifactsDir, runId, tasks,
+    });
+    expect(reminted.workload.contract_version).toBe("audit-host-workload/v1alpha4");
+    const reparsed = JSON.parse(await readFile(reminted.workload_path, "utf8")) as {
+      contract_version: string;
+    };
+    expect(reparsed.contract_version).toBe("audit-host-workload/v1alpha4");
+    // Coherent: the reminted workload ingests cleanly (no stale, no binding error).
+    const remintedIngest = await boundary.ingestAuditHostResults({
+      root, artifactsDir, runId, auditTasks: tasks,
+    });
+    expect(remintedIngest.accepted_count).toBe(0);
+    expect(
+      remintedIngest.issues.map((issue) => issue.code),
+      "a reminted workload must ingest without a stale/binding refusal",
+    ).not.toContain("workload_stale");
+
+    // (3) Idempotent: preparing the same partition again is byte-identical.
+    const bytes = await readFile(reminted.workload_path, "utf8");
+    const again = await boundary.prepareAuditHostHandoff({
+      root, artifactsDir, runId, tasks: [...tasks].reverse(),
+    });
+    expect(await readFile(again.workload_path, "utf8")).toBe(bytes);
+  });
+
+  // ── Duplicate submission id: the seen guard stays reachable (packet 15) ────
+  //
+  // `deriveResultId` keeps only the first twelve hex chars of the prompt digest,
+  // so two DISTINCT full digests sharing a twelve-char prefix mint the SAME
+  // result id. The in-scan `seen` guard is the defense that refuses a result
+  // whose id is already on the accepted ledger — M45 warned that no test reaches
+  // it, and the guard was at risk of being deleted as dead. This test crosses it
+  // through the public ingest, with an existing accepted binding whose result id
+  // shares the submitted result's twelve-char prefix while its full digest
+  // differs. The prefix collision is constructed (not hashed) by rewriting the
+  // persisted accepted-ledger entry's digest, exactly as the sibling
+  // old-bindings test rewrites the persisted bindings file.
+  it("refuses a result whose derived id collides on a twelve-char prompt-digest prefix with an existing accepted binding", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-host-dup-id-"));
+    cleanupRoots.push(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const runId = "host-run-dup-id";
+    const tasks = [
+      task(
+        "audit-dup",
+        "correctness",
+        "src/a.ts",
+        { size: "small", complexity: "standard", risk: "medium" },
+        1200,
+      ),
+    ];
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+
+    const prepared = await boundary.prepareAuditHostHandoff({
+      root, artifactsDir, runId, tasks,
+    });
+    const item = prepared.workload.work_items[0]!;
+    const resultPath = expectContained(root, item.result_path, "bound result");
+    await mkdir(join(resultPath, ".."), { recursive: true });
+    await writeFile(
+      resultPath,
+      JSON.stringify(boundResult(runId, item)),
+      "utf8",
+    );
+    // Accept once: the ledger now holds (W, realDigest) with result id
+    // `W-<digest[0:12]>`.
+    const accepted = await boundary.ingestAuditHostResults({
+      root, artifactsDir, runId, auditTasks: tasks,
+    });
+    expect(accepted.accepted_count).toBe(1);
+
+    // Forge the persisted ledger entry: replace its FULL prompt digest with a
+    // distinct digest that shares the real one's twelve-char prefix, keeping the
+    // result id (and therefore the twelve-char prefix) unchanged. The two full
+    // digests differ, but `deriveResultId` collapses them to one id — the exact
+    // collision the seen guard exists to refuse.
+    const realDigest = item.prompt.sha256;
+    const forgedDigest = realDigest.slice(0, 12) + "f".repeat(64 - 12);
+    expect(forgedDigest, "the forged digest must be a distinct full digest").not.toBe(realDigest);
+    expect(forgedDigest.slice(0, 12), "…sharing the twelve-char prefix").toBe(realDigest.slice(0, 12));
+
+    const ledgerPath = join(
+      artifactsDir, "runs", runId, "host-accepted-results-ledger.json",
+    );
+    const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as {
+      entries: Array<{
+        work_item_id: string;
+        prompt_sha256: string;
+        result_id: string;
+        result_sha256: string;
+        result: Record<string, unknown>;
+      }>;
+    };
+    expect(ledger.entries).toHaveLength(1);
+    const entry = ledger.entries[0]!;
+    expect(entry.prompt_sha256).toBe(realDigest);
+    entry.prompt_sha256 = forgedDigest;
+    entry.result.prompt_sha256 = forgedDigest;
+    entry.result_sha256 = contentSha256(entry.result);
+    await writeFile(ledgerPath, JSON.stringify(ledger), "utf8");
+
+    // Re-submit the SAME result bytes (self-consistent: result id derived from
+    // the real digest, prompt_sha256 = real digest). Its binding is not on the
+    // ledger (the ledger now carries the forged digest), so it is not skipped as
+    // already-accepted — but its derived id collides with the accepted one, so
+    // the seen guard refuses it as a duplicate.
+    const summary = await boundary.ingestAuditHostResults({
+      root, artifactsDir, runId, auditTasks: tasks,
+    });
+    expect(summary.accepted_count).toBe(0);
+    const duplicate = summary.issues.find((issue) => issue.code === "duplicate_submission_id");
+    expect(duplicate, `issues: ${JSON.stringify(summary.issues)}`).toBeDefined();
+    expect(duplicate!.work_item_id ?? duplicate!.result_path).toBeDefined();
   });
 });
 

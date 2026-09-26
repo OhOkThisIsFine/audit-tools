@@ -6,9 +6,10 @@ import {
   writeStepContract,
   StepStatusSchema,
   AccessDeclarationSchema,
+  LaneReviewRecordSchema,
   AGENT_FEEDBACK_FILENAME,
 } from "audit-tools/shared";
-import type { AccessDeclaration, StepStatus } from "audit-tools/shared";
+import type { AccessDeclaration, LaneReviewRecord, StepStatus } from "audit-tools/shared";
 import {
   LaneSubmissionShortfallSchema,
   type LaneSubmissionShortfall,
@@ -107,6 +108,16 @@ export const StepArtifactSchema = z
      * diffing two identical-looking steps.
      */
     submission_shortfall: LaneSubmissionShortfallSchema.optional(),
+    /**
+     * The DECLARED review mode and reason per materialized lane, recorded beside
+     * the lane so an automated consumer reads the independence requirement off
+     * the contract instead of reconstructing it from prose. The mode is a
+     * DECLARATION — the tool records it and does not claim it verified that a
+     * host produced an independent context (independence is a property of the
+     * execution context, invisible to tooling). Present only when a lane's mode
+     * is not `ordinary`, so a default run carries no noise.
+     */
+    lane_reviews: z.array(LaneReviewRecordSchema).optional(),
   })
   .strict();
 export type StepArtifact = z.infer<typeof StepArtifactSchema>;
@@ -181,6 +192,12 @@ export async function writeCurrentStep(params: {
   prompt: string;
   access?: AccessDeclaration;
   submissionShortfall?: LaneSubmissionShortfall;
+  /**
+   * The declared review mode and reason per materialized lane. Folded into the
+   * step contract's `lane_reviews` field, minus `ordinary` lanes (which carry no
+   * requirement worth recording). See {@link StepArtifact.lane_reviews}.
+   */
+  laneReviews?: readonly LaneReviewRecord[];
 }): Promise<StepArtifact> {
   const echo = scopeEchoLine(params.artifactsDir);
   return writeStepContract<StepArtifact, StepKind, string | null>({
@@ -214,6 +231,14 @@ export async function writeCurrentStep(params: {
       ...(params.submissionShortfall &&
       params.submissionShortfall.outstanding.length > 0
         ? { submission_shortfall: params.submissionShortfall }
+        : {}),
+      ...(params.laneReviews &&
+      params.laneReviews.some((r) => r.mode !== "ordinary")
+        ? {
+            lane_reviews: params.laneReviews.filter(
+              (r) => r.mode !== "ordinary",
+            ),
+          }
         : {}),
     },
   });

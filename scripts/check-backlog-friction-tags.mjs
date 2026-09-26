@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-status-tokens.test.ts
 // Refuse a `friction:` tag in docs/backlog/ that is not drawn from the canonical
 // category vocabulary.
 //
@@ -32,14 +33,12 @@
 // refused is a tag that names a category nothing else in the pipeline knows.
 //
 //   node scripts/check-backlog-friction-tags.mjs
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { splitBacklogEntries } from "./shared/backlog-entry-grammar.mjs";
+import { listBacklogFiles, readBacklogCorpus, REPO_ROOT } from "./shared/backlog-corpus.mjs";
 import { FRICTION_CATEGORIES } from "./shared/friction-categories.generated.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
+const repoRoot = REPO_ROOT;
 
 /**
  * `friction:` followed by the single word that names the category — CLOSED, not
@@ -147,10 +146,7 @@ export function evaluateFrictionTags(files) {
 }
 
 function main() {
-  const files = readdirSync(backlogDir)
-    .filter((f) => f.endsWith(".md"))
-    .sort()
-    .map((file) => ({ file, text: readFileSync(join(backlogDir, file), "utf8") }));
+  const files = readBacklogCorpus(listBacklogFiles(repoRoot)).map(({ file, text }) => ({ file, text }));
 
   const result = evaluateFrictionTags(files);
 

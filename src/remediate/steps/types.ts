@@ -62,6 +62,19 @@ export type RemediationStepKind =
   // and does not know this one treats it as informational, which is the correct
   // reading — the step asks for nothing but a re-run once the suite is green.
   | "final_gate_red"
+  // A SIXTH thing, and the same attribution argument again. No executable gate
+  // command is derivable from the target repository's declared commands, so
+  // there is no floor to run and nothing to be red: the run pauses for an
+  // operator decision — declare a build/typecheck/lint/test command in the
+  // repository manifest (the next next-step re-resolves and runs it), or stop
+  // the run. It mutates nothing and is resumable by re-run, exactly like
+  // `final_gate_red`, but it must never be mistaken for it: a red names a
+  // failing command to fix, while this names the declarations that were
+  // probed and found empty.
+  //
+  // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
+  // by a host that does not know it.
+  | "final_gate_needs_command"
   // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): written by
   // the CLI when next-step dies on an unhandled error, so a stale prior step can
   // never read as a live instruction. Mirrors audit-code's "blocked" kind.
@@ -102,7 +115,17 @@ export type RemediationStepKind =
   //
   // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
   // by a host that does not know it.
-  | "extracted_plan_discarded";
+  | "extracted_plan_discarded"
+  // A run parked by the operator lifecycle verbs (O31 / packet 14): `paused` by
+  // `plan-only`/`pause` (resumable via the `resume` verb), and `cancelled` by
+  // `cancel` (terminal; artifacts preserved). Both are informational steps a
+  // bare `next-step` emits against the parked state so it is never mis-read as
+  // an in-progress run that should be advanced.
+  //
+  // Persisted contract: ADDITIVE values, read the same way as the gate-red and
+  // discard kinds by a host that does not know them.
+  | "paused"
+  | "cancelled";
 
 import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 
@@ -112,12 +135,10 @@ import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 // listing — that was the duplicate this consolidates.
 export type { AccessDeclaration };
 
-export type RemediationStepStatus = StepStatus;
-
 export interface RemediationStep {
   contract_version: typeof REMEDIATION_STEP_CONTRACT_VERSION;
   step_kind: RemediationStepKind;
-  status: RemediationStepStatus;
+  status: StepStatus;
   prompt_path: string;
   run_id: string | null;
   repo_root: string;

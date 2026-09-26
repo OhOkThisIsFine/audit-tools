@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/intent-equivalence-executor.test.ts
 /**
  * DD-9 — the intent-equivalence obligation's executor.
  *
@@ -46,6 +47,13 @@ export const IntentEquivalenceVerdictSchema = z
         new_hash: z.string(),
       })
       .strict(),
+    /**
+     * Optional judge rationale for the `equivalent`/`changed` verdict — the
+     * auditable explanation of why planning was preserved or invalidated.
+     * Optional: an older or minimally-instrumented judge may omit it without
+     * being rejected.
+     */
+    rationale: z.string().optional(),
   })
   .strict();
 export type IntentEquivalenceVerdictSubmission = z.infer<

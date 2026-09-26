@@ -1,11 +1,11 @@
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts
+// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/final-gate-arbitrary-repo.test.ts, tests/remediate/intake-subset-selection.test.ts, tests/remediate/conformance-review.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { z } from "zod";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StateStore, type RemediationState } from "../state/store.js";
 import type {
@@ -14,7 +14,9 @@ import type {
   RemediationBlock,
   RemediationItemState,
   RemediationPlan,
+  LifecycleWorktree,
 } from "../state/types.js";
+import { planOnlyVerb } from "./lifecycle.js";
 // IO / validation / rendering helpers
 import {
   discardOnSchemaVersionMismatch,
@@ -34,33 +36,30 @@ import {
   renderPromptCommand,
   headCommit,
   projectAuditFindingsReportSubset,
+  hashContent,
   // obligation engine + intent
   interpretFreeFormIntent,
-  interpretIntent,
   unresolvedFromClauses,
   advance,
   describeStoppedFold,
-  decideFrictionTriage,
   buildFrictionTriageBlock,
   linkFrictionRunIds,
   // domain constants
   LENSES,
   SEVERITIES,
   // types
-  type ConstraintClauseRecord,
-  type FrictionTriageDecision,
   type ObligationDef,
   type ObligationOutcome,
   type StoppedFoldDescription,
-  type InterpretedIntent,
   type SessionIntentLoadResult,
   CLOSING_ACTIONS,
-  SKIP_WRITE,
-  invalidateStepContracts,
+  commandLeavesDeclaredShape,
+  parseCommandString,
   detectProjectFacts,
   isClosingAction,
   neutralProjectFacts,
   repoRelativePath,
+  toPromptPathToken,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
 import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
@@ -72,17 +71,15 @@ import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
 import { validateRemediationPlan } from "../validation/remediationState.js";
 import {
+  CannotPrepareWorkloadError,
   readExtractedPlanIfPresent,
 } from "./dispatch/marshal.js";
 import {
   ingestRemediationHostResults,
   hostDependencyLevels,
   permanentlyDeadPendingBlocks,
-  precomputeRecoveryTestVerdicts,
   prepareRemediationHostHandoff,
   remediationIssueRemedy,
-  workloadBindingIdentity,
-  type CurrentRemediationHostState,
   type RemediationHostIngestSummary,
 } from "./dispatch/hostHandoff.js";
 import {
@@ -100,10 +97,27 @@ import {
   remediationArtifactsDir,
 } from "../../shared/io/auditToolsPaths.js";
 import {
-  callerWorkingDirectory,
-  discoverRepoRoot,
-  resolveRepoRoot,
-} from "../../shared/io/repoRoot.js";
+  resolveArtifactsDir,
+  resolveRoot,
+} from "./stepUtils.js";
+import {
+  buildFrictionWalkStep,
+  decideRemediateFrictionCloseout,
+  requireStateRunId,
+  stateRunId,
+} from "./frictionCloseout.js";
+import {
+  currentHostBoundaryState,
+} from "./recovery.js";
+import {
+  persistReviewFilterDispositions,
+  reviewFilterDispositionsPath,
+  type PersistedReviewFilterDispositions,
+} from "./pathADisposition.js";
+import {
+  readOrRepairIntentInterpretation,
+  readPersistedIntentInterpretationSync,
+} from "./intentPersistence.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { InputResolution, RemediationStep } from "./types.js";
 import {
@@ -120,13 +134,18 @@ import { resolveIntakeStep } from "./intakeResolver.js";
 import { carriesGateVerdict } from "../../shared/types/remediationOutcome.js";
 import {
   RUNTIME_RESIDUAL_DECLARATION,
+  finalGateOutcomePath,
   readFinalGateVerdict,
+  readLastGateBinding,
+  gateBindingChanged,
+  resolveGateBinding,
   runToolOwnedFinalGate,
   writeFinalGateRedRecord,
   writeFinalGateOutcomeRecord,
   writeFinalGateVerdict,
   type FinalGateOutcomeKind,
   type GateRunner,
+  type ToolOwnedFinalGateOptions,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
 import {
@@ -156,11 +175,7 @@ import {
   type ReviewResolution,
 } from "../review/reviewGate.js";
 import { buildAutonomousReviewDecision } from "../review/autonomousGate.js";
-import { runFindingFilterPass, type FindingFilterResult } from "../findingFilter.js";
-import {
-  droppedFindingsRecordPath,
-  renderDroppedFindingsRecord,
-} from "../droppedFindingsRecord.js";
+import { runFindingFilterPass } from "../findingFilter.js";
 import {
   intakePaths,
   isIntakeReady,
@@ -183,6 +198,7 @@ import {
 } from "../riskSignal.js";
 import {
   isLegacyDraftCheckpoint,
+  IntentCheckpointSchema,
   readIntentCheckpoint,
   readIntentCheckpointLenient,
 } from "audit-tools/shared";
@@ -216,8 +232,15 @@ export interface NextStepOptions {
   root?: string;
   artifactsDir?: string;
   input?: string | string[];
+  /** Repeatable native audit-intake selectors; severity and ID matches are unioned. */
+  intakeSeverities?: string[];
+  intakeFindingIds?: string[];
   finalizeClosing?: boolean;
   forceReplan?: boolean;
+  /** Request a durable stop at the planning-to-implementation boundary. */
+  planOnly?: boolean;
+  /** Host-reported worktree metadata to retain with the eventual pause. */
+  planOnlyWorktree?: LifecycleWorktree;
   /**
    * True when this invocation supplied `--guidance-file` (folded into
    * intake/conversation-start.md before the step decision). Like a fresh
@@ -242,6 +265,15 @@ export interface NextStepOptions {
    * deterministically in tests. Unset in production → real env-scrubbed builds.
    */
   finalGateRunner?: GateRunner;
+  /**
+   * The opt-in per-result contract conformance review (O39 / packet 17),
+   * DISABLED by default. When true, each mechanically-corroborated landed result
+   * is held until a bounded independent review of its obligation evidence
+   * against the carried module contracts passes (bound to result, obligation
+   * set, and contract content). Latched to this run's plan ID before ingestion,
+   * so subsequent bare next-step calls keep the same review policy.
+   */
+  conformanceReview?: boolean;
 }
 
 const SESSION_INTENT_RESULT: unique symbol = Symbol("session-intent-result");
@@ -261,61 +293,17 @@ function randomRunId(prefix = "RUN"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function resolveRoot(root?: string): string {
-  // The library-entry arm of the same two-arm resolution the CLI performs
-  // (`resolveRootOption` in src/remediate/index.ts). A SUPPLIED root is honored
-  // verbatim through `resolveRepoRoot` — an explicit root is an instruction, so
-  // a sub-project inside a larger repo stays the sub-project — while an ABSENT
-  // one is DISCOVERED from the caller's working directory rather than falling
-  // back to the literal ".". The old `?? "."` made an embedded call from a
-  // nested cwd root the run at that SUBDIRECTORY and fork a phantom nested
-  // artifact tree there; anchoring alone could not fix it, because
-  // `resolveRepoRoot` only climbs out of `.audit-tools/` and never up to the
-  // owning repository. See src/shared/io/repoRoot.ts.
-  return root === undefined
-    ? discoverRepoRoot(callerWorkingDirectory())
-    : resolveRepoRoot(root);
-}
+export {
+  resolveRoot,
+  resolveArtifactsDir,
+} from "./stepUtils.js";
+export {
+  stateRunId,
+  requireStateRunId,
+  buildFrictionWalkStep,
+  decideRemediateFrictionCloseout,
+} from "./frictionCloseout.js";
 
-function resolveArtifactsDir(root: string, artifactsDir?: string): string {
-  // The default rebases onto the anchored root via the shared helper (the sole
-  // owner of the `.audit-tools/remediation` join literal); an explicit dir is
-  // honored verbatim.
-  return artifactsDir ? resolve(artifactsDir) : remediationArtifactsDir(root);
-}
-
-/**
- * The run's friction-record key: the plan id, or `null` when there is no plan.
- *
- * There is DELIBERATELY no fallback key. A fallback ("run") is a path every
- * planless state shares, and `decideFrictionTriage` MATERIALIZES the record it
- * is handed — so a planless caller could MINT a fresh empty record under it,
- * which the close gate then blocks on. That is the 2026-08-24 defect exactly.
- *
- * The key is therefore the plan id or nothing, and a caller handed `null` has
- * no walk to key: the walk ran before the close archived the plan-keyed record,
- * and the plan is where its identity came from.
- */
-function stateRunId(state: RemediationState | null): string | null {
-  return state?.plan?.plan_id ?? null;
-}
-
-/**
- * The run key for a caller holding a LOADED state that must carry a plan id —
- * the host-handoff/ingest paths, whose contracts declare `run_id: string`.
- *
- * It throws rather than inventing a key: an absent plan id there is a
- * reachable-but-unexpected state, and silently falling back would mint a
- * shared path exactly as the fallback key did. Callers that can legitimately
- * hold a planless state use {@link stateRunId} and handle the `null`.
- */
-function requireStateRunId(state: RemediationState): string {
-  const runId = stateRunId(state);
-  if (!runId) {
-    throw new Error("remediate: a loaded state with no plan id cannot name a run");
-  }
-  return runId;
-}
 
 /**
  * Where an autonomous run's LEFTOVER deliverable pair lands.
@@ -586,7 +574,10 @@ export function phaseBoundaryToGate(state: RemediationState): number | null {
 // documentation.
 
 export {
+  gateBindingChanged,
   isAuditToolsMonorepo,
+  readLastGateBinding,
+  resolveGateBinding,
   toolOwnedFinalGateCommands,
   runToolOwnedFinalGate,
   finalGateOutcomePath,
@@ -595,6 +586,8 @@ export {
 export type {
   FinalGateCommandSpec,
   FinalGateCommandResult,
+  GateBinding,
+  ToolOwnedFinalGateOptions,
   ToolOwnedFinalGateResult,
   FinalGateOutcomeKind,
   FinalGateOutcomeRecord,
@@ -832,6 +825,21 @@ async function saveStateForPlan(
   planCoverage?: CoverageLedger,
 ): Promise<RemediationState> {
   const { host_handoff: _staleHostHandoff, ...carryForwardState } = existing;
+  const priorReview = existing.conformance_review_policy;
+  const conformanceReviewPolicy = priorReview === undefined
+    ? existing.plan || Object.values(existing.items ?? {}).some((item) => item.status !== "pending")
+      ? { plan_id: plan.plan_id, choice: "off" as const, first_dispatch_recorded: true }
+      : { plan_id: plan.plan_id, choice: "undecided" as const, first_dispatch_recorded: false }
+    : priorReview.plan_id === undefined
+      ? { ...priorReview, plan_id: plan.plan_id }
+    : priorReview.plan_id === plan.plan_id
+      ? priorReview
+      : Object.values(existing.items ?? {}).some((item) => item.status !== "pending")
+        ? { plan_id: plan.plan_id, choice: "off" as const, first_dispatch_recorded: true }
+        : { plan_id: plan.plan_id, choice: "undecided" as const, first_dispatch_recorded: false };
+  const planOnlyRequest = existing.plan_only_request
+    ? { ...existing.plan_only_request, plan_id: plan.plan_id }
+    : undefined;
   const items: Record<string, RemediationItemState> = {};
   const blockIds = blockIdsByFinding(plan);
   for (const finding of plan.findings) {
@@ -846,6 +854,8 @@ async function saveStateForPlan(
     status: "planning",
     plan,
     items,
+    conformance_review_policy: conformanceReviewPolicy,
+    ...(planOnlyRequest ? { plan_only_request: planOnlyRequest } : {}),
     closing_plan: await confirmedClosingPlan(artifactsDir),
     ...(planCoverage ? { plan_coverage: planCoverage } : {}),
   };
@@ -975,6 +985,12 @@ async function forceReplanFromExistingIntake(
 ): Promise<RemediationState | { kind: "discarded"; reason: string; archivePath?: string } | null> {
   const pendingState: RemediationState = {
     status: "pending",
+    ...(previous.conformance_review_policy
+      ? { conformance_review_policy: previous.conformance_review_policy }
+      : {}),
+    ...(previous.plan_only_request
+      ? { plan_only_request: previous.plan_only_request }
+      : {}),
     started_at: previous.started_at,
     step_count: previous.step_count,
     // Carry the run-lifetime staging-manifest fields across a force-replan.
@@ -1014,39 +1030,20 @@ async function forceReplanFromExistingIntake(
   }
 
   const carried = carryForwardMatchingItems(previous, replanned);
+  if (Object.values(carried.items ?? {}).some((item) => item.status !== "pending")) {
+    // A newly minted plan may retain accepted work from the previous plan.
+    // Its old review choice does not carry across plan IDs, and acceptance
+    // history means the new plan is already past the opt-in boundary.
+    carried.conformance_review_policy = {
+      plan_id: carried.plan!.plan_id,
+      choice: "off",
+      first_dispatch_recorded: true,
+    };
+  }
   await store.saveState(carried);
   return carried;
 }
 
-/**
- * The BLOCKING friction close-out step for a run whose walk is still owed.
- *
- * Emitted from `handleClosing` BEFORE the close touches disk, so the record the
- * host is told to write (`triage.recordPath`) is the plan-keyed one this very
- * decision just materialized — and so the run's identity in that path is the
- * plan id, not a fallback. The step is a `closing`-phase gate: `next-step`
- * re-decides the same walk on the next call, and only a disposed walk lets the
- * close proceed.
- */
-async function buildFrictionWalkStep(
-  root: string,
-  artifactsDir: string,
-  state: RemediationState,
-  triage: FrictionTriageDecision,
-): Promise<RemediationStep> {
-  return writeCurrentStep({
-    stepKind: "close_run",
-    status: "ready",
-    runId: requireStateRunId(state),
-    repoRoot: root,
-    artifactsDir,
-    prompt: `# Remediation Run Friction Triage\n\nComplete the friction close-out walk before the run may close.\n${buildFrictionTriageBlock(triage)}`,
-    allowedCommands: [],
-    stopCondition:
-      "Complete friction triage (write dispositions and open_observations), then call next-step again.",
-    artifactPaths: { friction_record: triage.recordPath },
-  });
-}
 
 async function presentReportStep(
   root: string,
@@ -1114,191 +1111,11 @@ async function presentReportStep(
   });
 }
 
-function currentHostBoundaryState(
-  state: RemediationState,
-): CurrentRemediationHostState {
-  return {
-    contract_version: "remediate-code-state/v1alpha1",
-    ...state,
-  } as CurrentRemediationHostState;
-}
+export {
+  currentHostBoundaryState,
+  recoverIngestHostResults,
+} from "./recovery.js";
 
-/**
- * The `recover-ingest` verb's whole body: ingest the host's landed results in
- * RECOVERY mode and persist through the same file-locked, atomically-writing
- * store, with the same `contract_version` strip.
- *
- * It is a separate verb rather than a flag on `next-step` because the
- * relaxation it enables must be an operator's explicit act — see
- * `ingestRemediationHostResults`, which states what is waived and the residual
- * risk. Nothing else here differs from the normal ingestion: the same workload,
- * the same contract gates, the same eligibility frontier.
- *
- * ## Why this runs in two phases
- *
- * A required-test rerun is `spawnSync`, which blocks the event loop for its
- * whole duration. Run inside the state lock, it would starve the lock's own
- * heartbeat timer (`setInterval` in the shared fileLock) — the held lock's mtime
- * would stop being refreshed, a second acquirer would classify it as stale at
- * ~30s and steal it, and mutual exclusion would be gone precisely during the
- * longest critical section in the codebase. Holding a lock across a blocking
- * spawn is therefore not merely slow; it is unsound.
- *
- * So:
- *
- * - **Phase 1, UNLOCKED.** Snapshot the state, capture HEAD and the workload
- *   binding, and run every distinct required-test command exactly once
- *   (`precomputeRecoveryTestVerdicts`). Both identities are captured BEFORE the
- *   spawns, not after, because a host-authored command that MOVES HEAD would
- *   otherwise produce verdicts of mixed provenance and go undetected. (The HEAD
- *   guard compares commit shas: it sees HEAD movement, not worktree dirt — a
- *   command that only dirties files is invisible to it, which is acceptable
- *   because phase 2's corroboration is commit-based.)
- * - **Phase 2, LOCKED.** Re-read both identities and abort the whole recovery if
- *   either moved — `tree_moved_between_phases` for HEAD,
- *   `state_moved_between_phases` for the binding — because the phase-1 verdicts
- *   would describe a tree or a frontier that no longer exists, and nothing is
- *   accepted or appended. Otherwise ingest with the pre-computed verdicts, which
- *   the ingest only READS: in recovery mode it never spawns, and a command
- *   missing from the table fails closed.
- *
- * What remains inside the lock is git plumbing (ancestry, ref scan, diff-tree),
- * the ledger append, and the state write — sub-second work, comfortably inside
- * heartbeat coverage. The two unchanged-identity guards close the gap the phase
- * split opens; the operational protocol is still one writer at a time, now
- * enforced by a lock that cannot be stolen mid-hold instead of by convention.
- *
- * A recovery that changes nothing writes nothing: phase 2 returns the locked
- * store's `SKIP_WRITE` sentinel, which `StateStore.mutate` now honors, so the
- * retry loop of a genuinely-empty recovery no longer replaces `state.json` with
- * byte-identical content on every pass.
- */
-export async function recoverIngestHostResults(options: {
-  readonly root: string;
-  readonly artifactsDir: string;
-  readonly runId: string;
-}): Promise<RemediationHostIngestSummary> {
-  const root = resolveRoot(options.root);
-  const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
-  const store = new StateStore(artifactsDir);
-
-  // ── Phase 1: unlocked ────────────────────────────────────────────────────
-  const snapshot = await store.loadState();
-  if (!snapshot) {
-    throw new Error(
-      `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
-    );
-  }
-  const headBeforeTests = await headCommit(root);
-  const bindingBeforeTests = workloadBindingIdentity(currentHostBoundaryState(snapshot));
-  const requiredTestVerdicts = await precomputeRecoveryTestVerdicts({
-    root,
-    artifactsDir,
-    runId: options.runId,
-    state: currentHostBoundaryState(snapshot),
-  });
-  if (requiredTestVerdicts === "unsupported_retired_state") {
-    throw new Error(
-      "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
-    );
-  }
-
-  // ── Phase 2: locked; children are async + deadline-bounded only ──────────
-  // The long-running required tests were precomputed in Phase 1, outside the
-  // lock. What still spawns under the hold is the corroboration git probes —
-  // async on the tracked twin with the shared deadline (INV-SSF), so the
-  // hold's heartbeat keeps beating through every probe.
-  let ingested!: RemediationHostIngestSummary;
-  await store.mutate(async (state) => {
-    if (!state) {
-      throw new Error(
-        `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
-      );
-    }
-    const headNow = await headCommit(root);
-    const bindingNow = workloadBindingIdentity(currentHostBoundaryState(state));
-    // TWO identities, because they catch different writers. HEAD moves when the
-    // tree does; the workload binding moves when a concurrent state writer
-    // settles items or re-mints the workload without committing anything. The
-    // verdict table describes the frontier as it was at phase 1, so either
-    // change invalidates it — and a stale table is not merely imprecise: the
-    // commands it no longer covers read as `required_test_failed`, which
-    // attributes a bookkeeping race to the host's work.
-    const moved =
-      headNow !== headBeforeTests
-        ? "tree"
-        : bindingNow !== bindingBeforeTests
-          ? "state"
-          : null;
-    if (moved !== null) {
-      ingested = {
-        accepted_count: 0,
-        completed_work_item_ids: [],
-        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-        // This verdict aborts the whole recovery BEFORE any item is read, so
-        // there is no per-item observation to report — an empty map is the
-        // honest statement of that, not a missing field.
-        work_item_outcomes: new Map(),
-        issues: [
-          moved === "tree"
-            ? {
-                code: "tree_moved_between_phases",
-                message:
-                  `HEAD moved from ${headBeforeTests ?? "(none)"} to ${headNow ?? "(none)"} ` +
-                  "while the required tests were running, so their verdicts no longer describe " +
-                  "this tree. Nothing was accepted; re-run recover-ingest on a settled tree.",
-              }
-            : {
-                code: "state_moved_between_phases",
-                message:
-                  "the run's workload binding changed while the required tests were running, " +
-                  "so their verdicts no longer describe the pending frontier. Nothing was " +
-                  "accepted; re-run recover-ingest once no other writer is advancing this run.",
-              },
-        ],
-        state_changed: false,
-        state: currentHostBoundaryState(state),
-      };
-      // The lock was taken to WRITE. Nothing changed, so write nothing: the
-      // no-op sentinel is what keeps a settled recovery from replacing
-      // state.json with byte-identical content on every retry.
-      return SKIP_WRITE;
-    }
-    const outcome = await ingestRemediationHostResults({
-      root,
-      artifactsDir,
-      runId: options.runId,
-      state: currentHostBoundaryState(state),
-      recovery: { requiredTestVerdicts },
-    });
-    if (outcome === "unsupported_retired_state") {
-      throw new Error(
-        "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
-      );
-    }
-    ingested = outcome;
-    // A nothing-to-recover pass returns the sentinel, not the state it read: the
-    // mutation is a no-op and must not rewrite the file (see StateStore.mutate).
-    if (!outcome.state_changed) return SKIP_WRITE;
-    // No `contract_version` strip. The boundary helper below stamps the version
-    // onto the state it hands the host handoff, and this used to peel it back
-    // off on the way to disk so `state.json` matched what was written before.
-    // The STORE now owns that field end to end — it stamps it on read and the
-    // write hook validates it — so peeling it here would persist a state
-    // without the identity the store just established, and the next read would
-    // have to re-invent it.
-    return outcome.state;
-  });
-  // The run moved, so the persisted step contract no longer describes it: it
-  // names work this ingest just resolved, against a workload binding this ingest
-  // may have cleared. Invalidate it — but only when something actually changed,
-  // because a no-op recovery must leave the tree byte-identical (which is the
-  // same reason the mutation above writes nothing).
-  if (ingested.state_changed) {
-    await invalidateStepContracts(artifactsDir);
-  }
-  return ingested;
-}
 
 /**
  * The ingest report for the implement-dispatch prompt, as prompt lines.
@@ -1323,6 +1140,46 @@ function remediationIngestReportLines(
   });
 }
 
+const LATE_CONFORMANCE_REVIEW_STOP = "Stop rather than changing the review policy of an active dispatch.";
+
+async function resolveConformanceReviewChoice(params: {
+  root: string;
+  artifactsDir: string;
+  runId?: string;
+  optedIn: boolean;
+  state: RemediationState;
+  store: StateStore;
+}): Promise<{ enabled: boolean; refusal?: never } | { enabled?: never; refusal: RemediationStep }> {
+  const { root, artifactsDir, runId, optedIn, state, store } = params;
+  const policy = state.conformance_review_policy;
+  if (!optedIn) return { enabled: policy?.choice === "on" };
+  if (policy?.choice === "on" &&
+    (policy.plan_id === undefined || policy.plan_id === runId)) {
+    return { enabled: true };
+  }
+  const itemProgressed = Object.values(state.items ?? {}).some((item) => item.status !== "pending");
+  if (!policy || policy.choice === "off" || policy.first_dispatch_recorded ||
+    itemProgressed || (policy.plan_id !== undefined && policy.plan_id !== runId)) {
+    return {
+      refusal: await writeCurrentStep({
+        stepKind: "blocked",
+        status: "blocked",
+        runId: stateRunId(state),
+        repoRoot: root,
+        artifactsDir,
+        prompt: "# Conformance-review opt-in is late\n\nThis run already emitted implementation work or advanced an item without conformance review, or its legacy history cannot prove otherwise. Opt in before the first implementation dispatch of a new run; this run's review policy cannot be changed after dispatch.",
+        allowedCommands: [],
+        stopCondition: LATE_CONFORMANCE_REVIEW_STOP,
+      }),
+    };
+  }
+  if (policy.choice !== "on") {
+    state.conformance_review_policy = { ...policy, choice: "on" };
+    await store.saveState(state);
+  }
+  return { enabled: true };
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -1331,8 +1188,12 @@ async function buildImplementDispatchStep(ctx: {
   store: StateStore;
   runLogger: RunLogger;
 }): Promise<RemediateOutcome> {
-  const { root, artifactsDir, state, store, runLogger } = ctx;
+  const { root, artifactsDir, state, store, runLogger, options } = ctx;
   const runId = requireStateRunId(state);
+  const reviewChoice = await resolveConformanceReviewChoice({
+    root, artifactsDir, runId, optedIn: options.conformanceReview === true, state, store,
+  });
+  if (reviewChoice.refusal) return { kind: "emit", step: reviewChoice.refusal };
   const boundaryState = currentHostBoundaryState(state);
   const ingested = await ingestRemediationHostResults({
     root,
@@ -1371,6 +1232,14 @@ async function buildImplementDispatchStep(ctx: {
         ` message=${issue.message}`,
     });
   }
+  for (const logPath of ingested.ignored_root_logs ?? []) {
+    runLogger.event({
+      phase: "next-step",
+      kind: "outcome",
+      obligation: "host_ingest",
+      note: `newly_created_ignored_root_log path=${logPath}`,
+    });
+  }
   if (ingested.state_changed) {
     // Same as the recovery verb above: the version is the store's to write,
     // not a boundary decoration to peel off before persisting.
@@ -1382,26 +1251,79 @@ async function buildImplementDispatchStep(ctx: {
   if (!baselineCommit) {
     throw new Error("Cannot prepare remediation host work without a repository HEAD commit.");
   }
-  const handoff = await prepareRemediationHostHandoff({
-    root,
-    artifactsDir,
-    runId,
-    baselineCommit,
-    state: boundaryState,
-  });
+  let handoff: Awaited<ReturnType<typeof prepareRemediationHostHandoff>>;
+  try {
+    handoff = await prepareRemediationHostHandoff({
+      root,
+      artifactsDir,
+      runId,
+      baselineCommit,
+      state: boundaryState,
+    });
+  } catch (error) {
+    // A producer defect ON the frontier is a bounded repair the OPERATOR owns,
+    // not a fault this fold can resolve. Before this it rethrew out of the fold
+    // (and through the CLI to an exit code) as a bare stack, so a run sat on a
+    // malformed plan with no step to read and every retry reproduced the crash.
+    // The malformed block itself is attributable to its producer — the message
+    // names it — so this step routes there, never to hand-editing the binding.
+    if (error instanceof CannotPrepareWorkloadError) {
+      runLogger.event({
+        phase: "next-step",
+        kind: "error",
+        obligation: "host_handoff",
+        note: `cannot_prepare_workload message=${error.message}`,
+      });
+      return {
+        kind: "emit",
+        step: await writeCurrentStep({
+          stepKind: "blocked",
+          status: "ready",
+          runId,
+          repoRoot: root,
+          artifactsDir,
+          prompt: [
+            "# Remediation workload cannot be prepared",
+            "",
+            error.message,
+            "",
+            "A block on the dispatch frontier is outside the shape this boundary " +
+              "consumes (its write scope or declared commands). Correct that block in " +
+              "the plan — the message names it — then run:",
+            "",
+            `\`${loaderCommand("next-step")}\``,
+          ].join("\n"),
+          allowedCommands: [loaderCommand("next-step")],
+          stopCondition:
+            "Stop after the malformed block is corrected and next-step re-prepares the workload.",
+        }),
+      };
+    }
+    throw error;
+  }
   if (handoff === "unsupported_retired_state") {
     throw new Error(
       "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
     );
   }
-  if (
-    state.host_handoff?.workload_sha256 !==
-    handoff.handoff_record.workload_sha256
-  ) {
-    await store.saveState({
-      ...state,
-      host_handoff: handoff.handoff_record,
-    });
+  const policy = state.conformance_review_policy;
+  if (!policy || policy.plan_id !== runId) {
+    throw new Error("implementation dispatch requires a review policy bound to its plan");
+  }
+  const handoffChanged = state.host_handoff?.workload_sha256 !==
+    handoff.handoff_record.workload_sha256;
+  // This is the irreversible boundary. The choice and the trusted handoff are
+  // persisted together before the host can see a dispatch_implement step.
+  state.host_handoff = handoff.handoff_record;
+  if (!policy.first_dispatch_recorded) {
+    state.conformance_review_policy = {
+      ...policy,
+      choice: policy.choice === "undecided" ? "off" : policy.choice,
+      first_dispatch_recorded: true,
+    };
+    await store.saveState(state);
+  } else if (handoffChanged) {
+    await store.saveState(state);
   }
 
   // Name the runs this dispatch round relates to on the friction record (semantics:
@@ -1520,31 +1442,7 @@ async function handleComplete(
   return presentReportStep(root, artifactsDir, state);
 }
 
-/**
- * The terminal friction-TRIAGE close-out for the remediate half. Thin delegation to
- * the single-sourced `decideFrictionTriage` (`audit-tools/shared`) — the exact analog
- * of audit-code's `decideAuditFrictionCloseout`, so the triage shape, disposition
- * vocabulary, blocking semantics, and close-out logic cannot drift between the two
- * halves. Drops the former false-green (an empty up-front record no longer satisfies):
- * the blocking triage stays unsatisfied ("dispose") until every captured mechanical
- * event AND every surfaced agent-feedback reflection carries a disposition; an empty
- * set (zero events AND zero reflections) is trivially "disposed". Keyed only off
- * `(artifactsDir, runId)`; never coupled to any repo's backlog doc.
- *
- * A state with NO plan id can name no run, and since the decision MATERIALIZES
- * the record it keys, guessing a key there would mint one. It returns `null`
- * instead — "there is no run here to close out", which is the truthful answer
- * for a state whose plan is gone. Callers that hold the run's plan get a
- * decision; callers past the run boundary get nothing to render.
- */
-export async function decideRemediateFrictionCloseout(
-  artifactsDir: string,
-  state: RemediationState | null,
-): Promise<FrictionTriageDecision | null> {
-  const runId = stateRunId(state);
-  if (!runId) return null;
-  return decideFrictionTriage(artifactsDir, runId, "remediate-code");
-}
+
 
 /**
  * Copy an unusable extracted plan somewhere recoverable and PROVE the copy
@@ -1937,6 +1835,56 @@ function ambiguityResolutionPath(artifactsDir: string): string {
 function ambiguityDecisionPath(artifactsDir: string): string {
   return join(artifactsDir, "ambiguity_decision.json");
 }
+/**
+ * The ambiguity REVIEW PACKET (packet 8): the finding context the candidate list
+ * alone cannot carry — each finding's description, evidence files, confidence,
+ * and cited files, beside the candidates. Written at the gate's halt so the host
+ * can read the facts it must judge against, and bound in the step's `access`.
+ */
+function ambiguityPacketPath(artifactsDir: string): string {
+  return join(artifactsDir, "ambiguity_packet.json");
+}
+
+/**
+ * The ambiguity review PACKET body (packet 8): every finding's description,
+ * evidence files, confidence, and cited files, beside the candidate list the
+ * heuristics seeded. The candidate's own `description` is a derived heuristic
+ * sentence — the host judging whether it is a genuine scoping/judgment ambiguity
+ * needs the finding the candidate names, which is exactly what this carries.
+ */
+interface AmbiguityFindingPacket {
+  finding_id: string;
+  title: string;
+  summary: string;
+  confidence: Finding["confidence"];
+  lens: string;
+  evidence: string[];
+  affected_files: string[];
+}
+interface AmbiguityReviewPacket {
+  findings: AmbiguityFindingPacket[];
+  candidates: ClarificationRequest[];
+}
+
+function writeAmbiguityReviewPacket(
+  packetPath: string,
+  candidates: ClarificationRequest[],
+  findings: Finding[],
+): Promise<void> {
+  const packet: AmbiguityReviewPacket = {
+    findings: findings.map((f) => ({
+      finding_id: f.id,
+      title: f.title,
+      summary: f.summary,
+      confidence: f.confidence,
+      lens: f.lens,
+      evidence: f.evidence ?? [],
+      affected_files: (f.affected_files ?? []).map((loc) => loc.path),
+    })),
+    candidates,
+  };
+  return writeJsonFile(packetPath, packet);
+}
 
 /** Pull the Finding[] out of a parsed audit-findings.json payload. */
 function extractAuditFindings(parsed: unknown): Finding[] {
@@ -2196,51 +2144,178 @@ async function emitAutonomousLeftoverDeliverable(
 // disposition), even though it runs after the pipeline has collapsed the approved
 // survivors into DAG nodes. Maps are serialized as entry arrays for JSON.
 
-const REVIEW_FILTER_DISPOSITIONS_FILENAME = "review_filter_dispositions.json";
+export const REVIEW_FILTER_DISPOSITIONS_FILENAME = "review_filter_dispositions.json";
+export {
+  persistReviewFilterDispositions,
+  readReviewFilterDispositions,
+  reviewFilterDispositionsPath,
+  type PersistedReviewFilterDispositions,
+} from "./pathADisposition.js";
 
-interface PersistedReviewFilterDispositions {
-  originals: Finding[];
-  mergeMap: [string, string][];
-  droppedNoEvidence: string[];
-  droppedPhantomPaths: [string, string[]][];
-  phantomPathsRemoved: [string, string[]][];
-  droppedByCheckpoint: string[];
+const INTAKE_SUBSET_SELECTION_FILENAME = "subset-selection.json";
+const IntakeSubsetSelectionSchema = z.object({
+  schema_version: z.literal("remediate-code-intake-subset-selection/v1alpha1"),
+  source_path: z.string().min(1),
+  source_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  severities: z.array(z.string().refine((severity) =>
+    (SEVERITIES as readonly string[]).includes(severity))),
+  finding_ids: z.array(z.string().min(1)),
+}).strict();
+type IntakeSubsetSelection = z.infer<typeof IntakeSubsetSelectionSchema>;
+
+function intakeSubsetSelectionPath(artifactsDir: string): string {
+  return join(intakePaths(artifactsDir).dir, INTAKE_SUBSET_SELECTION_FILENAME);
 }
 
-function reviewFilterDispositionsPath(artifactsDir: string): string {
-  return join(artifactsDir, REVIEW_FILTER_DISPOSITIONS_FILENAME);
-}
-
-async function persistReviewFilterDispositions(
+async function refuseIntakeSubset(
+  root: string,
   artifactsDir: string,
-  originals: Finding[],
-  filter: FindingFilterResult,
-): Promise<void> {
-  const payload: PersistedReviewFilterDispositions = {
-    originals,
-    mergeMap: [...filter.mergeMap.entries()],
-    droppedNoEvidence: filter.droppedNoEvidence,
-    droppedPhantomPaths: [...filter.droppedPhantomPaths.entries()],
-    phantomPathsRemoved: [...filter.phantomPathsRemoved.entries()],
-    droppedByCheckpoint: filter.droppedByCheckpoint,
-  };
-  await writeJsonFile(reviewFilterDispositionsPath(artifactsDir), payload);
-  // The human half of the same fact. The JSON above keeps only IDS, which told a
-  // reader an id and nothing else; this states what each removed finding WAS and
-  // why it went. Written beside it, on every pass, so its absence means the pass
-  // did not run rather than "nothing was dropped".
-  await writeFile(
-    droppedFindingsRecordPath(artifactsDir),
-    renderDroppedFindingsRecord(originals, filter),
-    "utf8",
-  );
+  reason: string,
+): Promise<RemediationStep> {
+  return writeCurrentStep({
+    stepKind: "blocked",
+    status: "blocked",
+    runId: randomRunId("INTAKE"),
+    repoRoot: root,
+    artifactsDir,
+    prompt: `# Intake subset selection refused\n\n${reason}\n\nRe-run with the intended \`--input <path>\`, \`--intake-severity <severity>\`, and/or \`--intake-finding-id <id>\` flags, or start a new intake with a different input source.`,
+    allowedCommands: [loaderCommand("next-step --input <path> --intake-severity <severity>"), loaderCommand("next-step --input <path> --intake-finding-id <id>")],
+    stopCondition: "Stop until the intake selection and source are corrected by name.",
+  });
 }
+
+/** Bind a native selector to the exact report bytes before intake synthesis can pause. */
+async function resolveIntakeSubsetSelection(
+  root: string,
+  artifactsDir: string,
+  options: NextStepOptions,
+): Promise<{ selection?: IntakeSubsetSelection; refusal?: RemediationStep }> {
+  const requestedSeverities = [...new Set(options.intakeSeverities ?? [])];
+  const requestedIds = [...new Set(options.intakeFindingIds ?? [])];
+  const supplied = requestedSeverities.length > 0 || requestedIds.length > 0;
+  const explicitInput = Array.isArray(options.input)
+    ? options.input.length > 0
+    : typeof options.input === "string" && options.input.length > 0;
+  const invalidSeverities = requestedSeverities.filter((severity) =>
+    !(SEVERITIES as readonly string[]).includes(severity)
+  );
+  if (invalidSeverities.length > 0) {
+    return { refusal: await refuseIntakeSubset(root, artifactsDir,
+      `Unknown intake severity: ${invalidSeverities.map((value) => `\`${value}\``).join(", ")}. Valid severities: ${VALID_SEVERITIES_PROSE}.`) };
+  }
+  const path = intakeSubsetSelectionPath(artifactsDir);
+  let previousRaw: unknown;
+  try {
+    previousRaw = await readOptionalJsonFile<unknown>(path);
+  } catch {
+    previousRaw = null;
+  }
+  const previousParsed = previousRaw === undefined
+    ? undefined
+    : IntakeSubsetSelectionSchema.safeParse(previousRaw);
+  const manifest = await readSourceManifest(intakePaths(artifactsDir).sourceManifest);
+  const source = manifest
+    ? resolveManifestSources(root, manifest).resolved.find((candidate) => candidate.type === "structured_audit")
+    : undefined;
+  if (!source) {
+    if (supplied) {
+      return { refusal: await refuseIntakeSubset(root, artifactsDir,
+        "Native intake selectors require a structured audit findings report supplied through `--input <path>`.") };
+    }
+    if (previousRaw !== undefined) {
+      const previousPath = previousParsed?.success ? previousParsed.data.source_path : undefined;
+      const explicitlyDifferent = explicitInput && previousPath !== undefined &&
+        !resolveInputPaths(root, options.input).checked.map((candidate) => resolve(candidate)).includes(previousPath);
+      if (explicitlyDifferent) {
+        await rm(path, { force: true });
+        return {};
+      }
+      return { refusal: await refuseIntakeSubset(root, artifactsDir,
+        "The saved intake subset selection has no matching structured audit source in the current intake manifest.") };
+    }
+    return {};
+  }
+  if (!supplied && previousRaw === undefined) return {};
+  const sourcePath = resolve(source.path);
+  let sourceBytes: Buffer;
+  try {
+    sourceBytes = await readFile(sourcePath);
+  } catch {
+    return { refusal: await refuseIntakeSubset(root, artifactsDir,
+      `The structured audit source cannot be read: \`${sourcePath}\`.`) };
+  }
+  const sourceHash = hashContent(sourceBytes);
+  if (supplied) {
+    let report: unknown;
+    try {
+      report = JSON.parse(sourceBytes.toString("utf8")) as unknown;
+      // The canonical projector validates the complete report even when the
+      // selection is empty; an unknown ID cannot bypass an empty report.
+      projectAuditFindingsReportSubset(report, []);
+    } catch {
+      return { refusal: await refuseIntakeSubset(root, artifactsDir,
+        `The structured audit source is not a valid canonical report: \`${sourcePath}\`.`) };
+    }
+    const knownIds = new Set(extractAuditFindings(report).map((finding) => finding.id));
+    const unknownIds = requestedIds.filter((id) => !knownIds.has(id));
+    if (unknownIds.length > 0) {
+      return { refusal: await refuseIntakeSubset(root, artifactsDir,
+        `Unknown intake finding ID: ${unknownIds.map((id) => `\`${id}\``).join(", ")}. Check \`--intake-finding-id\` against the report.`) };
+    }
+    const selection: IntakeSubsetSelection = {
+      schema_version: "remediate-code-intake-subset-selection/v1alpha1",
+      source_path: sourcePath,
+      source_sha256: sourceHash,
+      severities: requestedSeverities,
+      finding_ids: requestedIds,
+    };
+    await writeJsonFile(path, selection);
+    return { selection };
+  }
+  if (previousRaw === undefined) return {};
+  if (previousParsed?.success !== true) {
+    const previousPath = isRecord(previousRaw) && typeof previousRaw.source_path === "string"
+      ? previousRaw.source_path
+      : undefined;
+    if (explicitInput && previousPath && previousPath !== sourcePath) {
+      const reset: IntakeSubsetSelection = {
+        schema_version: "remediate-code-intake-subset-selection/v1alpha1",
+        source_path: sourcePath, source_sha256: sourceHash,
+        severities: [], finding_ids: [],
+      };
+      await writeJsonFile(path, reset);
+      return { selection: reset };
+    }
+    return { refusal: await refuseIntakeSubset(root, artifactsDir,
+      `The saved intake subset selection at \`${path}\` is invalid.`) };
+  }
+  const previous = previousParsed.data;
+  if (previous.source_path !== sourcePath) {
+    if (explicitInput) {
+      // An explicit different source starts a new intake without inheriting the
+      // old source's selectors. Persist the empty binding for bare resumption.
+      const reset: IntakeSubsetSelection = { ...previous, source_path: sourcePath,
+        source_sha256: sourceHash, severities: [], finding_ids: [] };
+      await writeJsonFile(path, reset);
+      return { selection: reset };
+    }
+    return { refusal: await refuseIntakeSubset(root, artifactsDir,
+      "The saved intake subset selection belongs to a different source path.") };
+  }
+  if (previous.source_sha256 !== sourceHash) {
+    return { refusal: await refuseIntakeSubset(root, artifactsDir,
+      `The structured audit source bytes changed at \`${sourcePath}\`; repeat the intake flags or start a new intake.`) };
+  }
+  return { selection: previous };
+}
+
 
 async function handleReadyIntakeContractPipeline(
   root: string,
   artifactsDir: string,
   options: NextStepOptions,
   runLogger: RunLogger,
+  pendingState: RemediationState | null = null,
 ): Promise<RemediationStep | RemediationState | null> {
   // Fast path: if an extracted-plan.json already exists (pipeline complete or
   // promoted from a previous contract pipeline run), consume it directly without
@@ -2251,7 +2326,7 @@ async function handleReadyIntakeContractPipeline(
     const outcome = await handlePendingExtractedPlan(
       root,
       artifactsDir,
-      { status: "pending" },
+      pendingState ?? { status: "pending" },
       earlyExtractedPlan,
       runLogger,
     );
@@ -2264,6 +2339,8 @@ async function handleReadyIntakeContractPipeline(
   if (!intake.summary || !isIntakeReady(intake.summary)) {
     return null;
   }
+  const subsetResult = await resolveIntakeSubsetSelection(root, artifactsDir, options);
+  if (subsetResult.refusal) return subsetResult.refusal;
 
   // Resolve the manifest sources ONCE for the whole step (risk signal, Path A,
   // and the pipeline source inputs all consume the same snapshot), and read the
@@ -2293,6 +2370,30 @@ async function handleReadyIntakeContractPipeline(
     }
     return auditFindingsCache.value;
   };
+  const rawAuditFindings = await readAuditFindingsOnce();
+  const fullOriginals = extractAuditFindings(rawAuditFindings);
+  const subset = subsetResult.selection;
+  const subsetRequested = Boolean(subset &&
+    (subset.severities.length > 0 || subset.finding_ids.length > 0));
+  const selectedOriginals = subsetRequested
+    ? fullOriginals.filter((finding) =>
+      subset!.severities.includes(finding.severity) || subset!.finding_ids.includes(finding.id))
+    : fullOriginals;
+  if (subsetRequested && selectedOriginals.length === 0) {
+    return writeCurrentStep({
+      stepKind: "zero_documentable_findings",
+      status: "blocked",
+      runId: randomRunId("INTAKE"),
+      repoRoot: root,
+      artifactsDir,
+      prompt: `# No findings match the intake subset\n\nThe requested severities (${subset!.severities.join(", ") || "none"}) and finding IDs (${subset!.finding_ids.join(", ") || "none"}) select no findings from the structured audit report. Repeat \`--intake-severity\` and/or \`--intake-finding-id\` with a different selection, or supply a different \`--input\`.`,
+      allowedCommands: [loaderCommand("next-step --input <path> --intake-severity <severity>"), loaderCommand("next-step --input <path> --intake-finding-id <id>")],
+      stopCondition: "Stop until a nonempty audit subset is selected.",
+    });
+  }
+  const selectedReport = subsetRequested
+    ? projectAuditFindingsReportSubset(rawAuditFindings, selectedOriginals)
+    : rawAuditFindings;
 
   // Slice 2 — compute & persist the shared intake risk/complexity signal the
   // self-scaling dials (Slices 3/4) will read. Idempotent: recorded once from
@@ -2307,8 +2408,7 @@ async function handleReadyIntakeContractPipeline(
   await ensureIntakeRiskSignal(artifactsDir, async () => {
     const summary = intake.summary!;
     const affectedFiles = summary.affected_files.map((f) => f.path);
-    const parsed = await readAuditFindingsOnce();
-    affectedFiles.push(...distinctAffectedFiles(extractAuditFindings(parsed)));
+    affectedFiles.push(...distinctAffectedFiles(selectedOriginals));
     return { affectedFiles, goals: summary.goals };
   });
 
@@ -2330,8 +2430,8 @@ async function handleReadyIntakeContractPipeline(
   // disposition). The gate may halt to collect the user's decision.
   let reviewSourceSwap: { from: string; to: string } | undefined;
   if (auditSource) {
-    const auditFindings = await readAuditFindingsOnce();
-    const originals = extractAuditFindings(auditFindings);
+    const auditFindings = selectedReport;
+    const originals = selectedOriginals;
     if (originals.length > 0) {
       const checkpoint = await readIntentCheckpoint(join(artifactsDir, "intent_checkpoint.json"));
       const filter = await runFindingFilterPass(originals, {
@@ -2381,7 +2481,7 @@ async function handleReadyIntakeContractPipeline(
         gate.approved,
       );
       let seedSourcePath = auditSource.path;
-      if (gate.approved.length < originals.length) {
+      if (gate.approved.length < fullOriginals.length) {
         await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
         seedSourcePath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
         await writeJsonFile(seedSourcePath, approvedPayload);
@@ -2433,7 +2533,7 @@ async function handleReadyIntakeContractPipeline(
   const outcome = await handlePendingExtractedPlan(
     root,
     artifactsDir,
-    { status: "pending" },
+    pendingState ?? { status: "pending" },
     extractedPlan,
     runLogger,
   );
@@ -2447,6 +2547,7 @@ async function handlePendingIntake(
   artifactsDir: string,
   options: NextStepOptions,
   runLogger: RunLogger,
+  pendingState: RemediationState | null,
 ): Promise<RemediationStep | RemediationState | null> {
   // Short-circuit: if an extracted-plan.json already exists (promoted from the
   // contract pipeline), consume it directly without requiring intake artifacts.
@@ -2459,6 +2560,7 @@ async function handlePendingIntake(
       artifactsDir,
       options,
       runLogger,
+      pendingState,
     );
   }
 
@@ -2474,6 +2576,8 @@ async function handlePendingIntake(
     synthesizeIntakePrompt,
     collectIntakeClarificationsPrompt,
   });
+  const subsetResult = await resolveIntakeSubsetSelection(root, artifactsDir, options);
+  if (subsetResult.refusal) return subsetResult.refusal;
   if (intakeResult.kind === "step") {
     return intakeResult.step;
   }
@@ -2483,6 +2587,7 @@ async function handlePendingIntake(
     artifactsDir,
     options,
     runLogger,
+    pendingState,
   );
 }
 
@@ -3099,6 +3204,8 @@ async function runPlanAmbiguityGate(
   const requestPath = ambiguityRequestPath(artifactsDir);
   const resolutionPath = ambiguityResolutionPath(artifactsDir);
   const decisionPath = ambiguityDecisionPath(artifactsDir);
+  const packetPath = ambiguityPacketPath(artifactsDir);
+  const validIds = findings.map((f) => f.id);
 
   if (!existsSync(resolutionPath)) {
     // Deterministic detection is the gate trigger: with zero candidates there is
@@ -3109,19 +3216,35 @@ async function runPlanAmbiguityGate(
     const candidates = detectPlanAmbiguities(findings, state.items);
     if (candidates.length === 0) return null;
     await writeJsonFile(requestPath, candidates);
+    await writeAmbiguityReviewPacket(packetPath, candidates, findings);
     return writeCurrentStep({
       stepKind: "collect_clarifications",
       status: "blocked",
       runId: stateRunId(state),
       repoRoot: root,
       artifactsDir,
-      prompt: ambiguityReviewPrompt(candidates, resolutionPath, findings.map((f) => f.id)),
+      prompt: ambiguityReviewPrompt(
+        candidates,
+        resolutionPath,
+        validIds,
+        undefined,
+        toPromptPathToken(packetPath),
+        findings,
+      ),
       allowedCommands: [loaderCommand("next-step")],
       stopCondition:
         "Stop after reviewing the candidate ambiguities (and asking the user any genuine ones), unless the resolution is already written and the prompt told you to continue.",
       artifactPaths: {
         ambiguity_request: requestPath,
         ambiguity_resolution: resolutionPath,
+        ambiguity_packet: packetPath,
+      },
+      access: {
+        // The review packet carrying each finding's description, evidence, and
+        // confidence is a READ the prompt names — a host that cannot open it has
+        // only the candidate's category to judge by.
+        read_paths: [toPromptPathToken(packetPath)],
+        write_paths: [toPromptPathToken(resolutionPath)],
       },
     });
   }
@@ -3150,6 +3273,9 @@ async function runPlanAmbiguityGate(
     const candidates =
       (await readOptionalJsonFile<ClarificationRequest[]>(requestPath)) ??
       detectPlanAmbiguities(findings, state.items);
+    // Re-emission after refusal RETAINS the packet (same bound path) and adds the
+    // refusal reason — the host re-judges against the same findings it saw first,
+    // now told exactly what went wrong.
     return writeCurrentStep({
       stepKind: "collect_clarifications",
       status: "blocked",
@@ -3159,8 +3285,10 @@ async function runPlanAmbiguityGate(
       prompt: ambiguityReviewPrompt(
         candidates,
         resolutionPath,
-        findings.map((f) => f.id),
+        validIds,
         refusal ?? "the resolution could not be read",
+        toPromptPathToken(packetPath),
+        findings,
       ),
       allowedCommands: [loaderCommand("next-step")],
       stopCondition:
@@ -3168,6 +3296,11 @@ async function runPlanAmbiguityGate(
       artifactPaths: {
         ambiguity_request: requestPath,
         ambiguity_resolution: resolutionPath,
+        ambiguity_packet: packetPath,
+      },
+      access: {
+        read_paths: [toPromptPathToken(packetPath)],
+        write_paths: [toPromptPathToken(resolutionPath)],
       },
     });
   }
@@ -3182,7 +3315,7 @@ async function runPlanAmbiguityGate(
     changed = true;
   }
   await writeJsonFile(decisionPath, { resolved_at: now, resolution_count: resolutions.length });
-  for (const p of [resolutionPath, requestPath]) {
+  for (const p of [resolutionPath, requestPath, packetPath]) {
     if (existsSync(p)) {
       await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
     }
@@ -3339,6 +3472,27 @@ function finalGateDisabledReason(options: NextStepOptions): string | null {
     return "REMEDIATE_SKIP_FINAL_GATE environment variable";
   }
   return null;
+}
+
+/**
+ * The plan's operator-written test command as gate argv, or undefined.
+ *
+ * ONLY `test_command_source === "explicit"` flows here: a project-facts test
+ * command is re-derived from the manifest at every gate evaluation anyway, so
+ * threading the plan's copy through would be a second channel for the same
+ * value — and a stale one, which is exactly what the re-resolve exists to
+ * prevent. A command that leaves the declared single-invocation shape is
+ * REFUSED (undefined): the close leg owns the loud refusal for it, and the
+ * gate must never hand a shell-dependent string to a spawn. The needs-command
+ * step names that refusal when it is the reason no test role exists.
+ */
+function explicitGateTestCommand(state: RemediationState): string[] | undefined {
+  if (state.plan?.test_command_source !== "explicit") return undefined;
+  const command = state.plan.test_command;
+  if (typeof command !== "string" || command.trim().length === 0) return undefined;
+  if (commandLeavesDeclaredShape(command)) return undefined;
+  const argv = parseCommandString(command);
+  return argv.length > 0 ? argv : undefined;
 }
 
 /**
@@ -3534,6 +3688,102 @@ ${bindingBlock}
 }
 
 /**
+ * The ONE response to a gate with no derivable command, shared by both gates
+ * that run it — the `needs_command` counterpart to {@link emitFinalGateRedStep}.
+ *
+ * Records nothing but the outcome artifact the caller already wrote, and emits
+ * a resumable `final_gate_needs_command` step. Like the red pause it MUTATES
+ * NOTHING — no item status, no `state.status`, no persisted state write at
+ * all — so a repeat next-step re-resolves and continues the moment a command
+ * is declared. The two pauses must never be mistaken for each other: a red
+ * names a failing command to fix, while this names the declarations that were
+ * probed and found empty, because their repairs are different (fix the suite
+ * versus declare a gate).
+ */
+async function emitFinalGateNeedsCommandStep(ctx: {
+  root: string;
+  artifactsDir: string;
+  state: RemediationState;
+  scope: string;
+  /**
+   * Where the run stands, in the operator's words — the sentence opener of the
+   * pause ("At the phase 2 boundary", "Before the close phase"). `scope` stays
+   * the recorded identifier; this is only how the prompt names it.
+   */
+  where: string;
+  gate: ToolOwnedFinalGateResult;
+  runLogger: RunLogger;
+}): Promise<RemediateOutcome> {
+  const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
+  const outcomePath = finalGateOutcomePath(artifactsDir);
+  const discoveredEntries = Object.entries(gate.binding.discovered);
+  const discoveredBlock =
+    discoveredEntries.length > 0
+      ? discoveredEntries.map(([role, command]) => `  - ${role}: \`${command}\``).join("\n")
+      : "  (none — no build, typecheck, lint, test or e2e role is declared)";
+  const explicitRefused =
+    state.plan?.test_command_source === "explicit" &&
+    typeof state.plan.test_command === "string" &&
+    state.plan.test_command.trim().length > 0 &&
+    commandLeavesDeclaredShape(state.plan.test_command)
+      ? `\nThe plan carries an explicit test command that leaves the declared\n` +
+        `single-invocation shape, so the gate cannot run it:\n\n` +
+        `\`${state.plan.test_command}\`\n\n` +
+        `Rewrite it as one plain invocation (no chaining, redirection or\n` +
+        `quoting the shape gate refuses), or declare the suite in the manifest.\n`
+      : "";
+  runLogger.event({
+    phase: "next-step",
+    kind: "outcome",
+    obligation: state.status,
+    note: `final_gate_needs_command scope=${scope} profile=${gate.binding.profile}`,
+  });
+  const nextCommand = loaderCommand("next-step");
+  return {
+    kind: "emit",
+    step: await writeCurrentStep({
+      stepKind: "final_gate_needs_command",
+      status: "blocked",
+      runId: stateRunId(state),
+      repoRoot: root,
+      artifactsDir,
+      prompt: `
+# Remediation paused — no repository gate command to run
+
+${ctx.where}, the tool looked for the repository's own build, typecheck, lint
+and test commands and found none it can execute. The run cannot be validated
+without a gate, so it stops here rather than continuing unvalidated.
+This is not a pass: no suite ran.
+
+Root under gate: \`${gate.binding.root}\`
+Derivation profile: \`${gate.binding.profile}\`
+Declared commands the gate probed (from \`package.json\`, \`go.mod\`,
+\`pyproject.toml\`, \`pytest.ini\`):
+${discoveredBlock}
+${explicitRefused}
+This pause changes nothing. Every item keeps its status, the run stays in its
+phase, and no work is lost. The evaluation is recorded in \`${outcomePath}\`.
+
+Do one of these steps:
+
+1. Declare the gate commands in the repository manifest — a \`build\`,
+   \`typecheck\`/\`check:types\`, \`lint\` or \`test\` script in
+   \`package.json\` (a \`go.mod\` or pytest project supplies the fallback
+   test/build roles) — then run \`${nextCommand}\`. The gate re-resolves its
+   commands on every evaluation, so the new declarations are picked up with
+   no other action, and the run continues from where it stopped.
+2. Stop the run: do not re-run next-step. The run stays paused with its work
+   intact.
+`,
+      allowedCommands: [nextCommand],
+      stopCondition:
+        "Stop. Declare a repository gate command, or leave the run paused.",
+      artifactPaths: { final_gate_outcome: outcomePath },
+    }),
+  };
+}
+
+/**
  * Whole-repo test-suite gate at a foundations→consumers PHASE BOUNDARY (T3). Runs
  * the tool-owned final gate (INV-RS-10) INLINE before the next phase dispatches,
  * so an integration break introduced by a just-completed foundations phase is
@@ -3591,6 +3841,16 @@ async function runPhaseBoundaryGate(ctx: {
   // and the floor re-runs — which is correct: the tree it certified is gone.
   const tree = await worktreeContentId(root);
   const gateKey = `phase_boundary_gate phase=${phase}`;
+  // The operator's explicit test command (if the plan carries one) and the
+  // last bound declarations, resolved BEFORE the floor runs so the cached
+  // verdict below and the fresh evaluation compare against the same inputs.
+  const explicitTestCommand = explicitGateTestCommand(state);
+  const previousBinding = await readLastGateBinding(artifactsDir);
+  const gateOpts: ToolOwnedFinalGateOptions = {
+    ...(options.finalGateRunner ? { runner: options.finalGateRunner } : {}),
+    ...(explicitTestCommand ? { explicitTestCommand } : {}),
+    ...(previousBinding ? { previousBinding } : {}),
+  };
 
   // THE CACHE. The fold re-enters this boundary on every next-step taken before
   // the next phase dispatches, and the floor is build + typecheck + the whole
@@ -3600,7 +3860,19 @@ async function runPhaseBoundaryGate(ctx: {
   // including for a RED one (see {@link readFinalGateVerdict} — the pause is
   // rebuilt from the cached results rather than re-derived).
   const cached = await readFinalGateVerdict(artifactsDir, scope, tree);
-  if (cached !== undefined) {
+  // The run's explicit test command lives in state.json under .audit-tools,
+  // which worktreeContentId deliberately excludes. A tree-identical verdict
+  // is reusable only when its command binding still matches the fresh draw.
+  // Old records without a binding are misses: they cannot prove what ran.
+  const cachedBindingCurrent =
+    cached?.binding !== undefined &&
+    !gateBindingChanged(
+      cached.binding,
+      resolveGateBinding(root, {
+        ...(explicitTestCommand ? { explicitTestCommand } : {}),
+      }).binding,
+    );
+  if (cached !== undefined && cachedBindingCurrent) {
     // Recorded as a distinct outcome from a real run: the judge is `history`,
     // not a spawned command, and `commands_run` counts what HISTORY held, never
     // what this call executed. `passed` is echoed unchanged, so a cached green
@@ -3619,7 +3891,7 @@ async function runPhaseBoundaryGate(ctx: {
         `recorded_at ${cached.recorded_at}); the floor was NOT re-run because the tree it ` +
         "would run against has not changed",
     });
-    if (cached.passed) return null; // cached green (or scope-out) → dispatch
+    if (cached.passed) return null; // cached green → dispatch
     // Cached RED. The run has not progressed since that verdict — the pause
     // mutates nothing — so re-entering it is the same pause, rebuilt from the
     // cached command results so the record keeps its failing command, exit code
@@ -3634,7 +3906,12 @@ async function runPhaseBoundaryGate(ctx: {
         passed: false,
         results: cached.results,
         outcome: cached.outcome,
-        scoped_out: cached.scoped_out,
+        binding:
+          cached.binding ??
+          resolveGateBinding(root, {
+            ...(explicitTestCommand ? { explicitTestCommand } : {}),
+          }).binding,
+        reresolved: false,
         runtime_residual: RUNTIME_RESIDUAL_DECLARATION,
       },
       // The RECORD's own tree, not the freshly-measured one: the prompt must
@@ -3652,15 +3929,33 @@ async function runPhaseBoundaryGate(ctx: {
     obligation: state.status,
     note: gateKey,
   });
-  const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
-  await writeFinalGateVerdict(artifactsDir, {
-    scope,
-    tree,
-    passed: gate.passed,
-    scoped_out: gate.scoped_out,
-    outcome: gate.outcome,
-    results: gate.results,
-  });
+  const gate = await runToolOwnedFinalGate(root, gateOpts);
+  if (gate.reresolved) {
+    // The declarations moved since the last bound evaluation: name the move
+    // so a changed manifest is visibly re-resolved rather than silently
+    // re-derived. The gate already ran the fresh draw.
+    runLogger.event({
+      phase: "next-step",
+      kind: "executor_end",
+      obligation: state.status,
+      note:
+        `${gateKey} gate_commands_reresolved profile=${gate.binding.profile} ` +
+        `commands=${gate.results.map((result) => result.argv.join(" ")).join(" | ") || "(none)"}`,
+    });
+  }
+  if (gate.outcome === "executed") {
+    await writeFinalGateVerdict(artifactsDir, {
+      scope,
+      tree,
+      passed: gate.passed,
+      binding: gate.binding,
+      outcome: gate.outcome,
+      results: gate.results,
+    });
+  }
+  // A `needs_command` evaluation writes no verdict: nothing ran, so there is
+  // no verdict to cache, and the next call must re-resolve rather than be
+  // served an answer about a tree nobody judged.
   await recordFinalGateOutcome({
     artifactsDir,
     state,
@@ -3670,12 +3965,29 @@ async function runPhaseBoundaryGate(ctx: {
     outcome: gate.outcome,
     passed: gate.passed,
     commandsRun: gate.results.length,
-    ...(gate.outcome === "scoped_out"
-      ? { reason: "target is not the audit-tools monorepo" }
+    ...(gate.outcome === "needs_command"
+      ? {
+          reason:
+            "no executable gate command is derivable from the target's declared " +
+            "commands; the run pauses for an operator decision (declare a command, or stop)",
+        }
       : {}),
     durationMs: Date.now() - gateStart,
   });
-  if (gate.passed) return null; // green (or declared-out-of-scope) → dispatch
+  if (gate.outcome === "needs_command") {
+    // No floor to run and nothing red: pause for the operator decision rather
+    // than proceeding unvalidated. Never a pass, never silent.
+    return emitFinalGateNeedsCommandStep({
+      root,
+      artifactsDir,
+      state,
+      scope,
+      where,
+      gate,
+      runLogger,
+    });
+  }
+  if (gate.passed) return null; // green → dispatch
 
   // RED at the boundary. The next phase does NOT dispatch — but nothing is
   // re-opened or closed either; the run pauses exactly where it stands.
@@ -3712,8 +4024,11 @@ async function handleAllTerminalTransition(
   // There is deliberately no third "already gave up" skip: the flag that used to
   // provide one made a run that hit the old backstop's bound skip the suite check
   // permanently, so the gate it exists to enforce stopped running exactly when it
-  // mattered most. The gate is INDEPENDENT of plan.test_command and runs through
-  // the env-scrubbing runTracked path.
+  // mattered most. The gate runs through the env-scrubbing runTracked path. It
+  // is independent of the DISCOVERED test command (re-derived from the manifest
+  // at every evaluation, never threaded stale from the plan), but an EXPLICIT
+  // operator `test_command` takes the test role without dropping the other
+  // declared roles.
   if (!gateDisabled && hasResolvedItems(state)) {
     const gateStart = Date.now();
     runLogger.event({
@@ -3722,7 +4037,23 @@ async function handleAllTerminalTransition(
       obligation: state.status,
       note: "tool_owned_final_gate",
     });
-    const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner });
+    const explicitTestCommand = explicitGateTestCommand(state);
+    const previousBinding = await readLastGateBinding(artifactsDir);
+    const gate = await runToolOwnedFinalGate(root, {
+      ...(options.finalGateRunner ? { runner: options.finalGateRunner } : {}),
+      ...(explicitTestCommand ? { explicitTestCommand } : {}),
+      ...(previousBinding ? { previousBinding } : {}),
+    });
+    if (gate.reresolved) {
+      runLogger.event({
+        phase: "next-step",
+        kind: "executor_end",
+        obligation: state.status,
+        note:
+          `tool_owned_final_gate gate_commands_reresolved profile=${gate.binding.profile} ` +
+          `commands=${gate.results.map((result) => result.argv.join(" ")).join(" | ") || "(none)"}`,
+      });
+    }
     await recordFinalGateOutcome({
       artifactsDir,
       state,
@@ -3732,11 +4063,30 @@ async function handleAllTerminalTransition(
       outcome: gate.outcome,
       passed: gate.passed,
       commandsRun: gate.results.length,
-      ...(gate.outcome === "scoped_out"
-        ? { reason: "target is not the audit-tools monorepo" }
+      ...(gate.outcome === "needs_command"
+        ? {
+            reason:
+              "no executable gate command is derivable from the target's declared " +
+              "commands; the run pauses for an operator decision (declare a command, or stop)",
+          }
         : {}),
       durationMs: Date.now() - gateStart,
     });
+
+    if (gate.outcome === "needs_command") {
+      // No floor to run: pause for the operator decision. The run does NOT
+      // advance to `closing` — closing with no gate would write a report
+      // claiming an outcome no suite corroborated.
+      return emitFinalGateNeedsCommandStep({
+        root,
+        artifactsDir,
+        state,
+        scope,
+        where: "Before the close phase",
+        gate,
+        runLogger,
+      });
+    }
 
     if (!gate.passed) {
       // A whole-repo red at the closing funnel is exactly as unattributable as
@@ -3998,6 +4348,107 @@ export async function decideNextStep(
   }
 }
 
+/**
+ * The terminal step a `cancelled` run emits (O31 / packet 14). A cancelled run is
+ * ended by the operator and never advances; this states that plainly, names the
+ * preserved artifacts, and offers no command except the one that confirms a STOP
+ * (there is deliberately no `resume`, which a `cancel` supersedes). The worktree
+ * a cancel may have recorded is surfaced so the operator knows where any
+ * still-live work lives.
+ */
+async function buildLifecycleCancelledStep(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+): Promise<RemediationStep> {
+  const lifecycle = state.lifecycle;
+  const worktreeLine =
+    lifecycle?.worktree?.location !== undefined
+      ? `\n- **Recorded worktree**: \`${lifecycle.worktree.location}\`` +
+        (lifecycle.worktree.outcome !== undefined
+          ? ` (${lifecycle.worktree.outcome})`
+          : "")
+      : "";
+  return writeCurrentStep({
+    stepKind: "cancelled",
+    status: "complete",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: [
+      "# Remediation run cancelled",
+      "",
+      "This remediation run was cancelled by the operator and will not advance.",
+      "",
+      "Artifacts are preserved at:",
+      "",
+      `\`${artifactsDir}\``,
+      worktreeLine,
+      "",
+      "No further action is required. To start fresh, re-run with a new `--input`.",
+    ].join("\n"),
+    allowedCommands: [],
+    stopCondition: "Stop; the run is cancelled.",
+    artifactPaths: { state_file: join(artifactsDir, "state.json") },
+  });
+}
+
+/**
+ * The step a `paused` run emits (O31 / packet 14). It names the saved
+ * continuation and the resume verb, and — importantly — does NOT run the
+ * resume itself: resuming is an explicit operator act (a `resume` verb, or a
+ * `next-step` is NOT the trigger), because a resume re-enters the state machine
+ * and could dispatch work. Placed so a bare `next-step` on a paused run is this
+ * informational step, never a silent re-dispatch.
+ */
+async function buildLifecyclePausedStep(
+  root: string,
+  artifactsDir: string,
+  state: RemediationState,
+): Promise<RemediationStep> {
+  const lifecycle = state.lifecycle;
+  const resumeCommand = loaderCommand("resume");
+  const continuationLine = lifecycle?.continuation
+    ? `\n${lifecycle.continuation}`
+    : "";
+  const itemLine =
+    lifecycle?.current_item_id
+      ? `\n- **Paused item**: \`${lifecycle.current_item_id}\``
+      : "";
+  const worktreeLine =
+    lifecycle?.worktree?.location !== undefined
+      ? `\n- **Worktree**: \`${lifecycle.worktree.location}\`` +
+        (lifecycle.worktree.outcome !== undefined
+          ? ` (${lifecycle.worktree.outcome})`
+          : "")
+      : "";
+  return writeCurrentStep({
+    stepKind: "paused",
+    status: "ready",
+    runId: stateRunId(state),
+    repoRoot: root,
+    artifactsDir,
+    prompt: [
+      "# Remediation run paused",
+      "",
+      "This remediation run is paused. Its saved continuation is:",
+      continuationLine,
+      itemLine,
+      `- **Phase to restore**: \`${lifecycle?.phase ?? "(unknown)"}\``,
+      worktreeLine,
+      "",
+      "To continue, run:",
+      "",
+      `\`${resumeCommand}\``,
+      "",
+      "Resume consumes the saved continuation and skips work that was already accepted.",
+    ].join("\n"),
+    allowedCommands: [resumeCommand],
+    stopCondition: "Stop; run the resume verb to continue the paused run.",
+    artifactPaths: { state_file: join(artifactsDir, "state.json") },
+  });
+}
+
 async function buildConfirmResumeOrRestartStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -4223,7 +4674,10 @@ Please review the intake summary at \`.audit-tools/remediation/intake/intake-sum
 
 Confirm or refine the remediation scope and intent by writing a valid \`intent_checkpoint.json\` artifact under \`.audit-tools/remediation/\`.
 
-Only \`scope_summary\` and \`intent_summary\` are required; add the optional fields to narrow what gets remediated:
+Required fields: ${Object.entries(IntentCheckpointSchema.shape)
+      .filter(([, field]) => !field.isOptional())
+      .map(([key]) => `\`${key}\``)
+      .join(", ")}. Add the optional fields to narrow what gets remediated:
 
 \`\`\`json
 {
@@ -4290,162 +4744,15 @@ Once the file is written, run:
 
 /** Sidecar artifact recording the deterministic interpretation of free_form_intent. */
 export const INTENT_INTERPRETATION_FILENAME = "intent-interpretation.json";
-// v1alpha2: unencodable_clauses carries identity-keyed records (clause_id +
-// checkpoint_question), not bare strings — the shape the blocking consumer
-// reads. A v1alpha1 sidecar (string[]) is stale and is repaired by
-// re-derivation; it had no readers, so no migration path is owed.
-export const INTENT_INTERPRETATION_SCHEMA_VERSION =
-  "remediate-code-intent-interpretation/v1alpha2";
+export {
+  INTENT_INTERPRETATION_SCHEMA_VERSION,
+  type PersistedIntentInterpretation,
+  interpretConfirmedCheckpointIntent,
+  readOrRepairIntentInterpretation,
+  parsePersistedIntentInterpretation,
+  readPersistedIntentInterpretationSync,
+} from "./intentPersistence.js";
 
-export interface PersistedIntentInterpretation {
-  schema_version: typeof INTENT_INTERPRETATION_SCHEMA_VERSION;
-  /** The interpreter's structured output (lens weights / priority / scope). */
-  interpreted: InterpretedIntent;
-  /**
-   * Clauses the clause pipeline could not encode as a lens weight, priority
-   * signal, or scope emphasis — with their stable identity and blocking
-   * question. CONSUMED by the interpret_intent obligation: an unanswered
-   * record blocks the decide loop until the host resolves it via a
-   * `constraint_clauses` entry on the checkpoint (CE-004, identity-keyed).
-   */
-  unencodable_clauses: ConstraintClauseRecord[];
-  created_at: string;
-}
-
-/**
- * Interpret a confirmed checkpoint's `free_form_intent` via the shared
- * deterministic interpreter and persist the structured signals to a sidecar
- * artifact. Idempotent and best-effort: returns the persisted interpretation (or
- * null when there is nothing to interpret / no confirmed checkpoint) and never
- * throws into the decide loop. The raw `free_form_intent` string is NOT returned
- * or threaded anywhere — only the structured `InterpretedIntent` is (INV-S04).
- */
-export async function interpretConfirmedCheckpointIntent(
-  artifactsDir: string,
-  checkpoint: IntentCheckpoint | undefined,
-  // Optional so the exported helper stays callable standalone; the decide loop
-  // always supplies it, because an unencodable clause is an operator-visible
-  // loss of intent and belongs in the durable log, not only on stderr.
-  runLogger?: RunLogger,
-): Promise<PersistedIntentInterpretation | null> {
-  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
-  const raw = checkpoint.free_form_intent;
-  if (typeof raw !== "string" || raw.trim().length === 0) return null;
-
-  const interpreted = interpretFreeFormIntent(raw);
-  // The clause pipeline (interpretIntent) owns identity + blocking questions;
-  // the hint interpreter above owns lens/priority/scope signals. Both are
-  // deterministic draws over the same input.
-  const clauseResult = interpretIntent(raw);
-  const unencodable_clauses: ConstraintClauseRecord[] = [];
-  for (const clause of clauseResult.clauses) {
-    if (clause.encodable || !clause.checkpoint_question) continue;
-    unencodable_clauses.push({
-      clause_id: clause.clause_id,
-      text: clause.text,
-      checkpoint_question: clause.checkpoint_question,
-    });
-  }
-  const persisted: PersistedIntentInterpretation = {
-    schema_version: INTENT_INTERPRETATION_SCHEMA_VERSION,
-    interpreted,
-    unencodable_clauses,
-    created_at: new Date().toISOString(),
-  };
-  try {
-    await writeJsonFile(
-      join(artifactsDir, INTENT_INTERPRETATION_FILENAME),
-      persisted,
-    );
-  } catch {
-    // Best-effort WRITE: a write failure must never crash the decide loop.
-    // Enforcement does not depend on it — the consumer re-derives when the
-    // sidecar is missing (readOrRepairIntentInterpretation).
-  }
-  if (unencodable_clauses.length > 0) {
-    const clauseTexts = unencodable_clauses.map((c) => c.text);
-    runLogger?.event({
-      phase: "next-step",
-      kind: "outcome",
-      obligation: "interpret_intent",
-      note:
-        `intent_unencodable_clauses count=${String(unencodable_clauses.length)} ` +
-        `clauses=${clauseTexts.join("; ")}`,
-    });
-    process.stderr.write(
-      `[remediate-code] free_form_intent: ${unencodable_clauses.length} ` +
-        `clause(s) could not be encoded as lens/priority/scope signals and ` +
-        `block planning until answered via constraint_clauses: ` +
-        `${clauseTexts.join("; ")}\n`,
-    );
-  }
-  return persisted;
-}
-
-/**
- * Read the persisted intent interpretation — the LOAD-BEARING input to the
- * constraint-clause gate — repairing it by re-derivation when it is missing,
- * unparseable, or carries a stale schema_version. Returns null only when
- * there is nothing to interpret (no confirmed checkpoint / empty intent).
- */
-export async function readOrRepairIntentInterpretation(
-  artifactsDir: string,
-  checkpoint: IntentCheckpoint | undefined,
-  runLogger?: RunLogger,
-): Promise<PersistedIntentInterpretation | null> {
-  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
-  const raw = checkpoint.free_form_intent;
-  if (typeof raw !== "string" || raw.trim().length === 0) return null;
-
-  const sidecarPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
-  try {
-    const parsed = parsePersistedIntentInterpretation(
-      JSON.parse(await readFile(sidecarPath, "utf8")),
-    );
-    if (parsed) return parsed;
-  } catch {
-    // Missing or unreadable — fall through to repair.
-  }
-  return interpretConfirmedCheckpointIntent(artifactsDir, checkpoint, runLogger);
-}
-
-/** Pure shape gate for the sidecar: current version + record-shaped clauses, else null. */
-function parsePersistedIntentInterpretation(
-  parsed: unknown,
-): PersistedIntentInterpretation | null {
-  if (
-    isRecord(parsed) &&
-    parsed.schema_version === INTENT_INTERPRETATION_SCHEMA_VERSION &&
-    Array.isArray(parsed.unencodable_clauses) &&
-    parsed.unencodable_clauses.every(
-      (c): c is ConstraintClauseRecord =>
-        isRecord(c) &&
-        typeof c.clause_id === "string" &&
-        typeof c.text === "string" &&
-        typeof c.checkpoint_question === "string",
-    )
-  ) {
-    return parsed as unknown as PersistedIntentInterpretation;
-  }
-  return null;
-}
-
-/**
- * Sync sidecar read for the obligation's derive scan. Returns the persisted
- * interpretation, or null when the sidecar is missing, unreadable, or stale —
- * the execute path repairs via {@link readOrRepairIntentInterpretation}.
- */
-function readPersistedIntentInterpretationSync(
-  sidecarPath: string,
-): PersistedIntentInterpretation | null {
-  try {
-    return parsePersistedIntentInterpretation(
-      JSON.parse(readFileSync(sidecarPath, "utf8")),
-    );
-  } catch {
-    return null;
-  }
-}
 
 /** Execution dependencies threaded to every remediate obligation executor. */
 export interface RemediateCtx {
@@ -4531,6 +4838,8 @@ function requireState(state: RemediationState | null): RemediationState {
  */
 export const PRE_INTAKE_PRIORITY: readonly string[] = [
   "input_conflict",
+  "lifecycle_cancelled",
+  "lifecycle_paused",
   "confirm_resume",
   "confirm_intent",
   "interpret_intent",
@@ -4617,6 +4926,40 @@ export function buildPreIntakeObligations(
             state: s,
             ackPath,
           }),
+        };
+      },
+    },
+    {
+      // A terminally cancelled run (O31 / packet 14) never advances: `next-step`
+      // reports the terminal cancellation and stops. It must short-circuit
+      // BEFORE `confirm_resume`/`complete` and every main obligation, so no
+      // downstream path (triage, close, dispatch) re-opens a run the operator
+      // ended. Artifacts are preserved — cancel never reaches the close phase's
+      // archive-and-delete.
+      id: "lifecycle_cancelled",
+      derive: (state) => (state?.status === "cancelled" ? "missing" : "satisfied"),
+      execute: async (state, c) => {
+        await c.countStep(state);
+        return {
+          kind: "emit",
+          step: await buildLifecycleCancelledStep(c.root, c.artifactsDir, requireState(state)),
+        };
+      },
+    },
+    {
+      // A paused run (O31 / packet 14) also never advances until `resume`: emit a
+      // step naming the resume verb rather than falling through to
+      // `confirm_resume` (whose "resume/restart/merge" ack is a DIFFERENT, older
+      // gate for an ordinary in-progress run). Placed after `confirm_resume` and,
+      // critically, after the input_conflict gate so a fresh `--input` against a
+      // paused run still conflicts before this would otherwise describe a resume.
+      id: "lifecycle_paused",
+      derive: (state) => (state?.status === "paused" ? "missing" : "satisfied"),
+      execute: async (state, c) => {
+        await c.countStep(state);
+        return {
+          kind: "emit",
+          step: await buildLifecyclePausedStep(c.root, c.artifactsDir, requireState(state)),
         };
       },
     },
@@ -4805,17 +5148,23 @@ Then run:
       },
     },
     {
-      // No state yet: resolve intake. A produced step is emitted; a produced state
+      // No plan yet: resolve intake. A plan-only request may have persisted a
+      // pending state before intake, and must travel into the minted plan.
+      // A produced step is emitted; a produced state
       // transitions (the re-scan falls through to the inline tail); a null result
       // emits the collect-starting-point step (the folded old no-state branch).
       id: "pending_intake",
-      derive: (state) => (state == null ? "missing" : "satisfied"),
-      execute: async (_state, c) => {
+      derive: (state) =>
+        state == null || (state.status === "pending" && !state.plan)
+          ? "missing"
+          : "satisfied",
+      execute: async (state, c) => {
         const outcome = await handlePendingIntake(
           c.root,
           c.artifactsDir,
           c.options,
           c.runLogger,
+          state,
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -4966,6 +5315,52 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
         state?.status === "implementing" ? "missing" : "satisfied",
       execute: async (state) => {
         const s = requireState(state);
+        const stop = s.plan_only_request;
+        if (stop) {
+          if (!s.plan || stop.plan_id !== s.plan.plan_id) {
+            return {
+              kind: "emit",
+              step: await writeCurrentStep({
+                stepKind: "blocked",
+                status: "blocked",
+                runId: stateRunId(s),
+                repoRoot: root,
+                artifactsDir,
+                prompt: "The saved plan-only request does not match this remediation plan. Stop and resolve the run state before dispatching work.",
+                allowedCommands: [],
+                stopCondition: "Stop; do not dispatch implementation from a mismatched plan-only request.",
+              }),
+            };
+          }
+          const parked = await planOnlyVerb({
+            root,
+            artifactsDir,
+            ...(stop.worktree ? { worktree: stop.worktree } : {}),
+          });
+          if (parked.status === "unrunnable") {
+            return {
+              kind: "emit",
+              step: await writeCurrentStep({
+                stepKind: "blocked",
+                status: "blocked",
+                runId: stateRunId(s),
+                repoRoot: root,
+                artifactsDir,
+                prompt: `Plan-only could not pause before implementation: ${parked.message}`,
+                allowedCommands: [],
+                stopCondition: "Stop; resolve the plan-only boundary before dispatching work.",
+              }),
+            };
+          }
+          const paused = await store.loadState();
+          if (!paused || paused.status !== "paused") {
+            throw new Error("Plan-only pause did not persist a paused remediation state.");
+          }
+          return {
+            kind: "emit",
+            step: await buildLifecyclePausedStep(root, artifactsDir, paused),
+          };
+        }
         // A non-empty dispatch frontier dispatches; triage only runs once every
         // item has left "pending".
         const pendingBlocks = dispatchFrontier(s);
@@ -5214,6 +5609,68 @@ async function advanceUnderPhaseLock(deps: {
     inputResolution,
     await readSourceManifest(intakePaths(artifactsDir).sourceManifest),
   );
+
+  // An explicit review or planning-stop choice must be durable before an
+  // intake/confirmation gate emits. Both choices share this one pending state
+  // write; an empty bare call still reaches complete_redelivery/handleNoState.
+  const ip = intakePaths(artifactsDir);
+  const reportPath = join(dirname(artifactsDir), "remediation-report.md");
+  const activeIntake = inputResolution.supplied || Boolean(options.guidanceFileSupplied) ||
+    existsSync(ip.conversationStart) || existsSync(ip.extractedPlan) ||
+    (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host") ||
+    (inputResolution.existing.length > 0 &&
+      (!existsSync(reportPath) ||
+        isDefaultCandidateFresherThanReport(inputResolution.existing[0], reportPath)));
+  if (state === null && activeIntake &&
+    (options.conformanceReview === true || options.planOnly === true)) {
+    state = {
+      status: "pending",
+      conformance_review_policy: {
+        choice: options.conformanceReview === true ? "on" : "undecided",
+        first_dispatch_recorded: false,
+      },
+      ...(options.planOnly === true ? {
+        plan_only_request: {
+          request_id: randomRunId("PLAN-ONLY"),
+          requested_at: new Date().toISOString(),
+          ...(options.planOnlyWorktree ? { worktree: options.planOnlyWorktree } : {}),
+        },
+      } : {}),
+    };
+    await store.saveState(state);
+  } else if (state &&
+    !(inputResolution.supplied && !suppliedInputUnchanged && state.status !== "pending")) {
+    if (options.conformanceReview === true) {
+      const reviewChoice = await resolveConformanceReviewChoice({
+        root, artifactsDir, runId: state.plan?.plan_id,
+        optedIn: true, state, store,
+      });
+      if (reviewChoice.refusal) return reviewChoice.refusal;
+    }
+    if (options.planOnly === true && !state.plan_only_request) {
+      const beforeDispatch = !state.conformance_review_policy?.first_dispatch_recorded &&
+        Object.values(state.items ?? {}).every((item) => item.status === "pending");
+      if (!beforeDispatch || !["pending", "planning", "implementing"].includes(state.status)) {
+        return writeCurrentStep({
+          stepKind: "blocked",
+          status: "blocked",
+          runId: stateRunId(state),
+          repoRoot: root,
+          artifactsDir,
+          prompt: "# Plan-only request is late\n\nThis run has already dispatched implementation work or advanced an item. Plan-only may be requested before the first implementation dispatch of a new run.",
+          allowedCommands: [],
+          stopCondition: "Stop rather than relabeling an already-dispatched run as plan-only.",
+        });
+      }
+      state.plan_only_request = {
+        request_id: randomRunId("PLAN-ONLY"),
+        requested_at: new Date().toISOString(),
+        ...(state.plan ? { plan_id: state.plan.plan_id } : {}),
+        ...(options.planOnlyWorktree ? { worktree: options.planOnlyWorktree } : {}),
+      };
+      await store.saveState(state);
+    }
+  }
 
   // The linear pre-intake gates run as obligations through the shared advance
   // loop. An emit returns to the host; a transition re-scans within this call;
