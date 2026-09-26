@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/free-form-intent-escalation.test.ts
 /**
  * audit-code free_form_intent interpreter consumer.
  *
@@ -14,6 +15,7 @@
 
 import {
   interpretIntent,
+  projectUnencodableConstraintClauses,
   unresolvedFromClauses,
   FREE_FORM_INTENT_INTERPRETATION_VERSION,
 } from "audit-tools/shared";
@@ -86,15 +88,6 @@ export function interpretFreeFormIntentForAudit(
 // ---------------------------------------------------------------------------
 
 /**
- * A blocking checkpoint question that the host has not yet answered.
- * Alias of the shared {@link ConstraintClauseRecord}: the identity-keyed
- * resolution semantics (CE-004) live in audit-tools/shared
- * (`intent/constraintClauses.ts`) so remediate's sidecar consumer and this
- * gate cannot drift.
- */
-export type UnresolvedConstraintClause = ConstraintClauseRecord;
-
-/**
  * Compute the blocking checkpoint questions raised by an intent checkpoint's
  * `free_form_intent` that the host has NOT yet resolved.
  *
@@ -116,7 +109,7 @@ export type UnresolvedConstraintClause = ConstraintClauseRecord;
  */
 export function unresolvedConstraintClauses(
   checkpoint: IntentCheckpoint | undefined,
-): UnresolvedConstraintClause[] {
+): ConstraintClauseRecord[] {
   const freeForm = checkpoint?.free_form_intent ?? "";
   if (!freeForm.trim()) return [];
 
@@ -124,15 +117,7 @@ export function unresolvedConstraintClauses(
   const result = interpretIntent(freeForm);
   if (!result.has_unencodable) return [];
 
-  const records: ConstraintClauseRecord[] = [];
-  for (const clause of result.clauses) {
-    if (clause.encodable || !clause.checkpoint_question) continue;
-    records.push({
-      clause_id: clause.clause_id,
-      text: clause.text,
-      checkpoint_question: clause.checkpoint_question,
-    });
-  }
+  const records = projectUnencodableConstraintClauses(result.clauses);
   // Identity-keyed resolution (CE-004) is the shared core — one matcher for
   // this gate and remediate's sidecar consumer.
   return unresolvedFromClauses(records, checkpoint);

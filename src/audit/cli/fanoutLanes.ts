@@ -13,6 +13,9 @@ import {
   laneAssetsDir,
   toPromptPathToken,
   type LaneDemand,
+  type LaneReviewMode,
+  type LaneReviewModeDeclaration,
+  type LaneReviewRecord,
 } from "audit-tools/shared";
 import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
 
@@ -77,12 +80,43 @@ export interface FanoutLaneSpec {
    * every lane's prompt is on disk before its demand is derived, so the biggest
    * term is content-derived and no caller can forget it. What a caller may
    * still know and the text does not is genuinely per-mode: which files the
-   * lane will read, and how much is riding on it. Both default to `0`, which
-   * the shared deriver reads as "no signal" — honestly the smallest band, never
-   * a guess. Never a model, provider, or tier: see `LaneDemandSchema`.
+   * lane will read, how much is riding on it, and — for a lane whose prompt is
+   * a POINTER at a materialized packet — how large that granted packet is.
+   * `fileCount` and `riskScore` default to `0` ("no signal" — the smallest band,
+   * never a guess). Never a model, provider, or tier: see `LaneDemandSchema`.
+   *
+   * MEANINGFUL-DEMAND REQUIREMENT (packet 10 / F01): a lane that reads a
+   * granted packet — the charter evidence packet, the fidelity packet, the
+   * findings report a synthesis or critical-flow lane names — must state that
+   * packet's byte size via `grantedContentBytes`, because the lane's prompt
+   * TEXT is only a short pointer at it. A short pointer at a large packet is
+   * LARGE work; deriving demand from the pointer bytes alone classifies it
+   * `small`, which is exactly the mis-ranking the host makes when it matches a
+   * weak model to a whole-repo cross-cutting review. A caller that omits
+   * `grantedContentBytes` for such a lane is a latent failure mode.
    */
   fileCount?: number;
   riskScore?: number;
+  /**
+   * Bytes of granted content the lane reads BEYOND its own prompt text — a
+   * materialized packet or artifact the prompt names by path. Folded into the
+   * demand's token estimate, so demand reflects the work the lane actually
+   * performs, not the length of the pointer that names it.
+   */
+  grantedContentBytes?: number;
+  /** Floor for lane judgment need (e.g. standard for whole-repo semantic reviews). */
+  complexityFloor?: LaneDemand["complexity"];
+  /** Floor for lane consequence (e.g. high for whole-repo semantic reviews). */
+  riskFloor?: LaneDemand["risk"];
+  /**
+   * The lane's review MODE and (for anything but `ordinary`) the reason it
+   * needs that mode. A lane that requires independence states it here; the
+   * materializer records it in the bound lane metadata and the execution-line
+   * renderer turns it into the host instruction (pause / degraded fallback /
+   * ordinary). Defaults to `ordinary`.
+   */
+  reviewMode?: LaneReviewMode;
+  reviewReason?: string;
 }
 
 export interface MaterializedFanoutLane {
@@ -102,6 +136,15 @@ export interface MaterializedFanoutLane {
    * ranking whether the work arrives as a review task or a fan-out lane.
    */
   demand: LaneDemand;
+  /**
+   * The lane's declared review mode and reason, normalized to a bound
+   * declaration the step contract can record verbatim. Defaults to `ordinary`
+   * with no reason. The tool records the DECLARED mode — it does not and cannot
+   * verify that a host actually produced an independent context (independence
+   * is a property of the execution CONTEXT, invisible to this package; claiming
+   * otherwise would be asserting a falsehood).
+   */
+  review: LaneReviewModeDeclaration;
 }
 
 export interface MaterializedFanout {
@@ -121,6 +164,8 @@ export interface MaterializedFanout {
    * as the same step arriving twice.
    */
   shortfall: LaneSubmissionShortfall;
+  /** Bound lane review mode records for transport metadata. */
+  laneReviews: LaneReviewRecord[];
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -240,13 +285,30 @@ export async function materializeFanoutLanes(params: {
       resultPath,
       resultExists,
       // Derived from the prompt text the tool just wrote — the lane's own
-      // bytes, not the caller's claim about them — plus whatever per-mode
-      // signal the caller had. See {@link FanoutLaneSpec}.
+      // bytes, not the caller's claim about them — PLUS the granted content the
+      // lane reads beyond that pointer (a materialized packet), plus whatever
+      // per-mode signal the caller had. See {@link FanoutLaneSpec}. Without the
+      // granted-content fold, a short pointer at a large packet is classified
+      // `small` and the host matches a weak model to whole-repo work.
       demand: deriveLaneDemand({
-        tokenEstimate: estimateTokensFromBytes(Buffer.byteLength(promptText, "utf8")),
+        tokenEstimate: estimateTokensFromBytes(
+          Buffer.byteLength(promptText, "utf8") +
+            (spec.grantedContentBytes ?? 0),
+        ),
         fileCount: spec.fileCount ?? 0,
         riskScore: spec.riskScore ?? 0,
+        complexityFloor: spec.complexityFloor,
+        riskFloor: spec.riskFloor,
       }),
+      review: {
+        mode: spec.reviewMode ?? "ordinary",
+        // A reason is only meaningful beside a non-ordinary mode; an ordinary
+        // lane carries no reason so the bound metadata never claims a basis it
+        // does not have.
+        ...(spec.reviewMode && spec.reviewMode !== "ordinary"
+          ? { reason: spec.reviewReason ?? spec.reviewMode }
+          : {}),
+      },
     });
   }
 
@@ -282,6 +344,11 @@ export async function materializeFanoutLanes(params: {
     artifactPaths[`${lane.id}_prompt`] = lane.promptPath;
     artifactPaths[`${lane.id}_results`] = lane.resultPath;
   }
+  const laneReviews: LaneReviewRecord[] = lanes.map((lane) => ({
+    lane: lane.id,
+    mode: lane.review.mode,
+    ...(lane.review.reason ? { reason: lane.review.reason } : {}),
+  }));
   return {
     lanes,
     pendingLanes,
@@ -289,5 +356,6 @@ export async function materializeFanoutLanes(params: {
     readPaths: pendingLanes.map((lane) => lane.promptPath),
     writePaths: pendingLanes.map((lane) => lane.resultPath),
     shortfall,
+    laneReviews,
   };
 }

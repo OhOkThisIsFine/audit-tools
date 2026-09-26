@@ -46,9 +46,10 @@ export interface ExternalAcquisitionAdvanceOptions {
   /** Per-analyzer resolution policy (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
-   * Item B: recorded consent decisions from session config. A recorded
-   * "granted" admits a non-default candidate without a per-run grant; a
-   * recorded "declined" is terminal — no grant overrides it.
+   * Item B: this run's consent decisions, folded in from the `analyzer_consent`
+   * lane inside the fold. A "declined" is terminal for the rest of the run — no
+   * grant overrides it. Consent is strictly per-run (packet 5 / O07): nothing
+   * durable is ever read here, so the next run re-offers every candidate.
    */
   analyzerConsent?: AnalyzerConsentDecisions;
   /** Override the binary cache dir / platform / arch (tests). */

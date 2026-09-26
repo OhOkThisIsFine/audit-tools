@@ -5,10 +5,9 @@ import {
   pushValidationIssue,
   prefixValidationIssues,
   requireKeys,
+  VALID_SEVERITIES,
+  VALID_CONFIDENCES,
 } from "audit-tools/shared";
-
-const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
-const VALID_CONFIDENCES = new Set(["high", "medium", "low"]);
 
 export function validateFinding(
   value: unknown,

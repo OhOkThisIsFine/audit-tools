@@ -23,10 +23,34 @@ import {
   deriveGeneratedFiles,
   parseUnifiedDiff,
   pinSites,
+  readGitDiff,
   readPinDeclaration,
 } from "../../scripts/check-sites-pinned.mjs";
 
 const INCLUDE = (p: string) => p.startsWith("src/");
+
+it("reads a staged diff beyond execFileSync's default output buffer without losing its last hunk", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const repo = mkdtempSync(join(tmpdir(), "sites-pinned-large-diff-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: repo, windowsHide: true });
+    // This is larger than Node's documented 1 MiB default maxBuffer. The
+    // sentinel proves the stream was not merely truncated after crossing it.
+    const lines = Array.from({ length: 4096 }, (_, index) =>
+      `export const VALUE_${index} = "${"x".repeat(256)}";`,
+    );
+    writeFileSync(join(repo, "large.ts"), `${lines.join("\n")}\nexport const LAST_HUNK_SENTINEL = true;\n`);
+    execFileSync("git", ["add", "--", "large.ts"], { cwd: repo, windowsHide: true });
+    const diff = await readGitDiff(["diff", "--cached", "-U0", "--diff-filter=ACMR", "--"], repo);
+    expect(Buffer.byteLength(diff, "utf8")).toBeGreaterThan(1024 * 1024);
+    expect(diff).toContain("+export const LAST_HUNK_SENTINEL = true;");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
 
 /** A minimal `git diff -U0` block for one file, with its hunk placed at `atLine`. */
 function diffFor(

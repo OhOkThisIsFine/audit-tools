@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveSmokeTarball } from "../../scripts/shared/smoke-tarball.mjs";
+import { releaseGatePhases } from "../../scripts/shared/run-release-gates.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -129,11 +130,18 @@ describe("packaged smokes share one tarball", () => {
     const pkg = await readPackageJson();
     expect(pkg.scripts["pack:smoke"], "a single pack step must own the tarball").toBeTruthy();
 
-    const chain = pkg.scripts["verify:checks"];
-    const packIdx = chain.indexOf("pack:smoke");
-    expect(packIdx >= 0, "verify:checks must run the shared pack step").toBe(true);
+    // verify:checks no longer hand-lists its steps in package.json — it runs
+    // the one executable gate catalog (packet 22), so the pack-ahead-of-smokes
+    // order is owned by GUARDS order, and this pins the DERIVED sequence
+    // rather than the package.json text it replaced.
+    expect(pkg.scripts["verify:checks"], "verify:checks must run the gate catalog").toMatch(
+      /run-release-gates\.mjs/,
+    );
+    const { default: sequence } = releaseGatePhases();
+    const packIdx = sequence.indexOf("pack:smoke");
+    expect(packIdx >= 0, "the gate catalog must run the shared pack step").toBe(true);
     for (const smoke of ["smoke:packaged-audit-code", "smoke:packaged-remediate-code"]) {
-      expect(chain.indexOf(smoke) > packIdx, `${smoke} must run after the shared pack step`).toBe(true);
+      expect(sequence.indexOf(smoke) > packIdx, `${smoke} must run after the shared pack step`).toBe(true);
     }
   });
 

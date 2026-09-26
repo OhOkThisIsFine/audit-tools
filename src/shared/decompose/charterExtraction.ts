@@ -21,6 +21,7 @@
 
 import { z } from "zod";
 import { hashContent } from "../hash.js";
+import { stableStringify } from "../stableStringify.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import { parseCitationRef } from "../validation/citationGrounding.js";
 import {
@@ -792,6 +793,14 @@ export function applyFidelity(
  * Surface every `supported` finding candidate as a Finding LEAD (leads-not-verdicts).
  * `affected_files` = the union of the corresponding nodes' scopes (the report's
  * grouping evidence); `confidence` = the weakest account's source confidence.
+ *
+ * Each surfaced finding is a DETERMINISTIC lead and is stamped with its
+ * `lead_lineage` — producer `differenceFindings`, source hash over the exact
+ * difference record the detector iterated (stable-serialized) — so the report
+ * gate (`mergeFindings`) can hold it for semantic confirmation rather than
+ * admitting an unconfirmed charter delta as a verdict. The stamp is tool-owned:
+ * a host-supplied `lead_lineage` on a charter finding is refused by the same
+ * doors that refuse it for every other deterministic producer.
  */
 export function differenceFindings(
   differences: readonly CharterDifference[],
@@ -829,6 +838,16 @@ export function differenceFindings(
       summary: `${d.gap} ${d.accounts.map((a) => `[${a.kind}] ${a.claim}`).join(" ")}`,
       affected_files: [...files].sort(compareCodeUnits).map((path) => ({ path })),
       systemic: true,
+      // The deterministic producer's lineage: where the lead came from and over
+      // what exact signal (the difference record this finding is derived from).
+      // `confirmation: "lead"` marks it awaiting semantic confirmation — a
+      // semantic pass promotes a lead on its own verdict, never by rewriting
+      // this stamp.
+      lead_lineage: {
+        producer: "differenceFindings",
+        source_hash: hashContent(stableStringify(d)),
+        confirmation: "lead",
+      },
     });
   }
   return findings.sort((a, b) => compareCodeUnits(a.id, b.id));

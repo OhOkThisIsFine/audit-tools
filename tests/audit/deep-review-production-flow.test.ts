@@ -1,7 +1,7 @@
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { prepareConceptualDispatch } from "../../src/audit/cli/conceptualDispatch.js";
 import {
@@ -16,8 +16,8 @@ import {
 } from "../../src/audit/io/artifacts.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { readConceptualReviewRoundManifest } from "../../src/audit/types/conceptualAdjudication.js";
-import { persistAnalyzerConsent } from "../../src/shared/analyzerPolicy.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
+import { GATE_LANES, laneSubmissionPath } from "../../src/audit/cli/laneSubmissions.js";
 
 function readyForIntentBundle(): ArtifactBundle {
   return {
@@ -183,13 +183,23 @@ test("production systemic dispatch never advertises the deleted deep-review judg
       },
     };
     await writeCoreArtifacts(artifactsDir, bundle);
-    await persistAnalyzerConsent(root, {
-      semgrep: "declined",
-      eslint: "declined",
-      knip: "declined",
-      jscpd: "declined",
-      "osv-scanner": "declined",
-    });
+    // Packet 5 / O07: consent is strictly per-run — there is no durable
+    // decline to pre-record. Answer this run's `analyzer_consent` offer
+    // instead, at the lane's tool-owned bound path, so the fold proceeds past
+    // the consent pause to the systemic dispatch under test.
+    const consentPath = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_consent);
+    await mkdir(dirname(consentPath), { recursive: true });
+    await writeFile(
+      consentPath,
+      JSON.stringify({
+        semgrep: "declined",
+        eslint: "declined",
+        knip: "declined",
+        jscpd: "declined",
+        "osv-scanner": "declined",
+      }) + "\n",
+      "utf8",
+    );
 
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
 

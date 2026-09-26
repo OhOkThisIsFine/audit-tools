@@ -1,7 +1,8 @@
+// sites-pinned: tests/shared/friction-run-linkage.test.ts
 import { join } from "node:path";
 import { hashContent } from "../hash.js";
 import { cp, readdir } from "node:fs/promises";
-import { isFileMissingError, readOptionalJsonFile } from "./json.js";
+import { readOptionalJsonFile } from "./json.js";
 import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
 
 /**
@@ -261,7 +262,7 @@ export async function listFrictionRecordFilenames(artifactsDir: string): Promise
   try {
     entries = await readdir(frictionCaptureDir(artifactsDir));
   } catch (error) {
-    if (isFileMissingError(error)) return [];
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return [];
     throw error;
   }
   return entries.filter((name) => name.endsWith(".json")).sort();

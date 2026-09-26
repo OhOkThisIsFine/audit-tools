@@ -171,7 +171,16 @@ export function renderConfirmIntentPrompt(
   const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
 
   return [
-    `# Confirm Audit Scope and Intent\n\nConceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
+    `# Confirm Audit Scope and Intent`,
+    "",
+    "## Do Now",
+    "",
+    "Ask the operator one round of scope-and-intent questions, then record their",
+    "choices in `intent_checkpoint.json`. Nothing below is yours to decide — the",
+    "scope was discovered deterministically, and every dial is the operator's",
+    "answer to record, not a recommendation to act on.",
+    "",
+    `Conceptual review depth proposed for this intent: **${proposedDepth}**. Confirm or change it; this choice is fresh for each run.`,
     "",
     ...(hasBlockingClauses
       ? [
@@ -310,7 +319,14 @@ export function renderConfirmIntentPrompt(
     ...CONCEPTUAL_PERSPECTIVES.slice(0, DEFAULT_CONCEPTUAL_PERSPECTIVES).map(
       (p) => `    - **${p.name}** — ${p.lens}`,
     ),
-    "  Set `design_review.perspectives` to widen or narrow the fan-out.",
+    "  Set `design_review.perspectives` to widen or narrow the fan-out: an integer",
+    "  count keeps the legacy draw, or list explicit perspective names to select",
+    "  EXACTLY those reviewers (built-in names from the list above, or names you",
+    "  define in `design_review.custom_perspectives` as `{name, lens}` entries).",
+    "  An explicit list is honored verbatim — no additional reviewers are added.",
+    "  Unknown names, duplicates, and custom names colliding with a built-in name",
+    "  are refused: the run halts naming the value instead of reviewing with a",
+    "  quieter substitute set.",
     "",
     "This records *how much* conceptual review to do. Execution details remain",
     "entirely with the host that receives the review workload.",
@@ -382,10 +398,16 @@ export function renderConfirmIntentPrompt(
     "  silently re-applying this run's choice. A block without a matching",
     "  `answered_at` is read as unanswered and falls back to the defaults above.",
     "- `design_review.conceptual_depth` is `shallow` (schema default) or `deep`; on `deep`,",
-    "  `perspectives` bounds the parallel-reviewer fan-out. Omit for shallow.",
+    "  `perspectives` selects the reviewers: an integer count (legacy draw) or an",
+    "  explicit array of perspective names (exactly those reviewers, in order — e.g.",
+    '  `["Adversary", "Minimalist"]`). Omit for shallow. A `custom_perspectives`',
+    "  array of `{name, lens}` definitions adds caller-authored reviewers the list",
+    "  may reference; custom names must not duplicate each other or a built-in name.",
     "- Leave the optional fields out to audit the full discovered scope.",
     "",
-    `Then run: ${opts.continueCommand}`,
+    "## Continue",
+    "",
+    `Run: ${opts.continueCommand}`,
     "",
   ].join("\n").replace(
     '"design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',

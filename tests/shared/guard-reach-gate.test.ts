@@ -78,10 +78,8 @@ const reconcile = reconcileImpl as (args: ReconcileArgs) => string[];
 // contract test, one declared gap. Every synthetic case below mutates exactly
 // one thing and asserts the reconciler names it.
 const SCRIPTS: Record<string, string> = {
-  'verify:checks':
-    'node scripts/shared/profile-run.mjs verify-checks check:alpha build',
-  'verify:release':
-    'npm run verify:checks && node scripts/shared/run-vitest-gate.mjs',
+  'verify:checks': 'node scripts/shared/run-release-gates.mjs',
+  'verify:release': 'node scripts/shared/run-release-gates.mjs --tail',
   'check:alpha': 'node scripts/check-alpha.mjs',
   build: 'tsc -p tsconfig.json',
 };
@@ -216,22 +214,24 @@ describe('registry rot — dead patterns and phantom guards', () => {
 });
 
 describe('wiring — a script in no gate is not a gate', () => {
-  it('a gate row whose npm script is not reachable from verify:release is an error', () => {
+  it('a gate row whose impl names no package.json script is an error', () => {
+    // The release sequence is DERIVED from the row (packet 22), so there is no
+    // separate "wire into verify:checks" step to forget. The remaining wiring
+    // fact is the COMMAND: a script impl must name a real package.json script.
     const errors = run({
       guards: [...GUARDS, { id: 'check:stray', kind: 'gate', impl: 'check:stray', preCommit: false, fix: 'fix stray' }],
-      packageScripts: { ...SCRIPTS, 'check:stray': 'node scripts/check-stray.mjs' },
     });
     expect(errors.some((e) => e.includes('check:stray'))).toBe(true);
   });
 
-  it('a gate row may be wired as a path referenced verbatim in a reachable script (the vitest-gate shape)', () => {
-    // vitest-gate's impl is a path inside verify:release's command string, not
-    // an npm script name — the healthy fixture already asserts it reconciles.
+  it('a gate row may be wired as a path (the vitest-gate shape) — but the path must name a tracked file', () => {
+    // vitest-gate's impl is a repo path, not an npm script name. A path impl
+    // that names an untracked file is a dead gate: the release runner would try
+    // to execute a file that is not in the tree.
     const errors = run({
       guards: GUARDS.map((g) =>
         g.id === 'vitest-gate' ? { ...g, impl: 'scripts/shared/never-invoked.mjs' } : g,
       ),
-      onDisk: [...ON_DISK, 'scripts/shared/never-invoked.mjs'],
     });
     expect(errors.some((e) => e.includes('never-invoked'))).toBe(true);
   });
@@ -314,26 +314,29 @@ describe('gate registration is ONE report, not a serial walk (backlog 2026-08-30
     expect(gapsOf()).toEqual([]);
   });
 
-  it('a gate missing THREE homes is reported ONCE, naming all three', () => {
-    // The 2026-08-30 walk: a new `check:omega` whose script, step, GUARDS row
-    // and REACH row are all absent. Before this pass the build revealed them one
-    // per run; here the whole remainder arrives together.
+  it('a gate missing BOTH remaining homes is reported ONCE, naming both', () => {
+    // Packet 22 removed the hand-accreted step list, so the homes that remain
+    // outside the declaration are the package.json script and (for a
+    // reach/final pre-commit gate) a REACH row. A `check:omega` that has neither
+    // gets the aggregate instead of a serial walk.
     const gaps = gapsOf({
       guards: [...GUARDS, { id: 'check:omega', kind: 'gate', impl: 'check:omega', preCommit: 'reach', fix: 'x' }],
     });
     expect(gaps.map((g) => g.id)).toEqual(['check:omega']);
     const missing = gaps[0]?.missing.join(' | ') ?? '';
     expect(missing).toContain('package.json scripts["check:omega"]');
-    expect(missing).toContain('verify:checks step list');
     expect(missing).toContain('REACH row');
   });
 
-  it('a bare npm script with no GUARDS row at all is reported with its missing homes', () => {
+  it('a bare npm script with no GUARDS row is a single-home case, left to the precise rule', () => {
+    // Packet 22 removed the hand-accreted step list, so a `check:*` script with
+    // no GUARDS row no longer aggregates (only one home is missing). The
+    // bidirectional rule ('a check:* npm script with no GUARDS row is an error')
+    // states that one home precisely.
     const gaps = gapsOf({
       packageScripts: { ...SCRIPTS, 'check:omega': 'node scripts/check-omega.mjs' },
     });
-    expect(gaps.map((g) => g.id)).toEqual(['check:omega']);
-    expect(gaps[0]?.missing.join(' | ')).toContain('a GUARDS row');
+    expect(gaps).toEqual([]);
   });
 
   it('a gate missing only ONE home is left to that home\'s precise message — no duplicate report', () => {

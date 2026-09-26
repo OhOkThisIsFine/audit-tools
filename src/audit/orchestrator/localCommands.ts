@@ -148,12 +148,12 @@ export async function runFirstAvailableCommand(
   let lastDecline: string | undefined;
   for (const candidate of candidates) {
     // Decline-first admission, BEFORE resolution and before anything spawns. A
-    // recorded refusal is a veto for THIS tool wherever its executable resolves
+    // this-run refusal is a veto for THIS tool wherever its executable resolves
     // from — including the repo-local `node <script>` arm (the script is the
     // key, never `node`). It runs ahead of resolution because whether the binary
     // happens to be INSTALLED says nothing about whether the operator refused
     // it: resolving first meant an absent tool reported `not_resolved` and the
-    // recorded decline was never consulted, so one policy read two ways on two
+    // run's decline was never consulted, so one decision read two ways on two
     // machines.
     const denied = admitLocalSpawn(
       [candidate.command, ...candidate.args],

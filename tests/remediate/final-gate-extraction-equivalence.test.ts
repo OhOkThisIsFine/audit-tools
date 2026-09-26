@@ -53,15 +53,24 @@ describe("CP-NODE-1: final-gate extraction is a behaviour-preserving move", () =
     expect(toolOwnedFinalGateCommandsNext).toBe(toolOwnedFinalGateCommandsGate);
   });
 
-  it("runToolOwnedFinalGate scopes out (does not block) on a non-monorepo target via both paths", async () => {
+  it("runToolOwnedFinalGate blocks with needs_command on a target with no derivable gate, via both paths", async () => {
     const noRepo = "/definitely/not/the/audit-tools/repo/root";
-    const runner = () => ({ status: 0 });
+    let consulted = 0;
+    const runner = () => {
+      consulted += 1;
+      return { status: 0 };
+    };
     const viaNext = await runToolOwnedFinalGateNext(noRepo, { runner });
     const viaGate = await runToolOwnedFinalGateGate(noRepo, { runner });
-    expect(viaNext.scoped_out).toBe(true);
-    expect(viaGate.scoped_out).toBe(true);
-    expect(viaNext.passed).toBe(true);
-    expect(viaGate.passed).toBe(true);
+    // O01: the audit-tools-only exemption is retired. A target with no
+    // derivable command blocks for an operator decision — never a
+    // non-blocking scope note, and no spawn.
+    expect(consulted).toBe(0);
+    expect(viaNext.outcome).toBe("needs_command");
+    expect(viaGate.outcome).toBe("needs_command");
+    expect(viaNext.passed).toBe(false);
+    expect(viaGate.passed).toBe(false);
+    expect(viaNext.results).toEqual([]);
   });
 });
 
@@ -118,23 +127,29 @@ describe("OBL-…-inv-2: the gate's command list is derived, not transcribed", (
     );
   });
 
-  it("NEGATIVE: no argv can carry a plan-supplied test command — the derivation's only input is `root`", () => {
-    // Structural, not a string search for a value we happened to think of: the
-    // function's ONLY parameter is the root, so there is no channel through
-    // which a `plan.test_command` could reach an argv. The determinism check
-    // beside it closes the other half (nothing is rewritten per call).
+  it("POSITIVE: the explicit override is the derivation's only plan-supplied channel, and it is argv", () => {
+    // Structural: the derivation takes `(root, opts?)` — the override arrives
+    // as a parsed argv array, never as a shell string the gate would re-parse,
+    // and the pinned audit-tools profile ignores it outright (INV-RS-10).
     expect(toolOwnedFinalGateCommandsGate.length, "arity is the channel count").toBe(1);
-    const first = toolOwnedFinalGateCommandsGate(REPO_ROOT);
+    const without = toolOwnedFinalGateCommandsGate(REPO_ROOT);
     const second = toolOwnedFinalGateCommandsGate(REPO_ROOT);
-    expect(second).toEqual(first);
-    for (const spec of first) {
+    expect(second, "nothing is rewritten per call").toEqual(without);
+    const withOverride = toolOwnedFinalGateCommandsGate(REPO_ROOT, {
+      explicitTestCommand: ["node", "scripts/verify.mjs"],
+    });
+    expect(
+      withOverride,
+      "the pinned profile is the gate here, not a discovery draw",
+    ).toEqual(without);
+    for (const spec of [...without, ...withOverride]) {
       for (const token of spec.argv) {
         expect(token).not.toContain("test_command");
       }
     }
   });
 
-  it("NEGATIVE: a root missing ANY ONE of the six markers is out of scope, and its list is empty", async () => {
+  it("NEGATIVE: a root missing ANY ONE of the six markers leaves the pinned profile, and its list is empty", async () => {
     const MARKER_DIRS = ["src/shared", "src/audit", "src/remediate"];
     const MARKER_FILES = [
       "audit-code.mjs",
@@ -167,6 +182,15 @@ describe("OBL-…-inv-2: the gate's command list is derived, not transcribed", (
       expect(isAuditToolsMonorepo(partial), `missing ${marker}`).toBe(false);
       expect(toolOwnedFinalGateCommandsGate(partial), `missing ${marker}`).toEqual([]);
     }
+
+    // Leaving the pinned profile no longer means sailing through: with no
+    // manifest declaring a command, the run blocks for the operator decision.
+    const partial = join(SCRATCH, "markers-missing-0");
+    const gate = await runToolOwnedFinalGateGate(partial, {
+      runner: () => ({ status: 0 }),
+    });
+    expect(gate.outcome).toBe("needs_command");
+    expect(gate.passed).toBe(false);
   });
 });
 
@@ -191,7 +215,6 @@ describe("OBL-…-inv-8: the gate's blocking path is executed, not just its earl
         return { status: 0 };
       },
     });
-    expect(gate.scoped_out).toBe(false);
     expect(gate.outcome).toBe("executed");
     expect(gate.passed).toBe(true);
     expect(invoked, "the runner must actually run").toEqual(
@@ -292,7 +315,7 @@ describe("OBL-…-inv-1/inv-13/fail-7: executed, scoped-out and disabled are thr
   it("NEGATIVE: a not-run gate cannot be RECORDED as a pass, even when told it passed", async () => {
     // The normalization lives in the writer, not at the call sites: a consumer
     // handing `passed: true` for a gate that ran nothing still persists `null`.
-    for (const outcome of ["scoped_out", "disabled"] as const) {
+    for (const outcome of ["scoped_out", "disabled", "needs_command"] as const) {
       const dir = join(SCRATCH, `outcome-${outcome}`);
       await mkdir(dir, { recursive: true });
       await writeFinalGateOutcomeRecord(dir, {
@@ -310,9 +333,9 @@ describe("OBL-…-inv-1/inv-13/fail-7: executed, scoped-out and disabled are thr
     }
   });
 
-  it("NEGATIVE: the three outcomes are not byte-identical records", async () => {
+  it("NEGATIVE: the four outcomes are not the same record", async () => {
     const bodies = new Set<string>();
-    for (const outcome of ["executed", "scoped_out", "disabled"] as const) {
+    for (const outcome of ["executed", "scoped_out", "disabled", "needs_command"] as const) {
       const dir = join(SCRATCH, `outcome-distinct-${outcome}`);
       await mkdir(dir, { recursive: true });
       await writeFinalGateOutcomeRecord(dir, {
@@ -325,21 +348,23 @@ describe("OBL-…-inv-1/inv-13/fail-7: executed, scoped-out and disabled are thr
       const { recorded_at: _ignored, ...stable } = record;
       bodies.add(JSON.stringify(stable));
     }
-    expect(bodies.size, "three outcomes, three records").toBe(3);
+    expect(bodies.size, "four outcomes, four records").toBe(4);
   });
 
   it("NEGATIVE: runToolOwnedFinalGate itself reports WHICH of the two reachable kinds happened", async () => {
-    const scoped = await runToolOwnedFinalGateGate(
+    const undecidable = await runToolOwnedFinalGateGate(
       "/definitely/not/the/audit-tools/repo/root",
       { runner: () => ({ status: 0 }) },
     );
     const executed = await runToolOwnedFinalGateGate(REPO_ROOT, {
       runner: () => ({ status: 0 }),
     });
-    // Both are `passed: true` — which is exactly why the boolean alone cannot
-    // carry the distinction and `outcome` has to.
-    expect(scoped.passed).toBe(executed.passed);
-    expect(scoped.outcome).toBe("scoped_out");
+    // The verdicts differ — which is exactly why the boolean alone cannot
+    // carry the distinction and `outcome` has to. A gate that ran nothing is
+    // `needs_command` (blocking), never a pass.
+    expect(undecidable.passed).toBe(false);
+    expect(executed.passed).toBe(true);
+    expect(undecidable.outcome).toBe("needs_command");
     expect(executed.outcome).toBe("executed");
   });
 });
@@ -510,14 +535,20 @@ describe("OBL-…-inv-1/fail-7 end to end: the consumers record which gate happe
     expect(record.scope).toContain("phase 1");
   });
 
-  it("NEGATIVE: a SCOPED-OUT gate takes the same non-blocking branch but leaves a different record", async () => {
-    await establishBoundaryRun(false); // no markers → the suite does not apply
+  it("NEGATIVE: a NEEDS-COMMAND gate blocks for the operator decision and leaves a not-run record", async () => {
+    await establishBoundaryRun(false); // no markers, no manifest → nothing derivable
     expect(toolOwnedFinalGateCommandsGate(REPO_DIR)).toEqual([]);
 
-    await decideNextStep({ root: REPO_DIR, finalGateRunner: () => ({ status: 0 }) });
+    const step = await decideNextStep({
+      root: REPO_DIR,
+      finalGateRunner: () => ({ status: 0 }),
+    });
+    expect(step.step_kind, "no gate ran, so the run must pause, not dispatch").toBe(
+      "final_gate_needs_command",
+    );
 
     const record = await readOutcomeRecord(ARTIFACTS_DIR);
-    expect(record.outcome).toBe("scoped_out");
+    expect(record.outcome).toBe("needs_command");
     expect(record.passed, "nothing ran, so there is no verdict").toBeNull();
     expect(record.commands_run).toBe(0);
     expect(record.reason).toBeTruthy();
@@ -539,7 +570,7 @@ describe("OBL-…-inv-1/fail-7 end to end: the consumers record which gate happe
     expect(record.reason).toContain("skipFinalGate");
   });
 
-  it("NEGATIVE: the run log tells the three apart too — never a bare passed=true for a not-run", async () => {
+  it("NEGATIVE: the run log tells the outcomes apart too — never a bare passed=true for a not-run", async () => {
     await establishBoundaryRun(false);
     await decideNextStep({ root: REPO_DIR, finalGateRunner: () => ({ status: 0 }) });
     const log = await readFile(join(ARTIFACTS_DIR, "run.log.jsonl"), "utf8");
@@ -548,7 +579,7 @@ describe("OBL-…-inv-1/fail-7 end to end: the consumers record which gate happe
       .filter((line) => line.includes("phase_boundary_gate"));
     expect(gateLines.length).toBeGreaterThan(0);
     const end = gateLines.find((line) => line.includes("outcome="))!;
-    expect(end).toContain("outcome=scoped_out");
+    expect(end).toContain("outcome=needs_command");
     expect(end, "a not-run gate has no verdict to log").toContain("passed=n/a");
     expect(end).not.toContain("passed=true");
   });
@@ -723,7 +754,7 @@ describe("OBL-…-inv-1: the completion report names which gate happened", () =>
     expect(report).not.toContain("PASSED");
   });
 
-  it("NEGATIVE: the three reports are not the same document", async () => {
+  it("NEGATIVE: the four reports are not the same document", async () => {
     const executed = await closeWithGateRecord({
       schema_version: "remediate-code-final-gate-outcome/v1alpha1",
       scope: "s",
@@ -742,16 +773,30 @@ describe("OBL-…-inv-1: the completion report names which gate happened", () =>
       recorded_at: "2026-01-01T00:00:00.000Z",
     });
     await harness.resetTestRepo();
+    const needsCommand = await closeWithGateRecord({
+      schema_version: "remediate-code-final-gate-outcome/v1alpha1",
+      scope: "s",
+      outcome: "needs_command",
+      passed: null,
+      commands_run: 0,
+      reason: "no executable gate command is derivable",
+      recorded_at: "2026-01-01T00:00:00.000Z",
+    });
+    await harness.resetTestRepo();
     const absent = await closeWithGateRecord(undefined);
 
     const gateSection = (report: string): string =>
       report.slice(report.indexOf("## Repository Gate")).split("\n##")[0]!;
+    expect(gateSection(needsCommand.report)).toContain("needs_command");
+    expect(gateSection(needsCommand.report)).toContain("This is not a pass");
+    expect(gateSection(needsCommand.report)).not.toContain("PASSED");
     const sections = new Set([
       gateSection(executed.report),
       gateSection(scoped.report),
+      gateSection(needsCommand.report),
       gateSection(absent.report),
     ]);
-    expect(sections.size, "three gate outcomes, three reports").toBe(3);
+    expect(sections.size, "four gate outcomes, four reports").toBe(4);
   });
 });
 

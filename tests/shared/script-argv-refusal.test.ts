@@ -27,7 +27,7 @@
  * must be written down or the covered half reads as a close. 42 of the tracked
  * scripts read `process.argv` without the guard (measured against HEAD when this
  * landed); migrating them is mechanical but touches gate entry points such as
- * `run-vitest-gate.mjs` and `profile-run.mjs`, which forward variadic arguments,
+ * `run-vitest-gate.mjs`, which forwards variadic arguments,
  * so it is its own change rather than a side effect of the nightly one. Until
  * then the list below is the honest boundary, and the ratchet stops it growing.
  *
@@ -321,7 +321,6 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/shared/generate-spec-mirrors.mjs',
     'scripts/shared/generatedArtifacts.mjs',
     'scripts/shared/guard-no-suite-running.mjs',
-    'scripts/shared/profile-run.mjs',
     'scripts/shared/run-vitest-gate.mjs',
     'scripts/shared/sessionRegistry.mjs',
     'scripts/shared/smoke-tarball.mjs',

@@ -48,6 +48,8 @@ import {
   splitBacklogEntries,
 } from '../../scripts/shared/backlog-entry-grammar.mjs';
 import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
+import { releaseGatePhases } from '../../scripts/shared/run-release-gates.mjs';
+import { listBacklogFiles, readBacklogCorpus } from '../../scripts/shared/backlog-corpus.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 // P53: the derived legs run at GIT's boundary, in commit-gate.mjs.
@@ -502,8 +504,75 @@ describe('the gate fires at COMMIT, not only in verify:checks', () => {
   });
 
   it('is wired into verify:checks as well', () => {
+    // Packet 22: verify:checks is no longer a hand-written step list — it
+    // DELEGATES to the gate catalog (`run-release-gates.mjs`), which derives the
+    // sequence from the GUARDS declaration. So the wiring is asserted against the
+    // declaration + the derived release sequence, never by grepping the
+    // package.json string for a literal `check:backlog-index` step (which no
+    // longer appears there).
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:backlog-index']).toBeDefined();
-    expect(pkg.scripts['verify:checks']).toContain('check:backlog-index');
+    expect(pkg.scripts['verify:checks']).toContain('run-release-gates.mjs');
+    const { default: sequence } = releaseGatePhases();
+    expect(sequence).toContain('check:backlog-index');
+  });
+});
+
+describe('the index and the shared-parse validators agree on entry boundaries', () => {
+  it('the generator\'s hardcoded source list and the shared corpus enumerate the same files', () => {
+    // `readSources` now enumerates via `listBacklogFiles` (git index, the
+    // packet-23 shared corpus) instead of its own fixed read. `collectIndex`
+    // still iterates the hardcoded INDEX_SOURCES, so the two must name the same
+    // set or the generator throws "was not supplied" at run time — pinned here
+    // rather than discovered in a commit gate.
+    const indexed = [...new Set(INDEX_SOURCES.map((s) => s.file))].sort();
+    expect(indexed, 'INDEX_SOURCES must name exactly the git-indexed backlog files').toEqual(
+      listBacklogFiles(REPO_ROOT),
+    );
+  });
+
+  it('every bullet-source anchor is exactly the line splitBacklogEntries reports', () => {
+    // The load-bearing agreement: the seek index and the validation side (budget,
+    // status, line-number, friction) must see the SAME entry boundaries, or an
+    // entry invisible to one is silently absent from the other. Both the index
+    // (via parseBulletEntries) and the validators (via readBacklogCorpus →
+    // splitBacklogEntries) derive boundaries from the ONE grammar, so their line
+    // sets must be identical for the bullet-grammar sources. `## Open tracks`
+    // writes `**…**` paragraphs that `splitBacklogEntries` does not meter, so it
+    // is deliberately outside this comparison — the budget meter and the index
+    // both omit it for the same grammatical reason.
+    const bulletSources = INDEX_SOURCES.filter((s) => s.kind === 'bullets');
+    const files = [...new Set(bulletSources.map((s) => s.file))];
+    const sources = new Map(
+      files.map((f) => [f, readFileSync(join(REPO_ROOT, 'docs', 'backlog', f), 'utf8')]),
+    );
+    const grouped = collectIndex(sources);
+    for (const file of files) {
+      // A file may host more than one group (forward-tracks.md has an `## Open
+      // tracks` paragraph group too); the bullet sources' lines are the groups
+      // whose (file, section) is one of the declared bullet sources.
+      const bulletSections = bulletSources.filter((s) => s.file === file).map((s) => s.section);
+      const indexLines = grouped
+        .filter((g) => g.file === file && bulletSections.includes(g.section))
+        .flatMap((g) => g.items.map((i) => i.line))
+        .sort((a, b) => a - b);
+      const sharedLines = splitBacklogEntries(sources.get(file)!)
+        .map((e) => e.line)
+        .sort((a, b) => a - b);
+      expect(indexLines, `index anchors for ${file} must equal the shared parse`).toEqual(sharedLines);
+      expect(indexLines.length, `the comparison for ${file} must be non-vacuous`).toBeGreaterThan(0);
+    }
+  });
+
+  it('the shared corpus parse is what readBacklogCorpus hands the validators, for the live files', () => {
+    // The same module feeds the budget/status/line-number/friction validators;
+    // assert it parses each indexed bullet file into the same entry count the
+    // index renders, so "which entries exist" cannot fork between the two paths.
+    const bulletFiles = [...new Set(INDEX_SOURCES.filter((s) => s.kind === 'bullets').map((s) => s.file))];
+    const corpus = new Map(readBacklogCorpus(listBacklogFiles(REPO_ROOT), REPO_ROOT).map((f) => [f.file, f]));
+    for (const file of bulletFiles) {
+      const shared = corpus.get(file)!.entries.map((e) => e.line).sort((a, b) => a - b);
+      expect(shared).toEqual(splitBacklogEntries(readFileSync(join(REPO_ROOT, 'docs', 'backlog', file), 'utf8')).map((e) => e.line));
+    }
   });
 });

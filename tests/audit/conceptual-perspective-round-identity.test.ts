@@ -33,9 +33,6 @@ const { prepareConceptualDispatch } = await import(
 );
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
-const { persistAnalyzerConsent } = await import(
-  "../../src/shared/analyzerPolicy.js"
-);
 const { expectedSubmissionsPath } = await import(
   "../../src/shared/io/auditToolsPaths.js"
 );
@@ -203,13 +200,10 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
         },
       },
     } as ArtifactBundle);
-    await persistAnalyzerConsent(root, {
-      semgrep: "declined",
-      eslint: "declined",
-      knip: "declined",
-      jscpd: "declined",
-      "osv-scanner": "declined",
-    });
+    // No consent pre-seed: this fixture root carries no ecosystem markers, so
+    // no consent-gated analyzer is applicable and the offer never fires.
+    // (Packet 5 / O07: consent is strictly per-run — there is no durable
+    // decline to pre-record.)
 
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const firstStep = JSON.parse(

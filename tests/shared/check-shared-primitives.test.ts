@@ -66,6 +66,50 @@ describe("single-definition rules", () => {
     );
     expect(hits.some((h) => h.rule === "single-definition:isRecord")).toBe(true);
   });
+
+  test("packet 25 shared primitives have declared homes and enforce single definition", () => {
+    const rules = new Map(SINGLE_DEFINITION_RULES.map((r) => [r.name, r.home]));
+    expect(rules.get("collectFilesSorted")).toBe("src/shared/io/collectFiles.ts");
+    expect(rules.get("projectUnencodableConstraintClauses")).toBe("src/shared/intent/constraintClauses.ts");
+    expect(rules.get("isLens")).toBe("src/shared/types/lens.ts");
+    expect(rules.get("VALID_SEVERITIES")).toBe("src/shared/types/lens.ts");
+    expect(rules.get("VALID_CONFIDENCES")).toBe("src/shared/types/lens.ts");
+    expect(rules.get("collectFiles")).toBeNull();
+
+    // Verification of banned fork collectFiles
+    const bannedHits = scanFile(
+      "src/audit/io/toolingManifest.ts",
+      "function collectFiles(dir: string): string[] { return []; }",
+    );
+    expect(bannedHits.some((h) => h.rule === "single-definition:collectFiles")).toBe(true);
+    expect(bannedHits[0]?.detail).toContain("retired fork name");
+
+    // Verification of violation outside home
+    const outsideHits = scanFile(
+      "src/audit/foo.ts",
+      [
+        "function collectFilesSorted() {}",
+        "function projectUnencodableConstraintClauses() {}",
+        "function isLens() {}",
+        "const VALID_SEVERITIES = new Set();",
+        "const VALID_CONFIDENCES = new Set();",
+      ].join("\n"),
+    );
+    const outsideRuleNames = outsideHits.map((h) => h.rule);
+    expect(outsideRuleNames).toContain("single-definition:collectFilesSorted");
+    expect(outsideRuleNames).toContain("single-definition:projectUnencodableConstraintClauses");
+    expect(outsideRuleNames).toContain("single-definition:isLens");
+    expect(outsideRuleNames).toContain("single-definition:VALID_SEVERITIES");
+    expect(outsideRuleNames).toContain("single-definition:VALID_CONFIDENCES");
+
+    // Verification of declared home exemption
+    expect(
+      scanFile(
+        "src/shared/io/collectFiles.ts",
+        "export function collectFilesSorted(root: string): string[] { return []; }",
+      ).filter((h) => h.rule === "single-definition:collectFilesSorted"),
+    ).toEqual([]);
+  });
 });
 
 describe("comparator-body pattern", () => {

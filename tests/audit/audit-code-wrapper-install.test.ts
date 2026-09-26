@@ -133,7 +133,9 @@ const repoLocalHostCases: RepoLocalHostCase[] = [
       expect(vscodeAgent).toMatch(/# Audit Code Agent/);
       expect(vscodeAgent).toMatch(/host work/);
       expect(vscodeAgent).not.toMatch(/--auditor/);
-      expect(vscodeAgent).toMatch(/node audit-code\.mjs/);
+      // Packet 9: the VS Code agent embeds the thin loader, which no longer
+      // carries a repo-local dev entrypoint to a third-party host.
+      expect(vscodeAgent).not.toMatch(/node audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## VS Code/);

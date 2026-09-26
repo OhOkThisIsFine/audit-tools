@@ -73,7 +73,20 @@ function declaredSymbols(): Set<string> {
   // EVERY tracked source file, not a tree list: the resolution universe must be
   // wider than the scan set, or a comment citing a hook helper
   // (`.claude/hooks/*.mjs`) or a script would red for naming something real.
-  const files = execFileSyncHidden("git", ["ls-files"], { cwd: REPO_ROOT, encoding: "utf8" })
+  // PLUS every untracked working-tree source file (`--others`): a module split
+  // mid-lap declares its moved symbols in new files the index does not list
+  // yet, and "exists in the tree" means the working tree, not the last
+  // commit — a comment citing a symbol its lap just moved is reconciled, not
+  // drift. This only ever turns false reds green: a genuinely deleted symbol
+  // (no declaration in any working-tree file) still reds, which the
+  // `comment-symbol-exempt:` idiom then covers explicitly.
+  const tracked = execFileSyncHidden("git", ["ls-files"], { cwd: REPO_ROOT, encoding: "utf8" });
+  const untracked = execFileSyncHidden(
+    "git",
+    ["ls-files", "--others", "--exclude-standard"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  const files = `${tracked}\n${untracked}`
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => /\.(ts|tsx|mjs|cjs|js|jsx)$/.test(line));

@@ -262,10 +262,10 @@ test("inv-1: Python route detection requires a framework marker, not a .py exten
   ]);
 });
 
-// CP-NODE-19 accepted gaps, pinned so closing either is a DELIBERATE act (this
-// test must be updated) rather than a silent side effect of widening a gate.
-// Both are leads-not-verdicts trades: missing evidence over fabricated evidence.
-test("CP-NODE-19 gap: a sibling-imported router carries no marker, so its routes are dropped", () => {
+// CP-NODE-19 gaps closed in packet 18:
+// 1. Sibling-imported routers in Python are traced and their routes extracted.
+// 2. Component script regions in Vue/Svelte/Astro are extracted while template markup is ignored.
+test("CP-NODE-19 gap closed: a sibling-imported router is traced and its routes are extracted", () => {
   // Asked at the FRAMEWORK boundary, not via `routesOf`: a path segment named
   // `routes` also trips `fallbackRouteEdge`, and that conventional route would
   // mask what this gap is actually about (the decorator scan contributing
@@ -280,18 +280,12 @@ test("CP-NODE-19 gap: a sibling-imported router carries no marker, so its routes
     ].join("\n"),
     new Map(),
   );
-  // The file constructs no framework object and imports no framework by name, so
-  // the positive-marker gate (which exists to stop @mock.patch fabricating routes)
-  // cannot distinguish it from a test module. Recorded as an accepted false
-  // negative; a consumption trace that identifies the sibling `router` would close
-  // it without reopening the fabricated-route hole.
-  expect(
-    routes,
-    "a sibling-imported router is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
-  ).toEqual([]);
+  expect(routes).toEqual([
+    { path: "/orders", handler: "app/handlers.py", method: "GET" },
+  ]);
 });
 
-test("CP-NODE-19 gap: a .vue script block contributes no route — the accepted gap", () => {
+test("CP-NODE-19 gap closed: a .vue script block contributes routes while markup is ignored", () => {
   const vue = [
     "<template>",
     '  <div class="app">router.get("/not-a-route", h)</div>',
@@ -301,22 +295,14 @@ test("CP-NODE-19 gap: a .vue script block contributes no route — the accepted 
     "router.get('/users', listUsers)",
     "</script>",
   ].join("\n");
-  // Read at the REGISTERED-route boundary, which is where the gap actually is —
-  // `TS_LIKE_EXTENSION_PATTERN` is the gate that skips the whole SFC. The
-  // framework entry point is a different gate and is not what this pins.
+  // Read at the REGISTERED-route boundary.
   const { routes } = extractRegisteredRouteEvidence("src/App.vue", vue, new Map());
-  expect(
-    routes,
-    "a .vue script block is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
-  ).toEqual([]);
+  expect(routes).toEqual([
+    { path: "/users", handler: "src/App.vue", method: "GET" },
+  ]);
 
-  // WHAT CLOSING IT NAIVELY WOULD COST, measured: the same content under a
-  // TS-family extension reads the `<template>` MARKUP as route source and
-  // fabricates a `/not-a-route` edge alongside the real one. That is the
-  // prose-fabrication class this gate exists to prevent, so the gap is the
-  // cheaper error — closing it needs a real `<script>`-block extraction, never
-  // an extension addition. Pinning the mechanism here means the trade is stated
-  // as a measurement rather than as a claim in a comment.
+  // Reading the same content under a TS-family extension reads the entire file as a
+  // module and picks up both routes (the markup-fabrication that script-region gating avoids).
   const asModule = extractRegisteredRouteEvidence(
     "src/App.svelte.ts",
     vue,
@@ -326,6 +312,134 @@ test("CP-NODE-19 gap: a .vue script block contributes no route — the accepted 
     asModule.routes.map((route) => route.path).sort(),
     "reading the SFC as a module picks up the MARKUP's route — the fabrication the gap avoids",
   ).toEqual(["/not-a-route", "/users"]);
+});
+
+test("packet 18: Python sibling router imports with aliases and unrelated imports", () => {
+  const content = [
+    "from .deps import router as custom_router, helper, client as api_client",
+    "from ..common.routers import api_router",
+    "from unittest import mock",
+    "",
+    '@custom_router.get("/orders")',
+    "async def list_orders(): ...",
+    "",
+    '@api_router.post("/items")',
+    "async def create_item(): ...",
+    "",
+    '@helper.get("/helper-route")',
+    "async def helper_route(): ...",
+    "",
+    '@api_client.get("/client-route")',
+    "async def client_route(): ...",
+    "",
+    '@mock.patch("/mock-target")',
+    "def test_func(): ...",
+  ].join("\n");
+
+  const { routes } = extractFrameworkRouteEvidence("app/handlers.py", content, new Map());
+  expect(routes).toEqual([
+    { path: "/orders", handler: "app/handlers.py", method: "GET" },
+    { path: "/items", handler: "app/handlers.py", method: "POST" },
+  ]);
+});
+
+test("packet 18: Python route registration with methods list on sibling router", () => {
+  const content = [
+    "from .deps import bp as custom_bp",
+    '@custom_bp.route("/users", methods=["GET", "POST"])',
+    "def users(): ...",
+  ].join("\n");
+
+  const { routes } = extractFrameworkRouteEvidence("app/views.py", content, new Map());
+  expect(routes).toEqual([
+    { path: "/users", handler: "app/views.py", method: "GET" },
+    { path: "/users", handler: "app/views.py", method: "POST" },
+  ]);
+});
+
+test("packet 18: Python comments and docstrings do not fabricate routes", () => {
+  const content = [
+    "from .deps import router",
+    "# @router.get('/commented-route')",
+    '"""',
+    '@router.post("/docstring-route")',
+    '"""',
+    '@router.get("/real-route")',
+    "def real_route(): ...",
+  ].join("\n");
+
+  const { routes } = extractFrameworkRouteEvidence("app/views.py", content, new Map());
+  expect(routes).toEqual([
+    { path: "/real-route", handler: "app/views.py", method: "GET" },
+  ]);
+});
+
+test("packet 18: Svelte component script regions extract routes and ignore template markup", () => {
+  const svelte = [
+    '<script context="module">',
+    "import { router } from './router';",
+    "router.get('/module-health', healthHandler);",
+    "</script>",
+    "<script>",
+    "router.post('/instance-action', actionHandler);",
+    "</script>",
+    '<main>',
+    '  <button>router.get("/template-fake", h)</button>',
+    '  <!-- <script>router.get("/commented-script", h)</script> -->',
+    '</main>',
+  ].join("\n");
+
+  const { routes } = extractRegisteredRouteEvidence("src/Component.svelte", svelte, new Map());
+  expect(routes).toEqual([
+    { path: "/module-health", handler: "src/Component.svelte", method: "GET" },
+    { path: "/instance-action", handler: "src/Component.svelte", method: "POST" },
+  ]);
+});
+
+test("packet 18: Astro component frontmatter and script tags extract routes and ignore template markup", () => {
+  const astro = [
+    "---",
+    "import { router } from './router';",
+    "// router.get('/commented-in-frontmatter', h);",
+    "router.post('/api/astro-post', postHandler);",
+    "---",
+    "<section>",
+    '  <p>router.get("/astro-template-fake", h)</p>',
+    "  <!-- <script>router.get('/commented-script-tag', h);</script> -->",
+    "</section>",
+    "<script>",
+    "router.get('/api/astro-client', clientHandler);",
+    "/* router.get('/block-commented', h); */",
+    "</script>",
+  ].join("\n");
+
+  const { routes } = extractRegisteredRouteEvidence("src/pages/index.astro", astro, new Map());
+  expect(routes).toEqual([
+    { path: "/api/astro-post", handler: "src/pages/index.astro", method: "POST" },
+    { path: "/api/astro-client", handler: "src/pages/index.astro", method: "GET" },
+  ]);
+});
+
+test("packet 18: Component script regions with handler bindings resolve calls", () => {
+  const vue = [
+    "<script setup>",
+    "import { userHandler } from './handlers/users';",
+    "router.get('/api/users', userHandler);",
+    "</script>",
+    "<template><div>users</div></template>",
+  ].join("\n");
+
+  const lookup = new Map([
+    ["src/handlers/users.ts", "src/handlers/users.ts"],
+  ]);
+  const { routes, calls } = extractRegisteredRouteEvidence("src/App.vue", vue, lookup);
+  expect(routes).toEqual([
+    { path: "/api/users", handler: "src/handlers/users.ts", method: "GET" },
+  ]);
+  expect(calls.length).toBe(1);
+  expect(calls[0].from).toBe("src/App.vue");
+  expect(calls[0].to).toBe("src/handlers/users.ts");
+  expect(calls[0].kind).toBe("route-handler-link");
 });
 
 test("inv-1: an unmarked .py test file contributes no fabricated route to the graph", () => {

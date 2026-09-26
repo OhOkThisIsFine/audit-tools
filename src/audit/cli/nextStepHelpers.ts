@@ -22,7 +22,6 @@ import {
   readJsonFile,
   readSubmissionIngestHistory,
   readTrailingSubmissionRefusals,
-  persistAnalyzerConsent,
   persistAnalyzerSettings,
   writeJsonFile,
   type ObligationDef,
@@ -248,6 +247,14 @@ export type NextStepParams = {
    * acquisition executor stays a hermetic empty-marker no-op.
    */
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
+  /**
+   * Phase-1 deterministic auto-fix gate (packet 5 / F03: opt-in). Absent ⇒ the
+   * phase is skipped and the audited tree is left unchanged; `enabled: true`
+   * opts the current run in; `dryRun: true` keeps precedence over `enabled`.
+   * Set from the CLI `--allow-auto-fix` / `--auto-fix-dry-run` flags; the
+   * in-memory advance path carries it, never durable storage.
+   */
+  autoFix?: { enabled?: boolean; dryRun?: boolean };
   since?: string;
   /**
    * The FOLD's git-index probe cache (see `ScopeIndexMemo`), created once by
@@ -508,12 +515,14 @@ type AnalyzerConsentBranchResult =
  * Item B (consent surfacing) — the acquisition obligation's fold branch,
  * mirroring the analyzer-install consent fold exactly:
  *   - nothing pending (acquisition off / this run's scoped grant covers every
- *     applicable candidate / all decided) → run the deterministic acquisition
- *     executor (`fallthrough`);
+ *     applicable candidate / all decided this run) → run the deterministic
+ *     acquisition executor (`fallthrough`);
  *   - a decisions submission arrived on the `analyzer_consent` lane
- *     (`{ "<id>": "granted" | "declined" }`) → persist the decisions into
- *     session config (decisions durable, tokens never), fold them into the
- *     in-flight acquisition options, and re-scan (`continue`);
+ *     (`{ "<id>": "granted" | "declined" }`) → fold the decisions into the
+ *     in-flight acquisition options for THIS RUN ONLY (packet 5 / O07: grants
+ *     and declines are strictly ephemeral — nothing is written to durable
+ *     storage, so the next run re-offers every candidate) and re-scan
+ *     (`continue`);
  *   - otherwise → emit the ONE batched operator-interactive offer step
  *     (`return`), so applicable consent-gated candidates are never silently
  *     skipped (the silent-fail-closed defect this program exists to fix).
@@ -546,21 +555,21 @@ export async function handleAnalyzerConsentBranch(
     return { action: "continue" };
   }
   if (incoming.status === "ok") {
-    // The operator answers grants and declines on ONE lane, but the two have
-    // different lifetimes and the split is enforced here rather than trusted.
-    // A DECLINE is durable: it vetoes every later spawn of that tool. A GRANT
-    // binds only the run that asked (owner directive, 2026-08-21) — a durable
-    // grant keeps granting itself to runs whose operator never saw the offer,
-    // which for a network-egress analyzer turns one consent into standing
-    // consent. Grants therefore ride the per-run consent TOKEN, the channel the
-    // strict policy schema cannot hold.
+    // The operator answers grants and declines on ONE lane, and the two have
+    // different lifetimes — but BOTH are strictly per-run (packet 5 / O07: a
+    // durable decline vetoes runs whose operator never saw the offer, and a
+    // durable grant turns one consent into standing consent for a
+    // network-egress analyzer). A DECLINE vetoes every later spawn of that
+    // tool for the rest of THIS run; a GRANT binds only the run that asked
+    // and rides the per-run consent TOKEN, the channel the strict policy
+    // schema cannot hold. Neither reaches durable storage, so the next run
+    // re-offers every consent-gated candidate.
     const declined: Record<string, "declined"> = {};
     const granted: string[] = [];
     for (const [id, decision] of Object.entries(incoming.values)) {
       if (decision === "declined") declined[id] = "declined";
       else granted.push(id);
     }
-    await persistAnalyzerConsent(params.root, declined);
     if (params.externalAcquisition) {
       params.externalAcquisition.analyzerConsent = {
         ...(params.externalAcquisition.analyzerConsent ?? {}),
@@ -578,9 +587,9 @@ export async function handleAnalyzerConsentBranch(
         };
       }
     }
-    // Deletion + the accepted ledger event are COMMIT-phase (the consent
-    // persist above is durable-by-design and idempotent, so a crash-replay
-    // re-applies it harmlessly while the staged file is restored).
+    // Deletion + the accepted ledger event are COMMIT-phase (the in-memory
+    // consent fold above is idempotent, so a crash-replay re-applies it
+    // harmlessly while the staged file is restored).
     markSubmissionApplied(
       tx,
       incoming.path,
@@ -2354,7 +2363,7 @@ export async function handleSystemicChallengeBranch(
  * lock acquisition (the deleted O2 RMW).
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "autoFix" | "since" | "scopeIndexMemo">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -2383,6 +2392,7 @@ export async function executeAndRecord(
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
+      autoFix: params.autoFix,
       since: params.since,
       lineIndex: indexes.lineIndex,
       sizeIndex: indexes.sizeIndex,
@@ -2955,9 +2965,9 @@ export function buildAuditObligations(
   // handler's returned bundle (an in-memory carry, never a disk reload).
   const bespoke: Readonly<Record<string, AuditObligationDef["execute"]>> = {
     // External analyzers: the Item B consent fold runs FIRST — applicable
-    // consent-gated candidates with no recorded decision surface ONE batched
-    // operator offer (or consume the arrived decisions file), and only then
-    // does the deterministic acquisition executor run.
+    // consent-gated candidates with no decision yet this run surface ONE
+    // batched operator offer (or consume the arrived decisions file), and only
+    // then does the deterministic acquisition executor run.
     external_analyzers_current: async (bundle, ctx): Promise<AuditOutcome> => {
       const state = deriveAuditState(bundle, { emitStaleness: false });
       const branch = await handleAnalyzerConsentBranch(

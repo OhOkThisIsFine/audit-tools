@@ -239,6 +239,69 @@ describe("buildConfirmIntentStep — prompt 17c: proposal from the intake summar
 });
 
 // ---------------------------------------------------------------------------
+// buildConfirmIntentStep — fallback (no summary): complete required fields
+// ---------------------------------------------------------------------------
+//
+// Packet 9 (P0.2 remediate half): the fallback prompt once said "Only
+// `scope_summary` and `intent_summary` are required", contradicting the strict
+// schema (which also requires `schema_version`, `confirmed_at`, `confirmed_by`).
+// The rendered required set must now be derived from the schema. The fallback
+// is reached when an EXTRACTED PLAN exists but no intake summary does.
+describe("buildConfirmIntentStep — fallback names the COMPLETE required fields", () => {
+  beforeEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(join(ARTIFACTS_DIR, "intake"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("states every schema-required field, not only scope_summary/intent_summary", async () => {
+    const { IntentCheckpointSchema } = await import("audit-tools/shared");
+    const required = Object.entries(IntentCheckpointSchema.shape)
+      .filter(([, field]) => !field.isOptional())
+      .map(([key]) => `\`${key}\``);
+
+    // An extracted plan alone satisfies the `confirm_intent` gate (no summary
+    // file), which is the path that renders the fallback prompt.
+    await writeFile(
+      intakePaths(ARTIFACTS_DIR).extractedPlan,
+      JSON.stringify({
+        plan_id: "P1",
+        findings: [
+          {
+            id: "F-001",
+            title: "Fix auth",
+            category: "correctness",
+            severity: "high",
+            confidence: "high",
+            lens: "correctness",
+            summary: "s",
+            affected_files: [],
+            evidence: ["evidence"],
+          },
+        ],
+        blocks: [],
+      }),
+      "utf8",
+    );
+
+    const step = await decideNextStep({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    expect(step.step_kind).toBe("confirm_intent");
+    const prompt = await readFile(step.prompt_path, "utf8");
+
+    // The old wording must be gone, and the complete set present.
+    expect(prompt).not.toMatch(/Only `scope_summary` and `intent_summary` are required/);
+    const requiredLine = prompt.split("\n").find((line) => line.startsWith("Required fields:"));
+    expect.soft(requiredLine?.match(/`([^`]+)`/g)?.map((key) => key)).toEqual(required);
+    for (const field of required) {
+      expect(prompt, `required field ${field} must appear in the fallback prompt`).toContain(field);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A legacy draft checkpoint is not a confirmation
 // ---------------------------------------------------------------------------
 

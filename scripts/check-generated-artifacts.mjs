@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/generated-artifact-registry.test.ts
 // Reconcile every tracked generator with exactly one declared freshness
 // authority. Individual check legs and contract tests compare bytes; this gate
 // makes the SET of generators and authorities mechanically complete.
@@ -8,6 +9,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { GENERATED } from './guard-reach-data.mjs';
+import { releaseGatePhases } from './shared/run-release-gates.mjs';
 
 const GENERATOR_DECLARATION = /^\s*\/\/\s*@generated-artifact\b/m;
 const DEFAULT_WRITE_ARM = /process\.argv\.includes\(\s*['"]--write['"]\s*\)/;
@@ -59,7 +61,13 @@ export function validateGeneratedRegistry({ rows, generators, trackedFiles, pack
     if (count > 1) failures.push(`${generator}: claimed by ${count} rows`);
   }
 
-  const verifySteps = (packageScripts['verify:checks'] ?? '').split(/\s+/);
+  // The release step set is DERIVED from the gate declaration (packet 22), so
+  // "inside verify:checks" means "one of the declared release legs", read from
+  // the catalog — never parsed back out of a hand-list in package.json.
+  const verifySteps = new Set([
+    ...releaseGatePhases().default,
+    ...releaseGatePhases().tail,
+  ]);
   for (const row of rows) {
     if (!trackedFiles.has(row.generator)) {
       failures.push(`${row.generator}: row names a generator that is not tracked`);
@@ -93,8 +101,8 @@ export function validateGeneratedRegistry({ rows, generators, trackedFiles, pack
         } else if (checkMode === 'default' && /(?:^|\s)--write(?:\s|$)/.test(command)) {
           failures.push(`${row.generator}: default-check authority '${script}' invokes --write`);
         }
-        if (!verifySteps.includes(script)) {
-          failures.push(`${row.generator}: '${script}' is not inside verify:checks`);
+        if (!verifySteps.has(script)) {
+          failures.push(`${row.generator}: '${script}' is not inside the release gate sequence`);
         }
       }
       continue;

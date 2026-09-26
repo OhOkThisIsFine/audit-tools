@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/run-status-has-no-document-phase.test.ts, tests/remediate/remediate-state-invariants.test.ts
 /**
  * The single authority for the `RemediationState` RUN status lifecycle.
  *
@@ -38,6 +39,17 @@ export const REMEDIATION_RUN_STATUSES = [
   "waiting_for_triage",
   "closing",
   "complete",
+  // Operator lifecycle actions (O31 / packet 14): a run parked by an explicit
+  // `plan-only` / `pause` verb, and a run terminally cancelled. Both are
+  // first-class statuses so `next-step` derives a truthful step from them
+  // rather than mis-reading a stopped run as one that is still `implementing`
+  // (the 2026-08-03 defect: a manual stop left `state.json` at `implementing`
+  // and nothing on disk named the pause). `paused` carries its exact
+  // continuation in the state's `lifecycle` record; `cancelled` is terminal and
+  // preserves artifacts (the close phase — which archives and deletes on green —
+  // is never reached).
+  "paused",
+  "cancelled",
 ] as const;
 
 export type RemediationRunStatus = (typeof REMEDIATION_RUN_STATUSES)[number];

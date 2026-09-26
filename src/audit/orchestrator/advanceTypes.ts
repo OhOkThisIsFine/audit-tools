@@ -77,10 +77,12 @@ export interface AdvanceAuditOptions {
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   /**
    * Host gate on the phase-1 deterministic auto-fix, which is the one audit
-   * phase that WRITES to the audited tree. Absent ⇒ the phase runs, preserving
-   * today's default. `enabled: false` opts it out; `dryRun: true` reports what
-   * it would do without spawning a formatter. Both are checked before the first
-   * formatter, never applied as a revert afterwards.
+   * phase that WRITES to the audited tree. OPT-IN: absent ⇒ the phase is
+   * skipped and the audited tree is left unchanged (the read-only default).
+   * `enabled: true` (CLI `--allow-auto-fix`) opts the current run in;
+   * `dryRun: true` (CLI `--auto-fix-dry-run`) reports what it would do without
+   * spawning a formatter and keeps precedence over `enabled`. Both are checked
+   * before the first formatter, never applied as a revert afterwards.
    *
    * Distinct from `externalAcquisition.analyzerConsent`, which vetoes one named
    * tool: this refuses the phase regardless of which formatters resolve.

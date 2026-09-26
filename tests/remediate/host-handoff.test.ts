@@ -2285,4 +2285,52 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
     expect(reminted.workload.contract_version).toBe("remediation-host-workload/v1alpha3");
     expect(reminted.handoff_record).toEqual(handoff.handoff_record);
   });
+
+  it("re-binds a stale digest when the plan moved under a live binding, instead of refusing", async () => {
+    // open-bugs "Host-handoff residuals" item (h): the 2026-08-20 wedge. A
+    // clarification answer (or a widened scope) changes the prompt content the
+    // workload re-derives, so the digest the persisted record binds to no longer
+    // matches — while every other field (run, baseline, work item ids) is
+    // unchanged because the block ids did not move. That used to throw a raw
+    // "no longer matches the persisted state binding" with no sanctionable
+    // repair short of hand-deleting `host_handoff`. The sanctioned repair is the
+    // same re-mint the version-bump path already performs: the record re-pins
+    // the CURRENT state's digest, and no stale result is ever accepted to make
+    // progress.
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    // Move the plan under the binding WITHOUT moving any block id: a changed
+    // targeted_command changes the prompt, hence the re-derived digest, while the
+    // persisted record still carries the pre-change digest.
+    const movedState: CurrentState = {
+      ...state,
+      plan: {
+        ...state.plan,
+        blocks: state.plan.blocks.map((entry) =>
+          entry.block_id === "block-a"
+            ? { ...entry, targeted_commands: ['node -e "process.exit(0)" --moved'] }
+            : entry,
+        ),
+      },
+    };
+    const changed = requirePrepared(
+      await boundary.prepareRemediationHostHandoff({
+        root,
+        artifactsDir,
+        runId,
+        baselineCommit: await headOf(root),
+        state: movedState,
+      }),
+    );
+    // The block id is preserved — the canonical expected identity survives the
+    // rebind — and the return is a fresh record, not a throw.
+    expect(changed.workload.work_items.map((item) => item.id)).toContain("block-a");
+    // The record re-mints the CURRENT digest rather than retaining the stale one.
+    expect(changed.handoff_record.workload_sha256).not.toBe(
+      handoff.handoff_record.workload_sha256,
+    );
+    // The binding's other identity fields are unchanged — only the digest moved.
+    expect(changed.handoff_record.run_id).toBe(handoff.handoff_record.run_id);
+    expect(changed.handoff_record.baseline_commit).toBe(handoff.handoff_record.baseline_commit);
+    expect(changed.handoff_record.work_item_ids).toEqual(handoff.handoff_record.work_item_ids);
+  });
 });

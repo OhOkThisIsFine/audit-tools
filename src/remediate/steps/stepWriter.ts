@@ -3,17 +3,18 @@ import {
   writeStepContract,
   writeBlockedStepContract,
   type BaseStepContract,
+  type AccessDeclaration,
+  type StepStatus,
 } from "audit-tools/shared";
 import {
   REMEDIATION_STEP_CONTRACT_VERSION,
   type RemediationStep,
   type RemediationStepKind,
-  type RemediationStepStatus,
 } from "./types.js";
 
 export interface WriteStepInput {
   stepKind: RemediationStepKind;
-  status: RemediationStepStatus;
+  status: StepStatus;
   runId: string | null;
   repoRoot: string;
   artifactsDir: string;
@@ -21,6 +22,15 @@ export interface WriteStepInput {
   allowedCommands?: string[];
   stopCondition: string;
   artifactPaths?: Record<string, string>;
+  /**
+   * Packet 7 (Prompt Contract v1): the read/write scope the prompt's exact
+   * paths are bound at. Rides through `extraFields` with the same
+   * conditional-omission semantics as audit's writer — present only when the
+   * emitter supplies it, so it can never clobber the normalized path fields.
+   * A rendered input path must be present in the emitted read scope
+   * (`renderedPathsInScope` in audit-tools/shared holds that mechanically).
+   */
+  access?: AccessDeclaration;
 }
 
 /**
@@ -42,6 +52,7 @@ export async function writeCurrentStep({
   allowedCommands = [],
   stopCondition,
   artifactPaths = {},
+  access,
 }: WriteStepInput): Promise<RemediationStep> {
   return writeStepContract<RemediationStep, RemediationStepKind, string>({
     contractVersion: REMEDIATION_STEP_CONTRACT_VERSION,
@@ -55,6 +66,9 @@ export async function writeCurrentStep({
     stopCondition,
     artifactPaths,
     trimPromptStart: true,
+    extraFields: {
+      ...(access ? { access } : {}),
+    },
   });
 }
 

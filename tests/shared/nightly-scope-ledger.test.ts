@@ -19,6 +19,7 @@ import {
   inScopeDocs,
   itemHash,
   normalizeItemText,
+  pruneScopeLedger,
   readCoverage,
   readScopeLedger,
   splitDocItems,
@@ -251,5 +252,52 @@ describe("the in-scope corpus", () => {
     const manifest = [{ type: "design / concept", files: ["docs/**/*.md"], check: "c", autoApply: "yes" }];
     writeFileSync(join(root, "docs", "scratch.md"), "# Scratch\n");
     expect(inScopeDocs(root, { manifest }).map((d) => d.path)).toEqual(["docs/concept.md"]);
+  });
+});
+
+describe("ledger pruning (M43)", () => {
+  // The canonical in-scope set is `inScopeDocs` — resolved through the doc
+  // manifest — so a deleted or renamed document leaves a stale `path` behind in
+  // the ledger and nothing enumerates it. `pruneScopeLedger` drops exactly those
+  // orphans: an entry whose recorded `path` is no longer in scope.
+  const manifest = [
+    { type: "design / concept", files: ["docs/concept.md"], check: "c", autoApply: "yes" },
+  ];
+
+  it("removes entries whose document the manifest no longer enumerates", () => {
+    const at = headCommit(root);
+    const [first] = docItems(root, "docs/concept.md");
+    let ledger = stampExamined(readScopeLedger(root), [first.hash], {
+      commit: at,
+      path: "docs/concept.md",
+    });
+    // A deleted/renamed doc leaves this orphan path behind.
+    ledger = stampExamined(ledger, [itemHash("orphaned claim")], {
+      commit: at,
+      path: "docs/gone.md",
+    });
+    // A legacy entry with no recorded path cannot be identified to prune.
+    ledger = stampExamined(ledger, [itemHash("pathless legacy")], { commit: at });
+
+    const pruned = pruneScopeLedger(root, ledger, { manifest });
+
+    expect(pruned.items[first.hash]).toBeDefined();
+    expect(pruned.items[itemHash("pathless legacy")]).toBeDefined();
+    expect(pruned.items[itemHash("orphaned claim")]).toBeUndefined();
+  });
+
+  it("keeps an entry whose path is still in scope untouched", () => {
+    const at = headCommit(root);
+    const [first] = docItems(root, "docs/concept.md");
+    const ledger = stampExamined(readScopeLedger(root), [first.hash], {
+      commit: at,
+      path: "docs/concept.md",
+    });
+    const pruned = pruneScopeLedger(root, ledger, { manifest });
+    expect(pruned.items[first.hash].lastCheckedCommit).toBe(at);
+  });
+
+  it("is a no-op on an empty ledger", () => {
+    expect(pruneScopeLedger(root, readScopeLedger(root), { manifest }).items).toEqual({});
   });
 });

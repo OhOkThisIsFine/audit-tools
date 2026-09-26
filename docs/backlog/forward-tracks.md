@@ -30,17 +30,14 @@ host is what must act on the ranking.
 **Ceremony-review remainder — Tier 2/3 consolidations, plus the one unlanded Part-5 mechanism
 (2026-08-29).** Full evidence and the ranked plan:
 [`ceremony-complexity-review-2026-08-29.md`](../reviews/ceremony-complexity-review-2026-08-29.md).
-The 2026-08-29 lap landed Tier 0, Tier 1, F8, F10 (registry moved to `~/.agent-config`), and both
-anti-refill mechanisms for the orphan-module class (`check:orphan-modules` + knip `files`). What
-remains open: **`check:shared-primitives` still scans `git ls-files 'src/**/*.ts'` only**, so the
-governance tree stays exempt from the one-definition rule it enforces (the F1 substrate removed
-today's duplicates; the gate reach is what stops them re-growing); and the review's Tier 2
-(CY-02/05/06 vocabulary copies, CY-15 collectFiles, CY-14, CY-13, F5 one-backlog-process, F4
-test:doc-contract registration, F6 Stop-gate preamble, CY-08 line-index memo, C-05, C-09) and
-Tier 3 (CY-04, CY-07, CY-12, CY-09, F3 attestation dedup, C-03 philosophy map, C-11 traps sweep,
-CY-11, F9 pre-commit boundary split) stay as ranked in the review. **Property:** the single-source
-gate reaches the governance tree, so a consolidation lands once instead of refilling. ⚠ Not the
-refused half of PH-05 — no gate is weakened; the substrate stops being written N times.
+  The shared-primitives check now reaches source and governance files, and release execution
+  derives from the ordered gate registry. Those slices do not finish the consolidation track:
+  adding a gate still requires independently authored command, reach, and package-script data.
+  **Remaining property:** one executable declaration owns command, order, reach and pre-commit
+  policy, with generated consumers. The fixture that supplies separate GUARDS, REACH and package
+  declarations proves their consumers, not this property. Reconcile other ranked Tier 2/3 items
+  against their own acceptance evidence before removing them; a recovered deletion is not proof.
+  No gate is weakened to make the consolidation pass.
 
 **The audit draw WRITES to the audited tree, and the read-only framing does not say so
 (2026-08-24, raised by CP-NODE-7's refutation lane).** `docs/project-philosophy.md` and CLAUDE.md

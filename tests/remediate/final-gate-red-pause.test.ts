@@ -49,10 +49,11 @@ async function writeLayoutMarkers(): Promise<void> {
  * Make the scratch repo look like the audit-tools monorepo, INCLUDING the vitest
  * gate script the unit leg spawns.
  *
- * Without the layout the gate is `scoped_out` — its command list is audit-tools
- * specific — and a scoped-out gate PASSES, so the red path would never be
- * reached and the test would pass for the wrong reason. Without the SCRIPT the
- * tree is deliberately out of scope; see the negative pin below.
+ * Without the layout the pinned profile does not apply — this fixture declares
+ * no manifest command either, so the gate would be the blocking
+ * `needs_command` decision and the red path would never be reached (the test
+ * would pass for the wrong reason). Without the SCRIPT the tree deliberately
+ * leaves the pinned profile; see the negative pin below.
  */
 async function makeRepoLookLikeAuditTools(): Promise<void> {
   await writeLayoutMarkers();
@@ -872,23 +873,31 @@ describe("the gate's unit leg reads a trustworthy verdict", () => {
     }
   });
 
-  it("scopes OUT a tree carrying the layout markers but not the gate script", async () => {
-    // Applicability must be verified, not coincidental. A tree with the five
-    // layout markers and no gate script would otherwise be judged in scope, spawn
-    // `node <missing>`, exit 1, and report a whole-repo RED on a healthy repo —
-    // the same false-red class the pause design exists to remove. This fixture
-    // shape is not hypothetical: it is what the harness produced before the
-    // predicate learned to check the script.
+  it("does NOT scope out a tree carrying the layout markers but not the gate script", async () => {
+    // Applicability of the PINNED profile must be verified, not coincidental.
+    // A tree with the five layout markers and no gate script is not the
+    // audit-tools monorepo, so the pinned suite does not apply — but the run
+    // no longer sails through on a scope note either: with no derivable
+    // command (this fixture declares none) the gate is the BLOCKING
+    // `needs_command` decision, never a pass. Spawning `node <missing>` and
+    // reporting a whole-repo RED on a healthy repo would be the same
+    // false-red class the pause design exists to remove.
     await writeLayoutMarkers();
     expect(isAuditToolsMonorepo(REPO_DIR)).toBe(false);
     expect(toolOwnedFinalGateCommands(REPO_DIR)).toEqual([]);
 
+    let consulted = false;
     const gate = await runToolOwnedFinalGate(REPO_DIR, {
-      runner: failingRunner,
+      runner: () => {
+        consulted = true;
+        return failingRunner();
+      },
     });
-    // Scoped out, so the failing runner is never consulted: no command ran.
-    expect(gate.scoped_out).toBe(true);
-    expect(gate.passed).toBe(true);
+    // The failing runner is never consulted: no command ran. But the gate
+    // BLOCKS rather than passing.
+    expect(consulted).toBe(false);
+    expect(gate.outcome).toBe("needs_command");
+    expect(gate.passed).toBe(false);
     expect(gate.results).toEqual([]);
   });
 

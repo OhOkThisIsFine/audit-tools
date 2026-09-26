@@ -1,3 +1,11 @@
+// sites-pinned: tests/remediate/step-utils.test.ts, tests/remediate/cli-root-resolution.test.ts
+import { resolve } from "node:path";
+import {
+  callerWorkingDirectory,
+  discoverRepoRoot,
+  remediationArtifactsDir,
+  resolveRepoRoot,
+} from "audit-tools/shared";
 import type { Finding } from "../state/types.js";
 
 export type FindingRiskTier = "safe" | "substantive" | "context_dependent";
@@ -61,4 +69,27 @@ export function classifyFindingRisk(finding: Finding): FindingClassification {
   }
 
   return { tier: "substantive", reason: `lens "${finding.lens}", severity=${finding.severity} — no safe/breaking signal matched` };
+}
+
+export function resolveRoot(root?: string): string {
+  // The library-entry arm of the same two-arm resolution the CLI performs
+  // (`resolveRootOption` in src/remediate/index.ts). A SUPPLIED root is honored
+  // verbatim through `resolveRepoRoot` — an explicit root is an instruction, so
+  // a sub-project inside a larger repo stays the sub-project — while an ABSENT
+  // one is DISCOVERED from the caller's working directory rather than falling
+  // back to the literal ".". The old `?? "."` made an embedded call from a
+  // nested cwd root the run at that SUBDIRECTORY and fork a phantom nested
+  // artifact tree there; anchoring alone could not fix it, because
+  // `resolveRepoRoot` only climbs out of `.audit-tools/` and never up to the
+  // owning repository. See src/shared/io/repoRoot.ts.
+  return root === undefined
+    ? discoverRepoRoot(callerWorkingDirectory())
+    : resolveRepoRoot(root);
+}
+
+export function resolveArtifactsDir(root: string, artifactsDir?: string): string {
+  // The default rebases onto the anchored root via the shared helper (the sole
+  // owner of the `.audit-tools/remediation` join literal); an explicit dir is
+  // honored verbatim.
+  return artifactsDir ? resolve(artifactsDir) : remediationArtifactsDir(root);
 }

@@ -69,6 +69,10 @@ export type { AccessTouchEvent } from "./accessMemory.js";
 export { deriveAccessMemoryFromEvents } from "./accessMemory.js";
 export { normalizeGraphPath, collectGraphEdges } from "./graph/graphPaths.js";
 export { findCyclicComponents, findFirstCycleWitness } from "./graph/directedCycles.js";
+export {
+  computeDirectedReachability,
+  type EdgeTraversalPredicate,
+} from "./graph/directedReachability.js";
 export { edgeConfidence } from "./graph/edgeConfidence.js";
 export { computeContinuityScores, continuityMassForPaths } from "./continuityScore.js";
 export type {
@@ -123,6 +127,7 @@ export type { LensCoverageEntry } from "./types/finding.js";
 export type {
   DesignReviewBinding,
   DesignReviewSettings,
+  CustomConceptualPerspective,
   IntentCheckpoint,
 } from "./types/intentCheckpoint.js";
 export type {
@@ -131,6 +136,7 @@ export type {
 } from "./types/intentCheckpoint.js";
 export {
   DESIGN_REVIEW_PROVENANCE_FIELDS,
+  CustomConceptualPerspectiveSchema,
   IntentCheckpointInvalidError,
   IntentCheckpointSchema,
   IntentFiltersSchema,
@@ -291,7 +297,10 @@ export {
   clauseIdentity,
 } from "./intent/clauseInterpreter.js";
 export type { ConstraintClauseRecord } from "./intent/constraintClauses.js";
-export { unresolvedFromClauses } from "./intent/constraintClauses.js";
+export {
+  unresolvedFromClauses,
+  projectUnencodableConstraintClauses,
+} from "./intent/constraintClauses.js";
 export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
@@ -330,14 +339,20 @@ export {
   detectRepoConventions,
   formatRepoConventions,
 } from "./tooling/repoConventions.js";
-export type { LaneDemand, StepStatus } from "./types/stepContract.js";
+export type { LaneDemand, LaneReviewMode, LaneReviewModeDeclaration, LaneReviewRecord, StepStatus } from "./types/stepContract.js";
 export {
   deriveLaneDemand,
   LANE_COMPLEXITY_VALUES,
   LANE_DEMAND_KEYS,
+  LANE_REVIEW_MODE_VALUES,
   LANE_RISK_VALUES,
   LANE_SIZE_VALUES,
   LaneDemandSchema,
+  LaneReviewModeSchema,
+  LaneReviewRecordSchema,
+  SEMANTIC_WORK_COMPLEXITY_FLOOR,
+  SEMANTIC_WORK_RISK_FLOOR,
+  SHARED_SEMANTIC_DEMAND_FLOORS,
   StepStatusSchema,
 } from "./types/stepContract.js";
 export {
@@ -351,15 +366,12 @@ export type {
 } from "./sessionConfig.js";
 export {
   ANALYZER_POLICY_RELATIVE_PATH,
-  AnalyzerConsentDecisionSchema,
   AnalyzerPolicySchema,
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
   persistAnalyzerSettings,
-  persistAnalyzerConsent,
 } from "./analyzerPolicy.js";
 export type {
-  AnalyzerConsentDecision,
   AnalyzerPolicy,
   AnalyzerSetting,
 } from "./analyzerPolicy.js";
@@ -384,6 +396,29 @@ export {
   lensCoverageEntryContradictsCount,
   reprojectLensCoverage,
 } from "./reporting/lensCoverage.js";
+
+// Performance profiling — subprocess duration, synchronous blocking, repeated commands.
+export {
+  startProfileSession,
+  getCurrentSession,
+  markSynchronousPhaseStart,
+  markSynchronousPhaseEnd,
+  profileSynchronousPhase,
+  profileSpawn,
+  profileSpawnSync,
+  profileNpmCommand,
+  profileNodeCommand,
+  endProfileSession,
+  writeProfileLedger,
+  formatProfileSummary,
+  _resetProfileState,
+} from "./measurement/performanceProfiler.js";
+export type {
+  ProfiledSpawn,
+  SynchronousPhase,
+  RepeatedCommandGroup,
+  PerformanceProfile,
+} from "./measurement/performanceProfiler.js";
 
 // Contracts
 export { AUDITOR_REPORT_MARKER } from "./contracts.js";
@@ -731,6 +766,11 @@ export {
   diffProjections,
   renderDiffReReviewSection,
 } from "./reReview/projectionDiff.js";
+export {
+  createReviewSnapshotStore,
+  type ReviewSnapshotStore,
+  type ReviewSnapshotStoreConfig,
+} from "./reReview/reviewSnapshotStore.js";
 
 // Tooling: command execution
 export type {
@@ -940,6 +980,7 @@ export {
   isTransientPermissionContention,
 } from "./io/fileLock.js";
 export { canonicalizeFilePath } from "./io/pathIdentity.js";
+export { collectFilesSorted, type CollectFilesOptions } from "./io/collectFiles.js";
 
 // IO: canonical `.audit-tools/` path layout (single source for both CLIs)
 export {
@@ -992,6 +1033,14 @@ export {
   assertCliCommandAllowedFromCwd,
   assertNotNodeWorktreeCwd,
 } from "./io/nodeWorktreeGuard.js";
+
+// IO: mechanical refusal of retired backend-selection arguments (provider /
+// model / routing / quota / window / launch axes) — a host must not pass them,
+// and the tool now refuses them rather than asking the host to remember.
+export {
+  RETIRED_HOST_SELECTION_ARGS,
+  assertNoRetiredHostSelectionArgs,
+} from "./io/retiredArgs.js";
 
 // IO: tool-emitted end-of-run friction capture (single-sourced shape + persist
 // helper for BOTH orchestrators — cannot drift, never couples to any one repo's
@@ -1129,6 +1178,10 @@ export {
 } from "./validation/basic.js";
 export { formatSchemaFailure } from "./validation/schemaFailure.js";
 export {
+  assertValidAuditFindingsReport,
+  assertValidRemediationOutcomesReport,
+} from "./validation/producerBoundary.js";
+export {
   AUDIT_FINDINGS_CONTRACT_VERSION,
   auditReadOf,
   validateAuditFindingsReport,
@@ -1237,12 +1290,31 @@ export type {
 //   contract shapes against the real zod schemas.
 
 export type { CacheablePromptParts } from "./prompts.js";
+export type {
+  PromptProfile,
+  PromptActor,
+  PromptInput,
+} from "./promptContract.js";
+export {
+  renderExactPath,
+  renderInputList,
+  renderClosedValues,
+  renderActorOwnership,
+  renderOutputSection,
+  renderCheckSection,
+  renderStopSection,
+  renderContinueSection,
+  renderDispatchFallback,
+  collectRenderedPaths,
+  renderedPathsInScope,
+} from "./promptContract.js";
 export {
   buildCacheablePrompt,
   DISPATCH_PROMPT_HANDOFF_NOTE,
   renderHostScratchNote,
   renderIndependentReviewMandate,
   renderFanoutExecutionLines,
+  renderLaneReviewRequirement,
 } from "./prompts.js";
 
 // Host-asset renderers — every IDE asset derives from the one canonical prompt body.
@@ -1363,7 +1435,7 @@ export {
   deriveEngineBound,
 } from "./engine/obligationEngine.js";
 export { LOOP_CORE_PATTERNS, isLoopCorePath } from "./loopCorePaths.js";
-export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";
+export { applyGuidanceFile, guidanceFilePathUnder } from "./intake/guidanceBootstrap.js";
 
 // External analyzer acquisition substrate (one core, two draws: audit's read
 // draw and remediate's close-verify draw both run analyzers through this).
@@ -1381,12 +1453,15 @@ export {
   resolveBinaryCandidates,
   detectNodeEcosystem,
   detectPythonEcosystem,
+  AnalyzerConsentDecisionSchema,
+  ANALYZER_CONSENT_DECISIONS,
 } from "./analyzers/acquisitionEngine.js";
 export type {
   EcosystemRunner,
   AnalyzerSafetyProfile,
   ExternalAnalyzerCandidate,
   AnalyzerConsentTokenGrant,
+  AnalyzerConsentDecision,
   AnalyzerConsentDecisions,
   AcquisitionRunner,
   AcquisitionEngineOptions,

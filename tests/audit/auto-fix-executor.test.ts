@@ -38,8 +38,9 @@ function isAutoFixesApplied(value: unknown): value is AutoFixesApplied {
 async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
+  options?: { autoFix?: { enabled?: boolean; dryRun?: boolean } },
 ): Promise<AutoFixExecutorResult> {
-  const result = await runAutoFixExecutorSource(bundle, root);
+  const result = await runAutoFixExecutorSource(bundle, root, options ?? {});
   const applied = result.updated.auto_fixes_applied;
   if (!isAutoFixesApplied(applied)) {
     throw new TypeError("auto_fixes_applied did not match the executor contract");
@@ -49,6 +50,9 @@ async function runAutoFixExecutor(
     updated: { ...result.updated, auto_fixes_applied: applied },
   };
 }
+
+/** The packet-5 opt-in: tests that expect a formatter to run enable the phase. */
+const OPTED_IN = { autoFix: { enabled: true } } as const;
 
 function bundleWithFile(
   path: string,
@@ -61,18 +65,21 @@ test("runAutoFixExecutor requires file_disposition", async () => {
   await assert.rejects(() => runAutoFixExecutor({}, tmpdir()), /file_disposition/);
 });
 
-test("runAutoFixExecutor is a no-op and records an empty result when no formatter matches", async () => {
+test("runAutoFixExecutor is a no-op without opt-in and records an empty result when no formatter matches", async () => {
   const root = await mkdtemp(join(tmpdir(), "autofix-"));
   try {
     // .txt has no associated formatter, and the temp root has no prettier
     // config — so no formatter is even attempted (no subprocess spawned).
+    // Run WITHOUT the opt-in: the packet-5 default leaves the tree alone even
+    // before formatter resolution.
     const bundle = bundleWithFile("notes/readme.txt", "included");
     const result = await runAutoFixExecutor(bundle, root);
     expect(result.artifacts_written).toEqual(["auto_fixes_applied.json"]);
     expect(result.updated.auto_fixes_applied.executed_tools).toEqual([]);
     expect(result.updated.auto_fixes_applied.tool_timings).toEqual([]);
     expect(result.updated.auto_fixes_applied.timestamp).toBeTruthy();
-    expect(result.progress_summary).toMatch(/Formatters executed: None/);
+    // Default-off: the phase reports the skip, never a formatter tally.
+    expect(result.progress_summary).toMatch(/not opted in/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -83,8 +90,9 @@ test("runAutoFixExecutor ignores audit-excluded files when collecting extensions
   try {
     // The only file is a .py that is excluded from the audit, so black must not
     // be attempted (extensions stays empty -> no formatter branch runs).
+    // Opted in so this pins the EXCLUSION property, not the opt-in gate.
     const bundle = bundleWithFile("vendor/generated.py", "excluded");
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, OPTED_IN);
     const applied = result.updated.auto_fixes_applied;
     expect(applied.executed_tools).toEqual([]);
     expect(applied.tool_timings.length).toBe(applied.executed_tools.length);
@@ -112,7 +120,7 @@ test("runAutoFixExecutor surfaces failed formatters in progress_summary", async 
     );
 
     const bundle = bundleWithFile("src/index.ts", "included");
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, OPTED_IN);
     const applied = result.updated.auto_fixes_applied;
 
     // Tool was attempted but failed — it must NOT appear in executed_tools.
@@ -140,7 +148,7 @@ test("runAutoFixExecutor progress_summary shows 'Formatters executed: None' with
     );
 
     const bundle = bundleWithFile("src/app.ts", "included");
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, OPTED_IN);
     const applied = result.updated.auto_fixes_applied;
 
     expect(applied.executed_tools, "executed_tools must be empty when all fail").toEqual([]);
@@ -152,18 +160,19 @@ test("runAutoFixExecutor progress_summary shows 'Formatters executed: None' with
   }
 });
 
-test("runAutoFixExecutor progress_summary shows 'Formatters executed: None' with no failed list when no formatter is applicable", async () => {
+test("runAutoFixExecutor reports no formatter when opted in but none is applicable", async () => {
   const root = await mkdtemp(join(tmpdir(), "autofix-noapp-"));
   try {
-    // .txt only — no formatter applicable, no subprocess spawned.
+    // .txt only — no formatter applicable, no subprocess spawned. Opt in so
+    // this reaches formatter selection rather than the default-off gate.
     const bundle = bundleWithFile("notes/readme.txt", "included");
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, OPTED_IN);
     const applied = result.updated.auto_fixes_applied;
 
     expect(applied.executed_tools).toEqual([]);
     expect(applied.failed_tools, "failed_tools must be empty when no formatter was applicable").toEqual([]);
     expect(result.progress_summary).toMatch(/Formatters executed: None/);
-    expect(result.progress_summary, "progress_summary must NOT mention 'Formatters failed:' when no formatter was applicable").not.toMatch(/Formatters failed:/);
+    expect(result.progress_summary, "no applicable formatter is not a formatter failure").not.toMatch(/Formatters failed:/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -204,7 +213,7 @@ test("runAutoFixExecutor enters the formatter branch when a prettier config and 
     );
 
     const bundle = bundleWithFile("src/index.ts", "included");
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, OPTED_IN);
 
     // Distinct from the no-formatter no-op: prettier was actually executed.
     expect(result.updated.auto_fixes_applied.executed_tools.includes("prettier"), "executed_tools should contain prettier").toBeTruthy();

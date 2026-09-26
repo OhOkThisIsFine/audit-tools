@@ -7,7 +7,7 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { walkStepsUntilTerminal } from "./step-driver.js";
-import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
+import { skipDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 import { buildSyntheticResults as buildSyntheticResultsImpl } from "../../../scripts/audit/smoke-audit-flow.mjs";
 import type { AuditTask } from "../../../src/audit/types.js";
 
@@ -149,7 +149,7 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
       ].join("\n"),
     );
 
-    await declineDefaultAcquiredAnalyzers(root);
+    await skipDefaultAcquiredAnalyzers(root);
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });

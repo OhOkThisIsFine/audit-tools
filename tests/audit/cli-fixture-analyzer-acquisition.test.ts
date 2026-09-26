@@ -11,13 +11,15 @@
  * class produced 45-minute local runs. No test may depend on the network or on
  * npx cache state.
  *
- * The control is the product's own seam, not a test-only escape hatch: a
- * recorded operator `declined` is read FIRST in `admitSpawn` and refuses the
- * spawn outright. `declineDefaultAcquiredAnalyzers` states that decision through
- * `persistAnalyzerConsent`, and every shared fixture creator calls it.
+ * The control is the product's own seam, not a test-only escape hatch: since
+ * packet 5 / O07 consent is strictly per-run and cannot be pre-recorded, the
+ * fixtures instead record the durable `analyzers.<id> = "skip"` resolution
+ * choice, which `admitSpawn` reads ahead of the DEFAULT-set short-circuit and
+ * refuses outright. `skipDefaultAcquiredAnalyzers` states that choice, and
+ * every shared fixture creator calls it.
  *
  * Both halves are pinned here because either one alone is satisfiable without
- * the other: the fixtures WRITE the decision (cheap, per helper), and the fold
+ * the other: the fixtures WRITE the choice (cheap, per helper), and the fold
  * HONORS it end to end (the acquisition marker the tool writes).
  */
 import { describe, expect, test } from "vitest";
@@ -57,20 +59,20 @@ const FIXTURE_CREATORS: ReadonlyArray<
   ],
 ];
 
-describe("shared CLI fixtures record the operator decline before any CLI call", () => {
+describe("shared CLI fixtures record the skip resolution before any CLI call", () => {
   for (const [label, createFixture] of FIXTURE_CREATORS) {
-    test(`${label} declines every default acquired analyzer`, async () => {
+    test(`${label} skips every default acquired analyzer`, async () => {
       await createFixture(async (root) => {
         const policy = await loadAnalyzerPolicy(root);
         // Derived from the registry: a new `defaultRun: true` candidate must be
-        // declined by every fixture the day it lands.
+        // skipped by every fixture the day it lands.
         expect(DEFAULT_ACQUIRED_ANALYZER_IDS.length).toBeGreaterThan(0);
         for (const id of DEFAULT_ACQUIRED_ANALYZER_IDS) {
           expect(
-            policy.analyzer_consent?.[id],
-            `${label} left default acquired analyzer '${id}' undeclined — the fold ` +
+            policy.analyzers?.[id],
+            `${label} left default acquired analyzer '${id}' un-skipped — the fold ` +
               "would admit it with no consent token and spawn npx/a release download",
-          ).toBe("declined");
+          ).toBe("skip");
         }
       });
     });
@@ -120,8 +122,8 @@ test(
         expect(
           status?.error,
           `default acquired analyzer '${id}' was not refused by the recorded ` +
-            "operator decline — this fixture reaches the network",
-        ).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
+            "skip resolution — this fixture reaches the network",
+        ).toBe(ANALYZER_DENIAL_REASONS.setting_skip);
         expect(status?.resolved).toBe(false);
       }
     });

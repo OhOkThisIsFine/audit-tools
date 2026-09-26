@@ -1,7 +1,13 @@
-import { existsSync, rmSync, statSync } from "node:fs";
+// sites-pinned: tests/remediate/final-gate-arbitrary-repo.test.ts, tests/remediate/final-gate-extraction-equivalence.test.ts
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hashContent } from "../../shared/hash.js";
 import { normalizeRepoPath } from "../../shared/validation/findingGrounding.js";
+import {
+  discoverProjectCommands,
+  type ProjectCommands,
+} from "../../shared/tooling/testCommand.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { headCommit, stagedAndUntracked } from "../../shared/git.js";
 import {
@@ -546,17 +552,180 @@ export function renderGateAttribution(
   ].join("\n");
 }
 
+/** Options for {@link resolveGateBinding} / {@link toolOwnedFinalGateCommands}. */
+export interface GateDerivationOptions {
+  /**
+   * Operator-supplied test argv for the test role (already parsed and
+   * shape-checked by the caller — this module never parses a shell string).
+   * Replaces the discovered test role; every other declared role still runs.
+   * Ignored on the audit-tools profile, whose pinned suite is the gate.
+   */
+  explicitTestCommand?: string[];
+}
+
 /**
- * The tool-owned final-gate command list (INV-RS-10) for the audit-tools
- * monorepo. Pure and deterministic so tests can assert: it is non-vacuous
- * (always > 0 build + check + unit commands) for the audit-tools structure,
- * never references `plan.test_command`, every UNIT command is build-free, and no
- * package's unit suite appears twice (single-flight — CE-001). Returns `[]` when
- * `root` is not the audit-tools monorepo (the audit-tools-specific suite is
- * inapplicable there — see `runToolOwnedFinalGate`).
+ * One gate role in derivation order. `build` first (later layers are
+ * meaningless on a broken build — the runner short-circuits), then the two
+ * check roles, then the suite.
  */
-export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[] {
-  if (!isAuditToolsMonorepo(root)) return [];
+export type GateCommandRole = "build" | "typecheck" | "lint" | "test";
+
+/** Which profile derived a gate binding (see {@link GateBinding}). */
+export type GateCommandProfile = "audit-tools" | "discovered";
+
+/**
+ * What a gate evaluation is BOUND to: the resolved root, which profile
+ * derived it, the discovery result it read, and the exact manifest bytes that
+ * result came from.
+ *
+ * `discovered` records role → rendered command for every role discovery
+ * emitted (including roles the derivation does not run, e.g. `e2e`), so the
+ * record states what was PROBED, not only what ran. `manifest_digest` is the
+ * change detector: a manifest edit that rewrites a script BODY leaves the
+ * derived argv identical while changing what the gate executes, so comparing
+ * argv alone cannot see it — the digest (over every manifest discovery reads)
+ * can. `null` when none of those manifests exists.
+ */
+export interface GateBinding {
+  root: string;
+  profile: GateCommandProfile;
+  discovered: Partial<Record<GateCommandRole | "e2e", string>>;
+  /** The explicit override that took the test role, when one did. */
+  explicit_test_command?: string[];
+  /** sha256 over the discovery manifests present at resolve time, or null. */
+  manifest_digest: string | null;
+}
+
+/** Manifests `discoverProjectCommands` reads, in digest order. */
+const GATE_DISCOVERY_MANIFESTS = [
+  "package.json",
+  "go.mod",
+  "pyproject.toml",
+  "pytest.ini",
+] as const;
+
+function gateManifestDigest(root: string): string | null {
+  const parts: Buffer[] = [];
+  let found = false;
+  for (const file of GATE_DISCOVERY_MANIFESTS) {
+    let bytes: Buffer | null = null;
+    try {
+      bytes = existsSync(join(root, file)) ? readFileSync(join(root, file)) : null;
+    } catch {
+      bytes = null;
+    }
+    if (bytes === null) continue;
+    found = true;
+    parts.push(Buffer.from(file), Buffer.from("\0"), bytes, Buffer.from("\0"));
+  }
+  return found ? hashContent(Buffer.concat(parts)) : null;
+}
+
+function renderDiscovered(discovered: ProjectCommands): GateBinding["discovered"] {
+  const rendered: GateBinding["discovered"] = {};
+  const roles: ReadonlyArray<GateCommandRole | "e2e"> = [
+    "build",
+    "typecheck",
+    "lint",
+    "test",
+    "e2e",
+  ];
+  for (const role of roles) {
+    const argv = discovered[role];
+    if (argv && argv.length > 0) rendered[role] = argv.join(" ");
+  }
+  return rendered;
+}
+
+/**
+ * Whether the declarations behind `fresh` moved since `previous` was bound:
+ * a different root, a different manifest digest, a different discovery draw,
+ * or a different explicit override. A manifest edit that rewrites a script
+ * body without changing the derived argv still counts (the digest moved), and
+ * so does an edit that changes nothing the gate runs — the honest answer to
+ * "did the declarations change" is about the declarations, and the gate
+ * re-runs on any move (the tree-keyed verdict cache already misses, because
+ * the manifest is tracked content; this names the move rather than relying on
+ * that miss being noticed).
+ */
+export function gateBindingChanged(
+  previous: GateBinding | undefined,
+  fresh: GateBinding,
+): boolean {
+  if (previous === undefined) return false;
+  if (previous.root !== fresh.root) return true;
+  if (previous.profile !== fresh.profile) return true;
+  if (previous.manifest_digest !== fresh.manifest_digest) return true;
+  const keys = new Set([...Object.keys(previous.discovered), ...Object.keys(fresh.discovered)]);
+  for (const key of keys) {
+    if (previous.discovered[key as keyof GateBinding["discovered"]] !== fresh.discovered[key as keyof GateBinding["discovered"]]) {
+      return true;
+    }
+  }
+  return (
+    (previous.explicit_test_command?.join(" ") ?? null) !==
+    (fresh.explicit_test_command?.join(" ") ?? null)
+  );
+}
+
+/**
+ * Resolve the gate binding AND the command list in one derivation, so the
+ * commands that run and the declarations they came from cannot drift apart.
+ * Discovery is filesystem reads (no spawn), so every evaluation re-resolves
+ * rather than trusting a stale draw.
+ */
+export function resolveGateBinding(
+  root: string,
+  opts: GateDerivationOptions = {},
+): { binding: GateBinding; commands: FinalGateCommandSpec[] } {
+  if (isAuditToolsMonorepo(root)) {
+    const discovered = discoverProjectCommands(root);
+    return {
+      binding: {
+        root,
+        profile: "audit-tools",
+        discovered: renderDiscovered(discovered),
+        manifest_digest: gateManifestDigest(root),
+      },
+      commands: auditToolsGateCommands(),
+    };
+  }
+  const discovered = discoverProjectCommands(root);
+  const binding: GateBinding = {
+    root,
+    profile: "discovered",
+    discovered: renderDiscovered(discovered),
+    ...(opts.explicitTestCommand && opts.explicitTestCommand.length > 0
+      ? { explicit_test_command: [...opts.explicitTestCommand] }
+      : {}),
+    manifest_digest: gateManifestDigest(root),
+  };
+  // DERIVATION ORDER IS EXECUTION ORDER: build, typecheck, lint, test. The
+  // runner short-circuits at the first red, so a broken build never spends
+  // the suite's minutes, and a red typecheck/lint never waits behind tests.
+  const test = binding.explicit_test_command ?? discovered.test;
+  const commands: FinalGateCommandSpec[] = [];
+  if (discovered.build) {
+    commands.push({ argv: [...discovered.build], build_free: false, layer: "build" });
+  }
+  if (discovered.typecheck) {
+    commands.push({ argv: [...discovered.typecheck], build_free: true, layer: "check" });
+  }
+  if (discovered.lint) {
+    commands.push({ argv: [...discovered.lint], build_free: true, layer: "check" });
+  }
+  if (test) {
+    // `build_free` guards what the GATE prepends (the audit-tools `npm test`
+    // case, which rebuilds dist before the suite). An `npm run <script>`'s
+    // lifecycle pre-script is the repository's own declared script body — the
+    // same class as the script itself — not a gate-prepended build.
+    commands.push({ argv: [...test], build_free: true, layer: "unit" });
+  }
+  return { binding, commands };
+}
+
+/** The pinned INV-RS-10 suite: the audit-tools profile's command list. */
+function auditToolsGateCommands(): FinalGateCommandSpec[] {
   return [
     { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
     { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
@@ -604,4 +773,29 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
       layer: "unit",
     },
   ];
+}
+
+/**
+ * The tool-owned final-gate command list for an arbitrary target repository.
+ *
+ * TWO PROFILES, one function. When `root` is the audit-tools monorepo the gate
+ * is the pinned INV-RS-10 suite (the tool-owned floor whose exact argv the
+ * pause/attribution machinery is built around). Everywhere else the gate is
+ * DERIVED from the target's own declared commands
+ * ({@link discoverProjectCommands}): build, typecheck, lint and test roles, in
+ * that order. An explicitly supplied test command (the plan's operator-written
+ * `test_command`) takes the test role without dropping the other declared
+ * roles; on the audit-tools profile the pinned suite wins outright, because
+ * that profile IS the gate (INV-RS-10 independence), not a discovery draw.
+ *
+ * Pure and deterministic over `(root, explicitTestCommand)` so tests can
+ * assert: non-vacuous for a repo that declares commands, empty (never
+ * fabricated) for one that declares none, and the derivation's only
+ * plan-supplied channel is the explicit override.
+ */
+export function toolOwnedFinalGateCommands(
+  root: string,
+  opts: GateDerivationOptions = {},
+): FinalGateCommandSpec[] {
+  return resolveGateBinding(root, opts).commands;
 }

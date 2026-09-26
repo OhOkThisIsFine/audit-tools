@@ -432,6 +432,33 @@ export const FindingSchema = z.object({
   /** Commands recommended by the implementation DAG for focused verification. */
   targeted_commands: z.array(z.string()).optional(),
   /**
+   * The concrete change this remediation finding implements (contract-pipeline
+   * producer). A human-readable statement of what the fix does, distinct from
+   * the finding `summary` that stated the defect. Optional: absent on findings
+   * not minted from an implementation DAG node.
+   */
+  concrete_change: z.string().optional(),
+  /**
+   * Upstream contracts' declared outputs this finding's fix depends on
+   * (contract-pipeline producer, copied from the DAG node's `preconditions`).
+   * The list of preconditions the implementer must hold for the change to be
+   * correct.
+   */
+  preconditions: z.array(z.string()).optional(),
+  /**
+   * Human-readable description of the concrete changes this finding is expected
+   * to produce (contract-pipeline producer, copied from the DAG node's
+   * `expected_changes`).
+   */
+  expected_changes: z.string().optional(),
+  /**
+   * Accepted counterexample IDs this finding's fix addresses
+   * (contract-pipeline producer, copied from the DAG node's
+   * `addresses_counterexamples`). These are the accepted adversarial
+   * counterexamples the implementer's change threads through to resolution.
+   */
+  addresses_counterexamples: z.array(z.string()).optional(),
+  /**
    * Content-anchored identity of the analyzer lead this finding was born from
    * (item C). Copied verbatim from the injected lead by the auditing worker;
    * remediation's close-verify draw re-runs the analyzer and checks this exact

@@ -81,8 +81,14 @@ test("E1: every IDE asset uses the correct in-repo entrypoint, not a stale monor
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
     // A12 collapsed the monorepo: the dev entrypoint is `audit-code.mjs` at the
     // repo root, not the old `packages/audit-code/audit-code.mjs`.
-    expect(/\bnode audit-code\.mjs\b/.test(asset), `${kind} asset must reference the repo-root 'node audit-code.mjs' entrypoint`).toBeTruthy();
     expect(!asset.includes("packages/audit-code/audit-code.mjs"), `${kind} asset must not embed the stale 'packages/audit-code/audit-code.mjs' entrypoint`).toBeTruthy();
+  }
+});
+
+test("E1: no host asset carries audit-tools development instructions (packet 9)", () => {
+  for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
+    expect(!/developing audit-tools itself/u.test(asset), `${kind} asset must not carry repo-development instructions to a third-party host`).toBeTruthy();
+    expect(!/\bnode audit-code\.mjs\b/u.test(asset), `${kind} asset must not instruct a third-party host to run the repo-local wrapper`).toBeTruthy();
   }
 });
 

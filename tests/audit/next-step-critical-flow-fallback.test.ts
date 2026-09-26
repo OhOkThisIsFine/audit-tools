@@ -24,6 +24,7 @@ interface CriticalFlowFallbackStep {
   prompt_path: string;
   artifact_paths: Record<string, string>;
   access?: {
+    read_paths?: string[];
     write_paths?: string[];
   };
 }
@@ -111,6 +112,14 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
         (p) => p.replaceAll("\\", "/") === resultsPath.replaceAll("\\", "/"),
       ),
     ).toBeTruthy();
+    // The COMPLETE critical_flows artifact is granted READ access, so the lane's
+    // "N more flows at <path>" overflow line names a file the reader can open
+    // (packet 8) — the same access-bearing shape synthesis-narrative's findings
+    // path took.
+    const criticalFlowsPath = join(artifactsDir, "critical_flows.json").replaceAll("\\", "/");
+    expect(
+      (paused.access?.read_paths ?? []).map((p) => p.replaceAll("\\", "/")),
+    ).toContain(criticalFlowsPath);
     // Always-materialized (design resolution 2): the flow-stub body lives in
     // the LANE file; the step prompt is the capability-neutral instruction.
     const stepPrompt = await readFile(paused.prompt_path, "utf8");

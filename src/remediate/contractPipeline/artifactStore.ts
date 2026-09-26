@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/contract-pipeline-artifact-store.test.ts, tests/remediate/contract-pipeline-semantic-staleness.test.ts
 /**
  * Typed read/write helpers for the contract-pipeline artifacts.
  *
@@ -24,6 +25,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  computeDirectedReachability,
   hashContent,
   isRecord,
   readOptionalJsonFile,
@@ -83,6 +85,44 @@ export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipeli
     "implementation_dag",
   ],
 };
+
+/**
+ * Forward staleness adjacency: keyed by an UPSTREAM artifact → the list of
+ * DOWNSTREAM artifacts that depend on it (and so become stale when it changes).
+ * Derived by inverting DEPENDENCY_MAP (the single canonical table) — mirrors
+ * audit's ARTIFACT_DEPENDENTS_MAP.
+ */
+export const DEPENDENTS_MAP: Record<
+  ContractPipelineArtifactName,
+  readonly ContractPipelineArtifactName[]
+> = (() => {
+  const map: Record<ContractPipelineArtifactName, ContractPipelineArtifactName[]> = {
+    goal_spec: [],
+    context_bundle: [],
+    module_decomposition: [],
+    module_contracts: [],
+    seam_reconciliation_report: [],
+    finalized_module_contracts: [],
+    conceptual_design_critique: [],
+    obligation_ledger: [],
+    cyclic_seam_resolution: [],
+    test_validator_plan: [],
+    contract_assessment_report: [],
+    counterexample: [],
+    judge_report: [],
+    implementation_dag: [],
+    verification_report: [],
+  };
+  for (const [name, deps] of Object.entries(DEPENDENCY_MAP) as [
+    ContractPipelineArtifactName,
+    readonly ContractPipelineArtifactName[],
+  ][]) {
+    for (const dep of deps) {
+      map[dep].push(name);
+    }
+  }
+  return map;
+})();
 
 // ── Stored envelope ───────────────────────────────────────────────────────────
 
@@ -533,21 +573,14 @@ export async function detectStaleArtifacts(
     }
   }
 
-  // Propagate transitively: if a dependency is stale, all downstream are stale.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const name of CP_ARTIFACT_NAMES) {
-      if (stale.has(name) || absent.has(name)) continue;
-      for (const dep of DEPENDENCY_MAP[name]) {
-        if (stale.has(dep) || absent.has(dep)) {
-          stale.add(name);
-          changed = true;
-          break;
-        }
-      }
-    }
-  }
+  // Propagate transitively (CY-11): if a dependency is stale, all downstream
+  // present artifacts are stale. Absent artifacts are tracked in `absent` and
+  // never marked stale.
+  computeDirectedReachability(
+    stale,
+    (dep) => DEPENDENTS_MAP[dep],
+    (_from, to) => !absent.has(to),
+  );
 
   return {
     stale: [...stale],

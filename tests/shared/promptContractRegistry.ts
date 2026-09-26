@@ -40,6 +40,15 @@ export interface PromptContractRegistryRow {
   builder: string;
   file: string;
   disposition: "derived" | "projection" | "declared-gap";
+  /**
+   * Prompt Contract v1 profile (standard §4/§6, packet 7). `worker` = a bounded
+   * semantic task that writes an artifact; `driver` = an orchestration/operator
+   * decision that records a result; `dispatch` = a thin envelope naming
+   * already-materialized lanes. ABSENT only on structural rows that render no
+   * prompt of their own (path/quoting helpers matched by the prompt-name scan,
+   * and the multi-contract dispatchers whose branch rows carry the profile).
+   */
+  profile?: "worker" | "driver" | "dispatch";
   schema?: { name: string; file: string; object?: ZodTypeAny };
   projectionFields?: string[];
   gapReason?: string;
@@ -295,24 +304,36 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
   ...row,
   file: "src/remediate/steps/contractPipelinePrompts.ts",
   disposition: "projection",
+  profile: "worker",
 }));
 
+// Every driver prompt carries the SAME gap reason — an operator-facing decision
+// has no worker output contract — but each now names its PROFILE (`driver`), so
+// a driver prompt no longer hides behind a blanket "declared gap" exemption: it
+// is classified, and the profile test asserts the decision-maker is explicit
+// rather than excusing it for lacking a worker schema (standard §6, packet 7).
 const DRIVER_GAP = "driver-facing operator prompt — no worker output contract";
 
 const reconciliationGapRows: PromptContractRegistryRow[] = [
-  ["renderConfirmIntentPrompt", "src/audit/cli/confirmIntentStep.ts", DRIVER_GAP],
-  ["renderAnalyzerConsentPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderAnalyzerInstallPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderEdgeReasoningDispatchPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderPresentReportPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["ambiguityReviewPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["clarificationPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["collectIntakeClarificationsPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["collectStartingPointPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["extractedPlanDiscardedPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["reviewApprovalPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["triagePrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", DRIVER_GAP],
+  ["renderConfirmIntentPrompt", "src/audit/cli/confirmIntentStep.ts", DRIVER_GAP, "driver"],
+  ["renderAnalyzerConsentPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP, "driver"],
+  ["renderAnalyzerInstallPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP, "driver"],
+  // A THIN ENVELOPE: it names the materialized lane prompt/result paths and the
+  // cache key, and never restates the lane's semantic task. That is the
+  // dispatch profile, not the driver profile.
+  ["renderEdgeReasoningDispatchPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP, "dispatch"],
+  ["renderPresentReportPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP, "driver"],
+  ["ambiguityReviewPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["clarificationPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["collectIntakeClarificationsPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["collectStartingPointPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["extractedPlanDiscardedPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["reviewApprovalPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["triagePrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP, "driver"],
+  ["renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", DRIVER_GAP, "driver"],
+  // Structural rows render no prompt of their own (the multi-contract
+  // dispatchers branch to rows that DO carry a profile, and the helpers are
+  // matched by the prompt-name scan) — so they carry no profile.
   ["renderContractPipelinePrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — branch projection rows are registered separately"],
   ["renderContractRepairPrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — repair-target projection rows are registered separately"],
   ["currentPromptPath", "src/shared/io/stepContractWriter.ts", "path helper matched by the prompt-name scan — no rendered output contract"],
@@ -323,11 +344,12 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
   ["normalizePromptBodyPaths", "src/shared/tooling/exec.ts", "path normalizer applied to an already-rendered prompt body by writeStepContract — states no contract of its own"],
   ["bindWorkerPrompt", "src/shared/submission/workerPromptBinding.ts", "joins a draw's prompt body to the result template that draw renders — each draw's buildPrompt row carries the contract"],
   ["workerPromptBindingHolds", "src/shared/submission/workerPromptBinding.ts", "predicate over a persisted prompt's binding matched by the prompt-name scan — renders no prompt"],
-].map(([builder, file, gapReason]) => ({
+].map(([builder, file, gapReason, profile]) => ({
   builder,
   file,
   disposition: "declared-gap",
   gapReason,
+  ...(profile ? { profile: profile as "driver" | "dispatch" } : {}),
 }));
 
 export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
@@ -394,7 +416,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     file: "src/audit/reporting/criticalFlowFallbackPrompt.ts",
     disposition: "derived",
     schema: { name: "CriticalFlowFallbackResultSchema", file: "src/shared/types/flows.ts", object: CriticalFlowFallbackResultSchema },
-    render: () => renderCriticalFlowFallbackPrompt({ flows: [] } as Parameters<typeof renderCriticalFlowFallbackPrompt>[0]),
+    render: () => renderCriticalFlowFallbackPrompt({ flows: [] } as Parameters<typeof renderCriticalFlowFallbackPrompt>[0], "registry-fixture/critical_flows.json"),
   },
   // The four design-review doors. Each ITEM is parsed with
   // `SubmittedDesignFindingSchema` since 2026-09-17 (owner review, prompt 11),
@@ -406,6 +428,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "renderContractReviewPrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
+    profile: "worker",
     schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
     gapReason:
       "each finding is parsed with SubmittedDesignFindingSchema at ingestion; the ENVELOPE is a bare array with no zod object schema, so no derived row can name one",
@@ -414,6 +437,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "renderConceptualReviewPrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
+    profile: "worker",
     schema: { name: "consumeArraySubmission<Finding>", file: "src/audit/cli/nextStepHelpers.ts" },
     gapReason:
       "each finding is parsed with SubmittedDesignFindingSchema at ingestion; the ENVELOPE is a bare array with no zod object schema, so no derived row can name one",
@@ -422,6 +446,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "renderConceptualPerspectivePrompt",
     file: "src/audit/orchestrator/designReviewPrompt.ts",
     disposition: "declared-gap",
+    profile: "worker",
     schema: { name: "submissionFindings", file: "src/audit/types/conceptualAdjudication.ts" },
     gapReason:
       "the perspective LOADER already parses each finding with SubmittedDesignFindingSchema; the lane GATE that admits the file checks array shape only, and that gate is the gap",
@@ -453,6 +478,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "buildEdgeReasoningPrompt",
     file: "src/audit/orchestrator/edgeReasoning.ts",
     disposition: "declared-gap",
+    profile: "worker",
     schema: { name: "applyEdgeReasoning manual guards", file: "src/audit/orchestrator/edgeReasoning.ts" },
     gapReason: "EdgeReasoningResults is a TypeScript interface and ingestion uses manual field guards, not zod",
   },
@@ -493,6 +519,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "buildPrompt",
     file: "src/audit/cli/dispatch/hostHandoff.ts",
     disposition: "declared-gap",
+    profile: "worker",
     schema: { name: "parseHostResult manual envelope", file: "src/audit/cli/dispatch/hostHandoff.ts" },
     gapReason: "the raw audit host-result envelope is manually enforced; only nested findings are zod-backed",
   },

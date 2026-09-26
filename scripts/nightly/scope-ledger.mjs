@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/nightly-scope-ledger.test.ts
 // Leg 1's scope ledger — the coverage stamp and the diff window.
 //
 // WHY THIS MODULE EXISTS (owner determination 285b804c0aef617d, 2026-08-12).
@@ -173,6 +174,31 @@ export function writeScopeLedger(root, ledger) {
     version: SCOPE_LEDGER_VERSION,
     items: ledger?.items ?? {},
   });
+}
+
+/**
+ * Drop ledger entries whose document the doc manifest no longer enumerates
+ * (M43). The canonical in-scope set is `inScopeDocs` — the SAME manifest the doc
+ * gate reconciles against — so an entry whose recorded `path` is no longer in
+ * that set is an orphan left by a deleted or renamed document, and is removed.
+ * Nothing READS the orphans (`plan` enumerates through the manifest), so their
+ * only harm is unbounded growth plus a per-document table that lists files which
+ * are gone; pruning here bounds both.
+ *
+ * An entry with no recorded `path` is left untouched: its document cannot be
+ * identified to prune, and "unidentifiable" is not evidence that it is out of
+ * scope. The prune is wired into the `stamp` verb so a run that persists the
+ * ledger prunes it in the same write.
+ */
+export function pruneScopeLedger(root, ledger, { manifest = DOC_MANIFEST } = {}) {
+  const inScope = new Set(inScopeDocs(root, { manifest }).map((d) => d.path));
+  const items = { ...(ledger?.items ?? {}) };
+  for (const [hash, entry] of Object.entries(items)) {
+    if (entry && typeof entry.path === 'string' && !inScope.has(entry.path)) {
+      delete items[hash];
+    }
+  }
+  return { version: SCOPE_LEDGER_VERSION, items };
 }
 
 /**
@@ -408,6 +434,7 @@ function main(argv) {
     }
     let ledger = readScopeLedger(root);
     ledger = stampExamined(ledger, items.map((i) => i.hash), { commit: head, path: relPath, run });
+    ledger = pruneScopeLedger(root, ledger);
     writeScopeLedger(root, ledger);
     process.stdout.write(`stamped ${items.length} items from ${relPath} at ${head.slice(0, 8)} (run ${run})\n`);
     return 0;

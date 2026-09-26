@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/final-gate-arbitrary-repo.test.ts, tests/remediate/final-gate-red-pause.test.ts
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10)
 // ---------------------------------------------------------------------------
@@ -57,9 +58,13 @@ import {
 } from "../../shared/types/remediationOutcome.js";
 import {
   attributeGateRed,
+  gateBindingChanged,
   isAuditToolsMonorepo,
+  resolveGateBinding,
   toolOwnedFinalGateCommands,
   type FinalGateCommandSpec,
+  type GateBinding,
+  type GateDerivationOptions,
   type GateRedAttribution,
   type RemediationGateState,
 } from "./gateCommands.js";
@@ -68,8 +73,13 @@ import {
 // are single-sourced in the leaf module `gateCommands.ts` (so `dispatch.ts` can
 // derive the same pinned merged-base check without an import cycle). Imported
 // here for local use and re-exported to preserve the public surface + test imports.
-export { isAuditToolsMonorepo, toolOwnedFinalGateCommands };
-export type { FinalGateCommandSpec };
+export {
+  gateBindingChanged,
+  isAuditToolsMonorepo,
+  resolveGateBinding,
+  toolOwnedFinalGateCommands,
+};
+export type { FinalGateCommandSpec, GateBinding, GateDerivationOptions };
 
 /** A command's recorded outcome within a gate run. */
 export interface FinalGateCommandResult {
@@ -101,8 +111,14 @@ export interface FinalGateCommandResult {
  * the same three outcomes, which is the defect this record exists to close.
  *
  * `executed`   — the command list ran; `passed` is a real verdict.
- * `scoped_out` — the audit-tools-specific suite does not apply to this target,
- *                so zero commands ran.
+ * `scoped_out` — RETIRED (O01): the audit-tools-only exemption that reported
+ *                a non-blocking pass on arbitrary targets. No current writer
+ *                emits it; it remains on the shared vocabulary so an old record
+ *                still parses, and {@link readFinalGateVerdict} refuses to
+ *                serve one. A target with no derivable gate is `needs_command`.
+ * `needs_command` — no executable gate is derivable: the run pauses for an
+ *                operator decision (declare a command, or stop). Blocking,
+ *                never a pass.
  * `disabled`   — a gate was DUE and did not run. TWO distinct causes, both
  *                recorded with this kind and told apart by the record's
  *                `reason`: (1) SUPPRESSED — the `skipFinalGate` hermeticity
@@ -125,18 +141,29 @@ export interface ToolOwnedFinalGateResult {
   passed: boolean;
   results: FinalGateCommandResult[];
   /**
-   * Which of the two REACHABLE outcome kinds this run was. `disabled` never
+   * Which of the REACHABLE outcome kinds this run was. `disabled` never
    * appears here — a disabled gate returns before the runner is consulted — so
-   * its record is written by the consumer that suppressed it.
+   * its record is written by the consumer that suppressed it. `scoped_out`
+   * never appears either: the audit-tools-only exemption is retired (O01), so
+   * a target with no derivable gate command is `needs_command` — a BLOCKING
+   * operator decision — never a non-blocking scope note. The member remains on
+   * the shared vocabulary so an old record still parses; no current writer
+   * emits it and no current reader serves one (see {@link readFinalGateVerdict}).
    */
   outcome: Exclude<FinalGateOutcomeKind, "disabled">;
   /**
-   * True when the audit-tools-specific suite did not apply (target is not the
-   * audit-tools monorepo). The gate then does not block; it is a declared scope,
-   * not a vacuous pass. Kept alongside {@link outcome} as the boolean draw of
-   * the same fact for the branches that only need "did anything run".
+   * What this evaluation resolved and ran (or probed): the root, the profile,
+   * the discovery draw and the manifest digest behind `results`. The commands
+   * that run and the declarations they came from are resolved together
+   * ({@link resolveGateBinding}) so the two cannot drift apart.
    */
-  scoped_out: boolean;
+  binding: GateBinding;
+  /**
+   * True when the bound declarations moved since `previousBinding` — the gate
+   * re-resolved and ran the fresh draw. The caller records the move; the gate
+   * itself always runs what it just resolved.
+   */
+  reresolved: boolean;
   /**
    * The runtime/packaging surface the hard floor does NOT gate, declared as a
    * residual for a separate pass (CE-002). Always present (the floor is scoped
@@ -198,33 +225,55 @@ export const RUNTIME_RESIDUAL_DECLARATION: ToolOwnedFinalGateResult["runtime_res
   };
 
 /**
- * Run the tool-owned final gate (INV-RS-10). Each command runs through the
+ * Options for {@link runToolOwnedFinalGate}. `previousBinding` is the last
+ * bound declaration set (read off the run's own records by the caller); the
+ * gate compares it against what it just resolved and reports the move as
+ * `reresolved`, so a changed manifest is re-resolved explicitly rather than
+ * silently re-derived.
+ */
+export interface ToolOwnedFinalGateOptions {
+  runner?: GateRunner;
+  explicitTestCommand?: GateDerivationOptions["explicitTestCommand"];
+  previousBinding?: GateBinding;
+}
+
+/**
+ * Run the tool-owned final gate (INV-RS-10, O01). Each command runs through the
  * shared async `runTrackedAsync`, which scrubs the wrapper's
  * `AUDIT_TOOLS_CALLER_CWD` stamp (and nothing else — see `finalGate.ts`'s file
  * header; the host's session variables reach the child unchanged).
  * The first failing command short-circuits the floor (a broken build makes the
- * later layers meaningless). A `runner` may be injected for tests. When the
- * audit-tools suite does not apply (non-monorepo target), the gate is
- * `scoped_out` (does not block) rather than vacuously passing.
+ * later layers meaningless). A `runner` may be injected for tests.
+ *
+ * On the audit-tools monorepo the floor is the pinned INV-RS-10 suite;
+ * everywhere else it is derived from the target's own declared build /
+ * typecheck / lint / test commands, in that order, with an explicitly
+ * supplied test command taking the test role. When no executable gate is
+ * derivable the result is `needs_command` (`passed: false` — it BLOCKS): the
+ * caller pauses for an operator decision (declare a command, or stop). It is
+ * never a vacuous pass.
  */
 export async function runToolOwnedFinalGate(
   root: string,
-  opts: { runner?: GateRunner } = {},
+  opts: ToolOwnedFinalGateOptions = {},
 ): Promise<ToolOwnedFinalGateResult> {
   const runtime_residual = RUNTIME_RESIDUAL_DECLARATION;
 
-  const commands = toolOwnedFinalGateCommands(root);
+  const { binding, commands } = resolveGateBinding(root, {
+    ...(opts.explicitTestCommand ? { explicitTestCommand: opts.explicitTestCommand } : {}),
+  });
+  const reresolved = gateBindingChanged(opts.previousBinding, binding);
   if (commands.length === 0) {
-    // Audit-tools-specific suite does not apply here — declared scope, not a
-    // vacuous pass (it never substitutes for a real gate on the audit-tools repo).
-    // `passed: true` keeps it NON-BLOCKING, which is the declared design; the
-    // `outcome` beside it is what stops that non-blocking value from being
-    // recorded as if a floor had run green.
+    // No executable gate is derivable from the target's declared commands —
+    // a BLOCKING operator decision, not a scope note. `passed: false` keeps
+    // both gates paused; `outcome` is what stops the pause from being
+    // recorded (or read back) as any kind of pass.
     return {
-      passed: true,
+      passed: false,
       results: [],
-      outcome: "scoped_out",
-      scoped_out: true,
+      outcome: "needs_command",
+      binding,
+      reresolved,
       runtime_residual,
     };
   }
@@ -292,7 +341,8 @@ export async function runToolOwnedFinalGate(
     passed,
     results,
     outcome: "executed",
-    scoped_out: false,
+    binding,
+    reresolved,
     runtime_residual,
   };
 }
@@ -351,9 +401,16 @@ export interface FinalGateVerdictRecord {
   tree: string | null;
   /** The verdict, as evaluated. A red is cached as readily as a green. */
   passed: boolean;
-  /** Whether the audit-tools suite applied to this target. */
-  scoped_out: boolean;
-  outcome: Exclude<FinalGateOutcomeKind, "disabled">;
+  /**
+   * What the verdict was reached with: the resolved root, the derivation
+   * profile, the discovery draw and the manifest digest. The next evaluation
+   * compares its fresh resolve against this to detect changed declarations
+   * (see `gateBindingChanged`). Optional so a record written before the field
+   * existed still serves its verdict; absent means "no declaration comparison
+   * available", never a mismatch.
+   */
+  binding?: GateBinding;
+  outcome: Exclude<FinalGateOutcomeKind, "disabled" | "needs_command" | "scoped_out">;
   /** The per-command results the red record is rebuilt from. */
   results: FinalGateCommandResult[];
   recorded_at: string;
@@ -371,7 +428,9 @@ export function finalGateVerdictPath(artifactsDir: string): string {
 /**
  * Read the cached verdict for `scope`, or `undefined` when there is none to
  * serve: absent, unreadable, unparseable, written by a different record version,
- * for a different scope, or about a different (or unknown) tree.
+ * for a different scope, about a different (or unknown) tree, or carrying the
+ * retired `scoped_out` outcome (a gate that ran nothing must never be served
+ * as a green floor — see the `needs_command` migration).
  *
  * Every one of those degrades to "run the floor", which is the safe direction —
  * a cache miss costs a gate run, a false hit certifies a tree nobody checked.
@@ -391,7 +450,33 @@ export async function readFinalGateVerdict(
   if (record.scope !== scope) return undefined;
   if (record.tree === null || record.tree !== tree) return undefined;
   if (!Array.isArray(record.results)) return undefined;
+  // The retired exemption, refused as a served verdict: a record that ran zero
+  // commands has no verdict to serve, and its `passed: true` is the exact
+  // vacuous pass O01 removed. Degrade to a miss so the floor re-evaluates
+  // (which now yields the blocking `needs_command` decision).
+  if ((record.outcome as string) === "scoped_out") return undefined;
   return record;
+}
+
+/**
+ * The last gate binding this run recorded, whatever tree it was about: the
+ * cached verdict's binding when one was written, else undefined. The caller
+ * compares its fresh resolve against this (see `gateBindingChanged`) to name
+ * a changed declaration set. No tree match is required — staleness is the
+ * POINT here (a changed manifest moves the tree, which is exactly the move
+ * being detected), and a mismatch degrades to "first resolution", never to a
+ * served verdict (that question stays with {@link readFinalGateVerdict}).
+ * Never throws.
+ */
+export async function readLastGateBinding(
+  artifactsDir: string,
+): Promise<GateBinding | undefined> {
+  const raw = await readOptionalJsonFile<FinalGateVerdictRecord>(
+    finalGateVerdictPath(artifactsDir),
+  ).catch(() => undefined);
+  const record = discardOnSchemaVersionMismatch(raw, FINAL_GATE_VERDICT_VERSION);
+  if (record === undefined || record === null) return undefined;
+  return record.binding;
 }
 
 /**
@@ -407,8 +492,8 @@ export async function writeFinalGateVerdict(
     scope: string;
     tree: string | null;
     passed: boolean;
-    scoped_out: boolean;
-    outcome: Exclude<FinalGateOutcomeKind, "disabled">;
+    binding: GateBinding;
+    outcome: Exclude<FinalGateOutcomeKind, "disabled" | "needs_command" | "scoped_out">;
     results: FinalGateCommandResult[];
   },
 ): Promise<string> {
@@ -418,7 +503,7 @@ export async function writeFinalGateVerdict(
     scope: verdict.scope,
     tree: verdict.tree,
     passed: verdict.passed,
-    scoped_out: verdict.scoped_out,
+    binding: verdict.binding,
     outcome: verdict.outcome,
     results: verdict.results,
     recorded_at: new Date().toISOString(),

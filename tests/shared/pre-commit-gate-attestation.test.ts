@@ -4,7 +4,7 @@
 // end-to-end. Fixture + rationale in pre-commit-gate-harness.ts (shared across
 // the pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -115,6 +115,39 @@ describe("pre-commit gate: bypass scoping, attester class, destination-keyed con
     const r = runCommit();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("no adversarial-review attestation");
+  });
+
+  test("reports both missing attestation classes together for the same staged tree in one deterministic refusal", () => {
+    stageLoopCoreFile();
+    writeFileSync(join(repo, "CLAUDE.md"), "# Constitutional\n");
+    g("add", "CLAUDE.md");
+
+    const r = runCommit();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    // Both missing classes must be reported together in one refusal:
+    expect(r.stderr).toContain("CONSTITUTIONAL doc(s)");
+    expect(r.stderr).toContain("no owner-decision override record exists for the staged tree");
+    expect(r.stderr).toContain("loop-core commit blocked");
+    expect(r.stderr).toContain("no adversarial-review attestation for the staged tree");
+  });
+
+  test("when one attestation class is satisfied but another is missing, reports only the missing class", () => {
+    stageLoopCoreFile();
+    writeFileSync(join(repo, "CLAUDE.md"), "# Constitutional\n");
+    g("add", "CLAUDE.md");
+
+    // Attest loop-core
+    const at = runAttest([
+      "--reviewed-by", "t",
+      "--attester-class", "agent",
+      "--checked", "checked loop core changes adversarially for accounting and drift",
+    ]);
+    expect(at.status, `attest failed:\n${at.stderr}`).toBe(0);
+
+    const r = runCommit();
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("CONSTITUTIONAL doc(s)");
+    expect(r.stderr).not.toContain("loop-core commit blocked");
   });
 
   // Under a git hook the attestation is read when GIT runs the commit — after

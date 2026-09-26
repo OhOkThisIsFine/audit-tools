@@ -65,6 +65,14 @@ import {
  *   `'final'` = reach-triggered but runs AFTER every structural refusal
  *               (check:doc-links only — the broadest trigger in the gate must
  *               never mask a more specific refusal behind it).
+ * @property {'default'|'tail'} [release] gates only. Which release phase a gate
+ *   runs in, as a property of THIS declaration (the one executable gate
+ *   catalog, packet 22): `default` gates are the `verify:checks` sequence in
+ *   declared order; `tail` gates (vitest-gate, the linked-install smokes) run
+ *   after it and are pulled into `verify:release` only. Derived by
+ *   `scripts/shared/run-release-gates.mjs`; executed through the shared
+ *   `runProfiledCommands` (scripts/shared/profile.mjs) so the fail-fast timing
+ *   semantics are unchanged.
  * @property {{scope:'file', maxMs:number}} [writeTime] gates only. Declares a
  *   reach-triggered gate safe to run after one edited file. `maxMs` must be at
  *   most 1000: write-time feedback is advisory, but it must also stay cheap.
@@ -140,27 +148,6 @@ import {
 
 /** @type {GuardRow[]} */
 export const GUARDS = [
-  // ── gates (npm scripts reachable from verify:release) ──────────────────────
-  {
-    id: 'build',
-    kind: 'gate',
-    impl: 'build',
-    preCommit: false,
-    fix:
-      'tsc failed over src/ — fix the reported type error; in a fresh checkout or worktree run ' +
-      '`npm install` first (a stale dist/ fakes "no exported member" errors)',
-    note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg',
-  },
-  {
-    id: 'check:tests',
-    kind: 'gate',
-    impl: 'check:tests',
-    preCommit: 'reach',
-    fix:
-      'the test tree failed its typecheck (tsconfig.test.json) — fix the staged type error; ' +
-      'untyped destructured test params infer never[] and red only this leg and release CI',
-    note: 'tsc over the test tree (tsconfig.test.json); ~7s, so the src-reach widening is deliberate',
-  },
   {
     id: 'check:control-bytes',
     kind: 'gate',
@@ -171,15 +158,11 @@ export const GUARDS = [
       'the merge/import paths the tool-input-guard write-time hook never sees',
     note:
       "'always' rather than 'reach': a control byte can enter ANY tracked file, so there is no " +
-      'narrower honest trigger — the same argument check:guard-reach makes. This row read ' +
-      'preCommit false until 2026-09-05, on the premise that the tool-input-guard hook already ' +
-      'refuses control bytes AT WRITE TIME. That premise only covers writes made through THIS ' +
-      "agent's tools. A delegated lane writes in its own process, so the hook never sees it: an " +
-      'offloaded lane authoring a doc emitted nine raw 0x1A bytes where arrows belonged, every ' +
-      'local gate passed, and the gate that caught it was release CI — 22s in, on main. The row ' +
-      "already knew about paths the hook cannot see (its own fix text says so); what it got wrong " +
-      'was treating those paths as rare. The gate scans 1405 files in 0.2s.',
+      'narrower honest trigger. UNCOVERED HALF: the gate scans only TRACKED files, so a byte ' +
+      'written into an untracked file outside the write-time hook\'s sight is not caught here.',
   },
+
+
   {
     id: 'check:shared-primitives',
     kind: 'gate',
@@ -208,16 +191,16 @@ export const GUARDS = [
     note:
       'single-definition rules plus defect-class pattern rules (comparator body, containment ' +
       'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts AND the ' +
-      'governance tree (scripts/, wrapper/, dispatch/, .claude/hooks/, the root bins) — the ' +
-      'enforcement layer used to be the one tree exempt from the rule it enforces (ceremony review ' +
-      '2026-08-29, F1), which is why the generated-artifact pattern was written fifteen times there. ' +
-      'Three primitives have TWO declared homes: the src/ file and the pre-build twin in ' +
+      'governance tree (scripts/, wrapper/, dispatch/, .claude/hooks/, the root bins). Three ' +
+      'primitives have TWO declared homes: the src/ file and the pre-build twin in ' +
       'scripts/shared/primitives.mjs (the governance tree cannot reach dist/). ' +
       'PATTERN_DATA_SOURCES exempts the two declaration files whose literals ARE the banned ' +
       'spelling as data. UNCOVERED: tests/**/*.ts stays out of scope — a test oracle must not ' +
       'import the code it validates — as does tests/**.mjs, so a comparator copy in a test helper ' +
       'passes; and the pattern rules match SPELLINGS, not semantics',
   },
+
+
   {
     id: 'check:agents-region',
     kind: 'gate',
@@ -239,6 +222,334 @@ export const GUARDS = [
       'the sentence this gate fails closed with the message saying so rather than passing vacuously ' +
       '(P64, owner decision 2026-09-10; the machine-wide half is filed separately)',
   },
+
+
+  {
+    id: 'check:loader-fragments',
+    kind: 'gate',
+    impl: 'check:loader-fragments',
+    preCommit: 'reach',
+    fix:
+      'a shipped loader asset drifted from its canonical fragment — reconcile it against ' +
+      'scripts/shared/loader-fragments-data.mjs (embed the fragment verbatim where it is declared ' +
+      '`verbatimIn`, or point at the `home` asset in prose where it is not), then re-run ' +
+      '`npm run check:loader-fragments`',
+    note:
+      'the four shipped loader assets (skills/<tool>/<tool>.prompt.md + skills/<tool>/SKILL.md, both ' +
+      'pairs) previously carried the same instruction in four drifted copies. UNCOVERED HALF: the ' +
+      'check reconciles only the fragments DECLARED in the data module, so a NEW duplicated ' +
+      'instruction is invisible until someone adds a fragment row for it — the module is the ' +
+      'inventory, not a detector of duplication',
+  },
+
+
+  {
+    id: 'check:version-gates',
+    kind: 'gate',
+    forms: [
+      // A version constant, a payload type stamped with it, and a read-back that never compares it.
+      { name: 'stamped version read back unchecked', drive: 'export', module: 'scripts/check-version-gates.mjs',
+        exportName: 'scanVersionGates', call: 'sources-map', fixturePath: 'src/fixture.ts',
+        sample: [
+          'export const FIXTURE_SCHEMA_VERSION = "fixture/v1";',
+          'export interface FixturePayload {',
+          '  schema_version: typeof FIXTURE_SCHEMA_VERSION;',
+          '}',
+          'export async function loadFixture(path: string) {',
+          '  return await readJsonFile<FixturePayload>(path);',
+          '}',
+        ].join('\n') },
+    ],
+    impl: 'check:version-gates',
+    preCommit: false,
+    fix:
+      'a schema version is stamped on write but never compared where the payload is read back — ' +
+      'add the version check at the read site (discardOnSchemaVersionMismatch or an explicit ' +
+      'compare); never silence the constant by widening the scan rules',
+    note: 'preCommit false is deliberate (CI-only) — cheap, flip to reach if wanted',
+  },
+
+
+  {
+    id: 'check:guard-reach',
+    kind: 'gate',
+    impl: 'check:guard-reach',
+    preCommit: 'always',
+    fix:
+      "register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or " +
+      "'declared-gap' with the reason in note)",
+    note: 'this registry, reconciled; always: tree membership changes on ANY staged add/delete/rename',
+  },
+
+
+  {
+    id: 'check:guard-reach-paths',
+    kind: 'gate',
+    impl: 'check:guard-reach-paths',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/guard-reach-derived-paths.generated.mjs no longer matches the declarations ' +
+      'it is projected from — re-render it with ' +
+      '`node scripts/shared/generate-guard-reach-paths.mjs`, then re-stage. Run ' +
+      '`npm run check:guard-reach-paths` for the exact drift',
+    note:
+      'freshness for the pre-build twins this registry imports (the pinning gate\'s scan set, and ' +
+      'the schemas the worker-schema producer writes). The registry is loaded by the commit gate ' +
+      'under plain node with no build, so those two declarations cannot be imported as TypeScript ' +
+      '— the twin is generated from both sources and this gate fails the build when it drifts. ' +
+      'REACH: the leg fires when the staged set intersects the union of the `files` globs of every ' +
+      'REACH row citing this gate — which is where both SOURCES and the twin itself are claimed ' +
+      '(the staged-source-hunks row carries `scripts/check-sites-pinned.mjs` and PINNED_PATHS\' ' +
+      'own contents; the contract row carries `src/audit/contracts/workerSchemas.ts` and the ' +
+      'schema files) plus the `scripts/shared/**` glob — ∪ its own impl script path and ' +
+      'package.json. That reach is what makes the leg honest: a changed CONTRACT_SCHEMA_PRODUCERS ' +
+      'or PINNED_PATHS with no unclaimed file and no unwired guard goes red HERE, at commit, ' +
+      'which is the only boundary that sees a stale twin before it lands',
+  },
+
+
+  {
+    id: 'check:pin-obligations',
+    kind: 'gate',
+    impl: 'check:pin-obligations',
+    preCommit: 'reach',
+    fix:
+      'a PINS row in scripts/shared/derived-file-preflight.mjs names a subject or a test that is not ' +
+      'tracked, or a test that imports the BUILT package (no dist/ in a fresh worktree) — point the ' +
+      'row at the right tracked file, or delete it. This check is what keeps a subject-keyed pin leg ' +
+      'from silently obliging nothing',
+    note:
+      'configuration-time reconciliation of the PINS graph: every row resolves against the tracked ' +
+      'tree and is build-free. It does NOT prove a bound test still asserts the literal — that is a ' +
+      'reading, not a mechanism, and it is stated in the check header',
+  },
+
+
+  {
+    id: 'check:source-test-ownership',
+    kind: 'gate',
+    impl: 'check:source-test-ownership',
+    preCommit: 'reach',
+    fix:
+      'a SOURCE_TEST_OWNERSHIP row (scripts/shared/source-test-ownership-data.mjs) names a subject or ' +
+      'test that is not tracked, or a bound test that NEVER EXECUTES its subject (missing-reach) or ' +
+      'that executes it but asserts none of its exports (missing-behaviour) — point the row at a test ' +
+      'that genuinely runs and asserts on the subject, or drop the row',
+    note:
+      'execution-reach + behavioural-evidence verification over the SHARED source→test ownership map ' +
+      '(O11/O36): each bound test must EXECUTE its subject (run under @vitest/coverage-v8, the subject\'s ' +
+      'runtime coverage inspected) AND assert on a subject export — the two evidence classes are reported ' +
+      'separately so an unrelated test is never folded together with an under-asserting one. The reach ' +
+      'classifier is scripts/shared/source-test-reach.mjs, shared by both pin consumers. Ceiling stated: ' +
+      'behavioural evidence is a static reading, and an author-supplied name is never advertised as ' +
+      'proof of a specific assertion',
+  },
+
+
+  {
+    id: 'check:sites-pinned',
+    kind: 'gate',
+    impl: 'check:sites-pinned',
+    preCommit: 'reach',
+    fix:
+      'a staged source hunk has no `// sites-pinned: <test file names>` declaration binding it to ' +
+      'the test(s) expected to fail, or the declaration names a test file that is not tracked — ' +
+      'add or correct the declaration, or a `// sites-pinned: none — <why>` where the file asserts ' +
+      'no behaviour',
+    note:
+      'the per-site pinning gate (open-bugs, owner decision 2026-07-25 — BUILD it, with a ' +
+      'DIFF-DERIVED site list). The site list is derived from the staged diff, so the declared-7-vs-' +
+      '>=11-hunks fail-open is closed by construction. ⚠ THE NAME BINDING IS AUTHOR-SUPPLIED: the ' +
+      'expected-failing test names come from the declaration, so this measures "the declared tests ' +
+      'exist" and NOT "a test asserting THIS behaviour went red" — the gate prints that admission ' +
+      'in its own output and its result is NOT admissible as loop-core attestation evidence. The ' +
+      'derivation that would make it admissible is a baseline coverage/ownership map, which is not ' +
+      'built',
+  },
+
+
+  {
+    id: 'check:contract-sites',
+    kind: 'gate',
+    impl: 'check:contract-sites',
+    preCommit: 'reach',
+    fix:
+      'a validated contract type has no producer construction site, or a rendered worker schema no ' +
+      'longer carries its contract\'s field set — run `npm run check:contract-sites` for the exact ' +
+      'refusal. Add `// construction-site: <Type>` at the constructing site (or a ' +
+      '`// contract-construction-sites: exempt — <why>` where the absence is deliberate), and ' +
+      'regenerate the schema with `npm run generate-schemas`',
+    note:
+      'per-type construction-site derivation for every validated contract type. Answers the ' +
+      '"contract coverage is derived from where TESTS live" defect (minor-bugs, 2026-07-25): the ' +
+      'sites are derived FROM THE CONTRACT, so a producer under scripts/ cannot miss a field the ' +
+      'contract added. NOT a typecheck — a cast makes a typecheck inert. UNCOVERED: a site marker ' +
+      'says a producer constructs the contract HERE; it does not prove the construction passes ' +
+      'every field (a spread of a partial still compiles), and it does not prove the site is ' +
+      'reached at runtime. The half closed is the DENOMINATOR',
+  },
+
+
+  {
+    id: 'check:generated-artifacts',
+    kind: 'gate',
+    impl: 'check:generated-artifacts',
+    preCommit: 'always',
+    fix:
+      'add or correct the generator row in the GENERATED section of scripts/guard-reach-data.mjs; ' +
+      'each tracked generator needs exactly one check, contractTest, or explained onDemand authority',
+    note: 'always: adding, deleting, or renaming any tracked generator changes the reconciled set',
+  },
+
+
+  {
+    id: 'check:invariant-glossary',
+    kind: 'gate',
+    impl: 'check:invariant-glossary',
+    preCommit: 'reach',
+    fix:
+      'add the missing uppercase nonnumeric INV-* namespace to docs/glossary-ids.md with its ' +
+      'contract and owning symbol/file, or retire the last source occurrence',
+  },
+
+
+  {
+    id: 'check:nightly-inbox',
+    kind: 'gate',
+    impl: 'check:nightly-inbox',
+    preCommit: 'reach',
+    fix: 'run `node scripts/nightly/render-inbox.mjs`, then re-stage docs/nightly-inbox.md',
+  },
+
+
+  {
+    id: 'check:ci-trigger-paths',
+    kind: 'gate',
+    impl: 'check:ci-trigger-paths',
+    preCommit: 'reach',
+    fix:
+      "ci.yml's paths: blocks are GENERATED from this registry — regenerate with " +
+      '`node scripts/shared/generate-ci-trigger-paths.mjs` and re-stage .github/workflows/ci.yml',
+    note:
+      'derives the ci.yml trigger-path list from non-declared-gap REACH rows + the always-trigger ' +
+      'base, so a new claimed tree cannot land outside the CI trigger set',
+  },
+
+
+  {
+    id: 'check:loop-core-patterns',
+    kind: 'gate',
+    impl: 'check:loop-core-patterns',
+    preCommit: 'reach',
+    fix:
+      '.claude/hooks/loop-core-patterns.mjs is stale against src/shared/loopCorePaths.ts — ' +
+      'run `node scripts/shared/generate-loop-core-patterns.mjs`, then re-stage it',
+  },
+
+
+  {
+    id: 'check:loop-core-closure',
+    kind: 'gate',
+    impl: 'check:loop-core-closure',
+    preCommit: 'reach',
+    fix:
+      'a module is reachable ONLY through loop-core but is neither in LOOP_CORE_PATTERNS nor ' +
+      'declared — add it to src/shared/loopCorePaths.ts (then regenerate) if it is core, or add a ' +
+      'row with its reason to scripts/shared/loopCoreClosureData.mjs if it is not',
+  },
+
+
+  {
+    id: 'check:constitutional-doc-paths',
+    kind: 'gate',
+    impl: 'check:constitutional-doc-paths',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/constitutional-doc-paths.generated.mjs is stale against ' +
+      'src/shared/constitutionalDocPaths.ts — run ' +
+      '`node scripts/shared/generate-constitutional-doc-paths.mjs`, then re-stage it',
+  },
+
+
+  {
+    id: 'check:runtime-artifact-names',
+    kind: 'gate',
+    impl: 'check:runtime-artifact-names',
+    preCommit: 'reach',
+    fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
+  },
+
+
+  {
+    id: 'check:friction-categories',
+    kind: 'gate',
+    impl: 'check:friction-categories',
+    preCommit: 'reach',
+    fix:
+      'scripts/shared/friction-categories.generated.mjs is stale against ' +
+      'src/shared/friction/frictionRecord.ts — run ' +
+      '`node scripts/shared/generate-friction-categories.mjs`, then re-stage it',
+  },
+
+
+  {
+    id: 'check:executor-producers',
+    kind: 'gate',
+    impl: 'check:executor-producers',
+    preCommit: 'reach',
+    fix:
+      'spec/audit/executor-producers.generated.md is stale — run `node scripts/shared/generate-executor-producers.mjs`, ' +
+      'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
+  },
+
+
+  {
+    id: 'check:spec-mirrors',
+    kind: 'gate',
+    impl: 'check:spec-mirrors',
+    preCommit: 'reach',
+    fix:
+      'a generated table region in spec/audit/artifact-contract.md, executor-catalog.md or ' +
+      'dependency-map.md is stale — run `node scripts/shared/generate-spec-mirrors.mjs`, then ' +
+      're-stage the doc(s). Never hand-edit between the markers: the rows come from ' +
+      'ARTIFACT_DEFINITIONS / EXECUTOR_REGISTRY / ARTIFACT_DEPENDS_ON_MAP and the Purpose/Notes ' +
+      'prose from scripts/shared/spec-mirror-data.mjs. If the check instead names a row the ' +
+      'declaration and the registry disagree about, fix the declaration — a new registry entry ' +
+      'must be filed under a section with its prose before it can render',
+  },
+
+
+  {
+    id: 'check:cli-surface',
+    kind: 'gate',
+    impl: 'check:cli-surface',
+    preCommit: 'reach',
+    fix:
+      "docs/audit-pkg/product.md's installer-verb block is stale — run " +
+      '`node scripts/shared/generate-cli-surface.mjs`, then re-stage it. The verbs and their ' +
+      'summaries are declared in wrapper/installer-verb-help.mjs (what both bins answer ' +
+      '`<verb> --help` from); never hand-edit inside the markers',
+    note:
+      'covers the four wrapper-intercepted INSTALLER verbs only. UNCOVERED HALF: every OTHER command ' +
+      "wrapper/audit-code-wrapper-lib.mjs's printHelp() lists — `prompt-path`, `mcp`, `validate`, " +
+      '`explain-task`, the ingest verbs — carries its one-line summary as loose prose rather than a ' +
+      'declaration this render can read, so doc prose naming those stays hand-written and unchecked ' +
+      '(lift them from printHelp to a declaration the way the installer verbs were)',
+  },
+
+
+  {
+    id: 'check:ingestion-checks',
+    kind: 'gate',
+    impl: 'check:ingestion-checks',
+    preCommit: 'reach',
+    fix:
+      'the ingestion-check block in docs/audit-pkg/contracts.md is stale — run ' +
+      '`node scripts/shared/generate-ingestion-checks.mjs`, then re-stage it. The check set is declared ' +
+      'in INGESTION_CHECKS (src/shared/submission/ingestionChecks.ts); never hand-edit the render',
+  },
+
+
   {
     id: 'check:deadcode',
     kind: 'gate',
@@ -250,6 +561,8 @@ export const GUARDS = [
       'with no adopter reds this gate',
     note: 'knip, default mode',
   },
+
+
   {
     id: 'check:orphan-modules',
     kind: 'gate',
@@ -273,21 +586,49 @@ export const GUARDS = [
       'flagged and needs an ORPHAN_ALLOW row; and the pass costs ~4-5s, since binding symbols over ' +
       'all of src/ is what makes the name flow followable at all',
   },
+
+
   {
-    id: 'check:pin-obligations',
+    id: 'check:lint',
     kind: 'gate',
-    impl: 'check:pin-obligations',
-    preCommit: 'reach',
+    impl: 'check:lint',
+    preCommit: false,
     fix:
-      'a PINS row in scripts/shared/derived-file-preflight.mjs names a subject or a test that is not ' +
-      'tracked, or a test that imports the BUILT package (no dist/ in a fresh worktree) — point the ' +
-      'row at the right tracked file, or delete it. This check is what keeps a subject-keyed pin leg ' +
-      'from silently obliging nothing',
+      'eslint failed — fix the named violation; the ruleset is curated zero-tolerance, so prefer ' +
+      'the fix over a disable comment, and a disable carries its reason on the same line',
     note:
-      'configuration-time reconciliation of the PINS graph: every row resolves against the tracked ' +
-      'tree and is build-free. It does NOT prove a bound test still asserts the literal — that is a ' +
-      'reading, not a mechanism, and it is stated in the check header',
+      'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
+      'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
+      '.mjs script surface (scripts/wrapper/dispatch/root bins; typed by check:scripts since 2026-08-25)',
   },
+
+
+  {
+    id: 'check:dup',
+    kind: 'gate',
+    impl: 'check:dup',
+    preCommit: false,
+    fix:
+      'jscpd is over the .jscpd.json threshold — extract the duplicated logic into its shared ' +
+      'home instead of raising the threshold',
+    note: 'jscpd duplication ratchet (.jscpd.json threshold) over src+scripts+tests',
+  },
+
+
+  {
+    id: 'check:depgraph',
+    kind: 'gate',
+    impl: 'check:depgraph',
+    preCommit: false,
+    fix:
+      'dependency-cruiser found a runtime import cycle in src/, or src/shared importing an ' +
+      'orchestrator — break the cycle or invert the dependency; never widen .dependency-cruiser.cjs',
+    note:
+      'dependency-cruiser (.dependency-cruiser.cjs): no runtime import cycles in src; ' +
+      'src/shared never imports src/audit|src/remediate',
+  },
+
+
   {
     id: 'check:doc-manifest',
     kind: 'gate',
@@ -306,6 +647,8 @@ export const GUARDS = [
       'half the entry left open — the committing session running no hooks at all — is closed ' +
       'structurally by P53: git runs its own hook for its own commits',
   },
+
+
   {
     id: 'check:doc-links',
     kind: 'gate',
@@ -327,6 +670,8 @@ export const GUARDS = [
       'uncovered half: generated deliverable renders are excluded (shared/generated-renders.mjs) — ' +
       'their worker-authored prose may quote link-shaped text (2026-08-18)',
   },
+
+
   {
     id: 'check:doc-code-citations',
     kind: 'gate',
@@ -368,6 +713,8 @@ export const GUARDS = [
       '`symbol-citation-exempt:` marker for a record naming a retired mechanism ' +
       '(2026-08-18; extension-census source narrowed 2026-09-10)',
   },
+
+
   {
     id: 'check:philosophy-brief',
     kind: 'gate',
@@ -377,6 +724,8 @@ export const GUARDS = [
       "README.md's Philosophy section is GENERATED from docs/project-philosophy.md — regenerate with " +
       '`npm run check:philosophy-brief -- --write`; never hand-edit the rendered block',
   },
+
+
   {
     id: 'check:readme-sample-report',
     kind: 'gate',
@@ -386,6 +735,8 @@ export const GUARDS = [
       "README.md's sample-report block is GENERATED from the report renderer — regenerate with " +
       '`npm run check:readme-sample-report -- --write`; never hand-edit the rendered block',
   },
+
+
   {
     id: 'check:proposal-red-at',
     kind: 'gate',
@@ -396,119 +747,8 @@ export const GUARDS = [
       'HEAD and record the exact command, sha, and verbatim failure (or one line stating why it ' +
       'cannot run at HEAD)',
   },
-  {
-    id: 'check:loop-core-patterns',
-    kind: 'gate',
-    impl: 'check:loop-core-patterns',
-    preCommit: 'reach',
-    fix:
-      '.claude/hooks/loop-core-patterns.mjs is stale against src/shared/loopCorePaths.ts — ' +
-      'run `node scripts/shared/generate-loop-core-patterns.mjs`, then re-stage it',
-  },
-  {
-    id: 'check:loop-core-closure',
-    kind: 'gate',
-    impl: 'check:loop-core-closure',
-    preCommit: 'reach',
-    fix:
-      'a module is reachable ONLY through loop-core but is neither in LOOP_CORE_PATTERNS nor ' +
-      'declared — add it to src/shared/loopCorePaths.ts (then regenerate) if it is core, or add a ' +
-      'row with its reason to scripts/shared/loopCoreClosureData.mjs if it is not',
-  },
-  {
-    id: 'check:constitutional-doc-paths',
-    kind: 'gate',
-    impl: 'check:constitutional-doc-paths',
-    preCommit: 'reach',
-    fix:
-      'scripts/shared/constitutional-doc-paths.generated.mjs is stale against ' +
-      'src/shared/constitutionalDocPaths.ts — run ' +
-      '`node scripts/shared/generate-constitutional-doc-paths.mjs`, then re-stage it',
-  },
-  {
-    id: 'check:runtime-artifact-names',
-    kind: 'gate',
-    impl: 'check:runtime-artifact-names',
-    preCommit: 'reach',
-    fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
-  },
-  {
-    id: 'check:friction-categories',
-    kind: 'gate',
-    impl: 'check:friction-categories',
-    preCommit: 'reach',
-    fix:
-      'scripts/shared/friction-categories.generated.mjs is stale against ' +
-      'src/shared/friction/frictionRecord.ts — run ' +
-      '`node scripts/shared/generate-friction-categories.mjs`, then re-stage it',
-  },
-  {
-    id: 'check:executor-producers',
-    kind: 'gate',
-    impl: 'check:executor-producers',
-    preCommit: 'reach',
-    fix:
-      'spec/audit/executor-producers.generated.md is stale — run `node scripts/shared/generate-executor-producers.mjs`, ' +
-      'then re-stage it. The producer relation is declared on EXECUTOR_REGISTRY[].produces; never hand-edit the render',
-  },
-  {
-    id: 'check:ingestion-checks',
-    kind: 'gate',
-    impl: 'check:ingestion-checks',
-    preCommit: 'reach',
-    fix:
-      'the ingestion-check block in docs/audit-pkg/contracts.md is stale — run ' +
-      '`node scripts/shared/generate-ingestion-checks.mjs`, then re-stage it. The check set is declared ' +
-      'in INGESTION_CHECKS (src/shared/submission/ingestionChecks.ts); never hand-edit the render',
-  },
-  {
-    id: 'check:spec-mirrors',
-    kind: 'gate',
-    impl: 'check:spec-mirrors',
-    preCommit: 'reach',
-    fix:
-      'a generated table region in spec/audit/artifact-contract.md, executor-catalog.md or ' +
-      'dependency-map.md is stale — run `node scripts/shared/generate-spec-mirrors.mjs`, then ' +
-      're-stage the doc(s). Never hand-edit between the markers: the rows come from ' +
-      'ARTIFACT_DEFINITIONS / EXECUTOR_REGISTRY / ARTIFACT_DEPENDS_ON_MAP and the Purpose/Notes ' +
-      'prose from scripts/shared/spec-mirror-data.mjs. If the check instead names a row the ' +
-      'declaration and the registry disagree about, fix the declaration — a new registry entry ' +
-      'must be filed under a section with its prose before it can render',
-  },
-  {
-    id: 'check:loader-fragments',
-    kind: 'gate',
-    impl: 'check:loader-fragments',
-    preCommit: 'reach',
-    fix:
-      'a shipped loader asset drifted from its canonical fragment — reconcile it against ' +
-      'scripts/shared/loader-fragments-data.mjs (embed the fragment verbatim where it is declared ' +
-      '`verbatimIn`, or point at the `home` asset in prose where it is not), then re-run ' +
-      '`npm run check:loader-fragments`',
-    note:
-      'the four shipped loader assets (skills/<tool>/<tool>.prompt.md + skills/<tool>/SKILL.md, both ' +
-      'pairs) previously carried the same instruction in four drifted copies. UNCOVERED HALF: the ' +
-      'check reconciles only the fragments DECLARED in the data module, so a NEW duplicated ' +
-      'instruction is invisible until someone adds a fragment row for it — the module is the ' +
-      'inventory, not a detector of duplication',
-  },
-  {
-    id: 'check:cli-surface',
-    kind: 'gate',
-    impl: 'check:cli-surface',
-    preCommit: 'reach',
-    fix:
-      "docs/audit-pkg/product.md's installer-verb block is stale — run " +
-      '`node scripts/shared/generate-cli-surface.mjs`, then re-stage it. The verbs and their ' +
-      'summaries are declared in wrapper/installer-verb-help.mjs (what both bins answer ' +
-      '`<verb> --help` from); never hand-edit inside the markers',
-    note:
-      'covers the four wrapper-intercepted INSTALLER verbs only. UNCOVERED HALF: every OTHER command ' +
-      "wrapper/audit-code-wrapper-lib.mjs's printHelp() lists — `prompt-path`, `mcp`, `validate`, " +
-      '`explain-task`, the ingest verbs — carries its one-line summary as loose prose rather than a ' +
-      'declaration this render can read, so doc prose naming those stays hand-written and unchecked ' +
-      '(lift them from printHelp to a declaration the way the installer verbs were)',
-  },
+
+
   {
     id: 'check:handoff-roadmap',
     kind: 'gate',
@@ -556,6 +796,8 @@ export const GUARDS = [
       'does not make the section immediate-next by construction. Words rather than lines because a ' +
       'line count measures the wrap width, not the content',
   },
+
+
   {
     id: 'check:retired-infrastructure',
     kind: 'gate',
@@ -588,6 +830,8 @@ export const GUARDS = [
       'identifier match, so an entry that refers to retired infrastructure only by DESCRIPTION ' +
       '("the old router on the other port") is not caught',
   },
+
+
   {
     id: 'check:backlog-index',
     kind: 'gate',
@@ -598,138 +842,8 @@ export const GUARDS = [
       'hand-patch line numbers inside the generated seek-index markers; they are derived, and the ' +
       'next backlog edit moves them again',
   },
-  {
-    id: 'check:backlog-budget',
-    kind: 'gate',
-    forms: [
-      // The states-the-property half (second backlog-clearance lap, 2026-07-24):
-      // a prescription with no `**Property:**` marker beside it. Driven through
-      // the pure detector — `evaluateBacklog` takes a file LIST, which no form
-      // kind supplies, and the detector is what decides either leg's refusal.
-      { name: 'prescribed fix with no property', drive: 'export',
-        module: 'scripts/check-backlog-budget.mjs',
-        exportName: 'prescribedFixShapes', call: 'text',
-        sample: '- **An entry.** The fix is to move it into one module.' },
-      { name: 'imperative remedy instead of a property', drive: 'export',
-        module: 'scripts/check-backlog-budget.mjs',
-        exportName: 'prescribedFixShapes', call: 'text',
-        sample: '- **An entry.** Anchor the deletion on the next bullet instead of a count.' },
-    ],
-    impl: 'check:backlog-budget',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
-      'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
-      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise. ' +
-      'A refusal naming a PRESCRIBED FIX MECHANISM is the states-the-property leg instead: the entry ' +
-      'says how to change the code without saying what must become true, so add `**Property:** …` — ' +
-      'the prescribed mechanism is the part that does not survive contact with the tree (a lap opened ' +
-      'on one whose fix would have regressed the run)',
-    note:
-      'TWO legs, one gate, because both are entry WRITE-TIME shape rules over the same parsed corpus ' +
-      '(the size budget, and the states-the-property rule from the 2026-07-24 second-backlog-clearance ' +
-      'lap). The property leg is DELIBERATELY NARROW: it refuses an entry that prescribes a fix ' +
-      '(PRESCRIBED_FIX_SHAPES — three literal shapes drawn from live entries) without a `**Property:**` ' +
-      'marker, not "every entry needs a marker" — half the corpus is measurements, residual lists and ' +
-      'live-run watches that prescribe nothing, and requiring the marker there would red 100+ entries ' +
-      'for a rule they cannot satisfy. Pre-existing prescriptions are amnestied BY NAME in ' +
-      '`entries_prescribing_mechanism` (the same shape as the byte amnesty, and it drops a key as soon ' +
-      'as the entry gains its marker). UNCOVERED HALF, stated: the leg detects the marker\'s PRESENCE, ' +
-      'never whether the sentence after it states a property rather than a mechanism in different ' +
-      'words — nor an entry that states a property and then prescribes a mechanism anyway in its body. ' +
-      'The shape list errs toward false NEGATIVES by construction (a wider net flags legitimate ' +
-      '`**Property:** a lap can …` prose, and a gate that cries wolf on its own corpus gets disabled). ' +
-      'Those are readings; the nightly doc leg is the semantic backstop',
-  },
-  {
-    id: 'check:backlog-status',
-    kind: 'gate',
-    forms: [
-      { name: 'status glyph', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- ✅ the fix landed' },
-      { name: 'emphasised status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- **SHIPPED 2026-07-19.** the entry' },
-      { name: 'leading status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- DONE: the entry' },
-    ],
-    impl: 'check:backlog-status',
-    preCommit: 'reach',
-    fix:
-      'a staged backlog entry leads with a status label, and the backlog is a living to-do list, not a ' +
-      'status log — a fully-closed entry is DELETED (durables move to their real home first), a ' +
-      'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
-  },
-  {
-    id: 'check:backlog-friction-tags',
-    kind: 'gate',
-    forms: [
-      { name: 'off-vocabulary friction tag', drive: 'export', module: 'scripts/check-backlog-friction-tags.mjs',
-        exportName: 'findFrictionTags', call: 'file-content', fixturePath: 'open-bugs.md',
-        sample: '- **A thing (2026-08-30, low, friction: false_red).** prose' },
-    ],
-    impl: 'check:backlog-friction-tags',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a backlog entry tags a `friction:` category the vocabulary does not hold — map it onto the ' +
-      'canonical three (ambiguous_direction | tool_should_decide | inefficient_feeding) whose ' +
-      'definition it fits; do NOT add a category, the list is single-sourced in ' +
-      'src/shared/friction/frictionRecord.ts and the close-out gate counts coverage per category',
-    note:
-      'the tag is the field a closeout walk or a triage sweep GROUPS BY, and nothing read it: the ' +
-      'vocabulary existed in three places already (the TS source, its generated sibling, the ' +
-      'close-out gate) while seven off-vocabulary tags accumulated in docs/backlog/ — five of them ' +
-      'synonyms of the canonical three, which made any grouping silently incomplete. The gate ' +
-      'imports the GENERATED sibling, never audit-tools/shared, so it runs in a never-built ' +
-      'checkout. UNCOVERED HALF: an untagged entry is not refused (the tag is a grouping aid, not ' +
-      'a required field), and the tags a friction WALK writes into its own prose line are matched ' +
-      'only in `friction: <word>` form — a tag phrased some other way is not seen. Whether a tag ' +
-      'is the RIGHT one of the three remains a reading, not a mechanism',
-  },
-  {
-    id: 'check:backlog-line-numbers',
-    kind: 'gate',
-    forms: [
-      { name: 'backticked path with line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
-        exportName: 'findLineNumberCitations', call: 'text', sample: 'see `src/x.ts:123` for the write' },
-      { name: 'backticked bare line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
-        exportName: 'findLineNumberCitations', call: 'text', sample: 'the anchor at `:21` moved' },
-    ],
-    impl: 'check:backlog-line-numbers',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a staged backlog entry cites a bare line number (a backticked `path:123` or a bare `:21` span) — ' +
-      'cite the SYMBOL instead, or the file alone when no good symbol exists; never auto-resolve a ' +
-      'drifted number to the nearest declaration (dropping the number beats false precision)',
-  },
-  {
-    id: 'check:review-routing',
-    kind: 'gate',
-    forms: [
-      { name: 'routing declaration in a review record', drive: 'export', module: 'scripts/check-review-routing.mjs',
-        exportName: 'findRoutingDeclarations', call: 'text',
-        sample: '<!-- review-routing: backlog-bugs -->' },
-    ],
-    impl: 'check:review-routing',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a review record added since this mechanism landed carries no routing declaration — add ' +
-      '`<!-- review-routing: <row> -->` in its first lines, naming a row from ' +
-      'scripts/review-routing-data.mjs; a record whose analysis produced no work declares ' +
-      '`no-forward-work` explicitly rather than by omitting the line',
-    note:
-      'A record is a RATCHET, not each record. 73 dated records predate the mechanism and sit on the ' +
-      'declared-debt baseline (docs/reviews/.routing-baseline.json), which only SHRINKS: a declared ' +
-      'record still listed there is a RED, as is a baseline path that no longer exists. Uncovered, ' +
-      'declared: the gate checks the declaration EXISTS and names a live row — it cannot check that ' +
-      'the author picked the TRUE row, because whether a prose analysis identified work is the ' +
-      'semantic judgment that made the obvious "every review is cited from somewhere" gate wrong ' +
-      '(it reds a dogfood log and a measurement record, and a false red gets a gate disabled). A ' +
-      'baselined record is announced in the pass line, never silently exempt (2026-09-10)',
-  },
+
+
   {
     id: 'check:memory-citations',
     kind: 'gate',
@@ -775,156 +889,175 @@ export const GUARDS = [
       'prose may quote citation-shaped text (2026-08-18; store-resolution note 2026-08-30; path ' +
       'direction 2026-09-10)',
   },
+
+
   {
-    id: 'check:version-gates',
+    id: 'check:review-routing',
     kind: 'gate',
     forms: [
-      // A version constant, a payload type stamped with it, and a read-back that never compares it.
-      { name: 'stamped version read back unchecked', drive: 'export', module: 'scripts/check-version-gates.mjs',
-        exportName: 'scanVersionGates', call: 'sources-map', fixturePath: 'src/fixture.ts',
-        sample: [
-          'export const FIXTURE_SCHEMA_VERSION = "fixture/v1";',
-          'export interface FixturePayload {',
-          '  schema_version: typeof FIXTURE_SCHEMA_VERSION;',
-          '}',
-          'export async function loadFixture(path: string) {',
-          '  return await readJsonFile<FixturePayload>(path);',
-          '}',
-        ].join('\n') },
+      { name: 'routing declaration in a review record', drive: 'export', module: 'scripts/check-review-routing.mjs',
+        exportName: 'findRoutingDeclarations', call: 'text',
+        sample: '<!-- review-routing: backlog-bugs -->' },
     ],
-    impl: 'check:version-gates',
+    impl: 'check:review-routing',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a review record added since this mechanism landed carries no routing declaration — add ' +
+      '`<!-- review-routing: <row> -->` in its first lines, naming a row from ' +
+      'scripts/review-routing-data.mjs; a record whose analysis produced no work declares ' +
+      '`no-forward-work` explicitly rather than by omitting the line',
+    note:
+      'A record is a RATCHET, not each record. 73 dated records predate the mechanism and sit on the ' +
+      'declared-debt baseline (docs/reviews/.routing-baseline.json), which only SHRINKS: a declared ' +
+      'record still listed there is a RED, as is a baseline path that no longer exists. Uncovered, ' +
+      'declared: the gate checks the declaration EXISTS and names a live row — it cannot check that ' +
+      'the author picked the TRUE row, because whether a prose analysis identified work is the ' +
+      'semantic judgment that made the obvious "every review is cited from somewhere" gate wrong ' +
+      '(it reds a dogfood log and a measurement record, and a false red gets a gate disabled). A ' +
+      'baselined record is announced in the pass line, never silently exempt (2026-09-10)',
+  },
+
+
+  {
+    id: 'check:backlog-budget',
+    kind: 'gate',
+    forms: [
+      // The states-the-property half (second backlog-clearance lap, 2026-07-24):
+      // a prescription with no `**Property:**` marker beside it. Driven through
+      // the pure detector — `evaluateBacklog` takes a file LIST, which no form
+      // kind supplies, and the detector is what decides either leg's refusal.
+      { name: 'prescribed fix with no property', drive: 'export',
+        module: 'scripts/check-backlog-budget.mjs',
+        exportName: 'prescribedFixShapes', call: 'text',
+        sample: '- **An entry.** The fix is to move it into one module.' },
+      { name: 'imperative remedy instead of a property', drive: 'export',
+        module: 'scripts/check-backlog-budget.mjs',
+        exportName: 'prescribedFixShapes', call: 'text',
+        sample: '- **An entry.** Anchor the deletion on the next bullet instead of a count.' },
+    ],
+    impl: 'check:backlog-budget',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
+      'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
+      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise. ' +
+      'A refusal naming a PRESCRIBED FIX MECHANISM is the states-the-property leg instead: the entry ' +
+      'says how to change the code without saying what must become true, so add `**Property:** …` — ' +
+      'the prescribed mechanism is the part that does not survive contact with the tree (a lap opened ' +
+      'on one whose fix would have regressed the run)',
+    note:
+      'TWO legs, one gate, because both are entry WRITE-TIME shape rules over the same parsed corpus ' +
+      '(the size budget, and the states-the-property rule from the 2026-07-24 second-backlog-clearance ' +
+      'lap). The property leg is DELIBERATELY NARROW: it refuses an entry that prescribes a fix ' +
+      '(PRESCRIBED_FIX_SHAPES — three literal shapes drawn from live entries) without a `**Property:**` ' +
+      'marker, not "every entry needs a marker" — half the corpus is measurements, residual lists and ' +
+      'live-run watches that prescribe nothing, and requiring the marker there would red 100+ entries ' +
+      'for a rule they cannot satisfy. Pre-existing prescriptions are amnestied BY NAME in ' +
+      '`entries_prescribing_mechanism` (the same shape as the byte amnesty, and it drops a key as soon ' +
+      'as the entry gains its marker). UNCOVERED HALF, stated: the leg detects the marker\'s PRESENCE, ' +
+      'never whether the sentence after it states a property rather than a mechanism in different ' +
+      'words — nor an entry that states a property and then prescribes a mechanism anyway in its body. ' +
+      'The shape list errs toward false NEGATIVES by construction (a wider net flags legitimate ' +
+      '`**Property:** a lap can …` prose, and a gate that cries wolf on its own corpus gets disabled). ' +
+      'Those are readings; the nightly doc leg is the semantic backstop',
+  },
+
+
+  {
+    id: 'check:backlog-status',
+    kind: 'gate',
+    forms: [
+      { name: 'status glyph', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- ✅ the fix landed' },
+      { name: 'emphasised status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- **SHIPPED 2026-07-19.** the entry' },
+      { name: 'leading status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
+        exportName: 'findStatusMarkers', call: 'text', sample: '- DONE: the entry' },
+    ],
+    impl: 'check:backlog-status',
+    preCommit: 'reach',
+    fix:
+      'a staged backlog entry leads with a status label, and the backlog is a living to-do list, not a ' +
+      'status log — a fully-closed entry is DELETED (durables move to their real home first), a ' +
+      'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
+  },
+
+
+  {
+    id: 'check:backlog-line-numbers',
+    kind: 'gate',
+    forms: [
+      { name: 'backticked path with line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
+        exportName: 'findLineNumberCitations', call: 'text', sample: 'see `src/x.ts:123` for the write' },
+      { name: 'backticked bare line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
+        exportName: 'findLineNumberCitations', call: 'text', sample: 'the anchor at `:21` moved' },
+    ],
+    impl: 'check:backlog-line-numbers',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a staged backlog entry cites a bare line number (a backticked `path:123` or a bare `:21` span) — ' +
+      'cite the SYMBOL instead, or the file alone when no good symbol exists; never auto-resolve a ' +
+      'drifted number to the nearest declaration (dropping the number beats false precision)',
+  },
+
+
+  {
+    id: 'check:backlog-friction-tags',
+    kind: 'gate',
+    forms: [
+      { name: 'off-vocabulary friction tag', drive: 'export', module: 'scripts/check-backlog-friction-tags.mjs',
+        exportName: 'findFrictionTags', call: 'file-content', fixturePath: 'open-bugs.md',
+        sample: '- **A thing (2026-08-30, low, friction: false_red).** prose' },
+    ],
+    impl: 'check:backlog-friction-tags',
+    preCommit: 'reach',
+    writeTime: { scope: 'file', maxMs: 1000 },
+    fix:
+      'a backlog entry tags a `friction:` category the vocabulary does not hold — map it onto the ' +
+      'canonical three (ambiguous_direction | tool_should_decide | inefficient_feeding) whose ' +
+      'definition it fits; do NOT add a category, the list is single-sourced in ' +
+      'src/shared/friction/frictionRecord.ts and the close-out gate counts coverage per category',
+    note:
+      'the tag is the field a closeout walk or a triage sweep GROUPS BY, and nothing read it: the ' +
+      'vocabulary existed in three places already (the TS source, its generated sibling, the ' +
+      'close-out gate) while seven off-vocabulary tags accumulated in docs/backlog/ — five of them ' +
+      'synonyms of the canonical three, which made any grouping silently incomplete. The gate ' +
+      'imports the GENERATED sibling, never audit-tools/shared, so it runs in a never-built ' +
+      'checkout. UNCOVERED HALF: an untagged entry is not refused (the tag is a grouping aid, not ' +
+      'a required field), and the tags a friction WALK writes into its own prose line are matched ' +
+      'only in `friction: <word>` form — a tag phrased some other way is not seen. Whether a tag ' +
+      'is the RIGHT one of the three remains a reading, not a mechanism',
+  },
+
+
+  {
+    id: 'check:tests',
+    kind: 'gate',
+    impl: 'check:tests',
+    preCommit: 'reach',
+    fix:
+      'the test tree failed its typecheck (tsconfig.test.json) — fix the staged type error; ' +
+      'untyped destructured test params infer never[] and red only this leg and release CI',
+    note: 'tsc over the test tree (tsconfig.test.json); ~7s, so the src-reach widening is deliberate',
+  },
+
+
+  // ── gates (npm scripts reachable from verify:release) ──────────────────────
+  {
+    id: 'build',
+    kind: 'gate',
+    impl: 'build',
     preCommit: false,
     fix:
-      'a schema version is stamped on write but never compared where the payload is read back — ' +
-      'add the version check at the read site (discardOnSchemaVersionMismatch or an explicit ' +
-      'compare); never silence the constant by widening the scan rules',
-    note: 'preCommit false is deliberate (CI-only) — cheap, flip to reach if wanted',
+      'tsc failed over src/ — fix the reported type error; in a fresh checkout or worktree run ' +
+      '`npm install` first (a stale dist/ fakes "no exported member" errors)',
+    note: 'tsc over src/ + data-asset copy; the pre-commit gate hand-codes its `npm run check` leg',
   },
-  {
-    id: 'check:contract-sites',
-    kind: 'gate',
-    impl: 'check:contract-sites',
-    preCommit: 'reach',
-    fix:
-      'a validated contract type has no producer construction site, or a rendered worker schema no ' +
-      'longer carries its contract\'s field set — run `npm run check:contract-sites` for the exact ' +
-      'refusal. Add `// construction-site: <Type>` at the constructing site (or a ' +
-      '`// contract-construction-sites: exempt — <why>` where the absence is deliberate), and ' +
-      'regenerate the schema with `npm run generate-schemas`',
-    note:
-      'per-type construction-site derivation for every validated contract type. Answers the ' +
-      '"contract coverage is derived from where TESTS live" defect (minor-bugs, 2026-07-25): the ' +
-      'sites are derived FROM THE CONTRACT, so a producer under scripts/ cannot miss a field the ' +
-      'contract added. NOT a typecheck — a cast makes a typecheck inert. UNCOVERED: a site marker ' +
-      'says a producer constructs the contract HERE; it does not prove the construction passes ' +
-      'every field (a spread of a partial still compiles), and it does not prove the site is ' +
-      'reached at runtime. The half closed is the DENOMINATOR',
-  },
-  {
-    id: 'check:sites-pinned',
-    kind: 'gate',
-    impl: 'check:sites-pinned',
-    preCommit: 'reach',
-    fix:
-      'a staged source hunk has no `// sites-pinned: <test file names>` declaration binding it to ' +
-      'the test(s) expected to fail, or the declaration names a test file that is not tracked — ' +
-      'add or correct the declaration, or a `// sites-pinned: none — <why>` where the file asserts ' +
-      'no behaviour',
-    note:
-      'the per-site pinning gate (open-bugs, owner decision 2026-07-25 — BUILD it, with a ' +
-      'DIFF-DERIVED site list). The site list is derived from the staged diff, so the declared-7-vs-' +
-      '>=11-hunks fail-open is closed by construction. ⚠ THE NAME BINDING IS AUTHOR-SUPPLIED: the ' +
-      'expected-failing test names come from the declaration, so this measures "the declared tests ' +
-      'exist" and NOT "a test asserting THIS behaviour went red" — the gate prints that admission ' +
-      'in its own output and its result is NOT admissible as loop-core attestation evidence. The ' +
-      'derivation that would make it admissible is a baseline coverage/ownership map, which is not ' +
-      'built',
-  },
-  {
-    id: 'check:guard-reach-paths',
-    kind: 'gate',
-    impl: 'check:guard-reach-paths',
-    preCommit: 'reach',
-    fix:
-      'scripts/shared/guard-reach-derived-paths.generated.mjs no longer matches the declarations ' +
-      'it is projected from — re-render it with ' +
-      '`node scripts/shared/generate-guard-reach-paths.mjs`, then re-stage. Run ' +
-      '`npm run check:guard-reach-paths` for the exact drift',
-    note:
-      'freshness for the pre-build twins this registry imports (the pinning gate\'s scan set, and ' +
-      'the schemas the worker-schema producer writes). The registry is loaded by the commit gate ' +
-      'under plain node with no build, so those two declarations cannot be imported as TypeScript ' +
-      '— the twin is generated from both sources and this gate fails the build when it drifts. ' +
-      'REACH: the leg fires when the staged set intersects the union of the `files` globs of every ' +
-      'REACH row citing this gate — which is where both SOURCES and the twin itself are claimed ' +
-      '(the staged-source-hunks row carries `scripts/check-sites-pinned.mjs` and PINNED_PATHS\' ' +
-      'own contents; the contract row carries `src/audit/contracts/workerSchemas.ts` and the ' +
-      'schema files) plus the `scripts/shared/**` glob — ∪ its own impl script path and ' +
-      'package.json. That reach is what makes the leg honest: a changed CONTRACT_SCHEMA_PRODUCERS ' +
-      'or PINNED_PATHS with no unclaimed file and no unwired guard goes red HERE, at commit, ' +
-      'which is the only boundary that sees a stale twin before it lands',
-  },
-  {
-    id: 'check:guard-reach',
-    kind: 'gate',
-    impl: 'check:guard-reach',
-    preCommit: 'always',
-    fix:
-      "register the file or guard in scripts/guard-reach-data.mjs (guardedBy a real guard id, or " +
-      "'declared-gap' with the reason in note)",
-    note: 'this registry, reconciled; always: tree membership changes on ANY staged add/delete/rename',
-  },
-  {
-    id: 'check:generated-artifacts',
-    kind: 'gate',
-    impl: 'check:generated-artifacts',
-    preCommit: 'always',
-    fix:
-      'add or correct the generator row in the GENERATED section of scripts/guard-reach-data.mjs; ' +
-      'each tracked generator needs exactly one check, contractTest, or explained onDemand authority',
-    note: 'always: adding, deleting, or renaming any tracked generator changes the reconciled set',
-  },
-  {
-    id: 'check:invariant-glossary',
-    kind: 'gate',
-    impl: 'check:invariant-glossary',
-    preCommit: 'reach',
-    fix:
-      'add the missing uppercase nonnumeric INV-* namespace to docs/glossary-ids.md with its ' +
-      'contract and owning symbol/file, or retire the last source occurrence',
-  },
-  {
-    id: 'check:nightly-inbox',
-    kind: 'gate',
-    impl: 'check:nightly-inbox',
-    preCommit: 'reach',
-    fix: 'run `node scripts/nightly/render-inbox.mjs`, then re-stage docs/nightly-inbox.md',
-  },
-  {
-    id: 'check:ci-trigger-paths',
-    kind: 'gate',
-    impl: 'check:ci-trigger-paths',
-    preCommit: 'reach',
-    fix:
-      "ci.yml's paths: blocks are GENERATED from this registry — regenerate with " +
-      '`node scripts/shared/generate-ci-trigger-paths.mjs` and re-stage .github/workflows/ci.yml',
-    note:
-      'derives the ci.yml trigger-path list from non-declared-gap REACH rows + the always-trigger ' +
-      'base, so a new claimed tree cannot land outside the CI trigger set',
-  },
-  {
-    id: 'check:lint',
-    kind: 'gate',
-    impl: 'check:lint',
-    preCommit: false,
-    fix:
-      'eslint failed — fix the named violation; the ruleset is curated zero-tolerance, so prefer ' +
-      'the fix over a disable comment, and a disable carries its reason on the same line',
-    note:
-      'eslint, curated zero-tolerance ruleset (eslint.config.js): unused-vars + verified sonarjs ' +
-      'correctness rules over src (type-aware), tests (type-aware, unused-vars only) and the ' +
-      '.mjs script surface (scripts/wrapper/dispatch/root bins; typed by check:scripts since 2026-08-25)',
-  },
+
+
   {
     id: 'check:scripts',
     kind: 'gate',
@@ -935,28 +1068,8 @@ export const GUARDS = [
       '(tsconfig.scripts.json) failed — fix the type error or annotate with JSDoc; noImplicitAny ' +
       'stays relaxed there by design',
   },
-  {
-    id: 'check:dup',
-    kind: 'gate',
-    impl: 'check:dup',
-    preCommit: false,
-    fix:
-      'jscpd is over the .jscpd.json threshold — extract the duplicated logic into its shared ' +
-      'home instead of raising the threshold',
-    note: 'jscpd duplication ratchet (.jscpd.json threshold) over src+scripts+tests',
-  },
-  {
-    id: 'check:depgraph',
-    kind: 'gate',
-    impl: 'check:depgraph',
-    preCommit: false,
-    fix:
-      'dependency-cruiser found a runtime import cycle in src/, or src/shared importing an ' +
-      'orchestrator — break the cycle or invert the dependency; never widen .dependency-cruiser.cjs',
-    note:
-      'dependency-cruiser (.dependency-cruiser.cjs): no runtime import cycles in src; ' +
-      'src/shared never imports src/audit|src/remediate',
-  },
+
+
   {
     id: 'verify:hosts',
     kind: 'gate',
@@ -966,6 +1079,8 @@ export const GUARDS = [
       'an audit host asset failed its isolated deploy+verify — regenerate the rendered assets from ' +
       'the canonical prompt body (src/shared/hostAssets.ts render path); never hand-edit a rendered asset',
   },
+
+
   {
     id: 'verify:remediate-hosts',
     kind: 'gate',
@@ -975,6 +1090,8 @@ export const GUARDS = [
       'a remediate host asset failed its isolated deploy+verify — regenerate the rendered assets from ' +
       'the canonical prompt body (src/shared/hostAssets.ts render path); never hand-edit a rendered asset',
   },
+
+
   {
     id: 'pack:smoke',
     kind: 'gate',
@@ -985,6 +1102,8 @@ export const GUARDS = [
       'family, never by dev checks, so fix the packaging (package.json files, requiredPackagedPaths), ' +
       'not the smoke',
   },
+
+
   {
     id: 'smoke:packaged-audit-code',
     kind: 'gate',
@@ -994,6 +1113,8 @@ export const GUARDS = [
       'the packaged audit-code bin failed its installed-tarball smoke — fix the packaging or the bin ' +
       'entry it names, never the smoke',
   },
+
+
   {
     id: 'smoke:packaged-remediate-code',
     kind: 'gate',
@@ -1003,6 +1124,8 @@ export const GUARDS = [
       'the packaged remediate-code bin failed its installed-tarball smoke — fix the packaging or the ' +
       'bin entry it names, never the smoke',
   },
+
+
   {
     id: 'smoke:remediate-gate',
     kind: 'gate',
@@ -1014,25 +1137,10 @@ export const GUARDS = [
       'on a clean tree blocks every remediate run (the v0.32.61 node:test-runner bug shipped exactly ' +
       'that way because the gate execution path had no end-to-end check)',
   },
+
+
   {
-    id: 'smoke:linked-audit-code',
-    kind: 'gate',
-    impl: 'smoke:linked-audit-code',
-    preCommit: false,
-    fix:
-      'the npm-linked audit-code bin failed its smoke — a link-only failure is resolution drift ' +
-      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
-  },
-  {
-    id: 'smoke:linked-remediate-code',
-    kind: 'gate',
-    impl: 'smoke:linked-remediate-code',
-    preCommit: false,
-    fix:
-      'the npm-linked remediate-code bin failed its smoke — a link-only failure is resolution drift ' +
-      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
-  },
-  {
+    release: 'tail',
     id: 'vitest-gate',
     kind: 'gate',
     impl: 'scripts/shared/run-vitest-gate.mjs',
@@ -1043,10 +1151,42 @@ export const GUARDS = [
     note: 'the full suite, invoked by path in verify:release',
   },
 
+
+  {
+    release: 'tail',
+    id: 'smoke:linked-audit-code',
+    kind: 'gate',
+    impl: 'smoke:linked-audit-code',
+    preCommit: false,
+    fix:
+      'the npm-linked audit-code bin failed its smoke — a link-only failure is resolution drift ' +
+      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
+  },
+
+
+  {
+    release: 'tail',
+    id: 'smoke:linked-remediate-code',
+    kind: 'gate',
+    impl: 'smoke:linked-remediate-code',
+    preCommit: false,
+    fix:
+      'the npm-linked remediate-code bin failed its smoke — a link-only failure is resolution drift ' +
+      '(junction / global-bin shadowing); fix the wrapper resolution, not the smoke',
+  },
+
+
+
   // ── hooks (registered in .claude/settings.json) ────────────────────────────
   { id: 'session-start', kind: 'hook', impl: '.claude/hooks/session-start.sh' },
+
+
   { id: 'nightly-surface', kind: 'hook', impl: '.claude/hooks/nightly-surface.mjs' },
+
+
   { id: 'session-start-guards', kind: 'hook', impl: '.claude/hooks/session-start-guards.mjs' },
+
+
   {
     id: 'shell-trap-guard',
     kind: 'hook',
@@ -1071,6 +1211,8 @@ export const GUARDS = [
         sample: 'git push origin main | tail -3', expect: 'masked state-changing exit code' },
     ],
   },
+
+
   {
     id: 'commit-gate',
     kind: 'git-hook',
@@ -1090,6 +1232,8 @@ export const GUARDS = [
         test: 'tests/shared/pre-commit-gate-doc-contract-attribution.test.ts', sample: '[vitest-gate] ATTRIBUTION:' },
     ],
   },
+
+
   {
     id: 'pre-commit-gate',
     kind: 'hook',
@@ -1102,6 +1246,8 @@ export const GUARDS = [
       'crashed staged-snapshot round-trip on every shell call. An unresolvable target with none of those ' +
       'is out of jurisdiction (the mktemp false RED of 2026-09-04 is closed by construction)',
   },
+
+
   {
     id: 'tool-input-guard',
     kind: 'hook',
@@ -1119,6 +1265,8 @@ export const GUARDS = [
         sample: 'Work in the node_id n3 tree', expect: 'isolation' },
     ],
   },
+
+
   {
     id: 'question-philosophy-gate',
     kind: 'hook',
@@ -1131,6 +1279,8 @@ export const GUARDS = [
         sample: 'Landed the fix.\n\nWant me to also split the backlog?', expect: 'ends in a question to the owner' },
     ],
   },
+
+
   {
     id: 'push-gate',
     kind: 'hook',
@@ -1153,9 +1303,17 @@ export const GUARDS = [
       'satisfy this hook is to have actually run the suite on this content. Its uncovered halves are ' +
       'stated on its REACH row.',
   },
+
+
   { id: 'async-typecheck', kind: 'hook', impl: '.claude/hooks/async-typecheck.mjs' },
+
+
   { id: 'friction-stop-gate', kind: 'hook', impl: '.claude/hooks/friction-stop-gate.mjs' },
+
+
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
+
+
 
   // ── contract tests (the guards' own guards) ────────────────────────────────
   {
@@ -1167,6 +1325,8 @@ export const GUARDS = [
       'rule, and each refusal) and, for the one refusal that must fire exactly as shipped, spawns the ' +
       'real CLI against a throwaway git repo',
   },
+
+
   {
     id: 'contract-construction-sites-test',
     kind: 'contract-test',
@@ -1176,6 +1336,20 @@ export const GUARDS = [
       'against the REAL zod schemas (property set and per-field optionality), so the registry cannot ' +
       'drift from the contracts it describes',
   },
+
+
+  {
+    id: 'source-test-ownership-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/source-test-ownership.test.ts',
+    note:
+      'drives scripts/check-source-test-ownership.mjs and the shared reach classifier over fixture ' +
+      'trees: reach-by-import and reach-by-disk-read are separate from behavioural evidence, an ' +
+      'unrelated test refuses as missing-reach and an under-asserting one as missing-behaviour, and ' +
+      'the real SOURCE_TEST_OWNERSHIP rows each demonstrably reach and assert on their subject',
+  },
+
+
   {
     id: 'guard-form-reach-test',
     kind: 'contract-test',
@@ -1185,6 +1359,8 @@ export const GUARDS = [
       'sample (script in a fixture repo, exported pure function, or hook payload), so a syntax form a ' +
       'guard stops recognizing goes red instead of being found by accident',
   },
+
+
   {
     id: 'shared-primitives-gate-test',
     kind: 'contract-test',
@@ -1193,6 +1369,8 @@ export const GUARDS = [
       'pins the rule matching semantics of check:shared-primitives on synthetic content; its forms are ' +
       'the gate\'s own (declared on the check:shared-primitives row), driven through the same scanFile export',
   },
+
+
   {
     id: 'push-gate-test',
     kind: 'contract-test',
@@ -1203,6 +1381,8 @@ export const GUARDS = [
       '(a stamp covering different content) and the announced relocated-push fail-open are all pinned ' +
       'against the shipped mechanism rather than a hand-rolled stamp file',
   },
+
+
   {
     id: 'suite-green-stamp-test',
     kind: 'contract-test',
@@ -1211,6 +1391,8 @@ export const GUARDS = [
       'pins the full-suite green stamp (P48): the full-suite predicate, the tree-bound stamp path, ' +
       'the run-vitest-gate write wiring, and the closeout-challenge-gate read wiring',
   },
+
+
   {
     id: 'sync-spawn-budget-test',
     kind: 'contract-test',
@@ -1225,6 +1407,8 @@ export const GUARDS = [
       '(tests/shared/shared-tests-invariants.test.mjs) is the sibling guard that fails exactly that ' +
       'import, so the half is closed by a different mechanism, not left to memory.',
   },
+
+
   {
     id: 'test-mirrors-production-test',
     kind: 'contract-test',
@@ -1240,7 +1424,11 @@ export const GUARDS = [
       'including a hand-rolled cycle detector and a release poll loop); and a mirror whose name ' +
       'coincides with no production export is invisible to the name-match signal.',
   },
+
+
   { id: 'hook-trap-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-trap-guards.test.ts' },
+
+
   {
     id: 'shipped-import-closure-test',
     kind: 'contract-test',
@@ -1256,12 +1444,18 @@ export const GUARDS = [
       'relative specifier that resolves to nothing on disk is skipped — that is a broken import, ' +
       'which the packaged smokes catch directly, not a coverage hole.',
   },
+
+
   {
     id: 'green-mechanism-declaration-test',
     kind: 'contract-test',
     impl: 'tests/shared/green-mechanism-declaration.test.ts',
   },
+
+
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
+
+
   {
     id: 'session-registry-test',
     kind: 'contract-test',
@@ -1271,6 +1465,8 @@ export const GUARDS = [
       'leg end-to-end, the explicit-id CLI, and the readSessionRegistry predicate the session-scoped ' +
       'gates import',
   },
+
+
   {
     id: 'run-hermeticity-test',
     kind: 'contract-test',
@@ -1295,11 +1491,23 @@ export const GUARDS = [
       'tracked file under tests/ — so this text is unenforced: read the row, never trust a green gate ' +
       'to have checked it. Diagnosis and remedy: docs/backlog/durable-traps.md',
   },
+
+
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
+
+
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
+
+
   { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
+
+
   { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
+
+
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
+
+
   {
     id: 'write-time-derived-gates-test',
     kind: 'contract-test',
@@ -1311,9 +1519,17 @@ export const GUARDS = [
       'remedy rewrites lap-scoped baseline state. Also pins the hook end-to-end: with four legs wired ' +
       'to failing commands it must still exit 0 and print the deferral',
   },
+
+
   { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
+
+
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
+
+
   { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
+
+
   {
     id: 'installer-verb-help-test',
     kind: 'contract-test',
@@ -1322,6 +1538,8 @@ export const GUARDS = [
       'the installer-verb declaration and its copies: every verb of both bins answers --help without ' +
       'installing, and the two enumerations that cannot import the module are pinned verb AND summary',
   },
+
+
   {
     id: 'shipped-doc-surface-test',
     kind: 'contract-test',
@@ -1341,8 +1559,14 @@ export const GUARDS = [
       'relative link or fragment leaving the set, every absolute github.com slug bound to ' +
       'package.json `repository`, and the target-directory rule stated once across the loader pair',
   },
+
+
   { id: 'doc-manifest-gate-test', kind: 'contract-test', impl: 'tests/shared/doc-manifest-gate.test.ts' },
+
+
   { id: 'guard-reach-gate-test', kind: 'contract-test', impl: 'tests/shared/guard-reach-gate.test.ts' },
+
+
   {
     id: 'orphan-modules-relative-import-test',
     kind: 'contract-test',
@@ -1354,6 +1578,8 @@ export const GUARDS = [
       'actually consumes, a production file that re-exports the name, and a module the tests never ' +
       'reach (left to the file-level pass and knip)',
   },
+
+
   {
     id: 'host-asset-plan-test',
     kind: 'contract-test',
@@ -1366,6 +1592,8 @@ export const GUARDS = [
       'the plan and hand-spells no host target path — the two-installers-drifting shape the backlog ' +
       'entry names',
   },
+
+
   {
     id: 'agents-region-gate-test',
     kind: 'contract-test',
@@ -1376,6 +1604,8 @@ export const GUARDS = [
       'so a machine-wide retirement of the sentence cannot leave a green check over an ' +
       'unrecognized region',
   },
+
+
   {
     id: 'sync-spawn-fold-safety-test',
     kind: 'contract-test',
@@ -1398,6 +1628,8 @@ export const GUARDS = [
       'commands, hostHandoff git probes, findingGrounding / contractPipelineGates enumerations) are ' +
       'outside the scan — tracked in the open-bugs entry',
   },
+
+
   {
     id: 'submission-no-sizing-identity-test',
     kind: 'contract-test',
@@ -1412,6 +1644,8 @@ export const GUARDS = [
       'mechanical replacement for a backlog note: the submission core must not re-grow a packet/shard/' +
       'provider/model/budget field, in the emitted objects OR as a source identifier',
   },
+
+
   {
     id: 'lane-demand-no-execution-identity-test',
     kind: 'contract-test',
@@ -1425,6 +1659,8 @@ export const GUARDS = [
       'model and tier selection belong to the host, so a lane that names one has moved execution ' +
       'selection into the tool. The schema is .strict() and this row pins the emitted key set',
   },
+
+
   {
     id: 'submission-path-tool-owned-test',
     kind: 'contract-test',
@@ -1439,18 +1675,24 @@ export const GUARDS = [
       'scans all of src/ for a reintroduced host-typed drop directory — the guard that keeps the ' +
       'tool-owned submission path from being undone one call site at a time',
   },
+
+
   {
     id: 'pre-commit-staged-snapshot-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-staged-snapshot.test.ts',
     note: 'staged-snapshot leg of the pre-commit-gate-*.test.ts family (shared fixture: pre-commit-gate-harness.ts)',
   },
+
+
   {
     id: 'pre-commit-commit-detection-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-commit-detection.test.ts',
     note: 'commit-detection + crash-recovery + live-lock leg of the pre-commit-gate family',
   },
+
+
   {
     id: 'pre-commit-roundtrip-journal-test',
     kind: 'contract-test',
@@ -1459,30 +1701,40 @@ export const GUARDS = [
       'round-trip journal HEAD binding: recovery refuses + quarantines on a moved or unrecorded HEAD, ' +
       'and history-moving verbs take the direct check instead of the materializing round-trip',
   },
+
+
   {
     id: 'pre-commit-commit-creating-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-commit-creating.test.ts',
     note: 'P9 commit-creating-subcommand leg of the pre-commit-gate family',
   },
+
+
   {
     id: 'pre-commit-attestation-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-attestation.test.ts',
     note: 'spawns the pre-commit gate AND the attest-loop-core-review hook end-to-end',
   },
+
+
   {
     id: 'pre-commit-branch-strand-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-branch-strand.test.ts',
     note: 'branch-strand refusal + fail-open announcement leg of the pre-commit-gate family',
   },
+
+
   {
     id: 'pre-commit-child-session-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-child-session.test.ts',
     note: 'Build 1 (P23) child-session commit/push refusal + push narrowness leg of the pre-commit-gate family',
   },
+
+
   {
     id: 'pre-commit-target-repo-test',
     kind: 'contract-test',
@@ -1493,12 +1745,16 @@ export const GUARDS = [
       '2026-08-19 false-RED class (an unrelated repo\'s commit blocked by audit-tools\' red index) — ' +
       'while linked worktrees of THIS repo and unresolvable targets stay gated, fail-closed',
   },
+
+
   {
     id: 'loop-core-gate-parity-test',
     kind: 'contract-test',
     impl: 'tests/shared/loop-core-gate-parity.test.ts',
     note: 'pins pattern + predicate parity between pre-commit-gate and attest-loop-core-review',
   },
+
+
   {
     id: 'attest-derived-file-preflight-test',
     kind: 'contract-test',
@@ -1508,6 +1764,8 @@ export const GUARDS = [
       'the gate would reject — and since 2026-08-30 they refuse ONLY when the worktree tree equals ' +
       'the staged tree before and after the legs, abstaining otherwise',
   },
+
+
   {
     id: 'precommit-leg-derivation-test',
     kind: 'contract-test',
@@ -1516,18 +1774,24 @@ export const GUARDS = [
       'P34 unit matrix over buildPreCommitLegs: every derived leg trigger reproduces (or safely ' +
       'widens) the retired hand-coded trigger it replaced, against the LIVE registry',
   },
+
+
   {
     id: 'pre-commit-derived-legs-test',
     kind: 'contract-test',
     impl: 'tests/shared/pre-commit-gate-derived-legs.test.ts',
     note: 'P34 spawn smoke: the real hook runs the derived leg loop end-to-end (block on a wired failing leg, announced skip on an unwired one)',
   },
+
+
   {
     id: 'ci-trigger-paths-test',
     kind: 'contract-test',
     impl: 'tests/shared/ci-trigger-paths.test.ts',
     note: 'P26: derivation excludes declared-gap rows, keeps the always-trigger base, and the tracked ci.yml matches the generator byte-for-byte',
   },
+
+
   {
     id: 'runtime-artifact-names-drift-test',
     kind: 'contract-test',
@@ -1536,6 +1800,8 @@ export const GUARDS = [
       'drift pin for the generated run-artifact name set the doc-citation gate consumes — re-runs the ' +
       'textual extraction against the runtime-layout sources and cross-checks ARTIFACT_DEFINITIONS directly',
   },
+
+
   {
     id: 'commit-gate-git-boundary-test',
     kind: 'contract-test',
@@ -1548,6 +1814,8 @@ export const GUARDS = [
       'the tracked .githooks/* files — executable in the index, LF, running the gate relative to themselves, ' +
       'pre-push delegating to the local .git/hooks/pre-push identity guard',
   },
+
+
   {
     id: 'ingestion-checks-drift-test',
     kind: 'contract-test',
@@ -1558,6 +1826,8 @@ export const GUARDS = [
       'load-bearing by structural extraction: the shared scan and each host-handoff twin cite exactly ' +
       'the checks the registry declares for them, in both directions',
   },
+
+
   {
     id: 'executor-producer-declaration-test',
     kind: 'contract-test',
@@ -1567,6 +1837,8 @@ export const GUARDS = [
       'directions (declared ⊇ extracted, and extracted ∪ data-declared dynamic contributors ⊇ declared), ' +
       'plus one primary producer per registry artifact and drift of the generated render',
   },
+
+
   {
     id: 'spec-mirror-drift-test',
     kind: 'contract-test',
@@ -1576,6 +1848,8 @@ export const GUARDS = [
       'the gate already does), pins the both-way membership reconciliation red on a dropped and on an ' +
       'invented row, and pins the splice refusals for a missing / duplicated marker pair',
   },
+
+
   {
     id: 'lane-dispatch-driver-test',
     kind: 'contract-test',
@@ -1587,6 +1861,8 @@ export const GUARDS = [
       'every lane-answered row, and the read-verbatim coverage-stamp field names/order the nightly ' +
       'routine consumes',
   },
+
+
   {
     id: 'prompt-capability-test',
     kind: 'contract-test',
@@ -1615,6 +1891,8 @@ export const GUARDS = [
       'imperative — including the driver-facing "The executor must write ... to:" step-prompt lines, ' +
       'which are deliberately in scope for neither — goes unflagged',
   },
+
+
   {
     id: 'prompt-renders-its-contract-test',
     kind: 'contract-test',
@@ -1627,6 +1905,8 @@ export const GUARDS = [
       'reasons. A recursive fs-only source reconciliation makes every exported /Prompt/ builder ' +
       'claim exactly one row. The two P40 behavioral/source pins remain.',
   },
+
+
   {
     id: 'conceptual-category-comment-drift-test',
     kind: 'contract-test',
@@ -1640,42 +1920,8 @@ export const GUARDS = [
       'lines for 3+ canonical token enumerations. Uncovered: comments naming 1-2 tokens (accepted ' +
       'as topical discussion rather than enumeration) and non-.ts files are outside the scan',
   },
-  {
-    id: 'check:doc-test-consumers',
-    kind: 'gate',
-    forms: [
-      // The map recognises a STAGED DOC as one whose consumers must be named.
-      { name: 'a staged doc with declared test consumers', drive: 'export', module: 'scripts/check-doc-test-consumers.mjs',
-        exportName: 'describeStagedHits', call: 'text', sample: 'docs/HANDOFF.md',
-        expect: 'docs/HANDOFF.md → asserts:' },
-    ],
-    impl: 'check:doc-test-consumers',
-    // No reach semantics: it validates a repo-wide MAP and surfaces it for the
-    // staged docs. A staged-path trigger would make the map's own rows the only
-    // thing that fires it, which is not what it checks.
-    preCommit: false,
-    fix:
-      'the declared doc → test consumer map names a doc or test that is not tracked, a duplicate doc, ' +
-      'a row with no consumer, or a row with no `what` — fix the row in ' +
-      'scripts/doc-test-consumers-data.mjs, or drop it and declare the doc UNCLAIMED',
-    note:
-      'A map plus a stderr SURFACE, never an enforcement. When a mapped doc is staged the map is ' +
-      'printed with the tests that assert it (`--staged`), so the editor is handed the list without ' +
-      'grepping — which is the cost the record names (a nightly-routine.md edit green through every ' +
-      'local doc gate, red in release CI on a parity test that pinned the retired helper, burning tag ' +
-      'v0.34.40). Uncovered, declared: it does NOT check that the named tests still ASSERT the doc, nor ' +
-      'that an unmapped doc is uncovered — it is only UNCLAIMED. Both need assertion-level provenance ' +
-      '(which string in a test came from which doc), the undecidable class the acquired-analyzer ' +
-      'boundary already declares, so the map is CURATED and only its SHAPE is checked (2026-09-10)',
-  },
-  {
-    id: 'doc-test-consumers-map-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/doc-test-consumers-gate.test.ts',
-    note:
-      'P09: pins the map check itself — a row must name a tracked doc, tracked tests, and a `what`; ' +
-      'duplicates are refused, because a second row for one doc is how a map grows two answers',
-  },
+
+
   {
     id: 'review-routing-gate-test',
     kind: 'contract-test',
@@ -1691,6 +1937,8 @@ export const GUARDS = [
       'declaration checked for existence and shape, with pre-mechanism records on a shrinking ' +
       'declared-debt baseline. Uncovered: the gate cannot tell whether the author picked the TRUE row',
   },
+
+
   {
     id: 'comment-symbol-drift-test',
     kind: 'contract-test',
@@ -1718,9 +1966,12 @@ export const GUARDS = [
       'marker: `comment-symbol-exempt:` reaching the rest of its comment block, for deliberate ' +
       'archaeology',
   },
+
+
 ];
 
-/** @type {ReachRow[]} */
+/** @type {ReachRow[
+]} */
 export const REACH = [
   {
     area: 'shared primitive single-source (comparator / containment / hash / paths / collation)',
@@ -2184,6 +2435,9 @@ export const REACH = [
       // Reads the PINS graph declared beside it, and reconciles it against the
       // tracked tree.
       'check:pin-obligations',
+      // Reads the shared source→test ownership map and verifies each bound test
+      // reaches and asserts on its subject (the reach classifier beside it).
+      'check:source-test-ownership',
     ],
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
@@ -2236,8 +2490,8 @@ export const REACH = [
       'implied per the durable-traps rule: 42 of the tracked scripts still read process.argv without ' +
       'the guard, and the list above is a DECLARED boundary, not a clean sweep — those scripts can ' +
       'still ignore an unrecognized flag. Migrating them is mechanical but reaches gate entry points ' +
-      'such as run-vitest-gate.mjs and profile-run.mjs, which forward variadic arguments to another ' +
-      'process; each needs its own spec, so it is its own change.',
+      'such as run-vitest-gate.mjs, which forwards variadic arguments to another process; each needs ' +
+      'its own spec, so it is its own change.',
   },
   {
     area: 'nightly inbox projection',
@@ -2619,7 +2873,12 @@ export const GENERATED = [
   },
   { generator: 'scripts/shared/generate-handoff-roadmap.mjs', authority: 'check', npmScript: 'check:handoff-roadmap' },
   { generator: 'scripts/shared/generate-ingestion-checks.mjs', authority: 'check', npmScript: 'check:ingestion-checks' },
-  { generator: 'scripts/shared/generate-loop-core-patterns.mjs', authority: 'check', npmScript: 'check:loop-core-patterns' },
+  {
+    generator: 'scripts/shared/generate-loop-core-patterns.mjs',
+    authority: 'check',
+    npmScript: 'check:loop-core-patterns',
+    artifacts: ['.claude/hooks/loop-core-patterns.mjs'],
+  },
   {
     generator: 'scripts/shared/generate-runtime-artifact-names.mjs',
     authority: 'check',

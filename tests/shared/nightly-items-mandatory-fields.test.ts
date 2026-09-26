@@ -287,10 +287,108 @@ describe('writing the queue refreshes the generated HANDOFF state', () => {
     expect(readFileSync(path, 'utf8')).not.toMatch(/DOC-1/);
   });
 
-  it('is silent, not fatal, when the root has no HANDOFF to regenerate', () => {
+  it('is not fatal when the root has no HANDOFF, and reports the failure', () => {
     // A test fixture with no docs/HANDOFF.md: the queue write is the durable
-    // act and must still succeed; the gate is what reports a stale block.
-    expect(() => writeOpenItems(root, { items: [item()] })).not.toThrow();
+    // act and must still succeed, but a failed regeneration must be REPORTED on
+    // the returned record, not swallowed silently (M14) — the run then records
+    // it and the gate is the hard backstop for the resulting stale block.
+    const payload = writeOpenItems(root, { items: [item()] }) as {
+      handoff_regeneration?: { code: number } | { error: string };
+    };
+    expect(payload.handoff_regeneration).toBeTruthy();
     expect(readOpenItems(root).items).toHaveLength(1);
+  });
+});
+
+describe('a failed HANDOFF regeneration is reported without discarding the queue write (M14)', () => {
+  function seedBrokenHandoff(): void {
+    // A HANDOFF whose hand-written region carries nightly-claim creep: the
+    // generator REFUSES to write (returns 1) rather than regenerating around
+    // hand-edited prose. That is a regeneration FAILURE the queue write must
+    // survive and report.
+    mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'backlog', 'open-bugs.md'), '# Open bugs\n\n- **An entry that is not pinned.**\n', 'utf8');
+    writeFileSync(join(root, 'docs', 'backlog', 'forward-tracks.md'), '# Forward tracks\n\n## Open tracks\n\n## Forward tracks\n', 'utf8');
+    writeFileSync(join(root, 'docs', 'backlog', 'deferred.md'), '# Deferred\n', 'utf8');
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(
+      join(root, 'docs', 'HANDOFF.md'),
+      [
+        '# Handoff',
+        '',
+        '<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
+        '<!-- END GENERATED LIVE STATUS -->',
+        '',
+        '<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
+        '<!-- END GENERATED ROADMAP -->',
+        '',
+        '## Immediate next',
+        '',
+        'None.',
+        '',
+        '## Nightly state',
+        '',
+        'The nightly run currently reports no open items.',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+  }
+
+  it('reports the regeneration refusal and keeps the queue write intact', () => {
+    seedBrokenHandoff();
+    const payload = writeOpenItems(root, { items: [item()] }) as {
+      handoff_regeneration?: { code: number } | { error: string };
+    };
+    // The failure is visible on the returned record...
+    expect(payload.handoff_regeneration).toEqual({ code: 1 });
+    // ...and the durable queue write survived, untouched by the failure.
+    expect(readOpenItems(root).items).toHaveLength(1);
+  });
+
+  it('the failure is reported on the RETURN only, never persisted into open-items.json', () => {
+    seedBrokenHandoff();
+    const payload = writeOpenItems(root, { items: [item()] }) as {
+      handoff_regeneration?: { code: number } | { error: string };
+    };
+    expect(payload.handoff_regeneration).toBeTruthy();
+    // The machine contract on disk stays clean — no handoff_regeneration field
+    // leaks into what the renderer reads in full.
+    const onDisk = JSON.parse(readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8'));
+    expect(onDisk.handoff_regeneration).toBeUndefined();
+    expect(onDisk.items).toHaveLength(1);
+  });
+
+  it('reports nothing when the block regenerates cleanly', () => {
+    // A well-formed HANDOFF regenerates without refusing: the returned record
+    // carries no handoff_regeneration field at all.
+    mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'backlog', 'open-bugs.md'), '# Open bugs\n\n- **An entry that is not pinned.**\n', 'utf8');
+    writeFileSync(join(root, 'docs', 'backlog', 'forward-tracks.md'), '# Forward tracks\n\n## Open tracks\n\n## Forward tracks\n', 'utf8');
+    writeFileSync(join(root, 'docs', 'backlog', 'deferred.md'), '# Deferred\n', 'utf8');
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(
+      join(root, 'docs', 'HANDOFF.md'),
+      [
+        '# Handoff',
+        '',
+        '<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
+        '<!-- END GENERATED LIVE STATUS -->',
+        '',
+        '<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
+        '<!-- END GENERATED ROADMAP -->',
+        '',
+        '## Immediate next',
+        '',
+        'None.',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const payload = writeOpenItems(root, { items: [item()] }) as {
+      handoff_regeneration?: { code: number } | { error: string };
+    };
+    expect(payload.handoff_regeneration).toBeUndefined();
+    expect(readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8')).toMatch(/DOC-1/);
   });
 });

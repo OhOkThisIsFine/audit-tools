@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loop-core-gate-parity.test.ts, tests/shared/loop-core-closure.test.ts
 // Single source of truth for the "loop-core" path set — the persisted workflow,
 // host-handoff, verification, and orchestrator-step substrate whose changes carry
 // the highest blast radius. The surviving consumers are the two pre-build
@@ -49,6 +50,9 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
+  // Chooses the persisted review inputs and verdict reused by the pipeline.
+  // Delegating the filesystem write does not remove that workflow authority.
+  "src/remediate/contractPipeline/reviewSnapshot.ts",
   // Imported ONLY by nextStep.ts, so the closure rule claims it: a module every
   // one of whose importers is core is core. It renders the record of what the
   // intake filter removed, which is a statement about the loop's own decisions.
@@ -56,7 +60,13 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/remediate/riskSignal.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
+  "src/remediate/steps/frictionCloseout.ts",
+  "src/remediate/steps/intentPersistence.ts",
+  // The CLI imports these persisted lifecycle decisions directly; an importer
+  // outside core must not hide pause/resume/cancel from the review boundary.
+  "src/remediate/steps/lifecycle.ts",
   "src/remediate/steps/nextStep.ts",
+  "src/remediate/steps/pathADisposition.ts",
   "src/shared/engine/",
   // The host-facing step-contract WRITE-AND-LOG site: `createStepEmissionScaffold`
   // owns the ONE call site that turns a plan into a written, logged step for BOTH

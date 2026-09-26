@@ -210,12 +210,6 @@ function objectMapIssue(value: unknown): SubmissionIssue | null {
       };
 }
 
-/** What the recovery verb needs in order to apply the FULL lane contract. */
-export interface LaneValidationContext {
-  /** The repo manifest's path set — the charter lanes' scope grounding. */
-  readonly repoFiles: ReadonlySet<string>;
-}
-
 /**
  * The validator the normal lane applies to `lane`, or `null` when the lane id
  * is not one this tool knows. Callers that cannot supply a validator must
@@ -224,7 +218,7 @@ export interface LaneValidationContext {
  */
 export function laneSubmissionValidator(
   lane: string,
-  context: LaneValidationContext,
+  context: { readonly repoFiles: ReadonlySet<string> },
 ): ((value: unknown) => SubmissionIssue | null) | null {
   const systemicRound = lane.startsWith(SYSTEMIC_CHALLENGE_LANE_PREFIX)
     && /^[0-9a-f]{12}$/.test(lane.slice(SYSTEMIC_CHALLENGE_LANE_PREFIX.length));

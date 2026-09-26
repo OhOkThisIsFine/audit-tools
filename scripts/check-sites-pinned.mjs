@@ -70,7 +70,7 @@
 //   exported walker over fixture diffs and spawns this CLI against a throwaway
 //   repo for the one refusal that must fire exactly as shipped.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -479,7 +479,38 @@ export const ADMISSIBILITY_NOTE =
 /**
  * @param {{base: string|null, root: string}} options
  */
-function main({ base, root: repoArg }) {
+/**
+ * Read a Git diff through a stream. A large staged tree can exceed
+ * `execFileSync`'s default maxBuffer; raising that bound merely moves the
+ * failure to the next large change. The parser needs the complete diff, so
+ * collect all chunks without imposing an output-size policy here.
+ *
+ * @param {string[]} args Git arguments
+ * @param {string} cwd repository root
+ * @returns {Promise<string>}
+ */
+export function readGitDiff(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', args, {
+      cwd,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    let errors = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { errors += chunk; });
+    child.on('error', reject);
+    child.on('close', (code, signal) => {
+      if (code === 0) resolve(output);
+      else reject(new Error(`git ${args.join(' ')} failed (${signal ?? code}): ${errors.trim()}`));
+    });
+  });
+}
+
+async function main({ base, root: repoArg }) {
   // The repository this run judges. Defaults to the CWD — `git rev-parse
   // --show-toplevel` from where the caller stands, exactly as the commit gate
   // does — never this file's own location. A gate that resolved its own path
@@ -495,11 +526,7 @@ function main({ base, root: repoArg }) {
     ? ['diff', '-U0', '--diff-filter=ACMR', `${base}`, '--']
     : ['diff', '--cached', '-U0', '--diff-filter=ACMR', '--'];
 
-  const diffText = execFileSync('git', diffArgs, {
-    encoding: 'utf8',
-    cwd: root,
-    windowsHide: true, // INV-WH — a console child from a windowless parent pops a window
-  });
+  const diffText = await readGitDiff(diffArgs, root);
 
   const tracked = new Set(
     execFileSync('git', ['ls-files'], { encoding: 'utf8', cwd: root, windowsHide: true })
@@ -516,10 +543,16 @@ function main({ base, root: repoArg }) {
     matchers.some((m) => (m.re ? m.re.test(path) : m.literal === path));
 
   // The name binding: a declared test path must be a TRACKED file that EXISTS.
-  // This is the half that is mechanically checkable without a coverage map —
+  // This is the half that is mechanically checkable without a coverage run —
   // it refuses a binding to a test that was renamed or never written, which is
   // the failure mode that makes an author-supplied list worthless rather than
-  // merely weak.
+  // merely weak. The reach/behavioural half — does this test EXECUTE the subject
+  // (runtime coverage) and ASSERT on it — lives in `scripts/shared/source-test-reach.mjs`
+  // and its `check:source-test-ownership` gate, which runs each bound test under
+  // the real coverage tooling (`@vitest/coverage-v8`) over the DECLARED ownership
+  // map (`SOURCE_TEST_OWNERSHIP`), rather than over every author-supplied name
+  // here (a subprocess / render-driven pin has no single declared-ownership row
+  // to execute).
   const checkNames = (names) => {
     const errs = [];
     for (const name of names) {
@@ -607,5 +640,5 @@ if (invokedDirectly) {
     usage: 'node scripts/check-sites-pinned.mjs [--base <rev>] [--root <dir>]',
     values: ['--base', '--root'],
   });
-  main({ base: args.get('--base') ?? null, root: args.get('--root') ?? process.cwd() });
+  await main({ base: args.get('--base') ?? null, root: args.get('--root') ?? process.cwd() });
 }

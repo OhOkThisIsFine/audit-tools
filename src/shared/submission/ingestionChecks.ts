@@ -22,9 +22,12 @@
  *
  * `cited_by` says WHERE the citation lives. The shared submission scan
  * (`submissionScan.ts`) owns the path, read and duplicate checks for both
- * draws; everything else is cited from the draw's own host-handoff module. Row
- * order is the render order: envelope and binding first, then per-draw content
- * checks, then corroboration, then the ledger.
+ * draws; everything else is cited from the draw's own host-handoff module
+ * FAMILY — the dispatch modules a draw's ingestion actually runs in, declared
+ * per draw in `INGESTION_DRAWS.sources`, never inferred by glob, so a citation
+ * that moves to a sibling module stays a declared draw citation rather than
+ * an undocumented one. Row order is the render order: envelope and binding
+ * first, then per-draw content checks, then corroboration, then the ledger.
  *
  * Keep every field a plain literal: the generator reads this file as TEXT
  * through the TypeScript compiler API (no build, no import), and refuses a
@@ -32,8 +35,15 @@
  */
 
 export const INGESTION_DRAWS = [
-  { id: "audit", source: "src/audit/cli/dispatch/hostHandoff.ts" },
-  { id: "remediate", source: "src/remediate/steps/dispatch/hostHandoff.ts" },
+  { id: "audit", sources: ["src/audit/cli/dispatch/hostHandoff.ts"] },
+  {
+    id: "remediate",
+    sources: [
+      "src/remediate/steps/dispatch/hostHandoff.ts",
+      "src/remediate/steps/dispatch/corroboration.ts",
+      "src/remediate/steps/dispatch/requiredTests.ts",
+    ],
+  },
 ] as const;
 
 export type IngestionDraw = (typeof INGESTION_DRAWS)[number]["id"];
@@ -150,6 +160,13 @@ export const INGESTION_CHECKS = [
   {
     id: "run_start_dirt",
     verifies: "No file the landed commit changed overlaps dirt that pre-dated the run.",
+    draws: ["remediate"],
+    cited_by: "draw",
+  },
+  {
+    id: "conformance_review",
+    verifies:
+      "When the per-run conformance-review option is enabled, a bounded independent review of the result's obligation evidence against the carried module contracts has passed, bound to the result, obligation set, and contract content — coverage is mechanical, but sufficiency is judged by the review.",
     draws: ["remediate"],
     cited_by: "draw",
   },

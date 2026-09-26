@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/design-review-diff-rereview.test.ts
 /**
  * Diff-based re-review for audit-code's design-review passes (B2 parity port).
  *
@@ -19,16 +20,14 @@
  * precise changed-since-last-review delta and instructs re-affirm-or-revise-only-
  * affected — never a blind full re-run. Enforced by the tool, not host memory.
  */
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   diffProjections,
-  readOptionalJsonFile,
-  discardOnSchemaVersionMismatch,
+  createReviewSnapshotStore,
   renderDiffReReviewSection,
   stableStringifyProjection,
-  writeJsonFile,
   type ProjectionDiffEntry,
+  type ReviewSnapshotStore,
 } from "audit-tools/shared";
 import type { Finding } from "../types.js";
 import {
@@ -63,16 +62,14 @@ export type DesignReviewSnapshotBundle = Partial<
 
 const SNAPSHOT_DIRNAME = "design-review-snapshots";
 
-function snapshotDir(artifactsDir: string): string {
-  return join(artifactsDir, SNAPSHOT_DIRNAME);
-}
-
-export function designReviewSnapshotPath(
-  artifactsDir: string,
-  pass: DesignReviewPass,
-): string {
-  return join(snapshotDir(artifactsDir), `${pass}.json`);
-}
+// The shared snapshot store owns the schema-version-discard read, the
+// mkdir+writeJsonFile write, and the path resolution; audit supplies only its
+// directory and identity-field opinions (the per-mode "two functions, not eight").
+const store: ReviewSnapshotStore<DesignReviewSnapshot> = createReviewSnapshotStore({
+  dirPath: (artifactsDir) => join(artifactsDir, SNAPSHOT_DIRNAME),
+  schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+  keyOf: (snapshot) => snapshot.pass,
+});
 
 export async function readDesignReviewSnapshot(
   artifactsDir: string,
@@ -80,14 +77,7 @@ export async function readDesignReviewSnapshot(
 ): Promise<DesignReviewSnapshot | null> {
   // Regenerable: a snapshot from an older schema is treated as ABSENT so the pass
   // re-reviews, rather than being read back under semantics it was not written for.
-  return (
-    discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<DesignReviewSnapshot>(
-        designReviewSnapshotPath(artifactsDir, pass),
-      ),
-      SNAPSHOT_SCHEMA_VERSION,
-    ) ?? null
-  );
+  return store.read(artifactsDir, pass);
 }
 
 /**
@@ -134,11 +124,7 @@ export async function writeDesignReviewSnapshot(
   artifactsDir: string,
   snapshot: DesignReviewSnapshot,
 ): Promise<void> {
-  await mkdir(snapshotDir(artifactsDir), { recursive: true });
-  await writeJsonFile(
-    designReviewSnapshotPath(artifactsDir, snapshot.pass),
-    snapshot,
-  );
+  await store.write(artifactsDir, snapshot);
 }
 
 export interface DesignReReviewDelta {

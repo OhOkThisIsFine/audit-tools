@@ -1,11 +1,11 @@
+// sites-pinned: tests/audit/io-remediation.test.ts
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import { isFileMissingError } from "audit-tools/shared";
+import { collectFilesSorted, isFileMissingError } from "audit-tools/shared";
 
 // dist/audit/io/toolingManifest.js → repo root is three levels up
 // (io → audit → dist → repo root).
@@ -112,34 +112,6 @@ function recordAbsentEntry(
  * A permission error or any other IO failure still throws: those are not a
  * concurrent rebuild, and swallowing them would hide a real defect.
  */
-async function collectFiles(path: string): Promise<string[]> {
-  let info: Awaited<ReturnType<typeof stat>>;
-  try {
-    info = await stat(path);
-  } catch (error) {
-    if (!isFileMissingError(error)) throw error;
-    return [vanishedEntry(path)];
-  }
-  if (info.isFile()) {
-    return [path];
-  }
-  if (!info.isDirectory()) {
-    return [];
-  }
-
-  let entries: Dirent[];
-  try {
-    entries = await readdir(path, { withFileTypes: true });
-  } catch (error) {
-    if (!isFileMissingError(error)) throw error;
-    return [vanishedEntry(path)];
-  }
-  const files: string[] = [];
-  for (const entry of entries.sort((a, b) => compareCodeUnits(a.name, b.name))) {
-    files.push(...(await collectFiles(join(path, entry.name))));
-  }
-  return files;
-}
 
 /**
  * Read `version` from the package.json under `packageRoot`, or `null` when the
@@ -240,7 +212,9 @@ export async function hashToolingInputs(
       continue;
     }
     existingInputs.push(input);
-    const files = await collectFiles(absolute);
+    const files = await collectFilesSorted(absolute, {
+      onMissingEntry: vanishedEntry,
+    });
     for (const file of files.sort((a, b) => compareCodeUnits(a, b))) {
       // A sentinel never reaches the reader: it stands for a path that was
       // listed and had nothing behind it. Hashed as an absence it loses its NUL

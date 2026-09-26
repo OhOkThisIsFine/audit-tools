@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/contract-pipeline-diff-review.test.ts
 /**
  * Diff-based re-review for the contract pipeline (B2).
  *
@@ -20,13 +21,11 @@
  * expensive verdict, not a deterministic/scaffolded restructuring.
  */
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import {
+  createReviewSnapshotStore,
   diffProjections,
-  discardOnSchemaVersionMismatch,
-  readOptionalJsonFile,
   renderDiffReReviewSection,
-  writeJsonFile,
+  type ReviewSnapshotStore,
 } from "audit-tools/shared";
 
 export { diffProjections };
@@ -38,7 +37,9 @@ import {
 } from "./artifactStore.js";
 // The path helper is IMPORTED and re-exported (the archive boundary reaches the
 // same file from a module that cannot import this one), so the two can never
-// disagree about where a snapshot lives.
+// disagree about where a snapshot lives. The shared snapshot store delegates its
+// directory resolution to the same single source, so the store also holds no
+// divergent `join`.
 import { reviewSnapshotFilePath } from "./artifactStore.js";
 import { semanticProjection } from "./semanticProjection.js";
 
@@ -88,9 +89,16 @@ export interface ReviewSnapshot {
  */
 export const reviewSnapshotPath = reviewSnapshotFilePath;
 
-function reviewSnapshotDir(artifactsDir: string): string {
-  return reviewSnapshotDirPath(artifactsDir);
-}
+// The shared snapshot store owns the schema-version-discard read and the
+// mkdir+writeJsonFile write; remediate supplies only its directory/identity
+// opinions, both routed through `artifactStore` so the single path source stays
+// the one the archive boundary already reaches.
+const store: ReviewSnapshotStore<ReviewSnapshot> = createReviewSnapshotStore({
+  dirPath: (artifactsDir) => reviewSnapshotDirPath(artifactsDir),
+  fileFor: (name) => `${name}.json`,
+  schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+  keyOf: (snapshot) => snapshot.artifact_name,
+});
 
 export function reviewSnapshotExists(
   artifactsDir: string,
@@ -111,14 +119,7 @@ export async function readReviewSnapshot(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
 ): Promise<ReviewSnapshot | null> {
-  return (
-    discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<ReviewSnapshot>(
-        reviewSnapshotPath(artifactsDir, name),
-      ),
-      SNAPSHOT_SCHEMA_VERSION,
-    ) ?? null
-  );
+  return store.read(artifactsDir, name);
 }
 
 /**
@@ -150,8 +151,7 @@ export async function captureReviewSnapshot(
     prior_payload: payload,
     reviewed_inputs,
   };
-  await mkdir(reviewSnapshotDir(artifactsDir), { recursive: true });
-  await writeJsonFile(path, snapshot);
+  await store.write(artifactsDir, snapshot);
 }
 
 // ── Projection diffing ─────────────────────────────────────────────────────────

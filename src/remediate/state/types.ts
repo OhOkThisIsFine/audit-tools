@@ -2,7 +2,6 @@
 import { z } from "zod";
 import { CLOSING_ACTIONS } from "audit-tools/shared";
 import type { RemediationItemStatus } from "./itemStatus.js";
-
 // `Finding` is the canonical machine contract owned by audit-tools/shared.
 // The remediator consumes the auditor's `audit-findings.json` directly, so it
 // uses the shared shape verbatim rather than a divergent local copy. Imported
@@ -12,7 +11,7 @@ import type {
   RemediationOutcome,
   MechanicalVerification,
 } from "audit-tools/shared";
-import { AuditReadSchema, FindingSchema, FindingThemeSchema } from "audit-tools/shared";
+import { AuditReadSchema, FindingSchema } from "audit-tools/shared";
 export type { Finding };
 
 // `Evidence` is a brand-new export of `src/shared/types/remediationOutcome.ts`
@@ -122,8 +121,6 @@ export const RemediationPlanSchema = z
     block_strategy: z
       .enum(["test_graph", "git_cocommit", "file_overlap", "manual"])
       .optional(),
-    /** Synthesis themes carried from audit-findings.json (Phase 6/7 fix hints). */
-    themes: z.array(FindingThemeSchema).optional(),
     /**
      * What the AUDIT read (`AuditRead`), stamped by the TOOL at plan application
      * from the validated source findings report — never taken from the
@@ -263,6 +260,122 @@ export const ClosingPlanSchema = z
   })
   .strict();
 export type ClosingPlan = z.infer<typeof ClosingPlanSchema>;
+
+/**
+ * A host-reported worktree location and its outcome (O31 / packet 14). Recorded
+ * verbatim by the pause/cancel verbs; the tool takes NO ownership of creating or
+ * deleting the branch/worktree — it only persists what the host says so a
+ * later resume (or an operator reconstructing the run) knows where the work
+ * lives and whether it landed. Fully optional: a run paused without a worktree,
+ * or one whose host never reported, simply omits it.
+ */
+export interface LifecycleWorktree {
+  /** Host-reported worktree / branch location (repo-relative or absolute path). */
+  location: string;
+  /**
+   * Host-reported outcome — what happened to the work there (e.g. "unmerged",
+   * "merged", "discarded"). Free-form; the tool does not interpret it.
+   */
+  outcome?: string;
+}
+
+/** A requested planning stop, retained through intake until one plan is bound. */
+export const PlanOnlyRequestSchema = z.object({
+  request_id: z.string().min(1),
+  requested_at: z.string().min(1),
+  plan_id: z.string().min(1).optional(),
+  worktree: z.object({
+    location: z.string(),
+    outcome: z.string().optional(),
+  }).strict().optional(),
+}).strict();
+export type PlanOnlyRequest = z.infer<typeof PlanOnlyRequestSchema>;
+
+/** The single state-owned review choice for one plan and its first dispatch. */
+export const ConformanceReviewPolicySchema = z.object({
+  plan_id: z.string().min(1).optional(),
+  choice: z.enum(["undecided", "on", "off"]),
+  first_dispatch_recorded: z.boolean(),
+}).strict().refine(
+  (policy) => !policy.first_dispatch_recorded ||
+    (policy.plan_id !== undefined && policy.choice !== "undecided"),
+  "a recorded dispatch requires a bound, decided review policy",
+);
+export type ConformanceReviewPolicy = z.infer<typeof ConformanceReviewPolicySchema>;
+
+/**
+ * The persisted operator-lifecycle continuation (O31 / packet 14). Written by
+ * the `plan-only` / `pause` / `resume` / `cancel` verbs so that a restart of the
+ * process between transitions — the acceptance condition — finds exactly what
+ * to do next instead of a state that merely says `implementing` (the manual-stop
+ * defect that left nothing on disk naming the pause, its worktree, or the
+ * continuation). `resume` consumes it and clears it; `cancel` stamps a terminal
+ * entry.
+ */
+export const LIFECYCLE_RECORD_SCHEMA_VERSION =
+  "remediate-code-lifecycle/v1alpha1" as const;
+
+export interface LifecycleRecord {
+  contract_version: typeof LIFECYCLE_RECORD_SCHEMA_VERSION;
+  /** Which operator action produced this record. */
+  action: "plan_only" | "pause" | "resume" | "cancel";
+  /**
+   * The run status to RESTORE on resume — the phase the run was in when it
+   * was parked (`planning`, `implementing`, `triage`, or `closing`). `cancel`
+   * records this for the audit trail too, but no resume follows a cancel.
+   */
+  phase: string;
+  /**
+   * The item the run was most directly on when parked, when one is meaningful.
+   * Best-effort: a plan-only stop before implementation, or a run paused with
+   * no dispatched item, records null. Never used to re-run work on resume —
+   * accepted (terminal) items are skipped by the ordinary drain, which is the
+   * property that "resume must not re-run accepted work" rests on.
+   */
+  current_item_id?: string | null;
+  /**
+   * A faithful copy of `host_handoff` at pause time. Persisting the binding here
+   * is what lets pause CLEAR `host_handoff` (the store validator scopes that
+   * field to `implementing`) without losing the workload identity — resume
+   * restores it verbatim.
+   */
+  binding?: RemediationHostHandoffRecord;
+  /**
+   * The exact next action to take on resume, in operator terms.
+   */
+  continuation: string;
+  /** Host-reported worktree location/outcome. Optional. */
+  worktree?: LifecycleWorktree;
+  /** ISO-8601 timestamp the record was written. */
+  at: string;
+}
+
+/**
+ * The verification schema for a persisted lifecycle record. The `phase` is
+ * written as a plain string by the verbs (they mirror the run status they park
+ * from), and validated for membership against the SAME single-sourced
+ * `REMEDIATION_RUN_STATUSES` the run status type derives from, so the stored
+ * continuation can only name a real phase — a drifted or hand-written phase is
+ * refused rather than read back as "resume to nowhere".
+ */
+export const LifecycleRecordSchema = z
+  .object({
+    contract_version: z.literal(LIFECYCLE_RECORD_SCHEMA_VERSION),
+    action: z.enum(["plan_only", "pause", "resume", "cancel"]),
+    phase: z.string(),
+    current_item_id: z.string().nullable().optional(),
+    binding: RemediationHostHandoffRecordSchema.optional(),
+    continuation: z.string(),
+    worktree: z
+      .object({
+        location: z.string(),
+        outcome: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    at: z.string(),
+  })
+  .strict();
 
 export interface CoverageLedgerEntry {
   finding_id: string;

@@ -1,0 +1,131 @@
+{
+  "contract_version": "audit-tools/audit-findings/v1alpha2",
+  "audit_read": null,
+  "summary": {
+    "finding_count": 4,
+    "work_block_count": 4,
+    "severity_breakdown": { "critical": 1, "high": 1, "medium": 1, "low": 1 },
+    "audited_file_count": 4,
+    "excluded_file_count": 0,
+    "runtime_validation_status_breakdown": {}
+  },
+  "findings": [
+    {
+      "id": "F-CRIT",
+      "title": "SQL injection in admin handler",
+      "category": "General",
+      "severity": "critical",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "Admin handler passes user input directly to the database query.",
+      "affected_files": [{ "path": "src/admin/handler.ts" }],
+      "evidence": ["src/admin/handler.ts:10: db.query('SELECT * FROM users WHERE id = ' + req.params.id)"]
+    },
+    {
+      "id": "F-HIGH",
+      "title": "Missing authentication check on API",
+      "category": "General",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "API endpoint allows unauthenticated access.",
+      "affected_files": [{ "path": "src/api/endpoint.ts" }],
+      "evidence": ["src/api/endpoint.ts:25: No auth middleware applied"]
+    },
+    {
+      "id": "F-MED",
+      "title": "Verbose error messages expose stack traces",
+      "category": "General",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "security",
+      "summary": "Error handler returns full stack traces to the client.",
+      "affected_files": [{ "path": "src/middleware/error.ts" }],
+      "evidence": ["src/middleware/error.ts:8: res.json({ error: err.stack })"]
+    },
+    {
+      "id": "F-LOW",
+      "title": "Missing security headers",
+      "category": "General",
+      "severity": "low",
+      "confidence": "high",
+      "lens": "security",
+      "summary": "HTTP responses do not include standard security headers.",
+      "affected_files": [{ "path": "src/app.ts" }],
+      "evidence": ["src/app.ts:5: No helmet or equivalent middleware"]
+    }
+  ],
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "F-CRIT",
+        "file_paths": ["src/admin/handler.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      },
+      {
+        "id": "F-HIGH",
+        "file_paths": ["src/api/endpoint.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      },
+      {
+        "id": "F-MED",
+        "file_paths": ["src/middleware/error.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      },
+      {
+        "id": "F-LOW",
+        "file_paths": ["src/app.ts"],
+        "unit_ids": [],
+        "tags": ["security"]
+      }
+    ],
+    "components": [["F-CRIT"], ["F-HIGH"], ["F-MED"], ["F-LOW"]]
+  },
+  "work_blocks": [
+    {
+      "id": "B-CRIT",
+      "finding_ids": ["F-CRIT"],
+      "unit_ids": [],
+      "owned_files": ["src/admin/handler.ts"],
+      "role": "implementation",
+      "max_severity": "critical",
+      "rationale": "Critical SQL injection finding.",
+      "depends_on": []
+    },
+    {
+      "id": "B-HIGH",
+      "finding_ids": ["F-HIGH"],
+      "unit_ids": [],
+      "owned_files": ["src/api/endpoint.ts"],
+      "role": "implementation",
+      "max_severity": "high",
+      "rationale": "High severity auth finding.",
+      "depends_on": []
+    },
+    {
+      "id": "B-MED",
+      "finding_ids": ["F-MED"],
+      "unit_ids": [],
+      "owned_files": ["src/middleware/error.ts"],
+      "role": "implementation",
+      "max_severity": "medium",
+      "rationale": "Medium severity error disclosure finding.",
+      "depends_on": []
+    },
+    {
+      "id": "B-LOW",
+      "finding_ids": ["F-LOW"],
+      "unit_ids": [],
+      "owned_files": ["src/app.ts"],
+      "role": "implementation",
+      "max_severity": "low",
+      "rationale": "Low severity headers finding.",
+      "depends_on": []
+    }
+  ],
+  "work_block_seams": [],
+  "top_risks": ["Review the selected security findings."]
+}

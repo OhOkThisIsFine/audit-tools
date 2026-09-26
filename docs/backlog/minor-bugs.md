@@ -89,8 +89,6 @@
 
 - **The nightly clean-tree rule does not say which writes it blocks (2026-08-22, low, friction: ambiguous_direction).** `docs/nightly-routine.md` says a dirty tree means the run "applies **nothing**". But the same run must still write its own tracked output — `.audit-tools/nightly/open-items.json`, `docs/nightly-inbox.md`, the leg-3 proposal records, and the regenerated `docs/HANDOFF.md` live-state block, which the commit gate independently REQUIRES to be current. The 2026-08-22 run had to decide for itself that emitting the queue is not an "apply", which is the host-discretion shape the repo bans. **Property:** the rule names the blocked class (doc edits derived from the review) and the always-written class (the routine's own generated output), so no run has to judge it.
 
-- **No native way to draw a subset of a large findings file into a remediation run (2026-08-22, low, friction: tool_should_decide).** The first draw of the 2,712-finding self-audit (all 40 high + the 3 top-risk medium findings) had to be built outside the tool: a hand-filtered copy fails `work_blocks must project exactly one block per coherence component`, the tool's own `projectAuditFindingsReportSubset` is unreachable from `--input`, and the intent checkpoint's `filters` cannot express 'the findings the top risks name'. **Property:** the operator can name a draw (a severity set and/or finding ids) at intake and the tool projects it with the same function the review gate uses.
-
 - **A transition that ends the call drops the fold's carried advisories (2026-08-22, low).** After e72a06bb, a fold's validation warnings and classified ingest issues survive the result-ingestion transition and reach the NEXT emission within the same `next-step` call — but a transition that ENDS the call still drops them: the carry is fold-local state on the ctx ref and is never persisted, so nothing survives into the next call. Advisory-only (the ledger record is unaffected); what is lost is the prompt statement of what the ledger already recorded. **Property:** every classified ingest issue and validation warning is stated on exactly one emitted step, whichever call emits it.
 
 - **A release version bump trips the path-A seed-drift alarm (2026-08-23, low, friction:
@@ -380,7 +378,6 @@
   **Property:** a ledger entry whose document the doc manifest no longer enumerates is removed, or
   its retention is a declared, mechanically-checked exception.
 
-
 - **The e2e leg's refusal test passes for the wrong reason (2026-09-15, low).**
   `tests/remediate/phase-close.test.ts`'s `SHAPE_LEAVING_CANARY_COMMAND` case asserts the canary was
   not written, but it passes because `discoverProjectCommands` never emits the fixture's vector, not
@@ -396,23 +393,6 @@
   **Property:** a persisted workload at an older version, driven through
   `ingestRemediationHostResults`/`buildImplementDispatchStep`, is pinned by a test that asserts the
   `workload_invalid` issue and the re-prepared document.
-
-- **The merge-commit gate reports one refusal class per attempt (2026-09-15, low, friction:
-  inefficient_feeding).** A `--no-ff` merge of a branch that touches BOTH a constitutional doc and a
-  loop-core path is refused by `.claude/hooks/commit-gate.mjs` for the constitutional attestation
-  first; only the next `git commit` attempt names the missing loop-core attestation. A script that
-  reads the first refusal and attests once therefore fails twice (P30 landing). An ordinary commit
-  does the same in the other order: the loop-core refusal first, the constitutional one after it
-  (2026-09-17). **Property:** one refusal names every attestation the staged tree still lacks, so
-  one round of attestations lets the next attempt through.
-
-- **`RemediationPlanSchema.themes` has no writer and no reader (2026-09-17, low, friction:
-  tool_should_decide).** The field in `src/remediate/state/types.ts` says it carries synthesis
-  themes from `audit-findings.json`, but nothing in `src/remediate` assigns it or reads it
-  (`filters.themes` in `src/remediate/intent/checkpointFilter.ts` is a different object). A strict
-  schema field that looks authoritative and holds nothing. **Property:** the plan schema declares
-  only fields a production path writes; delete `themes`, or wire the writer and its consumer in one
-  change.
 
 - **The in-scan `duplicate_submission_id` branch may now be unreachable (2026-09-18, low, friction:
   tool_should_decide).** Prompt 20 made every result id tool-derived (`deriveResultId` over the

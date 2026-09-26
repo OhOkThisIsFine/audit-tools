@@ -3,7 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   extractFrameworkRouteEvidence,
   extractRegisteredRouteEvidence,
+  fallbackRouteEdge,
 } from "../../src/audit/extractors/graphRoutes.js";
+import {
+  extractPythonImportEdges,
+  resolvePythonImportTarget,
+} from "../../src/audit/extractors/graphPythonImports.js";
+import {
+  isInterfacePath,
+  pathTokens,
+} from "../../src/audit/extractors/pathPatterns.js";
 
 /**
  * Super-linear backtracking in the framework-route patterns
@@ -255,5 +264,115 @@ describe("the destructuring-require scan is linear on adversarial input", () => 
     const targets = calls.map((call) => call.to);
     expect(targets, "a single destructured binding must still resolve").toContain("src/app/one.ts");
     expect(targets, "an aliased destructured binding must still resolve").toContain("src/app/two.ts");
+  });
+});
+
+describe("route local-name whitespace/alias splitting is linear in a single pass", () => {
+  it("scans named imports with huge whitespace runs without quadratic splitting", () => {
+    const ws = " ".repeat(40_000);
+    const source = `import { ${ws}origHandler${ws}as${ws}aliasedHandler${ws} } from './handler';\napp.get('/test', aliasedHandler);`;
+    const lookup = new Map([["src/app/handler.ts", "src/app/handler.ts"]]);
+    let calls: Array<{ to: string }> = [];
+    let routes: Array<{ path: string }> = [];
+    const elapsed = elapsedMsOf(() => {
+      const res = extractRegisteredRouteEvidence("src/app/routes.ts", source, lookup);
+      calls = res.calls;
+      routes = res.routes;
+    });
+    expect(routes.map((r) => r.path)).toContain("/test");
+    expect(calls.map((c) => c.to)).toContain("src/app/handler.ts");
+    expect(elapsed, `parsing named import took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+
+  it("scans destructuring requires with huge whitespace runs and default values in a single pass", () => {
+    const ws = " ".repeat(40_000);
+    const source = `const { ${ws}orig${ws}:${ws}destructured${ws}=${ws}fallbackVal${ws} } = require('./dest');\napp.get('/dest', destructured);`;
+    const lookup = new Map([["src/app/dest.ts", "src/app/dest.ts"]]);
+    let calls: Array<{ to: string }> = [];
+    const elapsed = elapsedMsOf(() => {
+      const res = extractRegisteredRouteEvidence("src/app/routes.ts", source, lookup);
+      calls = res.calls;
+    });
+    expect(calls.map((c) => c.to)).toContain("src/app/dest.ts");
+    expect(elapsed, `parsing destructuring require took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+});
+
+describe("route edge slashes trimming is linear with two pointers", () => {
+  it("trims nested controller and method path slashes without regex backtracking", () => {
+    const slashes = "/".repeat(30_000);
+    const source = [
+      "@Controller('///api///')",
+      "export class ApiController {",
+      `  @Get('${slashes}items${slashes}')`,
+      "  getItems() {}",
+      "}",
+    ].join("\n");
+    let routes: Array<{ path: string }> = [];
+    const elapsed = elapsedMsOf(() => {
+      routes = extractFrameworkRouteEvidence("src/app/api.controller.ts", source, new Map()).routes;
+    });
+    expect(routes.map((r) => r.path)).toContain("/api/items");
+    expect(elapsed, `joining route segments took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+
+  it("evaluates fallbackRouteEdge on paths with massive slash runs linearly", () => {
+    const longSlashPath = "///".repeat(15_000) + "api" + "///".repeat(15_000) + "users.ts";
+    let res: ReturnType<typeof fallbackRouteEdge>;
+    const elapsed = elapsedMsOf(() => {
+      res = fallbackRouteEdge(longSlashPath);
+    });
+    expect(res).toBeDefined();
+    expect(res?.method).toBe("GET");
+    expect(res?.handler).toBe(longSlashPath);
+    expect(elapsed, `fallbackRouteEdge took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+});
+
+describe("Python import alias suffixes and trailing slashes use linear backward scans", () => {
+  it("strips python alias suffixes with massive whitespace runs linearly", () => {
+    const ws = " ".repeat(40_000);
+    const source = `from pkg.sub import ${ws}my_service${ws}as${ws}svc_alias\n`;
+    const lookup = new Map([
+      ["src/pkg/sub/my_service.py", "src/pkg/sub/my_service.py"],
+      ["src/pkg/sub.py", "src/pkg/sub.py"],
+    ]);
+    let edges: Array<{ to: string; reason?: string }> = [];
+    const elapsed = elapsedMsOf(() => {
+      edges = extractPythonImportEdges("src/api.py", source, lookup);
+    });
+    expect(edges.length).toBe(1);
+    expect(edges[0]?.to).toBe("src/pkg/sub/my_service.py");
+    expect(edges[0]?.reason).toContain("pkg.sub.my_service");
+    expect(elapsed, `parsing python import alias took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+
+  it("resolves python candidates with trailing slashes using backward scan", () => {
+    const slashes = "/".repeat(40_000);
+    const candidate = "pkg.module" + slashes;
+    const lookup = new Map([["pkg/module.py", "pkg/module.py"]]);
+    let resolved: string | undefined;
+    const elapsed = elapsedMsOf(() => {
+      resolved = resolvePythonImportTarget("src/api.py", candidate, lookup);
+    });
+    expect(resolved).toBe(undefined);
+    expect(elapsed).toBeLessThan(150);
+  });
+});
+
+describe("pathPatterns hasToken and pathTokens are linear on growing punctuation", () => {
+  it("scans tokens and matches interface keywords on long punctuation runs", () => {
+    const longPunct = "src/" + "---...///".repeat(10_000) + "handler" + "---...///".repeat(10_000) + "/index.ts";
+    let isInterface = false;
+    const elapsed = elapsedMsOf(() => {
+      isInterface = isInterfacePath(longPunct);
+    });
+    expect(isInterface).toBe(true);
+    expect(elapsed, `isInterfacePath on long punctuation took ${elapsed.toFixed(1)}ms`).toBeLessThan(150);
+  });
+
+  it("pathTokens splits tokens identically with two pointers", () => {
+    const input = "foo-bar_baz.qux/hello123world";
+    expect(pathTokens(input)).toEqual(["foo", "bar", "baz", "qux", "hello123world"]);
   });
 });

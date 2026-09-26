@@ -1098,9 +1098,6 @@ describe("promoted findings carry nothing the dispatch boundary strips", () => {
   // field no host, no ingest, and no consumer ever sees — it is written into the
   // plan, read back by nothing, and silently discarded at the one door that
   // hands findings to a host.
-  //
-  // `concrete_change` was exactly that: a second copy of `node.description`,
-  // which `summary` already carries, declared nowhere and read nowhere.
   it("computes no finding field that FindingSchema would drop", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
       contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
@@ -1134,15 +1131,49 @@ describe("promoted findings carry nothing the dispatch boundary strips", () => {
       "a finding field no consumer reads is not computed — declare it on FindingSchema or stop writing it",
     ).toEqual([]);
   });
+
+  // O46 — the four per-node facts the producer computes onto a finding must
+  // survive the dispatch boundary's `FindingSchema.parse` (the assignment
+  // construction that hands findings to the host), so the host implementer sees
+  // the node's stated precondition and expected change rather than working from
+  // `summary`/`evidence` alone.
+  it("round-trips concrete_change, preconditions, expected_changes and addresses_counterexamples through FindingSchema.parse", async () => {
+    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
+      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
+      goal_id: "G1",
+      nodes: [
+        {
+          id: "N1",
+          title: "Add retry",
+          description: "Add retry around the API call",
+          satisfies_obligations: [],
+          depends_on: [],
+          verification_obligation_ids: [],
+          targeted_commands: [],
+          status: "pending",
+          preconditions: ["P1", "P2"],
+          expected_changes: "Adds retry logic",
+          addresses_counterexamples: ["CE-1", "CE-2"],
+        },
+      ],
+      edges: [],
+      created_at: CREATED_AT,
+    });
+    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR);
+    const plan = JSON.parse(
+      await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"),
+    );
+    const { FindingSchema } = await import("audit-tools/shared");
+    // The production hop: the boundary parses the promoted finding through the
+    // shared schema before it reaches the host.
+    const parsed = FindingSchema.parse(plan.findings[0]);
+    expect(parsed.concrete_change).toBe("Add retry around the API call");
+    expect(parsed.preconditions).toEqual(["P1", "P2"]);
+    expect(parsed.expected_changes).toBe("Adds retry logic");
+    expect(parsed.addresses_counterexamples).toEqual(["CE-1", "CE-2"]);
+  });
 });
 
-// The former "N-R12: propagates preconditions and expected_changes" block is
-// DELETED with the producer it pinned. Both fields are DAG-node facts read by
-// the node-side gates; copied onto a finding they were declared on no schema,
-// read by no consumer, and dropped at the dispatch boundary. The property that
-// replaces the block — "the promotion computes no finding field FindingSchema
-// would drop" — is asserted by the suite above, and it covers these two fields
-// rather than naming them, so the next one added here is caught too.
 describe("N-R12: promoteImplementationDagToExtractedPlan — graceful fallback when obligation_ledger absent", () => {
   it("completes without throwing and uses lens=correctness, severity=medium when no obligation_ledger", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
@@ -1448,6 +1479,49 @@ describe("CP-NODE-13 inv-4: named, ordered gate units — no label can collide o
     const prompt = await readFile(step!.prompt_path, "utf8");
     expect(prompt).toContain("Validation Errors From the Previous Attempt");
     expect(prompt).not.toContain("Cyclic Seam Resolution");
+  });
+});
+
+describe("T71: a decomposition-owned critique remedy routes to the decomposition phase", () => {
+  /** Write the chain through the critique with a blocking concern the critique
+   *  gate must repair. */
+  async function seedBlockingCritique(description: string): Promise<void> {
+    await writeChainThrough("conceptual_design_critique");
+    await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
+      ...CHAIN_PAYLOADS.conceptual_design_critique,
+      items: [{ id: "C-1", kind: "concern", severity: "blocking", description }],
+      verdict: "rejected",
+    });
+  }
+
+  it("POSITIVE: a concern prescribing a file_scope change routes up to decomposition, not a finalized-contract edit", async () => {
+    await seedBlockingCritique(
+      "Widen mod-a's file_scope to also cover src/b.ts; the finalized contract cannot express that.",
+    );
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "critique-file-scope",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toContain("Blocking Concerns Own the Decomposition");
+    expect(prompt).toContain("`C-1`");
+    // Routed to the decomposition phase, NOT a finalized_module_contracts repair.
+    expect(prompt).not.toMatch(/Contract Repair: finalized_module_contracts/);
+  });
+
+  it("NEGATIVE: an ordinary blocking concern still emits the finalized-contract repair step", async () => {
+    await seedBlockingCritique(
+      "The finalized contract for mod-a omits a validation boundary for malformed input.",
+    );
+    const step = await buildNextContractPipelineStep({
+      root: TEST_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      runId: "critique-ordinary",
+    });
+    const prompt = await readFile(step!.prompt_path, "utf8");
+    expect(prompt).toMatch(/Contract Repair: finalized_module_contracts/);
+    expect(prompt).not.toContain("Blocking Concerns Own the Decomposition");
   });
 });
 

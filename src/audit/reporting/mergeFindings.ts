@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/merge-findings-dedup.test.ts
 import type { AuditResult, Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
@@ -11,6 +12,7 @@ import {
   sameLensDedupe,
   upsertFindingByIdentity,
   compareCodeUnits,
+  findingReEmissionKey,
 } from "audit-tools/shared";
 
 function relevantRuntimeEvidence(
@@ -55,8 +57,6 @@ export function mergeFindings(
   charterRegister?: CharterRegister,
   systemicChallenge?: SystemicChallengeRegister,
 ): Finding[] {
-  const merged = new Map<string, Finding>();
-
   const allDesignFindings = [
     ...(designAssessment?.findings ?? []),
     // The two review passes, each carrying its own findings. A pre-split
@@ -77,18 +77,46 @@ export function mergeFindings(
     // routed to its real lens rather than collapsed into an architecture bucket.
     ...(systemicChallenge?.findings ?? []),
   ];
-  for (const finding of allDesignFindings) {
-    upsertFindingByIdentity(merged, finding);
-  }
 
   // Callers pass the supersession-resolved ledger (`selectCurrentResults`) so a
   // re-dispatched result's fresh findings have already replaced the stale base
   // record they superseded (O3). mergeFindings stays a pure merge over whatever
   // result set it is given.
-  for (const result of results) {
-    for (const finding of result.findings) {
-      upsertFindingByIdentity(merged, finding);
-    }
+  const resultFindings = results.flatMap((result) => result.findings);
+
+  // A deterministic producer is the ONLY thing that may stamp `lead_lineage`, and
+  // every host-authored door strips or refuses the field by name — so presence of
+  // the stamp is the boundary between a generation-bound LEAD and a semantic
+  // finding, not whichever array a row happened to arrive in.
+  const leads: Finding[] = [];
+  const semantic: Finding[] = [];
+  for (const finding of [...allDesignFindings, ...resultFindings]) {
+    (finding.lead_lineage ? leads : semantic).push(finding);
+  }
+
+  // A lead is promoted to the final report only when a semantic finding re-raises
+  // its canonical identity (the file-independent re-emission key: normalized
+  // lens|category|title). An unconfirmed lead stays in its analysis artifact
+  // (`design_assessment.json` / `structure_decomposition.json`) — it is never
+  // deleted, only not admitted here.
+  const confirmedKeys = new Set(
+    semantic.map((finding) => findingReEmissionKey(finding)),
+  );
+  const admittedLeads = leads.filter((lead) =>
+    confirmedKeys.has(findingReEmissionKey(lead)),
+  );
+
+  const merged = new Map<string, Finding>();
+  // Leads upsert FIRST so a confirmed lead is the survivor of its identity key
+  // and keeps its `lead_lineage`; the confirming semantic finding then unions its
+  // evidence and affected_files into it (`upsertFindingByIdentity` never touches
+  // `lead_lineage`, so the tool stamp survives the merge rather than being
+  // replaced by the host-authored row).
+  for (const lead of admittedLeads) {
+    upsertFindingByIdentity(merged, lead);
+  }
+  for (const finding of semantic) {
+    upsertFindingByIdentity(merged, finding);
   }
 
   for (const finding of merged.values()) {

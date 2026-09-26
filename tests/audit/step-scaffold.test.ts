@@ -158,4 +158,17 @@ describe("the step-command MODE contract", () => {
     expect(stepCalls).toHaveLength(1);
     expect(stepCalls[0]).not.toHaveProperty("preferredExecutor");
   });
+
+  it("cmdPlan forwards the explicit auto-fix choice and dry-run precedence", async () => {
+    await cmdPlan(["--root", root, "--allow-auto-fix"]);
+    expect(stepCalls[0]).toMatchObject({ autoFix: { enabled: true } });
+
+    stepCalls.length = 0;
+    await cmdPlan(["--root", root, "--allow-auto-fix", "--auto-fix-dry-run"]);
+    expect(stepCalls[0]).toMatchObject({ autoFix: { enabled: true, dryRun: true } });
+
+    stepCalls.length = 0;
+    await cmdPlan(["--root", root]);
+    expect(stepCalls[0]).toHaveProperty("autoFix", undefined);
+  });
 });

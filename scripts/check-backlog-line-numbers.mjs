@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-line-numbers.test.ts
 // Refuse bare LINE NUMBERS in citation position in docs/backlog/*.md.
 //
 // WHY. The durable-traps rule is explicit: "Cite a SYMBOL, never a bare line
@@ -42,12 +43,10 @@
 // nothing is guarded at all.
 //
 //   node scripts/check-backlog-line-numbers.mjs
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
+import { listBacklogFiles, readBacklogCorpus, REPO_ROOT } from "./shared/backlog-corpus.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
+const repoRoot = REPO_ROOT;
 
 /** A line suffix at the end of a token: `:123`, `:48-55`, `:21:7`, `:12:1-14:3`. */
 const LINE_SUFFIX = /:(\d+(?::\d+)?(?:-\d+(?::\d+)?)?)$/;
@@ -108,13 +107,11 @@ export function findLineNumberCitations(text) {
 }
 
 function main() {
-  const files = readdirSync(backlogDir)
-    .filter((f) => f.endsWith(".md"))
-    .sort();
+  const corpus = readBacklogCorpus(listBacklogFiles(repoRoot));
 
   const violations = [];
-  for (const file of files) {
-    for (const hit of findLineNumberCitations(readFileSync(join(backlogDir, file), "utf8"))) {
+  for (const { file, text } of corpus) {
+    for (const hit of findLineNumberCitations(text)) {
       violations.push(
         `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind} \`${hit.span}\`\n` +
           `      ${hit.source.trim().slice(0, 140)}`,
@@ -123,7 +120,7 @@ function main() {
   }
 
   if (violations.length === 0) {
-    process.stdout.write(`✓ backlog-line-numbers: no bare line-number citations across ${files.length} file(s)\n`);
+    process.stdout.write(`✓ backlog-line-numbers: no bare line-number citations across ${corpus.length} file(s)\n`);
     return;
   }
 

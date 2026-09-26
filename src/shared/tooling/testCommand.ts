@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/testCommand.test.ts
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,6 +13,17 @@ export interface ProjectCommands {
   e2e?: string[];
   build?: string[];
   lint?: string[];
+  /**
+   * The repository's declared typecheck command, as an argv array. npm scripts
+   * ONLY (`typecheck`, then `check:types`) — an arbitrary `check` script is
+   * never read as typechecking: `check` is an unowned prefix shared by lint,
+   * format, dependency and audit scripts, so treating it as a typecheck would
+   * run the wrong gate and report its verdict under the wrong role. No
+   * non-npm arm: Go's `go build` already typechecks and Python has no single
+   * canonical checker, so inventing `go vet` / `mypy` here would be a guess
+   * about a toolchain the manifest never declared.
+   */
+  typecheck?: string[];
 }
 
 // npm script names, in preference order, for each command role.
@@ -66,6 +78,16 @@ const LINT_SCRIPT_NAMES: readonly string[] = [
   "lint",
   // --- variants / less common ---
   "lint:check",
+];
+
+/**
+ * Typecheck script names in discovery preference order (most generic first).
+ * EXACTLY these two: a bare `check` script is deliberately absent (see the
+ * `typecheck` field doc above — `check` names a family, not a role).
+ */
+const TYPECHECK_SCRIPT_NAMES: readonly string[] = [
+  "typecheck",
+  "check:types",
 ];
 
 function readPackageScripts(root: string): Record<string, string> | null {
@@ -144,9 +166,9 @@ export function isValidExecutableCommand(
 }
 
 /**
- * Discover the test/e2e/build/lint commands for a repository as argv arrays.
+ * Discover the test/e2e/build/lint/typecheck commands for a repository as argv arrays.
  *
- * Node detection (package.json) takes precedence for e2e/build/lint. The test
+ * Node detection (package.json) takes precedence for e2e/build/lint/typecheck. The test
  * command prefers `npm test`, but — matching the auditor's prior behavior —
  * falls through to Go (`go test ./...`) then Python (`python -m pytest`) when
  * package.json has no usable `test` script or is absent. Absent roles are
@@ -167,6 +189,8 @@ export function discoverProjectCommands(root: string): ProjectCommands {
     if (build) result.build = build;
     const lint = pickScript(scripts, LINT_SCRIPT_NAMES);
     if (lint) result.lint = lint;
+    const typecheck = pickScript(scripts, TYPECHECK_SCRIPT_NAMES);
+    if (typecheck) result.typecheck = typecheck;
   }
 
   if (!result.test) {

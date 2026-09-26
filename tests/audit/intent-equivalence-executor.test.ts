@@ -9,6 +9,7 @@ import type {
 import type { IntentCheckpoint } from "../../src/shared/index.js";
 
 const {
+  IntentEquivalenceVerdictSchema,
   deriveIntentEquivalenceStatus,
   runIntentEquivalenceResolve,
 } = await import("../../src/audit/orchestrator/intentEquivalenceExecutor.js");
@@ -174,6 +175,44 @@ test("a verdict naming a stale pair is discarded; the obligation stays pending",
   expect(deriveIntentEquivalenceStatus(run.updated).kind).toBe(
     "prose_judgment_pending",
   );
+});
+
+// O06 — an optional `rationale` records the judge's reasoning for the verdict.
+test("IntentEquivalenceVerdictSchema accepts an optional rationale; a non-string is rejected", () => {
+  const pair = { prior_hash: "p", new_hash: "n" };
+  // With rationale (accepted).
+  expect(
+    IntentEquivalenceVerdictSchema.parse({
+      verdict: "equivalent",
+      judged_pair: pair,
+      rationale: "Wording-only change; intent unchanged.",
+    }),
+  ).toEqual({
+    verdict: "equivalent",
+    judged_pair: pair,
+    rationale: "Wording-only change; intent unchanged.",
+  });
+  // Without rationale (still accepted — the field is optional).
+  expect(
+    IntentEquivalenceVerdictSchema.parse({ verdict: "equivalent", judged_pair: pair }),
+  ).toEqual({ verdict: "equivalent", judged_pair: pair });
+  // A malformed rationale (non-string) fails.
+  expect(() =>
+    IntentEquivalenceVerdictSchema.parse({
+      verdict: "equivalent",
+      judged_pair: pair,
+      rationale: 42,
+    }),
+  ).toThrow();
+  // An unknown key is still refused by `.strict()`.
+  expect(() =>
+    IntentEquivalenceVerdictSchema.parse({
+      verdict: "equivalent",
+      judged_pair: pair,
+      rationale: "fine",
+      extra: true,
+    }),
+  ).toThrow();
 });
 
 test("verdict equivalent: forms advance, revision authority stays put", () => {

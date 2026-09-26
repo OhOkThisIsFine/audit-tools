@@ -1,3 +1,4 @@
+// sites-pinned: none — this hunk only inlines a type alias; emitted score behavior is unchanged
 import { join } from "node:path";
 import {
   readJsonFile,
@@ -13,10 +14,6 @@ import {
   type Scorecard,
 } from "../reporting/scoreAudit.js";
 import { getArtifactsDir, getFlag } from "./args.js";
-
-interface FindingsContainer {
-  findings?: Finding[];
-}
 
 /**
  * `score-audit` — emit the deterministic finding-quality scorecard for a fresh
@@ -48,9 +45,9 @@ export async function cmdScoreAudit(argv: string[]): Promise<void> {
     return;
   }
 
-  let findingsDoc: FindingsContainer;
+  let findingsDoc: { findings?: Finding[] };
   try {
-    findingsDoc = await readJsonFile<FindingsContainer>(findingsPath);
+    findingsDoc = await readJsonFile<{ findings?: Finding[] }>(findingsPath);
   } catch (error) {
     console.error(
       `Could not read findings at ${findingsPath}: ${(error as Error).message}`,

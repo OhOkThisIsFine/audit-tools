@@ -1399,7 +1399,7 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
         argv: ["node", "audit-code", "--root", artifactsDir],
         root: artifactsDir,
         artifactsDir,
-        analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
+        analyzerPolicy: { analyzers: {} },
         result: { kind, state, bundle, ...(extras[kind] ?? {}) },
       } as Parameters<typeof row>[0]);
 
@@ -1418,44 +1418,36 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
 
 // ── The analyzer-policy precondition on the acquisition-bearing rows ─────────
 
-test("BOTH halves of the loaded analyzer policy ride every acquisition call, and no consent token is synthesized", () => {
+test("the loaded analyzer settings ride every acquisition call, and no consent token is synthesized", () => {
   const options = buildExternalAcquisitionOptions({
     analyzers: { typescript: "skip" },
-    analyzer_consent: { semgrep: "declined" },
   });
 
   expect(options.enabled).toBe(true);
   expect(options.analyzers).toEqual({ typescript: "skip" });
   expect(
-    options.analyzerConsent,
-    "dropping the decisions leaves a recorded decline unrepresentable at admission",
-  ).toEqual({ semgrep: "declined" });
+    Object.prototype.hasOwnProperty.call(options, "analyzerConsent"),
+    "packet 5 / O07: consent is strictly per-run — there is nothing durable to forward",
+  ).toBe(false);
   expect(
     Object.prototype.hasOwnProperty.call(options, "consentToken"),
     "a consent token is never synthesized on the operator's behalf",
   ).toBe(false);
 });
 
-test("the pass-through reaches admission: a recorded decline vetoes even a DEFAULT-set candidate", () => {
-  const options = buildExternalAcquisitionOptions({
-    analyzer_consent: { gitleaks: "declined" },
-  });
+test("the pass-through reaches admission: a this-run decline vetoes even a DEFAULT-set candidate", () => {
   const gitleaks = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "gitleaks");
   assert.ok(gitleaks, "gitleaks is the default-set candidate this pins");
   expect(gitleaks.defaultRun).toBe(true);
 
-  // Exactly the arguments the acquisition engine forms from these options.
-  const denied = admitSpawn(
-    gitleaks,
-    "auto",
-    options.consentToken,
-    options.analyzerConsent?.[gitleaks.id],
-  );
+  // Exactly the arguments the acquisition engine forms from an in-run decline
+  // (folded from the `analyzer_consent` lane into the in-flight options).
+  const denied = admitSpawn(gitleaks, "auto", undefined, "declined");
   expect(denied).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
 
-  // Drop the pass-through and the operator's decline simply never arrives.
-  const withoutPassThrough = admitSpawn(gitleaks, "auto", undefined, undefined);
-  expect(withoutPassThrough).toBe(undefined);
+  // Drop the in-run decline and the DEFAULT set is admitted unprompted.
+  const withoutDecline = admitSpawn(gitleaks, "auto", undefined, undefined);
+  expect(withoutDecline).toBe(undefined);
 });
 
 test("an acquisition-bearing row REFUSES to emit when the analyzer policy did not load", async () => {
@@ -1581,7 +1573,7 @@ test("BOTH blocked paths carry the same operator-handoff contract, built from ON
       argv: ["node", "audit-code", "--root", root],
       root,
       artifactsDir: stepB.artifacts_dir,
-      analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
+      analyzerPolicy: { analyzers: {} },
       result: {
         kind: "blocked",
         state: { status: "active", obligations: [] },

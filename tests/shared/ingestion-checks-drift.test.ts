@@ -98,11 +98,14 @@ describe("INGESTION_CHECKS is load-bearing: every declared check is cited where 
 
   for (const draw of INGESTION_DRAWS) {
     it(`the ${draw.id} draw cites exactly the draw-cited checks it declares`, () => {
-      const cited = extractCitedIngestionChecks(read(draw.source));
-      const declared = ingestionCheckIdsCitedBy("draw", draw.id);
-      expect([...cited].sort(), `${draw.source} cites checks it does not declare, or omits declared ones`).toEqual(
-        [...declared].sort(),
+      const cited = new Set(
+        draw.sources.flatMap((source) => [...extractCitedIngestionChecks(read(source))]),
       );
+      const declared = ingestionCheckIdsCitedBy("draw", draw.id);
+      expect(
+        [...cited].sort(),
+        `${draw.sources.join(", ")} cite checks the draw does not declare, or omit declared ones`,
+      ).toEqual([...declared].sort());
     });
 
     it(`every check the ${draw.id} draw declares is either shared-cited or draw-cited`, () => {

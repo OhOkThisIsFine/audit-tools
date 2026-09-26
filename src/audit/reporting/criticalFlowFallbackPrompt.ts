@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/critical-flow-fallback-prompt.test.ts
 import type { CriticalFlowManifest } from "audit-tools/shared";
 
 const MAX_RENDERED_FLOWS = 80;
@@ -22,16 +23,30 @@ function summarizeFlow(
  * low-confidence), so the host reviews the repository's ACTUAL critical user /
  * system flows and returns an additive enrichment. It does not re-audit code or
  * invent findings — it authors the flow map the deterministic heuristics missed.
+ *
+ * Owner review 2026-09-17 (prompt 14, and the synthesis-narrative twinned fix)
+ * settled the overflow note's path: it previously said "see critical_flows.json"
+ * — a bare filename the lane reader could neither locate nor open, because the
+ * only path the lane is granted is its own prompt file. The emitter now passes
+ * the REAL artifact path and grants it, so the 80-flow cap names a place the
+ * reader can actually reach for the complete flow map.
  */
 export function renderCriticalFlowFallbackPrompt(
   manifest: CriticalFlowManifest,
+  /**
+   * Host-facing path of the complete `critical_flows.json` artifact. The
+   * overflow line points the reader here when the deterministic flow list
+   * exceeds the rendered cap, and the emitting step grants it read access — so
+   * this is an ACCESS-BEARING argument, not a cosmetic one.
+   */
+  criticalFlowsPath: string,
 ): string {
   const flows = manifest.flows;
   const rendered = flows.slice(0, MAX_RENDERED_FLOWS).map(summarizeFlow);
   const overflowNote =
     flows.length > MAX_RENDERED_FLOWS
       ? [
-          `  ... and ${flows.length - MAX_RENDERED_FLOWS} more flows (see critical_flows.json).`,
+          `  ... and ${flows.length - MAX_RENDERED_FLOWS} more flows at ${criticalFlowsPath}.`,
         ]
       : [];
 

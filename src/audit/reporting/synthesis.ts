@@ -31,6 +31,7 @@ import type {
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION as SHARED_AUDIT_FINDINGS_CONTRACT_VERSION,
   AUDITOR_REPORT_MARKER,
+  assertValidAuditFindingsReport,
   auditReadOf,
   renderProcessFeedbackSection,
   renderFindingBlockLines,
@@ -39,6 +40,7 @@ import {
   deriveLensCoverage,
   isIngestEvent,
   reprojectLensCoverage,
+  SEVERITIES,
   type AgentReflection,
   type LensCoverageEntry,
   type MeasuredOutcome,
@@ -394,7 +396,7 @@ function coverageSummary(coverage?: CoverageMatrix): {
 }
 
 function formatSeverityList(summary: Record<string, number>): string {
-  const ordered = ["critical", "high", "medium", "low", "info"];
+  const ordered = SEVERITIES;
   const parts = ordered
     .filter((severity) => (summary[severity] ?? 0) > 0)
     .map((severity) => `${severity}: ${summary[severity]}`);
@@ -600,6 +602,12 @@ export function buildAuditFindingsReport(
   if (barApplied) {
     report[CRITICAL_EVIDENCE_BAR_APPLIED] = barApplied;
   }
+  // Serialized-output boundary: the synthesis is the producer of
+  // `audit-findings.json`, so it runs its own finished value through the owning
+  // schema before the executor persists it. A required field the builder fails
+  // to carry breaks HERE — at emit, named — rather than surfacing later where a
+  // downstream consumer re-reads the persisted report.
+  assertValidAuditFindingsReport(report);
   return report;
 }
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-status-tokens.test.ts
 // Refuse status MARKERS in docs/backlog/**.
 //
 // WHY. Every backlog file's own header says the same thing — "A living to-do list,
@@ -43,12 +44,10 @@
 // nothing is guarded at all. Widen only on evidence of the form actually recurring.
 //
 //   node scripts/check-backlog-status-tokens.mjs
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
+import { listBacklogFiles, readBacklogCorpus, REPO_ROOT } from "./shared/backlog-corpus.mjs";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const backlogDir = join(repoRoot, "docs", "backlog");
+const repoRoot = REPO_ROOT;
 
 /** Status words refused in LABEL position. Deliberately short — every addition is false-RED surface. */
 export const STATUS_WORDS = ["SHIPPED", "DONE", "FIXED", "RESOLVED"];
@@ -127,13 +126,11 @@ export function findStatusMarkers(text) {
 }
 
 function main() {
-  const files = readdirSync(backlogDir)
-    .filter((f) => f.endsWith(".md"))
-    .sort();
+  const corpus = readBacklogCorpus(listBacklogFiles(repoRoot));
 
   const violations = [];
-  for (const file of files) {
-    for (const hit of findStatusMarkers(readFileSync(join(backlogDir, file), "utf8"))) {
+  for (const { file, text } of corpus) {
+    for (const hit of findStatusMarkers(text)) {
       violations.push(
         `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind}\n      ${hit.snippet}`,
       );
@@ -141,7 +138,7 @@ function main() {
   }
 
   if (violations.length === 0) {
-    process.stdout.write(`✓ backlog-status-tokens: no status markers across ${files.length} file(s)\n`);
+    process.stdout.write(`✓ backlog-status-tokens: no status markers across ${corpus.length} file(s)\n`);
     return;
   }
 

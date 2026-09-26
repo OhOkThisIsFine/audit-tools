@@ -98,6 +98,19 @@ describe("runCharterFidelityExecutor", () => {
     expect(reg.findings[0]!.affected_files.map((f) => f.path)).toEqual(["src/a.ts"]);
   });
 
+  test("a supported charter lead RETAINS its producer lineage through grounding (tool-minted, not host-authored)", () => {
+    const run = runCharterFidelityExecutor(bundleWith(pendingRegister()), {
+      verdicts: [{ difference_id: "diff-1", verdict: "supported", rationale: "both slices say so" }],
+    });
+    const finding = run.updated.charter_register!.findings[0]!;
+    // `groundDesignFindings` strips a host-supplied lineage, but these are the
+    // tool's own deterministic leads — the strip must NOT eat the producer stamp.
+    expect(finding.lead_lineage).toBeDefined();
+    expect(finding.lead_lineage!.producer).toBe("differenceFindings");
+    expect(finding.lead_lineage!.confirmation).toBe("lead");
+    expect(finding.lead_lineage!.source_hash.length).toBeGreaterThan(0);
+  });
+
   test("an interpretation verdict names the over-read side and yields NO finding", () => {
     const run = runCharterFidelityExecutor(bundleWith(pendingRegister()), {
       verdicts: [

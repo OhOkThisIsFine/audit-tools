@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -2629,6 +2630,58 @@ describe("remediation host handoff repository corroboration", () => {
       "required_test_output_overflow",
     ]);
     expect(refused.issues[0]!.message).toMatch(/UNKNOWN/u);
+  });
+
+  it("reports newly created ignored root logs while excluding old logs and sanctioned artifacts without automatic deletion", async () => {
+    const value = await fixture({
+      beforePrepare: async (root) => {
+        await writeFile(join(root, ".gitignore"), "*.log\n", "utf8");
+        git(root, ["add", ".gitignore"]);
+        git(root, ["commit", "-m", "add gitignore"]);
+        await writeFile(
+          join(root, "pre-existing.log"),
+          "pre-existing log\n",
+          "utf8",
+        );
+      },
+    });
+
+    // Newly created ignored log in repository root (e.g. stray agent log)
+    await writeFile(join(value.root, "stray.log"), "stray log\n", "utf8");
+
+    // Log in sanctioned artifact directory
+    await mkdir(value.artifactsDir, { recursive: true });
+    await writeFile(
+      join(value.artifactsDir, "run.log"),
+      "sanctioned artifact log\n",
+      "utf8",
+    );
+
+    const after = await landA(value);
+    await writeResult(value, resultFor(value, after));
+
+    const ingested = await ingestRemediationHostResults({
+      root: value.root,
+      artifactsDir: value.artifactsDir,
+      runId: value.runId,
+      state: boundState(value),
+    });
+    if (ingested === "unsupported_retired_state") {
+      throw new Error("state rejected");
+    }
+
+    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.issues).toEqual([]);
+
+    // Acceptance:
+    // - New ignored logs are reported
+    // - Old logs and sanctioned artifacts are not
+    expect(ingested.ignored_root_logs).toEqual(["stray.log"]);
+
+    // Scope corroboration: proves no automatic deletion occurs
+    expect(existsSync(join(value.root, "stray.log"))).toBe(true);
+    expect(existsSync(join(value.root, "pre-existing.log"))).toBe(true);
+    expect(existsSync(join(value.artifactsDir, "run.log"))).toBe(true);
   });
 });
 

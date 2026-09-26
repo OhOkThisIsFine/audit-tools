@@ -37,10 +37,12 @@
   no longer describes the decision that was actually made.
   **What remains:** (a) the charter family and `design_assessment.json` still key their downstreams
   on the whole content hash, so a semantically-identical re-derivation that only rewords re-stales
-  `charter_clarification` / `systemic_challenge` / `audit-report.md`; (b) nothing measures the
-  cascade — the sole staleness telemetry is the `{kind:"staleness", stale_artifacts:[…]}` stderr
-  record (`staleness.ts:emitStalenessRecord`), which names WHICH artifacts staled but not the
-  triggering edge, the size/nature of the source change, or the downstream token cost.
+  `charter_clarification` / `systemic_challenge` / `audit-report.md`; (b) classification now reports
+  newly stale candidates and its own elapsed time, but does not execute their re-derivation,
+  measure supplied prompt context or downstream token cost, or establish semantic necessity.
+  The [corrected measurement record](../reviews/staleness-cascade-cost-2026-09-20.md) withdraws
+  the recovered zero-cost/equivalence claim. Controlled before/after downstream execution remains
+  the missing evidence; classification timing must not be substituted for it.
   **Property to hold:** an efficiency mechanism is justified by a measured cost or a live-observed
   incident, never by an estimate of one. Extend the gate to a second artifact only when one of those
   exists for it; if the choice is ever genuinely undecidable, the cheap move is edge attribution +

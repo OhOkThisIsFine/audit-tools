@@ -18,7 +18,7 @@ import { spawnHidden as spawn } from "../../helpers/spawn.mjs";
 // From `trackedSpawn.js`, the module that owns the bound — a `.mjs` re-export is
 // invisible to `check:deadcode` (see the note in tests/shared/sync-spawn-budget).
 import { runBounded } from "../../helpers/trackedSpawn.js";
-import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
+import { skipDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 
 // Loose shapes for the JSON the wrapper prints / writes. Only the fields the
 // assertions read through a callback are named — everything else stays open via
@@ -278,7 +278,7 @@ export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise
         2,
       ) + "\n",
     );
-    await declineDefaultAcquiredAnalyzers(root);
+    await skipDefaultAcquiredAnalyzers(root);
     return await fn(root);
   } finally {
     await rm(tempDir, { recursive: true, force: true });

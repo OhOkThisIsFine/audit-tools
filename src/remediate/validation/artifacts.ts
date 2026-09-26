@@ -1,9 +1,9 @@
 // sites-pinned: tests/remediate/artifacts-validation.test.ts
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   absoluteSubmissionPath,
+  collectFilesSorted,
   readJsonFile,
   readSubmissionLedger,
   resolveWithinRoot,
@@ -103,20 +103,6 @@ async function readJsonForValidation(
   }
 }
 
-async function collectFiles(dir: string): Promise<string[]> {
-  if (!existsSync(dir)) return [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await collectFiles(path)));
-    } else {
-      files.push(path);
-    }
-  }
-  return files;
-}
 
 function validateStringArray(
   value: unknown,
@@ -365,7 +351,7 @@ async function validateHostSubmissions(
   currentRunId: string | undefined,
 ): Promise<{ discovered: number; validated: number }> {
   const runsDir = join(artifactsDir, "runs");
-  const files = (await collectFiles(runsDir)).filter(
+  const files = (await collectFilesSorted(runsDir)).filter(
     (file) =>
       currentRunId === undefined ||
       runDirectoryOf(runsDir, file) === currentRunId,

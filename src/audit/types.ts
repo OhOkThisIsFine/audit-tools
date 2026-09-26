@@ -1,19 +1,10 @@
+// sites-pinned: tests/audit/schema-contracts.test.ts
 import { z } from "zod";
-import type { Finding as SharedFinding } from "audit-tools/shared";
-import { FindingSchema } from "audit-tools/shared";
+import type { Finding as SharedFinding, Lens } from "audit-tools/shared";
+import { FindingSchema, isLens } from "audit-tools/shared";
 
-export type Lens =
-  | "correctness"
-  | "architecture"
-  | "maintainability"
-  | "security"
-  | "reliability"
-  | "performance"
-  | "data_integrity"
-  | "tests"
-  | "operability"
-  | "config_deployment"
-  | "observability";
+export type { Lens };
+export { isLens };
 
 /** Single authoritative record for one audit lens. `order_weight` governs task
  * priority ordering — lower values sort earlier (higher urgency). */
@@ -25,21 +16,36 @@ export interface LensDefinition {
   default_enabled: boolean;
 }
 
+const LENS_REGISTRY_MAP = {
+  security:          { id: "security",          display_name: "Security",            order_weight: 10,  default_enabled: true },
+  correctness:       { id: "correctness",       display_name: "Correctness",         order_weight: 20,  default_enabled: true },
+  reliability:       { id: "reliability",       display_name: "Reliability",         order_weight: 30,  default_enabled: true },
+  data_integrity:    { id: "data_integrity",    display_name: "Data Integrity",      order_weight: 40,  default_enabled: true },
+  performance:       { id: "performance",       display_name: "Performance",         order_weight: 50,  default_enabled: true },
+  architecture:      { id: "architecture",      display_name: "Architecture",        order_weight: 60,  default_enabled: true },
+  operability:       { id: "operability",       display_name: "Operability",         order_weight: 70,  default_enabled: true },
+  config_deployment: { id: "config_deployment", display_name: "Config & Deployment", order_weight: 80,  default_enabled: true },
+  observability:     { id: "observability",     display_name: "Observability",       order_weight: 90,  default_enabled: true },
+  maintainability:   { id: "maintainability",   display_name: "Maintainability",     order_weight: 100, default_enabled: true },
+  tests:             { id: "tests",             display_name: "Tests",               order_weight: 110, default_enabled: true },
+} as const satisfies Record<Lens, LensDefinition>;
+
 /** Single source of truth for all lens metadata. Adding or renaming a lens
  * requires a single edit here; `ALL_LENSES` (below) and `LENS_ORDER` (in
- * auditTaskUtils) are both derived from this registry. */
+ * auditTaskUtils) are both derived from this registry. Typed with exhaustiveness
+ * against canonical {@link Lens} so omitting a lens is a compile error. */
 export const LENS_REGISTRY: readonly LensDefinition[] = [
-  { id: "security",           display_name: "Security",           order_weight: 10, default_enabled: true },
-  { id: "correctness",        display_name: "Correctness",        order_weight: 20, default_enabled: true },
-  { id: "reliability",        display_name: "Reliability",        order_weight: 30, default_enabled: true },
-  { id: "data_integrity",     display_name: "Data Integrity",     order_weight: 40, default_enabled: true },
-  { id: "performance",        display_name: "Performance",        order_weight: 50, default_enabled: true },
-  { id: "architecture",       display_name: "Architecture",       order_weight: 60, default_enabled: true },
-  { id: "operability",        display_name: "Operability",        order_weight: 70, default_enabled: true },
-  { id: "config_deployment",  display_name: "Config & Deployment",order_weight: 80, default_enabled: true },
-  { id: "observability",      display_name: "Observability",      order_weight: 90, default_enabled: true },
-  { id: "maintainability",    display_name: "Maintainability",    order_weight: 100, default_enabled: true },
-  { id: "tests",              display_name: "Tests",              order_weight: 110, default_enabled: true },
+  LENS_REGISTRY_MAP.security,
+  LENS_REGISTRY_MAP.correctness,
+  LENS_REGISTRY_MAP.reliability,
+  LENS_REGISTRY_MAP.data_integrity,
+  LENS_REGISTRY_MAP.performance,
+  LENS_REGISTRY_MAP.architecture,
+  LENS_REGISTRY_MAP.operability,
+  LENS_REGISTRY_MAP.config_deployment,
+  LENS_REGISTRY_MAP.observability,
+  LENS_REGISTRY_MAP.maintainability,
+  LENS_REGISTRY_MAP.tests,
 ];
 
 /** Canonical list of every valid {@link Lens}. Derived from {@link LENS_REGISTRY}
@@ -47,12 +53,6 @@ export const LENS_REGISTRY: readonly LensDefinition[] = [
  * local guards, which drift (a copy omitting "observability" caused it to be
  * wrongly rejected in flow requeue). */
 export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
-
-export function isLens(value: unknown): value is Lens {
-  return (
-    typeof value === "string" && (ALL_LENSES as readonly string[]).includes(value)
-  );
-}
 
 export const FileRecordSchema = z.object({
   path: z.string(),

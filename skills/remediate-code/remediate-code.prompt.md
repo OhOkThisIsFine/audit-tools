@@ -21,8 +21,10 @@ Preserve user arguments:
   root from the working directory on its own, so normal usage passes no `--root`.
   Pass the user-supplied target directory with `--root <path>` only when running
   from outside that repository.
-- pass an existing path with `--input <path>`; write conversational feedback to a
-  temporary file and pass it with `--guidance-file <path>`.
+- pass an existing path with `--input <path>`. `--guidance-file <path>` is
+  available for the emitted prompt to direct; do not invent a guidance-file
+  workflow of your own — the current prompt owns intake mechanics and names the
+  exact file when one is needed.
 
 The target-directory rule above is one shared fragment, rendered into this body
 and the `audit-code` loader body in the same words; both skills point at the

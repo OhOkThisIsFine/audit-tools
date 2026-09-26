@@ -382,10 +382,10 @@ async function runEslint(
 
 export interface SyntaxResolutionExecutorOptions {
   /**
-   * Recorded consent decisions (from the durable analyzer policy). A recorded
-   * `declined` for `tsc` or `eslint` vetoes that spawn at the shared
-   * admitLocalSpawn chokepoint — the same decline-first rule every other local
-   * tooling spawn faces.
+   * This run's consent decisions. A `declined` for `tsc` or `eslint` vetoes
+   * that spawn at the shared admitLocalSpawn chokepoint — the same
+   * decline-first rule every other local tooling spawn faces. Decisions bind
+   * the current run only (packet 5 / O07); the next run is asked again.
    */
   analyzerConsent?: AnalyzerConsentDecisions;
 }

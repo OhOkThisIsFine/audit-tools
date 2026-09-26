@@ -1,12 +1,19 @@
 /**
- * Item B — consent-offer surfacing (spec/mechanical-analyzer-layer-design.md).
+ * Item B — consent-offer surfacing (spec/mechanical-analyzer-layer-design.md),
+ * under packet 5 / O07 per-run consent.
  * The silent-fail-closed defect: applicable consent-gated analyzers were
  * skipped without the operator ever seeing the choice. Pins:
  *  - pendingAnalyzerConsent: the single source of "who is owed an offer"
- *    (applicable + gated + undecided; token/disabled/skip/decided empty it);
+ *    (applicable + gated + undecided this run; token/disabled/skip/decided
+ *    empty it);
  *  - the drain stop predicate halts on a pending offer (fold-level pause);
- *  - persistAnalyzerConsent records decisions durably (and never a token);
- *  - the offer prompt is tool-rendered with purpose + safety + mechanism.
+ *  - decisions are strictly per-run: NOTHING durable is written (grants ride
+ *    the scoped token, declines ride the in-flight map), so the next run
+ *    re-offers every candidate after either a grant or a decline;
+ *  - a legacy `analyzer_consent` key in an old policy file is ignored — it can
+ *    neither authorize nor veto the new run;
+ *  - the offer prompt is tool-rendered with purpose + security risks + an
+ *    explicit operator question and a strict value enum.
  */
 import { commitFold, createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { describe, it, expect, afterEach } from "vitest";
@@ -36,7 +43,6 @@ import { readSubmissionLedger } from "../../src/shared/submission/submissionLedg
 import {
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
-  persistAnalyzerConsent,
 } from "../../src/shared/analyzerPolicy.js";
 import { renderAnalyzerConsentPrompt } from "../../src/audit/cli/prompts.js";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "../../src/shared/analyzers/candidates.js";
@@ -89,17 +95,31 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
     for (const c of pending) expect(c.defaultRun).toBe(false);
   });
 
-  it("a recorded decision (granted OR declined) removes the candidate — declined is never re-offered", () => {
+  it("a decision this run (decline OR scoped grant) removes the candidate — and the next run is asked again", () => {
     const root = nodeRepo();
     const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
     const first = base[0]!.id;
-    const after = pendingAnalyzerConsent({
+    // Within the run, both answers suppress the re-offer: a decline rides the
+    // in-flight map, a grant rides the scoped token.
+    const declinedThisRun = pendingAnalyzerConsent({
       root,
       externalAcquisitionEnabled: true,
       analyzerConsent: { [first]: "declined" },
     });
-    expect(after.map((c) => c.id)).not.toContain(first);
-    expect(after).toHaveLength(base.length - 1);
+    expect(declinedThisRun.map((c) => c.id)).not.toContain(first);
+    expect(declinedThisRun).toHaveLength(base.length - 1);
+    const grantedThisRun = pendingAnalyzerConsent({
+      root,
+      externalAcquisitionEnabled: true,
+      acquisitionConsentToken: { value: "tok", tools: [first] },
+    });
+    expect(grantedThisRun.map((c) => c.id)).not.toContain(first);
+    // The NEXT run starts with neither — every candidate is owed its offer
+    // again, after either a grant or a decline.
+    const nextRun = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    expect(nextRun.map((c) => c.id).sort()).toEqual(
+      base.map((c) => c.id).sort(),
+    );
   });
 
   it("a per-run SCOPED grant naming every applicable candidate empties the offer", () => {
@@ -150,35 +170,85 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
   });
 });
 
-describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
-  it("merges decisions into analyzer-policy.json without changing session intent", async () => {
-    const root = tempDir("consent-cfg-");
+describe("consent decisions are per-run: nothing durable is written, tokens never", () => {
+  it("answering the offer folds decisions into the run without touching the durable policy", async () => {
+    // A node-ecosystem repo so consent-gated candidates are applicable and the
+    // gate has an offer to answer.
+    const root = nodeRepo();
     const auditDir = join(root, ".audit-tools", "audit");
     const sessionConfigPath = join(auditDir, "session-config.json");
     const sessionConfigBytes = '{"review_mode":"autonomous"}\n';
     mkdirSync(auditDir, { recursive: true });
     writeFileSync(sessionConfigPath, sessionConfigBytes, "utf8");
 
-    await persistAnalyzerConsent(root, { knip: "declined" });
-    const cfg = JSON.parse(
-      readFileSync(getAnalyzerPolicyPath(root), "utf8"),
-    ) as {
-      analyzer_consent?: Record<string, string>;
-      external_acquisition?: unknown;
-    };
-    expect(cfg.analyzer_consent).toEqual({ knip: "declined" });
-    expect(JSON.stringify(cfg)).not.toContain("consent_token");
+    // Drive one gate turn answering "declined" for knip, through the same
+    // production handler a real next-step fold uses.
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const consentPath = laneSubmissionPath(artifactsDir, GATE_LANES.analyzer_consent);
+    mkdirSync(dirname(consentPath), { recursive: true });
+    writeFileSync(consentPath, JSON.stringify({ knip: "declined" }), "utf8");
+    const externalAcquisition: {
+      enabled: boolean;
+      analyzerConsent?: Record<string, "declined">;
+      consentToken?: { value: string; tools: readonly string[] };
+    } = { enabled: true };
+    const tx = createFoldTransaction();
+    const branch = await handleAnalyzerConsentBranch(
+      { root, artifactsDir, externalAcquisition } as never,
+      {} as never,
+      { status: "active", obligations: [] } as never,
+      { value: undefined },
+      tx,
+    );
+    expect(branch.action).toBe("continue");
+
+    // The decline vetoes knip for the rest of THIS run via the in-flight map.
+    expect(externalAcquisition.analyzerConsent).toEqual({ knip: "declined" });
+    expect(externalAcquisition.consentToken, "a decline mints no grant token").toBeUndefined();
+    // ...and leaves nothing durable behind: no policy file, no session change.
+    expect(existsSync(getAnalyzerPolicyPath(root)), "a per-run decision must not create the durable policy").toBe(false);
     expect(readFileSync(sessionConfigPath, "utf8")).toBe(sessionConfigBytes);
   });
 
-  it("rejects a persisted consent token as an unknown policy capability", async () => {
+  it("a legacy policy file carrying analyzer_consent loads but cannot authorize or veto", async () => {
+    // A node-ecosystem repo (package.json makes eslint applicable) whose
+    // policy file was written by an older release.
+    const root = nodeRepo();
+    const policyPath = getAnalyzerPolicyPath(root);
+    mkdirSync(dirname(policyPath), { recursive: true });
+    writeFileSync(
+      policyPath,
+      JSON.stringify({
+        analyzers: { typescript: "skip" },
+        analyzer_consent: { eslint: "declined", knip: "declined" },
+      }),
+      "utf8",
+    );
+
+    // Loads (unrelated analyzer configuration is preserved) ...
+    const policy = await loadAnalyzerPolicy(root);
+    expect(policy.analyzers).toEqual({ typescript: "skip" });
+    // ... but the legacy consent authorizes nothing and vetoes nothing: the
+    // loaded policy carries no consent shape at all, so the new run re-offers
+    // every applicable candidate.
+    expect("analyzer_consent" in policy).toBe(false);
+    expect(
+      pendingAnalyzerConsent({
+        root,
+        externalAcquisitionEnabled: true,
+        analyzers: policy.analyzers,
+      }).map((c) => c.id),
+    ).toContain("eslint");
+  });
+
+  it("the strict schema still rejects a persisted consent token as an unknown capability", async () => {
     const root = tempDir("consent-token-cfg-");
     const policyPath = getAnalyzerPolicyPath(root);
     mkdirSync(dirname(policyPath), { recursive: true });
     writeFileSync(
       policyPath,
       JSON.stringify({
-        analyzer_consent: { eslint: "granted" },
+        analyzers: { eslint: "permanent" },
         external_acquisition: { consent_token: "must-not-persist" },
       }),
       "utf8",
@@ -191,7 +261,7 @@ describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
 });
 
 describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
-  it("carries purpose, the gating reason, the decisions path, and the mechanism", () => {
+  it("carries purpose, the gating risks, the decisions path, the per-run mechanism, and the strict enum", () => {
     const eslint = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.id === "eslint")!;
     const prompt = renderAnalyzerConsentPrompt({
       pending: [eslint],
@@ -200,10 +270,18 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
     });
     expect(prompt).toContain("`eslint`");
     expect(prompt).toContain(eslint.purpose!);
-    expect(prompt).toContain("config can execute repo code");
-    expect(prompt).toContain(
-      "`declined` persists across runs; `granted` covers this run only, and the next run re-offers.",
-    );
+    expect(prompt).toContain("Arbitrary code execution during config evaluation");
+    // Per-run ephemerality, stated outright — no durable decline.
+    expect(prompt).toContain("strictly per-run and do not persist across runs");
+    expect(prompt).toContain("the next run asks again");
+    // The host is explicitly told to ASK, never to decide.
+    expect(prompt).toContain("Ask the operator directly");
+    expect(prompt).toContain("Do not make assumptions or answer on the operator's behalf");
+    // Consent-gated runs are observe-only; source mutation is a separate opt-in.
+    expect(prompt).toContain("never modify");
+    expect(prompt).toContain("opt-in auto-fix");
+    // Strict decision vocabulary.
+    expect(prompt).toContain('`"granted"` or `"declined"`');
     expect(prompt).toContain("X:/artifacts/submissions/0000000000000000000000000000000000000000000000000000000000000000.json");
     expect(prompt).toContain('"eslint": "granted"');
     expect(prompt).toContain("audit-code next-step");
@@ -222,10 +300,12 @@ describe("the consent gate refuses a submission it understands nothing in", () =
   const driveConsentGate = async (root: string) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     mkdirSync(artifactsDir, { recursive: true });
-    // Held so a test can observe BOTH halves of the split: what the gate
-    // persisted, and what it folded into this run's consent token.
+    // Held so a test can observe what the gate folded into this run: the
+    // in-flight decline map and the scoped grant token. NOTHING is persisted —
+    // per-run consent leaves no durable trace by design.
     const externalAcquisition: {
       enabled: boolean;
+      analyzerConsent?: Record<string, "declined">;
       consentToken?: { value: string; tools: readonly string[] };
     } = { enabled: true };
     return {
@@ -280,31 +360,48 @@ describe("the consent gate refuses a submission it understands nothing in", () =
   it("partial recognition still applies the real decisions, naming the ignored keys on the record", async () => {
     const root = nodeRepo();
     const { artifactsDir, externalAcquisition, run } = await driveConsentGate(root);
-    plant(artifactsDir, { eslint: "granted", knip: "maybe" });
+    plant(artifactsDir, { eslint: "granted", knip: "declined", jscpd: "maybe" });
 
     expect((await run()).action).toBe("continue");
 
     // The grant IS applied — to this run, via the scoped consent token, which is
-    // the only channel a grant travels on. It must NOT reach the durable policy:
-    // a standing grant would keep admitting eslint for operators who never saw
-    // the offer.
+    // the only channel a grant travels on ...
     expect(externalAcquisition.consentToken?.tools).toEqual(["eslint"]);
     expect(externalAcquisition.consentToken?.value).toBeTruthy();
+    // ... and the decline IS applied — to this run, via the in-flight map.
+    expect(externalAcquisition.analyzerConsent).toEqual({ knip: "declined" });
 
-    const policy = JSON.parse(readFileSync(getAnalyzerPolicyPath(root), "utf8")) as {
-      analyzer_consent?: Record<string, string>;
-    };
+    // NEITHER reaches durable storage: no policy file is created at all.
     expect(
-      policy.analyzer_consent ?? {},
-      "a grant must leave nothing durable behind",
-    ).toEqual({});
+      existsSync(getAnalyzerPolicyPath(root)),
+      "grants and declines alike leave nothing durable behind",
+    ).toBe(false);
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (event) => event.kind === "accepted",
     );
     expect(accepted).toHaveLength(1);
     expect(accepted[0]!.message, "the dropped key is on the record, not only on stderr")
-      .toContain("knip");
+      .toContain("jscpd");
+  });
+
+  it("the next run re-offers after a decline: nothing decided carries over", async () => {
+    const root = nodeRepo();
+    const { artifactsDir, externalAcquisition, run } = await driveConsentGate(root);
+    plant(artifactsDir, { knip: "declined" });
+    expect((await run()).action).toBe("continue");
+    expect(externalAcquisition.analyzerConsent).toEqual({ knip: "declined" });
+
+    // A FRESH run starts with no in-flight decisions and no durable ones — the
+    // same candidate is owed its offer again.
+    const pending = pendingAnalyzerConsent({
+      root,
+      externalAcquisitionEnabled: true,
+    });
+    expect(pending.map((c) => c.id)).toContain("knip");
+
+    // ... and committing the fold wrote no policy file that could veto it.
+    expect(existsSync(getAnalyzerPolicyPath(root))).toBe(false);
   });
 });
 
@@ -342,27 +439,24 @@ describe("the local-tooling decline veto fires through the production dispatch",
     timestamp: string;
   }
 
-  it("a recorded prettier decline refuses every auto-fix spawn through advanceAudit", async () => {
+  it("a this-run prettier decline refuses every auto-fix spawn through advanceAudit", async () => {
     await withTempDir("consent-veto-", async (root: string) => {
       await writeFixtureRepo(root);
       await writeFileAsync(join(root, ".prettierrc.json"), "{}\n");
-      // The durable policy is where a real run's decisions live; the
-      // production dispatch reads them out of the loaded policy via the
-      // advance options.
-      await persistAnalyzerConsent(root, { prettier: "declined" });
-      const policy = await loadAnalyzerPolicy(root);
-      expect(policy.analyzer_consent?.prettier).toBe("declined");
-
+      // The decline lives on the run's in-flight acquisition options — the
+      // same channel a real fold folds the `analyzer_consent` lane into.
+      // The run is OPTED IN to auto-fix so the refusal below proves the VETO,
+      // not the packet-5 default-off gate.
       const result = await advanceAudit(bundleWith([
         "src/api/auth.ts",
         "infra/deploy.yml",
       ]), {
         root,
         preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
         externalAcquisition: {
           enabled: true,
-          analyzers: policy.analyzers,
-          analyzerConsent: policy.analyzer_consent,
+          analyzerConsent: { prettier: "declined" },
         },
       });
 
@@ -375,7 +469,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
     });
   });
 
-  it("without the decline the same run still attempts the formatter (veto is decision-driven)", async () => {
+  it("without the decline the same opted-in run still attempts the formatter (veto is decision-driven)", async () => {
     await withTempDir("consent-no-veto-", async (root: string) => {
       await writeFixtureRepo(root);
       await writeFileAsync(join(root, ".prettierrc.json"), "{}\n");
@@ -388,11 +482,12 @@ describe("the local-tooling decline veto fires through the production dispatch",
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
       });
 
       const applied = result.updated_bundle
         .auto_fixes_applied as AutoFixesApplied;
-      // No recorded decision ⇒ admission proceeds. Whether prettier itself
+      // No this-run decision ⇒ admission proceeds. Whether prettier itself
       // succeeds or fails on this machine is not the assertion; that it was
       // ATTEMPTED is.
       const attempted =
@@ -402,18 +497,16 @@ describe("the local-tooling decline veto fires through the production dispatch",
     });
   });
 
-  it("a recorded eslint decline surfaces as skipped coverage, never resolved:true", async () => {
+  it("a this-run eslint decline surfaces as skipped coverage, never resolved:true", async () => {
     await withTempDir("consent-syntax-", async (root: string) => {
       await writeFixtureRepo(root);
       // Flat config — the only form the runnable gate accepts.
       await writeFileAsync(join(root, "eslint.config.js"), "module.exports = [];\n");
-      await persistAnalyzerConsent(root, { eslint: "declined" });
-      const policy = await loadAnalyzerPolicy(root);
 
       const result = await runSyntaxResolutionExecutor(
         bundleWith(["src/api/auth.ts"]),
         root,
-        { analyzerConsent: policy.analyzer_consent },
+        { analyzerConsent: { eslint: "declined" } },
       );
 
       const statuses =

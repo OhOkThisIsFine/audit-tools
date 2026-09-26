@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/orphan-modules-relative-import.test.ts
 // Orphan-module gate: every src/**/*.ts file must be REACHABLE from a
 // production root through literal import edges.
 //
@@ -53,7 +54,7 @@
 //
 //   node scripts/check-orphan-modules.mjs        # verify (exit 1 on orphans)
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -89,7 +90,11 @@ const norm = (/** @type {string} */ p) => p.replace(/\\/g, "/");
 
 function trackedFiles() {
   const out = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8", windowsHide: true });
-  return out.split("\0").filter(Boolean).map(norm);
+  return out
+    .split("\0")
+    .filter(Boolean)
+    .map(norm)
+    .filter((f) => existsSync(join(repoRoot, f)));
 }
 
 /** Resolve one import specifier from `importer` to a tracked repo file, or null. */
@@ -265,7 +270,9 @@ function main() {
   );
   // A src file whose compiled dist twin a shipped .mjs references is a runtime root.
   for (const mjs of mjsTrees) {
-    const text = readFileSync(join(repoRoot, mjs), "utf8");
+    const fullPath = join(repoRoot, mjs);
+    if (!existsSync(fullPath)) continue;
+    const text = readFileSync(fullPath, "utf8");
     for (const m of text.matchAll(/dist\/([A-Za-z0-9_\-./]+)\.js/g)) {
       const twin = `src/${m[1]}.ts`;
       if (tracked.has(twin)) roots.add(twin);

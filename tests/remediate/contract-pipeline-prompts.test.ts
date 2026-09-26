@@ -438,6 +438,59 @@ describe("contract repair prompt", () => {
       }),
     ).not.toThrow();
   });
+
+  // T70: the critique repair prompt used to order a full rewrite of
+  // finalized_module_contracts — "Regenerate IN FULL" / "Rewrite in full" — which
+  // orders the OPPOSITE of the INV-CO-13 targeted-edit invariant (a full rewrite
+  // is what collapsed a 7-module set to 4). The lead must order an edit that
+  // preserves the module set, and, when the canonical module names are supplied,
+  // the task must name that set as the identity to keep.
+  it("the critique lead orders a module-preserving edit, never a full rewrite", () => {
+    const result = renderContractRepairPrompt({
+      trigger: "critique",
+      target: "finalized_module_contracts",
+      instruction: "Resolve blocking concerns.",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+      canonicalModuleNames: ["mod-a", "mod-b"],
+    });
+    expect(result.prompt).not.toMatch(/rewrite .* in full|regenerate .* in full/iu);
+    expect(result.prompt).toContain("without changing its module set");
+  });
+
+  it("the critique repair names the canonical module set as the identity to preserve", () => {
+    const result = renderContractRepairPrompt({
+      trigger: "critique",
+      target: "finalized_module_contracts",
+      instruction: "Resolve blocking concerns.",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+      canonicalModuleNames: ["mod-a", "mod-b"],
+    });
+    expect(result.prompt).toContain("Preserve the canonical module set EXACTLY");
+    expect(result.prompt).toContain("- `mod-a`");
+    expect(result.prompt).toContain("- `mod-b`");
+    expect(result.prompt).toContain("Deleting, renaming, or merging any module here is a rejected rewrite");
+    // The task directs an edit of the existing contracts, not a blank rewrite.
+    expect(result.prompt).toContain(
+      "Edit the existing finalized contracts to address what the instruction names below",
+    );
+  });
+
+  it("a non-finalization target is unaffected by the module-set preservation", () => {
+    // obligation_ledger has no module set; passing canonicalModuleNames there must
+    // not change the generic full-write task wording.
+    const result = renderContractRepairPrompt({
+      trigger: "judge",
+      target: "obligation_ledger",
+      instruction: "Fix.",
+      artifactPaths: ALL_PATHS,
+      repoRoot: FAKE_REPO_ROOT,
+      canonicalModuleNames: ["mod-a"],
+    });
+    expect(result.prompt).toContain("Write the complete artifact, not a diff");
+    expect(result.prompt).not.toContain("Preserve the canonical module set EXACTLY");
+  });
 });
 
 describe("contract pipeline prompt renderer — isolation", () => {

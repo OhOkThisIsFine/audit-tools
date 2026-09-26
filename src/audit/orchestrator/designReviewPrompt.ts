@@ -423,6 +423,120 @@ export function selectPerspectives(count?: number): ConceptualPerspective[] {
 }
 
 /**
+ * The names the built-in roster answers to — the vocabulary an explicit
+ * `design_review.perspectives` list may draw on without a custom definition.
+ * Single-sourced from the roster so a rename cannot silently orphan a name the
+ * operator confirmed.
+ */
+export function builtInPerspectiveNames(): readonly string[] {
+  return CONCEPTUAL_PERSPECTIVES.map((p) => p.name);
+}
+
+/**
+ * Validate caller-authored perspective definitions against SHAPE and the
+ * built-in vocabulary: non-empty names/lenses, no duplicate custom names, and
+ * no custom name colliding with a built-in name (an exact match would make the
+ * name unresolvable — the roster always wins a lookup, so the custom would be
+ * dead on arrival and the operator would never learn it).
+ *
+ * THROWS on the first defect, naming the offending value. A refusal is a throw
+ * rather than a filter because silently dropping a perspective the operator
+ * chose is the defect class this packet closes: the run must halt naming what
+ * it cannot honor, never fan out a quieter subset.
+ */
+export function validateCustomPerspectives(
+  customs: readonly ConceptualPerspective[] | undefined,
+): ConceptualPerspective[] {
+  if (customs === undefined) return [];
+  const builtIns = new Set(builtInPerspectiveNames());
+  const seen = new Set<string>();
+  for (const custom of customs) {
+    if (custom.name.length === 0 || custom.lens.length === 0) {
+      throw new Error(
+        `invalid custom_perspectives entry ${JSON.stringify(custom)}: ` +
+          "both `name` and `lens` must be non-empty strings",
+      );
+    }
+    if (seen.has(custom.name)) {
+      throw new Error(
+        `duplicate custom perspective ${JSON.stringify(custom.name)}: ` +
+          "each custom name must be unique",
+      );
+    }
+    seen.add(custom.name);
+    if (builtIns.has(custom.name)) {
+      throw new Error(
+        `custom perspective ${JSON.stringify(custom.name)} collides with a built-in perspective name: ` +
+          "rename the custom perspective so every name resolves to exactly one reviewer",
+      );
+    }
+  }
+  return [...customs];
+}
+
+/**
+ * Resolve a `design_review.perspectives` selection to the reviewers a deep
+ * fan-out actually dispatches — the ONE production reader for the selection.
+ *
+ * - `undefined` / integer count — the legacy draw: {@link selectPerspectives},
+ *   with its required-perspective reservation. Preserved byte-for-byte so a
+ *   checkpoint that never named a perspective fans out exactly as before.
+ * - an explicit name list — EXACTLY those reviewers, in the listed order, with
+ *   NO injected defaults: the required-perspective reservation does NOT apply,
+ *   because applying it would second-guess a choice the operator made
+ *   deliberately (a two-name list without either required name must stay a
+ *   two-reviewer pass). Each name resolves against the built-ins first, then
+ *   the validated customs; an unknown name, a duplicate, or an empty list
+ *   THROWS naming the value, so the run halts instead of reviewing through a
+ *   quieter substitute set.
+ */
+export function resolvePerspectiveSet(
+  selection: number | readonly string[] | undefined,
+  customDefinitions?: readonly ConceptualPerspective[],
+): ConceptualPerspective[] {
+  const customs = validateCustomPerspectives(customDefinitions);
+  if (selection === undefined || typeof selection === "number") {
+    return selectPerspectives(selection);
+  }
+  if (selection.length === 0) {
+    throw new Error(
+      "invalid design_review.perspectives: an explicit list must name at least one perspective",
+    );
+  }
+  const seen = new Set<string>();
+  const resolved: ConceptualPerspective[] = [];
+  for (const name of selection) {
+    if (seen.has(name)) {
+      throw new Error(
+        `duplicate perspective ${JSON.stringify(name)} in design_review.perspectives: ` +
+          "list each perspective once",
+      );
+    }
+    seen.add(name);
+    const builtIn = CONCEPTUAL_PERSPECTIVES.find((p) => p.name === name);
+    if (builtIn) {
+      resolved.push(builtIn);
+      continue;
+    }
+    const custom = customs.find((c) => c.name === name);
+    if (custom) {
+      resolved.push(custom);
+      continue;
+    }
+    throw new Error(
+      `unknown perspective ${JSON.stringify(name)} in design_review.perspectives: ` +
+        `not a built-in (${builtInPerspectiveNames().map((n) => JSON.stringify(n)).join(", ")}) ` +
+        (customs.length > 0
+          ? `nor a custom_perspectives entry (${customs.map((c) => JSON.stringify(c.name)).join(", ")}) — ` +
+            "add a matching custom_perspectives definition or pick a listed name"
+          : "and no custom_perspectives definitions were supplied — " +
+            "add one or pick a built-in name"),
+    );
+  }
+  return resolved;
+}
+
+/**
  * Shared "how to think" block for the conceptual-review prompts. This is the
  * lens meant to catch deep architectural mistakes, so it asks GENERAL,
  * first-principles questions and tells the reviewer to orient then roam the real

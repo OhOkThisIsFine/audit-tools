@@ -1,6 +1,10 @@
+// sites-pinned: tests/audit/audit-cli-invariants.test.ts, tests/audit/cli-help.test.ts
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertCliCommandAllowedFromCwd } from "audit-tools/shared";
+import {
+  assertCliCommandAllowedFromCwd,
+  assertNoRetiredHostSelectionArgs,
+} from "audit-tools/shared";
 
 import {
   DIRECT_CLI_DEFAULTS,
@@ -94,6 +98,11 @@ export const COMMAND_ROUTES: ReadonlyArray<
 
 async function main(argv: string[]): Promise<void> {
   const command = argv[2] ?? "sample-run";
+  // Refuse retired backend-selection arguments BEFORE routing, so an
+  // unsupported `--provider`/`--model`/etc. fails loudly on every command
+  // rather than being silently ignored (packet 9: reject unsupported args
+  // mechanically instead of asking the host to avoid them).
+  assertNoRetiredHostSelectionArgs(argv);
   const route = COMMAND_ROUTES.find(([verb]) => verb === command);
   if (argv.slice(2).some((arg) => arg === "--help" || arg === "-h")) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);

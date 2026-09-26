@@ -32,7 +32,18 @@ import {
   LANE_SIZE_VALUES,
   LaneDemandSchema,
   deriveLaneDemand,
+  SEMANTIC_WORK_COMPLEXITY_FLOOR,
+  SEMANTIC_WORK_RISK_FLOOR,
+  SHARED_SEMANTIC_DEMAND_FLOORS,
+  LaneReviewRecordSchema,
 } from "../../src/shared/types/stepContract.js";
+import {
+  DISPATCH_PROMPT_HANDOFF_NOTE,
+  renderIndependentReviewMandate,
+  renderLaneReviewRequirement,
+  renderFanoutExecutionLines,
+} from "../../src/shared/prompts.js";
+import { renderDispatchFallback } from "../../src/shared/promptContract.js";
 import { prepareAuditHostHandoff } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { materializeFanoutLanes } from "../../src/audit/cli/fanoutLanes.js";
 import { AUDIT_GATE_SUBMISSION_SCOPE } from "../../src/audit/cli/laneSubmissions.js";
@@ -243,5 +254,128 @@ describe("the fan-out lane carries the same demand ranking", () => {
         "demand: lane.demand",
       );
     }
+  });
+
+  it("large grantedContentBytes prevents a short pointer prompt from being ranked small", async () => {
+    const artifactsDir = await mkdtemp(join(tmpdir(), "lane-demand-large-granted-"));
+    roots.push(artifactsDir);
+    const fanout = await materializeFanoutLanes({
+      artifactsDir,
+      runId: AUDIT_GATE_SUBMISSION_SCOPE,
+      lanes: [
+        {
+          id: "pointer-lane",
+          label: "Short pointer to large artifact",
+          promptFilename: "pointer-prompt.md",
+          // Short pointer prompt: ~30 characters would rank small
+          promptText: "# Run analysis on artifact\n",
+          // But grantedContentBytes is large:
+          grantedContentBytes: 250_000,
+        },
+      ],
+    });
+
+    const lane = fanout.lanes[0]!;
+    expect(lane.demand.size).not.toBe("small");
+    expect(lane.demand.size).toBe("large");
+  });
+
+  it("shared semantic floors elevate complexity to at least standard and risk to high", () => {
+    expect(SEMANTIC_WORK_COMPLEXITY_FLOOR).toBe("standard");
+    expect(SEMANTIC_WORK_RISK_FLOOR).toBe("high");
+    expect(SHARED_SEMANTIC_DEMAND_FLOORS).toEqual({
+      complexity: "standard",
+      risk: "high",
+      riskScore: 2 / 3,
+    });
+
+    // Zero tokens and zero files would naturally evaluate to focused/low
+    const natural = deriveLaneDemand({ tokenEstimate: 0, fileCount: 0, riskScore: 0 });
+    expect(natural.complexity).toBe("focused");
+    expect(natural.risk).toBe("low");
+
+    // With semantic floors applied, complexity and risk are lifted
+    const floored = deriveLaneDemand({
+      tokenEstimate: 0,
+      fileCount: 0,
+      riskScore: SHARED_SEMANTIC_DEMAND_FLOORS.riskScore,
+      complexityFloor: SHARED_SEMANTIC_DEMAND_FLOORS.complexity,
+      riskFloor: SHARED_SEMANTIC_DEMAND_FLOORS.risk,
+    });
+    expect(floored.complexity).toBe("standard");
+    expect(floored.risk).toBe("high");
+    expect(floored.size).toBe("small");
+  });
+
+  it("review modes adhere to LaneReviewRecordSchema", () => {
+    const ordinary = { lane: "audit-review", mode: "ordinary" };
+    const required = {
+      lane: "adversarial-contract",
+      mode: "independence_required",
+      reason: "author cannot grade own work",
+    };
+    const degraded = {
+      lane: "conceptual-pass",
+      mode: "degraded_permitted",
+      reason: "independent preferred but inline acceptable",
+    };
+
+    expect(LaneReviewRecordSchema.safeParse(ordinary).success).toBe(true);
+    expect(LaneReviewRecordSchema.safeParse(required).success).toBe(true);
+    expect(LaneReviewRecordSchema.safeParse(degraded).success).toBe(true);
+
+    // Invalid mode
+    expect(
+      LaneReviewRecordSchema.safeParse({ lane: "test", mode: "invalid_mode" }).success,
+    ).toBe(false);
+  });
+
+  it("required independent review cannot fall back to self-review and specifies pause instructions", () => {
+    const requiredMandate = renderIndependentReviewMandate("independence_required");
+    expect(requiredMandate).toContain("pause and report");
+    expect(requiredMandate).toContain("required independent review cannot fall back to self-review");
+    expect(requiredMandate).toContain("Do not write a self-conducted result or advance");
+
+    const degradedMandate = renderIndependentReviewMandate("degraded_permitted");
+    expect(degradedMandate).toContain("explicitly-degraded fallback");
+    expect(degradedMandate).toContain("self-conducted");
+
+    const ordinaryRequirement = renderLaneReviewRequirement("ordinary");
+    expect(ordinaryRequirement).toBe("");
+  });
+
+  it("shared prompts and handoff notes contain zero mechanism words (subagent)", () => {
+    expect(DISPATCH_PROMPT_HANDOFF_NOTE).not.toMatch(/sub-?agent/i);
+    expect(DISPATCH_PROMPT_HANDOFF_NOTE).not.toMatch(/agent tool/i);
+
+    const mandateReq = renderIndependentReviewMandate("independence_required");
+    expect(mandateReq).not.toMatch(/sub-?agent/i);
+
+    const mandateDeg = renderIndependentReviewMandate("degraded_permitted");
+    expect(mandateDeg).not.toMatch(/sub-?agent/i);
+
+    const reqRender = renderLaneReviewRequirement({
+      lane: "test",
+      mode: "independence_required",
+      reason: "independence needed",
+    });
+    expect(reqRender).not.toMatch(/sub-?agent/i);
+
+    const fallbackReq = renderDispatchFallback(true);
+    expect(fallbackReq).not.toMatch(/sub-?agent/i);
+
+    const fallbackOrd = renderDispatchFallback(false);
+    expect(fallbackOrd).not.toMatch(/sub-?agent/i);
+
+    const executionLines = renderFanoutExecutionLines({
+      lanes: [
+        {
+          label: "Test lane",
+          promptPath: "test-prompt.md",
+          demand: { size: "medium", complexity: "standard", risk: "high" },
+        },
+      ],
+    });
+    expect(executionLines.join("\n")).not.toMatch(/sub-?agent/i);
   });
 });

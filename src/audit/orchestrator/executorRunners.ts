@@ -219,10 +219,11 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       options.externalAnalyzerResults,
     );
   },
-  // Both local-tooling executors receive the recorded consent decisions so a
-  // recorded operator decline of prettier/black/sqlfluff/tsc/eslint vetoes the
-  // spawn at the shared admitLocalSpawn chokepoint — the same decline-first
-  // rule the acquisition engine enforces, applied to repo-local tooling.
+  // Both local-tooling executors receive this run's consent decisions so an
+  // operator decline of prettier/black/sqlfluff/tsc/eslint vetoes the spawn at
+  // the shared admitLocalSpawn chokepoint — the same decline-first rule the
+  // acquisition engine enforces, applied to repo-local tooling. Decisions are
+  // per-run (packet 5 / O07): the next run is asked again.
   auto_fix_executor: async (bundle, { options }) =>
     runAutoFixExecutor(bundle, requireRoot(options.root, "auto_fix_executor"), {
       analyzerConsent: options.externalAcquisition?.analyzerConsent,

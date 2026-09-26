@@ -473,3 +473,197 @@ test("deduplicateSameLens keeps near-duplicate-title findings separate when line
 
   expect(merged.length, "same-lens findings on different files must survive dedup unchanged").toBe(2);
 });
+
+// ── semantic confirmation of deterministic leads (O32) ───────────────────────
+//
+// A deterministic producer (designAssessment / structureDecomposition /
+// charterRegister / systemicChallenge) stamps its output with `lead_lineage`,
+// marking a generation-bound LEAD rather than an approved verdict. A lead may
+// enter the final report only when some semantic finding re-raises its canonical
+// identity (the file-independent re-emission key: normalized lens|category|
+// title). An unconfirmed lead stays in its analysis artifact — mergeFindings
+// simply does not admit it here.
+
+function makeLead(overrides?: Partial<Finding>): Finding {
+  return makeFinding({
+    id: "LEAD-001",
+    title: "Bridge seam between modules",
+    category: "architectural_seam",
+    lens: "architecture",
+    evidence: ["lead-evidence"],
+    affected_files: [{ path: "src/alpha.ts", line_start: 1, line_end: 5 }],
+    lead_lineage: {
+      producer: "detectSeams",
+      source_hash: "abc123def456",
+      confirmation: "lead",
+    },
+    ...overrides,
+  }) as Finding;
+}
+
+test("a deterministic lead alone is absent from the final findings (no semantic confirmation)", () => {
+  const lead = makeLead();
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    { generated_at: "2026-01-01T00:00:00Z", findings: [lead] },
+  );
+  expect(merged.map((f) => f.id), "an unconfirmed lead must not reach the report").toEqual([]);
+});
+
+test("a semantic finding that re-raises the lead's identity confirms it and preserves lineage plus evidence", () => {
+  const lead = makeLead();
+  const confirming = makeFinding({
+    id: "DR-001",
+    title: "Bridge seam between modules", // same identity (lens|category|title)
+    category: "architectural_seam",
+    lens: "architecture",
+    evidence: ["confirming-evidence"],
+    affected_files: [{ path: "src/beta.ts", line_start: 1, line_end: 2 }],
+    // host-authored: no lead_lineage
+  });
+
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [lead],
+      contract_findings: [confirming],
+    },
+  );
+  expect(merged.length, "a confirmed lead collapses to one finding").toBe(1);
+  const survivor = merged[0];
+  // The tool stamp survives the merge — the admitted finding still names its
+  // deterministic producer, not the host that confirmed it.
+  expect(survivor.lead_lineage).toEqual({
+    producer: "detectSeams",
+    source_hash: "abc123def456",
+    confirmation: "lead",
+  });
+  // Both the producer's evidence and the confirming finding's evidence survive.
+  expect([...survivor.evidence!].sort()).toEqual(
+    ["confirming-evidence", "lead-evidence"].sort(),
+  );
+  // The confirming finding's file is absorbed into the lead's affected_files.
+  expect(new Set(survivor.affected_files.map((f) => f.path))).toEqual(
+    new Set(["src/alpha.ts", "src/beta.ts"]),
+  );
+});
+
+test("an unrelated semantic finding does not confirm a lead", () => {
+  const lead = makeLead();
+  const unrelated = makeFinding({
+    id: "DR-002",
+    title: "Something else entirely",
+    category: "ResourceUse",
+    lens: "correctness",
+    affected_files: [{ path: "src/other.ts", line_start: 1, line_end: 2 }],
+  });
+
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    {
+      generated_at: "2026-01-01T00:00:00Z",
+      findings: [lead],
+      contract_findings: [unrelated],
+    },
+  );
+  // Only the unrelated semantic finding survives; the unconfirmed lead is absent.
+  expect(merged.map((f) => f.id)).toEqual(["DR-002"]);
+});
+
+test("an ordinary non-heuristic finding is unaffected by the lead gate", () => {
+  // A host-authored finding with no lead_lineage flows through exactly as before,
+  // whether or not any deterministic lead exists.
+  const ordinary = makeFinding({
+    id: "ORD-001",
+    title: "Unchecked null dereference",
+    category: "NullHandling",
+    lens: "correctness",
+    evidence: ["ev-ordinary"],
+  });
+  const merged = mergeFindings([
+    wrapResult([ordinary]),
+  ]);
+  expect(merged.length).toBe(1);
+  expect(merged[0].id).toBe("ORD-001");
+  expect(merged[0].lead_lineage).toBeUndefined();
+});
+
+// ── charter-delta leads (differenceFindings → charterRegister.findings) ───────
+//
+// `differenceFindings` is a deterministic chart-DAG producer and now stamps
+// `lead_lineage` on every surfaced lead, so the same gate applies: an
+// unconfirmed charter delta is a lead, held out of the report until a semantic
+// finding re-raises its identity.
+
+function makeCharterLead(overrides?: Partial<Finding>): Finding {
+  return makeFinding({
+    id: "diff-1",
+    title: "Charter purpose difference (revealed against the rest)",
+    category: "charter_difference:purpose",
+    lens: "architecture",
+    evidence: ["charter-evidence"],
+    affected_files: [{ path: "src/alpha.ts", line_start: 1, line_end: 5 }],
+    lead_lineage: {
+      producer: "differenceFindings",
+      source_hash: "deadbeefdeadbeef",
+      confirmation: "lead",
+    },
+    ...overrides,
+  }) as Finding;
+}
+
+test("an unconfirmed charter-delta lead alone is absent from the final findings", () => {
+  const lead = makeCharterLead();
+  const merged = mergeFindings(
+    [],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { findings: [lead] } as Parameters<typeof mergeFindings>[5],
+  );
+  expect(merged.map((f) => f.id), "an unconfirmed charter lead must not reach the report").toEqual([]);
+});
+
+test("a semantic finding re-raising the charter lead's identity confirms it and preserves producer lineage plus evidence", () => {
+  const lead = makeCharterLead();
+  const confirming = makeFinding({
+    id: "DR-CH",
+    title: "Charter purpose difference (revealed against the rest)",
+    category: "charter_difference:purpose",
+    lens: "architecture",
+    evidence: ["confirming-charter-evidence"],
+    affected_files: [{ path: "src/beta.ts", line_start: 1, line_end: 2 }],
+  });
+
+  const merged = mergeFindings(
+    [wrapResult([confirming])],
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { findings: [lead] } as Parameters<typeof mergeFindings>[5],
+  );
+  expect(merged.length, "a confirmed charter lead collapses to one finding").toBe(1);
+  const survivor = merged[0];
+  // The tool stamp survives the merge — the admitted finding still names its
+  // deterministic producer, not the host that confirmed it.
+  expect(survivor.lead_lineage).toEqual({
+    producer: "differenceFindings",
+    source_hash: "deadbeefdeadbeef",
+    confirmation: "lead",
+  });
+  expect([...survivor.evidence!].sort()).toEqual(
+    ["charter-evidence", "confirming-charter-evidence"].sort(),
+  );
+  expect(new Set(survivor.affected_files.map((f) => f.path))).toEqual(
+    new Set(["src/alpha.ts", "src/beta.ts"]),
+  );
+});

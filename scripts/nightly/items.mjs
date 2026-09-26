@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/nightly-items-mandatory-fields.test.ts, tests/shared/nightly-record-path-hint.test.ts
 // Shared state for the nightly maintenance routine: the open-items file, the
 // durable decisions ledger, and the subject key that ties them together.
 //
@@ -335,12 +336,48 @@ const RECORD_PATH_PREFIXES = [
 // and any FUTURE child, stays a record channel by default.
 const RECORD_PATH_EXEMPT_PREFIXES = ['.claude/hooks'];
 
+// Normalize a probe target to the forward-slash, no-leading-`./` spelling the
+// record-prefix tables speak. Both `isRecordPath` and `recordPathHint` route
+// through this so the WINDOWS and POSIX spellings of a path agree — a probe
+// written `docs\backlog\open-bugs.md` on a Windows authoring box classifies the
+// same as `docs/backlog/open-bugs.md`, and neither the gate nor the hint can
+// drift into disagreeing about which side a file falls on.
+function normalizeProbePath(file) {
+  return String(file ?? '').replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
 export function isRecordPath(file) {
-  const norm = file.replace(/\\/g, '/').replace(/^\.\//, '');
+  const norm = normalizeProbePath(file);
   if (RECORD_PATH_EXEMPT_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`))) {
     return false;
   }
   return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
+}
+
+/**
+ * Author-facing, up-front record-path classification. The write-time refusal
+ * (`writeOpenItems`) fires only once the batch is assembled; an item aimed at
+ * `docs/backlog/` must declare `auto_close: false` while one aimed at the
+ * router file `docs/backlog.md` must NOT — and nothing about the two filenames
+ * signals which side an item falls on, so authoring against the router file was
+ * a guess-then-retry (hit 2026-08-13). This returns the SAME classification the
+ * gate will apply, as a string the author can read before the batch exists:
+ *
+ *  - `'record path'`   — a probe target the evidence chain must treat as a
+ *    quote, not a premise. An item probing it must declare `auto_close: false`
+ *    and probe the RECORD's text (a `contains` on the record file).
+ *  - `'source path'`   — a probe-able tracked source (or the `.claude/hooks`
+ *    carve-out that is deliberate live guard source). `auto_close: false` is
+ *    refused on such a target.
+ *  - `'not a path'`    — empty/undefined input, so nothing can be classified.
+ *
+ * Single-sourced: it runs the same normalized predicate as `isRecordPath`, so
+ * the hint and the gate can never disagree about the same input.
+ */
+export function recordPathHint(file) {
+  const norm = normalizeProbePath(file);
+  if (norm === '') return 'not a path';
+  return isRecordPath(norm) ? 'record path' : 'source path';
 }
 
 // A positive `contains` probe passes at WRITE time in either of two ways: the
@@ -827,9 +864,17 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
   // trap the backlog recorded on 2026-08-20: the desync was caught only
   // afterwards, by the closeout gate. So the write that invalidates the block is
   // the write that refreshes it.
-  regenerateHandoffRoadmap(root);
+  //
+  // The regeneration failure is REPORTED on the returned record rather than
+  // thrown or swallowed: the queue write (above) already succeeded and is the
+  // durable act, so a failed regeneration must not discard it — but it must also
+  // be visible, not silent. The field is carried on the RETURNED object only,
+  // never written into `open-items.json`, so the machine contract's shape is
+  // untouched. A caller (the routine) reads it and records the failure in its
+  // report; `check:handoff-roadmap` stays the hard gate.
+  const handoffRegeneration = regenerateHandoffRoadmap(root);
 
-  return payload;
+  return handoffRegeneration ? { ...payload, handoff_regeneration: handoffRegeneration } : payload;
 }
 
 /**
@@ -843,17 +888,26 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
  * write into a fire-and-forget race, which is worse than the cycle.
  *
  * A failed regeneration must NOT fail the queue write — the queue is the
- * durable record and the generated block is re-derivable from it — so the error
- * is swallowed here, not thrown. `check:handoff-roadmap` (in `verify:checks`,
- * at commit, and at closeout) is the gate that makes a stale block loud, and a
- * root with no `docs/HANDOFF.md` at all (a test fixture) simply has nothing to
- * regenerate.
+ * durable record and the generated block is re-derivable from it — so this
+ * RETURNS the failure instead of throwing. The caller keeps the successful
+ * queue write and REPORTS the regeneration failure on the returned record, so
+ * a silent stale `docs/HANDOFF.md` block cannot ride underneath a write as if
+ * nothing happened (M14). `check:handoff-roadmap` (in `verify:checks`, at
+ * commit, and at closeout) remains the hard backstop; the report here is what
+ * tells the run it `skipped` leaving the gate red rather than discovering it
+ * later, at commit.
+ *
+ * Returns `null` when the block regenerated cleanly, or a `{ code | error }`
+ * describing the refusal/exception. A root with no `docs/HANDOFF.md` at all (a
+ * test fixture) throws an `ENOENT` and is reported the same way — there is
+ * nothing to regenerate, and saying so is more honest than silence.
  */
 function regenerateHandoffRoadmap(root) {
   try {
-    runGenerator({ root, check: false, out: () => {}, err: () => {} });
-  } catch {
-    // See above: the gate is the gate.
+    const code = runGenerator({ root, check: false, out: () => {}, err: () => {} });
+    return code === 0 ? null : { code };
+  } catch (err) {
+    return { error: String(err && /** @type {any} */ (err).message ? /** @type {any} */ (err).message : err) };
   }
 }
 

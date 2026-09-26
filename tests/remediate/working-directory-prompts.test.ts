@@ -58,4 +58,40 @@ describe("writeCurrentStep — slash-safe step contract JSON (FINDING-004)", () 
       expect(value).not.toContain("\\");
     }
   });
+
+  it("forwards RemediationStep.access through the shared step writer", async () => {
+    // Packet 7 (Prompt Contract v1): a step emitter can bind its prompt's exact
+    // read/write scope (`access`) and the field must ride through `WriteStepInput`
+    // into the persisted contract JSON, mirroring audit's writer — never dropped
+    // or clobbered by the canonical path fields. The read-scope guarantee
+    // (`renderedPathsInScope` in audit-tools/shared) only means anything when this
+    // binding lands on disk. Scope arrays forward verbatim (audit's writer does
+    // not slash-normalize them either — consumers normalize before comparing, as
+    // `design-review-contract-independence.test.ts` does).
+    const { writeCurrentStep } = await import("../../src/remediate/steps/stepWriter.js");
+    const access = {
+      read_paths: ["C:/Code/my-repo/.audit-tools/remediation/intake/summary.json"],
+      write_paths: ["C:/Code/my-repo/.audit-tools/remediation/steps/result.json"],
+    };
+    const step = await writeCurrentStep({
+      stepKind: "contract_pipeline",
+      status: "blocked",
+      runId: "RUN-1",
+      repoRoot: REPO_DIR,
+      artifactsDir: ARTIFACTS_DIR,
+      prompt: "Test prompt.",
+      allowedCommands: [],
+      stopCondition: "Stop after done.",
+      access,
+    });
+
+    expect(step.access).toEqual({
+      read_paths: access.read_paths,
+      write_paths: access.write_paths,
+    });
+
+    // The access field never shadows the canonical path fields the writer owns.
+    expect(step.prompt_path.length).toBeGreaterThan(0);
+    expect(step.artifact_paths).toBeDefined();
+  });
 });

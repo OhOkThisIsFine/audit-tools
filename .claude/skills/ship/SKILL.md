@@ -113,7 +113,7 @@ Profiling is a **standing feature** of every test + release run, single-sourced 
 `scripts/shared/profile.mjs` (never a manual flag). Ledgers land in `.audit-tools-profile/` (gitignored);
 under GitHub Actions each profile also appends a markdown table to the job summary.
 
-- **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `.audit-tools-profile/verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
+- **Gate:** `verify:checks` runs the ordered gate catalog through `scripts/shared/run-release-gates.mjs` and its shared profiled runner, preserving fail-fast execution. Per-step timing is written to `.audit-tools-profile/verify-checks-latest.json` and its history ledger; source checks, build, host verification and packaged smokes are each timed.
 - **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `.audit-tools-profile/vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
   profile name, not the file suffix).
 - **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm / reinstall+smoke) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
