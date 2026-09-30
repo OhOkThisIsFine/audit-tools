@@ -2,9 +2,7 @@
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   ANALYZER_SETTINGS,
-  buildFrictionTriageBlock,
   renderHostScratchNote,
-  type FrictionTriageDecision,
 } from "audit-tools/shared";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import { renderCommand } from "./args.js";
@@ -159,19 +157,7 @@ export function renderEdgeReasoningDispatchPrompt(params: {
   ].join("\n");
 }
 
-export function renderPresentReportPrompt(
-  finalReportPath: string,
-  triage?: FrictionTriageDecision,
-): string {
-  const frictionBlock = triage ? buildFrictionTriageBlock(triage) : "";
-  if (triage?.action === "dispose") {
-    return [
-      "# audit-code friction triage",
-      "",
-      "Complete friction triage before the audit report is presented.",
-      frictionBlock,
-    ].join("\n");
-  }
+export function renderPresentReportPrompt(finalReportPath: string): string {
   return [
     "# audit-code present report",
     "",
@@ -180,7 +166,6 @@ export function renderPresentReportPrompt(
     `Read the final audit report from: ${finalReportPath}`,
     "",
     "Present the completed audit with work blocks first.",
-    frictionBlock,
     "Do not run the orchestrator again for this completed audit.",
     "",
   ].join("\n");

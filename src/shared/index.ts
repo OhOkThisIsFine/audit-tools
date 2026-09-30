@@ -304,6 +304,7 @@ export {
   RemediationOutcomeStatusSchema,
   RemediationOutcomeSchema,
   RemediationOutcomesReportSchema,
+  REMEDIATION_OUTCOMES_CONTRACT_VERSION,
   MechanicalVerificationSchema,
   RecoveryMarkSchema,
   RunRecoverySchema,
@@ -1250,61 +1251,33 @@ export {
 export type { HostAssetKind, RenderHostAssetOptions } from "./hostAssets.js";
 export { renderHostAsset } from "./hostAssets.js";
 
-// Contract-pipeline artifact types (shared across both orchestrators)
+// sites-pinned: tests/shared/shared-tests-invariants.test.mjs, tests/shared/contractPipeline-types.test.ts
+// Reviewed executable change-plan contracts shared by authoring, state and handoff.
 export type {
-  GoalSpec,
-  ContextBundle,
-  ContextBundleEntry,
-  DesignSpec,
-  DesignSpecInvariant,
-  ConceptualDesignCritique,
-  DesignCritiqueItem,
-  ObligationLedger,
-  ObligationEntry,
-  ObligationChangeClassification,
-  ContractAssessmentReport,
-  ContractAssessmentFinding,
-  Counterexample,
-  CounterexampleReport,
-  CounterexampleClassification,
-  JudgedCounterexample,
-  JudgeRepairTarget,
-  JudgeRepairDirective,
-  JudgeReport,
-  ImplementationDAG,
-  ImplementationDAGNode,
-  ImplementationDAGEdge,
+  ExecutionRequirement,
+  ExecutionUnit,
+  ExecutionRequest,
+  ExecutionSourceDisposition,
+  ExecutableChangePlan,
+} from "./types/executionPlan.js";
+export {
+  ExecutionRequirementSchema,
+  ExecutionUnitSchema,
+  ExecutionRequestSchema,
+  ExecutionSourceDispositionSchema,
+  ExecutionRequestDispositionSchema,
+  ExecutableChangePlanSchema,
+  executionPlanReferenceIssues,
+} from "./types/executionPlan.js";
+
+// sites-pinned: tests/remediate/phase-close.test.ts, tests/remediate/unit-source-outcomes.test.ts
+// Landed verification evidence is a distinct fact from the reviewed plan.
+export type {
   VerificationReport,
   VerificationTraceEntry,
   FindingVerificationTrace,
-  TestSpec,
-  TestValidatorPlan,
-} from "./types/contractPipeline.js";
-export {
-  CONTRACT_REPAIR_TARGETS,
-  CONTRACT_REPAIR_TARGETS_LEGACY,
-  CONTRACT_REPAIR_TARGETS_OFFERED,
-} from "./types/contractPipeline.js";
-export {
-  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-  CONTRACT_PIPELINE_DESIGN_SPEC_VERSION,
-  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
-  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
-  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
-  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-  CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
-  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
-} from "./types/contractPipeline.js";
-
-// Obligation ledger construction with cycle detection (INV-shared-core-07)
-export type { BuildObligationLedgerOptions } from "./types/obligationLedger.js";
-export {
-  detectObligationCycle,
-  buildObligationLedger,
-} from "./types/obligationLedger.js";
+} from "./types/verificationReport.js";
+export { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "./types/verificationReport.js";
 
 // Parsing utilities
 export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";

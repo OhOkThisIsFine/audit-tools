@@ -416,7 +416,7 @@ test("S3: both design review obligations are present as host_delegation before e
   expect(conceptualOblState?.state, "design_review_conceptual_completed must be missing before conceptual review").toBe("missing");
 });
 
-test("S3: after contract review completes, conceptual review is still missing (sequential within design phase)", () => {
+test("S3: contract completion preserves conceptual review while scoped planning remains ready", () => {
   const bundle = settleIntentBaseline({
     ...makePostDesignAssessmentBundle(),
     intent_checkpoint: makeValidCheckpoint(),
@@ -428,7 +428,9 @@ test("S3: after contract review completes, conceptual review is still missing (s
     },
   });
   const decision = decideNextStep(bundle);
-  expect(decision.selected_obligation, "After contract review, conceptual review should be next").toBe("design_review_conceptual_completed");
+  expect(decision.selected_obligation, "Independent scoped planning can proceed before conceptual review").toBe("planning_artifacts");
+  expect(decision.state.obligations.find(obligation => obligation.id === "design_review_contract_completed")?.state).toBe("satisfied");
+  expect(decision.state.obligations.find(obligation => obligation.id === "design_review_conceptual_completed")?.state).toBe("missing");
 });
 
 // ── Scenario 4: Semantic review ──────────────────────────────────────────────

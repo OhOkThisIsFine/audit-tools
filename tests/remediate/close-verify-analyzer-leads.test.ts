@@ -1,3 +1,4 @@
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runClosePhase } from "../../src/remediate/phases/close.js";
 import { verifyAnalyzerLeads } from "../../src/remediate/phases/closeVerifyAnalyzerLeads.js";
@@ -80,7 +81,7 @@ const fakeRun: AcquisitionRunner = async (argv: string[], cwd: string) => ({
 function makeState(provenance: AnalyzerLeadProvenance): RemediationState {
   return makeBaseState({
     status: "closing",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "P1",
       findings: [
         {
@@ -96,16 +97,16 @@ function makeState(provenance: AnalyzerLeadProvenance): RemediationState {
           analyzer_provenance: provenance,
         },
       ],
-      blocks: [],
+      units: [canonicalUnitFixture("F1", {source_finding_ids:["F1"]})],
+      requirements:[{id:"REQ-F1",description:"Remove analyzer defect",source_finding_ids:["F1"],change_kind:"structural",assertions:[]}],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
+    }),
     closing_plan: { action: "none" },
     items: {
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "resolved",
-        block_id: "B1",
       },
     },
   }) as RemediationState;
@@ -156,14 +157,15 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     // snippet hash, so the lead identity persists.
     writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
     const state = makeState(provenanceFor(FLAGGED_SOURCE));
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
     });
     expect(next.status).toBe("triage");
     expect(next.items!.F1.status).toBe("blocked");
-    expect(next.items!.F1.mechanical_verification).toEqual({
+    expect(next.source_verifications?.F1?.mechanical_verification).toEqual({
       status: "lead_persists",
       analyzer_id: "fake-analyzer",
     });
@@ -175,7 +177,8 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     // snippet, so the recorded identity no longer fires.
     writeFileSync(join(REPO_DIR, "src", "dup.ts"), FIXED_SOURCE);
     const state = makeState(provenanceFor(FLAGGED_SOURCE));
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
@@ -194,5 +197,32 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     expect(f1.outcome).toBe("resolved");
     const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
     expect(report).toMatch(/Mechanical re-verify/);
+  });
+});
+
+describe("shared-unit analyzer outcomes", () => {
+  it("a persisting source reblocks the shared unit and cannot leave its sibling source resolved", async () => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
+    const state = makeState(provenanceFor(FLAGGED_SOURCE));
+    state.plan!.findings.push({...state.plan!.findings[0]!,id:"F2",analyzer_provenance:undefined});
+    state.plan!.units[0]!.source_finding_ids.push("F2");
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state,{root:REPO_DIR,artifactsDir:TEST_DIR,skipFinalGate:true,
+      analyzerLeadVerifyOverrides:{candidates:[fakeCandidate()],run:fakeRun}});
+    expect(next.items!.F1.status).toBe("blocked");
+    const {buildRemediationOutcomesReport}=await import("../../src/remediate/phases/close.js");
+    const report=buildRemediationOutcomesReport(next,{contract_version:"remediate-code-closing-result/v1alpha1",action:"none",status:"skipped",commands:[]});
+    expect(report.outcomes.map(outcome=>[outcome.finding_id,outcome.outcome])).toEqual([["F1","blocked"],["F2","blocked"]]);
+  });
+
+  it("an owner-disposed source cannot reblock the unit shared with active work", async () => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
+    const state = makeState(provenanceFor(FLAGGED_SOURCE));
+    state.plan!.findings.push({...state.plan!.findings[0]!,id:"F2",analyzer_provenance:undefined});
+    state.plan!.units[0]!.source_finding_ids.push("F2");
+    state.finding_dispositions={F1:{status:"ignored",reason:"Owner excluded this source"}};
+    const outcome=await verifyAnalyzerLeads({state,root:REPO_DIR,overrides:{candidates:[fakeCandidate()],run:fakeRun}});
+    expect(outcome.ran).toBe(false);
+    expect(state.items!.F1.status).toBe("resolved");
   });
 });

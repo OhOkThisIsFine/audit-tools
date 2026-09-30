@@ -43,13 +43,14 @@ but runs independently; when the two are paired, read alongside the auditor's
 Remediator accepts any of:
 
 - An `audit-findings.json` produced by `audit-code` — the canonical machine
-  contract. Finding extraction from it is deterministic: findings, work-block
-  assignments, and synthesis themes are adopted verbatim, with no LLM involved.
+  contract. Finding extraction is deterministic; original findings and their
+  evidence remain immutable provenance. Audit groupings inform planning without
+  becoming independently editable execution assignments.
 - An audit document in free-form Markdown or other text — including
   `audit-code`'s human-facing `audit-report.md`. Findings are extracted by
   the LLM.
-- A conversation transcript or user-supplied list of issues. Findings are
-  extracted by the LLM.
+- A conversation transcript or user-supplied request. The requested change is
+  retained directly; it does not require invented audit findings.
 
 Audit-code only retains the finalized report and `audit-findings.json` on
 success, so remediator does not rely on `.audit-tools/audit/` being present.
@@ -58,17 +59,17 @@ Remediator does not re-run the auditor and does not modify its inputs.
 
 ## Concepts
 
-- **Finding**: a single issue to remediate. Atomic unit of outcome reporting.
-- **Item**: the concrete change associated with one finding. Findings map
-  1:1 to items.
-- **Block**: a bundle of items that must be remediated together because they
-  write to overlapping files. A block is the unit
-  of parallel dispatch, not the unit of outcome reporting. Items within a
-  block may have different outcomes.
+- **Finding**: an original asserted issue, with evidence and a distinct user disposition.
+- **Requirement**: a stable, falsifiable condition the change must satisfy.
+- **Execution unit**: a cohesive approved change, with read/write scope, dependencies,
+  requirements and verification instructions. It is the unit of dispatch and retry.
+- **Item**: the recorded execution state of a unit.
 
-These are the output-contract vocabulary — the shapes every run reports
-against — and are independent of *how* the plan that produces them is built.
-The plan-building mechanism is named below (Planning mechanisms).
+Sources and units have a many-to-many relationship. A source finding is resolved
+only when all work required for it is verified; unrelated source dispositions do
+not disappear into a shared task. Conversation-only work reports execution outcomes
+without fabricating findings. Report views derive from these facts, not an editable
+second copy of the plan.
 
 ## Workflow
 
@@ -80,85 +81,51 @@ Write Tests -> Refactor Code -> Verify Code Against Tests -> Verify Code Against
 
 There is no separate per-item "document" authoring step (dissolved — N-R13):
 planning transitions directly to implementing, and implement dispatch reads scope
-from the finding. There is no per-item specification artifact at all.
+from the reviewed execution unit. There is no per-item specification artifact.
 
 ## Planning mechanisms
 
-The normative goals above are realized through the **contract-pipeline** — the
-planning engine that turns confirmed intent into an implementation DAG whose
-nodes each trace to a finding *and* a derived obligation. The pipeline advances
-through a fixed sequence of contract stages: `goal_spec` (normalized goals and
-constraints) → `context_bundle` (affected files and evidence) →
-`module_decomposition` (module list, responsibilities, file scope) →
-per-module contract drafting and seam reconciliation → `obligation_ledger`
-(one verification/test obligation per invariant and seam) → test/validator plan
-and design gates → `implementation_dag` (the metadata-enriched node graph the
-tool derives the dependency-ready frontier from — `hostDependencyLevels`,
-`src/remediate/steps/dispatch/hostHandoff.ts`; assignment, concurrency, and
-execution are the host's). The stage detail — multi-agent seam negotiation,
-the adversarial critic→judge→repair loop, DAG promotion metadata — is specified
-in [`spec/remediation-workflow-design.md`](../remediation-workflow-design.md)
-and [`spec/contract-authoring-determinism-design.md`](../contract-authoring-determinism-design.md);
-this document names the mechanism and owns the output contract it produces, not
-the mechanism's internals.
+The planning engine has one canonical executable change plan for all input forms.
+Independent conceptual critique, critic and judge evaluate that plan and supplied
+or directly checked evidence. Accepted counterexamples require explicit revision;
+approval binds the reviewed revision. Workload generation after approval is
+mechanical, not a new design-authoring phase. See
+[`remediation-workflow-design.md`](../remediation-workflow-design.md) for the
+review and revision contract.
 
-There is ONE plan-building mechanism traversed at two depths. The risk tier is
-the dial: a `low` tier collapses coherent authoring phases into shared
-round-trips and drops adversarial depth to a light inline self-check, while
-`medium`/`high` keep every phase its own gated step at full depth. There is no
-second producer and no path that skips the pipeline. `plan.source` records
-PROVENANCE only — where a plan came from, never which engine built it — so a
-plan ingested from outside the pipeline is still distinguishable from one the
-pipeline authored.
-
-## Phases
+The risk signal scales review depth and useful detail within that one engine.
+It does not select a separate trusted-audit bypass or require a fixed collection
+of redundant semantic documents. Changed behavior and affected boundaries determine
+which requirements and interface detail the plan needs.
 
 ### Phase 1: Plan
 
-Deterministic when the input is an `audit-findings.json`; LLM-assisted when the
-input is Markdown, free-form, or conversational.
-
-- Extract the findings list. Deterministic parse of `audit-findings.json`,
-  LLM extraction otherwise (including `audit-report.md`), emitting the same
-  `finding.schema.json` shape in either case.
-- If the input already carries block assignments (as `audit-findings.json`
-  does), adopt them. Otherwise, use the shared deterministic work partitioner:
-  attach an advisory, content-derived token estimate for the finding plus its
-  unique-file context and report that size to the host — planning never reshapes
-  or splits work around a backend's context window (`applyPlanPipeline`,
-  `src/remediate/phases/plan.ts`) — optimize normalized semantic/unit cohesion
-  and cross-block overlap, and keep shared files/units as affinity rather than
-  transitive-closure edges. Dangerous overlap is emitted as an explicit seam-preparation dependency;
-  it does not force one unbounded block.
-- Compute parallel-safety per block (default true unless dependencies are found).
-- Read the project facts — project type and candidate closing actions (git
-  remote names, package metadata, release scripts, CI configuration) — that the
-  intent checkpoint detected deterministically (`detectProjectFacts`) and
-  persisted (`project-facts.json`), falling back to `neutralProjectFacts` when
-  none were persisted, and record them on the plan as CANDIDATES. Planning
-  detects nothing itself. Detection presents; it never selects: the user
-  chooses the closing action at the intent checkpoint (below), and an unchosen
-  action is `none`.
-- Emit `remediation_plan.json` conforming to the `RemediationPlan` contract (validated by the
-  hand-written TypeScript validators in `src/remediate/validation/`, per the Schemas section below).
+- Preserve original source findings/request and owner constraints.
+- Define cohesive execution units, their scopes and dependencies; retain source
+  links and stable requirements with acceptance assertions and commands.
+- Identify shared-file and interface conflicts before parallel dispatch; represent
+  genuine ordering decisions explicitly rather than inferring one unbounded block.
+- Preserve candidate closing actions detected at the intent checkpoint. Detection
+  presents possibilities; only the owner chooses an action, with `none` the default.
+- Independently challenge and revise the plan. Validate source coverage, references,
+  scope, acyclicity, requirement coverage and exact review bindings before dispatch.
 
 ### Phase 2: Planning gates (batched review + ambiguity)
 
 There is no separate per-item LLM "document" phase (dissolved — N-R13): planning
-transitions DIRECTLY to implementing. Before any implement dispatch, two batched
-gates fire at planning, each at most once per run:
+transitions DIRECTLY to implementing. Before dispatch, the source review and
+canonical-plan decision surfaces batch owner choices. A materially changed owner-controlled choice
+requires renewed resolution; unchanged recorded decisions are not asked again:
 
-- **Review-necessity gate**: every run gets exactly ONE batched keep/decline
-  review before implementation, surfaced tiered by how much human review each
-  item needs. A declined item becomes a RECORDED terminal disposition
-  (`ignored`), never silently bulk-dispositioned inside a quality-tail node.
-  Which step performs the review (and over which objects) differs by intake
-  path; the obligation — one batched review per run, with recorded declines —
-  is the contract, and no run is reviewed twice.
-- **Ambiguity gate** (`runPlanAmbiguityGate`): every scoping/judgment ambiguity
-  across all items is batched into a single `ambiguity_request.json` and
-  surfaced to the user at once (categories under Ambiguity criteria below).
-  Remediation halts until every clarification is resolved.
+- **Review-necessity gate**: batch keep/decline choices before implementation,
+  tiered by how much owner judgment each source or requested change needs. A
+  decline is a recorded disposition, never silent loss inside a grouped unit.
+  Reuse that decision unless a plan revision materially changes what was approved.
+- **Plan choices**: resolve scoping/behavior questions together, then record the
+  chosen behavior in the actual plan revision and bind the owner decision to it.
+  Unanswered questions are not permission to invent scope. Worker-discovered
+  ambiguities use the deferred clarification window below; they do not revive a
+  separate planning-document lifecycle.
 
 The closing action is the USER's choice, made at the intent checkpoint
 (`confirm_intent`): the tool detects the candidates at that step and presents
@@ -175,23 +142,24 @@ for user resolution. Automatic `parallel_safe` stripping from the tag alone is
 **not** wired — parallel-safety is computed deterministically at plan time, and a
 dependency that surfaces later is resolved through triage.
 
-Appropriateness decisions are per-item, not per-block. The LLM may propose marking
-any individual item "deemed inappropriate"; that proposal rides the same
-clarification batch and requires user confirmation. A block may contain some items
-that are remediated and others declared inappropriate without dropping the block.
+Appropriateness decisions preserve each source disposition. The model may propose
+that a source is inappropriate; that proposal rides the same clarification batch
+and requires user confirmation. Grouping several sources into one unit cannot
+silently discard any of their independent outcomes.
 
 There is no per-item specification artifact: the implementation workload reads
-file scope from `finding.affected_files`, and the ENFORCED write scope is the
-block's `touched_files`. The project-level `closing_plan` persists inline on
+read/write scope from the approved execution unit; the enforced write scope is
+its bound `allowed_files`. The project-level `closing_plan` persists inline on
 `RemediationState` (`state.closing_plan`), validated against `ClosingPlanSchema`
 before the next phase may read it.
 
-After the gates exit cleanly, the next user *question* is the deferred
-clarification window at the end of Phase 3, or the end-of-run triage window.
+After the gates exit cleanly, routine worker questions are deferred to the
+clarification/triage windows. A revision that changes approved scope or another
+owner-controlled choice must resolve that choice before affected work proceeds.
 
 ### Phase 3: Implement (host-executed LLM work)
 
-The tool emits every dependency-ready block as a complete provider-neutral host
+The tool emits every dependency-ready execution unit as a complete provider-neutral host
 workload. Each item carries its bounded prompt, scope, worktree binding, result
 path, and content-derived metadata. The host chooses sequential or parallel
 execution; audit-tools does not configure or infer host concurrency.
@@ -205,7 +173,7 @@ Within a block, each item runs through:
    Tests must fail on the current code where a test step is applicable.
 2. Refactor code until the item's tests pass.
 3. Run the affected test scope deterministically and record results.
-4. LLM-verify the produced code against the finding. Conformance check, not a
+4. LLM-verify the produced code against the reviewed unit requirements. Conformance check, not a
    freshness opinion: catches cases where tests pass but the change deviates
    from the stated intent.
 
@@ -222,7 +190,7 @@ window at the END of the implement phase, once the eligible dispatch frontier ha
 drained. Because a `needs_clarification` item is not verified-complete, its
 dependents are ineligible while the answer is outstanding — they are HELD
 `pending`, explicitly distinguished from nodes whose upstream genuinely failed
-(the `permanentlyDeadPendingBlocks` liveness analysis), so an unanswered question
+(the `permanentlyDeadPendingUnits` liveness analysis), so an unanswered question
 is never recorded as "upstream failed". Once the answer lands, a re-opened
 upstream makes the
 dependents eligible and a disposed (skipped) upstream dead-ends them with the
@@ -327,16 +295,15 @@ the LLM decides.
 
 ## Schemas
 
-Only `finding.schema.json` is mirrored in `schemas/` as a JSON Schema. The rest of the remediation
-contract (`RemediationPlan`, `RemediationBlock`, `ClarificationRequest`, `ClosingPlan`,
-`TestSpec`, the remediation report) is validated by hand-written TypeScript validator functions
-(`src/remediate/validation/remediationState.ts`, `src/remediate/validation/contractPipeline.ts`,
-`src/remediate/validation/contractPipelineGates.ts`, `src/remediate/validation/artifacts.ts`),
-not JSON Schema files. `TriageBatch` is an internal wire type local to
-`src/remediate/phases/triage.ts`, not a `state/types.ts` contract type.
+The source-finding contract remains shared with the auditor. Executable plans,
+requirements, units, review submissions, runtime state and outcomes each have a
+single runtime schema/validation authority. Prompt projections and test fixtures
+must follow those real schemas rather than maintain a second contract.
 
-Every phase transition validates its output against the relevant validator before the next phase may
-read it.
+Every accepted transition validates shape, references and relevant source/review
+bindings before downstream work can use it. Unsupported stamped state is refused
+clearly without overwriting the retained evidence. Validation failure is not a
+successful empty plan or a license to reconstruct missing authority.
 
 ## Intermediate status
 
@@ -373,7 +340,8 @@ retained.
 The machine contract is `remediation-outcomes.json`; its render
 `remediation-report.md` lists, in order:
 
-- items resolved (with finding id, summary, and verification evidence),
+- source findings resolved (with original id, summary, linked units and evidence),
+- execution outcomes, including work originating from a request without findings,
 - items deemed inappropriate (with rationale captured in Phase 2),
 - items ignored after triage (with rationale captured in Phase 3b),
 - combined-state test result,
@@ -406,7 +374,7 @@ parallelism level. Regardless of how the host executes them:
 - parallel-safety is determined deterministically in Phase 1 and is NOT revoked by
   an LLM `public_contract` inference (that automatic stripping is not wired); a
   dependency that surfaces later is resolved through triage.
-- each parallel block runs in an isolated workspace (worktree or
+- each parallel execution unit runs in an isolated workspace (worktree or
   equivalent),
 - merge-back is serialized in deterministic workload order; the host performs the
   merge and the tests, and a node whose reported evidence does not attest a

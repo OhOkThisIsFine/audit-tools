@@ -398,17 +398,6 @@ export function incomingLiteralLines(source: string): { line: number; text: stri
 
 // ── prompt-capability ────────────────────────────────────────────────────────
 
-/** The `- \`<path>\` (<key>)` entries a rendered "## Required Inputs" block lists. */
-export function requiredInputEntries(prompt: string): Array<{ path: string; key: string }> {
-  const section = prompt.split(/^## Required Inputs$/m)[1];
-  if (section === undefined) return [];
-  const body = section.split(/^## /m)[0]!;
-  return [...body.matchAll(/^- `([^`]+)` \(([a-z_]+)\)$/gm)].map((match) => ({
-    path: match[1]!,
-    key: match[2]!,
-  }));
-}
-
 /**
  * Code lines that mint a second results-path section or promise one "provided
  * below" — the two shapes that let the bound path and its alternative drift.

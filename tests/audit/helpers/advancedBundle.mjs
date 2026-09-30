@@ -174,6 +174,8 @@ const FIXTURE_STAGES = [
   // then lets the deterministic equivalence-baseline arm bind it.
   { upTo: "intent_checkpoint_current", run: async (b) => injectConfirmedIntentCheckpoint(b) },
   { upTo: "intent_equivalence_current", run: forcedStep("intent_equivalence_executor") },
+  // Scoped inspection is prepared before the independent architecture lanes.
+  { upTo: "planning_artifacts", run: forcedStep("planning_executor", { withRoot: true }) },
   { upTo: "charter_extraction_current", run: forcedStep("charter_extraction_executor") },
   // Phase C steps 2–4: the comparison reader and the fidelity lane. host_delegation
   // like charter_extraction: at the default shallow ceiling the extraction pass
@@ -201,9 +203,8 @@ const FIXTURE_STAGES = [
  * a test that wants "a bundle advanced to phase X" never has to track which
  * numeric step that is.
  *
- * `planning_artifacts` and later are reached by running every stage (the stage
- * list stops at the last pre-planning phase); `advanceFixtureToPlanning` layers
- * the planning advance on top.
+ * Planning now precedes the architecture inquiries. A caller that needs all
+ * architectural evidence settled should target `audit_tasks_completed`.
  */
 export async function buildAdvancedBundle(root, targetObligation) {
   const target = priorityIndex(targetObligation);

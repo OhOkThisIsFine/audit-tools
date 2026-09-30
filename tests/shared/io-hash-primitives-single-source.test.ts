@@ -80,7 +80,7 @@ const HASH_CONTENT_CONSUMERS = [
   join(AUDIT_SRC, "orchestrator", "fileIntegrity.ts"),
   join(AUDIT_SRC, "reporting", "findingIdentity.ts"),
   join(REMEDIATE_SRC, "utils", "fileIntegrity.ts"),
-  join(REMEDIATE_SRC, "contractPipeline", "artifactStore.ts"),
+  join(REMEDIATE_SRC, "contractPipeline", "executionPlan.ts"),
 ];
 
 test("io-hash-single-source/2a: shared hashContent exists and is exported", () => {

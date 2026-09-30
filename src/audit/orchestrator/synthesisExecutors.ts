@@ -1,3 +1,4 @@
+import { withArchitectureFollowupEvidence } from "./architectureDiscovery.js";
 // sites-pinned: tests/audit/audit-read-synthesis.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -37,6 +38,8 @@ function buildBaseFindingsReport(
   results: AuditResult[],
   options: SynthesisOptions,
 ) {
+  bundle = withArchitectureFollowupEvidence({ ...bundle, audit_results: results });
+  results = bundle.audit_results ?? results;
   const report = buildAuditFindingsReport(
     buildAuditReportModel({
       results,

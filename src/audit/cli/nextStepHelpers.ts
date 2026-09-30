@@ -124,8 +124,6 @@ import { computeArtifactMetadata, computeArtifactStateSignature } from "../orche
 import {
   decideNextStep,
   PRIORITY,
-  AUDIT_FRICTION_RUN_ID,
-  decideAuditFrictionCloseout,
 } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
@@ -271,7 +269,7 @@ export type NextStepParams = {
 };
 
 export type TerminalStepResult =
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string };
 
 /**
@@ -342,9 +340,9 @@ export type NextStepResult = (
   | { kind: "edge_reasoning"; state: AuditState; bundle: ArtifactBundle; candidates: GraphEdge[] }
   | { kind: "critical_flow_fallback"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
-  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string; triage?: import("audit-tools/shared").FrictionTriageDecision }
+  | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
-) &
+) & { inspectionRun?: ActiveReviewRun } &
   /**
    * Advisories an EARLIER fold iteration carried, rendered as prompt lines.
    *
@@ -409,27 +407,11 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
 
 // ── Extracted helpers ─────────────────────────────────────────────────────────
 
-/**
- * Promote the final report bundle to the repo root — but only once friction
- * triage is satisfied. Returns the path the present_report step should surface.
- *
- * promoteFinalAuditReport copies audit-report.md + audit-findings.json to the
- * parent `.audit-tools/` dir, then DELETES artifactsDir (so a rerun after a
- * truly-complete audit starts fresh). That deletion must not happen while
- * friction triage is still pending ("dispose"): the host has not yet written its
- * open_observations, and wiping artifactsDir would also drop audit_state /
- * audit_report, causing the next next-step to replay the fold from scratch (the
- * confirm_intent regression). So:
- *   - already promoted (re-entry after a prior complete) → use the promoted path
- *   - friction pending → DO NOT promote; surface the in-place report so the host
- *     can read it while finishing triage. artifactsDir stays intact, so the next
- *     call (after open_observations are written) re-evaluates triage cleanly.
- *   - friction satisfied → promote (and delete artifactsDir) → rerun starts fresh
+/** Promote current deliverables, preserving captured diagnostics before cleanup.
+ * Development reflection belongs to the repository's sprint closeout, not the
+ * target repository's audit completion contract.
  */
-async function promoteIfFrictionSatisfied(
-  artifactsDir: string,
-  triage: import("audit-tools/shared").FrictionTriageDecision,
-): Promise<string> {
+async function promoteCompletedReport(artifactsDir: string): Promise<string> {
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -449,10 +431,6 @@ async function promoteIfFrictionSatisfied(
   const alreadyPromoted =
     promotedText !== null && (inPlaceText === null || promotedText === inPlaceText);
   if (alreadyPromoted) return promotedPath;
-  if (triage.action === "dispose") {
-    // Friction triage still pending — keep the in-place report, do not delete.
-    return inPlacePath;
-  }
   const promoted = await promoteFinalAuditReport({ artifactsDir });
   return promoted.promoted ? promotedPath : inPlacePath;
 }
@@ -488,20 +466,12 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  // Evaluate friction triage BEFORE promotion. promoteFinalAuditReport deletes
-  // artifactsDir, so promoting while triage is still pending ("dispose") would
-  // (a) delete the friction record the host must finish writing, and (b) wipe
-  // audit_state/audit_report so the next next-step replays the fold from scratch
-  // (the confirm_intent regression). Defer promotion until triage is satisfied;
-  // until then keep the in-place report so the host can read it.
-  const triage = await decideAuditFrictionCloseout(params.artifactsDir, AUDIT_FRICTION_RUN_ID);
-  const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
+  const finalReportPath = await promoteCompletedReport(params.artifactsDir);
   return {
     kind: "complete",
     state,
     bundle,
     finalReportPath,
-    triage,
   };
 }
 
@@ -3149,7 +3119,6 @@ export function buildAuditObligations(
   // The registry's membership and order DERIVE from PRIORITY — never a second
   // hand-enumerated list, so an id cannot be in the scan and absent from the
   // registry (this derivation dissolved the fold-array⇄PRIORITY sync tests).
-  // `friction_capture_current` gets a plain def and stays inert by absence:
   // `deriveAuditState` never emits it, so its derive is always satisfied.
   for (const id of Object.keys(bespoke)) {
     if (!PRIORITY.includes(id)) {
@@ -3183,26 +3152,11 @@ async function runDesignReviewObligation(
   return { kind: "transition", state: branch.bundle };
 }
 
-/**
- * Host-delegation dispatch obligation (`audit_tasks_completed` →
- * semantic_review_executor, no deterministic runner): materialize the semantic
- * review run and emit it. Guards on the executor actually being host-delegation,
- * mirroring the hand loop's `isHostDelegationExecutor` branch; a missing/non-
- * delegation executor emits the same blocked step the no-executor branch did.
- */
-async function runHostDelegationObligation(
+/** Consume available inspection results once at the full fold boundary, whatever inquiry is pending. */
+async function ingestAvailableInspectionResults(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
-): Promise<AuditOutcome> {
-  const decision = decideNextStep(bundle, { emitStaleness: false });
-  const state = decision.state;
-  if (!decision.selected_executor) {
-    return emitNoExecutorBlocked(bundle, ctx, decision);
-  }
-  if (!isHostDelegationExecutor(decision.selected_executor)) {
-    return runDeterministicExecutor(bundle, ctx);
-  }
-
+): Promise<ArtifactBundle> {
   // First fold every strictly-bound result that still belongs to the pending
   // set. Filtering against bundle truth makes crash recovery idempotent: an
   // accepted ledger written before core ingestion is retried, while results
@@ -3261,6 +3215,10 @@ async function runHostDelegationObligation(
       acceptedIds: completedIds,
     });
 
+    // Even a refused-only arrival must be visible on the next host step.
+    mergeFoldAdvisoriesInto(ctx.foldAdvisoriesRef.value, { issues: ingestIssues, validationWarnings });
+    await writePendingAdvisories(ctx.params.artifactsDir, ctx.foldAdvisoriesRef.value);
+
     const pendingIds = new Set(
       buildPendingAuditTasks(bundle).map((task) => task.task_id),
     );
@@ -3279,25 +3237,24 @@ async function runHostDelegationObligation(
         },
         bundle,
       );
-      // The transition returns before any emission, and the NEXT ingest skips
-      // already-accepted bindings — so this fold's advisories would be a
-      // one-shot loss. Carry them in the ctx ref; the semantic-review emit
-      // below (this call or a later iteration of the same drain) merges and
-      // consumes them exactly once.
-      mergeFoldAdvisoriesInto(ctx.foldAdvisoriesRef.value, {
-        issues: ingestIssues,
-        validationWarnings,
-      });
-      // PERSIST with the merge, not at the emission: the transition below can
-      // end the call (the budget cap), and an emission-only write would lose
-      // exactly the advisory a call-ending transition produced — the case this
-      // carry exists to cover.
-      await writePendingAdvisories(
-        ctx.params.artifactsDir,
-        ctx.foldAdvisoriesRef.value,
-      );
-      return { kind: "transition", state: ingested.updated_bundle };
+      return ingested.updated_bundle;
     }
+  }
+
+  return bundle;
+}
+
+async function runHostDelegationObligation(
+  bundle: ArtifactBundle,
+  ctx: AuditNextStepCtx,
+): Promise<AuditOutcome> {
+  const decision = decideNextStep(bundle, { emitStaleness: false });
+  const state = decision.state;
+  if (!decision.selected_executor) {
+    return emitNoExecutorBlocked(bundle, ctx, decision);
+  }
+  if (!isHostDelegationExecutor(decision.selected_executor)) {
+    return runDeterministicExecutor(bundle, ctx);
   }
 
   // The UNLOCKED variant: the fold already holds the artifact-tree lock, and
@@ -3327,8 +3284,6 @@ async function runHostDelegationObligation(
       kind: "semantic_review" as const,
       selectedExecutor: decision.selected_executor,
       ...review,
-      ...(ingestIssues.length > 0 ? { ingestIssues } : {}),
-      ...(validationWarnings.length > 0 ? { validationWarnings } : {}),
     },
     // The pause's blocked core state — the fold's single commit persists it
     // (the locking variant's own write was the other half of the split).
@@ -3513,6 +3468,12 @@ export async function runDeterministicForNextStep(
   }
 }
 
+const ARCHITECTURE_WORK_STEPS: ReadonlySet<string> = new Set([
+  "charter_extraction", "charter_comparison", "charter_fidelity",
+  "design_review_parallel", "design_review_contract", "design_review_conceptual",
+  "charter_clarification", "systemic_challenge",
+]);
+
 async function runDeterministicFold(
   params: NextStepParams,
   heartbeat: AdvanceHeartbeat,
@@ -3596,6 +3557,7 @@ async function runDeterministicFold(
       // `finally` below runs on the throw path too, still under the hold.
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
+      let ingestionExecutions = 0;
       await recoverStagedSubmissions(params.artifactsDir);
       const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
       const consent = params.autoFix?.enabled === undefined && !params.autoFix?.dryRun
@@ -3613,12 +3575,20 @@ async function runDeterministicFold(
       ctx.foldAdvisoriesRef.value = await readPendingAdvisories(
         params.artifactsDir,
       );
-      const startBundle = await loadArtifactBundle(params.artifactsDir);
+      let startBundle = await loadArtifactBundle(params.artifactsDir);
       if (consent.auto_fix && !previousConsent.auto_fix && !consent.dry_run) {
         delete startBundle.auto_fixes_applied;
       }
       ctx.currentBundleRef.value = startBundle;
       try {
+        if (startBundle.audit_tasks && startBundle.audit_state?.status !== "complete" &&
+            deriveAuditState(startBundle, { emitStaleness: false }).obligations.find((obligation) =>
+              obligation.id === "planning_artifacts")?.state === "satisfied") {
+          const beforeIngest = startBundle;
+          startBundle = await ingestAvailableInspectionResults(startBundle, ctx);
+          ingestionExecutions = startBundle === beforeIngest ? 0 : 1;
+          ctx.currentBundleRef.value = startBundle;
+        }
         const engineOutcome = await advance(
           {
             priority: PRIORITY,
@@ -3628,10 +3598,20 @@ async function runDeterministicFold(
           ctx,
           {
             maxTransitions: engineMaxTransitions(),
-            maxExecutions: MAX_DRAIN_STEPS,
+            maxExecutions: MAX_DRAIN_STEPS - ingestionExecutions,
           },
         );
-        chargedExecutions = engineOutcome.executions;
+        chargedExecutions = engineOutcome.executions + ingestionExecutions;
+        if (engineOutcome.step && engineOutcome.step.kind !== "terminal_intent" && ARCHITECTURE_WORK_STEPS.has(engineOutcome.step.kind) &&
+            buildPendingAuditTasks(engineOutcome.state).length > 0) {
+          const inspection = await ensureSemanticReviewRunUnlocked({
+            root: params.root, artifactsDir: params.artifactsDir,
+            bundle: engineOutcome.state,
+            state: deriveAuditState(engineOutcome.state, { emitStaleness: false }),
+            obligationId: "audit_tasks_completed",
+          });
+          engineOutcome.step = { ...engineOutcome.step, inspectionRun: inspection.activeReviewRun };
+        }
         await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
         return engineOutcome;
       } catch (error) {
@@ -3772,18 +3752,12 @@ async function runDeterministicFold(
       audit_state: state,
       progress_summary: decision.reason,
     });
-    // Evaluate friction triage BEFORE promotion, then promote only once triage
-    // is satisfied (see promoteIfFrictionSatisfied). Promoting while triage is
-    // still pending would delete the friction record the host must finish writing
-    // and wipe audit_state/audit_report (→ confirm_intent replay on re-entry).
-    const triage = await decideAuditFrictionCloseout(params.artifactsDir, AUDIT_FRICTION_RUN_ID);
-    const finalReportPath = await promoteIfFrictionSatisfied(params.artifactsDir, triage);
+    const finalReportPath = await promoteCompletedReport(params.artifactsDir);
     return {
       kind: "complete",
       state,
       bundle,
       finalReportPath,
-      triage,
     };
   }
 

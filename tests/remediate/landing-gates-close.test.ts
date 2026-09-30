@@ -26,27 +26,30 @@ import {
 } from "../../src/remediate/phases/closeVerifyLandingGates.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { scratchDir } from "../helpers/scratch.js";
 import { withFsRetry } from "../../src/shared/io/json.js";
 
 const REPO_DIR = scratchDir(".test-landing-gates-close");
 const TEST_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
-const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: TEST_DIR };
+// This suite isolates landing admission; final-floor behavior has its own suite.
+const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: TEST_DIR, skipFinalGate: true };
 
 function makeState(overrides: Record<string, unknown> = {}): RemediationState {
   return makeBaseState({
     status: "closing",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "P1",
       findings: [],
-      blocks: [],
+      units: [canonicalUnitFixture("F1")],
+      requirements: [{ id: "REQ-F1", description: "Exercise landing verification", source_finding_ids: [], change_kind: "structural", assertions: [] }],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
+    }),
     closing_plan: { action: "none", pre_authorized: true },
     items: {
-      F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+      F1: { unit_id: "F1", status: "resolved" },
     },
     ...overrides,
   });
@@ -109,6 +112,7 @@ describe("the landing-gate close leg", () => {
     // artifacts dir, and a tree-wide red is reported as a clean close.
     const state = makeState();
     const leg = stubbedLeg({ passed: false, output: "gate refused: cycle" });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, {
       ...BASE_OPTIONS,
       landingGateVerifyOverrides: leg.overrides,
@@ -128,6 +132,7 @@ describe("the landing-gate close leg", () => {
     // The inverse of the test above, so the red proof cannot be satisfied by a
     // leg that simply always preserves.
     const state = makeState();
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, {
       ...BASE_OPTIONS,
       landingGateVerifyOverrides: stubbedLeg({ passed: true }).overrides,
@@ -150,9 +155,11 @@ describe("the landing-gate close leg", () => {
     await mkdir(noGateArtifacts, { recursive: true });
     try {
       const state = makeState();
+      await writeApprovedPlanFixture(noGateArtifacts, state, noGateRoot);
       await runClosePhase(state, {
         root: noGateRoot,
         artifactsDir: noGateArtifacts,
+        skipFinalGate: true,
         landingGateVerifyOverrides: {
           run: async () => {
             throw new Error("no gate may be spawned when none is declared");
@@ -190,6 +197,7 @@ describe("the landing-gate close leg", () => {
     );
     const state = makeState();
     const leg = stubbedLeg({ passed: true });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, {
       ...BASE_OPTIONS,
       landingGateVerifyOverrides: leg.overrides,
@@ -290,6 +298,7 @@ describe("the landing-gate close leg", () => {
     // clean landing and deletes the artifacts dir on a tree no gate ever
     // checked. Red with `outcome.admitted &&` dropped from `passed`.
     const state = makeState();
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, {
       ...BASE_OPTIONS,
       landingGateVerifyOverrides: {

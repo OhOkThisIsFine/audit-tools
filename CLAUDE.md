@@ -81,7 +81,7 @@ Imported via the `audit-tools/shared` subpath export (single package — no `@au
 
 Obligation-driven: **ONE obligation registry, ONE drain, ONE lock hold** (CX-02). The registry
 DERIVES from the single-sourced `PRIORITY` array (`src/audit/orchestrator/nextStep.ts`, running
-`repo_manifest` → … → `friction_capture_current`) — never a second hand-enumerated list — and each
+`repo_manifest` → … → `synthesis_narrative_current`) — never a second hand-enumerated list — and each
 id carries its per-obligation host-boundary POLICY: a pure branch classifier both draws share
 (`src/audit/orchestrator/obligationPolicy.ts`), plus, in the full fold only, the consuming body.
 Two draws run the shared obligation engine over that one registry:
@@ -133,32 +133,28 @@ pending → planning → implementing → closing → complete
   waiting_for_clarification  triage → waiting_for_triage
 ```
 
-**Phases** (`src/remediate/phases/`):
-- `plan.ts` — `RemediationPlan` with `Finding[]` + `RemediationBlock[]`; detects auditor vs. conversation input
-- planning gates (there is no separate "document" phase — dissolved, N-R13): at planning, before any
-  implement dispatch, a review-necessity gate (`runPlanningReviewGate`) surfaces findings tiered by
-  review-need for a batched keep/decline (declined → recorded `ignored`) and an up-front ambiguity gate
-  (`runPlanAmbiguityGate`) batches all scoping/judgment ambiguities into one `clarification_request`;
-  planning then transitions DIRECTLY to implementing. There is no per-item specification artifact:
-  `ItemSpec` was deleted (N-R13) because nothing in production wrote one. The enforced write scope is
-  `block.touched_files`, normalized into the work item's `allowed_files` by `buildWorkItem`
-  (`src/remediate/steps/dispatch/hostHandoff.ts`) and re-checked against the landed diff at ingestion.
-  `touched_files` is produced upstream two ways: the contract pipeline's `deriveNodeFiles` (node
-  `output_files` → `files_likely_touched` → the matched module's `file_scope`), which makes it a SIBLING
-  of `finding.affected_files` rather than a derivation of it; or, on the no-blocks branch of
-  `normalizeExtractedPlan` (`src/remediate/steps/nextStep.ts`) — reached by a plan supplied from OUTSIDE
-  the pipeline — copied straight from `finding.affected_files`. Both gates
-  in `src/remediate/steps/nextStep.ts`; dispatch in `src/remediate/steps/dispatch/` (the
-  host-handoff module above; there is no re-export barrel, so import the submodules directly).
-- implement phase (dispatches implementation with test execution + verification) — in `src/remediate/steps/dispatch/`
-- `src/remediate/phases/triage.ts` — failed items; retry vs. block
-- `close.ts` — closing actions (test suites, build, lint)
+**Planning and execution:**
+- `steps/contractPipeline.ts` owns author/revise → conceptual critique → independent critic → judge
+  over one executable plan. `contractPipeline/executionPlan.ts` owns its accepted revisions,
+  source/context bindings and review receipts. The same engine serves findings and requests.
+- `state/types.ts` retains original source findings/request separately from execution units and
+  stable requirements. Units, not findings, are the dispatch/retry identity; source outcomes
+  aggregate all linked units without losing independent owner dispositions.
+- Planning resolves batched owner choices and ambiguities. Approval binds the actual units,
+  scopes, dependencies and assertions. There is no separate document phase or semantic planner
+  after approval. Dispatch metadata is derived; current source and review bindings are checked.
+- `steps/dispatch/hostHandoff.ts` emits ready units and validates landed evidence. The reviewed
+  unit's `allowed_files` is the enforced write grant; a response cannot widen its own scope.
+- `phases/triage.ts` handles failed units with their evidence and explicit decisions.
+- `phases/close.ts` owns final acceptance, authorized closing actions and source/unit outcomes.
+  Identical final requirements can share one valid same-call execution; distinct subjects and
+  trust boundaries retain their own observations.
 
 **Host handoff:** `src/remediate/steps/dispatch/hostHandoff.ts` derives the dependency-ready implementation frontier and writes a complete versioned workload with bounded prompts, worktree/scope bindings, result paths, and deterministic metadata. The host owns assignment and concurrency. Ingestion revalidates the persisted binding, evidence, write scope, worktree state, and result identity before advancing any item; retired adapter-shaped state fails closed.
 
 **State persistence** (`src/remediate/state/store.ts`): file-backed `RemediationState`, atomic temp-then-rename writes, guarded by the shared `LockedJsonStore` (`audit-tools/shared/io/lockedJsonStore.ts`, also used by analyzer policy), which wraps `withFileLock` (`audit-tools/shared/io/fileLock.ts`: exponential 50ms→500ms backoff, token-checked 30s stale-lock cleanup). The lock is single-sourced — `store.ts` adds no backoff/retry logic of its own.
 
-**Core types** live in `src/remediate/state/types.ts`; `TestSpec` lives in `src/shared/types/contractPipeline.ts`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
+**Core types** live in `src/remediate/state/types.ts`; execution-unit and requirement schemas live in `src/shared/types/executionPlan.ts`. `src/remediate/dedup/crossLensDedup.ts` deduplicates across lenses; `src/remediate/intake.ts` orchestrates source manifest, summary, clarification resolution.
 
 **Artifact layout:**
 ```
@@ -362,6 +358,11 @@ severity; re-tagging an entry moves it),
 [`deferred.md`](docs/backlog/deferred.md) (blocked on data/env),
 [`durable-traps.md`](docs/backlog/durable-traps.md) (standing reference, not work). Add an entry when
 deferring; remove it when shipped.
+
+**Development policy stays in development.** The repository's sprint closeout owns
+mandatory friction reflection. Shipped audit/remediation workflows capture and
+archive diagnostic events but do not make development attestations a prerequisite
+for completing work in a target repository.
 
 **Log friction the moment you hit it** — non-obvious traps, misbehaving tools, missing affordances, shell/env quirks. One line to `docs/backlog/open-bugs.md` if it's a fixable defect, or `docs/backlog/durable-traps.md` if it's a standing environment/tooling gotcha — before moving on. 30-second note now = fix a future session can pick up.
 

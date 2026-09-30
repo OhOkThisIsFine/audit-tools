@@ -1,3 +1,4 @@
+import { canonicalPlanFixture, canonicalUnitFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
 import { rm, mkdir, writeFile } from "node:fs/promises";
@@ -16,7 +17,8 @@ const TEST_DIR = scratchDir(".test-triage");
 const BASE_OPTIONS = { root: dirname(TEST_DIR), artifactsDir: TEST_DIR };
 
 function makeState(items: Record<string, RemediationItemState>): RemediationState {
-  return makeBaseState({ status: "triage", items });
+  const units = Object.values(items).map(item => canonicalUnitFixture(item.unit_id));
+  return makeBaseState({ status: "triage", items, plan: canonicalPlanFixture({ units, requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises retry lifecycle" })) }) });
 }
 
 function expectIsoTimestamp(value: unknown): void {
@@ -37,10 +39,9 @@ describe("runTriagePhase", () => {
   it("returns waiting_for_triage when blocked items have exhausted auto-retries and no resolution file", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
         // Retry budget exhausted → auto-retry is skipped, so the run
         // escalates to human triage rather than re-attempting the item.
         rework_count: 99,
@@ -55,7 +56,7 @@ describe("runTriagePhase", () => {
 
   it("returns closing when no blocked items", async () => {
     const state = makeState({
-      F1: { finding_id: "F1", status: "resolved", block_id: "B1" },
+      F1: { unit_id: "F1", status: "resolved", },
     });
 
     const next = await runTriagePhase(state, BASE_OPTIONS);
@@ -66,10 +67,9 @@ describe("runTriagePhase", () => {
     const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
         started_at: originalStartedAt,
       },
     });
@@ -78,7 +78,7 @@ describe("runTriagePhase", () => {
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
         items: [
-          { finding_id: "F1", action: "ignore", rationale: "not worth fixing" },
+          { unit_id: "F1", action: "ignore", rationale: "not worth fixing" },
         ],
       }),
       "utf8",
@@ -98,10 +98,9 @@ describe("runTriagePhase", () => {
     const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "provider failed",
-        block_id: "B1",
         rework_count: 2,
         started_at: originalStartedAt,
         completed_at: "2026-06-05T12:01:00.000Z",
@@ -113,7 +112,7 @@ describe("runTriagePhase", () => {
       JSON.stringify({
         items: [
           {
-            finding_id: "F1",
+            unit_id: "F1",
             action: "ignore",
             rationale:
               "Deferred - should be retried in a dedicated pass after the prerequisite lands.",
@@ -134,10 +133,9 @@ describe("runTriagePhase", () => {
   it("action:retry with retry-word rationale retries (action is authoritative)", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test failure",
-        block_id: "B1",
         started_at: "2026-06-05T12:00:00.000Z",
         completed_at: "2026-06-05T12:01:00.000Z",
       },
@@ -148,7 +146,7 @@ describe("runTriagePhase", () => {
       JSON.stringify({
         items: [
           {
-            finding_id: "F1",
+            unit_id: "F1",
             action: "retry",
             rationale: "deferred — will retry after prerequisite lands",
           },
@@ -166,10 +164,9 @@ describe("runTriagePhase", () => {
   it("action:retry wins over ignore-word rationale", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test failure",
-        block_id: "B1",
       },
     });
 
@@ -177,7 +174,7 @@ describe("runTriagePhase", () => {
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
         items: [
-          { finding_id: "F1", action: "retry", rationale: "ignore this and move on" },
+          { unit_id: "F1", action: "retry", rationale: "ignore this and move on" },
         ],
       }),
       "utf8",
@@ -193,10 +190,9 @@ describe("runTriagePhase", () => {
     const originalStartedAt = "2026-06-05T12:00:00.000Z";
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
         started_at: originalStartedAt,
         completed_at: "2026-06-05T12:01:00.000Z",
       },
@@ -205,7 +201,7 @@ describe("runTriagePhase", () => {
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry" }],
+        items: [{ unit_id: "F1", action: "retry" }],
       }),
       "utf8",
     );
@@ -222,17 +218,16 @@ describe("runTriagePhase", () => {
     // user_halted marking, rather than skipping the close phase entirely.
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "halt" }],
+        items: [{ unit_id: "F1", action: "halt" }],
       }),
       "utf8",
     );
@@ -252,18 +247,16 @@ describe("runTriagePhase", () => {
   it("auto-retries blocked items within budget when no resolution file exists", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
         started_at: "2026-06-05T12:00:00.000Z",
         completed_at: "2026-06-05T12:01:00.000Z",
       },
       F2: {
-        finding_id: "F2",
+        unit_id: "F2",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
         rework_count: 1,
         started_at: "2026-06-05T12:02:00.000Z",
         completed_at: "2026-06-05T12:03:00.000Z",
@@ -288,18 +281,17 @@ describe("runTriagePhase", () => {
   it("retried items carry prior failure context", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "assertion failed in writeTests",
         last_successful_step: "Refactor Code",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry" }],
+        items: [{ unit_id: "F1", action: "retry" }],
       }),
       "utf8",
     );
@@ -314,11 +306,10 @@ describe("runTriagePhase", () => {
   it("second retry overwrites failure_context with the most recent failure", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "second failure message",
         last_successful_step: "Write Tests",
-        block_id: "B1",
         failure_context: "first failure context from prior retry",
         rework_count: 1,
       },
@@ -327,7 +318,7 @@ describe("runTriagePhase", () => {
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry" }],
+        items: [{ unit_id: "F1", action: "retry" }],
       }),
       "utf8",
     );
@@ -340,17 +331,16 @@ describe("runTriagePhase", () => {
   it("an explicit retry increments the unified rework counter", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "quota exceeded — rate limit hit",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry" }],
+        items: [{ unit_id: "F1", action: "retry" }],
       }),
       "utf8",
     );
@@ -362,17 +352,16 @@ describe("runTriagePhase", () => {
   it("retry counting is independent of failure wording", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test assertion failed",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry" }],
+        items: [{ unit_id: "F1", action: "retry" }],
       }),
       "utf8",
     );
@@ -384,10 +373,9 @@ describe("runTriagePhase", () => {
   it("an item at the unified retry cap routes to human triage", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "EPERM: file locked by another process",
-        block_id: "B1",
         rework_count: 2,
       },
     });
@@ -412,18 +400,16 @@ describe("runTriagePhase", () => {
       const state = makeState({
         // Exhausted contract budget → must log "budget exhausted", not retry.
         EXHAUSTED: {
-          finding_id: "EXHAUSTED",
+          unit_id: "EXHAUSTED",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
           rework_count: 2,
         },
         // Below budget → must log an "auto-retrying" line instead.
         RETRYABLE: {
-          finding_id: "RETRYABLE",
+          unit_id: "RETRYABLE",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
           rework_count: 0,
         },
       });
@@ -462,16 +448,14 @@ describe("runTriagePhase", () => {
     const { readFile } = await import("node:fs/promises");
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test failure",
-        block_id: "B1",
       },
       F2: {
-        finding_id: "F2",
+        unit_id: "F2",
         status: "blocked",
         failure_reason: "other failure",
-        block_id: "B1",
       },
     });
 
@@ -479,8 +463,8 @@ describe("runTriagePhase", () => {
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
         items: [
-          { finding_id: "F1", action: "retry" },
-          { finding_id: "F2", action: "ignore" },
+          { unit_id: "F1", action: "retry" },
+          { unit_id: "F2", action: "ignore" },
         ],
       }),
       "utf8",
@@ -488,11 +472,11 @@ describe("runTriagePhase", () => {
 
     await runTriagePhase(state, BASE_OPTIONS);
     const raw = await readFile(join(TEST_DIR, "triage-outcome.json"), "utf8");
-    const outcome = JSON.parse(raw) as { items: { finding_id: string; action: string }[] };
+    const outcome = JSON.parse(raw) as { items: { unit_id: string; action: string }[] };
     expect(outcome.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ finding_id: "F1", action: "retried" }),
-        expect.objectContaining({ finding_id: "F2", action: "ignored" }),
+        expect.objectContaining({ unit_id: "F1", action: "retried" }),
+        expect.objectContaining({ unit_id: "F2", action: "ignored" }),
       ]),
     );
   });
@@ -501,27 +485,26 @@ describe("runTriagePhase", () => {
     const { readFile } = await import("node:fs/promises");
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "halt" }],
+        items: [{ unit_id: "F1", action: "halt" }],
       }),
       "utf8",
     );
 
     await runTriagePhase(state, BASE_OPTIONS);
     const raw = await readFile(join(TEST_DIR, "triage-outcome.json"), "utf8");
-    const outcome = JSON.parse(raw) as { items: { finding_id: string; action: string }[] };
+    const outcome = JSON.parse(raw) as { items: { unit_id: string; action: string }[] };
     expect(outcome.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ finding_id: "F1", action: "halted" }),
+        expect.objectContaining({ unit_id: "F1", action: "halted" }),
       ]),
     );
   });
@@ -529,11 +512,10 @@ describe("runTriagePhase", () => {
   it("auto-retry carries failure_context on blocked items", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "tool crash — unexpected exit",
         last_successful_step: "Write Tests",
-        block_id: "B1",
       },
     });
 
@@ -546,17 +528,16 @@ describe("runTriagePhase", () => {
   it("throws when triage_resolution.json fails validation", async () => {
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "test",
-        block_id: "B1",
       },
     });
 
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "" }],
+        items: [{ unit_id: "F1", action: "" }],
       }),
       "utf8",
     );
@@ -573,41 +554,22 @@ describe("runTriagePhase", () => {
   // node is reconciled to resolved_no_change instead of looping through retries
   // and human triage. `exit 0`/`exit 1` are shell builtins on both cmd.exe and
   // /bin/sh; root must exist for the spawn cwd, so use TEST_DIR.
-  function planWithBlocks(
-    blocks: {
-      block_id: string;
-      items: string[];
-      targeted_commands?: string[];
-      touched_files?: string[];
-    }[],
-  ) {
-    return {
-      plan_id: "P1",
-      findings: [],
-      project_type: "unknown",
-      candidate_closing_actions: [],
-      blocks: blocks.map((b) => ({
-        block_id: b.block_id,
-        items: b.items,
-        parallel_safe: true,
-        touched_files: b.touched_files ?? [],
-        ...(b.targeted_commands ? { targeted_commands: b.targeted_commands } : {}),
-      })),
-    };
+  function planWithBlocks(blocks: { items: string[]; targeted_commands?: string[]; touched_files?: string[] }[]) {
+    const units = blocks.map(block => canonicalUnitFixture(block.items[0]!, { required_tests: block.targeted_commands ?? [], allowed_files: block.touched_files ?? [] }));
+    return canonicalPlanFixture({ plan_id: "P1", units, requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises node verification" })) });
   }
 
   it("re-verifies a blocked item against the tree and reconciles to resolved_no_change when satisfied (takes precedence over the retry budget)", async () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
+        { items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
       ]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
           // Budget exhausted: without re-verify this would route to human triage.
           rework_count: 99,
         },
@@ -625,14 +587,13 @@ describe("runTriagePhase", () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(1)"'] },
+        { items: ["F1"], targeted_commands: ['node -e "process.exit(1)"'] },
       ]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
         },
       },
     }) as RemediationState;
@@ -651,7 +612,6 @@ describe("runTriagePhase", () => {
       status: "triage",
       plan: planWithBlocks([
         {
-          block_id: "B1",
           items: ["F1"],
           targeted_commands: ['node -e "process.exit(0)"'],
           touched_files: ["scripts/remediate/never-created.mjs"],
@@ -659,10 +619,9 @@ describe("runTriagePhase", () => {
       ]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
         },
       },
     }) as RemediationState;
@@ -676,24 +635,22 @@ describe("runTriagePhase", () => {
     const state = makeBaseState({
       status: "triage",
       plan: planWithBlocks([
-        { block_id: "B1", items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
-        { block_id: "B2", items: ["F2"], targeted_commands: ['node -e "process.exit(1)"'] },
+        { items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
+        { items: ["F2"], targeted_commands: ['node -e "process.exit(1)"'] },
       ]),
       items: {
         // Already satisfied in the tree → reconciled, not retried.
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
           rework_count: 99,
         },
         // Genuinely open AND budget-exhausted → stays blocked, routes to triage.
         F2: {
-          finding_id: "F2",
+          unit_id: "F2",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B2",
           rework_count: 99,
         },
       },
@@ -707,8 +664,8 @@ describe("runTriagePhase", () => {
     const { readFile } = await import("node:fs/promises");
     const batch = JSON.parse(
       await readFile(join(TEST_DIR, "triage_batch.json"), "utf8"),
-    ) as { items: { finding_id: string }[] };
-    expect(batch.items.map((i) => i.finding_id)).toEqual(["F2"]);
+    ) as { items: { unit_id: string }[] };
+    expect(batch.items.map((i) => i.unit_id)).toEqual(["F2"]);
   });
 
   it("NEVER spawns a targeted_command that leaves the declared shape — it reports indeterminate instead", async () => {
@@ -722,7 +679,6 @@ describe("runTriagePhase", () => {
       status: "triage",
       plan: planWithBlocks([
         {
-          block_id: "B1",
           items: ["F1"],
           // Single quotes — the shape rule refuses them in EVERY position (they
           // quote on /bin/sh and are ordinary characters on cmd.exe). It writes
@@ -735,10 +691,9 @@ describe("runTriagePhase", () => {
       ]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed",
-          block_id: "B1",
           rework_count: 99,
         },
       },
@@ -761,10 +716,9 @@ describe("runTriagePhase", () => {
     // prompt instead of looping implementing->triage->implementing.
     const state = makeState({
       F1: {
-        finding_id: "F1",
+        unit_id: "F1",
         status: "blocked",
         failure_reason: "dependency not satisfied",
-        block_id: "B1",
         rework_count: 2,
       },
     });

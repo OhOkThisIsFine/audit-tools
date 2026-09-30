@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
-import type { Finding, RemediationBlock } from "../../src/remediate/state/types.js";
+import type { Finding } from "../../src/remediate/state/types.js";
 import {
   deduplicateCrossLensFindings,
-  fixupBlocksAfterDedup,
   wordJaccard,
 } from "../../src/remediate/dedup/crossLensDedup.js";
 
@@ -446,72 +445,5 @@ describe("deduplicateCrossLensFindings — INV-remediate-state-05: source findin
     expect(findings[0].affected_files.some((f) => f.path === "src/bar.ts")).toBe(true);
     // Source finding is clean
     expect(a.affected_files).toHaveLength(1);
-  });
-});
-
-describe("fixupBlocksAfterDedup", () => {
-  it("replaces merged finding IDs in block items", () => {
-    const blocks: RemediationBlock[] = [
-      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true, touched_files: [] },
-    ];
-    const mergeMap = new Map([["A-001", "B-001"]]);
-    const result = fixupBlocksAfterDedup(blocks, mergeMap);
-    expect(result[0].items).toEqual(["B-001"]);
-  });
-
-  it("deduplicates block items after replacement", () => {
-    const blocks: RemediationBlock[] = [
-      {
-        block_id: "B-001",
-        items: ["TST-001", "COR-001", "SEC-001"],
-        parallel_safe: true,
-        touched_files: [],
-      },
-    ];
-    const mergeMap = new Map([["TST-001", "COR-001"]]);
-    const result = fixupBlocksAfterDedup(blocks, mergeMap);
-    expect(result[0].items).toEqual(["COR-001", "SEC-001"]);
-  });
-
-  it("returns blocks unchanged when mergeMap is empty", () => {
-    const blocks: RemediationBlock[] = [
-      { block_id: "B-001", items: ["A-001", "B-001"], parallel_safe: true, touched_files: [] },
-    ];
-    const result = fixupBlocksAfterDedup(blocks, new Map());
-    expect(result).toBe(blocks);
-  });
-
-  // OBL-C003-DEDUP / OBL-INV-RPS-07: an absorbed finding must never be silently
-  // dropped — its survivor stays referenced and the mergeMap records the
-  // attribution for the coverage ledger. Ownership, however, is SINGLE-block:
-  // rewriting used to leave the survivor in BOTH its own block and the absorbed
-  // finding's block, which made block ownership ill-defined (dispatch scoping
-  // and the coverage ledger each saw the finding twice — docs/backlog entry,
-  // fixed by enforcing exactly-one-block in fixupBlocksAfterDedup).
-  it("keeps a survivor in exactly one block; a block emptied by the merge is dropped", () => {
-    const blocks: RemediationBlock[] = [
-      { block_id: "B-survivor", items: ["SURV"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-absorbed", items: ["ABS"], parallel_safe: true, touched_files: [] },
-    ];
-    const mergeMap = new Map([["ABS", "SURV"]]);
-    const result = fixupBlocksAfterDedup(blocks, mergeMap);
-    // The survivor is still referenced (no finding lost) — but exactly once.
-    const allItems = result.flatMap((b) => b.items);
-    expect(allItems.filter((id) => id === "SURV")).toHaveLength(1);
-    expect(allItems).not.toContain("ABS");
-    // The emptied block is dropped whole rather than left as a zero-item shell.
-    expect(result.map((b) => b.block_id)).toEqual(["B-survivor"]);
-  });
-
-  it("a block that partially merges away keeps its remaining items", () => {
-    const blocks: RemediationBlock[] = [
-      { block_id: "B-1", items: ["SURV"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-2", items: ["ABS", "OTHER"], parallel_safe: true, touched_files: [] },
-    ];
-    const result = fixupBlocksAfterDedup(blocks, new Map([["ABS", "SURV"]]));
-    expect(result.map((b) => b.block_id)).toEqual(["B-1", "B-2"]);
-    expect(result.find((b) => b.block_id === "B-2")!.items).toEqual(["OTHER"]);
-    const allItems = result.flatMap((b) => b.items);
-    expect(allItems.filter((id) => id === "SURV")).toHaveLength(1);
   });
 });

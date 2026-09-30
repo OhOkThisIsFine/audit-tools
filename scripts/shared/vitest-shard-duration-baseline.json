@@ -493,7 +493,6 @@
     "tests/shared/guard-reach-gate.test.ts": 252,
     "tests/shared/handoff-roadmap.test.ts": 16059,
     "tests/shared/hook-async-typecheck.test.ts": 3717,
-    "tests/shared/hook-friction-stop-gate.test.ts": 1836,
     "tests/shared/hook-session-gates.test.ts": 7684,
     "tests/shared/hook-session-start-guards.test.ts": 2918,
     "tests/shared/hook-trap-guards.test.ts": 10649,

@@ -4,11 +4,20 @@
 import type { AnalyzerLeadVerifyOverrides } from "../phases/closeVerifyAnalyzerLeads.js";
 import type { LandingGateVerifyOverrides } from "../phases/closeVerifyLandingGates.js";
 import type { HeadEvidenceOverrides } from "../phases/closeVerifyHeadEvidence.js";
+import type { GateRunner, ToolOwnedFinalGateResult } from "../steps/finalGate.js";
 
 export interface OrchestratorOptions {
   root: string;
   artifactsDir: string;
   input?: string;
+  /** The same explicit test-hermeticity control used by next-step. */
+  skipFinalGate?: boolean;
+  /** Existing final-floor spawn seam; no receipt or worker claim is accepted. */
+  finalGateRunner?: GateRunner;
+  /** Explicit approval of the previously emitted, unchanged closing preview. */
+  finalizeClosing?: boolean;
+  /** Presentation only: close has already recorded and stopped on this red. */
+  onFinalGateRed?: (gate: ToolOwnedFinalGateResult) => Promise<void>;
   /**
    * Test-only seams for the close-gate analyzer re-verify leg
    * (candidate set / spawn runner / session config). Production passes nothing.

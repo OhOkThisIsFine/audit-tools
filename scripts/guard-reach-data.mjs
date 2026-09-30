@@ -1254,7 +1254,6 @@ export const GUARDS = [
       'stated on its REACH row.',
   },
   { id: 'async-typecheck', kind: 'hook', impl: '.claude/hooks/async-typecheck.mjs' },
-  { id: 'friction-stop-gate', kind: 'hook', impl: '.claude/hooks/friction-stop-gate.mjs' },
   { id: 'closeout-challenge-gate', kind: 'hook', impl: '.claude/hooks/closeout-challenge-gate.mjs' },
 
   // ── contract tests (the guards' own guards) ────────────────────────────────
@@ -1411,7 +1410,6 @@ export const GUARDS = [
       'remedy rewrites lap-scoped baseline state. Also pins the hook end-to-end: with four legs wired ' +
       'to failing commands it must still exit 0 and print the deferral',
   },
-  { id: 'hook-friction-stop-test', kind: 'contract-test', impl: 'tests/shared/hook-friction-stop-gate.test.ts' },
   { id: 'hook-session-start-guards-test', kind: 'contract-test', impl: 'tests/shared/hook-session-start-guards.test.ts' },
   { id: 'session-start-hook-test', kind: 'contract-test', impl: 'tests/audit/session-start-hook.test.ts' },
   {
@@ -1494,9 +1492,8 @@ export const GUARDS = [
       'starves the held file lock’s mtime heartbeat until another process steals the LIVE lock; ' +
       'the sync twin itself requires a declared timeout at the type level (RunTrackedSyncOptions). ' +
       'UNCOVERED: the module list is the reviewed reachability claim — a NEW fold-reachable module ' +
-      'must be added to the test by hand; and the remediate-side sync spawns (triage verify ' +
-      'commands, hostHandoff git probes, findingGrounding / contractPipelineGates enumerations) are ' +
-      'outside the scan — tracked in the open-bugs entry',
+      'must be added to the test by hand. The scan covers the declared audit and remediation ' +
+      'fold modules, including triage, host handoff, executable-plan storage and grounding',
   },
   {
     id: 'submission-no-sizing-identity-test',
@@ -1692,28 +1689,17 @@ export const GUARDS = [
     kind: 'contract-test',
     impl: 'tests/shared/prompt-capability.test.ts',
     forms: [
-      { name: 'required-inputs entry', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'requiredInputEntries', call: 'text',
-        sample: '## Required Inputs\n- `/project/.audit-tools/remediation/intake/goal-spec.json` (goal_spec)\n' },
       { name: 'second results-path heading', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
         sample: 'const footer = "## Results path";' },
       { name: 'results path promised below', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'resultsPathDriftLines', call: 'text',
         sample: 'const note = "write to the results path provided below";' },
     ],
     note:
-      'C2 (sol-10/P35): a rendered imperative must be satisfiable by the worker it is handed to — ' +
-      'contract-pipeline Required Inputs are DERIVED from DEPENDENCY_MAP (no hand-kept per-role list), ' +
-      'a tool-derived artifact is materialized at the host-facing input path as well as the canonical ' +
-      'envelope, and every fan-out lane prompt ends with the chokepoint footer carrying its own bound ' +
-      'path plus the read-only-executor alternative. Uncovered halves, declared: whether a named path ' +
-      'EXISTS on disk is a run property (pinned only for the targeted single-phase scenario in ' +
-      'tests/remediate/contract-pipeline-required-inputs.test.ts — a collapsed framing step ' +
-      'legitimately names paths written later in the same round-trip); archived-artifact references ' +
-      'are not pinned; renderContractRepairPrompt keeps its own declared six-input list and its ' +
-      '"Regenerate IN FULL" instruction, so the INV-CO-13 in-full-vs-targeted trap (durable-traps) is ' +
-      'out of this guard\'s reach; and the src scan is LITERAL (the "## Results path" heading and the ' +
-      '"results path provided below" dangling reference), so a differently-worded per-emitter write ' +
-      'imperative — including the driver-facing "The executor must write ... to:" step-prompt lines, ' +
-      'which are deliberately in scope for neither — goes unflagged',
+      'C2: executable-plan prompts name the canonical source, current plan and prior reviews, ' +
+      'allow actual-source inspection, and restrict writes to the assigned submission. Audit fan-out ' +
+      'lanes carry their bound result path and the read-only-executor alternative. The source scan ' +
+      'recognizes literal duplicate results-path headings and dangling results-path references; ' +
+      'it does not prove every named input exists in a running session or detect arbitrary rewordings',
   },
   {
     id: 'prompt-renders-its-contract-test',
@@ -2076,7 +2062,6 @@ export const REACH = [
       'hook-session-gates-test',
       'hook-async-typecheck-test',
       'write-time-derived-gates-test',
-      'hook-friction-stop-test',
       'hook-session-start-guards-test',
       'session-registry-test',
       'session-start-hook-test',
@@ -2106,12 +2091,6 @@ export const REACH = [
       ' The P28 long-dispatch refusal in shell-trap-guard measures only the INLINE quoted prompt — a ' +
       'prompt delivered via a stdin file (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc body ' +
       '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix. ' +
-      '.claude/hooks/friction-stop-gate.mjs no longer lists the friction dir at all: it reads the ' +
-      'ONE record the run named in its persisted step contract ' +
-      '(`artifact_paths.friction_record`), so there is no hand-maintained duplicate of ' +
-      'listFrictionRecordFilenames left to drift. What that leaves uncovered: a run whose step ' +
-      'contract was pruned while its walk was still owed reads as "no walk owed" and does not ' +
-      'block — the backstop is only as present as the contract it reads.' +
       ' hook-trap-guards-test pins tool-input-guard cases to a temp root (runInputGuard) so rule 3 ' +
       'cannot consume the live stale-main marker, and scans for REPO_ROOT source paths to keep the ' +
       'payloads inside that root — but BOTH halves are scoped to that ONE file. A future test file ' +

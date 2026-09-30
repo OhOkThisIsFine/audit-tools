@@ -259,21 +259,21 @@ test("decideFrictionTriage: re-derive is idempotent and PRESERVES host-authored 
 // drift. What is pinned here is that import — and that the generated sibling
 // itself equals the source tuple, which is `check:friction-categories`'s job.
 
-test("friction-stop-gate hook IMPORTS the shared vocabulary rather than copying it", async () => {
-  const hookPath = join(HERE, "..", "..", ".claude", "hooks", "friction-stop-gate.mjs");
+test("development closeout renderer IMPORTS the shared vocabulary rather than copying it", async () => {
+  const hookPath = join(HERE, "..", "..", "scripts", "closeout-sections-data.mjs");
   const src = await readFile(hookPath, "utf8");
   expect(
     src,
     "the hook must import the generated pre-build vocabulary — a literal here is the copy the " +
       "single-source property forbids",
-  ).toContain("from '../../scripts/shared/friction-categories.generated.mjs'");
+  ).toContain('from "./shared/friction-categories.generated.mjs"');
   expect(
     /const FRICTION_CATEGORIES = \[/.test(src),
     "no literal FRICTION_CATEGORIES array may survive in the hook",
   ).toBe(false);
 });
 
-test("the hook's imported vocabulary is the same module the closeout renderer reads", async () => {
+test("the development renderer's imported vocabulary is the same module the closeout renderer reads", async () => {
   // One pre-build data module, two consumers: if the hook imported anything else
   // (a fresh literal, a second generated file) the two could disagree about what
   // a complete friction walk covers.

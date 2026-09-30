@@ -1,3 +1,6 @@
+// sites-pinned: tests/audit/audit-frontier.test.ts
+import { DEEPENING_TAG } from "./selectiveDeepening/shared.js";
+import { architectureDiscoveryTasks, isArchitectureDiscoveryTask } from "./architectureDiscovery.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import { initializeCoverageFromPlan } from "./planning.js";
@@ -230,8 +233,10 @@ export async function runPlanningExecutor(
   // Freeze local estimates on every review task: a byte-based token estimate and
   // a deterministic risk seed. These persist as descriptive host-workload
   // metadata; the estimate-review step may later refine them.
+  const sourceHashes = new Map(bundle.repo_manifest.files.map((file) => [file.path, file.hash ?? "unversioned"]));
   const freezeEstimates = (task: AuditTask): AuditTask => ({
     ...task,
+    inputs: { ...task.inputs, ...Object.fromEntries(task.file_paths.map((path) => [`source:${path}`, sourceHashes.get(path) ?? "unversioned"])) },
     token_estimate:
       task.token_estimate ??
       taskContentTokens(task, resolvedSizeIndex, lineIndex),
@@ -241,6 +246,11 @@ export async function runPlanningExecutor(
   const allReviewTasks = canonicalizeAuditTasks([
     ...enrichedAuditTasks,
     ...pendingRequeueTasks.map(freezeEstimates),
+    // Reconciliation must not drop unrelated in-flight verification work.
+    ...(bundle.audit_tasks ?? []).filter((task) => task.tags?.includes(DEEPENING_TAG) &&
+      !isArchitectureDiscoveryTask(task) && task.file_paths.every((path) =>
+        coverage.files.some((file) => file.path === path && file.audit_status !== "excluded"))).map(freezeEstimates),
+    ...architectureDiscoveryTasks({ ...bundle, coverage_matrix: coverage }, lineIndex).map(freezeEstimates),
   ]);
 
   // Persist frozen task nodes and their soft affinity edges; the host workload

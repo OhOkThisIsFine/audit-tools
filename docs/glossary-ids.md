@@ -22,13 +22,9 @@ is deleted too.
 | INV-CC | Idempotent, sole-writer intent guidance bootstrap. | `src/shared/intake/guidanceBootstrap.ts` |
 | INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
-| INV-CO | Contract-pipeline obligation and reconciliation derivation. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-COVERAGE | Per-module remediation coverage joins preserve every owned finding's terminal outcome, verification evidence, and producing-module attribution; run close also reports planned findings missing from state. | `runClosePhase` in `src/remediate/phases/close.ts`; `RemediationItemState.recorded_by_module` in `src/remediate/state/types.ts`; `RemediationOutcomeRecord.recorded_by_module` in `src/shared/types/remediationOutcome.ts` |
-| INV-CPGV-OUTCOME-RECORD-OWNER | The cross-artifact gate-outcome record (`evaluated`/`reason`) is owned by `src/remediate/validation/contractPipelineGates.ts`. | `src/remediate/validation/contractPipelineGates.ts` |
-| INV-CVG | Fail-closed contract validation and scoped positive/negative coverage. | `src/remediate/validation/contractPipelineGates.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
 | INV-GND | Missing grounding evidence is treated as ungrounded. | `src/shared/validation/findingGrounding.ts` |
-| INV-IR | Item-scoped contract revalidation, empty-delta copy-forward, and semantic-hash reconvergence. | `src/remediate/contractPipeline/changeClassification.ts` |
 | INV-ISC | Every `RemediationItemStatus` belongs to exactly one classification under an exhaustive `Record<RemediationItemStatus, boolean>` for each partition axis (in-progress/terminal/skip/unsuccessful-end), so a new status is a compile error at every unhandled axis rather than a silently-permissive membership test. | `src/remediate/state/itemStatus.ts` |
 | INV-ISC-CLOSE-PHASE-PRECONDITION | The close phase force-closes `blocked`/`needs_clarification` items to `abandoned` so a run can end without livelocking or rendering a non-terminal item as a partial completion. | `src/remediate/state/itemStatus.ts` |
 | INV-ISC-EVIDENCE-EMITTED | A `verified_already_fixed`/`refuted` terminal disposition requires a complete verification-evidence triple (method, mechanism, and confirmation) before the writer may emit it; incomplete or mechanism-contradicting evidence is refused to a non-terminal `blocked` outcome instead. | `src/shared/types/remediationOutcome.ts`; `src/remediate/phases/close.ts`; `src/remediate/state/itemStatus.ts` |
@@ -53,6 +49,16 @@ is deleted too.
 | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
 | INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostHandoff.ts` |
 
+The replacement executable-plan contract has no separate obligation, module-contract, or
+interface-definition graph. Scoped positive/negative assertions are enforced by
+`ExecutionRequirementSchema` in `src/shared/types/executionPlan.ts`; reference integrity and
+execution dependency cycles by `executionPlanReferenceIssues` in the same module. Source coverage,
+reviewed write scope, and integration-checkpoint ordering are enforced by `executionPlanIssues` in
+`src/remediate/contractPipeline/executionPlan.ts`. That module also binds accepted revisions and
+review receipts to their source and repository context, replacing copy-forward between intermediate
+artifacts. The workflow and review responsibilities are documented in
+[`spec/remediation-workflow-design.md`](../spec/remediation-workflow-design.md).
+
 The source also contains local numeric invariants (`INV-<n>`). Those numbers are file-local and their
 set is sparse; resolve them at the citing module rather than treating them as a global namespace.
 
@@ -69,7 +75,6 @@ identity.
 | Id | Meaning | Live owner |
 |---|---|---|
 | N-R13 | The former document phase remains dissolved; the item-specification field it produced is gone. | design record only — the code it named now carries no such id: the run-status vocabulary (`REMEDIATION_RUN_STATUSES`, `src/remediate/state/runStatus.ts`) and the planning→implementing transition (`decideNextStep`, `src/remediate/steps/nextStep.ts`) |
-| N-R21 | Circular interface-definition dependencies are reported to the design critic, which breaks the cycle by re-drafting the interface definitions. | design record only — the warning is emitted by `validateDesignSpecGates` in `src/remediate/validation/contractPipelineGates.ts`; the message carries the diagnostic and the action, never the id |
 | N-X06 | Deterministic free-form intent interpretation seam. | design record only — the seam contract is `FreeFormIntentInterpretation` in `src/shared/types/intentInterpretation.ts`, consumed by `src/audit/orchestrator/intentInterpreter.ts` |
 
 ## Live finding citations

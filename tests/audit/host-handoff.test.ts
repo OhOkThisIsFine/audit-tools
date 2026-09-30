@@ -1683,7 +1683,15 @@ describe(FAILURE_SIGNATURE, () => {
     // review-run manifest, its pending-task list — plus the binding set that
     // build wrote, which has no `tags` and an older version.
     const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
-    const frontier = await buildAdvancedBundle(root, "planning_artifacts");
+    const frontier: ArtifactBundle = await buildAdvancedBundle(root, "planning_artifacts");
+    if (!frontier.design_assessment) throw new Error("Planning fixture requires design assessment");
+    // Planning now precedes architecture work. This binding-only fixture
+    // explicitly supplies the completed reviews it previously inherited.
+    frontier.design_assessment = {
+      ...frontier.design_assessment,
+      contract_reviewed: true, contract_findings: [],
+      conceptual_reviewed: true, conceptual_findings: [],
+    };
     const completed = captureCompletedDesignReviews(readyForReviewBundle(oldTask, frontier));
     await writeCoreArtifacts(artifactsDir, completed, {
       prune: true,

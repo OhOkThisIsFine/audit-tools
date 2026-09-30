@@ -22,7 +22,7 @@ export const REMEDIATION_STEP_CONTRACT_VERSION =
 // persisted workload of an earlier version is reported `workload_stale`, and
 // the next prepare re-mints its digest under the same binding.
 export const REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION =
-  "remediation-host-workload/v1alpha3" as const;
+  "remediation-host-workload/v2" as const;
 
 export const REMEDIATION_HOST_RESULT_CONTRACT_VERSION =
   "remediation-host-result/v1alpha3" as const;

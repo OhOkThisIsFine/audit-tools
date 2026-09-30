@@ -1,6 +1,6 @@
 /**
- * The two grounding corpora must be NUL-delimited (`git ls-files -z`), never
- * newline-split.
+ * The shared grounding corpus must preserve real paths (`git ls-files -z`),
+ * and reviewed write scope must accept those same paths.
  *
  * Without `-z`, `git ls-files` renders any path it considers unusual in C-quoted
  * form: non-ASCII bytes (core.quotePath, on by default) come back as
@@ -20,7 +20,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enumerateTrackedFilePaths } from "../../src/shared/validation/findingGrounding.js";
-import { enumerateRepoTreePaths } from "../../src/remediate/validation/contractPipelineGates.js";
+import { checkWriteScopePathsAgainstTrackedTree } from "../../src/remediate/steps/contractPipeline.js";
 
 const UNICODE_PATH = "src/café-ünïcode.ts";
 const ASCII_PATH = "src/plain.ts";
@@ -64,14 +64,9 @@ test("enumerateTrackedFilePaths keeps a non-ASCII tracked path verbatim (NUL-del
   });
 });
 
-test("enumerateRepoTreePaths (M-B3 corpus) keeps a non-ASCII tracked path verbatim", async () => {
-  await withUnicodeRepo(async (dir) => {
-    const corpus = await enumerateRepoTreePaths(dir);
-    expect(corpus.has(ASCII_PATH)).toBe(true);
-    expect(
-      [...corpus].filter((p) => p.includes('"')),
-      "a C-quoted entry means git ls-files ran without -z",
-    ).toEqual([]);
-    expect(nfcSet(corpus).has(nfc(UNICODE_PATH))).toBe(true);
+test("reviewed write-scope validation accepts the same real non-ASCII path", async () => {
+  await withUnicodeRepo(async dir => {
+    expect(await checkWriteScopePathsAgainstTrackedTree(dir, [ASCII_PATH, UNICODE_PATH], "fixture")).toEqual([]);
+    expect(await checkWriteScopePathsAgainstTrackedTree(dir, ["../outside.ts"], "fixture")).not.toEqual([]);
   });
 });

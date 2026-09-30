@@ -1,3 +1,4 @@
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -9,7 +10,7 @@ import {
 } from "./helpers/nextStepHarness.js";
 
 const harness = createNextStepHarness(".test-next-step-outcomes-contract");
-const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint, walkFriction } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint } = harness;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
@@ -41,7 +42,7 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
     }
 
     function makeRetryableClosingState(): RemediationState {
-      return {
+      return canonicalStateFromLegacyFixture({
         status: "closing",
         plan: {
           plan_id: "PLAN-RETRY",
@@ -62,10 +63,11 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
             },
             {
               block_id: "B-003",
-              items: ["F-003", "F-004"],
+              items: ["F-003"],
               parallel_safe: true,
               touched_files: [],
             },
+            { block_id: "B-004", items: ["F-004"], parallel_safe: true, touched_files: [] },
           ],
           project_type: "unknown",
           candidate_closing_actions: ["none"],
@@ -91,29 +93,32 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
           "F-004": {
             finding_id: "F-004",
             status: "deemed_inappropriate",
-            block_id: "B-003",
+            block_id: "B-004",
             // No failure_reason on purpose: skipped entries must still carry a
             // non-empty reason in the outcomes contract.
           },
         },
+        finding_dispositions: {
+          "F-003": { status: "ignored", reason: "Ignored by user decision." },
+          "F-004": { status: "declined", reason: "Owner declined an inappropriate change." },
+        },
         closing_plan: { action: "none" },
-      } as RemediationState;
+      });
     }
 
     async function readOutcomesReport(): Promise<any> {
       return JSON.parse(await readFile(OUTCOMES_PATH, "utf8"));
     }
 
-    it("every terminal item carries its full finding payload, item-spec summary, block refs, and final status", async () => {
+    it("every source retains its payload, execution-unit links, and independent final status", async () => {
       const state = makeRetryableClosingState();
-      await saveState(state);
-      // The close is gated on the run's friction walk — satisfy it first.
-      await walkFriction("PLAN-RETRY");
-      await acknowledgeResume();
       await writeIntentCheckpoint();
+      await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+      await saveState(state);
+      await acknowledgeResume();
 
       // Folded: closing state runs close and returns present_report in one call.
-      const step = await decideNextStep({ root: REPO_DIR });
+      const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
       expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
@@ -128,17 +133,19 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
 
       // (b) No per-item spec rides the outcomes contract. The document phase
       // that produced one was dissolved and the field is gone; a retry
-      // reads the full Finding in (a) and the block scope in (c) instead.
+      // reads the full Finding in (a) and the unit scope in (c) instead.
       for (const id of ["F-001", "F-002"]) {
         expect(byId.get(id)).not.toHaveProperty("item_spec");
       }
 
-      // (c) Owning block id and that block's dependency ids.
-      expect(byId.get("F-001")?.block_id).toBe("B-001");
-      expect(byId.get("F-001")?.block_dependencies).toEqual([]);
-      expect(byId.get("F-002")?.block_id).toBe("B-002");
-      expect(byId.get("F-002")?.block_dependencies).toEqual(["B-001"]);
-      expect(byId.get("F-003")?.block_id).toBe("B-003");
+      // (c) Source-to-unit links and execution dependency identities.
+      expect(byId.get("F-001")?.unit_ids).toEqual(["B-001"]);
+      expect(byId.get("F-001")?.unit_dependencies).toEqual([]);
+      expect(byId.get("F-002")?.unit_ids).toEqual(["B-002"]);
+      expect(byId.get("F-002")?.unit_dependencies).toEqual(["B-001"]);
+      expect(byId.get("F-003")?.unit_ids).toEqual(["B-003"]);
+      expect(byId.get("F-004")?.unit_ids).toEqual(["B-004"]);
+      expect(report.execution_outcomes.map((unit: any) => unit.unit_id).sort()).toEqual(["B-001", "B-002", "B-003", "B-004"]);
 
       // (d) Final status per terminal state.
       expect(byId.get("F-001")?.final_status).toBe("fixed");
@@ -152,30 +159,27 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
       expect(byId.get("F-004")?.reason).toBeTruthy();
     });
 
-    it("force-close records non-terminal items as failed with the original state preserved", async () => {
+    it("force-close records non-terminal source work as pending with the execution state preserved", async () => {
       const state = makeRetryableClosingState();
-      state.items!["F-002"] = {
-        finding_id: "F-002",
+      state.items!["B-002"] = {
+        unit_id: "B-002",
         status: "pending",
-        block_id: "B-002",
       };
-      await saveState(state);
-      // The close is gated on the run's friction walk — satisfy it first.
-      await walkFriction("PLAN-RETRY");
-      await acknowledgeResume();
       await writeIntentCheckpoint();
+      await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+      await saveState(state);
+      await acknowledgeResume();
 
       // Folded: closing runs to completion in one call.
-      const step = await decideNextStep({ root: REPO_DIR });
+      const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
       expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
       const entry = report.outcomes.find((e: any) => e.finding_id === "F-002");
-      expect(entry?.final_status).toBe("failed");
-      expect(entry?.outcome).toBe("blocked");
+      expect(entry?.final_status).toBe("pending");
+      expect(entry?.outcome).toBe("pending");
       expect(entry?.original_state).toBe("pending");
-      expect(entry?.reason).toMatch(/force-closed/i);
-      expect(entry?.reason).toMatch(/non-terminal/i);
+      expect(report.execution_outcomes.find((unit: any) => unit.unit_id === "B-002")?.status).toBe("pending");
       expect(entry?.reason).toMatch(/pending/);
       // The force-closed item still carries its full payload for retry.
       expect(entry?.finding?.id).toBe("F-002");
@@ -213,7 +217,7 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
         "utf8",
       );
 
-      const state: RemediationState = {
+      const state = canonicalStateFromLegacyFixture({
         status: "closing",
         plan: {
           plan_id: "PLAN-COVERAGE",
@@ -242,7 +246,7 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
               finding_id: "F-001",
               title: "First",
               disposition: "planned",
-              block_id: "B-001",
+              unit_ids: ["B-001"],
             },
             {
               finding_id: "F-DUP",
@@ -259,15 +263,14 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
             },
           ],
         },
-      } as RemediationState;
-      await saveState(state);
-      // The close is gated on the run's friction walk — satisfy it first.
-      await walkFriction("PLAN-COVERAGE");
-      await acknowledgeResume();
+      });
       await writeIntentCheckpoint();
+      await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+      await saveState(state);
+      await acknowledgeResume();
 
       // Folded: closing runs to completion in one call.
-      const step = await decideNextStep({ root: REPO_DIR });
+      const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
       expect(step.step_kind).toBe("present_report");
 
       const report = await readOutcomesReport();
@@ -294,14 +297,13 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
 
     it("close writes the enriched outcomes before deleting state.json", async () => {
       const state = makeRetryableClosingState();
-      await saveState(state);
-      // The close is gated on the run's friction walk — satisfy it first.
-      await walkFriction("PLAN-RETRY");
-      await acknowledgeResume();
       await writeIntentCheckpoint();
+      await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+      await saveState(state);
+      await acknowledgeResume();
 
       // Folded: closing runs to completion in one call.
-      const step = await decideNextStep({ root: REPO_DIR });
+      const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
       expect(step.step_kind).toBe("present_report");
 
       // This state has a `blocked` item (F-002), so the run is NOT fully green:
@@ -315,7 +317,7 @@ describe("decideNextStep — retryable remediation-outcomes contract", () => {
       for (const entry of report.outcomes) {
         expect(entry.finding?.id).toBe(entry.finding_id);
         expect(entry.finding?.summary).toBeTruthy();
-        expect(entry.block_id).toBeTruthy();
+        expect(entry.unit_ids.length).toBeGreaterThan(0);
       }
     });
 });

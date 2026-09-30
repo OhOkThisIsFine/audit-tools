@@ -11,10 +11,12 @@ import {
 } from "../../src/remediate/phases/close.js";
 import type { OrchestratorOptions } from "../../src/remediate/types/options.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import {
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   submissionLedgerPath,
   NO_RECOVERY,
+  REMEDIATION_OUTCOMES_CONTRACT_VERSION,
 } from "audit-tools/shared";
 
 function finding(id: string, lens: string, files: string[]) {
@@ -31,7 +33,7 @@ function finding(id: string, lens: string, files: string[]) {
 }
 
 function makeState() {
-  return makeBaseState({
+  return makeBaseState(canonicalStateFromLegacyFixture({
     status: "closing",
     plan: {
       plan_id: "PLAN-1",
@@ -41,17 +43,18 @@ function makeState() {
         finding("F-3", "performance", ["lib/d.py"]),
         finding("F-4", "tests", ["src/e.ts"]),
       ],
-      blocks: [],
+      blocks: [1, 2, 3, 4].map(n => ({ block_id: `U-${n}`, items: [`F-${n}`], touched_files: [] })),
       project_type: "typescript-node",
       candidate_closing_actions: ["none"],
     },
+    finding_dispositions: { "F-3": { status: "declined", reason: "Owner declined this inappropriate change." } },
     items: {
       "F-1": { finding_id: "F-1", status: "resolved", block_id: "B", rework_count: 2 },
       "F-2": { finding_id: "F-2", status: "resolved_no_change", block_id: "B" },
       "F-3": { finding_id: "F-3", status: "deemed_inappropriate", block_id: "B" },
       "F-4": { finding_id: "F-4", status: "blocked", block_id: "B" },
     },
-  });
+  }));
 }
 
 function closingResult(overrides: Partial<ClosingResult> = {}): ClosingResult {
@@ -65,6 +68,29 @@ function closingResult(overrides: Partial<ClosingResult> = {}): ClosingResult {
 }
 
 describe("buildRemediationOutcomesReport", () => {
+  it("keeps partial source work pending until every linked unit is verified", () => {
+    const state = makeState();
+    const first = state.plan!.units[0]!;
+    state.plan!.units.push({ ...first, id: "U-followup", title: "Follow-up", dependencies: [first.id] });
+    state.items!["U-followup"] = { unit_id: "U-followup", status: "pending" };
+    const partial = buildRemediationOutcomesReport(state, closingResult());
+    expect(partial.outcomes.find(entry => entry.finding_id === "F-1")?.outcome).toBe("pending");
+    expect(partial.execution_outcomes.find(entry => entry.unit_id === "U-followup")?.status).toBe("pending");
+    state.items!["U-followup"].status = "resolved";
+    const complete = buildRemediationOutcomesReport(state, closingResult());
+    expect(complete.outcomes.find(entry => entry.finding_id === "F-1")?.outcome).toBe("resolved");
+    expect(complete.execution_outcomes.filter(entry => entry.source_finding_ids.includes("F-1"))).toHaveLength(2);
+  });
+
+  it("a shared unit cannot erase a separate owner disposition on either source", () => {
+    const state = makeState();
+    state.plan!.units[0]!.source_finding_ids.push("F-3");
+    const report = buildRemediationOutcomesReport(state, closingResult());
+    expect(report.outcomes.find(entry => entry.finding_id === "F-1")?.outcome).toBe("resolved");
+    expect(report.outcomes.find(entry => entry.finding_id === "F-3")?.outcome).toBe("inappropriate");
+    expect(report.execution_outcomes.find(entry => entry.unit_id === "U-1")?.source_finding_ids).toEqual(["F-1", "F-3"]);
+  });
+
   it("captures one outcome per finding with lens, file_exts, and rework_count", () => {
     const report = buildRemediationOutcomesReport(
       makeState(),
@@ -72,7 +98,7 @@ describe("buildRemediationOutcomesReport", () => {
     );
 
     expect(report.total).toBe(4);
-    expect(report.contract_version).toBe("remediate-code-outcomes/v1alpha1");
+    expect(report.contract_version).toBe(REMEDIATION_OUTCOMES_CONTRACT_VERSION);
 
     const f1 = report.outcomes.find((o) => o.finding_id === "F-1")!;
     expect(f1.outcome).toBe("resolved");
@@ -158,14 +184,14 @@ describe("buildRemediationOutcomesReport", () => {
 
   it("includes item timing and aggregate duration fields when timestamps exist", () => {
     const state = makeState();
-    state.items!["F-1"].started_at = "2026-06-05T12:00:00.000Z";
-    state.items!["F-1"].completed_at = "2026-06-05T12:00:05.000Z";
-    state.items!["F-2"].started_at = "2026-06-05T12:00:02.000Z";
-    state.items!["F-2"].completed_at = "2026-06-05T12:00:10.000Z";
-    state.items!["F-3"].started_at = "2026-06-05T12:00:03.000Z";
-    state.items!["F-3"].completed_at = "2026-06-05T12:00:04.000Z";
-    state.items!["F-4"].started_at = "2026-06-05T12:00:01.000Z";
-    state.items!["F-4"].completed_at = "2026-06-05T12:00:07.000Z";
+    state.items!["U-1"].started_at = "2026-06-05T12:00:00.000Z";
+    state.items!["U-1"].completed_at = "2026-06-05T12:00:05.000Z";
+    state.items!["U-2"].started_at = "2026-06-05T12:00:02.000Z";
+    state.items!["U-2"].completed_at = "2026-06-05T12:00:10.000Z";
+    state.items!["U-3"].started_at = "2026-06-05T12:00:03.000Z";
+    state.items!["U-3"].completed_at = "2026-06-05T12:00:04.000Z";
+    state.items!["U-4"].started_at = "2026-06-05T12:00:01.000Z";
+    state.items!["U-4"].completed_at = "2026-06-05T12:00:07.000Z";
 
     const report = buildRemediationOutcomesReport(
       state,
@@ -406,7 +432,7 @@ describe("runClosePhase — a recovered run renders differently from a clean one
 
   /** A closing-phase state whose close runs to completion with no test command. */
   function closingState() {
-    return makeBaseState({
+    return canonicalStateFromLegacyFixture({
       status: "closing",
       plan: {
         plan_id: "PLAN-1",
@@ -422,7 +448,7 @@ describe("runClosePhase — a recovered run renders differently from a clean one
             affected_files: [{ path: "src/a.ts" }],
           },
         ],
-        blocks: [],
+        blocks: [{ block_id: "U-1", items: ["F-1"], touched_files: ["src/a.ts"] }],
         project_type: "typescript-node",
         candidate_closing_actions: ["none"],
       },
@@ -458,9 +484,11 @@ describe("runClosePhase — a recovered run renders differently from a clean one
       ledgerEvent("accepted"),
     ]);
 
+    const state = closingState();
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     await runClosePhase(
-      closingState(),
-      { root, artifactsDir } as OrchestratorOptions,
+      state,
+      { root, artifactsDir, skipFinalGate: true } satisfies OrchestratorOptions,
     );
 
     const { report, outcomes } = await readRenderedSurfaces();
@@ -485,9 +513,11 @@ describe("runClosePhase — a recovered run renders differently from a clean one
       }),
     ]);
 
+    const state = closingState();
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     await runClosePhase(
-      closingState(),
-      { root, artifactsDir } as OrchestratorOptions,
+      state,
+      { root, artifactsDir, skipFinalGate: true } satisfies OrchestratorOptions,
     );
 
     const { report, outcomes } = await readRenderedSurfaces();

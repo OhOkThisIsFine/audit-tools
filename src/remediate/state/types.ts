@@ -1,5 +1,7 @@
 import type { AcceptedConformanceReview } from "../../shared/types/reviewIndependence.js";
-import { ImplementationContextSchema } from "../../shared/types/contractPipeline/implementation.js";
+import { ExecutableChangePlanSchema, ExecutionRequestSchema } from "../../shared/types/executionPlan.js";
+import { PlanCounterexampleSchema } from "../contractPipeline/executionPlan.js";
+export type { ExecutionRequirement, ExecutionUnit, ExecutionRequest } from "../../shared/types/executionPlan.js";
 // sites-pinned: tests/remediate/audit-read-plan-stamp.test.ts
 import { z } from "zod";
 import { CLOSING_ACTIONS } from "audit-tools/shared";
@@ -12,133 +14,46 @@ import type { RemediationItemStatus } from "./itemStatus.js";
 import type {
   Finding,
   RemediationOutcome,
-  MechanicalVerification,
 } from "audit-tools/shared";
 import { AuditReadSchema, FindingSchema } from "audit-tools/shared";
 export type { Finding };
 
-// `Evidence` is a brand-new export of `src/shared/types/remediationOutcome.ts`
-// (CDC-25/CDC-28), not yet re-exported through the `audit-tools/shared` barrel
-// (`src/shared/index.ts` — outside this module's file_scope and this work
-// item's allowed_files). Imported by its real relative path rather than
-// through the barrel; both resolve the same source file, and
-// `check:depgraph`'s `shared-imports-no-orchestrator` rule only forbids the
-// opposite direction (`src/shared` importing `src/remediate`), so a
-// `src/remediate` module reaching down into `src/shared` this way is exactly
-// the allowed direction.
-import type { Evidence } from "../../shared/types/remediationOutcome.js";
-// Local usage (RemediationItemState.disposition_override below) alongside the
-// existing re-export-only statement further down this file, which does not by
-// itself bring the name into this module's local scope.
-import type { PerFindingDisposition } from "./disposition.js";
+import { EvidenceSchema, MechanicalVerificationSchema } from "../../shared/types/remediationOutcome.js";
+import { PER_FINDING_DISPOSITIONS } from "./disposition.js";
 
-export const RemediationBlockSchema = z
-  .object({
-    block_id: z.string(),
-    items: z.array(z.string()),
-    /**
-     * Whether this block may run concurrently with its peers. First-class on the
-     * block contract (not derived host-side) so the scheduler reads one source.
-     */
-    parallel_safe: z.boolean(),
-    /**
-     * Block ids that must complete before this block runs. First-class (the
-     * serialized schema-first chain head, CE-001): producers emit it, the
-     * scheduler consumes it. Optional — absence means no upstream dependency.
-     */
-    dependencies: z.array(z.string()).optional(),
-    /**
-     * Commands to run as a post-merge verification gate after this block's
-     * worktree branch is merged into the main tree. When present, these are
-     * preferred over `RemediationPlan.test_command` for the gate check.
-     */
-    targeted_commands: z.array(z.string()).optional(),
-    /**
-     * Repo-relative paths that this block's implementation is expected to touch.
-     * First-class and REQUIRED (an empty array is allowed, an omitted field is
-     * rejected by `validateRemediationBlock` — which the state LOAD gate
-     * delegates to, so the requirement holds on every path a block reaches a
-     * consumer through): the file-ownership-disjoint scheduler and
-     * `blockResolvedItemsOnCombinedFailure` both read it, so a block with no declared
-     * surface is a producer bug, not an implicit empty.
-     */
-    touched_files: z.array(z.string()),
-    /**
-     * 0-based foundations→consumers phase ordinal (auto-phasing, T3). Derived
-     * mechanically at promotion from the persisted phase cut (the module a block's
-     * obligations belong to). The host handoff treats it as a hard barrier: a
-     * block is never emitted until every lower-ordinal block is verified-complete,
-     * giving a per-phase whole-repo green checkpoint. Optional — absent (or all
-     * blocks sharing one ordinal) means a single phase, i.e. no barrier.
-     */
-    phase_ordinal: z.number().int().nonnegative().optional(),
-    /**
-     * Whether the blocks sharing a co-file (same touched path) may still run in
-     * parallel because their edit regions are disjoint. Additive + optional:
-     * absence is equivalent to `false` (co-file blocks serialize by default), and
-     * a pre-existing block with no such key still validates. Deliberately a bare
-     * boolean — no WriteRegion / WriteAnchor / anchor apparatus lives on the block.
-     */
-    cofile_parallel_safe: z.boolean().optional(),
-    /**
-     * Deterministic advisory size derived from this block's unique physical
-     * files. It is metadata for the host, never a backend-fit claim.
-     */
-    token_estimate: z.number().int().nonnegative().optional(),
-    /** Distinct instructions from the implementation node, carried into the bound prompt. */
-    implementation_context: ImplementationContextSchema.optional(),
-    /**
-     * The APPROVED finalized module contract(s) this block implements (the
-     * evidence-coverage entry in docs/backlog/open-bugs.md). Attached VERBATIM at promotion by resolving each DAG
-     * node's obligation-id slugs against `finalized_module_contracts`, and
-     * carried into the sha-bound dispatch prompt so a worker conforms to the
-     * approved interface instead of inventing a locally plausible one that
-     * contradicts it. Optional — a plan from outside the contract pipeline has
-     * no module contracts.
-     */
-    module_contracts: z
-      .array(
-        z
-          .object({
-            module: z.string(),
-            contract: z.record(z.string(), z.unknown()),
-          })
-          .strict(),
-      )
-      .optional(),
-  })
-  .strict();
-export type RemediationBlock = z.infer<typeof RemediationBlockSchema>;
-
-export const RemediationPlanSchema = z
-  .object({
-    plan_id: z.string(),
-    goal_id: z.string().optional(),
-    source: z.string().optional(),
-    findings: z.array(FindingSchema),
-    blocks: z.array(RemediationBlockSchema),
-    project_type: z.string(),
-    test_command: z.string().optional(),
-    e2e_command: z.string().optional(),
-    test_command_source: z.enum(["project_facts", "explicit"]).optional(),
-    e2e_command_source: z.enum(["project_facts", "explicit"]).optional(),
-    candidate_closing_actions: z.array(z.enum(CLOSING_ACTIONS)),
-    block_strategy: z
-      .enum(["test_graph", "git_cocommit", "file_overlap", "manual"])
-      .optional(),
-    /**
-     * What the AUDIT read (`AuditRead`), stamped by the TOOL at plan application
-     * from the validated source findings report — never taken from the
-     * host-writable extracted plan. It is the `B` of the close phase's two-read
-     * evidence leg (`verifyHeadEvidenceAgainstFindings`). `null` and absent both
-     * mean "no commit is known" (absent only on a state persisted before the
-     * field existed, or a plan with no audit-side source); either way the leg
-     * withholds, and no other commit may stand in.
-     */
-    audit_read: AuditReadSchema.nullable().optional(),
-  })
-  .strict();
+/** One reviewed semantic plan, carrying immutable source provenance. */
+export const RemediationPlanSchema = ExecutableChangePlanSchema.extend({
+  goal_id: z.string().optional(),
+  source: z.string().optional(),
+  findings: z.array(FindingSchema),
+  request: ExecutionRequestSchema.optional(),
+  review_revision_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  review_counterexamples: z.array(PlanCounterexampleSchema).default([]),
+  project_type: z.string(),
+  test_command: z.string().optional(),
+  e2e_command: z.string().optional(),
+  test_command_source: z.enum(["project_facts", "explicit"]).optional(),
+  e2e_command_source: z.enum(["project_facts", "explicit"]).optional(),
+  candidate_closing_actions: z.array(z.enum(CLOSING_ACTIONS)),
+  audit_read: AuditReadSchema.nullable().optional(),
+}).strict();
 export type RemediationPlan = z.infer<typeof RemediationPlanSchema>;
+
+export const SourceVerificationSchema = z.object({
+  disposition_override: z.enum(PER_FINDING_DISPOSITIONS).optional(),
+  evidence: EvidenceSchema.optional(),
+  recorded_by_module: z.string().min(1).optional(),
+  mechanical_verification: MechanicalVerificationSchema.optional(),
+  review_revision_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  source_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  head_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u).nullable().optional(),
+}).strict();
+export type SourceVerification = z.infer<typeof SourceVerificationSchema>;
+
+export interface FindingDisposition {
+  status: "ignored" | "declined";
+  reason: string;
+}
 
 /**
  * Tool-owned binding for one emitted host workload. The host may write result
@@ -170,13 +85,6 @@ const RemediationHostHandoffBindingFields = {
 
 };
 
-const LegacyRemediationHostHandoffRecordSchema = z
-  .object({
-    contract_version: z.literal(REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1),
-    ...RemediationHostHandoffBindingFields,
-  })
-  .strict();
-
 const ExplicitScopeRemediationHostHandoffRecordSchema = z
   .object({
     contract_version: z.literal(REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2),
@@ -185,20 +93,14 @@ const ExplicitScopeRemediationHostHandoffRecordSchema = z
   })
   .strict();
 
-export const RemediationHostHandoffRecordSchema = z.discriminatedUnion(
-  "contract_version",
-  [
-    LegacyRemediationHostHandoffRecordSchema,
-    ExplicitScopeRemediationHostHandoffRecordSchema,
-  ],
-);
+export const RemediationHostHandoffRecordSchema = ExplicitScopeRemediationHostHandoffRecordSchema;
 export type RemediationHostHandoffRecord = z.infer<
   typeof RemediationHostHandoffRecordSchema
 >;
 
 export const ClarificationRequestSchema = z
   .object({
-    finding_id: z.string(),
+    unit_id: z.string(),
     category: z.enum([
       "public_contract",
       "behavioral_semantics",
@@ -222,7 +124,7 @@ export type ClarificationRequest = z.infer<typeof ClarificationRequestSchema>;
  * others. A separate run-level question list used to be a second copy; clearing
  * it after a partial answer left the unanswered items with no question to show.
  */
-export type ClarificationQuestion = Omit<ClarificationRequest, "finding_id">;
+export type ClarificationQuestion = Omit<ClarificationRequest, "unit_id">;
 
 /** The canonical clarification categories (single-sourced from the schema). */
 export const CLARIFICATION_CATEGORIES =
@@ -241,6 +143,9 @@ export function isClarificationCategory(
 
 export const ClosingActionPreviewSchema = z
   .object({
+    /** Approval is for this action, never an interchangeable close label. */
+    action: z.enum(CLOSING_ACTIONS),
+    custom_command: z.array(z.string()).optional(),
     /** Repo-relative paths that would be staged for the commit. */
     files: z.array(z.string()),
     /** Generated commit message derived from item summaries / finding titles. */
@@ -286,7 +191,7 @@ export interface CoverageLedgerEntry {
     | "dropped_by_checkpoint"
     | "dropped_phantom_paths"
     | "declined_by_review";
-  block_id?: string;
+  unit_ids?: string[];
   folded_into?: string;
   rationale?: string;
   /** Phantom (non-existent) cited paths the grounding pass stripped. */
@@ -333,7 +238,9 @@ export type RemediationOutcomeFinalStatus =
   | "fixed"
   | "failed"
   | "ignored"
-  | "skipped";
+  | "skipped"
+  | "pending"
+  | "deferred";
 
 /**
  * One fully self-describing entry per finding in `remediation-outcomes.json`.
@@ -350,10 +257,9 @@ export type RemediationOutcomeFinalStatus =
 export interface RemediationOutcomeItem extends RemediationOutcome {
   /** Full original Finding payload (the shared `Finding` type, verbatim). */
   finding: Finding;
-  /** Owning block id (`RemediationBlock.block_id`). */
-  block_id: RemediationBlock["block_id"];
-  /** The owning block's dependency block ids (`RemediationBlock.dependencies`). */
-  block_dependencies: string[];
+  /** Every execution unit addressing this original source finding. */
+  unit_ids: string[];
+  unit_dependencies: string[];
   /** Retry-oriented final status (see `RemediationOutcomeFinalStatus`). */
   final_status: RemediationOutcomeFinalStatus;
   /**
@@ -392,9 +298,8 @@ export interface OutcomeCoverageLedger extends Omit<CoverageLedger, "entries"> {
 export type { PerFindingDisposition } from "./disposition.js";
 
 export interface RemediationItemState {
-  finding_id: string;
+  unit_id: string;
   status: RemediationItemStatus;
-  block_id: string;
   last_successful_step?: string;
   failure_reason?: string;
   /** Prompt-bound evidence supplied for a verified no-change host outcome. */
@@ -424,11 +329,6 @@ export interface RemediationItemState {
   host_landed_commit?: string;
   /** Repo-relative, path-sorted files the landed commit changed (see above). */
   host_landed_files?: string[];
-  /**
-   * Item C — close-gate mechanical re-verify verdict for an analyzer-born
-   * finding (set by `verifyAnalyzerLeads`; copied into the outcomes contract).
-   */
-  mechanical_verification?: MechanicalVerification;
   /** Times this item was sent back for rework via triage (Phase 7B outcomes). */
   rework_count?: number;
   /** ISO-8601 timestamp when this item first left pending. */
@@ -456,45 +356,4 @@ export interface RemediationItemState {
    * the cap is hit) instead of re-dispatching the same worker indefinitely.
    */
   incomplete_coverage_attempts?: number;
-  /**
-   * CDC-25/CDC-26 — SOURCE-SIDE SHAPE. The per-finding verification-evidence
-   * triple (file/line/mechanism) a producing module RECORDS onto this item at
-   * its OWN phase (INV-COVERAGE's "evidence producer" half) before the single
-   * run-terminal `runClosePhase` PERSISTS it (INV-ISC-EVIDENCE-EMITTED). The
-   * producer is `verifyHeadEvidenceAgainstFindings`
-   * (`src/remediate/phases/closeVerifyHeadEvidence.ts`), whose own reads of the
-   * finding's cited location — at the audit's commit and at HEAD — are what the
-   * triple names. A runtime data flow through this already-existing state item,
-   * not a build-phase dependency: no cross-phase artifact token is minted for
-   * it.
-   * This field lives here — inside item-status-partition-and-close's own
-   * file_scope — and is therefore owned BY SCOPE, not by a clause 1(c)
-   * declaration (that channel is only for a file outside every module's
-   * file_scope, as `src/shared/types/remediationOutcome.ts` needed one for the
-   * matching widened record shape). No other module edits this file.
-   */
-  evidence?: Evidence;
-  /**
-   * CDC-25 — which module recorded {@link evidence} (and, where set,
-   * {@link disposition_override}) for this finding. Carried byte-exact into the
-   * emitted outcome record's `recorded_by_module` (the ATTRIBUTION ROUND-TRIP)
-   * so the 26 INV-COVERAGE joins' condition (3) can still tell which module
-   * closed which id — the writer must never re-derive this or drop it.
-   */
-  recorded_by_module?: string;
-  /**
-   * CDC-25 — a producing module's own-phase determination that this finding's
-   * true disposition is `verified_already_fixed` or `refuted` rather than the
-   * disposition ordinarily derived from {@link status} alone.
-   * `RemediationItemStatus` stays a closed 12-member enum with no
-   * `verified_already_fixed`/`refuted` values of its own; the two new
-   * `PerFindingDisposition` members are reached ONLY through this explicit
-   * override (see `resolveDisposition` in `itemStatus.ts`), and only honoured
-   * by the writer when this item's {@link status} is terminal and its
-   * {@link evidence} triple is complete (INV-ISC-EVIDENCE-EMITTED) — an
-   * incomplete triple makes the writer refuse the override and fall back to a
-   * non-terminal, force-closed outcome instead of a green close on assertion
-   * alone.
-   */
-  disposition_override?: PerFindingDisposition;
 }

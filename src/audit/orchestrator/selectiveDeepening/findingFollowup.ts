@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-frontier.test.ts
 import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Finding } from "../../types.js";
 import {
@@ -36,6 +37,7 @@ export function buildFindingFollowupTask(params: {
     pass_id: `deepening:${params.result.pass_id}`,
     lens: params.result.lens,
     file_paths: paths,
+    ...(params.task?.inputs ? { inputs: { ...params.task.inputs } } : {}),
     file_line_counts: Object.fromEntries(
       paths.map((path) => [
         path,

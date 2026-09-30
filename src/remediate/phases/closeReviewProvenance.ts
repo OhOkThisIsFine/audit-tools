@@ -1,16 +1,15 @@
 // sites-pinned: tests/remediate/review-outcome-provenance.test.ts
 import { ContractReviewOutcomeSchema, type ContractReviewOutcome } from "../../shared/types/reviewIndependence.js";
-import { readContractArtifact } from "../contractPipeline/artifactStore.js";
-import { PHASE_TO_ARTIFACT } from "../steps/contractPipelinePrompts.js";
+import { PLAN_REVIEW_ROLES, readCanonicalPlan, readPlanReview } from "../contractPipeline/executionPlan.js";
 
-/** Export only accepted canonical receipts, never raw worker responses. */
+/** Report only accepted receipts bound to the canonical executable revision. */
 export async function readContractReviewOutcomes(artifactsDir: string): Promise<ContractReviewOutcome[]> {
+  const canonical = await readCanonicalPlan(artifactsDir);
+  if (!canonical) return [];
   const reviews: ContractReviewOutcome[] = [];
-  for (const [role, artifact] of Object.entries(PHASE_TO_ARTIFACT)) {
-    const accepted = await readContractArtifact(artifactsDir, artifact);
-    if (accepted?.review_provenance) {
-      reviews.push(ContractReviewOutcomeSchema.parse({ artifact, role, ...accepted.review_provenance }));
-    }
+  for (const role of PLAN_REVIEW_ROLES) {
+    const receipt = await readPlanReview(artifactsDir, role, canonical.revision_sha256);
+    if (receipt) reviews.push(ContractReviewOutcomeSchema.parse({ artifact: "execution_plan", role, ...receipt.provenance }));
   }
   return reviews;
 }

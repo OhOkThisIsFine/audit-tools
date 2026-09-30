@@ -1,23 +1,23 @@
+import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
-import { buildFrictionWalkStep, presentReportStep, decideRemediateFrictionCloseout } from "./frictionCloseout.js";
+import { presentReportStep } from "./frictionCloseout.js";
 import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type PersistedReviewFilterDispositions } from "../review/filterDispositions.js";
 import { INTENT_INTERPRETATION_FILENAME, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
 import { requestedFindingSelection, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 import { parseCommandString } from "../../shared/tooling/commandShape.js";
-// sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts
+// sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { z } from "zod";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { StateStore, OPERATOR_LIFECYCLE_FILENAME, type OperatorLifecycle, type OperatorLifecycleAction, type RemediationState } from "../state/store.js";
 import type {
   ClarificationRequest,
   Finding,
-  RemediationBlock,
   RemediationItemState,
   RemediationPlan,
 } from "../state/types.js";
@@ -29,11 +29,11 @@ import {
   readOptionalJsonFile,
   stagedAndUntracked,
   writeJsonFile,
+  stableStringify,
   writeTextFile,
   buildAuditDeliverablePair,
   auditReadOf,
   type AuditRead,
-  formatValidationIssues,
   isRecord,
   renderIngestReportLines,
   withFsRetry,
@@ -61,21 +61,12 @@ import {
   detectProjectFacts,
   isClosingAction,
   neutralProjectFacts,
-  repoRelativePath,
 } from "audit-tools/shared";
 import type { CoverageLedger } from "../state/types.js";
-import { applyPlanPipeline, buildCoverageLedger } from "../phases/plan.js";
-import {
-  groundExtractedFindings,
-  type ExtractedFindingGrounding,
-} from "../phases/grounding.js";
+import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
-import { validateRemediationPlan } from "../validation/remediationState.js";
-import {
-  readExtractedPlanIfPresent,
-} from "./dispatch/marshal.js";
-import { ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingBlocks, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
+import { ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
 import {
   FileLockTimeoutError,
@@ -103,22 +94,17 @@ import {
   isTerminalStatus,
   isVerifiedCompleteStatus,
 } from "../state/itemStatus.js";
-import {
-  deduplicateCrossLensFindings,
-  fixupBlocksAfterDedup,
-} from "../dedup/crossLensDedup.js";
-import { checkAffectedFileIntegrity } from "../utils/fileIntegrity.js";
 import { applyIntentOrdering } from "../intent/intentOrdering.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
-import { carriesGateVerdict } from "../../shared/types/remediationOutcome.js";
 import {
   RUNTIME_RESIDUAL_DECLARATION,
+  finalGateDisabledReason,
+  finalGateRecordPath,
   readFinalGateVerdict,
   runToolOwnedFinalGate,
   writeFinalGateRedRecord,
-  writeFinalGateOutcomeRecord,
+  recordFinalGateOutcome,
   writeFinalGateVerdict,
-  type FinalGateOutcomeKind,
   type GateRunner,
   type ToolOwnedFinalGateResult,
 } from "./finalGate.js";
@@ -130,17 +116,14 @@ import {
 } from "./gateCommands.js";
 import {
   buildNextContractPipelineStep,
-  shouldEnterContractPipeline,
-  readSeedAuditRead,
+  readApprovedExecutionPlan,
   writePathASeedFromFindings,
   normalizeBlockTouchedFiles,
   checkWriteScopePathsAgainstTrackedTree,
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import {
-  contractArtifactExists,
-  contractPipelineDir,
-} from "../contractPipeline/artifactStore.js";
+import { executionPlanPaths, readCanonicalPlan, readPlanSource, readPlanReviewHistory } from "../contractPipeline/executionPlan.js";
+import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 import {
   buildReviewRequest,
   applyReviewResolution,
@@ -183,11 +166,9 @@ import type {
   RejectedCheckpointField,
 } from "audit-tools/shared";
 import {
-  ambiguityReviewPrompt,
   clarificationPrompt,
   collectIntakeClarificationsPrompt,
   collectStartingPointPrompt,
-  extractedPlanDiscardedPrompt,
   loaderCommand,
   reviewApprovalPrompt,
   synthesizeIntakePrompt,
@@ -417,14 +398,14 @@ function isDefaultCandidateFresherThanReport(
 function suppliedInputMatchesRun(
   inputResolution: InputResolution,
   manifest: IntakeSourceManifest | undefined,
+  boundSourcePaths: readonly string[] = [],
 ): boolean {
   if (!inputResolution.supplied) return false;
-  if (!manifest || !manifestIsInputBound(manifest)) return false;
+  if (manifest && !manifestIsInputBound(manifest)) return false;
   const supplied = new Set(inputResolution.checked.map((p) => resolve(p)));
   const recorded = new Set(
-    manifest.sources
-      .filter((s) => s.type !== "conversation")
-      .map((s) => resolve(s.path)),
+    (manifest ? manifest.sources.filter((s) => s.type !== "conversation").map((s) => s.path) : boundSourcePaths)
+      .map((path) => resolve(path)),
   );
   if (supplied.size === 0 || supplied.size !== recorded.size) return false;
   for (const p of supplied) if (!recorded.has(p)) return false;
@@ -439,11 +420,8 @@ export { classifyFindingRisk } from "./stepUtils.js";
 export { isTerminalStatus, isVerifiedCompleteStatus };
 export { hostDependencyLevels };
 
-function documentableFindings(state: RemediationState): Finding[] {
-  if (!state.plan || !state.items) return [];
-  return state.plan.findings.filter(
-    (finding) => state.items?.[finding.id]?.status === "pending",
-  );
+function documentableFindings(state: RemediationState): ExecutionUnit[] {
+  return state.plan?.units.filter(unit => state.items?.[unit.id]?.status === "pending") ?? [];
 }
 
 /**
@@ -457,7 +435,7 @@ function documentableFindings(state: RemediationState): Finding[] {
  * the guard dispatched frontiers the builder refused, and next-step died
  * instead of pausing).
  */
-function dispatchFrontier(state: RemediationState): RemediationBlock[] {
+function dispatchFrontier(state: RemediationState): ExecutionUnit[] {
   return hostDependencyLevels(state)[0] ?? [];
 }
 
@@ -466,15 +444,15 @@ function dispatchFrontier(state: RemediationState): RemediationBlock[] {
  * the implementing obligation: marks the pending items of every permanently
  * dead block `blocked` with the INV-RS-01 reason, and reports whether anything
  * changed. Deadness is the workload boundary's own liveness analysis
- * ({@link permanentlyDeadPendingBlocks}), so a node held by an unanswered
+ * ({@link permanentlyDeadPendingUnits}), so a node held by an unanswered
  * clarification — or by a lower phase that is merely still working — is NEVER
  * mis-reported as an upstream failure (the 175cfb89 pin).
  */
 function sweepPermanentlyDeadBlocks(state: RemediationState): boolean {
   let changed = false;
   const now = new Date().toISOString();
-  for (const block of permanentlyDeadPendingBlocks(state)) {
-    for (const findingId of block.items) {
+  for (const block of permanentlyDeadPendingUnits(state)) {
+    for (const findingId of [block.id]) {
       const it = state.items?.[findingId];
       if (!it || it.status !== "pending") continue;
       it.status = "blocked";
@@ -531,12 +509,12 @@ export function phaseBoundaryToGate(state: RemediationState): number | null {
   if (!plan || !items) return null;
   const frontier = hostDependencyLevels(state).flat();
   if (frontier.length === 0) return null;
-  const phaseOf = (b: RemediationBlock): number => b.phase_ordinal ?? 0;
+  const phaseOf = (b: ExecutionUnit): number => b.phase_ordinal ?? 0;
   const dispatchPhase = Math.min(...frontier.map(phaseOf));
   if (dispatchPhase <= 0) return null;
-  const pristine = plan.blocks
+  const pristine = plan.units
     .filter((b) => phaseOf(b) === dispatchPhase)
-    .every((b) => b.items.every((id) => items[id]?.status === "pending"));
+    .every((b) => items[b.id]?.status === "pending");
   return pristine ? dispatchPhase : null;
 }
 
@@ -573,7 +551,7 @@ function resolvedOrTerminalItems(state: RemediationState): RemediationItemState[
 
 function allItemsTerminal(state: RemediationState): boolean {
   const items = Object.values(state.items ?? {});
-  return items.length > 0 && resolvedOrTerminalItems(state).length === items.length;
+  return state.plan !== undefined && resolvedOrTerminalItems(state).length === items.length;
 }
 
 /**
@@ -603,10 +581,10 @@ async function applyCheckpointIntentOrdering(
   if (typeof freeForm !== "string" || freeForm.trim().length === 0) return plan;
   const ordered = applyIntentOrdering(
     plan.findings,
-    plan.blocks,
+    plan.units,
     interpretFreeFormIntent(freeForm),
   );
-  return { ...plan, findings: ordered.findings, blocks: ordered.blocks };
+  return { ...plan, findings: ordered.findings, units: ordered.units };
 }
 
 /**
@@ -627,127 +605,6 @@ async function applyCheckpointIntentOrdering(
  * leaves the finding itself intact — grounding already decided which paths are
  * real, and this decides only how they are SPELLED.
  */
-function normalizedWriteScope(
-  root: string,
-  finding: Finding,
-): readonly string[] {
-  const normalized: string[] = [];
-  for (const affected of finding.affected_files) {
-    let path: string;
-    try {
-      path = repoRelativePath(root, affected.path, "affected_files[].path");
-    } catch {
-      continue;
-    }
-    if (path.length > 0 && !normalized.includes(path)) normalized.push(path);
-  }
-  return normalized;
-}
-
-function normalizeExtractedPlan(
-  root: string,
-  value: unknown,
-  facts: ProjectFacts,
-): {
-  plan: RemediationPlan;
-  /** Findings as received (post-default, pre-dedup) for coverage accounting. */
-  sourceFindings: Finding[];
-  /** Cross-lens dedup absorbed→survivor map for the coverage ledger. */
-  mergeMap: Map<string, string>;
-} {
-  if (!isRecord(value)) {
-    throw new Error("extracted-plan.json must be an object.");
-  }
-  const rawFindings = Array.isArray(value.findings) ? value.findings : [];
-  const findings = rawFindings.map((finding) => {
-    if (!isRecord(finding)) return finding;
-    return {
-      category: "General",
-      affected_files: [],
-      evidence: [],
-      ...finding,
-    };
-  }) as Finding[];
-  const rawBlocks = Array.isArray(value.blocks) ? value.blocks : [];
-  const blocks =
-    rawBlocks.length > 0
-      ? rawBlocks.map((block) => {
-          if (!isRecord(block)) return block;
-          return {
-            parallel_safe: true,
-            dependencies: [],
-            // touched_files is REQUIRED on the block contract; default to an
-            // empty array so a free-form block that omits it still validates,
-            // while an explicit value on `block` wins via the spread below.
-            touched_files: [],
-            ...block,
-          };
-        })
-      : findings.map((finding, index) => ({
-          block_id: `B-${String(index + 1).padStart(3, "0")}`,
-          items: [finding.id],
-          parallel_safe: true,
-          // Normalized, not copied: see normalizedWriteScope — a Windows-spelled
-          // citation would otherwise become a write scope the handoff refuses.
-          touched_files: normalizedWriteScope(root, finding),
-        }));
-  const dedup = deduplicateCrossLensFindings(findings);
-  const dedupBlocks = fixupBlocksAfterDedup(
-    blocks as RemediationBlock[],
-    dedup.mergeMap,
-  );
-  const plan: RemediationPlan = {
-    plan_id:
-      typeof value.plan_id === "string" ? value.plan_id : randomRunId("PLAN"),
-    ...(typeof value.goal_id === "string" ? { goal_id: value.goal_id } : {}),
-    ...(typeof value.source === "string" ? { source: value.source } : {}),
-    findings: dedup.findings,
-    blocks: dedupBlocks,
-    // Project facts (owner decision 92b0e2dd7cfdc06d): the input's own VALID
-    // values win — the contract pipeline detects them itself — and the run's
-    // detected facts fill the rest. Candidates are what the host chooses
-    // FROM at the intent checkpoint; nothing here selects one.
-    project_type:
-      typeof value.project_type === "string" && value.project_type !== "unknown"
-        ? value.project_type
-        : facts.project_type,
-    ...(typeof value.test_command === "string" && value.test_command.trim().length > 0
-      ? { test_command: value.test_command, test_command_source: "explicit" as const }
-      : facts.commands.test
-        ? { test_command: renderPromptCommand(facts.commands.test), test_command_source: "project_facts" as const }
-        : {}),
-    ...(typeof value.e2e_command === "string" && value.e2e_command.trim().length > 0
-      ? { e2e_command: value.e2e_command, e2e_command_source: "explicit" as const }
-      : facts.commands.e2e
-        ? { e2e_command: renderPromptCommand(facts.commands.e2e), e2e_command_source: "project_facts" as const }
-        : {}),
-    candidate_closing_actions:
-      Array.isArray(value.candidate_closing_actions) &&
-      value.candidate_closing_actions.length > 0 &&
-      value.candidate_closing_actions.every(isClosingAction)
-        ? value.candidate_closing_actions
-        : facts.candidate_closing_actions,
-    block_strategy:
-      value.block_strategy === "test_graph" ||
-      value.block_strategy === "git_cocommit" ||
-      value.block_strategy === "file_overlap" ||
-      value.block_strategy === "manual"
-        ? value.block_strategy
-        : undefined,
-  };
-
-  const issues = validateRemediationPlan(plan).filter(
-    (issue) => issue.severity === "error",
-  );
-  if (issues.length > 0) {
-    throw new Error(`Invalid extracted plan:\n${formatValidationIssues(issues)}`);
-  }
-  if (plan.findings.length === 0) {
-    throw new Error("Extracted plan contains zero findings.");
-  }
-  return { plan, sourceFindings: findings, mergeMap: dedup.mergeMap };
-}
-
 /**
  * The closing plan the HOST chose on the confirmed checkpoint: its action, or
  * `none` when the field is absent, plus the argv a `custom` choice carries.
@@ -797,13 +654,14 @@ async function saveStateForPlan(
 ): Promise<RemediationState> {
   const { host_handoff: _staleHostHandoff, conformance_review: priorConformance, ...carryForwardState } = existing;
   const items: Record<string, RemediationItemState> = {};
-  const blockIds = blockIdsByFinding(plan);
-  for (const finding of plan.findings) {
-    items[finding.id] = {
-      finding_id: finding.id,
-      status: "pending",
-      block_id: blockIds.get(finding.id) ?? "UNKNOWN",
-    };
+  const owner = await readOptionalJsonFile<{revision_sha256:string;declined_units:Array<{id:string;reason:string}>}>(join(executionPlanPaths(artifactsDir).directory,"owner-decision.json"));
+  for (const unit of plan.units) {
+    const prior = existing.plan?.units.find(entry => entry.id === unit.id);
+    items[unit.id] = prior && stableStringify(prior) === stableStringify(unit) && existing.items?.[unit.id]
+      ? existing.items[unit.id]! : { unit_id: unit.id, status: "pending" };
+    const declined = owner?.revision_sha256 === plan.review_revision_sha256 ? owner.declined_units.find(entry => entry.id === unit.id) : undefined;
+    if (declined && !isVerifiedCompleteStatus(items[unit.id]!.status)) items[unit.id] = { unit_id: unit.id, status: "ignored", failure_reason: declined.reason, completed_at: new Date().toISOString() };
+
   }
   const state: RemediationState = {
     ...carryForwardState,
@@ -819,169 +677,19 @@ async function saveStateForPlan(
   return state;
 }
 
-// Plan-time bookkeeping recomputed on every plan pass; it must not participate
-// in the carry-forward identity of a finding.
-const PLAN_TIME_BOOKKEEPING_KEYS = new Set([
-  "hash_at_plan_time",
-  "evidence_grounded",
-]);
-
-function stripPlanTimeBookkeeping(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => stripPlanTimeBookkeeping(entry));
-  }
-  if (!isRecord(value)) {
-    return value;
-  }
-
-  const stripped: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) {
-    if (PLAN_TIME_BOOKKEEPING_KEYS.has(key)) continue;
-    stripped[key] = stripPlanTimeBookkeeping(value[key]);
-  }
-  return stripped;
-}
-
-/**
- * The re-plan carry-forward identity of a finding: canonical JSON with the
- * plan-time bookkeeping keys stripped, so a re-plan whose only delta is a
- * recomputed file hash or a re-evaluated grounding flag carries the prior item
- * forward, while a real change to the finding does not.
- *
- * EXPORTED so the invariant suite can call THIS function. It was module-internal,
- * and the suite claiming to cover the invariant declared its own copy of the key
- * set, the strip and the key builder — so dropping `evidence_grounded` from the
- * production set, or widening it with a real field like `severity`, left the
- * block green while carry-forward regressed. A test asserting against its own
- * re-implementation pins nothing about shipped behaviour.
- */
-export function findingCarryForwardKey(finding: Finding): string {
-  return JSON.stringify(stripPlanTimeBookkeeping(finding));
-}
-
-// Single-block membership is enforced by `fixupBlocksAfterDedup` (each finding
-// id appears in exactly one block's items after fixup), so this scan is a plain
-// projection. First-wins in block order is kept as the tie-break for defense in
-// depth — it is the same order fixup resolves ownership in, so the two can
-// never disagree even on a malformed plan.
-function blockIdsByFinding(plan: RemediationPlan): Map<string, string> {
-  const byFinding = new Map<string, string>();
-  for (const block of plan.blocks) {
-    for (const id of block.items) {
-      if (!byFinding.has(id)) {
-        byFinding.set(id, block.block_id);
-      }
-    }
-  }
-  return byFinding;
-}
-
-function carryForwardMatchingItems(
-  previous: RemediationState,
-  replanned: RemediationState,
-): RemediationState {
-  if (!previous.plan || !previous.items || !replanned.plan || !replanned.items) {
-    return replanned;
-  }
-
-  const previousFindings = new Map(
-    previous.plan.findings.map((finding) => [finding.id, finding]),
-  );
-  const replannedBlockIds = blockIdsByFinding(replanned.plan);
-  const items = { ...replanned.items };
-  let carried = false;
-
-  for (const finding of replanned.plan.findings) {
-    const previousFinding = previousFindings.get(finding.id);
-    const previousItem = previous.items[finding.id];
-    // A still-pending item carries no work to preserve, so it is re-minted from
-    // the fresh plan rather than carried forward. (This test used to also admit
-    // a pending item that held an `item_spec`; the document phase that produced
-    // one was dissolved and the field is gone, so the second condition could
-    // never be true and is not restated here.)
-    if (!previousFinding || !previousItem) {
-      continue;
-    }
-    if (previousItem.status === "pending") {
-      continue;
-    }
-    if (findingCarryForwardKey(previousFinding) !== findingCarryForwardKey(finding)) {
-      continue;
-    }
-
-    items[finding.id] = {
-      ...previousItem,
-      block_id: replannedBlockIds.get(finding.id) ?? previousItem.block_id,
-    };
-    carried = true;
-  }
-
-  if (!carried) {
-    return replanned;
-  }
-
-  const hasPending = replanned.plan.findings.some(
-    (finding) => items[finding.id]?.status === "pending",
-  );
-
-  return {
-    ...replanned,
-    items,
-    status: hasPending ? "planning" : replanned.status,
-  };
-}
-
 async function forceReplanFromExistingIntake(
-  root: string,
-  artifactsDir: string,
-  previous: RemediationState,
-  store: StateStore,
+  root: string, artifactsDir: string, previous: RemediationState,
   runLogger: RunLogger,
-): Promise<RemediationState | { kind: "discarded"; reason: string; archivePath?: string } | null> {
-  const pendingState: RemediationState = {
-    status: "pending",
-    started_at: previous.started_at,
-    step_count: previous.step_count,
-    ...(previous.conformance_review ? { conformance_review: previous.conformance_review } : {}),
-    // Carry the run-lifetime staging-manifest fields across a force-replan.
-    // Dropping run_start_dirty here would make handlePendingExtractedPlan's
-    // capture-once guard re-capture AFTER edits have landed, misclassifying
-    // the run's own hand-applied edits as pre-existing dirt (silently
-    // under-staged at close); applied_edit_surface is git-proven ground truth
-    // that must survive replanning for the same reason.
-    ...(previous.run_start_dirty
-      ? { run_start_dirty: previous.run_start_dirty }
-      : {}),
-    ...(previous.applied_edit_surface
-      ? { applied_edit_surface: previous.applied_edit_surface }
-      : {}),
-  };
-  const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-  if (!extractedPlan) {
-    await store.saveState(pendingState);
-    return null;
-  }
-
-  const outcome = await handlePendingExtractedPlan(
-    root,
-    artifactsDir,
-    pendingState,
-    extractedPlan,
-    runLogger,
-  );
-  if (outcome.kind === "discarded") {
-    // Carried up rather than collapsed to null: the decide loop emits the step
-    // that names the discard.
-    return outcome;
-  }
-  const replanned = outcome.state;
-  if (!replanned) {
-    return null;
-  }
-
-  const carried = carryForwardMatchingItems(previous, replanned);
-  await store.saveState(carried);
-  return carried;
+): Promise<RemediationState | { kind: "blocked"; reason: string; archivePath?: string } | {kind:"planning_step";step:RemediationStep} | null> {
+  const step=await buildNextContractPipelineStep({root,artifactsDir,runId:requireStateRunId(previous),forceRevision:false});
+  if(step)return {kind:"planning_step",step};
+  const approved = await readApprovedExecutionPlan(artifactsDir);
+  if (!approved) return { kind: "blocked", reason: "Revise and independently approve the current executable plan before replanning. Accepted execution history is preserved." };
+  const activated = await activateApprovedPlan(root, artifactsDir, previous, approved, runLogger);
+  if (activated.kind === "blocked") return activated;
+  // Activation already carries unchanged history and applies CURRENT owner
+  // decisions. Reapplying old items here would undo a newly declined unit.
+  return activated.state;
 }
 
 /**
@@ -1115,7 +823,7 @@ async function buildImplementDispatchStep(ctx: {
       step: await writeCurrentStep({
         stepKind: "repair_handoff", status: "blocked", runId, repoRoot: root, artifactsDir,
         prompt: `# Repair the planning output before dispatch\n\n${excerpt}\n\nFull validation details: ${diagnosticsPath}\n\n` +
-          `Owning source: ${sourcePath} (plan.blocks and its generated handoff binding).\n` +
+          `Owning source: ${sourcePath} (plan.units and its generated handoff binding).\n` +
           `Upstream planning input: ${join(artifactsDir, "extracted-plan.json")}.\n\n` +
           "The current run and completed work are preserved. This dispatch cannot safely repair its upstream producer. " +
           "Return the named validation errors to the planning producer; do not edit generated state, discard accepted work, or submit results under invalid bindings. " +
@@ -1275,289 +983,50 @@ async function handleComplete(
  * caller's unlink is unreachable on that path — an irreversible delete never
  * runs before its archive is written and verified.
  */
-async function archiveExtractedPlan(extractedPlanPath: string): Promise<string> {
-  // BYTES, compared with Buffer.compare — the bar CP-NODE-3 set for the
-  // verified-archive promotion path. A utf8-string compare is a weaker claim
-  // than the one an archive has to make: it silently equates byte sequences that
-  // decode alike (a BOM, a lone surrogate, an invalid sequence replaced by
-  // U+FFFD on BOTH sides), so a corrupt copy can read as verified.
-  const original = await readFile(extractedPlanPath);
-  const archivePath = join(
-    dirname(extractedPlanPath),
-    "archive",
-    `extracted-plan-${Date.now()}.json`,
-  );
-  await mkdir(dirname(archivePath), { recursive: true });
-  await writeFile(archivePath, original);
-  const readBack = await readFile(archivePath);
-  if (Buffer.compare(original, readBack) !== 0) {
-    throw new Error(
-      `Extracted-plan archive at ${archivePath} does not match the original bytes.`,
-    );
-  }
-  return archivePath;
-}
-
-/**
- * What became of an extracted plan. A DISCARD is a first-class outcome, not an
- * absence: the plan was supplied, read, and rejected for a reason the tool
- * computed. Modelling it as `null` threw that reason away at the one boundary
- * where the host could have acted on it.
- */
-type ExtractedPlanOutcome =
+type PlanActivationOutcome =
   | { kind: "planned"; state: RemediationState }
-  | { kind: "discarded"; reason: string; archivePath?: string };
+  | { kind: "blocked"; reason: string; archivePath?: string };
 
 /** Render the step that STATES a discard, rather than asking for an input again. */
-async function emitExtractedPlanDiscardedStep(
-  root: string,
-  artifactsDir: string,
-  discard: { reason: string; archivePath?: string },
-): Promise<RemediationStep> {
-  const paths = intakePaths(artifactsDir);
-  return writeCurrentStep({
-    stepKind: "extracted_plan_discarded",
-    status: "blocked",
-    runId: randomRunId("PLAN-DISCARD"),
-    repoRoot: root,
-    artifactsDir,
-    prompt: extractedPlanDiscardedPrompt(discard.reason, discard.archivePath, paths),
-    allowedCommands: [loaderCommand("next-step")],
-    stopCondition:
-      "Stop after writing a corrected extracted plan and rerunning next-step.",
-    artifactPaths: { extracted_plan: paths.extractedPlan },
-  });
+async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,blocked:{reason:string}):Promise<RemediationStep>{
+  return writeCurrentStep({stepKind:"contract_pipeline",status:"blocked",runId:null,repoRoot:root,artifactsDir,
+    prompt:`# Executable plan requires attention\n\n${blocked.reason}\nThe current plan and accepted execution history are preserved. Revise the plan through its tool-issued submission and obtain fresh review before continuing.`,
+    allowedCommands:[loaderCommand("next-step")],stopCondition:"Resolve the named plan/review issue before implementation.",artifactPaths:{execution_plan:executionPlanPaths(artifactsDir).canonical}});
 }
 
-async function handlePendingExtractedPlan(
-  root: string,
-  artifactsDir: string,
-  existing: RemediationState,
-  extractedPlan: unknown,
-  // The plan path's high-consequence events — findings dropped by grounding, and
-  // the plan being destroyed — are DURABLE, so the logger is a parameter rather
-  // than a module-level singleton reached for at the point of use. stderr is not
-  // captured into the artifact dir; before this, the durable tree held no trace
-  // that a plan had been destroyed or that findings had been dropped.
-  runLogger: RunLogger,
-): Promise<ExtractedPlanOutcome> {
-  // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
-  // The discard-and-re-extract recovery below covers EXACTLY the region whose
-  // failures mean the extracted PLAN is unusable: normalization and grounding.
-  // It deliberately stops there. Everything after it — sizing, the dirty
-  // snapshot, the coverage ledger, persistence — fails for reasons that have
-  // nothing to do with the plan's content, so discarding the plan on those is
-  // both a data loss and a misdiagnosis.
-  //
-  // `resolvePlanContextBudget`'s refusal is the case that proved it. Its message
-  // asks the operator to declare a window, but it threw into this catch: the
-  // plan was deleted and the operator was told the file was corrupt. Because
-  // re-extraction cannot change the host's declared window, the next step
-  // reproduced it exactly — a deterministic loop that ate the extracted plan on
-  // every lap. Pinned by `tests/remediate/plan-sizing-refusal.test.ts`.
-  let plan: RemediationPlan;
-  let sourceFindings: Finding[];
-  let mergeMap: Map<string, string>;
-  let grounding: ExtractedFindingGrounding;
-  try {
-    ({ plan, sourceFindings, mergeMap } = normalizeExtractedPlan(
-      root,
-      extractedPlan,
-      // Persisted by the confirm step; planning spawns nothing (the
-      // backend-independent planning contract), so it never detects here.
-      (await readProjectFacts(artifactsDir)) ?? neutralProjectFacts(),
-    ));
-
-    // INTENT ORDERING, applied where the plan's findings and blocks are
-    // FINALIZED. `applyIntentOrdering` existed with no production caller at all:
-    // the checkpoint's interpreted intent was written and never read back, so
-    // "the work the user emphasised is dispatched first" was a property the code
-    // could state but not deliver. Ordering ONLY — it never drops or mutates a
-    // finding; every input is present in the output with a different order, so a
-    // plan whose checkpoint carries no intent is returned unchanged.
-    plan = await applyCheckpointIntentOrdering(artifactsDir, plan);
-
-    // Deterministic grounding for the LLM-extracted plan (this path never sees
-    // structured audit findings): strip phantom affected_files paths, drop
-    // findings whose every cited path was phantom, and classify evidence. No
-    // bounded LLM repair here — the host re-extracts with the corrected prompt
-    // if the whole plan grounds to nothing. Contract-pipeline-promoted plans
-    // are grounded by construction (the traceability gate ties every node to
-    // obligations/accepted counterexamples), so their obligation-reference
-    // evidence is exempt from the path-citation check.
-    grounding = await groundExtractedFindings(plan.findings, {
-      root,
-      evidenceGrounding: plan.source !== "contract_pipeline",
-    });
-    if (grounding.dropped.length > 0) {
-      // DROPPED-ID BOOKKEEPING, durable. A caller reading a finding count across
-      // the plan boundary must never receive the submitted count when findings
-      // were dropped, so the ids, the dropped count and the surviving grounded
-      // count all land in the run log — not only on stderr, which no artifact
-      // captures.
-      const droppedIds = grounding.dropped.map((d) => d.finding.id);
-      runLogger.event({
-        phase: "next-step",
-        kind: "outcome",
-        obligation: "plan_grounding",
-        note:
-          `grounding_dropped_findings dropped=${String(droppedIds.length)} ` +
-          `grounded=${String(grounding.findings.length)} ` +
-          `submitted=${String(plan.findings.length)} ` +
-          `ids=${droppedIds.join(",")}`,
-      });
-      process.stderr.write(
-        `[remediate-code] Grounding dropped ${grounding.dropped.length} extracted finding(s) whose cited paths do not exist: ${grounding.dropped.map((d) => `${d.finding.id} (${d.phantomPaths.join(", ")})`).join("; ")}\n`,
-      );
-    }
-    plan.findings = grounding.findings;
-    const keptIds = new Set(plan.findings.map((f) => f.id));
-    plan.blocks = plan.blocks
-      .map((b) => ({ ...b, items: (b.items ?? []).filter((id) => keptIds.has(id)) }))
-      .filter((b) => (b.items ?? []).length > 0);
-    if (plan.findings.length === 0) {
-      throw new Error(
-        "Every extracted finding cited only phantom paths; re-extract with real repo-relative paths.",
-      );
-    }
-  } catch (error) {
-    const paths = intakePaths(artifactsDir);
-    const reason = error instanceof Error ? error.message : String(error);
-    // ARCHIVE, VERIFY, THEN destroy — in that order, with the delete unreachable
-    // if the archive did not land. This recovery used to unlink the plan
-    // outright, unarchived and unverified, leaving a line on stderr as the only
-    // record; the plan the run was built from was simply gone.
-    let archivePath: string | undefined;
-    if (existsSync(paths.extractedPlan)) {
-      try {
-        archivePath = await archiveExtractedPlan(paths.extractedPlan);
-      } catch (archiveError) {
-        const detail =
-          archiveError instanceof Error
-            ? archiveError.message
-            : String(archiveError);
-        runLogger.event({
-          phase: "next-step",
-          kind: "error",
-          obligation: "extracted_plan_recovery",
-          note: `extracted_plan_archive_failed reason=${reason} archive_error=${detail}`,
-        });
-        // NOT a re-emitted extraction step. Returning null here would report a
-        // routine "re-extract, please" while the plan was destroyed and nothing
-        // held a copy of it.
-        throw new Error(
-          `Extracted plan at ${paths.extractedPlan} is unusable (${reason}) but could ` +
-            `not be archived (${detail}); it was left in place rather than destroyed.`,
-        );
-      }
-      const { unlink } = await import("node:fs/promises");
-      await unlink(paths.extractedPlan);
-    }
-    runLogger.event({
-      phase: "next-step",
-      kind: "outcome",
-      obligation: "extracted_plan_recovery",
-      note:
-        `extracted_plan_removed reason=${reason} ` +
-        `archive=${archivePath ?? "(nothing on disk to archive)"}`,
-    });
-    process.stderr.write(
-      `[remediate-code] Unusable extracted-plan.json removed (${reason}); archived at ${archivePath ?? "(nothing on disk to archive)"}. Emitting the plan-discarded step.\n`,
-    );
-    // The reason travels with the outcome, so the EMITTED STEP can state it.
-    // Returning a bare `null` here is what made a destroyed plan indistinguishable
-    // from a run that never had an input: the decide loop fell through to
-    // `collect_starting_point` and the host was told to go and find an input it
-    // had already supplied. Everything needed to say so was already computed —
-    // it just had nowhere to go.
-    return {
-      kind: "discarded",
-      reason,
-      ...(archivePath ? { archivePath } : {}),
-    };
-  }
-
-  // Past the recovery boundary: a failure below is a real failure and propagates.
-  //
-  // WHAT THE AUDIT READ, stamped by the tool. `normalizeExtractedPlan` builds
-  // the plan field by field and deliberately has no `audit_read` line: the
-  // extracted plan is host-writable, and this commit becomes terminal
-  // dispositions at close. Only a plan the contract pipeline promoted from a
-  // findings report has an audit-side source; every other plan states `null`.
-  plan = {
-    ...plan,
-    audit_read:
-      plan.source === "contract_pipeline" ? await readSeedAuditRead(artifactsDir) : null,
+async function activateApprovedPlan(
+  root: string, artifactsDir: string, existing: RemediationState,
+  _input: unknown, _runLogger: RunLogger,
+): Promise<PlanActivationOutcome> {
+  const approved = await readApprovedExecutionPlan(artifactsDir);
+  if (!approved) return { kind: "blocked", reason: "No current independently approved executable plan exists. Re-run planning; unreviewed projections cannot dispatch." };
+  const facts = (await readProjectFacts(artifactsDir)) ?? neutralProjectFacts();
+  const { canonical, source } = approved;
+  let plan: RemediationPlan = {
+    ...canonical.plan,
+    source: "execution_plan",
+    findings: source.findings,
+    ...(source.request ? { request: source.request } : {}),
+    review_revision_sha256: canonical.revision_sha256,
+    review_counterexamples: (await readPlanReviewHistory(artifactsDir)).counterexamples.filter(example => canonical.plan.units.some(unit => unit.addresses_counterexample_ids.includes(example.id))),
+    project_type: facts.project_type,
+    candidate_closing_actions: facts.candidate_closing_actions,
+    audit_read: source.audit_read,
+    ...(facts.commands.test ? { test_command: renderPromptCommand(facts.commands.test), test_command_source: "project_facts" as const } : {}),
+    ...(facts.commands.e2e ? { e2e_command: renderPromptCommand(facts.commands.e2e), e2e_command_source: "project_facts" as const } : {}),
   };
-  const pipelined = await applyPlanPipeline(plan, { root, artifactsDir });
-  // Run-start dirty snapshot for the V2 staging manifest, capture-once: the
-  // extracted-plan join runs at plan time (before any remediation edit), so
-  // the dirty set here is pre-existing user dirt — the close phase excludes
-  // it from DECLARED-surface staging.
-  if (!existing.run_start_dirty) {
-    existing = {
-      ...existing,
-      run_start_dirty: [...(await stagedAndUntracked(root))].sort(),
-    };
-  }
-  // Discarded on mismatch, so the gate re-asks rather than replaying operator
-  // decisions under semantics they were not made under. Re-asking costs a repeat
-  // answer; applying them blind could act on a keep/decline that no longer means
-  // what it meant when it was recorded.
-  const reviewDecision = discardOnSchemaVersionMismatch(
-    await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir)),
-    REVIEW_DECISION_SCHEMA_VERSION,
-  );
-  // Coverage ledger. Path A (structured_audit): the single filter pass ran at
-  // intake over the ORIGINAL findings and persisted its dispositions — build
-  // coverage over those originals so every audit finding gets exactly one
-  // disposition (planned / folded_into / dropped_* / dropped_by_checkpoint /
-  // declined_by_review), reconciling to the original count. Path B (no persisted
-  // dispositions): build over the post-pipeline node findings as before. Either
-  // way declined findings are recorded; their payloads recover at close from the
-  // unfiltered intake source.
-  const filterDisp = await readOptionalJsonFile<PersistedReviewFilterDispositions>(
-    reviewFilterDispositionsPath(artifactsDir),
-  );
-  const pipelinedBlockIds = blockIdsByFinding(pipelined);
-  const coverage = filterDisp
-    ? buildCoverageLedger({
-        planId: pipelined.plan_id,
-        sourceFindings: filterDisp.originals,
-        droppedNoEvidence: filterDisp.droppedNoEvidence,
-        droppedByCheckpoint: filterDisp.droppedByCheckpoint,
-        declinedByReview: reviewDecision?.declined ?? [],
-        droppedPhantomPaths: new Map(filterDisp.droppedPhantomPaths),
-        phantomPathsRemoved: new Map(filterDisp.phantomPathsRemoved),
-        mergeMap: new Map(filterDisp.mergeMap),
-        items: {}, // originals carry no node block_id; planned entries omit it
-      })
-    : buildCoverageLedger({
-        planId: pipelined.plan_id,
-        sourceFindings,
-        droppedNoEvidence: [],
-        droppedByCheckpoint: [],
-        declinedByReview: reviewDecision?.declined ?? [],
-        droppedPhantomPaths: new Map(
-          grounding.dropped.map((d) => [d.finding.id, d.phantomPaths]),
-        ),
-        phantomPathsRemoved: grounding.phantomPathsByFinding,
-        mergeMap,
-        items: Object.fromEntries(
-          pipelined.findings.map((finding) => [
-            finding.id,
-            {
-              finding_id: finding.id,
-              status: "pending" as const,
-              block_id: pipelinedBlockIds.get(finding.id) ?? "UNKNOWN",
-            },
-          ]),
-        ),
-      });
-  return {
-    kind: "planned",
-    state: await saveStateForPlan(artifactsDir, existing, pipelined, coverage),
-  };
+  plan = await applyCheckpointIntentOrdering(artifactsDir, plan);
+  if (!existing.run_start_dirty) existing = { ...existing, run_start_dirty: [...await stagedAndUntracked(root)].sort() };
+  const filter = await readOptionalJsonFile<PersistedReviewFilterDispositions>(reviewFilterDispositionsPath(artifactsDir));
+  const decision = await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir));
+  const coverage = buildCoverageLedger({
+    planId: plan.plan_id, sourceFindings: filter?.originals ?? source.findings,
+    droppedNoEvidence: filter?.droppedNoEvidence ?? [], droppedByCheckpoint: filter?.droppedByCheckpoint ?? [],
+    declinedByReview: decision?.declined ?? [], droppedPhantomPaths: new Map(filter?.droppedPhantomPaths ?? []),
+    phantomPathsRemoved: new Map(filter?.phantomPathsRemoved ?? []), mergeMap: new Map(filter?.mergeMap ?? []), units: plan.units,
+  });
+  const state = await saveStateForPlan(artifactsDir, existing, plan, coverage);
+  return { kind: "planned", state };
 }
 
 // ── Review-approval gate (go-forward program item 1) ───────────────────────────
@@ -1643,18 +1112,6 @@ async function archiveConsumedInputs(paths: readonly string[]): Promise<void> {
       await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
     }
   }
-}
-
-// Up-front ambiguity gate (note 3, part A) — its own request/resolution/decision
-// files, mirroring the review gate so it fires (and halts) at most once per run.
-function ambiguityRequestPath(artifactsDir: string): string {
-  return join(artifactsDir, "ambiguity_request.json");
-}
-function ambiguityResolutionPath(artifactsDir: string): string {
-  return join(artifactsDir, "ambiguity_resolution.json");
-}
-function ambiguityDecisionPath(artifactsDir: string): string {
-  return join(artifactsDir, "ambiguity_decision.json");
 }
 
 /** Pull the Finding[] out of a parsed audit-findings.json payload. */
@@ -1761,7 +1218,7 @@ async function runReviewApprovalGate(
   const gateOpen =
     survivors.length > 0 &&
     !existsSync(decisionPath) &&
-    !contractArtifactExists(artifactsDir, "goal_spec");
+    !existsSync(executionPlanPaths(artifactsDir).canonical);
 
   // Autonomous (unattended) mode: the gate NEVER halts. It re-evaluates the
   // survivors FRESH (no prior-run memory) and auto-approves only tier-safe +
@@ -1914,21 +1371,31 @@ async function handleReadyIntakeContractPipeline(
   options: NextStepOptions,
   runLogger: RunLogger,
 ): Promise<RemediationStep | RemediationState | null> {
-  // Fast path: if an extracted-plan.json already exists (pipeline complete or
-  // promoted from a previous contract pipeline run), consume it directly without
-  // requiring intake artifacts. This handles both "plan promoted, ready to
-  // ground+plan" and the grounding tests that write extracted-plan.json directly.
-  const earlyExtractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-  if (earlyExtractedPlan) {
-    const outcome = await handlePendingExtractedPlan(
+  // Resume the tool-owned plan without reconstructing completed intake.
+  const earlyExtractedPlan = await readApprovedExecutionPlan(artifactsDir);
+  if (earlyExtractedPlan && !existsSync(executionPlanPaths(artifactsDir).submission)) {
+    const outcome = await activateApprovedPlan(
       root,
       artifactsDir,
       { status: "pending" },
       earlyExtractedPlan,
       runLogger,
     );
-    return outcome.kind === "discarded"
-      ? emitExtractedPlanDiscardedStep(root, artifactsDir, outcome)
+    return outcome.kind === "blocked"
+      ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
+      : outcome.state;
+  }
+
+  if (await readPlanSource(artifactsDir)) {
+    const step = await buildNextContractPipelineStep({
+      root, artifactsDir, runId: randomRunId("CONTRACT"),
+    });
+    if (step) return step;
+    const approved = await readApprovedExecutionPlan(artifactsDir);
+    if (!approved) return null;
+    const outcome = await activateApprovedPlan(root, artifactsDir, { status: "pending" }, approved, runLogger);
+    return outcome.kind === "blocked"
+      ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
       : outcome.state;
   }
 
@@ -1984,14 +1451,6 @@ async function handleReadyIntakeContractPipeline(
     return { affectedFiles, goals: summary.goals };
   });
 
-  const pipeline = shouldEnterContractPipeline(
-    artifactsDir,
-    intake.summary.source_type,
-  );
-  if (!pipeline.shouldHandleContractPipeline) {
-    return null;
-  }
-
   const canonicalIntent = sessionIntentResult(options).intent;
 
   // Path A: run the single filter pass over the ORIGINAL findings, present the
@@ -2006,7 +1465,7 @@ async function handleReadyIntakeContractPipeline(
     const originals = extractAuditFindings(auditFindings);
     if (originals.length > 0) {
       const checkpoint = await readIntentCheckpoint(join(artifactsDir, "intent_checkpoint.json"));
-      const filter = await runFindingFilterPass(originals, {
+      const filter = await runFindingFilterPass(structuredClone(originals), {
         root,
         checkpoint: checkpoint ?? undefined,
         evidenceGrounding: true,
@@ -2031,8 +1490,8 @@ async function handleReadyIntakeContractPipeline(
       // intake path/breadth/intent signal doesn't see) INTO the shared risk signal as
       // escalate-on-evidence. The tier is the SINGLE classifier and the ONLY thing it
       // selects is DEPTH: every run enters the contract pipeline, and a `low` tier
-      // traverses it shallowly (collapsed round-trips, light adversarial depth). There
-      // is no second plan producer and no bypass — see COLLAPSE_GROUPS.
+      // receives light adversarial depth. There is no second plan producer or
+      // bypass that could disagree with this risk authority.
       const findingEvidence = findingRiskEvidence(gate.approved);
       let riskSignal = await readIntakeRiskSignal(artifactsDir);
       if (findingEvidence && riskSignal) {
@@ -2048,14 +1507,22 @@ async function handleReadyIntakeContractPipeline(
       // narrower than the originals (anything filtered or declined), route the
       // seed AND the pipeline's source inputs at a filtered file so a removed
       // finding can never re-enter via the raw audit-findings.json (tool-enforced).
+      // Filtering annotates its working copies; source provenance stays byte-faithful.
+      // Selection and risk use the filter's facts, while the plan owns original claims.
+      const originalsById = new Map(originals.map(finding => [finding.id, finding]));
+      const approvedOriginals = gate.approved.map(finding => {
+        const original = originalsById.get(finding.id);
+        if (!original) throw new Error(`Approved finding ${finding.id} has no original source payload.`);
+        return original;
+      });
       const approvedPayload = projectAuditFindingsReportSubset(
         auditFindings,
-        gate.approved,
+        approvedOriginals,
       );
       let seedSourcePath = auditSource.path;
       if (gate.approved.length < originals.length) {
-        await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
-        seedSourcePath = join(contractPipelineDir(artifactsDir), "approved-findings.json");
+        await mkdir(executionPlanPaths(artifactsDir).directory, { recursive: true });
+        seedSourcePath = join(executionPlanPaths(artifactsDir).directory, "approved-findings.json");
         await writeJsonFile(seedSourcePath, approvedPayload);
         reviewSourceSwap = { from: auditSource.path, to: seedSourcePath };
       }
@@ -2066,6 +1533,8 @@ async function handleReadyIntakeContractPipeline(
       );
     }
   }
+
+  if (auditSource && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, await readAuditFindingsOnce());
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();
@@ -2098,19 +1567,19 @@ async function handleReadyIntakeContractPipeline(
     return step;
   }
 
-  const extractedPlan = await readExtractedPlanIfPresent(artifactsDir);
+  const extractedPlan = await readApprovedExecutionPlan(artifactsDir);
   if (!extractedPlan) {
     return null;
   }
-  const outcome = await handlePendingExtractedPlan(
+  const outcome = await activateApprovedPlan(
     root,
     artifactsDir,
     { status: "pending" },
     extractedPlan,
     runLogger,
   );
-  return outcome.kind === "discarded"
-    ? emitExtractedPlanDiscardedStep(root, artifactsDir, outcome)
+  return outcome.kind === "blocked"
+    ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
     : outcome.state;
 }
 
@@ -2120,12 +1589,9 @@ async function handlePendingIntake(
   options: NextStepOptions,
   runLogger: RunLogger,
 ): Promise<RemediationStep | RemediationState | null> {
-  // Short-circuit: if an extracted-plan.json already exists (promoted from the
-  // contract pipeline), consume it directly without requiring intake artifacts.
-  // This allows decideNextStep to resume a plan-grounding pass even when the
-  // full intake artifact set is no longer present.
-  const earlyExtractedPlan = await readExtractedPlanIfPresent(artifactsDir);
-  if (earlyExtractedPlan) {
+  // Existing source ownership survives pending review and approval invalidation.
+  // The earlier confirm_intent obligation still guards this continuation.
+  if (await readPlanSource(artifactsDir)) {
     return handleReadyIntakeContractPipeline(
       root,
       artifactsDir,
@@ -2274,7 +1740,7 @@ const PLAN_CLARIFICATION_ACTIONS = ["clarified", "reject_finding", "defer"] as c
  */
 const PlanClarificationResolutionSchema = z
   .object({
-    finding_id: z.string().min(1, "must be a non-empty finding id"),
+    unit_id: z.string().min(1, "must be a non-empty finding id"),
     action: z.enum(PLAN_CLARIFICATION_ACTIONS),
     rationale: z.string().optional(),
     scope_additions: z.array(z.string()).optional(),
@@ -2305,9 +1771,7 @@ type ParsedPlanClarifications =
   | { ok: false; reason: string };
 
 /**
- * Read and validate a clarification resolution file — the mid-run
- * `clarification_resolution.json` and the up-front `ambiguity_resolution.json`
- * share this one parser.
+ * Read and validate the mid-run `clarification_resolution.json` file.
  *
  * ONE shape is accepted: a bare JSON array of entries. Every entry is checked
  * against {@link PlanClarificationResolutionSchema}, and a second entry for the
@@ -2349,14 +1813,14 @@ async function readPlanClarificationResolutions(
       }
       return;
     }
-    const prior = firstEntryFor.get(parsed.data.finding_id);
+    const prior = firstEntryFor.get(parsed.data.unit_id);
     if (prior !== undefined) {
       problems.push(
-        `entry [${index}] \`finding_id\`: \`${parsed.data.finding_id}\` is already answered by entry [${prior}]`,
+        `entry [${index}] \`unit_id\`: \`${parsed.data.unit_id}\` is already answered by entry [${prior}]`,
       );
       return;
     }
-    firstEntryFor.set(parsed.data.finding_id, index);
+    firstEntryFor.set(parsed.data.unit_id, index);
     resolutions.push(parsed.data);
   });
   return problems.length > 0
@@ -2378,7 +1842,7 @@ async function planClarificationRefusal(
 ): Promise<string | null> {
   if (!parsed.ok) return parsed.reason;
   const unknownIds = parsed.resolutions
-    .map((r) => r.finding_id)
+    .map((r) => r.unit_id)
     .filter((id) => !validIds.has(id));
   if (unknownIds.length > 0) {
     return `finding id(s) ${outsideSetLabel}: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`;
@@ -2407,21 +1871,22 @@ async function validateClarificationScopeAdditions(
   const refusals: string[] = [];
   for (const res of resolutions) {
     if (res.action !== "clarified" || !res.scope_additions?.length) continue;
-    const block = state.plan?.blocks?.find((b) => b.items.includes(res.finding_id));
+    const block = state.plan?.units?.find((b) => b.id === res.unit_id);
     if (!block) {
       refusals.push(
-        `scope_additions for \`${res.finding_id}\`: no plan block owns this finding, so ` +
+        `scope_additions for \`${res.unit_id}\`: no plan block owns this finding, so ` +
           `there is no write scope to widen.`,
       );
       continue;
     }
-    const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.block_id);
+    const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.id);
+    if (normalized.touched_files.some(path => !block.allowed_files.includes(path))) refusals.push(`Unit ${block.id} needs a revised executable plan and fresh review before its write scope can expand.`);
     refusals.push(...normalized.refusals);
     refusals.push(
       ...(await checkWriteScopePathsAgainstTrackedTree(
         root,
         normalized.touched_files,
-        `scope_additions for \`${res.finding_id}\` (block "${block.block_id}")`,
+        `scope_additions for \`${res.unit_id}\` (block "${block.id}")`,
       )),
     );
   }
@@ -2429,13 +1894,10 @@ async function validateClarificationScopeAdditions(
 }
 
 /**
- * Apply one validated scope delta: union the normalized additions into the
- * owning block's `touched_files` (content-sorted — an incidentally-ordered
- * scope would churn the plan hash). The workload-binding invalidation is the
- * caller's existing `delete state.host_handoff` on any applied resolution, so
- * the next prepare re-mints the work item with the widened `allowed_files`
- * (the open-bugs :661 wedge class); the up-front ambiguity gate has no binding
- * by construction.
+ * Normalize already-authorized paths in a clarification resolution. Validation
+ * rejects every addition outside the reviewed unit's allowed_files; genuinely
+ * new write scope requires plan revision and review. The caller invalidates any
+ * current host handoff when it applies the resolution.
  */
 function applyClarificationScopeAdditions(
   root: string,
@@ -2443,18 +1905,17 @@ function applyClarificationScopeAdditions(
   res: PlanClarificationResolution,
 ): void {
   if (res.action !== "clarified" || !res.scope_additions?.length) return;
-  const block = state.plan?.blocks?.find((b) => b.items.includes(res.finding_id));
+  const block = state.plan?.units?.find((b) => b.id === res.unit_id);
   if (!block) return; // refused upstream by validateClarificationScopeAdditions
-  const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.block_id);
-  block.touched_files = [
-    ...new Set([...block.touched_files, ...normalized.touched_files]),
+  const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.id);
+  block.allowed_files = [
+    ...new Set([...block.allowed_files, ...normalized.touched_files]),
   ].sort((left, right) => compareCodeUnits(left, right));
 }
 
 /**
- * Apply one clarification resolution to its item. Single-sourced so the up-front
- * ambiguity gate (part A) and the mid-run clarification round (part B) settle an
- * item identically: `clarified` re-opens it (pending) with the answer as context,
+ * Apply one mid-run clarification resolution to its execution unit:
+ * `clarified` re-opens it (pending) with the answer as context,
  * `reject_finding` closes it as not-a-real-issue (terminal `deemed_inappropriate`
  * disposition), and `defer` closes it as an explicit user deferral for this run.
  * Never resurrects a terminal item.
@@ -2508,7 +1969,7 @@ async function applyPlanClarificationResolution(
     root,
     state,
     parsed,
-    new Set(pausedClarifications(state).map((q) => q.finding_id)),
+    new Set(pausedClarifications(state).map((q) => q.unit_id)),
     "not waiting for a clarification",
   );
   if (refusal !== null || !parsed.ok) {
@@ -2529,7 +1990,7 @@ async function applyPlanClarificationResolution(
   const now = new Date().toISOString();
   let appliedCount = 0;
   for (const res of resolutions) {
-    const item = state.items[res.finding_id];
+    const item = state.items[res.unit_id];
     if (!item || isTerminalStatus(item.status)) continue;
     applyClarificationActionToItem(item, res, now);
     applyClarificationScopeAdditions(root, state, res);
@@ -2544,7 +2005,7 @@ async function applyPlanClarificationResolution(
   if (existsSync(resolutionPath)) {
     await withFsRetry(() => rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`));
   }
-  const remainingPending = state.plan.findings.some(
+  const remainingPending = state.plan.units.some(
     (f) => state.items?.[f.id]?.status === "pending",
   );
   // Undecided-remainder guard, mirroring triage's still-blocked guard: a
@@ -2579,9 +2040,9 @@ async function applyPlanClarificationResolution(
 function pausedClarifications(state: RemediationState): ClarificationRequest[] {
   return Object.values(state.items ?? {})
     .filter((item) => item.status === "needs_clarification")
-    .sort((left, right) => compareCodeUnits(left.finding_id, right.finding_id))
+    .sort((left, right) => compareCodeUnits(left.unit_id, right.unit_id))
     .map((item) => ({
-      finding_id: item.finding_id,
+      unit_id: item.unit_id,
       // The state store refuses a paused item without a question, so the
       // fallback is unreachable from a stored state; it keeps the render total.
       ...(item.clarification_question ?? {
@@ -2653,304 +2114,14 @@ async function handleWaitingForTriage(
  * Returns a halt step while awaiting the user's decision, or null to proceed
  * (decision recorded, any declined nodes marked terminal).
  */
-async function runPlanningReviewGate(
-  root: string,
-  artifactsDir: string,
-  state: RemediationState,
-  store: StateStore,
-): Promise<RemediationStep | null> {
-  const findings = state.plan?.findings ?? [];
-  if (findings.length === 0) return null;
-
-  const requestPath = reviewRequestPath(artifactsDir);
-  const resolutionPath = reviewResolutionPath(artifactsDir);
-  const decisionPath = reviewDecisionPath(artifactsDir);
-
-  // Path B correlates on the LIVE plan's own id (INV-RSM-RESOLUTION-CORRELATE):
-  // the plan exists at the planning point, so its plan_id is the natural
-  // run-unique key — a stale resolution from an earlier plan can never match.
-  const reviewPlanId = state.plan?.plan_id ?? randomRunId("path-b-review");
-
-  if (!existsSync(resolutionPath)) {
-    // Halt: present the tiered node findings and wait for the user's decision.
-    const request = buildReviewRequest(findings, reviewPlanId);
-    await writeJsonFile(requestPath, request);
-    return handleWaitingForReviewApproval(root, artifactsDir, request);
+async function handlePlanning(root: string, artifactsDir: string, state: RemediationState, store: StateStore): Promise<RemediateOutcome> {
+  const approved = await readApprovedExecutionPlan(artifactsDir);
+  if (!approved || approved.canonical.revision_sha256 !== state.plan?.review_revision_sha256) {
+    return { kind: "emit", step: await writeCurrentStep({ stepKind: "contract_pipeline", status: "blocked", runId: stateRunId(state), repoRoot: root, artifactsDir,
+      prompt: "The executable plan has changed since approval. Re-run planning and obtain fresh bound review before implementation; accepted execution history remains intact.",
+      stopCondition: "Approve the current executable revision before dispatch." }) };
   }
-
-  // Resolution present: consume it into a durable, reasoned decision record.
-  // Regenerable: a stale-schema request is treated as absent and rebuilt below.
-  const request =
-    discardOnSchemaVersionMismatch(
-      await readOptionalJsonFile<ReviewRequest>(requestPath),
-      REVIEW_REQUEST_SCHEMA_VERSION,
-    ) ?? buildReviewRequest(findings, reviewPlanId);
-  const read = await readReviewResolution(
-    root, artifactsDir, request, resolutionPath, requestPath,
-  );
-  if ("halt" in read) return read.halt;
-  const decision = applyReviewResolution(request, read.resolution);
-  await writeReviewDecisionRecord(decisionPath, {
-    planId: request.plan_id,
-    approvedIds: decision.approved_ids,
-    declined: decision.declined,
-  });
-  await archiveConsumedInputs([resolutionPath, requestPath]);
-
-  // Declined nodes → recorded terminal disposition (never a silent close).
-  let changed = false;
-  for (const { finding_id, reason } of decision.declined) {
-    const it = state.items?.[finding_id];
-    if (it && !isTerminalStatus(it.status)) {
-      const now = new Date().toISOString();
-      it.status = "ignored";
-      it.failure_reason = reason;
-      it.started_at ??= now;
-      it.completed_at = now;
-      changed = true;
-    }
-  }
-  if (changed) await store.saveState(state);
-  return null;
-}
-
-/**
- * Deterministic first pass (note 3, part A): scan the plan's non-terminal
- * findings for scoping/judgment ambiguity, classified into the canonical
- * clarification categories. These are CANDIDATES — the host reviews them against
- * the repo, dismisses false positives, and adds any it finds, before batching one
- * user round. Conservative by design: a candidate the host dismisses costs one
- * read; a real scoping question that falls silently to mid-run triage is the bug
- * this gate exists to prevent.
- */
-function detectPlanAmbiguities(
-  findings: Finding[],
-  items: Record<string, RemediationItemState> | undefined,
-): ClarificationRequest[] {
-  const out: ClarificationRequest[] = [];
-  for (const f of findings) {
-    const item = items?.[f.id];
-    if (item && isTerminalStatus(item.status)) continue;
-    const lens = (f.lens ?? "").toLowerCase();
-    const fileCount = f.affected_files?.length ?? 0;
-    const broadScope =
-      (lens === "architecture" || lens === "maintainability") &&
-      (fileCount === 0 || fileCount >= 5);
-    if (broadScope) {
-      out.push({
-        finding_id: f.id,
-        category: "scope_of_fix",
-        description:
-          `"${f.title}" is a finding in the ${lens} lens with ${fileCount === 0 ? "no cited files" : `${fileCount} affected files`}. ` +
-          "Confirm how far the fix should reach: a minimal local change, or a broader restructure.",
-      });
-      continue;
-    }
-    if (f.confidence === "low") {
-      out.push({
-        finding_id: f.id,
-        category: "issue_appropriateness",
-        description:
-          `"${f.title}" is a low-confidence finding. Confirm that it is a real issue to fix in this run.`,
-      });
-    }
-  }
-  return out;
-}
-
-/**
- * Up-front ambiguity gate (note 3, part A). Mirrors {@link runPlanningReviewGate}:
- * it fires once at planning, BEFORE any implement dispatch, so scoping/judgment
- * ambiguity is asked as a single batched question up front rather than falling
- * silently to triage mid-run. Deterministic heuristics seed CANDIDATES; the host
- * reviews them with repo access, dismisses/adds, and batches one user round. Each
- * item is resolved as `clarified` (answered → re-opened), `reject_finding`
- * (not a real issue → `deemed_inappropriate`), or `defer` (the user's explicit choice to skip this run).
- *
- * Idempotent: once `ambiguity_decision.json` exists the gate is done and never
- * re-halts. An empty resolution proceeds (the host found nothing to ask).
- */
-async function runPlanAmbiguityGate(
-  root: string,
-  artifactsDir: string,
-  state: RemediationState,
-  store: StateStore,
-): Promise<RemediationStep | null> {
-  const findings = state.plan?.findings ?? [];
-  if (findings.length === 0) return null;
-
-  const requestPath = ambiguityRequestPath(artifactsDir);
-  const resolutionPath = ambiguityResolutionPath(artifactsDir);
-  const decisionPath = ambiguityDecisionPath(artifactsDir);
-
-  if (!existsSync(resolutionPath)) {
-    // Deterministic detection is the gate trigger: with zero candidates there is
-    // nothing for the host to review, so the plan proceeds without a round. Any
-    // ambiguity the heuristics miss is still caught by the mid-run escape hatch
-    // (part B). When candidates exist, halt for the host's review + the user's
-    // batched answers.
-    const candidates = detectPlanAmbiguities(findings, state.items);
-    if (candidates.length === 0) return null;
-    await writeJsonFile(requestPath, { candidates, findings });
-    return writeCurrentStep({
-      stepKind: "collect_clarifications",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: ambiguityReviewPrompt(candidates, resolutionPath, findings.map((f) => f.id), undefined, requestPath),
-      access: { read_paths: [requestPath, root], write_paths: [resolutionPath] },
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after reviewing the candidate ambiguities (and asking the user any genuine ones), unless the resolution is already written and the prompt told you to continue.",
-      artifactPaths: {
-        ambiguity_request: requestPath,
-        ambiguity_resolution: resolutionPath,
-      },
-    });
-  }
-
-  // Resolution present: apply it to items, mark the gate done, archive inputs so
-  // it cannot re-halt.
-  // The same whole-file fail-closed contract as the mid-run round: a malformed
-  // entry, a finding id outside the plan, or an invalid scope addition refuses
-  // the WHOLE resolution (archived, nothing applied) and the gate re-halts with
-  // the reason named — the silent-continue alternative drops a host answer,
-  // leaving its item to fall to mid-run triage unexplained. At this up-front
-  // gate no workload binding exists yet, so an applied scope widening simply
-  // flows into the first dispatch.
-  const parsed = await readPlanClarificationResolutions(resolutionPath);
-  const refusal = await planClarificationRefusal(
-    root,
-    state,
-    parsed,
-    new Set(findings.map((f) => f.id)),
-    "not in the plan",
-  );
-  if (refusal !== null || !parsed.ok) {
-    await withFsRetry(() =>
-      rename(resolutionPath, `${resolutionPath}.refused-${Date.now()}`),
-    );
-    const candidates = detectPlanAmbiguities(findings, state.items);
-    await writeJsonFile(requestPath, { candidates, findings });
-    return writeCurrentStep({
-      stepKind: "collect_clarifications",
-      status: "blocked",
-      runId: stateRunId(state),
-      repoRoot: root,
-      artifactsDir,
-      prompt: ambiguityReviewPrompt(
-        candidates,
-        resolutionPath,
-        findings.map((f) => f.id),
-        refusal ?? "the resolution could not be read",
-        requestPath,
-      ),
-      access: { read_paths: [requestPath, root], write_paths: [resolutionPath] },
-      allowedCommands: [loaderCommand("next-step")],
-      stopCondition:
-        "Stop after re-submitting a corrected ambiguity resolution, unless it is already written and the prompt told you to continue.",
-      artifactPaths: {
-        ambiguity_request: requestPath,
-        ambiguity_resolution: resolutionPath,
-      },
-    });
-  }
-  const resolutions = parsed.resolutions;
-  const now = new Date().toISOString();
-  let changed = false;
-  for (const res of resolutions) {
-    const item = state.items?.[res.finding_id];
-    if (!item || isTerminalStatus(item.status)) continue;
-    applyClarificationActionToItem(item, res, now);
-    applyClarificationScopeAdditions(root, state, res);
-    changed = true;
-  }
-  await writeJsonFile(decisionPath, { resolved_at: now, resolution_count: resolutions.length });
-  for (const p of [resolutionPath, requestPath]) {
-    if (existsSync(p)) {
-      await withFsRetry(() => rename(p, `${p}.consumed-${Date.now()}`));
-    }
-  }
-  if (changed) await store.saveState(state);
-  return null;
-}
-
-async function handlePlanning(
-  root: string,
-  artifactsDir: string,
-  state: RemediationState,
-  store: StateStore,
-): Promise<RemediateOutcome> {
-  // Review-necessity gate (Path B). Path A records its review decision at intake,
-  // over the ORIGINAL findings, before the contract pipeline collapses them into
-  // DAG nodes; Path B (document / conversation) derives findings INSIDE the
-  // pipeline, so it is gated here, at the planning point, over the deduped/
-  // grounded node findings. Fires only when no decision exists yet, so Path A
-  // (decision already written) never double-reviews. Declined nodes get a
-  // recorded terminal disposition.
-  if (state.plan && !existsSync(reviewDecisionPath(artifactsDir))) {
-    const halt = await runPlanningReviewGate(root, artifactsDir, state, store);
-    if (halt) return { kind: "emit", step: halt };
-  }
-
-  // Up-front ambiguity gate (note 3, part A): resolve every scoping/judgment
-  // ambiguity in ONE batched round here, before any implement dispatch, so a
-  // question never falls silently to mid-run triage. Fires at most once per run.
-  if (state.plan && !existsSync(ambiguityDecisionPath(artifactsDir))) {
-    const halt = await runPlanAmbiguityGate(root, artifactsDir, state, store);
-    if (halt) return { kind: "emit", step: halt };
-  }
-
-  // Document phase dissolved: planning transitions directly to implementing,
-  // and the host workload reads finding context directly.
-  const implementBlocks = dispatchFrontier(state);
-  if (implementBlocks.length > 0) {
-    if (state.plan) {
-      const integrity = await checkAffectedFileIntegrity(root, state.plan.findings);
-      if (!integrity.is_clean) {
-        const details = [
-          ...integrity.changed.map((p) => `changed: ${p}`),
-          ...integrity.missing.map((p) => `missing: ${p}`),
-          ...integrity.io_errors.map((p) => `io-error: ${p}`),
-        ];
-        const replanCommand = loaderCommand("next-step --force-replan");
-        return { kind: "emit", step: await writeCurrentStep({
-          stepKind: "collect_starting_point",
-          status: "blocked",
-          runId: stateRunId(state),
-          repoRoot: root,
-          artifactsDir,
-          prompt: [
-            "## File integrity check failed",
-            "",
-            "The following files have changed since the remediation plan was created:",
-            ...details.map((d) => `- ${d}`),
-            "",
-            "Re-run planning to pick up the current file state before implementation begins.",
-            "Run:",
-            "",
-            `\`${replanCommand}\``,
-          ].join("\n"),
-          allowedCommands: [replanCommand],
-          stopCondition: "Stop after re-planning completes.",
-        }) };
-      }
-    }
-  }
-
-  // Transition directly to implementing — no separate document round.
-  // Any pending item that can never enter the host dependency frontier is
-  // dead-ended (INV-RS-01): a prerequisite was skipped/blocked, so its
-  // verified-complete edge can never be satisfied — never dispatch a dependent
-  // against an upstream surface that did not land. Mark it blocked so the run
-  // advances to close rather than looping forever. A node that is merely
-  // waiting on a still-running prerequisite — or on a clarification answer —
-  // is NOT dead; the liveness analysis behind the sweep holds it pending.
-  if (implementBlocks.length === 0) {
-    sweepPermanentlyDeadBlocks(state);
-  }
-
+  if (!dispatchFrontier(state).length) sweepPermanentlyDeadBlocks(state);
   state.status = "implementing";
   await store.saveState(state);
   return { kind: "transition", state };
@@ -2962,122 +2133,16 @@ async function handleImplementing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
-  options: NextStepOptions,
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
   const triaged = await runTriagePhase(state, { root, artifactsDir });
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
-  // INV-RS-10 / OBL-seam-prep-remediate-core-inv-1..4 (the CP-NODE-3 review
-  // finding): this is the ONE caller of runTriagePhase, shared by the
-  // `implementing` and `triage` obligations, so it is also THE single seam
-  // where a triage closing-intent crosses into close. Persisting
-  // `status: "closing"` directly would satisfy the closing obligation on the
-  // next scan and preempt the all-terminal → closing funnel's tool-owned final
-  // gate — exactly the defect class the finding named. So the intent is
-  // persisted under the NON-closing `triage` status first (keeping every
-  // preparation runTriagePhase made — halted items already converted to
-  // `abandoned`, `closing_context` stamped — so a gate-RED pause, which persists
-  // nothing itself, cannot lose them: re-entering triage with zero blocked items
-  // re-derives this exact intent instead of auto-retrying halted work), and only
-  // then handed to the funnel, which runs the gate and owns the closing stamp.
-  if (triaged.status === "closing") {
-    const prepared = { ...triaged, status: "triage" as const };
-    await store.saveState(prepared);
-    return handleAllTerminalTransition(
-      root,
-      artifactsDir,
-      prepared,
-      store,
-      options,
-      runLogger,
-    );
-  }
+  // Triage may enter closing directly: the close itself owns mandatory final
+  // acceptance, so a status transition cannot bypass it.
+  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store);
   await store.saveState(triaged);
   return { kind: "transition", state: triaged };
-}
-
-function hasResolvedItems(state: RemediationState): boolean {
-  return Object.values(state.items ?? {}).some((it) =>
-    isVerifiedCompleteStatus(it.status),
-  );
-}
-
-/**
- * WHICH suppression disabled the tool-owned final gate (INV-RS-10) for this run —
- * `skipFinalGate` (test hermeticity) or `REMEDIATE_SKIP_FINAL_GATE` — or null when
- * it is live. Single-sourced so the all-terminal gate and the per-phase boundary
- * gate agree, and so both RECORD the same reason.
- *
- * The reason is carried into the outcome record rather than collapsed to a
- * boolean: the environment skip is the quietest not-run in the system (it needs
- * no option, no argument and no code change to fire), so a record that says only
- * "disabled" would leave an operator unable to tell a deliberate test-hermeticity
- * run from a stray exported variable.
- */
-function finalGateDisabledReason(options: NextStepOptions): string | null {
-  if (options.skipFinalGate === true) return "skipFinalGate option";
-  if (
-    process.env.REMEDIATE_SKIP_FINAL_GATE === "1" ||
-    process.env.REMEDIATE_SKIP_FINAL_GATE === "true"
-  ) {
-    return "REMEDIATE_SKIP_FINAL_GATE environment variable";
-  }
-  return null;
-}
-
-/**
- * The ONE way a gate evaluation is recorded, shared by BOTH gate families (the
- * phase-boundary gate and the all-terminal funnel), so neither can grow a second
- * executed/scoped-out/disabled vocabulary of its own.
- *
- * Writes the durable {@link writeFinalGateOutcomeRecord} artifact AND the run-log
- * event from the same values, so the two can never disagree about which of the
- * three happened.
- *
- * This is the affirmation the gate lacked. The floor's control flow was already
- * right — a scoped-out gate is deliberately NON-BLOCKING, a declared scope rather
- * than a vacuous pass — but the only thing either consumer wrote was
- * `passed=<bool>`, which is `true` for an executed green floor, for a scoped-out
- * target that ran nothing, and for a suppressed gate that was never reached. All
- * three produced byte-identical records, so "the suite passed" and "no suite ran"
- * were indistinguishable after the fact.
- */
-async function recordFinalGateOutcome(ctx: {
-  artifactsDir: string;
-  state: RemediationState;
-  scope: string;
-  gateKey: string;
-  runLogger: RunLogger;
-  outcome: FinalGateOutcomeKind;
-  passed: boolean;
-  commandsRun: number;
-  reason?: string;
-  durationMs?: number;
-}): Promise<void> {
-  const verdict = carriesGateVerdict(ctx.outcome);
-  await writeFinalGateOutcomeRecord(ctx.artifactsDir, {
-    scope: ctx.scope,
-    outcome: ctx.outcome,
-    passed: ctx.passed,
-    commands_run: ctx.commandsRun,
-    ...(ctx.reason === undefined ? {} : { reason: ctx.reason }),
-  });
-  ctx.runLogger.event({
-    phase: "next-step",
-    kind: "executor_end",
-    obligation: ctx.state.status,
-    note:
-      `${ctx.gateKey} outcome=${ctx.outcome} ` +
-      // "n/a", never "true": a gate that ran nothing has no verdict, and the
-      // durable record it is written beside carries `passed: null` for the
-      // same reason. A `history` outcome DOES carry a verdict — a judge ruled
-      // on this exact tree — so it prints its verdict like an executed one.
-      `passed=${verdict ? String(ctx.passed) : "n/a"} ` +
-      `commands=${verdict ? String(ctx.commandsRun) : "0"}` +
-      (ctx.reason === undefined ? "" : ` reason=${ctx.reason}`),
-    ...(ctx.durationMs === undefined ? {} : { duration_ms: ctx.durationMs }),
-  });
 }
 
 /**
@@ -3127,10 +2192,12 @@ async function emitFinalGateRedStep(ctx: {
    * re-runs the floor on every arrival, so there is nothing to be bound to).
    */
   tree?: string | null;
+  /** Close has already recorded its red before presentation. */
+  recordedPath?: string;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
   const failed = gate.results.find((r) => !r.passed);
-  const recordPath = await writeFinalGateRedRecord(artifactsDir, scope, failed, {
+  const recordPath = ctx.recordedPath ?? await writeFinalGateRedRecord(artifactsDir, scope, failed, {
     root,
     state,
   });
@@ -3321,7 +2388,7 @@ async function runPhaseBoundaryGate(ctx: {
       runLogger,
       outcome: "history",
       passed: cached.passed,
-      commandsRun: cached.results.length,
+      commandsRun: cached.results.filter(result => result.ran !== false).length,
       reason:
         `a verdict for this exact tree content is already recorded (scope "${cached.scope}", ` +
         `recorded_at ${cached.recorded_at}); the floor was NOT re-run because the tree it ` +
@@ -3378,7 +2445,7 @@ async function runPhaseBoundaryGate(ctx: {
     runLogger,
     outcome: gate.outcome,
     passed: gate.passed,
-    commandsRun: gate.results.length,
+    commandsRun: gate.results.filter(result => result.ran !== false).length,
     ...(gate.outcome === "scoped_out"
       ? { reason: "no executable verification command declared; operator command required" }
       : {}),
@@ -3403,89 +2470,11 @@ async function runPhaseBoundaryGate(ctx: {
 }
 
 async function handleAllTerminalTransition(
-  root: string,
-  artifactsDir: string,
   state: RemediationState,
   store: StateStore,
-  options: NextStepOptions,
-  runLogger: RunLogger,
 ): Promise<RemediateOutcome> {
-  const disabledReason = finalGateDisabledReason(options);
-  const gateDisabled = disabledReason !== null;
-  const scope = "all-terminal final gate";
-
-  // The tool-owned final gate (INV-RS-10) runs at the single all-terminal →
-  // closing funnel, on EVERY arrival here. It is skipped only when:
-  //  - there is nothing resolved to validate (everything blocked/skipped), or
-  //  - it is explicitly disabled for test hermeticity.
-  // There is deliberately no third "already gave up" skip: the flag that used to
-  // provide one made a run that hit the old backstop's bound skip the suite check
-  // permanently, so the gate it exists to enforce stopped running exactly when it
-  // mattered most. The gate is INDEPENDENT of plan.test_command and runs through
-  // the env-scrubbing runTracked path.
-  if (!gateDisabled && hasResolvedItems(state)) {
-    const gateStart = Date.now();
-    runLogger.event({
-      phase: "next-step",
-      kind: "executor_start",
-      obligation: state.status,
-      note: "tool_owned_final_gate",
-    });
-    const gate = await runToolOwnedFinalGate(root, { runner: options.finalGateRunner, testCommand: explicitFinalGateTestCommand(state) });
-    await recordFinalGateOutcome({
-      artifactsDir,
-      state,
-      scope,
-      gateKey: "tool_owned_final_gate",
-      runLogger,
-      outcome: gate.outcome,
-      passed: gate.passed,
-      commandsRun: gate.results.length,
-      ...(gate.outcome === "scoped_out"
-        ? { reason: "no executable verification command declared; operator command required" }
-        : {}),
-      durationMs: Date.now() - gateStart,
-    });
-
-    if (!gate.passed) {
-      // A whole-repo red at the closing funnel is exactly as unattributable as
-      // one at a phase boundary, so it gets the same answer: record and pause.
-      // The run does NOT advance to `closing` — closing on a red would write a
-      // report claiming an outcome the suite never corroborated.
-      // No `tree` here on purpose: this funnel caches nothing (it runs the floor
-      // on every arrival), so there is no verdict record for a red to be bound
-      // to, and the prompt says exactly that instead of naming an id that would
-      // be re-measured on the next call anyway.
-      return emitFinalGateRedStep({
-        root,
-        artifactsDir,
-        state,
-        scope,
-        where: "Before the close phase",
-        gate,
-        runLogger,
-      });
-    }
-  } else {
-    // The gate was DUE at the closing funnel and did not run. Recorded, with
-    // WHICH suppression did it — the run is about to transition to `closing`
-    // and write a completion report, and without this the report would be
-    // byte-identical to one produced after a green floor.
-    await recordFinalGateOutcome({
-      artifactsDir,
-      state,
-      scope,
-      gateKey: "tool_owned_final_gate",
-      runLogger,
-      outcome: "disabled",
-      passed: false,
-      commandsRun: 0,
-      reason:
-        disabledReason ??
-        "no verified-complete items to validate (nothing resolved)",
-    });
-  }
-
+  // Final acceptance belongs to the actual close execution, after preview
+  // pauses. A transition carries no executable verification verdict.
   state.status = "closing";
   await store.saveState(state);
   return { kind: "transition", state };
@@ -3497,33 +2486,63 @@ async function handleClosing(
   state: RemediationState,
   runLogger: RunLogger,
   store: StateStore,
+  options: NextStepOptions,
 ): Promise<RemediateOutcome> {
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
 
-  // THE FRICTION WALK IS DECIDED HERE, BEFORE THE CLOSE TOUCHES DISK.
-  //
-  // `runClosePhase` ends by archiving the run's friction record into the
-  // promoted deliverables and deleting the artifacts dir. Both the record and
-  // the state's plan id — the key that names it — are gone after that, so this
-  // is the last moment a decision can name the run it is closing out. Deciding
-  // here also MATERIALIZES the plan-keyed record, which is what gives the host
-  // a file to append to during the walk.
-  //
-  // An unsatisfied walk short-circuits the close ENTIRELY: no tests, no closing
-  // action, no archive, no removal. The run stays open on the plan-keyed record
-  // and is emitted as the blocking friction step; once disposed, the next
-  // `next-step` re-decides it as satisfied and falls through to a real close.
-  const frictionTriage = await decideRemediateFrictionCloseout(artifactsDir, state);
-  if (frictionTriage && frictionTriage.action !== "disposed") {
-    return { kind: "emit", step: await buildFrictionWalkStep(root, artifactsDir, state, frictionTriage) };
+  // Target verification and closing are product obligations. Development
+  // reflection is owned by this repository's sprint closeout; captured run
+  // diagnostics are still archived by runClosePhase before cleanup.
+  let paused: RemediateOutcome | undefined;
+  let closed: RemediationState;
+  try {
+    closed = await runClosePhase(state, {
+      root, artifactsDir,
+      skipFinalGate: options.skipFinalGate,
+      finalGateRunner: options.finalGateRunner,
+      finalizeClosing: options.finalizeClosing,
+      onFinalGateRed: async (gate) => {
+        paused = await emitFinalGateRedStep({
+          root, artifactsDir, state, scope: "all-terminal final gate",
+          where: "Before completing the close phase", gate, runLogger,
+          recordedPath: finalGateRecordPath(artifactsDir),
+        });
+      },
+    }, runLogger);
+  } catch (error) {
+    if (!(error instanceof RemediationPlanAuthorityError)) throw error;
+    return { kind: "emit", step: await emitPlanRevisionBlockedStep(root, artifactsDir, {
+      reason: `Closing is paused before any closing action. ${error.message}`,
+    }) };
   }
-
-  const closed = await runClosePhase(state, { root, artifactsDir }, runLogger);
+  if (paused) return paused;
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "close", duration_ms: Date.now() - closeStart });
   if (closed.status !== "complete") {
-    // Not done (preview / re-blocked to triage): persist and re-scan.
     await store.saveState(closed);
+    const preview = closed.closing_plan?.closing_action_preview;
+    if (closed.status === "closing" && preview && !closed.closing_plan?.pre_authorized) {
+      const approveCommand = loaderCommand("next-step --finalize-closing");
+      return {
+        kind: "emit",
+        step: await writeCurrentStep({
+          stepKind: "close_run", status: "ready", runId: stateRunId(closed),
+          repoRoot: root, artifactsDir,
+          prompt: [
+            "# Approve closing action",
+            `Ask the user to approve the closing action: ${closed.closing_plan?.action}.`,
+            `Commit message: ${preview.commit_message}`,
+            "Files:", ...preview.files.map(file => `- ${file}`),
+            ...(preview.leftover_files?.length ? ["Files left untouched:", ...preview.leftover_files.map(file => `- ${file}`)] : []),
+            `Only after the user approves, run: ${approveCommand}`,
+            "If the preview changes, approval is requested again. Final verification runs after approval.",
+          ].join("\n"),
+          allowedCommands: [approveCommand],
+          stopCondition: "Stop after presenting the closing preview and wait for user approval.",
+        }),
+      };
+    }
+    // Re-blocked to triage: persist and re-scan.
     return { kind: "transition", state: closed };
   }
   // Close-complete CROSSES the engine boundary: `complete` is a pre-intake
@@ -3637,7 +2656,7 @@ async function handleUnhandledState(
 ): Promise<RemediationStep> {
   const itemsByStatus: Record<string, string[]> = {};
   for (const item of Object.values(state.items ?? {})) {
-    (itemsByStatus[item.status] ??= []).push(item.finding_id);
+    (itemsByStatus[item.status] ??= []).push(item.unit_id);
   }
   const statusBreakdown = Object.entries(itemsByStatus)
     .map(([status, ids]) => `- **${status}**: ${ids.join(", ")}`)
@@ -4070,6 +3089,8 @@ export interface PreIntakeSnapshot {
    * was built from — so the conflict gate treats it as a resume, not a conflict.
    */
   suppliedInputUnchanged: boolean;
+  /** Canonical source ownership starts before a runtime state exists. */
+  sourceAlreadyBound?: boolean;
   /** A selected source or its explicit selector changed, including on bare resume. */
   inputSelectionChanged?: boolean;
   selectionAlreadyBound?: boolean;
@@ -4136,7 +3157,7 @@ export function buildPreIntakeObligations(
   snapshot: PreIntakeSnapshot,
 ): RemediateObligation[] {
   const { artifactsDir, inputResolution } = ctx;
-  const { existingCheckpoint, rejectedCheckpointFields, resumeAck, entryState, suppliedInputUnchanged, inputSelectionChanged, selectionAlreadyBound, selectedSourceChanged, guidanceFileSupplied } = snapshot;
+  const { existingCheckpoint, rejectedCheckpointFields, resumeAck, entryState, suppliedInputUnchanged, sourceAlreadyBound, inputSelectionChanged, selectionAlreadyBound, selectedSourceChanged, guidanceFileSupplied } = snapshot;
   const ip = intakePaths(artifactsDir);
   const checkpointPath = join(artifactsDir, "intent_checkpoint.json");
   const ackPath = join(artifactsDir, "confirm_resume_ack.json");
@@ -4162,7 +3183,7 @@ export function buildPreIntakeObligations(
         (selectionAlreadyBound && inputSelectionChanged) ||
         (((inputResolution.supplied && !suppliedInputUnchanged) ||
           inputSelectionChanged || guidanceFileSupplied) &&
-        entryState != null && entryState.status !== "pending")
+        (sourceAlreadyBound || (entryState != null && entryState.status !== "pending")))
           ? "missing"
           : "satisfied",
       execute: async (_state, c) => {
@@ -4242,7 +3263,8 @@ export function buildPreIntakeObligations(
           invalidClosingAction ||
           (!existsSync(checkpointPath) &&
             (existsSync(ip.summary) ||
-              existsSync(ip.extractedPlan) ||
+              existsSync(executionPlanPaths(artifactsDir).canonical) ||
+              existsSync(executionPlanPaths(artifactsDir).source) ||
               activeRunState));
         return fires ? "missing" : "satisfied";
       },
@@ -4369,7 +3391,8 @@ Then run:
         // finding count included) rather than silently re-showing the stale report.
         const freshIntent =
           existsSync(ip.conversationStart) ||
-          existsSync(ip.extractedPlan) ||
+          existsSync(executionPlanPaths(artifactsDir).canonical) ||
+          sourceAlreadyBound ||
           (existsSync(ip.summary) && existingCheckpoint?.confirmed_by === "host") ||
           isDefaultCandidateFresherThanReport(inputResolution.existing[0], reportPath);
         return freshIntent ? "satisfied" : "missing";
@@ -4593,21 +3616,14 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           await store.saveState(s);
           return { kind: "transition", state: s };
         }
-        return handleImplementing(root, artifactsDir, s, runLogger, store, options);
+        return handleImplementing(root, artifactsDir, s, runLogger, store);
       },
     },
     {
       id: "triage",
       derive: (state) => (state?.status === "triage" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleImplementing(
-          root,
-          artifactsDir,
-          requireState(state),
-          runLogger,
-          store,
-          options,
-        ),
+        handleImplementing(root, artifactsDir, requireState(state), runLogger, store),
     },
     {
       // planning with zero documentable findings is a user question, not a
@@ -4617,7 +3633,7 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
       derive: (state) =>
         state != null &&
         state.status === "planning" &&
-        documentableFindings(state).length === 0
+        documentableFindings(state).length === 0 && !allItemsTerminal(state)
           ? "missing"
           : "satisfied",
       execute: async (state) => ({
@@ -4636,20 +3652,13 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           ? "missing"
           : "satisfied",
       execute: async (state) =>
-        handleAllTerminalTransition(
-          root,
-          artifactsDir,
-          requireState(state),
-          store,
-          options,
-          runLogger,
-        ),
+        handleAllTerminalTransition(requireState(state), store),
     },
     {
       id: "closing",
       derive: (state) => (state?.status === "closing" ? "missing" : "satisfied"),
       execute: async (state) =>
-        handleClosing(root, artifactsDir, requireState(state), runLogger, store),
+        handleClosing(root, artifactsDir, requireState(state), runLogger, store, options),
     },
     {
       // Catch-all: reached only when no specific obligation matched. Always
@@ -4740,8 +3749,13 @@ async function advanceUnderPhaseLock(deps: {
     return buildOperatorControlStep(root, artifactsDir, state, control);
   }
   if (options.guidanceFile && options.guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
-  if (options.guidanceFile) applyGuidanceFile(artifactsDir, options.guidanceFile);
-  if (options.guidanceText !== undefined) applyGuidanceText(artifactsDir, options.guidanceText);
+  const boundSource = await readPlanSource(artifactsDir);
+  // A conflicting new source must reach the bounded choice before bootstrap
+  // touches the existing conversation input (or throws on different bytes).
+  if (!boundSource && (state == null || state.status === "pending")) {
+    if (options.guidanceFile) applyGuidanceFile(artifactsDir, options.guidanceFile);
+    if (options.guidanceText !== undefined) applyGuidanceText(artifactsDir, options.guidanceText);
+  }
 
   if (options.verificationCommand !== undefined && state?.plan) {
     if (parseCommandString(options.verificationCommand).length === 0) {
@@ -4772,20 +3786,21 @@ async function advanceUnderPhaseLock(deps: {
   // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
   // runs once per host call (the engine folds planning → implementing → … through
   // transitions, never a recursive decideNextStepLoop), so this fires at most once.
-  if (options.forceReplan && state != null) {
+  const currentCanonical=state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
+  if (state != null && (options.forceReplan || existsSync(executionPlanPaths(artifactsDir).submission) || (currentCanonical && currentCanonical.revision_sha256!==state.plan?.review_revision_sha256))) {
     await countStep(state);
     const replanOutcome = await forceReplanFromExistingIntake(
       root,
       artifactsDir,
       state,
-      store,
       runLogger,
     );
     // A discarded plan is REPORTED here, not collapsed into `state = null`. Once
     // it is null the loop can no longer tell "the plan was destroyed, and here is
     // why" from "there was never an input", and it emits the second.
     if (replanOutcome !== null && "kind" in replanOutcome) {
-      return emitExtractedPlanDiscardedStep(root, artifactsDir, replanOutcome);
+      if(replanOutcome.kind==="planning_step")return replanOutcome.step;
+      return emitPlanRevisionBlockedStep(root, artifactsDir, replanOutcome);
     }
     state = replanOutcome;
   }
@@ -4837,6 +3852,7 @@ async function advanceUnderPhaseLock(deps: {
     (requestedSelection !== undefined && JSON.stringify(requestedSelection) !== JSON.stringify(recordedSelection?.criteria));
   const suppliedInputUnchanged = !inputSelectionChanged && suppliedInputMatchesRun(
     inputResolution, sourceManifest,
+    boundSource?.sources.map(source => source.path).filter(path => resolve(path) !== resolve(intakePaths(artifactsDir).brief)),
   );
 
   // The linear pre-intake gates run as obligations through the shared advance
@@ -4861,10 +3877,11 @@ async function advanceUnderPhaseLock(deps: {
         resumeAck,
         entryState: state,
         suppliedInputUnchanged,
+        sourceAlreadyBound: boundSource !== undefined,
         inputSelectionChanged,
         selectionAlreadyBound: recordedSelection !== undefined,
         selectedSourceChanged,
-        guidanceFileSupplied: Boolean(options.guidanceFileSupplied),
+        guidanceFileSupplied: Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined),
       }),
     },
     state,

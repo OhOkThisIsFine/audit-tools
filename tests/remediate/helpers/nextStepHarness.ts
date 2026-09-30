@@ -18,26 +18,10 @@ import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
 import type { RemediationState } from "../../../src/remediate/state/store.js";
-import { writeContractArtifact } from "../../../src/remediate/contractPipeline/artifactStore.js";
 import { intakeSummaryFixture } from "./intakeSummaryFixture.js";
-import {
-  CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-  CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-  CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-  CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-  CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
-  CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
-  CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
-  CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-  CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
-} from "audit-tools/shared";
-import {
-  CP_MODULE_DECOMPOSITION_VERSION,
-  CP_MODULE_CONTRACTS_VERSION,
-  CP_SEAM_RECONCILIATION_REPORT_VERSION,
-  CP_FINALIZED_MODULE_CONTRACTS_VERSION,
-  CP_CYCLIC_SEAM_RESOLUTION_VERSION,
-} from "../../../src/remediate/validation/contractPipeline.js";
+import { canonicalPlanFixture, canonicalUnitFixture } from "./canonicalPlanFixture.js";
+import { buildNextContractPipelineStep } from "../../../src/remediate/steps/contractPipeline.js";
+import { executionPlanPaths, readPlanSource, readCanonicalPlan } from "../../../src/remediate/contractPipeline/executionPlan.js";
 import { scratchDir } from "../../helpers/scratch.js";
 // The friction vocabulary is single-sourced in shared; the walk helper below
 // attests every category by iterating it, so a new category cannot leave this
@@ -61,26 +45,17 @@ export const AUDIT_FIXTURE = join(
   "fixtures",
   "audit-findings-simple.json",
 );
-/** Path to the richer auditor-contract fixture (with work_blocks + themes). */
-export const AUDITOR_CONTRACT_FIXTURE = join(
-  TESTS_DIR,
-  "fixtures",
-  "auditor-contract-audit-findings.json",
-);
-/** Path to the CLI wrapper used by the spawnSync end-to-end checks. */
-export const WRAPPER = join(TESTS_DIR, "..", "..", "remediate-code.mjs");
-
 // ---------------------------------------------------------------------------
 // Pure state builders — no filesystem dependency, safe to share verbatim.
 // ---------------------------------------------------------------------------
 
-/** A two-finding planning state with both items pending in separate blocks. */
+/** Two original findings, each linked to one independently executable unit. */
 export function makePlanningState(
   overrides: Partial<RemediationState> = {},
 ): RemediationState {
   return {
     status: "planning",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "PLAN-1",
       findings: [
         {
@@ -106,16 +81,22 @@ export function makePlanningState(
           evidence: ["src/b.ts:1 evidence"],
         },
       ],
-      blocks: [
-        { block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: ["src/a.ts"] },
-        { block_id: "B-002", items: ["F-002"], parallel_safe: true, touched_files: ["src/b.ts"] },
+      units: [
+        canonicalUnitFixture("B-001", { source_finding_ids: ["F-001"], read_paths: ["src/a.ts"], allowed_files: ["src/a.ts"] }),
+        canonicalUnitFixture("B-002", { source_finding_ids: ["F-002"], read_paths: ["src/b.ts"], allowed_files: ["src/b.ts"] }),
+      ],
+      requirements: [
+        { id: "REQ-B-001", description: "Fix first", source_finding_ids: ["F-001"], change_kind: "addition",
+          assertions: [{ kind: "positive", description: "First finding's acceptance condition holds", scope_paths: ["src/a.ts"] }] },
+        { id: "REQ-B-002", description: "Fix second", source_finding_ids: ["F-002"], change_kind: "addition",
+          assertions: [{ kind: "positive", description: "Second finding's acceptance condition holds", scope_paths: ["src/b.ts"] }] },
       ],
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
+    }),
     items: {
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
-      "F-002": { finding_id: "F-002", status: "pending", block_id: "B-002" },
+      "B-001": { unit_id: "B-001", status: "pending" },
+      "B-002": { unit_id: "B-002", status: "pending" },
     },
     closing_plan: { action: "none" },
     ...overrides,
@@ -161,10 +142,9 @@ export interface NextStepHarness {
   writeIntentCheckpoint(): Promise<void>;
   writeReadyStructuredAuditIntake(inputPath: string): Promise<void>;
   approveReviewGate(): Promise<void>;
-  writeCompleteContractPipelineDag(): Promise<void>;
+  writeApprovedExecutionPlan(): Promise<void>;
   /**
-   * Complete the run's friction close-out walk on the plan-keyed record. The
-   * close is gated on this walk, so a suite wanting the FOLD walks it first.
+   * Write an optional development friction record for diagnostic/archive tests.
    */
   walkFriction(planId?: string): Promise<void>;
   /**
@@ -236,13 +216,7 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
   /**
    * Complete the run's friction close-out walk on the plan-keyed record.
    *
-   * The close is GATED on this walk: `handleClosing` decides it before the close
-   * touches disk, so a run whose walk is still owed stops at the blocking
-   * `close_run` step instead of folding through to `present_report`. A suite
-   * that wants the FOLD (the pre-gate behavior) walks the record first, exactly
-   * as a host does.
-   *
-   * Keyed on the plan the caller saved — the same id the close keys on.
+   * This is development diagnostic input, never a product completion gate.
    */
   async function walkFriction(planId = "PLAN-1"): Promise<void> {
     const dir = join(ARTIFACTS_DIR, "friction");
@@ -347,190 +321,51 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     );
   }
 
-  async function writeCompleteContractPipelineDag(): Promise<void> {
-    const created_at = "2026-01-01T00:00:00.000Z";
-    // The N-B3 promotion-backstop citation gate enumerates the working tree via
-    // `git ls-files`; REPO_DIR is a fresh scratch dir with no tracked files, so
-    // without a real git tree the gate fails closed (empty tree = unreadable).
-    // Initialize REPO_DIR as a git repo containing the path the DAG node cites
-    // (src/remediate/intake.ts) so the promoted finding grounds against it.
-    await mkdir(join(REPO_DIR, "src", "remediate"), { recursive: true });
-    await writeFile(
-      join(REPO_DIR, "src", "remediate", "intake.ts"),
-      "// fixture file for citation grounding\nexport {};\n",
-      "utf8",
-    );
-    const git = (...args: string[]) =>
-      spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
-    git("init", "-q");
-    git("config", "user.email", "test@example.com");
-    git("config", "user.name", "Test");
-    git("add", "src/remediate/intake.ts");
-    await writeContractArtifact(ARTIFACTS_DIR, "goal_spec", {
-      contract_version: CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
-      goal_id: "G1",
-      objective: "Clean up the auth flow.",
-      non_goals: [],
-      success_criteria: ["Auth flow cleanup is implemented."],
-      source_type: "documents",
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "context_bundle", {
-      contract_version: CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
-      goal_id: "G1",
-      entries: [],
-      context_summary: "Auth flow context.",
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "module_decomposition", {
-      contract_version: CP_MODULE_DECOMPOSITION_VERSION,
-      goal_id: "G1",
-      modules: [
-        {
-          name: "auth-module",
-          responsibilities: "Handles auth flow.",
-          file_scope: ["src/auth.ts"],
-        },
-      ],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "module_contracts", {
-      contract_version: CP_MODULE_CONTRACTS_VERSION,
-      goal_id: "G1",
-      module_contracts: [
-        {
-          name: "auth-module",
-          inputs: ["credentials"],
-          outputs: ["session"],
-          invariants: [],
-          side_effects: [],
-          validation_boundary: "validates credentials",
-          failure_modes: [],
-          neighbor_needs: [],
-        },
-      ],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "seam_reconciliation_report", {
-      contract_version: CP_SEAM_RECONCILIATION_REPORT_VERSION,
-      goal_id: "G1",
-      mismatches: [],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "finalized_module_contracts", {
-      contract_version: CP_FINALIZED_MODULE_CONTRACTS_VERSION,
-      goal_id: "G1",
-      module_contracts: [
-        {
-          name: "auth-module",
-          inputs: ["credentials"],
-          outputs: ["session"],
-          invariants: [],
-          side_effects: [],
-          validation_boundary: "validates credentials",
-          failure_modes: [],
-          seam_adjustments: [],
-        },
-      ],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "conceptual_design_critique", {
-      contract_version: CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-      goal_id: "G1",
-      items: [],
-      verdict: "approved",
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "obligation_ledger", {
-      contract_version: CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION,
-      goal_id: "G1",
-      obligations: [
-        {
-          id: "O-1",
-          description: "the authFlow cleanup is implemented",
-          kind: "behavioral",
-          depends_on: [],
-          status: "pending",
-          // DC-5: a behavior CHANGE touching `authFlow`; its paired negative must
-          // be scoped to that symbol (an unscoped repo-wide negative fails the gate).
-          change_classification: {
-            change_kind: "change",
-            touched_symbols: ["authflow"],
-            determined_by: "touches_existing_symbol",
-          },
-        },
-      ],
-      created_at,
-    });
-    // cyclic_seam_resolution is auto-written by the pipeline when no cycles
-    // exist, but we write it explicitly here so the pipeline sees it and proceeds.
-    await writeContractArtifact(ARTIFACTS_DIR, "cyclic_seam_resolution", {
-      contract_version: CP_CYCLIC_SEAM_RESOLUTION_VERSION,
-      goal_id: "G1",
-      status: "no_cycles",
-      cycles: [],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "test_validator_plan", {
-      contract_version: CONTRACT_PIPELINE_TEST_VALIDATOR_PLAN_VERSION,
-      goal_id: "G1",
-      // O-1 is behavioral (testable): the paired-obligation gate requires a spec
-      // covering both the satisfied path and the failure path before the
-      // implementation DAG can promote.
-      test_specs: [
-        {
-          obligation_id: "O-1",
-          name: "auth flow cleanup holds and rejects the failure case",
-          kind: "invariant",
-          assertions: [
-            "authFlow returns the cleaned-up flow on the satisfied path",
-            "authFlow rejects the invalid request on the failure path",
-          ],
-        },
-      ],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "contract_assessment_report", {
-      contract_version: CONTRACT_PIPELINE_CONTRACT_ASSESSMENT_REPORT_VERSION,
-      goal_id: "G1",
-      findings: [],
-      verdict: "passed",
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "counterexample", {
-      contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
-      goal_id: "G1",
-      counterexamples: [],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "judge_report", {
-      contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION,
-      goal_id: "G1",
-      verdict: "approved",
-      classifications: [],
-      created_at,
-    });
-    await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
-      contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
-      goal_id: "G1",
-      nodes: [
-        {
-          id: "CP-001",
-          title: "Update auth flow",
-          description: "Implement the auth flow cleanup.",
-          satisfies_obligations: ["O-1"],
-          depends_on: [],
-          verification_obligation_ids: ["O-1"],
-          // A real tracked path so the promotion-backstop citation gate (N-B3)
-          // grounds the promoted finding against the working tree.
-          files_likely_touched: ["src/remediate/intake.ts"],
-          targeted_commands: ["npm test"],
-          status: "pending",
-        },
-      ],
-      edges: [],
-      created_at,
-    });
+  async function writeApprovedExecutionPlan(): Promise<void> {
+    const file = "src/remediate/intake.ts";
+    await mkdir(dirname(join(REPO_DIR, file)), { recursive: true });
+    await writeFile(join(REPO_DIR, file), "export const authFlow = true;\n", "utf8");
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
+    git("add", file);
+    const brief = join(ARTIFACTS_DIR, "fixture-request.md");
+    await writeFile(brief, "Clean up the auth flow while retaining its behavior.\n");
+    const options = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR, runId: "PLAN-1", sourcePaths: [brief] };
+    await buildNextContractPipelineStep(options);
+    const source = await readPlanSource(ARTIFACTS_DIR);
+    if (!source) throw new Error("Fixture planning source was not created");
+    const paths = executionPlanPaths(ARTIFACTS_DIR);
+    const sources = source.findings.map(finding => finding.id);
+    const plan = {
+      plan_id: source.plan_id, objective: "Clean up the auth flow", non_goals: [],
+      requirements: [{ id: "REQ-auth", description: "Preserve the auth flow", source_finding_ids: sources,
+        change_kind: "behavior_change", assertions: [
+          { kind: "positive", description: "Valid credentials preserve the auth flow", scope_paths: [file] },
+          { kind: "negative", description: "Invalid credentials cannot enter the auth flow", scope_paths: [file] },
+        ] }],
+      units: [canonicalUnitFixture("CP-001", { title: "Update auth flow", description: "Implement the auth flow cleanup",
+        source_finding_ids: sources, requirement_ids: ["REQ-auth"], read_paths: [file], allowed_files: [file], required_tests: ["npm test"] })],
+      source_dispositions: [],
+    };
+    await writeFile(paths.submission, JSON.stringify({ base_revision_sha256: null, plan, retired_requirements: [] }));
+    await buildNextContractPipelineStep(options);
+    const canonical = await readCanonicalPlan(ARTIFACTS_DIR);
+    if (source.request && canonical) await writeFile(join(paths.directory, "owner-decision.json"), JSON.stringify({
+      revision_sha256: canonical.revision_sha256, confirmed_by: "host", approved_unit_ids: plan.units.map(unit => unit.id), declined_units: [],
+    }));
+    for (const role of ["critique", "critic", "judge"] as const) {
+      await buildNextContractPipelineStep(options);
+      const request = JSON.parse(await readFile(paths.review(role).request, "utf8")) as { prompt_sha256: string };
+      const result = role === "critique" ? { verdict: "approved", issues: [] }
+        : role === "critic" ? { counterexamples: [] }
+        : { verdict: "approved", classifications: [], disposition_assessments: [],
+          requirement_assessments: [{ requirement_id: "REQ-auth", verdict: "satisfied", evidence: ["The scoped positive and negative assertions cover the source requirement"] }] };
+      await writeFile(paths.review(role).submission, JSON.stringify({
+        contract_version: "review-submission/v1", prompt_sha256: request.prompt_sha256,
+        review: { mode: "independent", reason: "Fixture simulates a separate review context" }, result,
+      }));
+    }
+    const remaining = await buildNextContractPipelineStep(options);
+    if (remaining !== null) throw new Error(`Fixture plan did not reach approval: ${remaining.prompt_path}`);
   }
 
   return {
@@ -544,7 +379,7 @@ export function createNextStepHarness(dirName: string): NextStepHarness {
     writeIntentCheckpoint,
     writeReadyStructuredAuditIntake,
     approveReviewGate,
-    writeCompleteContractPipelineDag,
+    writeApprovedExecutionPlan,
     walkFriction,
     finalGateRunner: HARNESS_GATE_RUNNER,
     runFinalGate: (root = REPO_DIR, runner = HARNESS_GATE_RUNNER) =>

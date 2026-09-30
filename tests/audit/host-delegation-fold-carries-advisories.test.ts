@@ -1,5 +1,6 @@
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
-import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
+import { declineDefaultAcquiredAnalyzers, DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
+import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 // N1 (A2 re-review F1-1): in `runHostDelegationObligation`, when the same fold
@@ -257,11 +258,21 @@ async function setup() {
   await writeCoreArtifacts(artifactsDir, settled as never);
   await persistDesignReviewSnapshots(artifactsDir, settled);
 
-  await satisfyFunctionalPreflight(root, artifactsDir);
+  // The real fold may refresh the seeded acquisition artifact as context moves.
+  // State the same current-run decline used by every shared CLI fixture, rather
+  // than relying on an enabled:false artifact to suppress external acquisition.
+  await declineDefaultAcquiredAnalyzers(root);
   return { root, artifactsDir };
 }
 
 describe("contract:host-delegation-fold-carries-advisories-to-the-next-emission", () => {
+  it("declines default acquired analyzers before the real fold can refresh stale fixture artifacts", async () => {
+    const { root, artifactsDir } = await setup();
+    const consent = await readRunConsentUnlocked(root, artifactsDir);
+    expect(DEFAULT_ACQUIRED_ANALYZER_IDS.length).toBeGreaterThan(0);
+    for (const id of DEFAULT_ACQUIRED_ANALYZER_IDS) expect(consent.decisions[id]).toBe("declined");
+  });
+
   it("renders the advisory line for a warning-only accepted result on the emitted step", async () => {
     const { root, artifactsDir } = await setup();
 
@@ -523,4 +534,3 @@ describe("contract:host-delegation-fold-carries-advisories-to-the-next-emission"
     ).toBe(false);
   });
 });
-

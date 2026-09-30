@@ -1,20 +1,12 @@
 /**
- * Diff-based re-review primitives (shared, B2/B3).
+ * Diff-based re-review primitives.
  *
- * Both orchestrators make staleness content/semantics-aware: a dependency is
- * recorded and compared by the hash of its *semantic projection* (only the
- * load-bearing structure a downstream consumes), and a verdict-bearing review
- * that must re-run after a genuine upstream change is handed its prior verdict
- * plus the precise changed-since-last-review delta — so it re-affirms cheaply or
- * revises only the affected items, never a blind full re-run.
+ * Audit design review records and compares each dependency's semantic projection:
+ * the load-bearing structure consumed by the review. A changed input can then be
+ * shown with its prior verdict and exact delta rather than forcing a blind re-read.
  *
- * Each orchestrator owns its own *projection table* (which fields of which
- * artifact are load-bearing — remediate's `semanticProjection`, audit-code's
- * `designReviewProjection`), but the GENERIC machinery is single-sourced here:
- * the order-independent stable serialization, the leaf-level projection diff,
- * and the re-review prompt section. This keeps the two halves of the pipeline in
- * lockstep (one diff algorithm, one prompt shape) while leaving the
- * domain-specific projection to each side.
+ * Audit's designReviewProjection owns the domain-specific field selection. This
+ * module supplies stable serialization, leaf-level diffs and re-review prompt text.
  */
 import { compareCodeUnits } from "../compareCodeUnits.js";
 

@@ -37,8 +37,8 @@ function finding(paths: string[]): Finding {
 test("INV-B3-1 POSITIVE: normalizeRepoPath preserves a dotfile-dir leading dot", () => {
   // Only a leading './' is stripped; the dot of `.claude` / `.github` survives so
   // the path stays identical to its `git ls-files` form for exact membership.
-  expect(normalizeRepoPath(".claude/hooks/friction-stop-gate.mjs")).toBe(
-    ".claude/hooks/friction-stop-gate.mjs",
+  expect(normalizeRepoPath(".claude/hooks/closeout-challenge-gate.mjs")).toBe(
+    ".claude/hooks/closeout-challenge-gate.mjs",
   );
   expect(normalizeRepoPath("./.claude/x.mjs")).toBe(".claude/x.mjs");
 });
@@ -55,9 +55,9 @@ test("INV-B3-1 NEGATIVE: normalizeRepoPath does NOT strip the leading dot of a d
 });
 
 test("INV-B3-1 POSITIVE: a finding citing a dotfile path grounds by exact membership", () => {
-  const corpus = new Set([".claude/hooks/friction-stop-gate.mjs"]);
+  const corpus = new Set([".claude/hooks/closeout-challenge-gate.mjs"]);
   const verdict = groundDesignFinding(
-    finding([".claude/hooks/friction-stop-gate.mjs"]),
+    finding([".claude/hooks/closeout-challenge-gate.mjs"]),
     corpus,
   );
   expect(verdict.status).not.toBe("ungrounded");

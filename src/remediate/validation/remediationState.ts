@@ -1,4 +1,5 @@
-import { ImplementationContextSchema } from "../../shared/types/contractPipeline/implementation.js";
+import { RemediationPlanSchema } from "../state/types.js";
+import { ExecutionUnitSchema, executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
 // sites-pinned: tests/remediate/validation.test.ts, tests/remediate/clarification-round-contract.test.ts
 import {
   type ValidationIssue,
@@ -6,7 +7,6 @@ import {
   VALID_CONFIDENCES,
   isRecord,
   pushValidationIssue,
-  prefixValidationIssues,
   requireKeys,
 } from "audit-tools/shared";
 
@@ -73,119 +73,22 @@ export function validateFinding(
   return issues;
 }
 
-export function validateRemediationBlock(
-  value: unknown,
-  path = "block",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  issues.push(
-    ...requireKeys(value, path, [
-      "block_id",
-      "items",
-      "parallel_safe",
-      "touched_files",
-    ]),
-  );
-  if (!isRecord(value)) return issues;
-
-  if (!Array.isArray(value.items)) {
-    pushValidationIssue(issues, `${path}.items`, "Expected an array.");
-  }
-  if (value.implementation_context !== undefined) {
-    const parsed = ImplementationContextSchema.safeParse(value.implementation_context);
-    if (!parsed.success) for (const issue of parsed.error.issues) {
-      pushValidationIssue(issues, `${path}.implementation_context.${issue.path.join(".")}`, issue.message);
-    }
-  }
-  if (typeof value.parallel_safe !== "boolean") {
-    pushValidationIssue(issues, `${path}.parallel_safe`, "Expected a boolean.");
-  }
-  // touched_files is REQUIRED and array-typed; an empty array is allowed (the
-  // block legitimately touches nothing extra), but an omitted field is rejected
-  // (requireKeys above) so producers cannot silently drop the surface
-  // declaration the file-ownership scheduler depends on (CE-001 chain head).
-  if (
-    value.touched_files !== undefined &&
-    (!Array.isArray(value.touched_files) ||
-      value.touched_files.some((f) => typeof f !== "string"))
-  ) {
-    pushValidationIssue(
-      issues,
-      `${path}.touched_files`,
-      "Expected an array of strings.",
-    );
-  }
-  if (
-    value.dependencies !== undefined &&
-    (!Array.isArray(value.dependencies) ||
-      value.dependencies.some((d) => typeof d !== "string"))
-  ) {
-    pushValidationIssue(
-      issues,
-      `${path}.dependencies`,
-      "Expected an array of strings when present.",
-    );
-  }
-  return issues;
+export function validateExecutionUnit(value: unknown, path = "unit"): ValidationIssue[] {
+  const result = ExecutionUnitSchema.safeParse(value);
+  return result.success ? [] : result.error.issues.map(issue => ({ path: `${path}.${issue.path.join(".")}`, message: issue.message, severity: "error" as const }));
 }
 
-export function validateRemediationPlan(
-  value: unknown,
-  path = "remediation_plan",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  issues.push(
-    ...requireKeys(value, path, [
-      "plan_id",
-      "findings",
-      "blocks",
-      "project_type",
-      "candidate_closing_actions",
-    ]),
-  );
-  if (!isRecord(value)) return issues;
-
-  if (!Array.isArray(value.findings)) {
-    pushValidationIssue(issues, `${path}.findings`, "Expected an array.");
-  } else {
-    for (const [i, finding] of value.findings.entries()) {
-      issues.push(
-        ...prefixValidationIssues(
-          `${path}.findings[${i}]`,
-          validateFinding(finding, `${path}.findings[${i}]`),
-        ),
-      );
-    }
-  }
-
-  if (!Array.isArray(value.blocks)) {
-    pushValidationIssue(issues, `${path}.blocks`, "Expected an array.");
-  } else {
-    for (const [i, block] of value.blocks.entries()) {
-      issues.push(
-        ...prefixValidationIssues(
-          `${path}.blocks[${i}]`,
-          validateRemediationBlock(block, `${path}.blocks[${i}]`),
-        ),
-      );
-    }
-  }
-
-  if (!Array.isArray(value.candidate_closing_actions)) {
-    pushValidationIssue(
-      issues,
-      `${path}.candidate_closing_actions`,
-      "Expected an array.",
-    );
-  }
-
-  return issues;
+export function validateRemediationPlan(value: unknown, path = "remediation_plan"): ValidationIssue[] {
+  const result = RemediationPlanSchema.safeParse(value);
+  return result.success
+    ? executionPlanReferenceIssues(result.data, result.data.findings.map(finding => finding.id)).map(message => ({ path, message, severity: "error" as const }))
+    : result.error.issues.map(issue => ({ path: `${path}.${issue.path.join(".")}`, message: issue.message, severity: "error" as const }));
 }
 
 export function validateTriageResolution(
   value: unknown,
   path = "triage_resolution",
-  knownFindingIds?: ReadonlySet<string>,
+  knownUnitIds?: ReadonlySet<string>,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   issues.push(...requireKeys(value, path, ["items"]));
@@ -204,21 +107,21 @@ export function validateTriageResolution(
         );
         continue;
       }
-      if (typeof item.finding_id !== "string") {
+      if (typeof item.unit_id !== "string") {
         pushValidationIssue(
           issues,
-          `${path}.items[${i}].finding_id`,
+          `${path}.items[${i}].unit_id`,
           "Expected a string.",
         );
-      } else if (knownFindingIds && !knownFindingIds.has(item.finding_id)) {
-        // Uniform id-join contract: an unknown finding_id is an ERROR, never a
+      } else if (knownUnitIds && !knownUnitIds.has(item.unit_id)) {
+        // Uniform id-join contract: an unknown unit_id is an ERROR, never a
         // silent no-op — the entry it names would otherwise be dropped whole,
         // losing the user's triage decision on a typo'd id.
         pushValidationIssue(
           issues,
-          `${path}.items[${i}].finding_id`,
-          `Unknown finding_id "${item.finding_id}" — not in this run's items. ` +
-            `Valid ids: ${[...knownFindingIds].join(", ")}.`,
+          `${path}.items[${i}].unit_id`,
+          `Unknown unit_id "${item.unit_id}" — not in this run's items. ` +
+            `Valid ids: ${[...knownUnitIds].join(", ")}.`,
         );
       }
       if (typeof item.action !== "string" || !validActions.has(item.action)) {

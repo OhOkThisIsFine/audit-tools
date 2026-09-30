@@ -31,9 +31,8 @@ import { deriveAuditState } from "./state.js";
 /**
  * `derive` for one PRIORITY id: the same holistic `deriveAuditState` scan
  * `decideNextStep` runs, narrowed to this id's own missing/stale/satisfied
- * state. A pruned/absent obligation (e.g. `friction_capture_current`, which
- * `deriveAuditState` never emits — see `executorRunners.ts`) is satisfied, so
- * the scan can never select it — preserving today's "unreachable" behavior.
+ * state. An obligation absent from `deriveAuditState` is satisfied, so the
+ * scan selects only work the current state actually requires.
  * Every other state collapses to `"satisfied"`, which is the same partition
  * `isActionableObligationState` draws.
  *

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/result-baseline-staleness.test.ts, tests/audit/ledger.test.ts, tests/audit/audit-frontier.test.ts
 /**
  * O2 ↔ F1 residual-risk fix for judge-accepted CE-011: element-staleness for an
  * already-ingested logical result must compare a FRESHLY-COMPUTED current
@@ -36,7 +37,7 @@ import {
   type ArtifactMetadataManifest,
 } from "../types/artifactMetadata.js";
 import type { AuditResult, AuditTask } from "../types.js";
-import { emitSourceFor, maxRedispatchAttempt } from "./ledger.js";
+import { emitSourceFor, maxRedispatchAttempt, selectCurrentResults } from "./ledger.js";
 
 /**
  * The baseline store — the per-logical-result contentKey snapshot, keyed by the
@@ -262,14 +263,14 @@ export function computeStaleResultTaskIds(
 }
 
 /**
- * Drift re-keying authority (O3). A just-submitted BASE result whose owning task's
- * live content has drifted from the recorded baseline for its base idempotency_key
+ * Drift re-keying authority (O3). A just-submitted result whose owning task's
+ * live content has drifted from the baseline for its current accepted identity
  * is re-keyed `emit_source: 'redispatch'` with the next 1-based `attempt`, and its
  * stamped ledger keys are cleared so `appendResultsToLedger` re-stamps a DISTINCT
  * idempotency_key (the append-only ledger accepts the fresh findings instead of
- * no-opping on the signature-stable base key). Deterministic + fully tool-owned:
- * the host never authors `emit_source`/`attempt`. Results that are not base, lack
- * a live task, have no baseline, or have not drifted pass through unchanged.
+ * no-opping on a signature-stable key). Deterministic + fully tool-owned:
+ * the host never authors `emit_source`/`attempt`. Unchanged replays retain the
+ * current accepted identity; absent tasks or baselines are not invented.
  */
 export function rekeyDriftedResults(
   incoming: readonly AuditResult[],
@@ -278,56 +279,31 @@ export function rekeyDriftedResults(
   existingLedger: readonly AuditResult[],
 ): AuditResult[] {
   if (!baselines) return [...incoming];
+  const currentByTask = new Map(selectCurrentResults(existingLedger).map((result) => [result.task_id, result]));
   return incoming.map((result) => {
-    if (emitSourceFor(result) !== "base") return result;
     const task = result.task_id ? tasksByTaskId.get(result.task_id) : undefined;
     if (!task) return result;
-    let signature: string;
-    try {
-      signature = taskContentSignatureForTask(task);
-    } catch {
+    // Every task family can be reissued. Compare with the CURRENT accepted
+    // attempt, not the original base/deepening key, or replay after one source
+    // change would manufacture another attempt forever.
+    const current = currentByTask.get(result.task_id);
+    const liveKeys = liveKeysForResult(current ?? result, task);
+    if (!liveKeys) return result;
+    const baseline = baselines[liveKeys.idempotency_key];
+    if (baseline === undefined || baseline === liveKeys.content_key) {
+      if (current && (emitSourceFor(current) !== emitSourceFor(result) || current.attempt !== result.attempt)) {
+        // The host repeats its original envelope, never authors attempt keys.
+        // Rebind an unchanged replay to the current accepted identity so the
+        // append-only ledger remains idempotent after a redispatch too.
+        return { ...result, emit_source: emitSourceFor(current), attempt: current.attempt,
+          instance_id: undefined, identity_key: current.identity_key, idempotency_key: current.idempotency_key };
+      }
       return result;
     }
-    const coordinate = {
-      unit_id: result.unit_id,
-      lens: result.lens,
-      pass_id: result.pass_id,
-    };
-    let baseIdempotencyKey: string;
-    let liveContentKey: string;
-    try {
-      const discriminator = buildResultContentDiscriminator({
-        source: "base",
-        split_discriminator: splitDiscriminatorFromTaskId(
-          result.task_id,
-          result.lens,
-        ),
-      });
-      baseIdempotencyKey = idempotencyKey({
-        ...coordinate,
-        result_content_discriminator: discriminator,
-      });
-      liveContentKey = contentKey({
-        ...coordinate,
-        result_content_discriminator: discriminator,
-        task_content_signature: signature,
-      });
-    } catch {
-      return result;
-    }
-    const baseline = baselines[baseIdempotencyKey];
-    if (baseline === undefined || baseline === liveContentKey) {
-      // First ingest (no baseline) or unchanged content — a genuine base result.
-      return result;
-    }
-    // Drift: promote to the next re-dispatch attempt with a fresh idempotency_key.
-    // Attempt count is keyed by task_id (a re-dispatch supersedes the SAME task),
-    // never identity_key (one-to-many over split siblings).
-    const attempt = maxRedispatchAttempt(existingLedger, result.task_id) + 1;
     return {
       ...result,
       emit_source: "redispatch",
-      attempt,
+      attempt: maxRedispatchAttempt(existingLedger, result.task_id) + 1,
       instance_id: undefined,
       identity_key: undefined,
       idempotency_key: undefined,

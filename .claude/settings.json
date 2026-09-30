@@ -121,12 +121,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/friction-stop-gate.mjs\"",
-            "timeout": 15,
-            "statusMessage": "Friction close-out backstop"
-          },
-          {
-            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/question-philosophy-gate.mjs\"",
             "timeout": 15,
             "statusMessage": "Project philosophy before asking"

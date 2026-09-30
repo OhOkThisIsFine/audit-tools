@@ -29,24 +29,8 @@ import {
   REMEDIATION_HOST_RESULT_CONTRACT_VERSION,
   REMEDIATION_STEP_CONTRACT_VERSION,
 } from "../steps/types.js";
-import {
-  CONTRACT_PIPELINE_VALIDATORS,
-  validateVerificationReport,
-} from "./contractPipeline.js";
-// The OUTCOMES variant, imported from the gate module directly (the same import
-// the next-step gates use): it reports which gates actually ran, so an empty
-// issues array from a gate whose input was absent is not read as proof-of-clean.
-import { evaluateContractPipelineCrossGateOutcomes } from "./contractPipelineGates.js";
-import {
-  readRepairState,
-  waivedJudgeAcceptedIds,
-} from "../contractPipeline/repairState.js";
-import {
-  CP_ARTIFACT_NAMES,
-  type ContractPipelineArtifactName,
-  contractPipelineDir,
-} from "../contractPipeline/artifactStore.js";
-import { intakePaths } from "../intake.js";
+import { validateVerificationReport } from "./verificationReport.js";
+import { readCanonicalPlan, readPlanSource, executionPlanIssues } from "../contractPipeline/executionPlan.js";
 
 export interface ArtifactValidationResult {
   status: "ok" | "error";
@@ -305,8 +289,8 @@ async function recordedSubmissionIds(
 ): Promise<ReadonlySet<string>> {
   const recorded = new Set<string>();
   for (const item of Object.values(state?.items ?? {})) {
-    if (item.block_id && !isInProgressStatus(item.status)) {
-      recorded.add(item.block_id);
+    if (item.unit_id && !isInProgressStatus(item.status)) {
+      recorded.add(item.unit_id);
     }
   }
   try {
@@ -500,58 +484,11 @@ export async function validateArtifacts(
     );
   }
 
-  // Contract-pipeline artifact validation (optional — only checked when present).
-  // Run the SAME full gate set next-step runs, accumulating EVERY failure across
-  // all present artifacts + gates into ONE result (B1 #3 — no per-invocation
-  // partial report that would force a fix→re-run→new-failure thrash). Per-artifact
-  // structural validators run first; the cross-artifact + decomposition gates run
-  // after so an authoring agent's `validate-artifact` reproduces exactly what
-  // next-step would reject.
-  const cpDir = contractPipelineDir(artifactsDir);
-  const cpPayloads = new Map<ContractPipelineArtifactName, unknown>();
-  for (const name of CP_ARTIFACT_NAMES) {
-    const cpPath = join(cpDir, `${name}.json`);
-    const cpRaw = await readJsonForValidation(cpPath, issues);
-    if (!cpRaw) continue;
-    // The envelope wraps the payload — validate the payload field.
-    const payload = isRecord(cpRaw) && "payload" in cpRaw ? cpRaw.payload : cpRaw;
-    cpPayloads.set(name, payload);
-    pushErrorIssues(issues, CONTRACT_PIPELINE_VALIDATORS[name](payload, name), `${cpPath}:`);
-  }
-
-  // Cross-artifact + decomposition gates. Each gate is individually tolerant of
-  // an absent input (returns [] when its primary payload is missing/malformed),
-  // so an incomplete pipeline never fabricates errors — only present artifacts
-  // are gated.
-  //
-  // The plural sweep and the singular `validate-artifact --name X` self-check
-  // both call `evaluateContractPipelineCrossGateOutcomes`, the single entry
-  // point that couples each gate's issues with its evaluated/skipped metadata.
-  let gatesEvaluated = 0;
-  let gatesSkipped = 0;
-  if (cpPayloads.size > 0) {
-    const findingEnumeration = await readJsonForValidation(
-      intakePaths(artifactsDir).findingEnumeration,
-      issues,
-    );
-
-    for (const outcome of await evaluateContractPipelineCrossGateOutcomes({
-      payloads: cpPayloads,
-      findingEnumeration,
-      root,
-      // Owner-waived counterexamples are excluded from the coverage gates
-      // (open-bugs.md:108) — the sweep must agree with next-step's own gating.
-      waivedCounterexampleIds: waivedJudgeAcceptedIds(
-        await readRepairState(artifactsDir),
-        cpPayloads.get("judge_report"),
-        cpPayloads.get("counterexample"),
-      ),
-    })) {
-      if (outcome.evaluated) gatesEvaluated += 1;
-      else gatesSkipped += 1;
-      pushErrorIssues(issues, outcome.issues);
-    }
-  }
+  const canonical = await readCanonicalPlan(artifactsDir);
+  const source = await readPlanSource(artifactsDir);
+  const gatesEvaluated = canonical && source ? 1 : 0;
+  const gatesSkipped = gatesEvaluated ? 0 : 1;
+  if (canonical && source) issues.push(...executionPlanIssues(root, source, canonical.plan));
 
   // Verification report at the root artifacts dir (from FINDING-027).
   const verificationReportFilePath = verificationReportPath(root);

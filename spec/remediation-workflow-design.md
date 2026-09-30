@@ -24,20 +24,11 @@ intake + validation          [deterministic; validates input at manifest time]
                               scope, answer questions, set closing action]
   → review_gate              [user gate — Path A: original findings, pre-pipeline;
                               tiered by review-necessity, approve/disapprove]
-  → contract_pipeline        [BOTH paths; multi-agent seam negotiation;
-                              Path B review_gate fires at the planning point within]
-      decomposition
-      → per-module contract drafting   [parallel]
-      → seam reconciliation            [deterministic detect + LLM resolve]
-      → contract finalization          [parallel]
-      → critique                       [conceptual design critique]
-      → obligation ledger              [largely deterministic]
-      → cyclic seam resolution         [breaks circular interface-definition obligations]
-      → test/validator plan
-      → deterministic design gates
-      → assessment                     [contract assessment: invariants/boundaries/obligations]
-      → critic → judge → repair        [bounded]
-      → implementation DAG             [metadata-enriched promotion]
+  → reviewed_change_plan      [both input paths; one executable semantic plan]
+      author scoped units, stable requirements and acceptance evidence
+      → conceptual critique → independent critic → judge
+      → revise affected meaning and re-review when required
+      → deterministic workload projection
   → host_implementation_handoff [dependency-safe provider-neutral work items;
                                   commit/test evidence validation]
   → triage                   [context-carrying retries]
@@ -45,7 +36,7 @@ intake + validation          [deterministic; validates input at manifest time]
 ```
 
 Onto CLAUDE.md's five-state machine (`pending → planning → implementing → closing → complete`):
-everything through the `contract_pipeline` phases is **planning**, `host_implementation_handoff` is **implementing**,
+everything through change-plan approval is **planning**, `host_implementation_handoff` is **implementing**,
 and `close` is **closing** (`pending`/`complete` bookend the run).
 
 ---
@@ -137,172 +128,94 @@ the orchestrator's job, not a host roundtrip that performs no work.
 
 ---
 
-## Contract pipeline — universal, multi-agent, seam-negotiating
+## Reviewed change plan — one subject of judgment
 
-The contract pipeline is the planning engine for **both** input paths, and its
-design phase is a multi-agent seam negotiation rather than a single
-self-consistent author.
+Both structured audit findings and conversation/document requests enter the same
+planning engine. Depth follows risk and uncertainty; neither path bypasses scope,
+traceability, independent review or verification.
 
-### Both paths run the pipeline; the risk tier sets the depth
+The original findings and request remain provenance, not execution instructions.
+A plan contains stable requirements, cohesive execution units, affected interfaces,
+explicit read/write scopes, dependencies and acceptance assertions/commands.
+Several units may address one finding, and a unit may address several findings.
+A conversation request does not need an invented audit finding to become executable.
 
-- **Path A (structured `audit-findings.json`)** seeds `goal_normalization` with
-  the findings ("remediate these N findings under this checkpoint") and
-  `context_collection` with their affected files and evidence. Every DAG node
-  traces to an auditor finding *and* a derived obligation.
-- **Path B (document/conversation)** runs the pipeline from the remediation
-  brief.
-- Both converge at the implementation DAG.
+Describe changed behavior and endangered boundaries. Expand interface detail when
+coordination actually requires it; do not reconstruct every untouched module's
+contract merely to derive an implementation task.
 
-Rationale: a fast path that implements findings "because the auditor said so",
-with no obligations, no seam contracts, and no traceability, cannot support
-confident parallel implementation. Routing both paths through the pipeline closes
-that gap.
+### Author, challenge, revise
 
-**How the risk dial realizes this:** the risk-tier semantics live in
-[`self-scaling-pipeline-design.md`](self-scaling-pipeline-design.md). Depth scales
-with the run's risk tier rather than branching to a separate path. EVERY run enters
-the contract pipeline; the tier sets how deeply it is traversed. No tier skips a
-phase, and none skips traceability or verification.
+The author proposes the executable units and their requirements before approval.
+Conceptual critique considers purpose and alternatives. An independent critic
+challenges correctness and boundary assumptions; a separate judge disposes of
+those counterexamples. These responsibilities remain distinct even though they
+refer to the same plan rather than successive restatements of it.
 
-A separate shallow path that bypasses the engine is rejected because it can
-disagree with the shared risk dial. The tier is the SINGLE classifier: finding-level risk evidence is folded
-into the shared risk signal before the run proceeds, so there is no separate
-eligibility boolean that can disagree with the dial — a grounded handful touching a
-risk subsystem stays `high` and is traversed at full depth. Read this section's
-"both paths run the [full] pipeline" literally: they do, at different depths.
+A valid counterexample changes the plan or remains an explicitly unresolved
+requirement. Approval binds the exact reviewed revision. Changed meaning requires
+fresh affected review; a post-approval semantic planner cannot silently change
+scope, dependencies or what a unit is supposed to accomplish.
 
-### Multi-agent seam negotiation
+Requirements keep stable identities across insertion and reordering. An unchanged
+requirement retains its assertions. Retirement or material modification is explicit;
+removing a requirement from an array is not evidence that it has been satisfied.
+Submissions bind their expected base revision so an old draft cannot overwrite a
+newer accepted decision. Landed execution history is immutable: later design changes
+produce explicit follow-up work, not deletion or replay of already accepted work.
 
-A single design agent controls both sides of every interface and never surfaces
-the conflicts between them. The design phase is:
+### Tool-owned checks and derived views
 
-1. **Decomposition** — one agent, one pass: GoalSpec + ContextBundle → module
-   list with rough responsibilities and file scope. No seam contracts yet.
-2. **Per-module contract drafting** — **parallel**, one agent per module. Each
-   reads the GoalSpec, its module description, and its actual repo files, and
-   drafts its full `ModuleContract`: inputs, outputs, invariants, side effects,
-   validation boundary, failure modes — and, critically, what it *needs from each
-   neighbor* (the seam from its side).
-3. **Seam reconciliation** — deterministic detection of every mismatch (module
-   A's declared output ≠ module B's declared input), then LLM resolution per
-   mismatch (which side adjusts, what the agreed interface becomes). Resolutions
-   may be adversarially checked (propose → attack → accept) before adoption.
-4. **Contract finalization** — deterministic: the tool merges each drafted
-   module contract with the seam report it belongs to
-   (`deriveFinalizedModuleContracts`), and re-emits an LLM finalization step only
-   when the declared token graph is cyclic or a downstream gate finds the merge
-   inadequate. The judgment already happened at seam reconciliation.
-5. **Critique** — conceptual design critique of the finalized contracts (the
-   philosophy/alternatives/better-directions lens, distinct from the mechanical
-   contract-assessment phase below).
-6. **Obligation ledger** — a first-class phase in `CONTRACT_PIPELINE_PHASE_ORDER`,
-   derived largely deterministically from finalized contracts: each invariant →
-   verification obligation, each seam interface → test obligation.
-7. **Cyclic seam resolution** — its own phase in `CONTRACT_PIPELINE_PHASE_ORDER`,
-   breaking circular interface-definition obligations surfaced by the ledger
-   (distinct from the deterministic *check* for the same condition below).
-8. **Test/validator plan** — a distinct phase converting ledger obligations into
-   concrete test specs, validators, and schemas *before any code is written*. A
-   worker may flag a planned test as inapplicable only against the ledger, never
-   on rationale alone.
-9. **Deterministic design gates** — mechanical checks before adversarial review:
-   - every module has inputs/outputs
-   - every side effect has an owner
-   - every invariant has a verification obligation
-   - every implementation task traces to a requirement/invariant
-   - every external dependency has failure semantics
-   - no raw/untrusted data crosses a trust boundary unvalidated
-   - **no circular interface-definition obligations** (two nodes each needing to
-     define an interface the other depends on — caught before implementation)
-10. **Assessment** — contract assessment (invariants/boundaries/obligations),
-    a required input to both the critic and the judge below.
-11. **Critic → judge → repair** — bounded, archived, hash-tracked; attacks the
-    negotiated contracts. When the judge omits `repair_directive`, the target is
-    inferred from the failing classifications rather than defaulting to a fixed
-    artifact.
+The tool validates references, scope, source coverage, dependency acyclicity,
+requirement coverage, assertion shape and revision bindings. Independent judgment
+checks semantic adequacy; structural validity does not prove that a plan fixes a bug.
+Review packets provide relevant source evidence and must distinguish supplied
+claims from independently checked repository behavior.
 
-Parallel-friendly phases (2; plus critique alongside assessment where inputs
-allow) dispatch as parallel agents in one step, not sequential next-step
-roundtrips. Prompt-caching principle applies: shared prefix (GoalSpec +
-ContextBundle) first, module-specific payload last.
+Supporting summaries, coverage views and workload metadata are derived from the
+accepted plan. They do not acquire independent editable authority. A genuine
+ownership or ordering conflict is resolved in the plan's actual relationships,
+not by separately repairing a second graph that dispatch does not use.
 
-### Metadata-enriched DAG promotion
-
-DAG promotion carries real metadata, never placeholder values — downstream risk
-classification, host workload scope, and `checkAffectedFileIntegrity` all depend
-on it:
-
-- `affected_files` ← `deriveNodeFiles(node)`, the `resolve` of
-  `buildNodeWriteScopeResolver`: the node's declared `output_files` (write
-  scope) first, else `files_likely_touched`, else the owning module's
-  `file_scope` from `module_decomposition` — and, in every one of those cases,
-  the owning module contract's declared write targets unioned in after that
-  base, whenever an obligation id prefix-matches a module slug. Flows through
-  the whole chain (contract → DAG node → finding → host write scope).
-- `lens` / `severity` ← derived from obligation kinds and contract content (an
-  `invariant` obligation on a trust boundary is a higher tier than a structural
-  cleanup); Path A nodes inherit their source finding's lens/severity.
-- DAG nodes carry `preconditions` (upstream contracts' declared outputs),
-  `expected_changes`, and `verification` obligations from the ledger.
-- **Write-scope vs read-scope are distinct.** `affected_files` is write-scope
-  (declared outputs); read-scope is neighbor-contract + integration files.
-  Create-new-file / greenfield nodes always receive a non-empty read context so
-  the Read allowlist is never degenerate.
+After approval, workload projection is deterministic. Current repository baseline,
+prompt digests, eligible frontier and result paths are bound at dispatch; those
+execution-time facts do not require another semantic design phase.
 
 ### One worker type — implementers
 
-With contracts, obligations, file scope, and test specs established upstream,
-there is no separate document phase: document is a thin deterministic translation
-(DAG node + contracts → implementation prompt), and the only semantic work type
-is implementers executing DAG nodes. There is one host-handoff contract, with no
-document/implement two-phase state machine or separate merge command family.
+Workers execute approved units with their scope, requirements, dependencies and
+verification instructions. There is no separate document phase or synthetic
+Finding-to-block translation. Original findings remain available for reporting and
+user dispositions; execution units remain the unit of implementation and retry.
 
 ---
 
 ## Review-approval gate
 
-Between the findings and the contract pipeline, every judgment-heavy finding is
-presented to the user for an explicit approve/disapprove **before** the pipeline
-can mark it terminal-without-change. This is the single review surface per run —
-it replaces the classic per-block implementation preview, which fired *after* the
-pipeline had collapsed the original findings into implementation-DAG nodes and so
-let design-review / free-form findings bundled inside a quality-tail node be
-bulk-dispositioned invisibly. The gate operates before that collapse.
+User-owned choices are resolved before the plan can turn them into execution or
+terminal-without-change outcomes. Structured input preserves each original finding
+and its explicit keep/decline decision. Conversation input presents the proposed
+change and meaningful unresolved choices without manufacturing audit findings.
 
-- **Tool owns structure; host owns judgment.** The tool deterministically buckets
-  each finding by *review-necessity* — `strategic` (a design/architecture or
-  cross-cutting call that is the user's to make), `concrete` (a real fix with some
-  latitude, worth a yes/no), or `mechanical` (obvious, low-risk, FYI) — and
-  guarantees each item is shown and tiered. The host fills only the semantic
-  pros/cons when presenting; it can never decide *whether* an item is surfaced.
-- **Fires before the contract pipeline, at the path-appropriate point.** Path A
-  (structured findings) gates the ORIGINAL findings at intake, over the filtered
-  survivors (deduped, evidence-bearing, path-grounded, checkpoint-kept), before the
-  pipeline collapses them into DAG nodes. Path B (document/conversation) has no
-  pre-pipeline finding set — its findings are derived inside the pipeline — so it
-  is gated at the planning point over the deduped/grounded node findings. One
-  review surface either way; the presence of a recorded decision prevents any
-  double review.
-- **Disapproval is a recorded terminal disposition, never a silent close.** A
-  declined finding (by id or by whole tier) is excluded from the pipeline AND
-  recorded as an explicit `ignored` disposition carrying the reason — the exact
-  failure this gate exists to prevent. The default is to act: the gate lets the
-  user REMOVE items, so an absent or empty resolution approves everything.
-- **Idempotent, at most once per run.** The gate halts to collect the decision
-  (`review_request.json` → `review_resolution.json`), then consumes it into a
-  durable record (`review_decision.json`); once recorded it proceeds directly on
-  every subsequent step and never re-halts. Unattended (autonomous) runs never
-  halt — they auto-approve only the lowest-risk findings and re-emit the rest as a
-  re-consumable deliverable, with no durable rejection.
+The tool owns complete presentation and recorded dispositions; the host supplies
+judgment and rationale. Declining a source finding is an explicit outcome, never
+silent loss during task grouping. A grouping or split of execution units cannot
+change the user's decision about a source finding. Recorded decisions are reused
+on continuation rather than repeatedly requested.
+
+Risk-based presentation and unattended authority remain governed by the confirmed
+intent checkpoint. A plan revision that changes an owner-controlled choice must
+return that choice for resolution; prior approval is not blanket permission for
+new scope or a different closing action.
 
 ---
 
 ## Host implementation handoff — dependency-safe and evidence-verified
 
-The backend emits every currently eligible DAG node in one
+The backend emits every currently eligible execution unit in one
 `remediation-host-workload` artifact (revision defined by
 `REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION` in `src/remediate/steps/types.ts`). Eligibility is deterministic: a
-node is emitted only after every dependency and lower phase is verified complete.
+unit is emitted only after every required dependency is verified complete.
 Each work item contains its obligations, declared write scope, complete prompt,
 prompt digest, baseline commit, and repository-contained result path; the
 workload digest binds the handoff record as a whole. Complexity, risk, and
@@ -327,15 +240,13 @@ carry the failing evidence into the next host work item.
 
 **Scope amendment.** Work outside a declared scope requires a new tool-owned
 workload binding; a result cannot make its own widened scope self-consistent.
-Contended or cross-contract edits return to seam reconciliation rather than
-being accepted as an incidental side effect.
+Contended or cross-boundary design changes revise the plan and its review binding
+rather than being accepted as an incidental side effect.
 
-**Cyclic-seam resolution.** When the no-circular-interface gate detects a genuine
-mutual interface dependency, resolution routes to a sanctioned cycle-break: a
-mediating module/type (re-checked so it cannot re-introduce a cycle), or a single
-authority owning the co-defined primitive's interface (an explicit, recorded,
-primitive-scoped exception). The re-decomposition loop is bounded; on exhaustion
-it routes to a user decision then close — a defined terminal, never an open spin.
+**Dependency conflicts.** A genuine ownership/order cycle requires a recorded plan
+revision, such as one owner for a shared primitive or an explicit mediator.
+Repeated unsuccessful revisions escalate a concrete unresolved question instead
+of spinning indefinitely.
 
 **Workflow-modifying node verification.** Nodes editing the handoff, ingestion,
 or orchestration engine are verified against the live built surface, not only a
@@ -344,9 +255,8 @@ stale installed bin or isolated worktree.
 **Token estimation** uses the shared `estimateTokensFromBytes`: node estimates
 from contract scope file sizes + spec length + pulled-in test files.
 
-**Write scope** is `block.touched_files` normalized into the work item's
-`allowed_files`: the host owns worker prompting, and nothing widens a node's
-write grant beyond that normalized set.
+**Write scope** comes from the approved unit's `allowed_files`, normalized and
+bound in the work item. A host response cannot widen its own grant.
 
 ---
 
@@ -375,7 +285,17 @@ write grant beyond that normalized set.
 - **Closing action preview.** Before `commit`/`push`/`open-pr`/`publish` executes,
   the file list and a generated (not hardcoded) commit message are presented for
   confirmation — unless the user pre-authorized unattended closing at the intent
-  checkpoint.
+  checkpoint. The preview is one host boundary, not a repeatedly drained state
+  transition. Approval binds the recorded action and preview; a changed preview
+  is presented again.
+- **One final acceptance execution window.** Close owns the tool-executed floor,
+  including direct phase calls, after preview approval. When its terminal unit
+  command and the combined-suite requirement select the same root-scoped
+  invocation, one admitted execution satisfies both requirements. No result
+  from an earlier call, worker, phase or repository is reused. Distinct commands
+  and E2E, analyzer and landing operations remain distinct, as do per-item and
+  intermediate phase checks. A floor failure pauses before combined-suite
+  triage can re-block items; a missing executable floor never authorizes close.
 - **E2E failure transitions, never throws.** An e2e failure records output,
   re-blocks the implicated items, and transitions to triage — like the
   combined-suite failure path.
@@ -410,11 +330,12 @@ The contract shared with the auditor — implement once, in `audit-tools/shared`
 
 - State persistence model (file-backed, pessimistic locking) and the
   one-bounded-step-per-invocation contract.
-- Critic → judge → repair loop structure, caps, and artifact archival.
-- Traceability invariant: no implementation node without an obligation or accepted
-  counterexample.
+- Independent critic → judge → revision, bounded disagreement and accepted history.
+- Traceability invariant: every execution unit addresses stable requirements, with
+  original source references and accepted counterexamples preserved.
 - Cross-lens dedup, grounding of extracted findings, coverage ledger.
 - Intent checkpoint filter semantics (severity/lens/package/theme,
   `excluded_scope`, `must_not_touch`).
 - Outcomes contract (`remediation-outcomes.json`) and report rendering.
-- Agent reflections (Process Feedback) flow.
+- Diagnostic capture and archival. Development reflection belongs to this repo's
+  development closeout, never to an external target's product completion gate.

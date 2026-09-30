@@ -1,5 +1,3 @@
-import { bindContractReviewPrompt } from "../../src/remediate/contractPipeline/contractReviewBinding.js";
-import { ReviewSubmissionEnvelopeSchema } from "../../src/shared/types/reviewIndependence.js";
 import { ANALYZER_SETTINGS } from "../../src/shared/analyzerPolicy.js";
 import { AnalyzerRunConsentDecisionSchema } from "../../src/shared/analyzerRunConsent.js";
 import { REVIEW_NECESSITY_ORDER } from "../../src/remediate/review/reviewNecessity.js";
@@ -19,7 +17,7 @@ import type { PromptContractRegistryRow } from "./promptContractRegistry.js";
 const paths = intakePaths("registry-fixture");
 const continueCommand = "audit-code next-step --root registry-fixture";
 const answerPath = "registry-fixture/operator-answer.json";
-const question = { finding_id: "F-CHOICE", category: "scope_of_fix" as const, description: "Keep the public API?", options: ["keep", "replace"] };
+const question = { unit_id: "F-CHOICE", category: "scope_of_fix" as const, description: "Keep the public API?", options: ["keep", "replace"] };
 const continuation = /(?:next-step|stop|Do not run the orchestrator again)/i;
 
 /** Test expectations for real driver renders; these do not define a second runtime output schema. */
@@ -49,8 +47,8 @@ export const driverPromptRows: PromptContractRegistryRow[] = [
   }), { ...checks(["typescript"], [answerPath], [...ANALYZER_SETTINGS]), actor: /(?:ask|operator|user)/i }),
   row("renderEdgeReasoningDispatchPrompt", auditFile, () => renderEdgeReasoningDispatchPrompt({ promptPath: "registry-fixture/edges-prompt.md", resultsPath: answerPath, continueCommand, contentHash: "fixture-content-hash", candidateCount: 1, scratchDirPath: "registry-fixture/scratch" }), checks(["registry-fixture/edges-prompt.md", "registry-fixture/scratch", "fixture-content-hash"], [answerPath]), "dispatch"),
   row("renderPresentReportPrompt", auditFile, () => renderPresentReportPrompt("registry-fixture/audit-report.md"), checks(["registry-fixture/audit-report.md"], ["Present", "Do not run the orchestrator again"])),
-  row("ambiguityReviewPrompt", remediateFile, () => ambiguityReviewPrompt([question], answerPath, [question.finding_id], undefined, "registry-fixture/ambiguity-request.json"), checks([question.finding_id, question.description, "registry-fixture/ambiguity-request.json"], [answerPath, "finding_id", "action", "rationale"], ["[]"])),
-  row("clarificationPrompt", remediateFile, () => clarificationPrompt([question], answerPath), checks([question.finding_id, question.description], [answerPath, "finding_id", "action", "rationale"], question.options)),
+  row("ambiguityReviewPrompt", remediateFile, () => ambiguityReviewPrompt([question], answerPath, [question.unit_id], undefined, "registry-fixture/ambiguity-request.json"), checks([question.unit_id, question.description, "registry-fixture/ambiguity-request.json"], [answerPath, "unit_id", "action", "rationale"], ["[]"])),
+  row("clarificationPrompt", remediateFile, () => clarificationPrompt([question], answerPath), checks([question.unit_id, question.description], [answerPath, "unit_id", "action", "rationale"], question.options)),
   row("collectIntakeClarificationsPrompt", remediateFile, () => collectIntakeClarificationsPrompt({
     schema_version: INTAKE_SUMMARY_SCHEMA_VERSION, ready: false, source_type: "conversation", goals: [], non_goals: [], constraints: [], affected_files: [],
     open_questions: [{ id: "Q-CHOICE", question: "Which API is public?", blocking: true }], source_summary: "Fixture task", acceptance_criteria: [], scope_summary: "Fixture", intent_summary: "Fixture", filters: {},
@@ -58,13 +56,8 @@ export const driverPromptRows: PromptContractRegistryRow[] = [
   row("collectStartingPointPrompt", remediateFile, () => collectStartingPointPrompt("registry-fixture", ["registry-fixture/audit-findings.json"], ["registry-fixture/missing.json"], paths), checks(["registry-fixture/missing.json", "registry-fixture/audit-findings.json"], ["--input", "--guidance"])),
   row("extractedPlanDiscardedPrompt", remediateFile, () => extractedPlanDiscardedPrompt("Unknown finding F-BAD", "registry-fixture/original-plan.json", paths), checks(["Unknown finding F-BAD", "registry-fixture/original-plan.json"], [paths.extractedPlan])),
   row("reviewApprovalPrompt", remediateFile, () => reviewApprovalPrompt(buildReviewRequest([{ id: "F-REVIEW", title: "Preserve fixture API", category: "General", severity: "high", confidence: "high", lens: "correctness", summary: "The public API drops a required field", affected_files: [{ path: "src/api.ts" }], evidence: ["src/api.ts#handler"] }], "PLAN-CHOICE"), answerPath), checks(["F-REVIEW", "The public API drops a required field"], [answerPath, "declined_findings", "declined_tiers"], [...REVIEW_NECESSITY_ORDER])),
-  row("triagePrompt", remediateFile, () => triagePrompt(makeState({ status: "waiting_for_triage", items: { "F-CHOICE": { finding_id: "F-CHOICE", status: "blocked", block_id: "B-CHOICE", failure_reason: "Fixture test fails" } } }), answerPath), checks(["F-CHOICE", "Fixture test fails"], [answerPath, "finding_id", "action", "rationale"], ["retry", "ignore", "halt"])),
+  row("triagePrompt", remediateFile, () => triagePrompt(makeState({ status: "waiting_for_triage", items: { "F-CHOICE": { unit_id: "F-CHOICE", status: "blocked", failure_reason: "Fixture test fails" } } }), answerPath), checks(["F-CHOICE", "Fixture test fails"], [answerPath, "unit_id", "action", "rationale"], ["retry", "ignore", "halt"])),
   row("renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", () => renderBlockedStepPrompt("audit-code", "Fixture infrastructure unavailable"), checks(["Fixture infrastructure unavailable"], ["Report this blocker", "stop"])),
-  row("bindContractReviewPrompt", "src/remediate/contractPipeline/contractReviewBinding.ts", async () => {
-    const root = await mkdtemp(join(tmpdir(), "prompt-bound-review-"));
-    try { return await bindContractReviewPrompt({ artifactsDir: root, artifact: "judge_report", role: "judge", emissionId: "registry-emission", requirement: "independent", prompt: "Reviewer: read registry-fixture/contract.json and assess the result. Write the result to registry-fixture/judge.input.json, then stop." }); }
-    finally { await rm(root, { recursive: true, force: true }); }
-  }, { ...checks(["registry-fixture/contract.json"], ["registry-fixture/judge.input.json", "prompt_sha256", "review", "result"], ["independent", "unavailable"]), actor: /Reviewer/, exampleSchema: ReviewSubmissionEnvelopeSchema }, "dispatch"),
   row("functionalPreflightStep", "src/audit/cli/functionalPreflight.ts", async () => {
     const root = await mkdtemp(join(tmpdir(), "prompt-preflight-"));
     try { return (await functionalPreflightStep(root, join(root, ".audit-tools", "audit")))!.prompt; }

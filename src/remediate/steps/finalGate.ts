@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/final-gate-extraction-equivalence.test.ts
+// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/final-gate-extraction-equivalence.test.ts, tests/remediate/final-acceptance-window.test.ts
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10)
 // ---------------------------------------------------------------------------
@@ -48,6 +48,7 @@ import {
   readOptionalJsonFile,
   writeJsonFile,
   runTrackedAsync,
+  type RunLogger,
 } from "audit-tools/shared";
 // Deep import: the CDC-25-era exports of the shared outcome contract are not yet
 // re-exported through the `audit-tools/shared` barrel (outside this work item's
@@ -79,6 +80,8 @@ export interface FinalGateCommandResult {
   package_dir?: string;
   exit_code: number | null;
   passed: boolean;
+  /** False when the selected operation refused admission before spawning. */
+  ran?: false;
   /**
    * Trailing slice of what the command printed, present only on a FAILING
    * command. The gate used to capture output and drop it on the floor — a red
@@ -161,8 +164,17 @@ export type GateRunner = (
   cwd: string,
   packageDir?: string,
 ) =>
-  | { status: number | null; stdout?: string; stderr?: string }
-  | Promise<{ status: number | null; stdout?: string; stderr?: string }>;
+  | { status: number | null; stdout?: string; stderr?: string; ran?: boolean }
+  | Promise<{ status: number | null; stdout?: string; stderr?: string; ran?: boolean }>;
+
+/** Existing explicit test-hermeticity controls, shared by both gate boundaries. */
+export function finalGateDisabledReason(options: { skipFinalGate?: boolean }): string | null {
+  if (options.skipFinalGate === true) return "skipFinalGate option";
+  if (process.env.REMEDIATE_SKIP_FINAL_GATE === "1" || process.env.REMEDIATE_SKIP_FINAL_GATE === "true") {
+    return "REMEDIATE_SKIP_FINAL_GATE environment variable";
+  }
+  return null;
+}
 
 /**
  * How much of a failing command's output rides into the persisted record. TAIL,
@@ -208,7 +220,16 @@ export const RUNTIME_RESIDUAL_DECLARATION: ToolOwnedFinalGateResult["runtime_res
  */
 export async function runToolOwnedFinalGate(
   root: string,
-  opts: { runner?: GateRunner; testCommand?: string[] } = {},
+  opts: {
+    runner?: GateRunner;
+    testCommand?: string[];
+    /**
+     * One planned terminal unit operation may discharge the close suite too.
+     * This is an executor, never a prior verdict. Only the last root-scoped
+     * unit command can use it; all preceding operations retain their ordering.
+     */
+    terminalUnit?: { argv: string[]; execute: GateRunner };
+  } = {},
 ): Promise<ToolOwnedFinalGateResult> {
   const runtime_residual = isAuditToolsMonorepo(root)
     ? RUNTIME_RESIDUAL_DECLARATION
@@ -264,11 +285,16 @@ export async function runToolOwnedFinalGate(
 
   const results: FinalGateCommandResult[] = [];
   let passed = true;
-  for (const spec of commands) {
+  for (const [index, spec] of commands.entries()) {
     // `await` is correct for an injected synchronous runner too — awaiting a
     // non-promise yields the value unchanged — so a stub needs no migration.
-    const { status, stdout, stderr } = await runner(spec.argv, root, spec.package_dir);
-    const cmdPassed = status === 0;
+    const terminal = opts.terminalUnit;
+    const execute = terminal && index === commands.length - 1 && spec.layer === "unit" &&
+      spec.package_dir === undefined && spec.argv.length === terminal.argv.length &&
+      spec.argv.every((arg, i) => arg === terminal.argv[i])
+      ? terminal.execute : runner;
+    const { status, stdout, stderr, ran } = await execute(spec.argv, root, spec.package_dir);
+    const cmdPassed = ran !== false && status === 0;
     const stdoutTail = cmdPassed ? undefined : outputTail(stdout);
     const stderrTail = cmdPassed ? undefined : outputTail(stderr);
     results.push({
@@ -277,6 +303,7 @@ export async function runToolOwnedFinalGate(
       ...(spec.package_dir ? { package_dir: spec.package_dir } : {}),
       exit_code: status,
       passed: cmdPassed,
+      ...(ran === false ? { ran: false as const } : {}),
       ...(stdoutTail === undefined ? {} : { stdout_tail: stdoutTail }),
       ...(stderrTail === undefined ? {} : { stderr_tail: stderrTail }),
     });
@@ -576,4 +603,43 @@ export async function writeFinalGateRedRecord(
   };
   await writeJsonFile(path, record);
   return path;
+}
+
+/** Record one gate evaluation and its matching optional run-log event. */
+export async function recordFinalGateOutcome(ctx: {
+  artifactsDir: string;
+  state: { status: string };
+  scope: string;
+  gateKey: string;
+  logPhase?: "close" | "next-step";
+  runLogger?: RunLogger;
+  outcome: FinalGateOutcomeKind;
+  passed: boolean;
+  commandsRun: number;
+  reason?: string;
+  durationMs?: number;
+}): Promise<void> {
+  const verdict = carriesGateVerdict(ctx.outcome);
+  await writeFinalGateOutcomeRecord(ctx.artifactsDir, {
+    scope: ctx.scope,
+    outcome: ctx.outcome,
+    passed: ctx.passed,
+    commands_run: ctx.commandsRun,
+    ...(ctx.reason === undefined ? {} : { reason: ctx.reason }),
+  });
+  ctx.runLogger?.event({
+    phase: ctx.logPhase ?? "next-step",
+    kind: "executor_end",
+    obligation: ctx.state.status,
+    note:
+      `${ctx.gateKey} outcome=${ctx.outcome} ` +
+      // "n/a", never "true": a gate that ran nothing has no verdict, and the
+      // durable record it is written beside carries `passed: null` for the
+      // same reason. A `history` outcome DOES carry a verdict — a judge ruled
+      // on this exact tree — so it prints its verdict like an executed one.
+      `passed=${verdict ? String(ctx.passed) : "n/a"} ` +
+      `commands=${verdict ? String(ctx.commandsRun) : "0"}` +
+      (ctx.reason === undefined ? "" : ` reason=${ctx.reason}`),
+    ...(ctx.durationMs === undefined ? {} : { duration_ms: ctx.durationMs }),
+  });
 }

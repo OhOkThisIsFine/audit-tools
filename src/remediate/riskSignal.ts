@@ -1,25 +1,10 @@
 /**
- * Slice 2 of the self-scaling remediation pipeline (design of record:
- * `spec/self-scaling-pipeline-design.md`): the ONE shared risk/complexity signal
- * that BOTH self-scaling dials (adversarial depth, phase granularity) will read.
+ * Shared intake risk/complexity signal for adversarial review depth.
  *
- * This module *produces and carries* the signal; the two dials that consume it
- * are now wired in `src/remediate/steps/contractPipeline.ts` — the adversarial-depth
- * dial (`adversarialDepthForTier`, T1 slice 4a) and the round-trip granularity-collapse
- * dial (`roundTripGranularityForTier`, T1 slice 4b) both key off the (possibly escalated)
- * tier, so the signal actively shapes pipeline behavior. This module remains the single
- * source both dials read.
- *
- * Hard constraints (from the spec):
- *   - Computed CHEAPLY at intake from data available at the routing point only:
- *     affected-files + a deterministic, configurable path-risk pattern set + the
- *     run intent (goals). It must NOT depend on any pipeline-internal output (the
- *     lap-3 circularity — `changeClassification` consumes finalized contracts that
- *     do not exist at the routing point; a routing signal cannot be a pipeline
- *     output).
- *   - Fail-CLOSED: anything unevaluable rounds toward MORE scrutiny, never less.
- *   - Re-assessable as the run produces evidence (escalate-on-evidence), and the
- *     re-assessment may only RAISE the tier, never lower it.
+ * The signal uses only available findings, affected paths and run intent. It
+ * must not depend on planning artifacts that do not yet exist. New executable
+ * plan or review evidence may raise scrutiny, never lower it. Unevaluable inputs
+ * fail closed toward more scrutiny.
  */
 
 import type { Finding } from "audit-tools/shared";
@@ -30,9 +15,8 @@ export const INTAKE_RISK_SIGNAL_SCHEMA_VERSION =
   "remediate-code-intake-risk-signal/v1alpha1" as const;
 
 /**
- * Ordered risk tiers. The two dials map onto this:
- *   - depth dial:       low → inline light self-check; high → full independent passes
- *   - granularity dial: low → coarse / collapsed round-trips; high → fine-grained
+ * Ordered risk tiers: low permits a light critique/critic pass; medium and high
+ * require independent review. The judge remains independent at every tier.
  * The floor is `low`, never "off" — nothing reaches zero adversarial scrutiny.
  */
 export type RiskTier = "low" | "medium" | "high";
@@ -62,28 +46,6 @@ export type AdversarialDepth = "light" | "full";
  */
 export function adversarialDepthForTier(tier: RiskTier | undefined): AdversarialDepth {
   return tier === "low" ? "light" : "full";
-}
-
-/**
- * Round-trip granularity dial (T1 slice 4b). The granularity at which the
- * authoring phases are gated:
- *   - `collapsed` — coherent authoring acts fold into ONE round-trip producing
- *     several artifacts (the ceremony saving — fewer gated steps);
- *   - `fine`      — every phase its own gated round-trip (failure-isolation +
- *     per-phase validation, earned only when there is real complexity to isolate).
- * Only `low` collapses; `medium`/`high` stay fine-grained. Fail-safe toward more
- * isolation: an absent/unknown tier resolves to `fine`. This composes with
- * escalate-on-evidence: a run begins collapsed (optimistic-start) and the moment
- * decomposition raises the tier (slice 4a), the *remaining* phases re-derive
- * fine-grained — the dial is read per next-step, never frozen at run start.
- */
-export type RoundTripGranularity = "collapsed" | "fine";
-
-/** Map a risk tier to its round-trip granularity. Only `low` collapses. */
-export function roundTripGranularityForTier(
-  tier: RiskTier | undefined,
-): RoundTripGranularity {
-  return tier === "low" ? "collapsed" : "fine";
 }
 
 /** A single deterministic path-risk family: a repo path family that warrants scrutiny. */
@@ -313,13 +275,11 @@ export interface DecompositionEvidenceInput {
  * Derive escalate-on-evidence from a COMPLETED decomposition (self-scaling
  * pipeline, slice 4 — optimistic-start). A run begins at the cheap intake tier;
  * once decomposition reveals the work's actual shape, raise the tier where the
- * evidence demands it so the adversarial-depth dial (and downstream granularity)
- * tighten:
+ * evidence demands it so adversarial review deepens:
  *   - any module file_scope touches a path-risk subsystem ⇒ `high` (a
  *     correctness-sensitive subsystem the intake affected-file list may not have
  *     surfaced);
- *   - >1 module ⇒ cross-module seams exist ⇒ at least `medium` (real complexity
- *     to isolate — exactly when the fine-grained per-phase gates earn their cost).
+ *   - >1 module ⇒ cross-module seams exist ⇒ at least `medium`.
  * Returns undefined when the decomposition reveals no new risk. Pure +
  * deterministic; the {@link escalateRiskSignal} combinator enforces raise-only.
  */

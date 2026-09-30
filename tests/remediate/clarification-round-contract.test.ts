@@ -1,3 +1,4 @@
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 // The mid-run clarification round (prompt 16a, owner-reviewed 2026-09-18).
 //
 // Two owner decisions are pinned here:
@@ -25,9 +26,8 @@ const IDS = ["F1", "F2"] as const;
 
 function paused(id: string): RemediationItemState {
   return {
-    finding_id: id,
+    unit_id: id,
     status: "needs_clarification",
-    block_id: `B-${id}`,
     clarification_question: {
       category: "scope_of_fix",
       description: `Question about ${id}?`,
@@ -38,7 +38,7 @@ function paused(id: string): RemediationItemState {
 function twoPausedState(): RemediationState {
   return {
     status: "waiting_for_clarification",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "PLAN-CR",
       findings: IDS.map((id) => ({
         id,
@@ -51,16 +51,11 @@ function twoPausedState(): RemediationState {
         affected_files: [{ path: `src/${id}.ts` }],
         evidence: [`src/${id}.ts:1`],
       })),
-      blocks: IDS.map((id) => ({
-        block_id: `B-${id}`,
-        items: [id],
-        parallel_safe: true,
-        dependencies: [],
-        touched_files: [`src/${id}.ts`],
-      })),
+      units: IDS.map(id => canonicalUnitFixture(id, { source_finding_ids: [id], allowed_files: [`src/${id}.ts`] })),
+      requirements: IDS.map(id => ({ id: `REQ-${id}`, description: `Resolve ${id}`, source_finding_ids: [id], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises clarification lifecycle" })),
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
+    }),
     items: { F1: paused("F1"), F2: paused("F2") },
     closing_plan: { action: "none" },
   };
@@ -79,9 +74,10 @@ describe("the clarification round reads its questions from the paused items", ()
   });
 
   async function start(state: RemediationState = twoPausedState()): Promise<void> {
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
     await new StateStore(ARTIFACTS_DIR).saveState(state);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
   }
 
   async function submit(resolution: unknown) {
@@ -97,7 +93,7 @@ describe("the clarification round reads its questions from the paused items", ()
     // applied answer, so F2 kept waiting on a question nobody could see.
     await start();
     const { state } = await submit([
-      { finding_id: "F1", action: "clarified", rationale: "Only the module boundary." },
+      { unit_id: "F1", action: "clarified", rationale: "Only the module boundary." },
     ]);
     expect(state.items.F1.status).toBe("pending");
     expect(state.items.F1.clarification_question).toBeUndefined();
@@ -111,21 +107,21 @@ describe("the clarification round reads its questions from the paused items", ()
   it("asks the remaining question once the other paused item is done", async () => {
     const state = twoPausedState();
     state.status = "implementing";
-    state.items!.F1 = { finding_id: "F1", status: "resolved", block_id: "B-F1" };
+    state.items!.F1 = { unit_id: "F1", status: "resolved" };
     await start(state);
     const step = await decideNextStep({ root: REPO_DIR });
     const prompt = await readFile(step.prompt_path, "utf8");
     expect(step.step_kind).toBe("collect_clarifications");
     expect(prompt).toContain("Question about F2?");
     expect(prompt).not.toContain("Question about F1?");
-    expect(prompt).toContain('"finding_id": "F2"');
+    expect(prompt).toContain('"unit_id": "F2"');
   });
 
   it("an unknown action refuses the WHOLE file, naming the entry and the field", async () => {
     await start();
     const { step, state, prompt } = await submit([
-      { finding_id: "F1", action: "approve", rationale: "the user said go" },
-      { finding_id: "F2", action: "clarified", rationale: "ok" },
+      { unit_id: "F1", action: "approve", rationale: "the user said go" },
+      { unit_id: "F2", action: "clarified", rationale: "ok" },
     ]);
     // Nothing applied — not even the valid second entry.
     expect(state.items.F1.status).toBe("needs_clarification");
@@ -139,8 +135,8 @@ describe("the clarification round reads its questions from the paused items", ()
   it("refuses a clarified entry with no rationale, and scope_additions on a defer", async () => {
     await start();
     const { state, prompt } = await submit([
-      { finding_id: "F1", action: "clarified", rationale: "   " },
-      { finding_id: "F2", action: "defer", scope_additions: ["src/F2.test.ts"] },
+      { unit_id: "F1", action: "clarified", rationale: "   " },
+      { unit_id: "F2", action: "defer", scope_additions: ["src/F2.test.ts"] },
     ]);
     expect(state.items.F1.status).toBe("needs_clarification");
     expect(state.items.F2.status).toBe("needs_clarification");
@@ -148,17 +144,17 @@ describe("the clarification round reads its questions from the paused items", ()
     expect(prompt).toContain("entry [1] `scope_additions`");
   });
 
-  it("refuses the old object wrapper and a duplicate finding_id", async () => {
+  it("refuses the old object wrapper and a duplicate unit_id", async () => {
     await start();
     const wrapped = await submit({
-      resolutions: [{ finding_id: "F1", action: "clarified", rationale: "x" }],
+      resolutions: [{ unit_id: "F1", action: "clarified", rationale: "x" }],
     });
     expect(wrapped.state.items.F1.status).toBe("needs_clarification");
     expect(wrapped.prompt).toContain("must be a JSON array");
 
     const duplicate = await submit([
-      { finding_id: "F1", action: "clarified", rationale: "x" },
-      { finding_id: "F1", action: "defer" },
+      { unit_id: "F1", action: "clarified", rationale: "x" },
+      { unit_id: "F1", action: "defer" },
     ]);
     expect(duplicate.state.items.F1.status).toBe("needs_clarification");
     expect(duplicate.prompt).toContain("already answered by entry [0]");
@@ -166,11 +162,11 @@ describe("the clarification round reads its questions from the paused items", ()
 
   it("refuses an id that is not waiting for a clarification", async () => {
     const state = twoPausedState();
-    state.items!.F2 = { finding_id: "F2", status: "pending", block_id: "B-F2" };
+    state.items!.F2 = { unit_id: "F2", status: "pending" };
     await start(state);
     const { state: after, prompt } = await submit([
-      { finding_id: "F1", action: "clarified", rationale: "x" },
-      { finding_id: "F2", action: "reject_finding", rationale: "not real" },
+      { unit_id: "F1", action: "clarified", rationale: "x" },
+      { unit_id: "F2", action: "reject_finding", rationale: "not real" },
     ]);
     expect(after.items.F1.status).toBe("needs_clarification");
     expect(after.items.F2.status).toBe("pending");
@@ -179,8 +175,8 @@ describe("the clarification round reads its questions from the paused items", ()
 
   it("a wait with no paused item resumes implementing instead of asking nothing", async () => {
     const state = twoPausedState();
-    state.items!.F1 = { finding_id: "F1", status: "pending", block_id: "B-F1" };
-    state.items!.F2 = { finding_id: "F2", status: "pending", block_id: "B-F2" };
+    state.items!.F1 = { unit_id: "F1", status: "pending" };
+    state.items!.F2 = { unit_id: "F2", status: "pending" };
     await start(state);
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step.step_kind).not.toBe("collect_clarifications");
@@ -215,36 +211,14 @@ describe("the state store owns the question's one home", () => {
     );
   });
 
-  it("adopts a legacy state file's questions onto the paused items on read", async () => {
-    const legacy = twoPausedState() as unknown as Record<string, unknown>;
-    const items = legacy.items as Record<string, Record<string, unknown>>;
-    delete items.F1!.clarification_question;
-    delete items.F2!.clarification_question;
-    // F2 has no legacy entry — the wedged shape the old partial answer left —
-    // but the old ingest also wrote the question into its failure_reason.
-    items.F2!.failure_reason = "Should F2 keep its alias?";
-    legacy.clarifications = [
-      {
-        finding_id: "F1",
-        category: "compatibility_policy",
-        description: "Keep the legacy export?",
-        options: ["keep", "drop"],
-      },
-    ];
+  it("refuses retired question authority without rewriting its evidence", async () => {
+    const legacy = { ...twoPausedState(), clarifications: [{ unit_id: "F1", description: "Original question" }] };
+    const path = join(ARTIFACTS_DIR, "state.json");
+    const bytes = JSON.stringify(legacy);
     await mkdir(ARTIFACTS_DIR, { recursive: true });
-    await writeFile(join(ARTIFACTS_DIR, "state.json"), JSON.stringify(legacy), "utf8");
-
-    const loaded = await new StateStore(ARTIFACTS_DIR).loadState();
-    expect(loaded).not.toHaveProperty("clarifications");
-    expect(loaded!.items!.F1!.clarification_question).toEqual({
-      category: "compatibility_policy",
-      description: "Keep the legacy export?",
-      options: ["keep", "drop"],
-    });
-    expect(loaded!.items!.F2!.clarification_question).toEqual({
-      category: "scope_of_fix",
-      description: "Should F2 keep its alias?",
-    });
+    await writeFile(path, bytes);
+    await expect(new StateStore(ARTIFACTS_DIR).loadState()).rejects.toThrow(/clarifications is retired/);
+    expect(await readFile(path, "utf8")).toBe(bytes);
   });
 });
 
@@ -252,16 +226,16 @@ describe("the 16a prompt text", () => {
   // Line breaks in the rendered prose are layout, not content.
   const prompt = clarificationPrompt(
     [
-      { finding_id: "F-007", category: "scope_of_fix", description: "How far?" },
-      { finding_id: "F-009", category: "public_contract", description: "Keep it?" },
+      { unit_id: "F-007", category: "scope_of_fix", description: "How far?" },
+      { unit_id: "F-009", category: "public_contract", description: "Keep it?" },
     ],
     "/run/clarification_resolution.json",
   ).replace(/[ \t]*\n(?![|\n])/g, " ");
 
   it("uses the first real id in its example and leaves scope_additions out of it", () => {
-    expect(prompt).toContain('"finding_id": "F-007"');
+    expect(prompt).toContain('"unit_id": "F-007"');
     expect(prompt).not.toMatch(/"scope_additions":/);
-    expect(prompt).not.toContain('"finding_id": "..."');
+    expect(prompt).not.toContain('"unit_id": "..."');
   });
 
   it("states the three actions, the scope rule, and the closed id set", () => {
@@ -291,13 +265,13 @@ describe("the 17a prompt text", () => {
 
   it("uses the first candidate's id, or the first real id when there is no candidate", () => {
     const withCandidate = render([
-      { finding_id: "F-004", category: "scope_of_fix", description: "How far?" },
+      { unit_id: "F-004", category: "scope_of_fix", description: "How far?" },
     ]);
-    expect(withCandidate).toContain('"finding_id": "F-004"');
+    expect(withCandidate).toContain('"unit_id": "F-004"');
     expect(withCandidate).not.toMatch(/"scope_additions":/);
     expect(withCandidate).toContain("The tool found 1 candidate ambiguity");
     const none = render([]);
-    expect(none).toContain('"finding_id": "F-003"');
+    expect(none).toContain('"unit_id": "F-003"');
     expect(none).toContain("The tool found no candidate ambiguity");
   });
 

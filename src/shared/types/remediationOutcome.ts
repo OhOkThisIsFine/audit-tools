@@ -6,6 +6,8 @@
 // auditor does not consume it automatically.
 
 import { z } from "zod";
+import { FindingSchema } from "./finding.js";
+import { ExecutionRequestSchema, ExecutionRequestDispositionSchema } from "./executionPlan.js";
 import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema } from "./reviewIndependence.js";
 
 // CDC-25: the run's terminal-disposition vocabulary is
@@ -21,6 +23,8 @@ export const RemediationOutcomeStatusSchema = z.enum([
   "inappropriate",
   "ignored",
   "blocked",
+  "pending",
+  "deferred",
   "verified_already_fixed",
   "refuted",
 ]);
@@ -302,6 +306,12 @@ export type MechanicalVerification = z.infer<typeof MechanicalVerificationSchema
 export const RemediationOutcomeSchema = z
   .object({
     finding_id: z.string(),
+    finding: FindingSchema.optional(),
+    unit_ids: z.array(z.string()).optional(),
+    unit_dependencies: z.array(z.string()).optional(),
+    unit_statuses: z.record(z.string(), z.string()).optional(),
+    final_status: z.enum(["fixed", "failed", "skipped", "ignored", "pending", "deferred"]).optional(),
+    original_state: z.string().optional(),
     conformance_review: AcceptedConformanceReviewSchema.optional(),
     /** Audit lens the finding came from (free string in the wire contract). */
     lens: z.string(),
@@ -359,6 +369,8 @@ const RemediationOutcomeCountsSchema = z
     inappropriate: z.number(),
     ignored: z.number(),
     blocked: z.number(),
+    pending: z.number(),
+    deferred: z.number(),
     verified_already_fixed: z.number(),
     refuted: z.number(),
   })
@@ -367,8 +379,18 @@ const RemediationOutcomeCountsSchema = z
 // NOT strict: the on-disk remediation-outcomes.json is a superset of this shared
 // subset (the remediator appends run-level fields like step_count / closing_result
 // / plan_coverage). Unknown keys are tolerated so a real artifact still parses.
+export const ExecutionOutcomeSchema = z.object({
+  unit_id: z.string(), title: z.string(), source_finding_ids: z.array(z.string()),
+  status: z.string(), required_tests: z.array(z.string()), evidence: z.array(z.string()),
+  rework_count: z.number(), landed_commit: z.string().optional(), landed_files: z.array(z.string()).optional(),
+  reason: z.string().optional(), started_at: z.string().optional(), completed_at: z.string().optional(),
+  conformance_review: AcceptedConformanceReviewSchema.optional(),
+}).strict();
+
+export const REMEDIATION_OUTCOMES_CONTRACT_VERSION = "remediate-code-outcomes/v2" as const;
+
 export const RemediationOutcomesReportSchema = z.object({
-  contract_version: z.string(),
+  contract_version: z.literal(REMEDIATION_OUTCOMES_CONTRACT_VERSION),
   total: z.number(),
   by_outcome: RemediationOutcomeCountsSchema,
   by_lens: z.record(z.string(), RemediationOutcomeCountsSchema.partial()),
@@ -396,6 +418,14 @@ export const RemediationOutcomesReportSchema = z.object({
   recovery: RunRecoverySchema,
   contract_reviews: z.array(ContractReviewOutcomeSchema).optional(),
   outcomes: z.array(RemediationOutcomeSchema),
+  execution_outcomes: z.array(ExecutionOutcomeSchema),
+  objective: z.string().optional(),
+  request: ExecutionRequestSchema.optional(),
+  request_disposition: ExecutionRequestDispositionSchema.optional(),
+  request_outcome: z.object({
+    status:z.enum(["resolved","already_satisfied","ignored","pending","deferred","blocked"]),
+    reason:z.string(), evidence:z.array(z.string()), unit_ids:z.array(z.string()),
+  }).strict().optional(),
 });
 export type RemediationOutcomesReport = z.infer<
   typeof RemediationOutcomesReportSchema

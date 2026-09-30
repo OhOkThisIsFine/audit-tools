@@ -150,39 +150,6 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
 // never have to reconstruct the invocation from prose.
 // ---------------------------------------------------------------------------
 
-test("present_report with pending friction triage is a ready step carrying the next-step continuation command", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
-  // In-process (no wrapper spawn) so the check stays build-free: the wrapper
-  // path imports from dist/, which the accept gate does not build.
-  const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
-  await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-tools/audit");
-    await mkdir(artifactsDir, { recursive: true });
-    await writeFile(
-      join(artifactsDir, "audit_state.json"),
-      JSON.stringify({ status: "complete", obligations: [] }, null, 2) + "\n",
-    );
-    await writeFile(
-      join(artifactsDir, "audit-report.md"),
-      "# Audit report\n\n## Work blocks\n\n- Done\n",
-    );
-    // NO pre-satisfied friction record: triage is pending, so the step must be
-    // status "ready" with a stop_condition instructing another next-step call.
-
-    await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
-    const step = JSON.parse(
-      await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
-    );
-
-    expect(step.step_kind).toBe("present_report");
-    expect(step.status).toBe("ready");
-    expect(step.stop_condition).toMatch(/next-step/i);
-    expect(
-      step.allowed_commands.some((command: string) => /next-step/.test(command)),
-      `a ready step whose stop_condition says to call next-step again must carry the executable continuation command; got: ${JSON.stringify(step.allowed_commands)}`,
-    ).toBeTruthy();
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Terminal-exit backstop (backlog: abnormal-exit no-step-contract): a fatal
 // next-step exit must overwrite current-step.json with a blocked step naming

@@ -213,9 +213,8 @@ export function renderDesignReReviewSection(
 /**
  * Build the diff-based re-review section for a design-review pass being re-emitted
  * after staleness, or `undefined` when this is not a re-review (no prior
- * snapshot — i.e. first authoring). Mirrors remediate-code's
- * `buildReReviewSection`. The pass-level step is only emitted when the pass is
- * `missing` (no snapshot → `undefined`) or `stale` (snapshot present → section),
+ * snapshot — i.e. first authoring). The pass-level step is only emitted when
+ * the pass is `missing` (no snapshot → `undefined`) or `stale` (snapshot present → section),
  * so the section appears exactly on a genuine re-review.
  */
 export async function buildDesignReReviewSection(

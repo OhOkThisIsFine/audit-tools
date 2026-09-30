@@ -154,30 +154,15 @@ test("INV-shared-tests-06: shared-core-invariants.test.ts covers obligation cycl
   expect(content.includes("cycle"), "INV-shared-core-07 tests must contain the word 'cycle' — INV-shared-tests-06").toBeTruthy();
 });
 
-test("INV-shared-tests-06: detectObligationCycle and buildObligationLedger are both exported from shared index", async () => {
+test("INV-shared-tests-06: the shared executable dependency validator is exported", async () => {
   const shared = await import("../../src/shared/index.ts");
-  expect(typeof shared.detectObligationCycle, "detectObligationCycle must be exported from shared index — INV-shared-tests-06").toBe("function");
-  expect(typeof shared.buildObligationLedger, "buildObligationLedger must be exported from shared index — INV-shared-tests-06").toBe("function");
+  expect(typeof shared.executionPlanReferenceIssues).toBe("function");
 });
-
-test("INV-shared-tests-06: detectObligationCycle returns a non-null result for a direct cycle", async () => {
-  const { detectObligationCycle } = await import("../../src/shared/types/obligationLedger.ts");
-  const cycle = detectObligationCycle([
-    { id: "X", description: "x", kind: "behavioral", depends_on: ["Y"], status: "pending" },
-    { id: "Y", description: "y", kind: "behavioral", depends_on: ["X"], status: "pending" },
-  ]);
-  expect(Array.isArray(cycle) && cycle.length > 0, "direct cycle X→Y→X must be detected — INV-shared-tests-06").toBeTruthy();
-  expect(cycle.includes("X") && cycle.includes("Y"), "cycle result must name both participants — INV-shared-tests-06").toBeTruthy();
-});
-
-test("INV-shared-tests-06: detectObligationCycle returns null for an acyclic graph", async () => {
-  const { detectObligationCycle } = await import("../../src/shared/types/obligationLedger.ts");
-  const result = detectObligationCycle([
-    { id: "A", description: "a", kind: "behavioral", depends_on: [], status: "pending" },
-    { id: "B", description: "b", kind: "behavioral", depends_on: ["A"], status: "pending" },
-    { id: "C", description: "c", kind: "behavioral", depends_on: ["A", "B"], status: "pending" },
-  ]);
-  expect(result, "valid DAG must return null from detectObligationCycle — INV-shared-tests-06").toBe(null);
+test("INV-shared-tests-06: actual execution graph rejects cycles and accepts acyclic dependencies", async () => {
+  const { executionPlanReferenceIssues } = await import("../../src/shared/types/executionPlan.ts");
+  const { executionPlanForGraph } = await import("./executionPlanGraphFixture.ts");
+  expect(executionPlanReferenceIssues(executionPlanForGraph([["X", ["Y"]], ["Y", ["X"]]]), []).join("\n")).toMatch(/cycle/);
+  expect(executionPlanReferenceIssues(executionPlanForGraph([["A", []], ["B", ["A"]]]), [])).toEqual([]);
 });
 
 // ── INV-shared-tests-07: Key shared exports are stable ───────────────────────
@@ -197,12 +182,11 @@ test("INV-shared-tests-07: core validation symbols exported from shared index", 
   expect(typeof shared.AUDIT_FINDINGS_CONTRACT_VERSION, "AUDIT_FINDINGS_CONTRACT_VERSION — INV-shared-tests-07").toBe("string");
 });
 
-test("INV-shared-tests-07: obligation ledger symbols exported from shared index", async () => {
+test("INV-shared-tests-07: executable plan contracts are exported from shared index", async () => {
   const shared = await import("../../src/shared/index.ts");
-
-  expect(typeof shared.buildObligationLedger, "buildObligationLedger — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.detectObligationCycle, "detectObligationCycle — INV-shared-tests-07").toBe("function");
-  expect(typeof shared.CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION, "CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION — INV-shared-tests-07").toBe("string");
+  expect(typeof shared.ExecutableChangePlanSchema.safeParse).toBe("function");
+  expect(typeof shared.ExecutionUnitSchema.safeParse).toBe("function");
+  expect(typeof shared.executionPlanReferenceIssues).toBe("function");
 });
 
 test("INV-shared-tests-07: finding identity and lens vocabulary exported from shared index", async () => {

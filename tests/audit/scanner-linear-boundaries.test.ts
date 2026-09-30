@@ -4,14 +4,9 @@ import { expect, test } from "vitest";
 test("public scanners keep semantics under growing malformed inputs within a bounded process", () => {
   const script = `
     import assert from 'node:assert/strict';
-    import { extractSymbolTokens, negativeAssertionIsScoped } from './src/remediate/contractPipeline/changeClassification.ts';
     import { extractRegisteredRouteEvidence, extractFrameworkRouteEvidence } from './src/audit/extractors/graphRoutes.ts';
     import { extractPythonImportEdges } from './src/audit/extractors/graphPythonImports.ts';
     for (const n of [20000, 40000, 80000]) {
-      const token = 'symbol' + '/'.repeat(n) + 'x';
-      assert.deepEqual(extractSymbolTokens(token), [token]);
-      assert.equal(negativeAssertionIsScoped('anchorName; ' + 'not repo-wide '.repeat(n), ['anchorName']), true);
-      assert.equal(negativeAssertionIsScoped('anchorName; ' + 'not repo-wide; '.repeat(n) + 'grep the repo', ['anchorName']), false);
       const lookup = new Map([['src/handler.ts', 'src/handler.ts']]);
       assert.deepEqual(extractRegisteredRouteEvidence('src/app.ts', 'import { h' + ' '.repeat(n) + 'oops } from "./handler"; router.get("/ok", h)', lookup).routes,
         [{method:'GET', path:'/ok', handler:'src/app.ts'}]);

@@ -16,16 +16,10 @@ import { ConceptualJudgeSubmissionSchema } from "../../src/audit/types/conceptua
 import { renderCriticalFlowFallbackPrompt } from "../../src/audit/reporting/criticalFlowFallbackPrompt.js";
 import { renderSynthesisNarrativePrompt } from "../../src/audit/reporting/synthesisNarrativePrompt.js";
 import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
-import {
-  CP_ARTIFACT_NAMES,
-  type ContractPipelineArtifactName,
-} from "../../src/remediate/contractPipeline/artifactStore.js";
 import { IntakeSummarySchema, intakePaths } from "../../src/remediate/intake.js";
-import {
-  renderContractPipelinePrompt,
-  renderContractRepairPrompt,
-} from "../../src/remediate/steps/contractPipelinePrompts.js";
-import { renderCyclicSeamResolutionPrompt } from "../../src/remediate/steps/contractPipeline.js";
+import { renderPlanAuthorPrompt, renderPlanReviewPrompt } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { PlanSubmissionSchema, CritiqueSchema, CriticSchema, PlanJudgeSchema } from "../../src/remediate/contractPipeline/executionPlan.js";
+import { planPromptSource, planPromptCanonical, planPromptHistory } from "./planPromptFixture.js";
 import { synthesizeIntakePrompt } from "../../src/remediate/steps/prompts.js";
 import {
   CharterComparisonSubmissionSchema,
@@ -48,27 +42,6 @@ export interface PromptContractRegistryRow {
   gapReason?: string;
   render?: () => string;
 }
-
-const artifactPaths = Object.fromEntries(
-  CP_ARTIFACT_NAMES.map((name) => [name, `registry-fixture/${name}.json`]),
-) as Record<ContractPipelineArtifactName, string>;
-
-const renderPipeline = (role: string): (() => string) => () =>
-  renderContractPipelinePrompt({ role, artifactPaths }).prompt;
-
-// The two repair TRIGGERS render different prompts (different framing, different
-// Required Inputs) against the same output schema, so each is its own registry
-// row: a rendered prompt nobody registers is a projection nobody checks.
-const renderRepair = (
-  target: "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report",
-  trigger: "judge" | "critique" = "judge",
-): (() => string) => () =>
-  renderContractRepairPrompt({
-    trigger,
-    target,
-    instruction: "Repair the registered contract.",
-    artifactPaths,
-  }).prompt;
 
 /**
  * The smallest bundle a design-review prompt renders from: one in-scope unit and
@@ -192,117 +165,23 @@ export const clarificationBundleFixture: ArtifactBundle = {
 };
 
 const pipelineProjectionRows: PromptContractRegistryRow[] = [
-  {
-    builder: "renderContractPipelinePrompt[goal_normalization]",
-    schema: { name: "validateGoalSpec", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "objective", "non_goals", "success_criteria", "source_type"],
-    render: renderPipeline("goal_normalization"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[context_collection]",
-    schema: { name: "validateContextBundle", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "entries.path", "entries.kind", "entries.relevance_reason", "context_summary"],
-    render: renderPipeline("context_collection"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[decomposition]",
-    schema: { name: "validateModuleDecomposition", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "modules.name", "modules.responsibilities", "modules.file_scope", "modules.source_work_block_ids", "modules.prepares_seam_ids"],
-    render: renderPipeline("decomposition"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[module_contract_drafting]",
-    schema: { name: "validateModuleContracts", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "module_contracts.name", "module_contracts.inputs", "module_contracts.outputs", "module_contracts.invariants", "module_contracts.side_effects", "module_contracts.validation_boundary", "module_contracts.failure_modes", "module_contracts.neighbor_needs"],
-    render: renderPipeline("module_contract_drafting"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[seam_reconciliation]",
-    schema: { name: "validateSeamReconciliationReport", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "mismatches.seam_id", "mismatches.module_a", "mismatches.module_b", "mismatches.description", "mismatches.resolution.decision", "mismatches.resolution.agreed_interface"],
-    render: renderPipeline("seam_reconciliation"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[contract_finalization]",
-    schema: { name: "validateFinalizedModuleContracts", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "module_contracts.name", "module_contracts.inputs", "module_contracts.outputs", "module_contracts.invariants", "module_contracts.side_effects", "module_contracts.validation_boundary", "module_contracts.failure_modes", "module_contracts.seam_adjustments"],
-    render: renderPipeline("contract_finalization"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[obligation_ledger]",
-    schema: { name: "validateObligationLedger", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "obligations.id", "obligations.description", "obligations.kind", "obligations.depends_on", "obligations.status"],
-    render: renderPipeline("obligation_ledger"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[critique]",
-    schema: { name: "validateConceptualDesignCritique", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "items.id", "items.kind", "items.description", "items.severity", "verdict"],
-    render: renderPipeline("critique"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[test_validator_plan]",
-    schema: { name: "validateTestValidatorPlan", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "test_specs.obligation_id", "test_specs.name", "test_specs.kind", "test_specs.assertions", "test_specs.inapplicable_claim.obligation_id", "test_specs.inapplicable_claim.reason"],
-    render: renderPipeline("test_validator_plan"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[assessment]",
-    schema: { name: "validateContractAssessmentReport", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "findings.obligation_id", "findings.status", "findings.evidence", "findings.rationale", "verdict"],
-    render: renderPipeline("assessment"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[critic]",
-    schema: { name: "validateCounterexample", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "counterexamples.id", "counterexamples.claim", "counterexamples.reproduction_steps", "counterexamples.expected", "counterexamples.actual", "counterexamples.violated_obligation_ids"],
-    render: renderPipeline("critic"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[judge]",
-    schema: { name: "validateJudgeReport", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "verdict", "classifications.counterexample_id", "classifications.classification", "classifications.rationale", "repair_directive.target", "repair_directive.instruction"],
-    render: renderPipeline("judge"),
-  },
-  {
-    builder: "renderContractPipelinePrompt[implementation_planning]",
-    schema: { name: "validateImplementationDAG", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "nodes.id", "nodes.title", "nodes.description", "nodes.satisfies_obligations", "nodes.addresses_counterexamples", "nodes.addressed_critique_items", "nodes.depends_on", "nodes.verification_obligation_ids", "nodes.targeted_commands", "nodes.status", "edges.from", "edges.to", "edges.kind"],
-    render: renderPipeline("implementation_planning"),
-  },
-  {
-    builder: "renderContractRepairPrompt[finalized_module_contracts]",
-    schema: { name: "validateFinalizedModuleContracts", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "module_contracts"],
-    render: renderRepair("finalized_module_contracts"),
-  },
-  {
-    builder: "renderContractRepairPrompt[obligation_ledger]",
-    schema: { name: "validateObligationLedger", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "obligations"],
-    render: renderRepair("obligation_ledger"),
-  },
-  {
-    builder: "renderContractRepairPrompt[contract_assessment_report]",
-    schema: { name: "validateContractAssessmentReport", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "findings", "verdict"],
-    render: renderRepair("contract_assessment_report"),
-  },
-  {
-    builder: "renderContractRepairPrompt[finalized_module_contracts:critique]",
-    schema: { name: "validateFinalizedModuleContracts", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "module_contracts"],
-    render: renderRepair("finalized_module_contracts", "critique"),
-  },
-].map((row) => ({
-  ...row,
-  file: "src/remediate/steps/contractPipelinePrompts.ts",
-  disposition: "projection",
-}));
+  { builder: "renderPlanAuthorPrompt", file: "src/remediate/steps/contractPipelinePrompts.ts", disposition: "projection",
+    schema: { name: "PlanSubmissionSchema", file: "src/remediate/contractPipeline/executionPlan.ts", object: PlanSubmissionSchema },
+    projectionFields: ["base_revision_sha256", "plan.plan_id", "plan.requirements", "plan.units", "retired_requirements"],
+    render: () => renderPlanAuthorPrompt({ root: "registry-fixture", source: planPromptSource, history: planPromptHistory,
+      sourcePath: "source.json", planPath: "plan.json", outputPath: "plan.input.json" }) },
+  ...(["critique", "critic", "judge"] as const).map(role => ({
+    builder: `renderPlanReviewPrompt[${role}]`, file: "src/remediate/steps/contractPipelinePrompts.ts", disposition: "projection" as const,
+    schema: { name: role === "critique" ? "CritiqueSchema" : role === "critic" ? "CriticSchema" : "PlanJudgeSchema",
+      file: "src/remediate/contractPipeline/executionPlan.ts", object: role === "critique" ? CritiqueSchema : role === "critic" ? CriticSchema : PlanJudgeSchema },
+    projectionFields: role === "critique" ? ["verdict", "issues"] : role === "critic" ? ["counterexamples"] : ["verdict", "classifications", "requirement_assessments", "disposition_assessments"],
+    render: () => renderPlanReviewPrompt({ role, root: "registry-fixture", sourcePath: "source.json", planPath: "plan.json",
+      canonical: planPromptCanonical, history: planPromptHistory, priorReviewPaths: [], requirement: "independent" }),
+  })),
+];
 
 const reconciliationGapRows: PromptContractRegistryRow[] = [
-  ["renderContractPipelinePrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — branch projection rows are registered separately"],
-  ["renderContractRepairPrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — repair-target projection rows are registered separately"],
+  ["renderPlanReviewPrompt", "src/remediate/steps/contractPipelinePrompts.ts", "three independent role projections registered separately"],
   ["currentPromptPath", "src/shared/io/stepContractWriter.ts", "path helper matched by the prompt-name scan — no rendered output contract"],
   ["buildCacheablePrompt", "src/shared/prompts.ts", "generic prompt composition helper — no worker output contract"],
   ["quotePromptCommandArg", "src/shared/tooling/exec.ts", "command quoting helper matched by the prompt-name scan — no rendered output contract"],
@@ -320,21 +199,6 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
 
 export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
   ...pipelineProjectionRows,
-  {
-    // Prompt 18: the cyclic-seam worker is rendered only by the re-check gate,
-    // which names the detected cycles — there is no ROLES entry for it.
-    builder: "renderCyclicSeamResolutionPrompt",
-    file: "src/remediate/steps/contractPipeline.ts",
-    disposition: "projection",
-    schema: { name: "validateCyclicSeamResolution", file: "src/remediate/validation/contractPipeline.ts" },
-    projectionFields: ["contract_version", "goal_id", "cycles.members", "cycles.break_strategy", "cycles.designated_obligation_id", "cycles.resolution_description", "cycles.exception_registration", "status"],
-    render: () =>
-      renderCyclicSeamResolutionPrompt({
-        cycleDescriptions: "Cycle 1: [OBL-A, OBL-B]",
-        ledgerInputPath: artifactPaths.obligation_ledger,
-        outputPath: artifactPaths.cyclic_seam_resolution,
-      }),
-  },
   {
     builder: "synthesizeIntakePrompt",
     file: "src/remediate/steps/prompts.ts",

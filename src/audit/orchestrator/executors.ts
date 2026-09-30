@@ -380,7 +380,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "planning_executor",
     kind: "deterministic",
-    obligation_ids: ["planning_artifacts"],
+    obligation_ids: ["planning_artifacts", "architecture_discoveries_current"],
     produces: [
       {
         artifact: "audit_plan_metrics.json",
@@ -618,19 +618,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["audit_tasks_completed"],
     produces: [],
   },
-  {
-    id: "friction_capture_executor",
-    kind: "deterministic",
-    obligation_ids: ["friction_capture_current"],
-    produces: [
-      {
-        artifact: "friction/run.json",
-        role: "side_channel",
-        note:
-          "run-scoped friction ledger under the run directory rather than a bundle artifact; it has no DAG dependents",
-      },
-    ],
-  },
+
 ];
 
 // O(1) lookup indexes over the registry, built once at module load. Uniqueness

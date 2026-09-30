@@ -1,0 +1,24 @@
+import { afterEach, beforeEach, expect, test } from "vitest";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { buildAuditFindingsDeliverable, type Finding } from "../../src/shared/index.js";
+import { readPlanSource } from "../../src/remediate/contractPipeline/executionPlan.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+const h = createNextStepHarness(".test-path-a-phantom-source");
+beforeEach(h.resetTestRepo);
+afterEach(h.cleanupTestRepo);
+test("all-phantom audit input records the original exclusion without inventing execution work", async () => {
+  const original: Finding = { id: "COR-phantom", title: "Missing source", category: "correctness", severity: "high", confidence: "high", lens: "correctness", summary: "Reported source is absent", affected_files: [{path:"absent/not-here.ts"}], evidence:["absent/not-here.ts:1 reported defect"] };
+  const input = join(h.REPO_DIR, "phantom-audit.json");
+  await writeFile(input, JSON.stringify(buildAuditFindingsDeliverable([original], null)));
+  await h.writeReadyStructuredAuditIntake(input);
+  await rm(join(h.REPO_DIR,"absent/not-here.ts"));
+  const step = await decideNextStep({root:h.REPO_DIR});
+  expect(step.step_kind).toBe("contract_pipeline");
+  expect((await readPlanSource(h.ARTIFACTS_DIR))?.findings).toEqual([]);
+  const dispositions = JSON.parse(await readFile(join(h.ARTIFACTS_DIR,"review_filter_dispositions.json"),"utf8"));
+  expect(dispositions.originals).toEqual([original]);
+  expect(dispositions.droppedPhantomPaths.map(([id]: [string, unknown]) => id)).toContain(original.id);
+  await expect(readFile(join(h.ARTIFACTS_DIR,"state.json"),"utf8")).rejects.toThrow();
+});

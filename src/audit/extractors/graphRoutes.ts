@@ -53,9 +53,7 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][\w$]*$/;
 // the file is a start position. Bounding the gap would fix the cost by silently
 // dropping the long matches (`leads-not-verdicts` bought and paid for elsewhere,
 // but unnecessary here). These scans instead keep EVERY match the regexes found
-// and are linear by SKIPPING rather than stepping — the same correction
-// `stripIdentifierTokens` (`src/remediate/contractPipeline/changeClassification.ts`)
-// applies to its own bounded-token regex, and for the same reason: emitting a
+// and are linear by SKIPPING rather than stepping: emitting a
 // character and re-entering re-runs the same failing scan one position later,
 // which is the quadratic relocated rather than removed.
 

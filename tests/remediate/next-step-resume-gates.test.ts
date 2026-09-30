@@ -1,3 +1,5 @@
+import { executionPlanPaths } from "../../src/remediate/contractPipeline/executionPlan.js";
+import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -149,13 +151,9 @@ describe("N-R01: --guidance-file against an advanced run trips input_conflict", 
   });
 });
 
-describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () => {
-  it("extracted-plan.json present with no checkpoint emits confirm_intent (not dispatch)", async () => {
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify(makePlanningState().plan),
-      "utf8",
-    );
+describe("N-R01: approved-plan fast-path does not bypass confirm_intent", () => {
+  it("canonical execution plan present with no checkpoint emits confirm_intent (not dispatch)", async () => {
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, makePlanningState(), REPO_DIR);
     // No intent_checkpoint.json written
 
     const step = await decideNextStep({ root: REPO_DIR });
@@ -163,12 +161,8 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
     expect(step.step_kind).toBe("confirm_intent");
   });
 
-  it("extracted-plan.json prompt references intent_checkpoint.json", async () => {
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify(makePlanningState().plan),
-      "utf8",
-    );
+  it("canonical execution plan prompt references intent_checkpoint.json", async () => {
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, makePlanningState(), REPO_DIR);
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -177,8 +171,8 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
     expect(prompt).toMatch(/intent_checkpoint\.json/);
   });
 
-  it("N-R06: with checkpoint + intake artifacts + extracted-plan, proceeds past confirm_intent to dispatch", async () => {
-    // After N-R06: a pre-existing extracted-plan.json still works for resumability,
+  it("N-R06: with checkpoint + intake artifacts + approved-plan, proceeds past confirm_intent to dispatch", async () => {
+    // After N-R06: a pre-existing canonical execution plan still works for resumability,
     // but intake artifacts must be present (the fast-path bypass without intake was removed).
     const intakeDir = join(ARTIFACTS_DIR, "intake");
     await mkdir(intakeDir, { recursive: true });
@@ -197,12 +191,8 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
       "utf8",
     );
     await writeFile(join(REPO_DIR, "notes.md"), "# notes", "utf8");
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify(makePlanningState().plan),
-      "utf8",
-    );
     await writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, makePlanningState(), REPO_DIR);
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -212,7 +202,7 @@ describe("N-R01: extracted-plan fast-path does not bypass confirm_intent", () =>
 });
 
 describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-built state)", () => {
-  // When pending_intake builds a planning state from a promoted extracted-plan,
+  // When pending_intake builds a planning state from a promoted approved-plan,
   // the shared advance loop re-scans on that fresh state. The resume/conflict
   // gates are about a *pre-existing* run, so they must stay frozen at the
   // call-entry state (null here) and NOT re-fire against the intake-built plan —
@@ -247,7 +237,7 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     await writeFile(join(REPO_DIR, "src", "b.ts"), "// b\n", "utf8");
     // A declared sizing window, without which `applyPlanPipeline` refuses and no
     // planning state is built. This fixture predates the refusal propagating:
-    // the refusal used to be swallowed as "corrupted extracted-plan.json", so
+    // the refusal used to be swallowed as "corrupted canonical execution plan", so
     // these two cases passed on their NEGATIVE assertions while exercising the
     // re-emit-extraction path the comment above says they must avoid.
     await writeFile(
@@ -257,12 +247,8 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
       }),
       "utf8",
     );
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify(makePlanningState().plan),
-      "utf8",
-    );
     await writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, makePlanningState(), REPO_DIR);
   }
 
   it("bare re-invocation (no pre-existing state) does not resurrect confirm_resume_or_restart after intake builds a plan", async () => {
@@ -277,12 +263,11 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     expect(step.step_kind).not.toBe("confirm_intent");
   });
 
-  it("--input against a fresh run (no pre-existing state) does not resurrect input_conflict after intake builds a plan", async () => {
+  it("the same --input with no runtime state does not resurrect input_conflict after intake builds a plan", async () => {
     await seedPromotedPlanWithIntake();
-    await writeFile(join(REPO_DIR, "audit-report.md"), "# audit\n", "utf8");
     const step = await decideNextStep({
       root: REPO_DIR,
-      input: join(REPO_DIR, "audit-report.md"),
+      input: join(REPO_DIR, "notes.md"),
     });
     await expectIntakeBuiltAPlan();
     expect(step.step_kind).not.toBe("input_conflict");
@@ -290,7 +275,7 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
   });
 
   /**
-   * The precondition both cases share: the promoted extracted plan survived the
+   * The precondition both cases share: the approved executable plan survived the
    * join and became a planning state. If it did not, every `not.toBe(...)` below
    * is vacuously true and the case tests nothing.
    */
@@ -301,7 +286,7 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
       "the extracted plan must have been joined into a planning state",
     ).toBe(true);
     expect(
-      existsSync(join(ARTIFACTS_DIR, "extracted-plan.json")),
+      existsSync(executionPlanPaths(ARTIFACTS_DIR).canonical),
       "a successful join keeps the extracted plan; its absence means the recovery path discarded it",
     ).toBe(true);
   }

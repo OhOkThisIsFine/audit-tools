@@ -165,12 +165,6 @@ export const EXECUTOR_WRITE_SITES = [
     rule: "runnerWriteSet",
   },
   {
-    executor: "friction_capture_executor",
-    file: "src/audit/orchestrator/executorRunners.ts",
-    scope: "friction_capture_executor",
-    rule: "runnerWriteSet",
-  },
-  {
     executor: "graph_enrichment_executor",
     file: "src/audit/orchestrator/graphEnrichmentExecutor.ts",
     scope: "runGraphEnrichmentExecutor",

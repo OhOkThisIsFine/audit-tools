@@ -1,3 +1,4 @@
+import { architectureDiscoveryWorkChanged } from "./architectureDiscovery.js";
 import { resolveDesignReviewBinding } from "../../shared/types/intentCheckpoint.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
@@ -473,6 +474,9 @@ export function deriveAuditState(
       ),
     ),
   );
+
+  obligations.push(obligation("architecture_discoveries_current",
+    architectureDiscoveryWorkChanged(bundle) ? "missing" : "satisfied"));
 
   // The pending set is the shared partition (INV-PENDING-SINGLE-SOURCE,
   // ./pendingTasks.ts) — the SAME derivation dispatch's buildPendingAuditTasks

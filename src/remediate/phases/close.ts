@@ -1,3 +1,6 @@
+import { assertApprovedRuntimePlan, RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
+import { executionPlanContextIssues } from "../contractPipeline/executionPlan.js";
+import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema, type ContractReviewOutcome } from "../../shared/types/reviewIndependence.js";
 import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
 // sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts
@@ -20,6 +23,7 @@ import {
   writeJsonFile,
   writeTextFile,
   RemediationOutcomeStatusSchema,
+  REMEDIATION_OUTCOMES_CONTRACT_VERSION,
   countBy,
   commandLeavesDeclaredShape,
   parseCommandString,
@@ -94,6 +98,7 @@ import {
 // cycle — and the alternative, a second `"final-gate-outcome.json"` literal
 // here, is exactly the drift the layout registry exists to prevent.
 import { finalGateOutcomePath } from "../steps/finalGate.js";
+import { runCloseAcceptance, type CombinedTestResult } from "./closeAcceptance.js";
 
 // Derived from the single source so the key list can never drift from the
 // RemediationOutcomeStatus contract (A6).
@@ -120,6 +125,8 @@ const FINAL_STATUS_BY_OUTCOME: Record<
   inappropriate: "skipped",
   ignored: "ignored",
   blocked: "failed",
+  pending: "pending",
+  deferred: "deferred",
   verified_already_fixed: "fixed",
   refuted: "skipped",
 };
@@ -340,30 +347,108 @@ export function buildRemediationOutcomesReport(
   recovery: RunRecovery = NO_RECOVERY,
   contractReviews: readonly ContractReviewOutcome[] = [],
 ): RemediationOutcomesReport {
-  const findingsById = new Map(
-    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
-  );
-  const blocksById = new Map(
-    (state.plan?.blocks ?? []).map((block) => [block.block_id, block]),
-  );
   const outcomes: RemediationOutcome[] = [];
   const closeReason = closingStatusReason(closingResult);
-  for (const item of Object.values(state.items ?? {})) {
-    // Derive the outcome from the single status→disposition→outcome
-    // authority. A non-terminal status — in-progress, `blocked`, or an
-    // unanswered `needs_clarification` — means the run was force-closed while
-    // the item was still non-terminal: record it as a failed (`blocked`)
-    // outcome — never drop it — and preserve the original state so a retry
-    // sees where it stood (every non-terminal status, not only the five
-    // in-progress ones — needs_clarification included).
+  const executionOutcomes = (state.plan?.units ?? []).map(unit => {
+    const item = state.items?.[unit.id];
+    return {
+      unit_id: unit.id, title: unit.title, source_finding_ids: [...unit.source_finding_ids],
+      status: item?.status ?? "pending",
+      required_tests: [...unit.required_tests], evidence: [...(item?.host_result_evidence ?? [])],
+      rework_count: item?.rework_count ?? 0,
+      ...(item?.host_landed_commit ? {landed_commit:item.host_landed_commit} : {}),
+      ...(item?.host_landed_files ? {landed_files:[...item.host_landed_files]} : {}),
+      ...(item?.failure_reason ? { reason: item.failure_reason } : !item ? {reason:"No execution state was recorded for this reviewed unit."} : !isVerifiedCompleteStatus(item.status) && !isSkipStatus(item.status) ? {reason:`Execution unit remains ${item.status}.`} : {}),
+      ...(item?.conformance_review ? { conformance_review: AcceptedConformanceReviewSchema.parse(item.conformance_review) } : {}),
+      ...(item?.started_at ? { started_at: item.started_at } : {}),
+      ...(item?.completed_at ? { completed_at: item.completed_at } : {}),
+    };
+  });
+  let requestOutcome: RemediationOutcomesReport["request_outcome"];
+  const requestDisposition = state.plan?.request_disposition;
+  if (state.plan?.request || requestDisposition) {
+    const units = state.plan?.units ?? [];
+    const items = units.map(unit => state.items?.[unit.id]);
+    const settled = items.length > 0 && items.every(item => item && (isVerifiedCompleteStatus(item.status) || isSkipStatus(item.status)));
+    const skipped = items.filter(item => item && isSkipStatus(item.status));
+    const status = requestDisposition?.status ??
+      (items.some(item => !item || isUnsuccessfulEndStatus(item.status)) ? "blocked" :
+       settled && skipped.length > 0 ? "ignored" : settled ? "resolved" : "pending");
+    requestOutcome = {
+      status,
+      reason:requestDisposition?.reason ?? (status === "ignored"
+        ? skipped.map(item => item!.failure_reason ?? "Owner declined this execution unit").join("; ")
+        : status === "resolved" ? "All reviewed execution units were verified."
+        : "The request still has unfinished execution work."),
+      evidence:requestDisposition?.evidence ?? executionOutcomes.flatMap(unit => unit.evidence),
+      unit_ids:units.map(unit => unit.id),
+    };
+  }
+  const sourceFindings = new Map((state.plan?.findings ?? []).map(finding => [finding.id, finding]));
+  for (const entry of state.plan_coverage?.entries ?? []) {
+    const original = sourceFindings.get(entry.finding_id);
+    if (entry.finding && original && contentSha256(entry.finding) !== contentSha256(original)) {
+      throw new Error(`Conflicting original source payload for ${entry.finding_id}; refusing an ambiguous outcome.`);
+    }
+    if (entry.finding && !original) sourceFindings.set(entry.finding_id, entry.finding);
+  }
+  for (const finding of sourceFindings.values()) {
+    const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
+    const linked = units.map(unit => state.items?.[unit.id]);
+    const coverage = state.plan_coverage?.entries.find(entry => entry.finding_id === finding.id);
+    const coverageDrop = coverage && DROP_REASON_BY_DISPOSITION[coverage.disposition];
+    const settledWithOwnerSkip = linked.length > 0 && linked.every(item => item && (isVerifiedCompleteStatus(item.status) || isSkipStatus(item.status))) && linked.some(item => item && isSkipStatus(item.status));
+    const unitOwnerDisposition = settledWithOwnerSkip ? {
+      status:linked.every(item => item?.status === "deemed_inappropriate") ? "declined" as const : "ignored" as const,
+      reason:linked.filter(item => item && isSkipStatus(item.status)).map(item => item!.failure_reason ?? "Owner declined this execution unit").join("; "),
+    } : undefined;
+    const ownerDisposition = state.finding_dispositions?.[finding.id] ?? unitOwnerDisposition ??
+      (coverageDrop ? {status:"ignored" as const, reason:coverage.rationale ?? `Source was not scheduled: ${coverageDrop}`} : undefined);
+    const semanticDisposition = state.plan?.source_dispositions?.find(entry => entry.finding_id === finding.id);
+    const recorded = state.source_verifications?.[finding.id];
+    const verified = recorded?.review_revision_sha256 === state.plan?.review_revision_sha256 &&
+      recorded?.source_sha256 === contentSha256(finding) ? recorded : undefined;
+    const allVerified = linked.length > 0 && linked.every(item => item && isVerifiedCompleteStatus(item.status));
+    const starts = linked.flatMap(item => item?.started_at ? [item.started_at] : []).sort();
+    const ends = linked.flatMap(item => item?.completed_at ? [item.completed_at] : []).sort();
+    const hasBlocked = linked.some(item => !item || isUnsuccessfulEndStatus(item.status));
+    const sourceDeferred = semanticDisposition?.status === "deferred";
+    const sourcePending = !ownerDisposition && !semanticDisposition && units.length > 0 && !hasBlocked && !sourceDeferred && !allVerified;
+    const sharedStatus = linked.length > 0 && linked.every(item => item?.status === linked[0]?.status) ? linked[0]?.status : undefined;
+    const status: RemediationItemState["status"] = ownerDisposition ? ownerDisposition.status === "declined" ? "deemed_inappropriate" : "ignored"
+      : semanticDisposition?.status === "deferred" ? "blocked"
+      : semanticDisposition ? "resolved_no_change"
+      : allVerified ? linked.every(item => item?.status === "resolved_no_change") ? "resolved_no_change" : "resolved"
+      : sourcePending ? sharedStatus ?? "pending" : sharedStatus && isUnsuccessfulEndStatus(sharedStatus) ? sharedStatus : "blocked";
+    // A source aggregation is not an execution item. Evidence remains keyed by
+    // original source identity, so shared units cannot overwrite another source.
+    const item = {
+      status,
+      ...verified,
+      disposition_override: ownerDisposition ? undefined : semanticDisposition?.status === "already_fixed" ? "verified_already_fixed" as const
+        : semanticDisposition?.status === "refuted" ? "refuted" as const : verified?.disposition_override,
+      failure_reason: ownerDisposition?.reason ?? semanticDisposition?.reason ??
+        (!allVerified ? units.length === 0 ? "No reviewed execution unit or source disposition covers this finding."
+          : "Not every required execution unit was verified: " + units.map((unit, i) => `${unit.id}=${linked[i]?.status ?? "missing"}${linked[i]?.failure_reason ? ` (${linked[i]!.failure_reason})` : ""}`).join(", ") : undefined),
+      rework_count: linked.reduce((sum, item) => sum + (item?.rework_count ?? 0), 0),
+      started_at: starts[0], completed_at: linked.length > 0 && ends.length === linked.length ? ends.at(-1) : undefined,
+    };
+    // Source verdicts retain pending/deferred separately from blocked. A
+    // successful source requires every linked unit verified, or an independently
+    // corroborated explicit source disposition; an empty link set never passes.
     let outcome: RemediationOutcomeStatus;
     let originalState: RemediationItemState["status"] | undefined;
     let evidence: Evidence | undefined;
     let recordedByModule: string | undefined;
     let evidenceRefusalReason: string | undefined;
-    if (!isTerminalStatus(item.status)) {
+    if (sourceDeferred && !ownerDisposition) {
+      outcome = "deferred";
+    } else if (sourcePending) {
+      outcome = "pending";
+      originalState = sharedStatus;
+    } else if (!isTerminalStatus(item.status)) {
       outcome = "blocked";
-      originalState = item.status;
+      originalState = sharedStatus;
     } else {
       const disposition = resolveDisposition(item.status, item.disposition_override);
       if (requiresVerificationEvidence(disposition)) {
@@ -401,7 +486,6 @@ export function buildRemediationOutcomesReport(
         }
       }
     }
-    const finding = findingsById.get(item.finding_id);
     const fileExts = [
       ...new Set(
         (finding?.affected_files ?? [])
@@ -428,7 +512,7 @@ export function buildRemediationOutcomesReport(
       reason = DEFAULT_REASON_BY_OUTCOME[outcome];
     }
     const base: RemediationOutcome = {
-      finding_id: item.finding_id,
+      finding_id: finding.id,
       lens: finding?.lens ?? "unknown",
       file_exts: fileExts,
       outcome,
@@ -444,22 +528,15 @@ export function buildRemediationOutcomesReport(
         : {}),
       ...(evidence ? { evidence } : {}),
       ...(recordedByModule ? { recorded_by_module: recordedByModule } : {}),
-      ...((outcome === "resolved" || outcome === "verified_no_change") && item.conformance_review
-        ? { conformance_review: AcceptedConformanceReviewSchema.parse(item.conformance_review) } : {}),
     };
-    if (!finding) {
-      // Degenerate (corrupt state): without the plan finding there is no payload
-      // to carry — emit the lean per-finding outcome rather than inventing one.
-      outcomes.push(base);
-      continue;
-    }
     const enriched: RemediationOutcomeItem = {
       ...base,
       finding,
-      block_id: item.block_id,
-      block_dependencies: [...(blocksById.get(item.block_id)?.dependencies ?? [])],
+      unit_ids: units.map(unit => unit.id),
+      unit_dependencies: [...new Set(units.flatMap(unit => unit.dependencies))],
+      unit_statuses: Object.fromEntries(units.map((unit,i) => [unit.id,linked[i]?.status ?? "missing"])),
       final_status: FINAL_STATUS_BY_OUTCOME[outcome],
-      ...(originalState ? { original_state: originalState } : {}),
+      original_state: originalState,
     };
     outcomes.push(enriched);
   }
@@ -539,7 +616,7 @@ export function buildRemediationOutcomesReport(
       : undefined;
 
   return {
-    contract_version: "remediate-code-outcomes/v1alpha1",
+    contract_version: REMEDIATION_OUTCOMES_CONTRACT_VERSION,
     total: outcomes.length,
     by_outcome: byOutcome,
     by_lens: byLens,
@@ -550,6 +627,10 @@ export function buildRemediationOutcomesReport(
     recovery,
     ...(contractReviews.length > 0 ? { contract_reviews: contractReviews.map(review => ContractReviewOutcomeSchema.parse(review)) } : {}),
     outcomes,
+    execution_outcomes: executionOutcomes,
+    ...(requestDisposition ? {request_disposition:requestDisposition} : {}),
+    ...(requestOutcome ? {request_outcome:requestOutcome} : {}),
+    ...(state.plan ? {objective:state.plan.objective, ...(state.plan.request ? {request:state.plan.request} : {})} : {}),
   };
 }
 
@@ -941,26 +1022,13 @@ function repoPathExactKey(path: string): string {
  * Falls back to a generic message when there are no findings to summarize.
  */
 function generateCommitMessage(state: RemediationState): string {
-  const findings = state.plan?.findings ?? [];
-  const items = Object.values(state.items ?? {});
-  const resolvedFindingIds = new Set(
-    items
-      .filter((i) => isVerifiedCompleteStatus(i.status))
-      .map((i) => i.finding_id),
-  );
-  const resolved = findings.filter((f) => resolvedFindingIds.has(f.id));
-  if (resolved.length === 0) {
-    return "Remediation complete";
-  }
-  if (resolved.length === 1) {
-    return `Fix: ${resolved[0]!.title ?? resolved[0]!.id}`;
-  }
-  const titles = resolved
-    .slice(0, 3)
-    .map((f) => f.title ?? f.id)
-    .join(", ");
-  const suffix = resolved.length > 3 ? ` (+${resolved.length - 3} more)` : "";
-  return `Fix: ${titles}${suffix}`;
+  const resolved = (state.plan?.units ?? []).filter(unit => {
+    const item = state.items?.[unit.id];
+    return item && isVerifiedCompleteStatus(item.status);
+  });
+  if (resolved.length === 0) return "Remediation complete";
+  const titles = resolved.slice(0, 3).map(unit => unit.title).join(", ");
+  return `Fix: ${titles}${resolved.length > 3 ? ` (+${resolved.length - 3} more)` : ""}`;
 }
 
 /**
@@ -982,7 +1050,7 @@ async function checkClosingPreview(
   state: RemediationState,
   options: OrchestratorOptions,
 ): Promise<
-  { files: string[]; commit_message: string; leftover_files?: string[] } | undefined
+  { action: ClosingAction; custom_command?: string[]; files: string[]; commit_message: string; leftover_files?: string[] } | undefined
 > {
   const closingPlan = state.closing_plan!;
   if (closingPlan.pre_authorized === true) return undefined;
@@ -993,11 +1061,19 @@ async function checkClosingPreview(
     toolDeliverablePaths(options),
   );
   const commitMessage = generateCommitMessage(state);
-  return {
+  const preview = {
+    action: closingPlan.action,
+    ...(closingPlan.custom_command ? { custom_command: closingPlan.custom_command } : {}),
     files,
     commit_message: commitMessage,
     ...(leftover.length > 0 ? { leftover_files: leftover } : {}),
   };
+  if (options.finalizeClosing && closingPlan.closing_action_preview &&
+      JSON.stringify(preview) === JSON.stringify(closingPlan.closing_action_preview)) {
+    closingPlan.pre_authorized = true;
+    return undefined;
+  }
+  return preview;
 }
 
 /**
@@ -1101,21 +1177,6 @@ export async function executeClosingAction(
   };
 }
 
-export interface CombinedTestResult {
-  /**
-   * Whether a suite actually ran. `false` means `plan.test_command` was never
-   * configured — a NEVER-RAN outcome, structurally distinct from `passed`, so
-   * a caller can no longer mistake "nothing ran" for "a real pass" (the
-   * vacuous-pass defect: previously `passed:true` alone claimed a real result
-   * even for an unrun, unconfigured suite).
-   */
-  ran: boolean;
-  passed: boolean;
-  duration_ms: number;
-  suite_name?: string;
-  /** Tail of combined stdout/stderr captured on failure (empty on pass). */
-  output: string;
-}
 
 /**
  * Run the plan's combined test suite over the fully merged post-remediation
@@ -1189,6 +1250,7 @@ export async function runCombinedTestSuite(
     return {
       ran: true,
       passed,
+      exit_code: admitted.exit_code,
       suite_name: suiteName,
       duration_ms: Date.now() - startedAt,
       output: passed
@@ -1209,14 +1271,14 @@ export async function runCombinedTestSuite(
   });
   const durationMs = Date.now() - startedAt;
   if (result.status === 0) {
-    return { ran: true, passed: true, suite_name: suiteName, duration_ms: durationMs, output: "" };
+    return { ran: true, passed: true, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output: "" };
   }
   const output = (
     (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
   )
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-  return { ran: true, passed: false, suite_name: suiteName, duration_ms: durationMs, output };
+  return { ran: true, passed: false, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output };
 }
 
 /**
@@ -1310,15 +1372,15 @@ export function blockResolvedItemsOnCombinedFailure(
 
   const implicatedPaths = extractImplicatedPaths(testOutput);
   const now = new Date().toISOString();
-  const touchedFilesByBlock = new Map(
-    (state.plan?.blocks ?? []).map((block) => [block.block_id, block.touched_files]),
+  const touchedFilesByUnit = new Map(
+    (state.plan?.units ?? []).map((unit) => [unit.id, unit.allowed_files]),
   );
 
   // Attempt attribution: find items whose block touched an implicated path.
   let attributed: typeof resolvedItems = [];
   if (implicatedPaths.length > 0) {
     for (const item of resolvedItems) {
-      const touchedFiles = touchedFilesByBlock.get(item.block_id) ?? [];
+      const touchedFiles = touchedFilesByUnit.get(item.unit_id) ?? [];
       const overlaps = touchedFiles.some((tf) =>
         implicatedPaths.some((ip) => touchedPathMatchesImplicated(tf, ip)),
       );
@@ -1416,12 +1478,12 @@ async function runE2eTests(
 }
 
 interface ResolvedReportEntry {
-  finding_id: string;
+  unit_id: string;
   summary: string;
   verification_evidence?: string[];
 }
 interface RationaleReportEntry {
-  finding_id: string;
+  unit_id: string;
   rationale: string;
 }
 interface ReportEntries {
@@ -1450,14 +1512,14 @@ function collectReportEntries(
   };
   for (const item of Object.values(state.items ?? {})) {
     if (isVerifiedCompleteStatus(item.status)) {
-      const finding = state.plan?.findings.find((f) => f.id === item.finding_id);
-      const title = finding?.title ?? "Unknown";
+      const unit = state.plan?.units.find((u) => u.id === item.unit_id);
+      const title = unit?.title ?? item.unit_id;
       let verificationEvidence: string[] | undefined =
         item.host_result_evidence;
 
       const verificationResultPath = join(
         options.artifactsDir,
-        `result_${item.finding_id}_verify_code_against_documentation.json`,
+        `result_${item.unit_id}_verify_code_against_documentation.json`,
       );
       if (existsSync(verificationResultPath)) {
         try {
@@ -1474,7 +1536,7 @@ function collectReportEntries(
       }
 
       const entry: ResolvedReportEntry = {
-        finding_id: item.finding_id,
+        unit_id: item.unit_id,
         summary: title,
         verification_evidence: verificationEvidence,
       };
@@ -1485,17 +1547,17 @@ function collectReportEntries(
       }
     } else if (item.status === "deemed_inappropriate") {
       entries.inappropriate.push({
-        finding_id: item.finding_id,
+        unit_id: item.unit_id,
         rationale: item.failure_reason ?? "Deemed inappropriate",
       });
     } else if (item.status === "ignored") {
       entries.ignored.push({
-        finding_id: item.finding_id,
+        unit_id: item.unit_id,
         rationale: item.failure_reason ?? "Ignored by user",
       });
     } else if (item.status === "blocked") {
       entries.blocked.push({
-        finding_id: item.finding_id,
+        unit_id: item.unit_id,
         rationale: item.failure_reason ?? "Blocked",
       });
     }
@@ -1507,7 +1569,7 @@ function collectReportEntries(
  * Render `remediation-report.md` from the partitioned entries, closing action,
  * e2e result, and per-finding outcomes. Pure string builder (no I/O).
  */
-function buildRemediationReportMarkdown(
+export function buildRemediationReportMarkdown(
   state: RemediationState,
   entries: ReportEntries,
   closingResult: ClosingResult,
@@ -1519,6 +1581,22 @@ function buildRemediationReportMarkdown(
 ): string {
   let reportContent = `# Remediation Report\n\n`;
 
+  if (outcomesReport.request_outcome) {
+    const request = outcomesReport.request_outcome;
+    reportContent += `## Request outcome\n\n${request.status}: ${request.reason}\n`;
+    for (const evidence of request.evidence) reportContent += `- ${evidence}\n`;
+    reportContent += "\n";
+  }
+  const executionUnits = outcomesReport.execution_outcomes;
+  const completedUnits = executionUnits.filter(unit => unit.status === "resolved" || unit.status === "resolved_no_change").length;
+  const skippedUnits = executionUnits.filter(unit => unit.status === "ignored" || unit.status === "deemed_inappropriate").length;
+  reportContent += `## Execution units\n\n${executionUnits.length} unit(s): ${completedUnits} verified complete, ${skippedUnits} skipped, ${executionUnits.length - completedUnits - skippedUnits} unfinished.\n\n`;
+  for (const unit of outcomesReport.execution_outcomes ?? []) {
+    reportContent += `- **${unit.unit_id}** ${unit.title}: ${unit.status}${unit.reason ? ` — ${unit.reason}` : ""}\n`;
+  }
+  if (!(outcomesReport.execution_outcomes ?? []).length) reportContent += "No execution units were required.\n";
+  reportContent += "\n";
+
   // Host results are accepted only after the claimed commit is mechanically
   // corroborated as reachable from HEAD. A no-change/skip-only run has no
   // changed commit to review.
@@ -1526,7 +1604,7 @@ function buildRemediationReportMarkdown(
     reportContent += `## Review\n\nAll code changes were accepted through the provider-neutral host handoff and corroborated as landed commits reachable from the repository HEAD. Review the resulting diff and commit history.\n\n`;
   }
 
-  const resultReviews = outcomesReport.outcomes.filter(outcome => outcome.conformance_review);
+  const resultReviews = outcomesReport.execution_outcomes.filter(outcome => outcome.conformance_review);
   if (outcomesReport.contract_reviews?.length || resultReviews.length) {
     reportContent += `## Declared Review Context\n\nThese are host-declared review contexts bound to accepted artifacts/results, not verified reviewer identities.\n\n`;
     for (const review of outcomesReport.contract_reviews ?? []) {
@@ -1534,7 +1612,7 @@ function buildRemediationReportMarkdown(
     }
     for (const outcome of resultReviews) {
       const review = outcome.conformance_review!;
-      reportContent += `- ${outcome.finding_id} conformance: required independent; declared ${review.review.mode}. ${review.summary}\n`;
+      reportContent += `- ${outcome.unit_id} conformance: required independent; declared ${review.review.mode}. ${review.summary}\n`;
     }
     reportContent += "\n";
   }
@@ -1544,7 +1622,7 @@ function buildRemediationReportMarkdown(
     reportContent += `None.\n`;
   } else {
     for (const entry of entries.resolved) {
-      reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
+      reportContent += `- **${entry.unit_id}**: ${entry.summary}\n`;
       if (entry.verification_evidence) {
         for (const check of entry.verification_evidence) {
           reportContent += `  - *Verification*: ${check}\n`;
@@ -1556,7 +1634,7 @@ function buildRemediationReportMarkdown(
   if (entries.verifiedNoChange.length > 0) {
     reportContent += `\n## Verified Already Correct (no changes made)\n\n`;
     for (const entry of entries.verifiedNoChange) {
-      reportContent += `- **${entry.finding_id}**: ${entry.summary}\n`;
+      reportContent += `- **${entry.unit_id}**: ${entry.summary}\n`;
       if (entry.verification_evidence) {
         for (const check of entry.verification_evidence) {
           reportContent += `  - *Verification*: ${check}\n`;
@@ -1568,14 +1646,14 @@ function buildRemediationReportMarkdown(
   if (entries.inappropriate.length > 0) {
     reportContent += `\n## Deemed Inappropriate\n\n`;
     for (const entry of entries.inappropriate) {
-      reportContent += `- **${entry.finding_id}**: ${entry.rationale}\n`;
+      reportContent += `- **${entry.unit_id}**: ${entry.rationale}\n`;
     }
   }
 
   if (entries.ignored.length > 0) {
     reportContent += `\n## Ignored\n\n`;
     for (const entry of entries.ignored) {
-      reportContent += `- **${entry.finding_id}**: ${entry.rationale}\n`;
+      reportContent += `- **${entry.unit_id}**: ${entry.rationale}\n`;
     }
   }
 
@@ -1697,7 +1775,7 @@ function buildRemediationReportMarkdown(
 
   const o = outcomesReport.by_outcome;
   reportContent += `\n## Remediation Outcomes\n\n`;
-  reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked.\n`;
+  reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked, ${o.pending} pending, ${o.deferred} deferred.\n`;
   const lensNames = Object.keys(outcomesReport.by_lens).sort();
   if (lensNames.length > 0) {
     reportContent += `\nBy lens:\n`;
@@ -1794,6 +1872,7 @@ export async function cleanupTempBranchesAndArtifacts(
   closingResult: ClosingResult,
   runLogger?: RunLogger,
   landingGates: LandingGateVerifyOutcome = { commands: [], gates: [], passed: true },
+  sourceOutcomes: RemediationOutcomesReport = buildRemediationOutcomesReport(completeState, closingResult),
 ): Promise<CleanupResult> {
   // Write final state before deleting the artifacts directory so the completion
   // is durable even if cleanup partially fails.
@@ -1844,12 +1923,21 @@ export async function cleanupTempBranchesAndArtifacts(
   // classification (see closingActionCompleted): success, or the skipped
   // action=none no-op — never a skipped non-none close.
   const closingCompleted = closingActionCompleted(closingResult);
+  const unresolvedSources = sourceOutcomes.outcomes.some(outcome => ["blocked", "pending", "deferred"].includes(outcome.outcome));
+  const unresolvedRequest = sourceOutcomes.request_outcome && ["blocked", "pending", "deferred"].includes(sourceOutcomes.request_outcome.status);
+  const unresolvedUnits = (completeState.plan?.units ?? []).some(unit => {
+    const item = completeState.items?.[unit.id];
+    return !item || (!isVerifiedCompleteStatus(item.status) && !isSkipStatus(item.status));
+  });
   const fullyGreen =
     combinedTest.passed &&
     e2eResult.passed &&
     landingGates.passed &&
     closingCompleted &&
-    !anyBlocked;
+    !anyBlocked &&
+    !unresolvedSources &&
+    !unresolvedRequest &&
+    !unresolvedUnits;
 
   if (!fullyGreen) {
     runLogger?.event({
@@ -1857,7 +1945,7 @@ export async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked})`,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked}, unresolvedSources=${unresolvedSources}, unresolvedUnits=${unresolvedUnits})`,
     });
     return {};
   }
@@ -1936,172 +2024,73 @@ export function buildVerificationReport(
   closingResult: ClosingResult,
   combinedTest: CombinedTestResult,
 ): VerificationReport {
-  const findings: FindingVerificationTrace[] = [];
-  const findingsById = new Map(
-    (state.plan?.findings ?? []).map((f) => [f.id, f]),
-  );
-
-  for (const item of Object.values(state.items ?? {})) {
-    const finding = findingsById.get(item.finding_id);
-    const isResolved = isVerifiedCompleteStatus(item.status);
-    const isSkipped = isSkipStatus(item.status);
-    const traces: VerificationTraceEntry[] = [];
-    const itemPassed = isResolved && combinedTest.passed;
-
-    if (isSkipped) {
-      // Ignored/inappropriate items are excluded from the run verdict — they
-      // get a single trace recording the user's settled decision and a
-      // first-class overall_status of "skipped" (see FindingVerificationTrace
-      // doc comment in src/shared/types/contractPipeline/verification.ts).
-      // The trace's own `status` stays "failed" because it did not verify
-      // anything (there is no passing evidence); the finding-level
-      // "skipped" is what excludes it from the report-level verdict below.
-      traces.push({
-        trace_id: `${item.finding_id}:skipped`,
-        kind: "task",
-        label: item.status === "ignored" ? "ignored by user" : "deemed inappropriate",
-        evidence: [item.failure_reason ?? item.status],
-        status: "failed",
-      });
-      findings.push({
-        finding_id: item.finding_id,
-        traces,
-        overall_status: "skipped",
-      });
-      continue;
-    }
-
-    // Combined test suite trace. A never-configured suite (`ran:false`) is
-    // NEVER labelled "passed" here — `combinedTest.passed` stays `true` for
-    // that case only so the pre-existing fullyGreen/itemPassed formulas below
-    // keep their vacuously-green behavior; this trace's own evidence/status is
-    // what tells a reader "nothing ran" apart from "it ran and passed"
-    // (`status` stays the file's established "failed" for any non-affirmative
-    // case — see the identical choice on the skipped-item trace above — the
-    // finding-level verdict is driven by `itemPassed`, not by this one trace).
-    const suiteLabel = combinedTest.suite_name ?? "combined test suite";
-    traces.push({
-      trace_id: `${item.finding_id}:combined-tests`,
-      kind: "task",
-      label: suiteLabel,
-      evidence: !combinedTest.ran
-        ? [combinedTest.output || "no combined test suite configured for this run"]
-        : combinedTest.passed
-          ? [`${suiteLabel} passed`]
-          : [`${suiteLabel} failed`, ...(combinedTest.output ? [combinedTest.output.slice(-500)] : [])],
+  const units = (state.plan?.units ?? []).map(unit => {
+    const item = state.items?.[unit.id];
+    const passed = !!item && isVerifiedCompleteStatus(item.status) && combinedTest.passed;
+    const skipped = !!item && isSkipStatus(item.status);
+    const traces: VerificationTraceEntry[] = [{
+      trace_id: `${unit.id}:combined-tests`, kind: "task", label: combinedTest.suite_name ?? "combined test suite",
+      evidence: [combinedTest.ran ? combinedTest.passed ? "Suite passed" : combinedTest.output : "No combined suite ran"],
       status: combinedTest.ran && combinedTest.passed ? "passed" : "failed",
+    }];
+    for (const requirementId of unit.requirement_ids) traces.push({
+      trace_id: `${unit.id}:requirement:${requirementId}`, kind: "requirement", label: requirementId,
+      evidence: [...(item?.host_result_evidence ?? [])], status: passed ? "passed" : "failed",
     });
-
-    const contractGoalId =
-      finding?.contract_goal_id ?? (state.plan as { goal_id?: string } | undefined)?.goal_id;
-    if (contractGoalId) {
-      traces.push({
-        trace_id: `${item.finding_id}:contract-goal`,
-        kind: "requirement",
-        label: "contract-pipeline goal",
-        evidence: [`goal_id=${contractGoalId}`],
-        status: itemPassed ? "passed" : "failed",
-      });
-    }
-
-    if (finding?.contract_obligation_ids?.length) {
-      traces.push({
-        trace_id: `${item.finding_id}:contract-obligations`,
-        kind: "requirement",
-        label: "contract-pipeline obligations satisfied by task",
-        evidence: finding.contract_obligation_ids,
-        status: itemPassed ? "passed" : "failed",
-      });
-    }
-
-    if (finding?.verification_obligation_ids?.length) {
-      traces.push({
-        trace_id: `${item.finding_id}:verification-obligations`,
-        kind: "invariant",
-        label: "contract-pipeline verification obligations",
-        evidence: finding.verification_obligation_ids,
-        status: itemPassed ? "passed" : "failed",
-      });
-    }
-
-    for (const [index, command] of (finding?.targeted_commands ?? []).entries()) {
-      traces.push({
-        trace_id: `${item.finding_id}:targeted-command-${index + 1}`,
-        kind: "command",
-        label: "implementation DAG targeted command",
-        evidence: [`planned command: ${command}`],
-        status: itemPassed ? "passed" : "failed",
-      });
-    }
-
-    // Verification result file evidence (verify_code_against_documentation).
-    const verificationResultPath = join(
-      options.artifactsDir,
-      `result_${item.finding_id}_verify_code_against_documentation.json`,
-    );
+    for (const [i, command] of unit.required_tests.entries()) traces.push({
+      trace_id: `${unit.id}:command:${i}`, kind: "command", label: command,
+      evidence: [...(item?.host_result_evidence ?? [])], status: passed ? "passed" : "failed",
+    });
+    const verificationResultPath = join(options.artifactsDir, `result_${unit.id}_verify_code_against_documentation.json`);
     if (existsSync(verificationResultPath)) {
       try {
-        const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
-        const evidence: string[] = Array.isArray(verRes.reason) ? verRes.reason : [];
-        traces.push({
-          trace_id: `${item.finding_id}:verify-doc`,
-          kind: "file",
-          label: `verify_code_against_documentation for ${item.finding_id}`,
-          evidence,
-          status: evidence.length > 0 ? "passed" : "failed",
-        });
-      } catch {
-        // Non-fatal: evidence file malformed
-      }
+        const result = JSON.parse(readFileSync(verificationResultPath, "utf8"));
+        const evidence = Array.isArray(result.reason) ? result.reason.filter((v: unknown) => typeof v === "string") : [];
+        traces.push({trace_id: `${unit.id}:verify-doc`, kind:"file", label:"verify_code_against_documentation", evidence, status:evidence.length ? "passed":"failed"});
+      } catch { /* malformed optional evidence cannot establish a passing trace */ }
     }
-
-    // Closing action trace (one per finding so the report is self-contained).
-    // Status keys on the single-sourced completion classification: a skipped
-    // NON-none closing action did not complete, so its trace is red — not
-    // "passed" merely because it didn't literally report "failed"
-    // (COR-fb656e3f-2).
-    if (closingResult.action !== "none") {
-      traces.push({
-        trace_id: `${item.finding_id}:closing`,
-        kind: "command",
-        label: `closing action: ${closingResult.action}`,
-        evidence: [`status=${closingResult.status}`],
-        status: closingActionCompleted(closingResult) ? "passed" : "failed",
-      });
-    }
-
-    findings.push({
-      finding_id: item.finding_id,
-      traces,
-      overall_status: itemPassed ? "passed" : "failed",
+    if (closingResult.action !== "none") traces.push({
+      trace_id: `${unit.id}:closing`, kind: "command", label: `closing action: ${closingResult.action}`,
+      evidence: [`status=${closingResult.status}`], status: closingActionCompleted(closingResult) ? "passed" : "failed",
     });
-  }
-
-  // Sort by finding_id for determinism.
-  findings.sort((a, b) => compareCodeUnits(a.finding_id, b.finding_id));
-
-  // Overall status: ignored/inappropriate (skipped) items do NOT contribute
-  // to failure — only resolved/non-skipped items count. The closing action's
-  // completion is part of the verdict (COR-fb656e3f): a run whose closing
-  // action failed or silently skipped a non-none action never reports an
-  // overall "passed".
-  const overallPassed =
-    combinedTest.passed &&
-    closingActionCompleted(closingResult) &&
-    findings
-      .filter((f) => f.overall_status !== "skipped")
-      .every((f) => f.overall_status === "passed");
-
-  // Derive goal_id from the plan if available.
-  const goalId = (state.plan as { goal_id?: string } | undefined)?.goal_id;
-
+    return {unit_id:unit.id, source_finding_ids:[...unit.source_finding_ids], traces,
+      overall_status: skipped ? "skipped" as const : passed ? "passed" as const : "failed" as const};
+  });
+  const outcomeReport = buildRemediationOutcomesReport(state, closingResult);
+  const findings: FindingVerificationTrace[] = outcomeReport.outcomes.map(outcome => ({
+    finding_id: outcome.finding_id,
+    traces: [
+      ...units.filter(unit => unit.source_finding_ids.includes(outcome.finding_id)).flatMap(unit => unit.traces),
+      ...(outcome.evidence ? [{trace_id:`${outcome.finding_id}:source-verification`, kind:"file" as const,
+        label:outcome.evidence.mechanism, evidence:[`${outcome.evidence.file}:${outcome.evidence.line}`,outcome.evidence.mechanism_detail ?? ""],
+        status:outcome.outcome === "verified_already_fixed" || outcome.outcome === "refuted" ? "passed" as const : "failed" as const}] : []),
+      ...(outcome.reason ? [{trace_id:`${outcome.finding_id}:source-disposition`,kind:"task" as const,label:outcome.outcome,evidence:[outcome.reason],status:"failed" as const}] : []),
+    ],
+    overall_status: outcome.outcome === "ignored" || outcome.outcome === "inappropriate" ? "skipped"
+      : ["blocked", "pending", "deferred"].includes(outcome.outcome) ? "failed" : "passed",
+  }));
+  const requestUnfinished = outcomeReport.request_outcome && ["blocked","pending","deferred"].includes(outcomeReport.request_outcome.status);
+  const overallPassed = !requestUnfinished && combinedTest.passed && closingActionCompleted(closingResult) &&
+    units.every(unit => unit.overall_status !== "failed") && findings.every(finding => finding.overall_status !== "failed");
   return {
     contract_version: CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION,
-    ...(goalId ? { goal_id: goalId } : {}),
-    findings,
+    ...(state.plan?.goal_id ? {goal_id:state.plan.goal_id} : {}),
+    findings, units,
     overall_status: overallPassed ? "passed" : "failed",
     created_at: new Date().toISOString(),
   };
+}
+
+// sites-pinned: tests/remediate/close-plan-authority.test.ts
+/** Closing observes reviewed context, allowing only changes explained by accepted landed work. */
+async function assertClosingPlanAuthority(state: RemediationState, options: OrchestratorOptions): Promise<void> {
+  const approved = await assertApprovedRuntimePlan(options.artifactsDir, state);
+  const accepted = approved.canonical.plan.units.flatMap(unit => {
+    const item = state.items?.[unit.id];
+    return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
+  });
+  const issues = await executionPlanContextIssues(options.root, approved.canonical, accepted);
+  if (issues.length) throw new RemediationPlanAuthorityError(issues.join("; "));
 }
 
 export async function runClosePhase(
@@ -2117,6 +2106,9 @@ export async function runClosePhase(
     );
   }
 
+  // Check before preview, verification, state mutation, action execution or promotion.
+  await assertClosingPlanAuthority(state, options);
+
   // CDC-19 (advisory): a planned finding with no corresponding item in
   // state.items would be left uncounted by every module's INV-COVERAGE join
   // — a module that was blocked or never dispatched must not silently vanish
@@ -2124,7 +2116,7 @@ export async function runClosePhase(
   // runLogger is actually wired, so it changes nothing for a caller that
   // doesn't ask for it.
   {
-    const findingIds = new Set((state.plan.findings ?? []).map((f) => f.id));
+    const findingIds = new Set((state.plan.units ?? []).map((unit) => unit.id));
     const itemIds = new Set(Object.keys(state.items));
     const uncounted = [...findingIds].filter((id) => !itemIds.has(id));
     if (uncounted.length > 0) {
@@ -2132,7 +2124,7 @@ export async function runClosePhase(
         phase: "close",
         kind: "error",
         obligation: "closing",
-        note: `${uncounted.length} planned finding(s) have no corresponding item in state.items and would be left uncounted by every module's coverage join: ${uncounted.slice(0, 10).join(", ")}`,
+        note: `${uncounted.length} planned execution unit(s) have no corresponding item in state.items and would be left uncounted by every module's coverage join: ${uncounted.slice(0, 10).join(", ")}`,
       });
     }
   }
@@ -2154,8 +2146,17 @@ export async function runClosePhase(
     return { ...state, closing_plan: updatedClosingPlan };
   }
 
-  // 2. Run the full test suite; on failure re-block resolved items and triage.
-  const combinedTest = await runCombinedTestSuite(state, options);
+  // 2. Acceptance begins only after preview/host pauses. The floor owns its
+  // failure: stop before the combined-suite triage branch can re-block items.
+  const acceptance = await runCloseAcceptance({
+    state, options, runLogger,
+    runCombined: () => runCombinedTestSuite(state, options),
+  });
+  if (acceptance.gate && !acceptance.gate.passed) {
+    await options.onFinalGateRed?.(acceptance.gate);
+    return state;
+  }
+  const combinedTest = acceptance.combinedTest ?? await runCombinedTestSuite(state, options);
   if (!combinedTest.passed) {
     console.log("Full test suite failed. Transitioning back to triage.");
     if (blockResolvedItemsOnCombinedFailure(state, combinedTest.output)) {
@@ -2187,16 +2188,20 @@ export async function runClosePhase(
   if (analyzerVerify.ran) {
     const now = new Date().toISOString();
     for (const [findingId, verdict] of Object.entries(analyzerVerify.verdicts)) {
-      const item = state.items[findingId];
-      if (!item) continue;
-      item.mechanical_verification = verdict;
+      state.source_verifications ??= {};
+      const source = state.plan.findings.find(finding => finding.id === findingId)!;
+      state.source_verifications[findingId] = {
+        ...state.source_verifications[findingId], mechanical_verification: verdict,
+        review_revision_sha256: state.plan.review_revision_sha256, source_sha256: contentSha256(source),
+      };
       if (verdict.status === "lead_persists") {
-        item.status = "blocked";
-        item.completed_at = now;
-        item.failure_reason =
-          `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports this ` +
-          `finding's content-anchored lead identity after the fix (item C). The lead is ` +
-          `objective evidence — rework the fix or dispose the item in triage.`;
+        for (const unit of state.plan.units.filter(unit => unit.source_finding_ids.includes(findingId))) {
+          const item = state.items[unit.id];
+          if (!item || !isVerifiedCompleteStatus(item.status)) continue;
+          item.status = "blocked";
+          item.completed_at = now;
+          item.failure_reason = `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}. Rework the linked execution unit.`;
+        }
       }
     }
     if (analyzerVerify.persisting.length > 0) {
@@ -2300,6 +2305,13 @@ export async function runClosePhase(
     }
   }
 
+  // Verification may await arbitrary repository commands. Revalidate the same
+  // current authority immediately before the consequential closing boundary.
+  // Once the authorized action runs, its real outcome is persisted and reported;
+  // expected publish/version effects do not retroactively revoke that operation.
+  const contractReviews = await readContractReviewOutcomes(options.artifactsDir);
+  await assertClosingPlanAuthority(state, options);
+
   // 4. Execute the closing action and record exact command outcomes before
   // reporting success.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
@@ -2325,13 +2337,19 @@ export async function runClosePhase(
   // was clean", which is the collapse the ledger exists to prevent.
   const recovery = await readRunRecoveryFacts(options.artifactsDir, state);
 
+  // Hydrate original coverage-only sources before ANY outcome or verification
+  // projection. Reading them after building outcomes silently loses excluded
+  // originals from the otherwise self-contained source report.
+  const outcomeCoverage = await buildOutcomeCoverageLedger(state, options);
+  if (outcomeCoverage) state.plan_coverage = outcomeCoverage;
+
   const finalGate = await readFinalGateReport(options.artifactsDir);
   const outcomesReport = buildRemediationOutcomesReport(
     state,
     closingResult,
     finalGate,
     recovery,
-    await readContractReviewOutcomes(options.artifactsDir),
+    contractReviews,
   );
   // No run-log line for the gate here ON PURPOSE: the gate already records its
   // own outcome at evaluation time (`recordFinalGateOutcome`), so a second line
@@ -2368,11 +2386,6 @@ export async function runClosePhase(
     closeFeedback.reflections,
     landingGates,
   );
-
-  // Enrich the coverage ledger with never-planned payloads NOW, from the live
-  // state and intake artifacts — both are deleted at the end of close, so this
-  // must happen strictly before cleanup.
-  const outcomeCoverage = await buildOutcomeCoverageLedger(state, options);
 
   const outcomesFile: RemediationOutcomesReport & {
     started_at?: string;
@@ -2462,6 +2475,7 @@ export async function runClosePhase(
     closingResult,
     runLogger,
     landingGates,
+    outcomesReport,
   );
 
   return completeState;

@@ -22,45 +22,16 @@ afterEach(async () => {
   await harness.cleanupTestRepo();
 });
 describe("decideNextStep — run lifecycle, input handling, and intake routing", () => {
-  it("complete run emits present_report with a folded friction close-out", async () => {
-    // A completed run keeps its plan (close writes `remediation-state.complete.json`
-    // with it), and the plan id is what keys the friction record.
-    await saveState({
-      status: "complete",
-      plan: { plan_id: "PLAN-LIFECYCLE", findings: [], blocks: [] },
-    } as never);
+  it("complete run presents outcomes without creating a development friction walk", async () => {
+    await saveState({ status: "complete", plan: { plan_id: "PLAN-LIFECYCLE", objective: "Report unchanged result", non_goals: [], requirements: [], units: [], source_dispositions: [], findings: [], review_revision_sha256: "a".repeat(64), project_type: "unknown", candidate_closing_actions: ["none"] } } as never);
     await mkdir(join(REPO_DIR, ".audit-tools"), { recursive: true });
     await writeFile(join(REPO_DIR, ".audit-tools", "remediation-report.md"), "# Report\n", "utf8");
-
-    // First call: the run's own record is unwalked — the folded close-out surfaces
-    // it, keyed on the plan, and the prompt renders the single-sourced walk.
-    const pending = await decideNextStep({ root: REPO_DIR });
-
-    expect(pending.contract_version).toBe("remediate-code-step/v1alpha1");
-    expect(pending.step_kind).toBe("present_report");
-    expect(pending.status).toBe("ready");
-    expect(pending.artifact_paths.final_report).toMatch(/remediation-report\.md$/);
-    // The record is PLAN-KEYED — never a shared fallback name.
-    expect(pending.artifact_paths.friction_record).toMatch(/PLAN-LIFECYCLE\.json$/);
-    expect(existsSync(pending.artifact_paths.friction_record)).toBe(true);
-    const pendingPrompt = await readFile(pending.prompt_path, "utf8");
-    expect(pendingPrompt).toMatch(/[Ff]riction triage/);
-
-    // Host covers all friction categories → friction satisfied.
-    const record = JSON.parse(await readFile(pending.artifact_paths.friction_record, "utf8"));
-    record.category_attestations = [
-      { category: "ambiguous_direction", note: "none this run" },
-      { category: "tool_should_decide", note: "none this run" },
-      { category: "inefficient_feeding", note: "none this run" },
-    ];
-    await writeFile(pending.artifact_paths.friction_record, JSON.stringify(record) + "\n", "utf8");
-
-    // Second call: friction satisfied → status:"complete", prompt includes report.
-    const done = await decideNextStep({ root: REPO_DIR });
-    expect(done.step_kind).toBe("present_report");
-    expect(done.status).toBe("complete");
-    const donePrompt = await readFile(done.prompt_path, "utf8");
-    expect(donePrompt).toMatch(/Present Remediation Report/);
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("present_report");
+    expect(step.status).toBe("complete");
+    expect(step.artifact_paths.friction_record).toBeUndefined();
+    expect(existsSync(join(ARTIFACTS_DIR, "friction"))).toBe(false);
+    expect(await readFile(step.prompt_path, "utf8")).toMatch(/Present Remediation Report/);
   });
 
   it("a planless complete state owns no friction walk (nothing to key it on)", async () => {

@@ -26,6 +26,7 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { worktreeContentId } from "../../src/remediate/steps/gateCommands.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { execSyncHidden } from "../helpers/spawn.mjs";
 
 const harness = createNextStepHarness(".test-final-gate-red-pause");
@@ -75,6 +76,12 @@ function makeBoundaryState(): RemediationState {
     status: "implementing",
     plan: {
       plan_id: "PLAN-GATE",
+      objective: "Land a foundation before its consumer", non_goals: [],
+      review_revision_sha256: "a".repeat(64), source_dispositions: [], review_counterexamples: [],
+      requirements: [0, 1].map(i => ({
+        id: `R${i}`, description: `Preserve module ${i}`, source_finding_ids: [`F-00${i}`],
+        change_kind: "structural" as const, assertions: [],
+      })),
       findings: [
         {
           id: "F-000",
@@ -99,21 +106,21 @@ function makeBoundaryState(): RemediationState {
           evidence: ["src/b.ts:1 evidence"],
         },
       ],
-      blocks: [
+      units: [
         {
-          block_id: "B-000",
-          items: ["F-000"],
-          parallel_safe: true,
-          touched_files: ["src/a.ts"],
+          id: "F-000", title: "Foundation", description: "Land the foundation.",
+          source_finding_ids: ["F-000"], requirement_ids: ["R0"],
+          read_paths: ["src/a.ts"], allowed_files: ["src/a.ts"],
+          required_tests: [], affected_interfaces: [], addresses_counterexample_ids: [],
           dependencies: [],
           phase_ordinal: 0,
         },
         {
-          block_id: "B-001",
-          items: ["F-001"],
-          parallel_safe: true,
-          touched_files: ["src/b.ts"],
-          dependencies: ["B-000"],
+          id: "F-001", title: "Consumer", description: "Build on the foundation.",
+          source_finding_ids: ["F-001"], requirement_ids: ["R1"],
+          read_paths: ["src/b.ts"], allowed_files: ["src/b.ts"],
+          required_tests: [], affected_interfaces: [], addresses_counterexample_ids: [],
+          dependencies: ["F-000"],
           phase_ordinal: 1,
         },
       ],
@@ -121,8 +128,8 @@ function makeBoundaryState(): RemediationState {
       candidate_closing_actions: ["none"],
     },
     items: {
-      "F-000": { finding_id: "F-000", status: "resolved", block_id: "B-000" },
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+      "F-000": { unit_id: "F-000", status: "resolved" },
+      "F-001": { unit_id: "F-001", status: "pending" },
     },
     closing_plan: { action: "none" },
   };
@@ -130,8 +137,10 @@ function makeBoundaryState(): RemediationState {
 
 async function establishBoundaryRun(): Promise<void> {
   await makeRepoLookLikeAuditTools();
-  await saveState(makeBoundaryState());
+  const state = makeBoundaryState();
   await writeIntentCheckpoint();
+  await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+  await saveState(state);
   await acknowledgeResume();
 }
 
@@ -902,8 +911,10 @@ describe("the gate's unit leg reads a trustworthy verdict", () => {
 describe("arbitrary repository phase-boundary gates", () => {
   async function establishGeneric(scripts: Record<string, string> = {}): Promise<void> {
     await writeFile(join(REPO_DIR, "package.json"), JSON.stringify({ scripts }));
-    await saveState(makeBoundaryState());
+    const state = makeBoundaryState();
     await writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+    await saveState(state);
     await acknowledgeResume();
   }
   it("production next-step runs declared roles and preserves all work on red", async () => {

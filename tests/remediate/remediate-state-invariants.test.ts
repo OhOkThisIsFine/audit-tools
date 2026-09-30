@@ -1,3 +1,8 @@
+import { executionPlanRevision } from "../../src/remediate/contractPipeline/executionPlan.js";
+import { executionPlanForGraph } from "../shared/executionPlanGraphFixture.js";
+import { ingestExecutionPlan, executionPlanPaths } from "../../src/remediate/contractPipeline/executionPlan.js";
+import { ExecutableChangePlanSchema } from "../../src/shared/types/executionPlan.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 /**
  * INV-remediate-state-06: blockingIntakeQuestions semantics
  * INV-remediate-state-07: isAuditFindingsReport contract_version validation
@@ -9,18 +14,16 @@ import { blockingIntakeQuestions, intakePaths } from "../../src/remediate/intake
 import { isAuditFindingsReport } from "../../src/remediate/phases/plan.js";
 import { hashFile } from "../../src/remediate/utils/fileIntegrity.js";
 import { existsSync } from "node:fs";
-import { readdir, readFile, rm, mkdir, writeFile } from "node:fs/promises";
+import { readFile, rm, mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IntakeSummary, IntakeOpenQuestion } from "../../src/remediate/intake.js";
 import { scratchDir } from "../helpers/scratch.js";
-import { stripComments } from "../helpers/recognizers.js";
 import {
   autonomousLeftoverFindingsPath,
   autonomousLeftoverReportPath,
   decideNextStep,
   defaultInputCandidates,
-  findingCarryForwardKey,
 } from "../../src/remediate/steps/nextStep.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -58,36 +61,7 @@ const TEST_DIR = scratchDir(".test-remediate-state-inv");
  * NARROWER window than the call — the safe direction for a scan that fails on a
  * missing label.
  */
-function enclosingCallStatement(source: string, at: number): string {
-  // FORWARD from the write site, never backward: the nearest `(` BEFORE the
-  // match is routinely one inside a `${…}` interpolation on the same line (these
-  // messages are template literals), whose matching `)` is the interpolation's —
-  // a window over a fragment of string, with the label outside it. The write
-  // site's own opener is the first `(` at or after the match, since nothing but
-  // optional whitespace separates the callee from it.
-  const opener = source.indexOf("(", at);
-  if (opener === -1) return source.slice(at).split("\n")[0] ?? "";
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = opener; i < source.length; i += 1) {
-    const char = source[i]!;
-    if (quote !== null) {
-      if (char === "\\") i += 1;
-      else if (char === quote) quote = null;
-      continue;
-    }
-    if (char === '"' || char === "'" || char === "`") {
-      quote = char;
-      continue;
-    }
-    if (char === "(") depth += 1;
-    else if (char === ")") {
-      depth -= 1;
-      if (depth === 0) return source.slice(opener, i + 1);
-    }
-  }
-  return source.slice(opener);
-}
+
 
 // ---------------------------------------------------------------------------
 // INV-remediate-state-06: blockingIntakeQuestions — blocking===true only
@@ -243,82 +217,18 @@ describe("hashFile — INV-remediate-state-10: ENOENT returns undefined, not io_
   });
 });
 
-// ---------------------------------------------------------------------------
-// INV-remediate-state-11: Finding carry-forward identity strips plan-time bookkeeping
-// (tested via the nextStep stripPlanTimeBookkeeping internals through a structural check)
-// ---------------------------------------------------------------------------
-
-describe("Finding identity — INV-remediate-state-11: plan-time bookkeeping fields are isolated from carry-forward identity", () => {
-  // The carry-forward identity is `findingCarryForwardKey` in nextStep.ts:
-  // canonical JSON of the finding with the plan-time bookkeeping keys stripped,
-  // so a re-plan whose only delta is a recomputed file hash / grounding flag
-  // carries the prior item forward, while a real change to
-  // the finding does not.
-  //
-  // OBL-remediate-nextstep-and-final-gate-inv-7: this block used to declare its
-  // OWN key set, strip function and key builder — a copy of the production trio
-  // — and every assertion called the local copy. Dropping `evidence_grounded`
-  // from the production set, or widening it with a real field like `severity`,
-  // left the block green while re-plan carry-forward regressed, so the file's
-  // claim to cover INV-remediate-state-11 was unsupported. The production symbol
-  // is now exported and called directly; a test that asserts against its own
-  // re-implementation pins nothing about shipped behaviour.
-  const carryForwardKey = (finding: unknown): string =>
-    findingCarryForwardKey(finding as Finding);
-
-  const baseFinding = {
-    id: "F-001",
-    title: "First",
-    category: "correctness",
-    severity: "high",
-    confidence: "high",
-    lens: "correctness",
-    summary: "Fix first.",
-    affected_files: [{ path: "src/a.ts" }],
-    evidence: ["src/a.ts:1 evidence"],
-  };
-
-  it("two findings differing ONLY in plan-time bookkeeping share a carry-forward key", () => {
-    const planned = {
-      ...baseFinding,
-      affected_files: [
-        { path: "src/a.ts", hash_at_plan_time: "abc123", evidence_grounded: true },
-      ],
-    };
-    const replanned = {
-      ...baseFinding,
-      affected_files: [
-        // Same finding, re-read at a different time → new hash, re-evaluated flag.
-        { path: "src/a.ts", hash_at_plan_time: "def456", evidence_grounded: false },
-      ],
-    };
-    expect(carryForwardKey(planned)).toBe(carryForwardKey(replanned));
+// INV-remediate-state-11: semantic execution identity is independent of presentation order.
+describe("reviewed execution identity", () => {
+  it("reordered requirements and units retain the same semantic revision", () => {
+    const plan = executionPlanForGraph([["A", []], ["B", ["A"]]]);
+    const reordered = { ...plan, requirements: [...plan.requirements].reverse(), units: [...plan.units].reverse() };
+    expect(executionPlanRevision(plan, "a".repeat(64))).toBe(executionPlanRevision(reordered, "a".repeat(64)));
   });
-
-  it("a finding differing in a real field does NOT share a carry-forward key", () => {
-    const planned = { ...baseFinding, affected_files: [{ path: "src/a.ts" }] };
-    const realChange = { ...baseFinding, severity: "low" };
-    expect(carryForwardKey(planned)).not.toBe(carryForwardKey(realChange));
-
-    // A different cited file is also a real change (not bookkeeping).
-    const movedFile = { ...baseFinding, affected_files: [{ path: "src/b.ts" }] };
-    expect(carryForwardKey(planned)).not.toBe(carryForwardKey(movedFile));
-  });
-
-  it("key derivation is order-insensitive for object keys (canonicalization)", () => {
-    const a = { ...baseFinding };
-    const b = {
-      evidence: baseFinding.evidence,
-      affected_files: baseFinding.affected_files,
-      summary: baseFinding.summary,
-      lens: baseFinding.lens,
-      confidence: baseFinding.confidence,
-      severity: baseFinding.severity,
-      category: baseFinding.category,
-      title: baseFinding.title,
-      id: baseFinding.id,
-    };
-    expect(carryForwardKey(a)).toBe(carryForwardKey(b));
+  it("changed execution meaning or source provenance requires a different review", () => {
+    const plan = executionPlanForGraph([["A", []]]);
+    const changed = { ...plan, units: [{ ...plan.units[0]!, description: "A different operation" }] };
+    expect(executionPlanRevision(plan, "a".repeat(64))).not.toBe(executionPlanRevision(changed, "a".repeat(64)));
+    expect(executionPlanRevision(plan, "a".repeat(64))).not.toBe(executionPlanRevision(plan, "b".repeat(64)));
   });
 });
 
@@ -347,12 +257,7 @@ describe("CP-NODE-15: checkpoint intent orders the finalized plan", () => {
   }
 
   function block(id: string, findingId: string) {
-    return {
-      block_id: id,
-      items: [findingId],
-      parallel_safe: true,
-      touched_files: [`src/${findingId}.ts`],
-    } as never;
+    return canonicalUnitFixture(id, { source_finding_ids: [findingId], allowed_files: [`src/${findingId}.ts`] });
   }
 
   it("reorders findings and their blocks by the interpreted intent", async () => {
@@ -369,15 +274,15 @@ describe("CP-NODE-15: checkpoint intent orders the finalized plan", () => {
 
     expect(
       ordered.findings.map((f: { id: string }) => f.id),
-      "the emphasised lens must be dispatched first",
-    ).toEqual(["b", "a"]);
+      "immutable source order stays unchanged",
+    ).toEqual(["a", "b"]);
     expect(
-      ordered.blocks.map((b: { block_id: string }) => b.block_id),
+      ordered.units.map((b: { id: string }) => b.id),
       "the blocks carrying those findings move with them",
     ).toEqual(["B-002", "B-001"]);
     // ORDERING ONLY: nothing is dropped or mutated.
     expect(ordered.findings).toHaveLength(2);
-    expect(ordered.blocks).toHaveLength(2);
+    expect(ordered.units).toHaveLength(2);
   });
 
   it("returns the plan untouched when the checkpoint carries no intent", async () => {
@@ -394,7 +299,7 @@ describe("CP-NODE-15: checkpoint intent orders the finalized plan", () => {
       ordered.findings.map((f: { id: string }) => f.id),
       "no intent means no reordering — the default path must stay identity",
     ).toEqual(["a", "b"]);
-    expect(ordered.blocks.map((b: { block_id: string }) => b.block_id)).toEqual([
+    expect(ordered.units.map((b: { id: string }) => b.id)).toEqual([
       "B-001",
       "B-002",
     ]);
@@ -544,226 +449,49 @@ async function readRunLog(): Promise<string> {
 // written and verified — and the destruction is visible in the durable log.
 // ---------------------------------------------------------------------------
 
-describe("CP-NODE-15 inv-5/fail-6: the unusable extracted plan is archived before it is destroyed", () => {
-  it("POSITIVE: the removed plan is recoverable from an archive, byte-identical to the original", async () => {
-    // Every cited path is phantom, so grounding drops every finding and the plan
-    // refuses — the exact failure that reaches the discard-and-re-extract
-    // recovery.
-    const plan = {
-      plan_id: "PLAN-PHANTOM",
-      findings: [extractedFinding("F-GHOST", "src/does-not-exist.ts")],
-    };
-    const planPath = await writeExtractedPlan(plan);
-    const originalBytes = await readFile(planPath, "utf8");
-
+describe("canonical plan changes preserve authored evidence", () => {
+  it("leaves a retired extracted plan byte-exact and unconsumed", async () => {
+    const path = await writeExtractedPlan({ plan_id: "PLAN-retired", findings: [extractedFinding("F-GHOST", "src/nonexistent.ts")] });
+    const bytes = await readFile(path, "utf8");
     await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
-
-    expect(existsSync(planPath), "the unusable plan is removed").toBe(false);
-    const archiveDir = join(dirname(planPath), "archive");
-    expect(existsSync(archiveDir), "…but only after an archive was written").toBe(true);
-    const archived = await readdir(archiveDir);
-    expect(archived.length).toBe(1);
-    expect(
-      await readFile(join(archiveDir, archived[0]!), "utf8"),
-      "the archive must be the plan, not a summary of it",
-    ).toBe(originalBytes);
+    expect(await readFile(path, "utf8")).toBe(bytes);
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.plan).toBeUndefined();
+    expect(await readRunLog()).toContain("collect_starting_point");
   });
 
-  it("NEGATIVE: the deletion is not stderr-only — the run log names it and its archive", async () => {
-    const planPath = await writeExtractedPlan({
-      plan_id: "PLAN-PHANTOM-2",
-      findings: [extractedFinding("F-GHOST", "src/nowhere/at/all.ts")],
-    });
-
-    await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
-
-    const log = await readRunLog();
-    expect(
-      log,
-      "stderr is not captured into the artifact dir; the destruction has to be durable",
-    ).toContain("extracted_plan_removed");
-    const line = log
-      .split("\n")
-      .find((entry) => entry.includes("extracted_plan_removed"))!;
-    expect(line).toContain("archive=");
-    expect(line, "the reason the plan was unusable rides with it").toContain("reason=");
-    expect(existsSync(planPath)).toBe(false);
+  it("refuses an invalid semantic amendment without losing the prior plan or submitted evidence", async () => {
+    const state = makeImplementingState();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+    const paths = executionPlanPaths(ARTIFACTS_DIR);
+    const before = await readFile(paths.canonical, "utf8");
+    const amendment = ExecutableChangePlanSchema.strip().parse(state.plan);
+    amendment.units[0]!.allowed_files = ["../outside.ts"];
+    const bytes = JSON.stringify({ base_revision_sha256: state.plan!.review_revision_sha256, plan: amendment });
+    await writeFile(paths.submission, bytes);
+    const result = await ingestExecutionPlan({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    expect(result.changed).toBe(false);
+    expect(result.issues.length).toBeGreaterThan(0);
+    expect(await readFile(paths.canonical, "utf8")).toBe(before);
+    expect(await readFile(paths.submission, "utf8")).toBe(bytes);
   });
-});
 
-// ---------------------------------------------------------------------------
-// OBL-…-inv-6 / fail-9: high-consequence plan-path diagnostics are mirrored
-// into the durable run log, and a phantom-path drop records its finding IDS.
-// ---------------------------------------------------------------------------
-
-describe("CP-NODE-15 inv-6/fail-9: grounding drops are recorded, not just printed", () => {
-  it("POSITIVE: a STRICT SUBSET of phantom-path findings is dropped, with its ids and both counts logged", async () => {
+  it("archives accepted predecessor revisions and keeps original source findings unchanged", async () => {
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
-    await writeFile(join(REPO_DIR, "src", "real.ts"), "export const x = 1;\n", "utf8");
-
-    await writeExtractedPlan({
-      plan_id: "PLAN-MIXED",
-      findings: [
-        extractedFinding("F-REAL", "src/real.ts"),
-        extractedFinding("F-GHOST", "src/imaginary.ts"),
-      ],
-    });
-
-    await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
-
-    const log = await readRunLog();
-    const line = log
-      .split("\n")
-      .find((entry) => entry.includes("grounding_dropped_findings"));
-    expect(
-      line,
-      "a caller reading a finding count across the plan boundary must be able to see the drop",
-    ).toBeTruthy();
-    expect(line!, "the dropped id itself, not merely a count").toContain("F-GHOST");
-    expect(line!).toContain("dropped=1");
-    expect(line!, "the surviving grounded count is the number that crosses").toContain(
-      "grounded=1",
-    );
-  });
-
-  it("NEGATIVE: EVERY diagnostic write in nextStep.ts is paired with ITS OWN durable run-log event", async () => {
-    // The three lean-fast-path diagnostics (route / escalate / fallback) sit on
-    // a branch that needs a `low` risk tier and a clear light review to reach,
-    // so they are pinned STRUCTURALLY rather than driven. The property is the
-    // one that matters and the one that decayed: stderr is not captured into the
-    // artifact dir, so a diagnostic that goes only there leaves the durable tree
-    // with no trace of a plan being destroyed, findings being dropped, or a run
-    // being rerouted.
-    //
-    // THREE ways this pin was FALSIFIED, all closed below:
-    //   (a) "any event within N chars" is satisfiable by a NEIGHBOUR's event, so
-    //       a brand-new unpaired write dropped beside a paired one passed. The
-    //       nearest preceding event must now fall AFTER the previous diagnostic
-    //       — a neighbour's event is on the wrong side of that boundary — AND
-    //       within a tight distance, so an unrelated far-away event elsewhere in
-    //       the module cannot stand in for a missing one either.
-    //   (b) no anti-vacuity guard: rewriting the diagnostics as `console.error`
-    //       emptied the needle and the test passed having scanned nothing. The
-    //       needle is now a FAMILY, and a zero-site scan fails outright.
-    //   (c) THE FAMILY WAS THE HOLE. It read `process.stderr.write(` +
-    //       `console.error|warn` — so migrating ONE diagnostic to `console.log`
-    //       (admissible: `console.log` is what this repo's loaders treat as the
-    //       ordinary channel) and deleting its event stayed GREEN, because the
-    //       in-family survivors satisfied the vacuity guard. Four entry points
-    //       now, `console.log` and `process.stdout.write` included: which stream
-    //       a diagnostic takes is not the property, so it must not decide
-    //       whether the property is checked.
-    //
-    // ⚠ ORDERING MANDATE — the event must be written BEFORE the diagnostic it
-    // pairs with (`event < write`), and the check enforces exactly that. A
-    // legitimate write-then-log pairing therefore false-reds BY DESIGN rather
-    // than by accident: write the durable record first, then announce it. The
-    // failure text below states the mandate so the next reader is not left
-    // guessing at an ordering requirement that only the test's arithmetic knows.
-    const raw = await readFile(
-      join(__dirname, "..", "..", "src", "remediate", "steps", "nextStep.ts"),
-      "utf8",
-    );
-    // Comment-aware: a diagnostic NAMED in a comment is not a diagnostic. The
-    // scan and the line numbers below are computed on the same stripped text.
-    const source = stripComments(raw);
-    const WRITE_RE =
-      /process\.stderr\.write\(|process\.stdout\.write\(|console\.(?:error|warn|log)\(/gu;
-    const EVENT_RE = /runLogger\??\.event\(/gu;
-    const writes = [...source.matchAll(WRITE_RE)].map((m) => m.index);
-    const events = [...source.matchAll(EVENT_RE)].map((m) => m.index);
-
-    expect(
-      writes.length,
-      "ANTI-VACUITY: a scan that matched no diagnostics proves nothing",
-    ).toBeGreaterThan(0);
-    expect(events.length).toBeGreaterThan(0);
-
-    const MAX_PAIRING_DISTANCE = 800;
-    const unpaired: number[] = [];
-    writes.forEach((at, index) => {
-      const previousWrite = index === 0 ? -1 : writes[index - 1]!;
-      const own = events.filter(
-        (event) =>
-          event < at && event > previousWrite && at - event <= MAX_PAIRING_DISTANCE,
-      );
-      if (own.length === 0) unpaired.push(source.slice(0, at).split("\n").length);
-    });
-    expect(
-      unpaired,
-      "each line number above writes a diagnostic the artifact directory never records. " +
-        "Pair it with a `runLogger?.event({...})` carrying the same fact, written BEFORE " +
-        "the diagnostic (event first, then announce) and after the previous diagnostic — " +
-        "the pairing is positional, so a neighbouring site's event cannot stand in.",
-    ).toEqual([]);
-  });
-
-  it("NEGATIVE: every diagnostic write in nextStep.ts is labelled with the [remediate-code] prefix", async () => {
-    // The other half of the door (c). Widening the family catches a diagnostic
-    // that CHANGES STREAM; this catches one that arrives UNLABELLED — a bare
-    // `console.log(msg)` on a stream shared with every other advisory in the
-    // process is un-greppable from a host log, so the durable run log is again
-    // the only way to find it. The prefix is what makes the stream searchable by
-    // tool rather than by eye, which is the whole point of writing it there.
-    const source = stripComments(
-      await readFile(
-        join(__dirname, "..", "..", "src", "remediate", "steps", "nextStep.ts"),
-        "utf8",
-      ),
-    );
-    const WRITE_RE =
-      /process\.stderr\.write\(|process\.stdout\.write\(|console\.(?:error|warn|log)\(/gu;
-    const sites = [...source.matchAll(WRITE_RE)].map((m) => m.index);
-    expect(
-      sites.length,
-      "ANTI-VACUITY: a scan that matched no diagnostics proves nothing",
-    ).toBeGreaterThan(0);
-
-    const unlabelled: number[] = [];
-    for (const at of sites) {
-      const line = source.slice(0, at).split("\n").length;
-      // The ENCLOSING CALL STATEMENT, not a fixed three-line window. A prefix
-      // scan over `[line-1, line+1]` only sees the write line itself and the two
-      // after it, so a perfectly labelled multi-line call whose `write(` sits
-      // more than two lines above its `[remediate-code]` argument false-reds —
-      // and the fix for that would have been to hand-edit the window to whatever
-      // the current source shape needs, which is the same bug one size larger.
-      const statement = enclosingCallStatement(source, at);
-      // The claim this scan can actually prove, and no more: the label is
-      // SOMEWHERE inside the call statement the write opens. It is not a claim
-      // about which argument the label belongs to (a nested call could carry it),
-      // and it is deliberately not a claim that the write emits it.
-      if (!statement.includes("[remediate-code]")) unlabelled.push(line);
-    }
-    expect(
-      unlabelled,
-      "each line number above writes a diagnostic that does not name [remediate-code], " +
-        "so nothing reading the stream can tell which tool produced it",
-    ).toEqual([]);
-  });
-
-  it("NEGATIVE: the surviving finding keeps its real path — a drop is not a plan-wide refusal", async () => {
-    await mkdir(join(REPO_DIR, "src"), { recursive: true });
-    await writeFile(join(REPO_DIR, "src", "real.ts"), "export const x = 1;\n", "utf8");
-    const planPath = await writeExtractedPlan({
-      plan_id: "PLAN-MIXED-2",
-      findings: [
-        extractedFinding("F-REAL", "src/real.ts"),
-        extractedFinding("F-GHOST", "src/imaginary.ts"),
-      ],
-    });
-
-    await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
-
-    // The plan was USABLE, so the recovery path never ran: it is still on disk.
-    expect(
-      existsSync(planPath),
-      "only an all-phantom plan refuses; a partial drop continues",
-    ).toBe(true);
-    const state = await new StateStore(ARTIFACTS_DIR).loadState();
-    const findingIds = (state?.plan?.findings ?? []).map((f) => f.id);
-    expect(findingIds).toContain("F-REAL");
-    expect(findingIds).not.toContain("F-GHOST");
+    await writeFile(join(REPO_DIR, "src/a.ts"), "export const source = true;\n");
+    const state = makeImplementingState();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+    const paths = executionPlanPaths(ARTIFACTS_DIR);
+    const before = JSON.parse(await readFile(paths.canonical, "utf8"));
+    const sourceBefore = await readFile(paths.source, "utf8");
+    const amendment = ExecutableChangePlanSchema.strip().parse(state.plan);
+    amendment.units[0]!.description = "Implement the same source requirement with an explicit boundary";
+    await writeFile(paths.submission, JSON.stringify({ base_revision_sha256: state.plan!.review_revision_sha256, plan: amendment }));
+    const result = await ingestExecutionPlan({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    expect(result.issues).toEqual([]);
+    expect(result.changed).toBe(true);
+    expect(JSON.parse(await readFile(join(paths.directory, "history", `${state.plan!.review_revision_sha256}.json`), "utf8"))).toEqual(before);
+    expect(await readFile(paths.source, "utf8")).toBe(sourceBefore);
+    expect(existsSync(paths.submission)).toBe(false);
   });
 });
 
@@ -896,23 +624,14 @@ function makeImplementingState(): RemediationState {
     }) as Finding;
   return {
     status: "implementing",
-    plan: {
-      plan_id: "PLAN-DISPATCH",
-      findings: [finding("F-001", "src/a.ts")],
-      blocks: [
-        {
-          block_id: "B-001",
-          items: ["F-001"],
-          parallel_safe: true,
-          touched_files: ["src/a.ts"],
-          dependencies: [],
-        },
-      ],
-      project_type: "unknown",
+    plan: canonicalPlanFixture({
+      plan_id: "PLAN-DISPATCH", findings: [finding("F-001", "src/a.ts")],
+      units: [canonicalUnitFixture("F-001", { source_finding_ids: ["F-001"], allowed_files: ["src/a.ts"] })],
+      requirements: [{ id: "REQ-F-001", description: "Fix the original issue", source_finding_ids: ["F-001"], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture tests dispatch boundary" }],
       candidate_closing_actions: ["none"],
-    },
+    }),
     items: {
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+      "F-001": { unit_id: "F-001", status: "pending" },
     },
     closing_plan: { action: "none" },
   };
@@ -960,8 +679,10 @@ describe("CP-NODE-15 fail-1/fail-2/fail-4: the dispatch preconditions refuse lou
   });
 
   it("POSITIVE (fail-2): a current-shaped state in a real checkout prepares a workload bound to HEAD", async () => {
-    await saveState(makeImplementingState());
+    const state = makeImplementingState();
     await writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+    await saveState(state);
     await acknowledgeResume();
 
     const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
@@ -979,8 +700,10 @@ describe("CP-NODE-15 fail-1/fail-2/fail-4: the dispatch preconditions refuse lou
   });
 
   it("NEGATIVE (fail-2): outside a git checkout the run refuses rather than synthesizing a baseline", async () => {
-    await saveState(makeImplementingState());
+    const state = makeImplementingState();
     await writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+    await saveState(state);
     await acknowledgeResume();
     await rm(join(REPO_DIR, ".git"), { recursive: true, force: true });
 

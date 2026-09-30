@@ -5,7 +5,12 @@
 
 ## Current state
 
-The backlog has an owner-approved implementation sequence and frozen entry inventory in
+Published baseline: `v0.52.5`, with registry publication and installed command entry
+points verified in the cloud workspace. This does not claim installation on the
+owner's desktop. Outcomes-first workflow cleanup is implemented under the
+[implementation plan](reviews/outcomes-first-workflow-plan-2026-09-30.md).
+
+The earlier backlog has an owner-approved implementation sequence and frozen entry inventory in
 [`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
 The historical preparation record reports separately preserved unfinished edits and points to
 `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`. That Windows recovery location
@@ -15,11 +20,11 @@ any cleanup; retain unknown work.
 
 ## Immediate next
 
-Complete exact final-head remote CI, merge, and verify `main`. Local validation and its
-limits are recorded in the [reconciliation evidence](reviews/backlog-reconciliation-2026-09-30.md).
-Release publication and global installation remain outside this task.
-
-**Live owner decision for the completed slice:** none.
+Cleanup is implemented; exact-head GitHub CI must pass before the authorized merge.
+Local validation: 570 files, 6,846 tests passed, 3 skipped; all catalog smoke legs passed.
+See the [decision and verification record](reviews/outcomes-first-workflow-plan-2026-09-30.md).
+Runtime/workload/outcome v2 refuses old in-progress state non-destructively.
+**Live owner decision:** none. No new npm publication is requested.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->

@@ -4,7 +4,7 @@ import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixtu
 import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
@@ -37,10 +37,6 @@ interface FindingDocument {
   executive_summary?: string;
 }
 
-interface FrictionRecord {
-  category_attestations?: Array<{ category: string; note: string }>;
-}
-
 /** Drive the deterministic pipeline in-process up to (and including) synthesis,
  * leaving synthesis_narrative_current as the only outstanding obligation, and
  * persist the resulting bundle so the next-step CLI resumes from that state. */
@@ -62,37 +58,15 @@ async function persistSynthesisReadyState(
   return synthesis;
 }
 
-/** Run next-step until present_report emits status:"complete", clearing the
- * mandatory friction-triage pause (write ≥1 open_observation, then re-call) the
- * way a host would. promoteFinalAuditReport deletes artifactsDir, so recreate
- * the friction subdir before writing. Returns the completed present_report step. */
+/** Product completion requires no development friction reflection. */
 async function nextStepToComplete(
   root: string,
   extraArgs: string[] = [],
 ): Promise<WrapperStep> {
-  for (let i = 0; i < 5; i++) {
-    const step: WrapperStep = JSON.parse((await runWrapper(["next-step", ...extraArgs], { cwd: root })).stdout);
-    if (
-      step.step_kind === "present_report" &&
-      step.status === "ready" &&
-      step.artifact_paths?.friction_record
-    ) {
-      let record: FrictionRecord = {};
-      try {
-        record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
-      } catch { /* new record */ }
-      record.category_attestations = [
-        { category: "ambiguous_direction", note: "none this run" },
-        { category: "tool_should_decide", note: "none this run" },
-        { category: "inefficient_feeding", note: "none this run" },
-      ];
-      await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
-      await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
-      continue;
-    }
-    return step;
-  }
-  throw new Error("next-step did not reach present_report:complete within 5 calls");
+  const step: WrapperStep = JSON.parse((await runWrapper(["next-step", ...extraArgs], { cwd: root })).stdout);
+  expect(step.step_kind).toBe("present_report");
+  expect(step.status).toBe("complete");
+  return step;
 }
 
 test.concurrent("next-step pauses for the synthesis narrative, then completes after it is provided", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {

@@ -93,11 +93,9 @@ export function resolveBasenameToTrackedPath(
 
 /**
  * Case-preserving corpus of the tracked working-tree paths at `root`, via
- * `git ls-files -z` (forward-slashed). THE one git enumeration behind both
- * grounding corpora: the M-B3 gate's `enumerateRepoTreePaths` is a
- * `normalizeRepoPath`-lowercased draw over this set, while the remediate
- * consumers that resolve a basename and then read the file off disk (line
- * counting) need the REAL on-disk case, so this one does not lowercase.
+ * `git ls-files -z` (forward-slashed). Consumers that resolve a basename and
+ * then read the file off disk (line counting) need the REAL on-disk case,
+ * so this enumeration does not lowercase.
  *
  * `-z` is load-bearing, not a flourish: plain `ls-files` renders any path git
  * considers unusual in C-quoted form (`core.quotePath` turns a non-ASCII byte
@@ -125,8 +123,7 @@ export async function enumerateTrackedFilePaths(
   // `--recurse-submodules` is REQUIRED, and it is one half of an ATOMIC pair:
   // the other half is the same flag on the audit disposition's
   // `evaluateTrackedFiles`, which decides what enters the auditable SCOPE. Both
-  // sides read "tracked" from this one git enumeration (the M-B3 gate's
-  // `enumerateRepoTreePaths` is a lowercased draw over this set), so the two
+  // sides read "tracked" using the same recursive git enumeration, so the two
   // rules must agree — a parent-only listing returns just the gitlink for a
   // first-party submodule, and a citation naming a file inside one would then
   // fail to ground while it sat in scope, or vice versa. Never change one

@@ -68,5 +68,4 @@ registry and the staleness DAG.
 
 | File | Written by | Why |
 |---|---|---|
-| `friction/run.json` | `friction_capture_executor` | run-scoped friction ledger under the run directory rather than a bundle artifact; it has no DAG dependents |
 | `scope_summary.json` | `intake_executor` | host-facing scope digest; the in-process channel is ExecutorRunResult.scope_summary, so it is deliberately outside ARTIFACT_DEFINITIONS and the staleness DAG |

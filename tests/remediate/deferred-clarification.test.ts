@@ -1,10 +1,11 @@
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 // Deferred clarification round: an implementation question waits for the END
 // of the implement phase instead of freezing dependency-state progression.
 //
 // A DEPENDENT of a `needs_clarification` item is NOT marked `blocked` by the
 // dead-end sweep — "awaiting an answer" must never be recorded as "upstream
 // failed". The sweep's discriminator is the workload boundary's liveness
-// analysis, `permanentlyDeadPendingBlocks`.
+// analysis, `permanentlyDeadPendingUnits`.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
@@ -13,11 +14,11 @@ import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type {
-  RemediationBlock,
+  ExecutionUnit,
   RemediationItemState,
 } from "../../src/remediate/state/types.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { permanentlyDeadPendingBlocks } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { permanentlyDeadPendingUnits } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
 // ---------------------------------------------------------------------------
@@ -28,19 +29,18 @@ function block(
   id: string,
   items: string[],
   dependencies: string[] = [],
-): RemediationBlock {
-  return { block_id: id, items, parallel_safe: true, dependencies, touched_files: [] };
+): ExecutionUnit {
+  return canonicalUnitFixture(id, { source_finding_ids: items, dependencies, allowed_files: [] });
 }
 
 function item(
-  findingId: string,
+  _findingId: string,
   blockId: string,
   status: RemediationItemState["status"],
 ): RemediationItemState {
   return {
-    finding_id: findingId,
+    unit_id: blockId,
     status,
-    block_id: blockId,
     // The state store refuses a paused item without its question.
     ...(status === "needs_clarification"
       ? {
@@ -54,15 +54,15 @@ function item(
 }
 
 function stateWith(
-  blocks: RemediationBlock[],
+  blocks: ExecutionUnit[],
   items: Record<string, RemediationItemState>,
 ): RemediationState {
   return {
     status: "implementing",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "PLAN-DC",
       findings: blocks.flatMap((b) =>
-        b.items.map((id) => ({
+        b.source_finding_ids.map((id) => ({
           id,
           title: id,
           category: "correctness",
@@ -74,11 +74,12 @@ function stateWith(
           evidence: [`src/${id}.ts:1`],
         })),
       ),
-      blocks,
+      units: blocks,
+      requirements: blocks.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [...unit.source_finding_ids], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises runtime lifecycle only" })),
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
-    items,
+    }),
+    items: Object.fromEntries(Object.values(items).map(item => [item.unit_id, item])),
     closing_plan: { action: "none" },
   } as RemediationState;
 }
@@ -87,10 +88,10 @@ function stateWith(
 // The discriminator itself: awaiting an answer vs. a genuinely failed upstream
 // ===========================================================================
 
-describe("permanentlyDeadPendingBlocks: awaiting-an-answer vs upstream-failed", () => {
+describe("permanentlyDeadPendingUnits: awaiting-an-answer vs upstream-failed", () => {
   const blocks = [block("B1", ["F1"]), block("B2", ["F2"], ["B1"])];
   const deadIds = (st: RemediationState): string[] =>
-    permanentlyDeadPendingBlocks(st).map((b) => b.block_id);
+    permanentlyDeadPendingUnits(st).map((b) => b.id);
 
   it("holds a dependent whose prerequisite is awaiting a clarification answer", () => {
     const st = stateWith(blocks, {
@@ -202,9 +203,10 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
       F1: item("F1", "B1", "needs_clarification"),
       F2: item("F2", "B2", "pending"),
     });
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
 
@@ -212,9 +214,9 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
     // The dependent is HELD, never mis-reported as an upstream failure...
-    expect(finalState.items.F2.status).toBe("pending");
-    expect(finalState.items.F2.failure_reason).toBeUndefined();
-    expect(finalState.items.F1.status).toBe("needs_clarification");
+    expect(finalState.items.B2.status).toBe("pending");
+    expect(finalState.items.B2.failure_reason).toBeUndefined();
+    expect(finalState.items.B1.status).toBe("needs_clarification");
     // ...and the run asks the deferred question instead of triaging the fallout.
     expect(step.step_kind).toBe("collect_clarifications");
   });
@@ -228,14 +230,15 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
       F1: item("F1", "B1", "needs_clarification"),
       F2: item("F2", "B2", "pending"),
     });
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
           {
-            finding_id: "F1",
+            unit_id: "B1",
             action: "reject_finding",
             rationale: "Not a real issue.",
           },
@@ -257,9 +260,9 @@ describe("the dead-end sweep does not blame an unanswered question", () => {
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(finalState.items.F1.status).toBe("deemed_inappropriate");
-    expect(finalState.items.F2.status).toBe("blocked");
-    expect(finalState.items.F2.failure_reason ?? "").toMatch(
+    expect(finalState.items.B1.status).toBe("deemed_inappropriate");
+    expect(finalState.items.B2.status).toBe("blocked");
+    expect(finalState.items.B2.failure_reason ?? "").toMatch(
       /verified-complete|INV-RS-01|skipped|blocked|cyclic/i,
     );
   });
@@ -293,22 +296,24 @@ describe("an applied clarification answer invalidates the persisted host-handoff
     });
     st.status = "implementing";
     st.host_handoff = {
-      contract_version: "remediation-host-handoff-record/v1alpha1",
+      contract_version: "remediation-host-handoff-record/v1alpha2",
+      scope_semantics: "explicit-directory-markers/v1",
       // The run id is the plan id (stateRunId), so the record belongs to THIS
       // run — the failure under test is the digest mismatch, not a foreign run.
       run_id: "PLAN-DC",
       baseline_commit: "a".repeat(40),
       workload_sha256: "b".repeat(64),
-      work_item_ids: ["F1"],
+      work_item_ids: ["B1"],
     };
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
           {
-            finding_id: "F1",
+            unit_id: "B1",
             action: "clarified",
             rationale: "Narrow the fix to the module boundary.",
           },
@@ -323,8 +328,8 @@ describe("an applied clarification answer invalidates the persisted host-handoff
     );
     // The answer landed (and the prepare above did not throw on the stale
     // record)...
-    expect(finalState.items.F1.status).toBe("pending");
-    expect(finalState.items.F1.clarification_context).toBe(
+    expect(finalState.items.B1.status).toBe("pending");
+    expect(finalState.items.B1.clarification_context).toBe(
       "Narrow the fix to the module boundary.",
     );
     // ...and any binding present now is a freshly regenerated one, never the
@@ -337,7 +342,7 @@ describe("an applied clarification answer invalidates the persisted host-handoff
 // Clarification scope delta (open-bugs.md:110 / :661)
 // ===========================================================================
 
-describe("clarification scope delta widens the owning block in-band", () => {
+describe("clarification scope delta preserves reviewed execution authority", () => {
   const harness = createNextStepHarness(".test-clarification-scope-delta");
   const { REPO_DIR, ARTIFACTS_DIR } = harness;
 
@@ -349,27 +354,29 @@ describe("clarification scope delta widens the owning block in-band", () => {
   });
 
   function needsClarificationState() {
-    const blocks = [{ ...block("B1", ["F1"]), touched_files: ["src/F1.ts"] }];
+    const blocks = [{ ...block("B1", ["F1"]), allowed_files: ["src/F1.ts"] }];
     return stateWith(blocks, { F1: item("F1", "B1", "needs_clarification") });
   }
 
-  it("a clarified resolution's scope_additions widen the owning block and drop the stale binding", async () => {
+  it("a clarification cannot widen a unit without a newly reviewed semantic revision", async () => {
     const st = needsClarificationState();
     st.host_handoff = {
-      contract_version: "remediation-host-handoff-record/v1alpha1",
+      contract_version: "remediation-host-handoff-record/v1alpha2",
+      scope_semantics: "explicit-directory-markers/v1",
       run_id: "PLAN-DC",
       baseline_commit: "a".repeat(40),
       workload_sha256: "b".repeat(64),
-      work_item_ids: ["F1"],
+      work_item_ids: ["B1"],
     };
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
           {
-            finding_id: "F1",
+            unit_id: "B1",
             action: "clarified",
             rationale: "Also create the pinning test and the shared helper.",
             scope_additions: ["tests/f1-pin.test.ts", "src/shared/f1Helper.ts"],
@@ -383,30 +390,23 @@ describe("clarification scope delta widens the owning block in-band", () => {
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(finalState.items.F1.status).toBe("pending");
-    const b1 = finalState.plan.blocks.find(
-      (b: { block_id: string }) => b.block_id === "B1",
-    );
-    expect(b1.touched_files).toContain("src/F1.ts");
-    expect(b1.touched_files).toContain("tests/f1-pin.test.ts");
-    expect(b1.touched_files).toContain("src/shared/f1Helper.ts");
-    // The stale workload binding is invalidated and the SAME call re-mints a
-    // fresh one over the widened scope (the open-bugs :661 wedge class): any
-    // binding present now is a freshly regenerated record, never the
-    // pre-answer one.
-    expect(finalState.host_handoff?.workload_sha256).not.toBe("b".repeat(64));
+    expect(finalState.items.B1.status).toBe("needs_clarification");
+    expect(finalState.plan.units.find((unit: { id: string }) => unit.id === "B1").allowed_files).toEqual(["src/F1.ts"]);
+    expect(finalState.plan.review_revision_sha256).toBe(st.plan!.review_revision_sha256);
+
   });
 
   it("an invalid scope delta refuses the WHOLE resolution file and applies nothing", async () => {
     const st = needsClarificationState();
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
     await writeFile(
       join(ARTIFACTS_DIR, "clarification_resolution.json"),
       JSON.stringify([
           {
-            finding_id: "F1",
+            unit_id: "B1",
             action: "clarified",
             rationale: "Widen.",
             scope_additions: ["../outside-the-repo.ts"],
@@ -421,11 +421,11 @@ describe("clarification scope delta widens the owning block in-band", () => {
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
     // Nothing applied: the item still awaits its answer; the scope is unchanged.
-    expect(finalState.items.F1.status).toBe("needs_clarification");
-    const b1 = finalState.plan.blocks.find(
-      (b: { block_id: string }) => b.block_id === "B1",
+    expect(finalState.items.B1.status).toBe("needs_clarification");
+    const b1 = finalState.plan.units.find(
+      (b: { id: string }) => b.id === "B1",
     );
-    expect(b1.touched_files).toEqual(["src/F1.ts"]);
+    expect(b1.allowed_files).toEqual(["src/F1.ts"]);
     // The file was refused (renamed away), and the run re-halts on the question.
     expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
     expect(step.status).toBe("blocked");

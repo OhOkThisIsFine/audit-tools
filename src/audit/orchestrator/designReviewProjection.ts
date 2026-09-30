@@ -12,9 +12,7 @@
  *
  * The naive trigger — "any byte changed" — re-runs the (expensive, LLM-driven)
  * review on cosmetic churn: a re-derived `generated_at`, a file's content hash
- * moving, a reordered list. This module is the audit-code half of the shared
- * semantic-projection policy (remediate-code's `contractPipeline/
- * semanticProjection.ts` is the other): each reviewed input is projected to ONLY
+ * moving, a reordered list. Each reviewed input is projected to ONLY
  * the load-bearing structure the review actually reasons about — provenance and
  * metrics stripped, each entry narrowed to its derivable fields and the
  * collections canonically ordered. A cosmetic upstream edit projects to the same
@@ -22,9 +20,7 @@
  * interface, a new surface, a re-scored risk) projects differently and correctly
  * re-stales the review.
  *
- * This mirrors remediate-code's `DERIVABLE_MODULE_CONTRACT_FIELDS` narrowing —
- * the "finalized-style structural projection" — applied to audit's structural
- * artifact set. The generic diff + hashing machinery is single-sourced in
+ * The generic diff + hashing machinery is single-sourced in
  * `audit-tools/shared/reReview`.
  */
 import {

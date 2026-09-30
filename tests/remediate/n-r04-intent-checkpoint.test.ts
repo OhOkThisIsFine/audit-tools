@@ -1,3 +1,5 @@
+import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { makePlanningState } from "./helpers/nextStepHarness.js";
 /**
  * N-R04 tests: consolidated synthesis + intent confirmation (two stops total).
  *
@@ -260,30 +262,10 @@ describe("legacy draft checkpoint — prompt 17c: archived, reads as not confirm
     expect(await readIntentCheckpoint(path)).toBeUndefined();
   });
 
-  it("archives a legacy draft and asks for confirmation, even when extracted-plan.json exists", async () => {
+  it("archives a legacy draft and asks for confirmation, even when a canonical execution plan exists", async () => {
     const checkpointPath = join(ARTIFACTS_DIR, "intent_checkpoint.json");
     await writeFile(checkpointPath, JSON.stringify(LEGACY_DRAFT), "utf8");
-    // An extracted plan with no confirmed checkpoint must ask for confirmation.
-    await writeFile(
-      intakePaths(ARTIFACTS_DIR).extractedPlan,
-      JSON.stringify({
-        findings: [
-          {
-            id: "F-001",
-            title: "Test finding",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix it.",
-            affected_files: [],
-            evidence: ["evidence"],
-          },
-        ],
-        blocks: [],
-      }),
-      "utf8",
-    );
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, makePlanningState(), REPO_DIR);
 
     const step = await decideNextStep({ root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
 
