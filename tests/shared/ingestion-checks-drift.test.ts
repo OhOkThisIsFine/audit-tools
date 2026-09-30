@@ -21,10 +21,11 @@
 // declares is an undocumented check.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { posix, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+import { buildImporterGraph, collectSourceModules } from "../../scripts/shared/loopCoreClosure.mjs";
 
 import {
   BEGIN_MARKER,
@@ -47,6 +48,26 @@ const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const read = (relative: string): string => readFileSync(join(repoRoot, relative), "utf8");
 
 const renderedBlock: string = renderIngestionChecks();
+
+// Draw-local extraction must not sever check authority. Derive the reachable
+// implementation modules from the same source graph used by the closure guard,
+// while keeping shared submission checks in their separate declared owner.
+const importerGraph = buildImporterGraph(repoRoot, collectSourceModules(repoRoot));
+function drawSources(entry: string): string[] {
+  const directory = `${posix.dirname(entry)}/`;
+  const reachable = new Set([entry]);
+  const queue = [entry];
+  for (const importer of queue) {
+    for (const [target, importers] of importerGraph) {
+      if (target.startsWith(directory) && importers.has(importer) && !reachable.has(target)) {
+        reachable.add(target);
+        queue.push(target);
+      }
+    }
+  }
+  return [...reachable].sort();
+}
+
 
 /** The hand-enumeration shape all three docs carried before the block existed. */
 const HAND_ENUMERATION = /run id, work-item id, prompt digest/;
@@ -98,9 +119,10 @@ describe("INGESTION_CHECKS is load-bearing: every declared check is cited where 
 
   for (const draw of INGESTION_DRAWS) {
     it(`the ${draw.id} draw cites exactly the draw-cited checks it declares`, () => {
-      const cited = extractCitedIngestionChecks(read(draw.source));
+      const sources = drawSources(draw.source);
+      const cited = new Set(sources.flatMap((source) => [...extractCitedIngestionChecks(read(source))]));
       const declared = ingestionCheckIdsCitedBy("draw", draw.id);
-      expect([...cited].sort(), `${draw.source} cites checks it does not declare, or omits declared ones`).toEqual(
+      expect([...cited].sort(), `${sources.join(", ")} cites checks it does not declare, or omits declared ones`).toEqual(
         [...declared].sort(),
       );
     });

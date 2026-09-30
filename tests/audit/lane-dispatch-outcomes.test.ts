@@ -87,6 +87,8 @@ function lanes(roundLaneIds: readonly string[]): FanoutLaneSpec[] {
     ...roundLaneIds.map((id) => ({
       id,
       label: `Perspective ${id}`,
+      fileCount: 0,
+      riskScore: 0,
       promptFilename: `${id}-prompt.md`,
       promptText: `# ${id}`,
       // The tool is owed nothing here — the judge reads it, not this tool.
@@ -95,6 +97,8 @@ function lanes(roundLaneIds: readonly string[]): FanoutLaneSpec[] {
     {
       id: "design_review_conceptual",
       label: "Judge",
+      fileCount: 0,
+      riskScore: 0,
       promptFilename: "judge-prompt.md",
       promptText: "# judge",
     },
@@ -284,6 +288,8 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
         {
           id: lane,
           label: "Contract review",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "contract-prompt.md",
           promptText: "# contract",
         },
@@ -304,6 +310,8 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
         {
           id: lane,
           label: "Contract review",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "contract-prompt.md",
           promptText: "# contract",
         },
@@ -332,6 +340,8 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
         {
           id: lane,
           label: "Contract review",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "contract-prompt.md",
           promptText: "# contract",
         },

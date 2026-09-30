@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-submission.test.ts, tests/audit/design-review-diff-rereview.test.ts
 /**
  * Diff-based re-review for audit-code's design-review passes (B2 parity port).
  *
@@ -19,6 +20,7 @@
  * precise changed-since-last-review delta and instructs re-affirm-or-revise-only-
  * affected — never a blind full re-run. Enforced by the tool, not host memory.
  */
+import { projectDesignReviewTask } from "./designReviewTask.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -43,7 +45,7 @@ import {
 export const DESIGN_REVIEW_PASSES = ["contract", "conceptual"] as const;
 export type DesignReviewPass = (typeof DESIGN_REVIEW_PASSES)[number];
 
-const SNAPSHOT_SCHEMA_VERSION = "audit-code/design-review-snapshot/v1alpha1" as const;
+const SNAPSHOT_SCHEMA_VERSION = "audit-code/design-review-snapshot/v2alpha1" as const;
 
 export interface DesignReviewSnapshot {
   schema_version: typeof SNAPSHOT_SCHEMA_VERSION;
@@ -54,6 +56,7 @@ export interface DesignReviewSnapshot {
   prior_findings: Finding[];
   /** Semantic projection of each structural input at review time. */
   reviewed_inputs: Record<DesignReviewInput, unknown>;
+  reviewed_task: ReturnType<typeof projectDesignReviewTask>;
 }
 
 /** Bundle-side view: the loaded snapshots, keyed by pass (absent until captured). */
@@ -126,6 +129,7 @@ export function buildDesignReviewSnapshot(
     reviewed_at: reviewedAt,
     prior_findings: priorFindings,
     reviewed_inputs: projectDesignReviewInputs(bundle),
+    reviewed_task: projectDesignReviewTask(bundle, pass),
   };
 }
 
@@ -164,6 +168,8 @@ export function computeDesignReReviewDelta(
     const lines = diffProjections(prior, current);
     if (lines.length > 0) changedInputs.push({ label: input, lines });
   }
+  const taskLines = diffProjections(snapshot.reviewed_task, projectDesignReviewTask(bundle, snapshot.pass));
+  if (taskLines.length > 0) changedInputs.push({ label: "review_task", lines: taskLines });
   return { changedInputs, allUnchanged: changedInputs.length === 0 };
 }
 
@@ -183,7 +189,7 @@ export function isDesignReviewStale(
     );
     if (prior !== current) return true;
   }
-  return false;
+  return stableStringifyProjection(snapshot.reviewed_task) !== stableStringifyProjection(projectDesignReviewTask(bundle, snapshot.pass));
 }
 
 /**

@@ -10,6 +10,8 @@
  * survive the promotion path into the design-review projection.
  */
 import { test, expect } from "vitest";
+import { mergeFindings } from "../../src/audit/reporting/mergeFindings.js";
+import type { AuditResult } from "../../src/audit/types.js";
 import { buildDesignAssessment } from "../../src/audit/extractors/designAssessment.js";
 import { detectNonColocalization } from "../../src/audit/decompose/findings.js";
 import { projectDesignReviewInput } from "../../src/audit/orchestrator/designReviewProjection.js";
@@ -173,4 +175,88 @@ test("the design-review projection carries lead lineage into the reviewed slice"
   expect(lineage.producer).toBeDefined();
   expect(lineage.source_hash).toBeDefined();
   expect(lineage.confirmation).toBe("lead");
+});
+
+
+test("unconfirmed deterministic leads stay in analysis rather than final findings", () => {
+  const design = assessment(seamGraph());
+  const leads = design.findings.filter((finding) => finding.lead_lineage);
+  expect(leads.length).toBeGreaterThan(0);
+  expect(mergeFindings([], undefined, undefined, { ...design, findings: leads })).toEqual([]);
+  expect(design.findings.filter((finding) => finding.lead_lineage)).toEqual(leads);
+});
+
+test("semantic confirmation receives original tool lineage and evidence", () => {
+  const design = assessment(seamGraph());
+  const lead = design.findings.find((finding) => finding.lead_lineage)!;
+  const { lead_lineage: lineage, ...semantic } = lead;
+  semantic.evidence = ["independently confirmed"];
+  semantic.severity = "low";
+  const report = mergeFindings([], undefined, undefined, {
+    ...design, findings: [lead], contract_findings: [semantic],
+  });
+  expect(report).toHaveLength(1);
+  expect(report[0]!.lead_lineage).toEqual(lineage);
+  expect(report[0]!.evidence).toEqual(expect.arrayContaining([...(lead.evidence ?? []), "independently confirmed"]));
+  expect(report[0]!.severity).toBe("low");
+  expect(semantic).not.toHaveProperty("lead_lineage");
+});
+
+test("unrelated semantic findings cannot confirm a lead merely by title or file", () => {
+  const design = assessment(seamGraph());
+  const lead = design.findings.find((finding) => finding.lead_lineage)!;
+  const { lead_lineage: _lineage, ...semantic } = lead;
+  for (const other of [
+    { ...semantic, title: "An unrelated defect in the same file", category: "unrelated" },
+    { ...semantic, affected_files: [{ path: "unrelated.ts" }] },
+  ]) {
+    const report = mergeFindings([], undefined, undefined, { ...design, findings: [lead], contract_findings: [other] });
+    expect(report).toHaveLength(1);
+    expect(report[0]!.lead_lineage).toBeUndefined();
+    expect(report[0]!.evidence).toEqual(other.evidence ?? []);
+  }
+});
+
+test("submitted result lineage is refused at the report merge boundary", () => {
+  const lead = assessment(seamGraph()).findings.find((finding) => finding.lead_lineage)!;
+  const result: AuditResult = {
+    task_id: "task", unit_id: "unit", pass_id: "pass", lens: lead.lens,
+    file_coverage: [], findings: [lead],
+  };
+  expect(() => mergeFindings([result])).toThrow(/lineage/i);
+});
+
+
+test("design-review output cannot forge producer lineage at merge", () => {
+  const design = assessment(seamGraph());
+  const lead = design.findings.find((finding) => finding.lead_lineage)!;
+  expect(() => mergeFindings([], undefined, undefined, {
+    ...design, findings: [], contract_findings: [lead],
+  })).toThrow(/lineage/i);
+});
+
+
+test("confirmed lineage survives absorption by a higher-severity semantic finding", () => {
+  const design = assessment(seamGraph());
+  const lead = design.findings.find((finding) => finding.lead_lineage)!;
+  const { lead_lineage: lineage, ...semantic } = lead;
+  const high = { ...semantic, id: "higher", title: `${semantic.title} risk`, severity: "high" as const };
+  const report = mergeFindings([], undefined, undefined, {
+    ...design, findings: [lead], contract_findings: [semantic, high],
+  });
+  expect(report).toHaveLength(1);
+  expect(report[0]!.severity).toBe("high");
+  expect(report[0]!.lead_lineage).toEqual(lineage);
+});
+
+test("review prompts expose the exact lead identity to retain while independently grounding the verdict", async () => {
+  const { renderContractReviewPrompt } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
+  const design = assessment(seamGraph());
+  const lead = design.findings.find(finding => finding.lead_lineage)!;
+  expect(lead).toBeDefined();
+  const prompt = renderContractReviewPrompt({ design_assessment: design });
+  expect(prompt).toContain("retain the lead's lens, category, title, and affected_files");
+  expect(prompt).toContain("independently determine severity, confidence, summary, and evidence");
+  expect(prompt).toContain(JSON.stringify({ lens: lead.lens, category: lead.category, title: lead.title, affected_files: lead.affected_files }));
+  expect(prompt).toContain("Do NOT supply `verification_status`, `evidence_lane` or `lead_lineage`");
 });

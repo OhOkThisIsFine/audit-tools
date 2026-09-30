@@ -1,94 +1,44 @@
 import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import {
-  AgentReflectionSchema,
-  AGENT_FEEDBACK_FILENAME,
-} from "../../src/shared/agentReflections.js";
-import {
-  writeCurrentStep,
-  AGENT_FEEDBACK_ARTIFACT_KEY,
-} from "../../src/audit/cli/steps.js";
+import { AgentReflectionSchema, AGENT_FEEDBACK_FILENAME, parseReflectionsNdjson } from "../../src/shared/agentReflections.js";
+import { writeCurrentStep, AGENT_FEEDBACK_ARTIFACT_KEY } from "../../src/audit/cli/steps.js";
+import { functionalPreflightStep, functionalPreflightPath } from "../../src/audit/cli/functionalPreflight.js";
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, "..", "..");
-
-// The canonical loader body. Every IDE/host asset renders from this one file
-// (see host-asset-renderer-drift.test.ts), so binding the check here covers the
-// rendered assets too.
-const CANONICAL_PROMPT = join(
-  repoRoot,
-  "skills",
-  "audit-code",
-  "audit-code.prompt.md",
-);
-
-/**
- * The fields `parseReflectionsNdjson` REQUIRES, derived from the schema rather
- * than hand-listed — a hand copy is the drift this test exists to prevent.
- */
-function requiredReflectionFields(): string[] {
-  return Object.entries(AgentReflectionSchema.shape)
-    .filter(([, field]) => !field.isOptional())
-    .map(([name]) => name)
-    .sort();
-}
-
-// The defect this pins, observed 2026-09-06: the prompt asked the host to record
-// a reserved `audit-capability-preflight` reflection and named `task_id` and
-// `severity`, but never `instruction_clarity`. `parseReflectionsNdjson` requires
-// all three and drops a line missing any of them SILENTLY, by explicit design.
-// So a host that followed the shipped prompt exactly produced a line the parser
-// discarded whole, and the capability-preflight channel — the one that decides
-// whether a run may be called comprehensive — could not carry a single message.
-//
-// This is the auditor-agnostic rule applied to our own prompt: the host must not
-// have to guess a field the tool silently requires.
-test("the shipped audit loader prompt names every reflection field the parser requires", () => {
-  const body = readFileSync(CANONICAL_PROMPT, "utf8");
-  const required = requiredReflectionFields();
-
-  expect(required.length, "the reflection schema must have required fields to check").toBeGreaterThan(0);
-
-  for (const field of required) {
-    expect(
-      body.includes(field),
-      `the loader prompt must name the required reflection field '${field}'; ` +
-        `parseReflectionsNdjson discards any line missing it, and the drop is silent`,
-    ).toBe(true);
+// Preflight no longer asks the loader/host to hand-author a reflection. The
+// production consumer writes it mechanically from validated capability evidence.
+// Pin the original silent-loss defect at its current owner and actual path.
+test("approved degraded preflight writes a complete reflection to the emitted step's feedback destination", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "audit-preflight-reflection-"));
+  try {
+    const plan = await functionalPreflightStep(artifactsDir, artifactsDir);
+    expect(plan).toBeDefined();
+    const step = await writeCurrentStep(plan!);
+    await satisfyFunctionalPreflight(artifactsDir, artifactsDir);
+    const path = functionalPreflightPath(artifactsDir);
+    const report = JSON.parse(await readFile(path, "utf8"));
+    report.relationship_inspection = { available: false, evidence: "Fixture relationship inspection is unavailable." };
+    report.decision = "degraded";
+    report.operator_approved_degraded = true;
+    report.limitation = "Operator approved source-only review without relationship inspection.";
+    await writeFile(path, JSON.stringify(report));
+    expect(await functionalPreflightStep(artifactsDir, artifactsDir)).toBeUndefined();
+    const feedbackPath = step.artifact_paths[AGENT_FEEDBACK_ARTIFACT_KEY];
+    expect(typeof feedbackPath).toBe("string");
+    const text = await readFile(feedbackPath!, "utf8");
+    const raw = JSON.parse(text.trim());
+    expect(AgentReflectionSchema.safeParse(raw).success).toBe(true);
+    for (const [field, schema] of Object.entries(AgentReflectionSchema.shape)) {
+      if (!schema.isOptional()) expect(raw).toHaveProperty(field);
+    }
+    const parsed = parseReflectionsNdjson(text);
+    expect(parsed.reflections).toHaveLength(1);
+    expect(parsed.reflections[0]).toMatchObject({ task_id: "audit-capability-preflight", severity: "high" });
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
   }
-});
-
-// The same silent-loss class, one step further out (nightly decision
-// `docs-audit-prompt-reflection-destination-unnamed`): the prompt named the
-// FIELDS but never the DESTINATION, so a host that followed it exactly still had
-// to guess a filename. A wrong guess is not reported — `parseReflectionsNdjson`
-// returns an empty list for an absent file with no affirmation — so the
-// reflection simply never appears and the report's limitations section is
-// silently thinner.
-//
-// The fix is the auditor-agnostic one: the tool SUPPLIES the path rather than
-// asking a host to reproduce it. `writeCurrentStep` — the one funnel every audit
-// step emission goes through — stamps `artifact_paths.agent_feedback`, and the
-// loader body names that key instead of a filename.
-test("the shipped audit loader prompt names the reflection destination by its step-contract key", () => {
-  const body = readFileSync(CANONICAL_PROMPT, "utf8");
-  expect(
-    body.includes(`artifact_paths.${AGENT_FEEDBACK_ARTIFACT_KEY}`),
-    `the loader prompt must name the step-contract key that carries the reflection path ` +
-      `(artifact_paths.${AGENT_FEEDBACK_ARTIFACT_KEY}); a host that has to guess the file ` +
-      `produces a silently empty channel`,
-  ).toBe(true);
-  // It must NOT spell the raw filename: that is the guess this replaces, and a
-  // prompt that names both invites a host to use the wrong one.
-  expect(
-    body.includes(AGENT_FEEDBACK_FILENAME),
-    `the loader prompt must not spell the raw filename '${AGENT_FEEDBACK_FILENAME}' — ` +
-      `the step contract supplies it`,
-  ).toBe(false);
 });
 
 test("every emitted audit step carries the reflection path on the contract", async () => {

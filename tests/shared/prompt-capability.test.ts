@@ -225,12 +225,16 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
           {
             id: "lane_alpha",
             label: "Alpha",
+            fileCount: 0,
+            riskScore: 0,
             promptFilename: "alpha-prompt.md",
             promptText: "# Alpha\n\nDo the alpha work.",
           },
           {
             id: "lane_beta",
             label: "Beta",
+            fileCount: 0,
+            riskScore: 0,
             promptFilename: "beta-prompt.md",
             promptText: "# Beta\n\nDo the beta work.",
             expected: false,
@@ -285,6 +289,8 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
           {
             id: "lane_body",
             label: "Body",
+            fileCount: 0,
+            riskScore: 0,
             promptFilename: "body-prompt.md",
             promptText: [
               "# Body",

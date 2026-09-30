@@ -1,5 +1,7 @@
+// sites-pinned: tests/audit/analyzer-consent-offer.test.ts, tests/shared/review-independence.test.ts, tests/shared/prompts.test.ts
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
+  ANALYZER_SETTINGS,
   buildFrictionTriageBlock,
   renderHostScratchNote,
   type FrictionTriageDecision,
@@ -79,7 +81,10 @@ export function renderAnalyzerConsentPrompt(params: {
 
 This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
 decision. Present EACH candidate below to the operator and record their choices —
-\`declined\` persists across runs; \`granted\` covers this run only, and the next run re-offers.
+Both \`declined\` and \`granted\` cover this run only; a new audit asks again.
+Ask explicitly before installing these analyzers or permitting their code/config execution.
+Audits do not format source by default. Source formatting requires separate operator approval
+and \`next-step --auto-fix\` for this run; \`--dry-run\` always prevents formatting.
 Do not decide on the operator's behalf.
 
 ${rows}
@@ -200,8 +205,9 @@ export function renderAnalyzerInstallPrompt(params: {
     "",
     ...analyzerLines,
     "",
-    "Choose `ephemeral`, `permanent`, or `skip` for each analyzer and write the",
-    "JSON object below. These choices persist in the provider-neutral analyzer policy.",
+    `Ask the operator to choose one of ${ANALYZER_SETTINGS.map(value => "`" + value + "`").join(", ")} for each analyzer, then write the JSON object below.`,
+    "Use repo to reuse an existing installation without installing. Ephemeral and permanent currently both install into the tool-managed cache, not the repository dependencies. Use skip to omit the analyzer, or auto to retry automatic resolution; if it remains unavailable, this decision step returns.",
+    "These choices persist in the provider-neutral analyzer policy; only the operator authorizes an installation.",
     "",
     `Decisions path: ${params.decisionsPath}`,
     `Example: ${exampleObject}`,

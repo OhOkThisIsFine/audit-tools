@@ -6,9 +6,8 @@
  * in-fold `runAuditStep` takes the lock, and the error-recovery catch takes it
  * again); under the CX-02 one-hold shape a whole call acquires exactly ONCE.
  *
- * Mechanism: wrap `withFileLock` via a module mock of `audit-tools/shared` —
- * both `nextStepHelpers.ts` and `auditStep.ts` import the lock from that one
- * subpath — and count only acquisitions whose path ends `artifact-tree.lock`,
+ * Mechanism: wrap the actual fileLock owner used by the shared artifact-tree
+ * hold and count only acquisitions whose path ends `artifact-tree.lock`,
  * so the analyzer-policy and submission-ledger locks (different paths) cannot
  * inflate the count. The fixture is the batch-deterministic-block one: the
  * longest guaranteed deterministic drain in the suite, so the pre-collapse
@@ -25,8 +24,8 @@ import { expect, test, vi } from "vitest";
 
 const counter = vi.hoisted(() => ({ artifactTreeAcquisitions: 0 }));
 
-vi.mock("audit-tools/shared", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("audit-tools/shared")>();
+vi.mock("../../src/shared/io/fileLock.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/shared/io/fileLock.js")>();
   const wrapped = async (
     path: string,
     ...rest: unknown[]

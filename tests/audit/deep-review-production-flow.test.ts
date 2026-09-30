@@ -1,3 +1,5 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -109,7 +111,7 @@ test("production systemic dispatch never advertises the deleted deep-review judg
     await mkdir(join(artifactsDir, "submissions"), { recursive: true });
     await writeFile(perspectiveResultPath, "[]\n");
 
-    const bundle: ArtifactBundle = {
+    const bundle: ArtifactBundle = captureCompletedDesignReviews({
       ...readyForIntentBundle(),
       intent_checkpoint: {
         schema_version: "intent-checkpoint/v1",
@@ -181,8 +183,9 @@ test("production systemic dispatch never advertises the deleted deep-review judg
         candidate_disposition_breakdown: {},
         candidate_verification_status_breakdown: {},
       },
-    };
+    });
     await writeCoreArtifacts(artifactsDir, bundle);
+    await persistDesignReviewSnapshots(artifactsDir, bundle);
     await persistAnalyzerConsent(root, {
       semgrep: "declined",
       eslint: "declined",
@@ -223,7 +226,7 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
 
-    const bundle: ArtifactBundle = {
+    const bundle: ArtifactBundle = captureCompletedDesignReviews({
       ...readyForIntentBundle(),
       design_assessment: {
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -231,8 +234,8 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
         contract_reviewed: true,
         conceptual_reviewed: false,
       },
-    };
-    const dispatch = await prepareConceptualDispatch({
+    });
+    await prepareConceptualDispatch({
       artifactsDir,
       bundle,
       settings: { conceptual_depth: "deep", perspectives: 2 },
@@ -255,16 +258,10 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
 
     await Promise.all(
       round.perspectives.map((contributor, index) =>
-        writeFile(
-          contributor.result_path,
-          JSON.stringify({ findings: [conceptualFinding(`DR-00${index + 1}`)] }),
-          "utf8",
-        ),
+        writeBoundReviewFixture(artifactsDir, contributor.lane_id, { findings: [conceptualFinding(`DR-00${index + 1}`)] }),
       ),
     );
-    await writeFile(
-      dispatch.conceptualResultsPath,
-      JSON.stringify({
+    await writeBoundReviewFixture(artifactsDir, round.judge.lane_id, {
         round_id: round.round_id,
         findings: [conceptualFinding("FINAL-001")],
         candidate_dispositions: round.perspectives.map((contributor, index) => ({
@@ -301,9 +298,7 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
             ],
           },
         ],
-      }),
-      "utf8",
-    );
+      });
 
     const tx = createFoldTransaction();
     const branch = await handleDesignReviewBranch(
@@ -345,7 +340,7 @@ test("the ingest fold quarantines a judge submission that supplies verification_
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
 
-    const bundle: ArtifactBundle = {
+    const bundle: ArtifactBundle = captureCompletedDesignReviews({
       ...readyForIntentBundle(),
       design_assessment: {
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -353,8 +348,8 @@ test("the ingest fold quarantines a judge submission that supplies verification_
         contract_reviewed: true,
         conceptual_reviewed: false,
       },
-    };
-    const dispatch = await prepareConceptualDispatch({
+    });
+    await prepareConceptualDispatch({
       artifactsDir,
       bundle,
       settings: { conceptual_depth: "deep", perspectives: 1 },
@@ -363,9 +358,7 @@ test("the ingest fold quarantines a judge submission that supplies verification_
     if (!round) throw new Error("missing conceptual round manifest");
     const perspective = round.perspectives[0];
     if (!perspective) throw new Error("manifest carries no perspective");
-    await writeFile(
-      perspective.result_path,
-      JSON.stringify({
+    await writeBoundReviewFixture(artifactsDir, perspective.lane_id, {
         findings: [
           {
             id: "DR-001",
@@ -378,14 +371,10 @@ test("the ingest fold quarantines a judge submission that supplies verification_
             affected_files: [{ path: "src/api/auth.ts" }],
           },
         ],
-      }),
-      "utf8",
-    );
+      });
 
     // The supplied field rides on the FINDING, which is where the schema omits it.
-    await writeFile(
-      dispatch.conceptualResultsPath,
-      JSON.stringify({
+    await writeBoundReviewFixture(artifactsDir, round.judge.lane_id, {
         round_id: round.round_id,
         findings: [
           {
@@ -431,9 +420,7 @@ test("the ingest fold quarantines a judge submission that supplies verification_
             ],
           },
         ],
-      }),
-      "utf8",
-    );
+      });
 
     const tx = createFoldTransaction();
     const branch = await handleDesignReviewBranch(

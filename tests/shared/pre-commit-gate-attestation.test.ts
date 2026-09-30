@@ -4,7 +4,7 @@
 // end-to-end. Fixture + rationale in pre-commit-gate-harness.ts (shared across
 // the pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -32,6 +32,16 @@ beforeEach(() => {
 
 afterEach(() => {
   if (repo && existsSync(repo)) rmSync(repo, { recursive: true, force: true });
+});
+
+test("reports both missing attestation classes for the same staged tree", () => {
+  stageLoopCoreFile();
+  writeFileSync(join(repo, "CLAUDE.md"), "# Constitutional fixture\n");
+  g("add", "CLAUDE.md");
+  const result = runCommit();
+  expect(result.status).toBe(2);
+  expect(result.stderr).toContain("CONSTITUTIONAL");
+  expect(result.stderr).toContain("no adversarial-review attestation");
 });
 
 describe("the fixture helper arms what it says it arms", () => {

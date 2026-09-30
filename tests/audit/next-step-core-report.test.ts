@@ -132,13 +132,14 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
     );
     expect(next.step_kind).not.toBe("analyzer_install");
 
-    // Both decisions persist durably to the analyzer policy: the install skip AND
-    // the consent declines (Item B — decisions durable, tokens never).
+    // Install preferences persist; execution decisions belong only to this run.
     const policy = JSON.parse(
       await readFile(join(root, ".audit-tools/audit", "analyzer-policy.json"), "utf8"),
     );
     expect(policy.analyzers.typescript).toBe("skip");
-    expect(policy.analyzer_consent.eslint).toBe("declined");
+    const consentRecord = JSON.parse(await readFile(join(root, ".audit-tools/audit", "run-consent.json"), "utf8"));
+    expect(consentRecord.decisions.eslint).toBe("declined");
+    expect(policy.analyzer_consent).toBeUndefined();
   });
 });
 

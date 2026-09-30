@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/next-step-critical-flow-fallback.test.ts
 import type { CriticalFlowManifest } from "audit-tools/shared";
 
 const MAX_RENDERED_FLOWS = 80;
@@ -25,13 +26,15 @@ function summarizeFlow(
  */
 export function renderCriticalFlowFallbackPrompt(
   manifest: CriticalFlowManifest,
+  manifestPath?: string,
 ): string {
   const flows = manifest.flows;
   const rendered = flows.slice(0, MAX_RENDERED_FLOWS).map(summarizeFlow);
   const overflowNote =
     flows.length > MAX_RENDERED_FLOWS
       ? [
-          `  ... and ${flows.length - MAX_RENDERED_FLOWS} more flows (see critical_flows.json).`,
+          `  ... and ${flows.length - MAX_RENDERED_FLOWS} more flows${manifestPath ? ` (read the complete artifact at \`${manifestPath}\`)` : ": all remaining flows are listed below"}.`,
+          ...(manifestPath ? [] : flows.slice(MAX_RENDERED_FLOWS).map(summarizeFlow)),
         ]
       : [];
 
@@ -62,6 +65,7 @@ export function renderCriticalFlowFallbackPrompt(
     "- Omit a flow you cannot substantiate; return an empty array if the repo has no",
     "  critical flows the deterministic pass missed.",
     "",
+    ...(manifestPath ? [`Read the complete critical-flow artifact at \`${manifestPath}\`.`, ""] : []),
     "## Deterministic flows",
     "",
     ...(rendered.length > 0

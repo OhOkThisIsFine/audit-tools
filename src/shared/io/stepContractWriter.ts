@@ -1,3 +1,4 @@
+import { AccessDeclarationSchema } from "../types/accessDeclaration.js";
 // sites-pinned: tests/shared/step-contract-writer.test.ts, tests/audit/semantic-review-step.test.ts
 // (THE boundary every step renderer's prompt passes through: dropping the body
 // normalization puts a backslashed path back into every rendered prompt)
@@ -314,6 +315,12 @@ export async function writeStepContract<
   normalizedArtifactPaths.current_step = toPromptPathToken(stepPath);
   normalizedArtifactPaths.current_prompt = toPromptPathToken(promptPath);
 
+  const access = input.extraFields?.access === undefined ? undefined : AccessDeclarationSchema.parse(input.extraFields.access);
+  const normalizedAccess = access ? {
+    ...access,
+    read_paths: access.read_paths.map(toPromptPathToken),
+    write_paths: access.write_paths.map(toPromptPathToken),
+  } : undefined;
   const step = {
     contract_version: input.contractVersion,
     step_kind: input.stepKind,
@@ -327,6 +334,7 @@ export async function writeStepContract<
     // Orchestrator-specific optional fields ride here; the canonical path
     // fields below are written last so extraFields can never clobber them.
     ...(input.extraFields ?? {}),
+    ...(normalizedAccess ? { access: normalizedAccess } : {}),
     prompt_path: toPromptPathToken(promptPath),
     repo_root: toPromptPathToken(input.repoRoot),
     artifacts_dir: toPromptPathToken(input.artifactsDir),

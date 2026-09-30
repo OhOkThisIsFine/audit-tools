@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loop-core-gate-parity.test.ts, tests/shared/loop-core-closure.test.ts
 // Single source of truth for the "loop-core" path set — the persisted workflow,
 // host-handoff, verification, and orchestrator-step substrate whose changes carry
 // the highest blast radius. The surviving consumers are the two pre-build
@@ -53,11 +54,19 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   // one of whose importers is core is core. It renders the record of what the
   // intake filter removed, which is a statement about the loop's own decisions.
   "src/remediate/droppedFindingsRecord.ts",
+  "src/remediate/intent/intentPersistence.ts",
+  "src/remediate/review/filterDispositions.ts",
   "src/remediate/riskSignal.ts",
+  "src/remediate/state/runIdentity.ts",
   "src/remediate/steps/contractPipeline.ts",
   "src/remediate/steps/dispatch/",
+  "src/remediate/steps/frictionCloseout.ts",
   "src/remediate/steps/nextStep.ts",
+  "src/remediate/steps/recoverIngest.ts",
   "src/shared/engine/",
+  // Both host boundaries own this persisted, create-once observation history.
+  // Keep its baseline and deduplication semantics under the same review gate.
+  "src/shared/observability/rootLogObservations.ts",
   // The host-facing step-contract WRITE-AND-LOG site: `createStepEmissionScaffold`
   // owns the ONE call site that turns a plan into a written, logged step for BOTH
   // orchestrators. It is the boundary every host handoff is emitted through —

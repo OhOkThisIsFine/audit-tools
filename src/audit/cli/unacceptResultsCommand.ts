@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/unaccept-results-single-message.test.ts, tests/audit/host-handoff-unaccept-results.test.ts
 import { dropAcceptedResults } from "./dispatch/hostHandoff.js";
 import {
   getArtifactsDir,
@@ -29,7 +30,7 @@ export async function cmdUnacceptResults(argv: string[]): Promise<void> {
   const all = hasFlag(argv, "--all");
   const workItemIds = argv
     .flatMap((token, index) =>
-      token === "--work-item" ? [argv[index + 1]] : [],
+      token === "--work-item" ? [argv[index + 1]] : token.startsWith("--work-item=") ? [token.slice("--work-item=".length)] : [],
     )
     .filter((value): value is string => typeof value === "string");
 

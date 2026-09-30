@@ -1,3 +1,7 @@
+import { bindContractReviewPrompt, validateContractReviewInput } from "../contractPipeline/contractReviewBinding.js";
+import { CONCEPTUAL_CRITIQUE_REPAIR_TARGETS, type ConceptualCritiqueRepairTarget } from "../../shared/types/contractPipeline/design.js";
+import { ImplementationContextSchema } from "../../shared/types/contractPipeline/implementation.js";
+import { CounterexampleSchema } from "../../shared/types/contractPipeline/obligations.js";
 // sites-pinned: tests/remediate/contract-pipeline.test.ts, tests/remediate/dc3.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts
 //   contract-pipeline: the promotion computes no finding field FindingSchema would drop.
 //   dc3: the fan-out wording (needs, not mechanism) and the TRANSPORT report for a
@@ -31,6 +35,7 @@ import {
   readOptionalJsonFile,
   formatValidationIssues,
   hashContent,
+  stableStringify,
   isRecord,
   withFsRetry,
   type ValidationIssue,
@@ -144,6 +149,7 @@ import {
   renderContractRepairPrompt,
   CONTRACT_PIPELINE_PHASE_ORDER,
   PHASE_TO_ARTIFACT,
+  reviewRequirementForRole,
 } from "./contractPipelinePrompts.js";
 // The seven cross-artifact validators this module used to call one by one are
 // gone from this list on purpose: every one of them is now reached through
@@ -516,7 +522,9 @@ export interface ContractIngestionResult {
   /** Raw worker payloads that validated and were wrapped into envelopes. */
   ingested: ContractPipelineArtifactName[];
   /** Raw worker payloads that failed validation (archived; phase re-emitted). */
-  invalid: { name: ContractPipelineArtifactName; issues: ValidationIssue[] }[];
+  invalid: { name: ContractPipelineArtifactName; issues: ValidationIssue[]; unavailable?: boolean }[];
+  /** Previously reviewed context changed; freshness work must run upstream-first. */
+  stale?: ContractPipelineArtifactName[];
 }
 
 /**
@@ -530,9 +538,12 @@ export interface ContractIngestionResult {
  */
 export async function ingestContractArtifacts(
   artifactsDir: string,
+  adversarialDepth?: AdversarialDepth,
 ): Promise<ContractIngestionResult> {
   const ingested: ContractPipelineArtifactName[] = [];
   const invalid: ContractIngestionResult["invalid"] = [];
+  const stale: ContractPipelineArtifactName[] = [];
+  const depth = adversarialDepth ?? (await resolveAdversarialDepth(artifactsDir)).adversarialDepth;
 
   for (const name of CP_ARTIFACT_NAMES) {
     const raw = await readOptionalJsonFile<unknown>(
@@ -541,7 +552,18 @@ export async function ingestContractArtifacts(
     if (raw === undefined || raw === null) continue;
     // The host writes a plain payload; defensively unwrap if an envelope slipped
     // into the input path so ingest and the validate-artifact self-check agree.
-    const bare = isEnvelope(raw) ? raw.payload : raw;
+    const role = ARTIFACT_TO_PHASE[name] ?? "";
+    const requirement = reviewRequirementForRole(role, depth);
+    const reviewed = await validateContractReviewInput({
+      artifactsDir, artifact: name, role, requirement,
+      raw: requirement === "ordinary" && isEnvelope(raw) ? raw.payload : raw,
+    });
+    if (!reviewed.ok) {
+      if (reviewed.code === "dependency_stale") { stale.push(name); continue; }
+      invalid.push({ name, issues: [{ severity: "error", path: `${name}.review`, message: reviewed.issue }], ...(reviewed.code === "review_unavailable" ? { unavailable: true } : {}) });
+      continue;
+    }
+    const bare = reviewed.payload;
 
     // The host has no clock: stamp the tool-owned `created_at` before validation
     // so the host never has to invent a timestamp (B4). No-op when already present.
@@ -552,19 +574,26 @@ export async function ingestContractArtifacts(
     // semantic projection strips the tool-stamped `created_at`, so a no-op
     // re-ingest is stable (it does NOT re-fire snapshots or rewrite the
     // envelope); only a genuine host edit re-derives.
+    const requiredIssues = reviewed.provenance
+      ? CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(issue => issue.severity === "error")
+      : undefined;
+    if (requiredIssues && requiredIssues.length > 0) { invalid.push({ name, issues: requiredIssues }); continue; }
     const existing = await readContractArtifact(artifactsDir, name);
-    if (existing && envelopeSemanticHash(existing) === payloadSemanticHash(name, payload)) {
+    const sameReview = !reviewed.provenance || (existing?.review_provenance?.prompt_sha256 === reviewed.provenance.prompt_sha256 &&
+      existing.review_provenance.requirement === reviewed.provenance.requirement &&
+      stableStringify(existing.review_provenance.review) === stableStringify(reviewed.provenance.review));
+    if (existing && sameReview && envelopeSemanticHash(existing) === payloadSemanticHash(name, payload)) {
       continue;
     }
 
-    const issues = CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
+    const issues = requiredIssues ?? CONTRACT_PIPELINE_VALIDATORS[name](payload, name).filter(
       (issue) => issue.severity === "error",
     );
     if (issues.length > 0) {
       invalid.push({ name, issues });
       continue;
     }
-    await writeContractArtifact(artifactsDir, name, payload);
+    await writeContractArtifact(artifactsDir, name, payload, reviewed.provenance);
     ingested.push(name);
     // Repair-revert fix: an ingested aggregated `module_contracts` payload (a
     // degenerate single-agent draft, or a direct edit) is written back through to
@@ -587,7 +616,7 @@ export async function ingestContractArtifacts(
     }
   }
 
-  return { ingested, invalid };
+  return { ingested, invalid, ...(stale.length > 0 ? { stale } : {}) };
 }
 
 // ── Public helpers ────────────────────────────────────────────────────────────
@@ -1058,7 +1087,7 @@ function acceptedCeIdsOf(judge: JudgeReport | undefined): string[] {
  * is gone: a deep-but-converging run is no longer cut mid-convergence, and a
  * genuinely non-converging run is surfaced rather than buried.
  */
-async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
+export async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
   const judgeEnvelope = await readContractArtifact(artifactsDir, "judge_report");
   if (!judgeEnvelope) return { kind: "proceed" };
   const judge = envelopePayload(judgeEnvelope) as JudgeReport | undefined;
@@ -1127,7 +1156,7 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
 
   // Map judge.repair_directive.target if present; if absent, infer from classifications.
   //
-  // The validator admits only the three contract artifacts plus the legacy
+  // The validator admits only the declared owning artifacts plus the legacy
   // `design_spec` alias (a report from an older release); `counterexample` is
   // refused at ingestion with its reason, never swapped here. The legacy alias
   // falls through to the inferred target, as it always has.
@@ -1143,7 +1172,9 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
     : inferRepairDirective(judge);
 
   const addressed = new Set(
-    repairState.repairs.flatMap(
+    repairState.repairs.filter((repair) =>
+      (repair.target === "design_spec" ? "finalized_module_contracts" : repair.target) === directive.target,
+    ).flatMap(
       (r) =>
         r.addressed_ce_fingerprints ??
         (r.accepted_ce_ids ?? []).map((id) => `id:${id}`),
@@ -1200,8 +1231,8 @@ async function evaluateJudgeGate(artifactsDir: string): Promise<JudgeGate> {
 
 type CritiqueGate =
   | { kind: "proceed" }
-  | { kind: "escalate"; reason: "stall" | "runaway"; blocking: string[]; note: string }
-  | { kind: "repair"; critiqueHash: string; blockingIds: string[] };
+  | { kind: "escalate"; reason: "stall" | "runaway" | "unsupported_target"; blocking: string[]; note: string }
+  | { kind: "repair"; critiqueHash: string; blockingIds: string[]; target: ConceptualCritiqueRepairTarget };
 
 /** Blocking-severity critique item ids from a conceptual_design_critique payload. */
 function blockingCritiqueIds(critique: unknown): string[] {
@@ -1227,7 +1258,7 @@ function blockingCritiqueIds(critique: unknown): string[] {
  * is advisory display; the blocking-item set is the contract.
  *
  * Convergence-terminated, mirroring {@link evaluateJudgeGate}: the first blocking
- * critique ⇒ repair the design (`finalized_module_contracts`); repairing it
+ * critique ⇒ repair its declared owner (legacy: `finalized_module_contracts`); repairing it
  * re-stales and re-emits the critique (it depends on the finalized contracts), so
  * a clean re-critique ⇒ proceed (the fixpoint). A fresh critique whose blocking
  * ids were ALL already addressed by a prior repair, with none new ⇒ escalate
@@ -1240,6 +1271,15 @@ export async function evaluateCritiqueGate(artifactsDir: string): Promise<Critiq
   const critique = envelopePayload(env);
   const blockingIds = blockingCritiqueIds(critique);
   if (blockingIds.length === 0) return { kind: "proceed" };
+  const requestedTarget = isRecord(critique) ? critique.repair_target : undefined;
+  if (requestedTarget !== undefined &&
+      !(CONCEPTUAL_CRITIQUE_REPAIR_TARGETS as readonly unknown[]).includes(requestedTarget)) {
+    return { kind: "escalate", reason: "unsupported_target", blocking: blockingIds,
+      note: `Unsupported critique repair_target ${JSON.stringify(requestedTarget)}; correct the critique to name finalized_module_contracts or module_decomposition.` };
+  }
+  const target: ConceptualCritiqueRepairTarget = requestedTarget === "module_decomposition"
+    ? "module_decomposition" : "finalized_module_contracts";
+
 
   const repairState = await readRepairState(artifactsDir);
   const critiqueRepairs = repairState.critique_repairs ?? [];
@@ -1254,10 +1294,12 @@ export async function evaluateCritiqueGate(artifactsDir: string): Promise<Critiq
   // Idempotent re-entry: this exact critique already drove a repair (its design
   // repair has not yet produced a fresh critique). Re-emit the same repair.
   if (alreadyHandled) {
-    return { kind: "repair", critiqueHash, blockingIds };
+    return { kind: "repair", critiqueHash, blockingIds, target };
   }
 
-  const addressed = new Set(critiqueRepairs.flatMap((r) => r.blocking_ids ?? []));
+  const addressed = new Set(critiqueRepairs
+    .filter((repair) => (repair.target ?? "finalized_module_contracts") === target)
+    .flatMap((repair) => repair.blocking_ids ?? []));
   const newBlocking = blockingIds.filter((id) => !addressed.has(id));
 
   // Runaway backstop (loud) — pathological non-convergence.
@@ -1272,7 +1314,7 @@ export async function evaluateCritiqueGate(artifactsDir: string): Promise<Critiq
 
   // Progress: a new blocking concern (or the first round) ⇒ repair the design.
   if (critiqueRepairs.length === 0 || newBlocking.length > 0) {
-    return { kind: "repair", critiqueHash, blockingIds };
+    return { kind: "repair", critiqueHash, blockingIds, target };
   }
 
   // Stall: every blocking concern was already addressed by a prior repair, none
@@ -1541,7 +1583,7 @@ async function evaluatePreCriticCitationGrounding(
   // only at a barrel is as unfixable downstream as one that does not ground at
   // all, and the decomposition prompt states the rule as binding.
   // Its tree-readability issue repeats the citation gate's own, so it is dropped.
-  const shimIssues = (await validateDecompositionFileScope(decomposition, repoRoot)).filter(
+  const shimIssues = (await validateDecompositionFileScope(decomposition, repoRoot)).issues.filter(
     (issue) => issue.path !== "decomposition_file_scope.repo_tree",
   );
   const errors = [...result.issues, ...shimIssues].filter(
@@ -1967,7 +2009,7 @@ async function propagateAggregateToShards(
  * signal is rewritten only on a real raise. Absent signal ⇒ undefined ⇒ the
  * renderer applies its fail-safe full depth (floor is `light`, never off).
  */
-async function resolveAdversarialDepth(
+export async function resolveAdversarialDepth(
   artifactsDir: string,
 ): Promise<{
   riskSignal: Awaited<ReturnType<typeof readIntakeRiskSignal>>;
@@ -2044,6 +2086,7 @@ export interface ContractGateContext {
   readonly sourcePaths?: string[];
   readonly paths: ReturnType<typeof intakePaths>;
   readonly artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
+  readonly artifactReadPaths: Partial<Record<ContractPipelineArtifactName, string>>;
   /** Present only for structured_audit (path-A) runs. */
   readonly pathASeedPath?: string;
   readonly riskSignal: Awaited<ReturnType<typeof readIntakeRiskSignal>>;
@@ -2137,13 +2180,19 @@ async function writeContractPhaseStep(
   const rendered = renderContractPipelinePrompt({
     role: phase,
     artifactPaths: ctx.artifactPaths,
+    artifactReadPaths: ctx.artifactReadPaths,
     sourcePaths: ctx.sourcePaths,
     repoRoot: ctx.root,
     pathASeedPath: ctx.pathASeedPath,
     adversarialDepth: ctx.adversarialDepth,
   });
-  return writeContractPromptStep(ctx, {
+  const prompt = await bindContractReviewPrompt({
+    artifactsDir: ctx.artifactsDir, artifact: PHASE_TO_ARTIFACT[phase]!, role: phase,
+    emissionId: ctx.runId, requirement: reviewRequirementForRole(phase, ctx.adversarialDepth),
     prompt: extraSection ? `${rendered.prompt}\n${extraSection}` : rendered.prompt,
+  });
+  return writeContractPromptStep(ctx, {
+    prompt,
     outputPath: rendered.outputPath,
     stopCondition: `Stop after writing the contract-pipeline output for phase "${phase}" and running next-step.`,
   });
@@ -2199,11 +2248,13 @@ async function writeCollapsedRoundTripStep(
   phases: string[],
 ): Promise<RemediationStep> {
   const sections = await Promise.all(
-    phases.map(async (phase) => ({
+    phases.map(async (phase, index) => ({
       phase,
       rendered: renderContractPipelinePrompt({
         role: phase,
         artifactPaths: ctx.artifactPaths,
+    artifactReadPaths: Object.fromEntries(Object.entries(ctx.artifactReadPaths).filter(([name]) =>
+          !phases.slice(0, index).some(earlier => PHASE_TO_ARTIFACT[earlier] === name))),
         sourcePaths: ctx.sourcePaths,
         repoRoot: ctx.root,
         pathASeedPath: ctx.pathASeedPath,
@@ -2223,12 +2274,12 @@ If you cannot complete a section (an artifact would be malformed), write the one
 
 Artifacts to produce (in order):
 ${outputPaths.map((p, i) => `${i + 1}. \`${p}\` (${phases[i]})`).join("\n")}`;
-  const body = sections
-    .map(
-      (s) =>
-        `\n---\n\n${s.extra ? `${s.rendered.prompt}\n${s.extra}` : s.rendered.prompt}`,
-    )
-    .join("\n");
+  const boundSections = await Promise.all(sections.map(async section => bindContractReviewPrompt({
+    artifactsDir: ctx.artifactsDir, artifact: PHASE_TO_ARTIFACT[section.phase]!, role: section.phase,
+    emissionId: ctx.runId, requirement: reviewRequirementForRole(section.phase, ctx.adversarialDepth),
+    prompt: section.extra ? `${section.rendered.prompt}\n${section.extra}` : section.rendered.prompt,
+  })));
+  const body = boundSections.map(prompt => `\n---\n\n${prompt}`).join("\n");
   return writeContractPromptStep(ctx, {
     prompt: `${header}\n${body}`,
     outputPath: outputPaths[outputPaths.length - 1],
@@ -2657,9 +2708,24 @@ Only as an explicit LAST resort — an accepted, recorded decision to design aga
  * errors — LLM output is untrusted until validated.
  */
 const invalidIngestionGate: ContractGate = async (ctx) => {
-  const ingestion = await ingestContractArtifacts(ctx.artifactsDir);
+  const ingestion = await ingestContractArtifacts(ctx.artifactsDir, ctx.adversarialDepth);
+  for (const name of ingestion.stale ?? []) {
+    const archived = await archiveContractArtifact(ctx.artifactsDir, name, "stale", ctx.options.renameFn);
+    if (!archived.originalFree) {
+      return { via: "blocked", prompt: `# Stale review context could not be archived\n\nThe inputs to ${name} changed. Its old review cannot be accepted. Unlock or remove the stale submission at \`${contractInputFilePath(ctx.artifactsDir, name)}\` and its canonical artifact, then run next-step.`, stopCondition: "Stop until the stale review artifacts can be archived; never accept the old review." };
+    }
+  }
+  // Continue the existing staleness/consistency walk. Re-emitting this downstream
+  // reviewer now would skip upstream repairs and ask it to review invalid inputs.
   if (ingestion.invalid.length === 0) return null;
   const first = ingestion.invalid[0];
+  if (first.unavailable) {
+    return { via: "blocked", prompt: `# Required review context unavailable
+
+${formatValidationIssues(first.issues)}
+
+Keep the submitted declaration for diagnosis. When an independent context is available, replace the response at \`${contractInputFilePath(ctx.artifactsDir, first.name)}\` using the current bound prompt, then run \`${loaderCommand("next-step")}\`. Do not substitute self-review or remove the required review.`, stopCondition: "Stop until a review context satisfying the required policy is available." };
+  }
   const archived = await archiveContractArtifact(
     ctx.artifactsDir,
     first.name,
@@ -2918,6 +2984,7 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
     if (!critiqueRepairs.some((repair) => repair.critique_hash === gate.critiqueHash)) {
       critiqueRepairs.push({
         critique_hash: gate.critiqueHash,
+        target: gate.target,
         at: new Date().toISOString(),
         blocking_ids: gate.blockingIds,
       });
@@ -2926,12 +2993,13 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
     }
     const rendered = renderContractRepairPrompt({
       trigger: "critique",
-      target: "finalized_module_contracts",
+      target: gate.target,
       instruction:
         "Revise the design to resolve every BLOCKING concern in the conceptual design critique " +
         `(${gate.blockingIds.join(", ")}). Read conceptual_design_critique.json for each concern's ` +
-        "description, then rewrite the finalized module contracts so the blocking concerns no longer apply.",
+        `description, then apply targeted edits to ${gate.target} so the blocking concerns no longer apply.`,
       artifactPaths: ctx.artifactPaths,
+    artifactReadPaths: ctx.artifactReadPaths,
       repoRoot: ctx.root,
     });
     return {
@@ -2939,7 +3007,7 @@ const conceptualCritiqueGate: ContractGate = async (ctx) => {
       prompt: rendered.prompt,
       outputPath: rendered.outputPath,
       stopCondition:
-        "Stop after rewriting finalized_module_contracts to resolve the blocking critique concerns and running next-step.",
+        `Stop after repairing ${gate.target} to resolve the blocking critique concerns and running next-step.`,
     };
   }
   if (gate.kind === "escalate") {
@@ -3112,6 +3180,7 @@ const judgeRepairGate: ContractGate = async (ctx) => {
       target: repairTarget,
       instruction: gate.directive.instruction,
       artifactPaths: ctx.artifactPaths,
+    artifactReadPaths: ctx.artifactReadPaths,
       repoRoot: ctx.root,
     });
     return {
@@ -4103,14 +4172,15 @@ export async function buildNextContractPipelineStep(
   // granularity-collapse gate, so it is carried on the context alongside it.
   const { riskSignal, adversarialDepth } = await resolveAdversarialDepth(artifactsDir);
 
-  // Resolve artifact paths for the prompt renderers. The host's world is the
-  // plain INPUT files (D3): every host-facing path — both where a role WRITES
-  // its output and where it READS its upstreams — is `<name>.input.json`. The
-  // tool's canonical envelopes (`<name>.json`) are derived at ingest and never
-  // named to the host.
+  // Writes and reads are distinct: hosts submit to *.input.json; accepted
+  // upstreams are canonical envelopes whose payload field holds domain data.
+  // Collapsed ordinary authoring sections may read staged raw outputs earlier
+  // in that same round trip, before they have been ingested.
   const artifactPaths: Partial<Record<ContractPipelineArtifactName, string>> = {};
+  const artifactReadPaths: Partial<Record<ContractPipelineArtifactName, string>> = {};
   for (const name of CP_ARTIFACT_NAMES) {
     artifactPaths[name] = contractInputFilePath(artifactsDir, name);
+    artifactReadPaths[name] = contractArtifactFilePath(artifactsDir, name);
   }
 
   const seedPath = pathASeedFilePath(artifactsDir);
@@ -4122,6 +4192,7 @@ export async function buildNextContractPipelineStep(
     sourcePaths,
     paths: intakePaths(artifactsDir),
     artifactPaths,
+    artifactReadPaths,
     // Present only for structured_audit runs.
     pathASeedPath: existsSync(seedPath) ? seedPath : undefined,
     riskSignal,
@@ -4888,24 +4959,13 @@ export async function promoteImplementationDagToExtractedPlan(
         obligationEvidence.length > 0
           ? obligationEvidence
           : [node.description ?? node.title ?? `Contract-pipeline task ${id}`],
-      // NO `concrete_change`. It was `node.description` a second time — `summary`
-      // above already carries exactly that — and no consumer ever read it:
-      // `FindingSchema` never declared it, so the dispatch boundary's
-      // `FindingSchema.parse` stripped it, and no reader recovered it from the
-      // plan in between. A field the pipeline computes onto a finding that
-      // reaches no consumer is not computed.
+      // The implementation description already lives in summary.
       contract_goal_id: dag?.goal_id,
       contract_obligation_ids: contractObligations,
       verification_obligation_ids: verificationObligations,
       targeted_commands: node.targeted_commands ?? [],
-      // NO `addresses_counterexamples`, `preconditions`, or `expected_changes`.
-      // Each is a DAG-node fact whose only readers are the node-side gates
-      // (`validateImplementationDAGIntegrity` and `validateCounterexampleThreading`
-      // in `src/remediate/validation/contractPipelineGates.ts`) — they read it
-      // off the NODE, never off a finding. Copied onto the finding they were
-      // declared on no schema, read by no consumer, and dropped by the dispatch
-      // boundary's `FindingSchema.parse`. The counterexample ids still reach the
-      // finding where they ARE consumed: folded into `evidence` above.
+      // Distinct node instructions travel on the block, not the finding.
+
     };
   });
 
@@ -4934,8 +4994,7 @@ export async function promoteImplementationDagToExtractedPlan(
           contract_obligation_ids: contractObligations,
           verification_obligation_ids: verificationObligations,
           targeted_commands: [...(node.targeted_commands ?? [])],
-          // The node-only fields are deliberately NOT copied here — see the
-          // sibling block above for why.
+          // The source finding stays intact; its node instructions travel on the block.
         };
       });
   }
@@ -4968,6 +5027,11 @@ export async function promoteImplementationDagToExtractedPlan(
       };
     }
   }
+
+  const counterexamplePayload = envelopePayload(await readContractArtifact(artifactsDir, "counterexample"));
+  const counterexampleEntries = isRecord(counterexamplePayload) && Array.isArray(counterexamplePayload.counterexamples)
+    ? counterexamplePayload.counterexamples.map(entry => CounterexampleSchema.parse(entry)) : [];
+  const counterexamplesById = new Map(counterexampleEntries.map(entry => [entry.id, entry]));
 
   const blocks = nodes.map((node, index) => {
     const nodeId = ensureNodeId(node.id, index);
@@ -5019,9 +5083,21 @@ export async function promoteImplementationDagToExtractedPlan(
         )
       : undefined;
     const blockModuleContracts = moduleContractsForNode(node);
+    const counterexamples = [...new Set(node.addresses_counterexamples ?? [])].map(id => {
+      const entry = counterexamplesById.get(id);
+      if (!entry) throw new Error(`Implementation node ${nodeId} names missing counterexample ${id}; repair the upstream counterexample binding.`);
+      return entry;
+    });
+    const implementationContext = ImplementationContextSchema.parse({
+      ...(approvedSource && node.description ? { description: node.description } : {}),
+      ...(node.preconditions !== undefined ? { preconditions: node.preconditions } : {}),
+      ...(node.expected_changes !== undefined ? { expected_changes: node.expected_changes } : {}),
+      ...(counterexamples.length > 0 ? { counterexamples } : {}),
+    });
     return {
       block_id: toBlockId(nodeId),
       items: canonicalItemsByNodeId.get(nodeId) ?? [nodeId],
+      ...(Object.keys(implementationContext).length > 0 ? { implementation_context: implementationContext } : {}),
       // INV-remediate-pipeline-02: a block with prerequisites is never
       // wave-dispatched as independent — parallel_safe derives from depends_on.
       parallel_safe: deps.length === 0,

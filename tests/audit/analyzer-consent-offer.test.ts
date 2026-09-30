@@ -1,3 +1,4 @@
+import { auditRunConsentPath, readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
 /**
  * Item B — consent-offer surfacing (spec/mechanical-analyzer-layer-design.md).
  * The silent-fail-closed defect: applicable consent-gated analyzers were
@@ -161,12 +162,12 @@ describe("persistAnalyzerConsent — decisions durable, tokens never", () => {
 
     await persistAnalyzerConsent(root, { knip: "declined" });
     const cfg = JSON.parse(
-      readFileSync(getAnalyzerPolicyPath(root), "utf8"),
+      readFileSync(auditRunConsentPath(auditDir), "utf8"),
     ) as {
       analyzer_consent?: Record<string, string>;
       external_acquisition?: unknown;
     };
-    expect(cfg.analyzer_consent).toEqual({ knip: "declined" });
+    expect((cfg as { decisions?: unknown }).decisions).toEqual({ knip: "declined" });
     expect(JSON.stringify(cfg)).not.toContain("consent_token");
     expect(readFileSync(sessionConfigPath, "utf8")).toBe(sessionConfigBytes);
   });
@@ -202,7 +203,7 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
     expect(prompt).toContain(eslint.purpose!);
     expect(prompt).toContain("config can execute repo code");
     expect(prompt).toContain(
-      "`declined` persists across runs; `granted` covers this run only, and the next run re-offers.",
+      "Both `declined` and `granted` cover this run only; a new audit asks again.",
     );
     expect(prompt).toContain("X:/artifacts/submissions/0000000000000000000000000000000000000000000000000000000000000000.json");
     expect(prompt).toContain('"eslint": "granted"');
@@ -291,13 +292,8 @@ describe("the consent gate refuses a submission it understands nothing in", () =
     expect(externalAcquisition.consentToken?.tools).toEqual(["eslint"]);
     expect(externalAcquisition.consentToken?.value).toBeTruthy();
 
-    const policy = JSON.parse(readFileSync(getAnalyzerPolicyPath(root), "utf8")) as {
-      analyzer_consent?: Record<string, string>;
-    };
-    expect(
-      policy.analyzer_consent ?? {},
-      "a grant must leave nothing durable behind",
-    ).toEqual({});
+    expect((await loadAnalyzerPolicy(root)).analyzer_consent).toBeUndefined();
+    expect((await readRunConsentUnlocked(root, artifactsDir)).decisions).toEqual({ eslint: "granted" });
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (event) => event.kind === "accepted",
@@ -350,7 +346,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
       // production dispatch reads them out of the loaded policy via the
       // advance options.
       await persistAnalyzerConsent(root, { prettier: "declined" });
-      const policy = await loadAnalyzerPolicy(root);
+      const policy = { analyzers: {}, analyzer_consent: { prettier: "declined", eslint: "declined" } as const };
       expect(policy.analyzer_consent?.prettier).toBe("declined");
 
       const result = await advanceAudit(bundleWith([
@@ -359,6 +355,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
       ]), {
         root,
         preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
         externalAcquisition: {
           enabled: true,
           analyzers: policy.analyzers,
@@ -388,6 +385,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
       });
 
       const applied = result.updated_bundle
@@ -408,7 +406,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
       // Flat config — the only form the runnable gate accepts.
       await writeFileAsync(join(root, "eslint.config.js"), "module.exports = [];\n");
       await persistAnalyzerConsent(root, { eslint: "declined" });
-      const policy = await loadAnalyzerPolicy(root);
+      const policy = { analyzers: {}, analyzer_consent: { prettier: "declined", eslint: "declined" } as const };
 
       const result = await runSyntaxResolutionExecutor(
         bundleWith(["src/api/auth.ts"]),

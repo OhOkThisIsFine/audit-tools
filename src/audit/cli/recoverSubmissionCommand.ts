@@ -1,3 +1,5 @@
+import { auditReviewBinding } from "./reviewSubmission.js";
+import { parseReviewSubmissionEnvelope } from "../../shared/types/reviewIndependence.js";
 // sites-pinned: tests/audit/recover-submission-mis-route.test.ts, tests/shared/hand-recovery-uses-the-same-validator.test.ts
 //   The first suite drives this verb's own mis-route guard through the CLI; the
 //   second pins that the rescue path validates through the same gate the normal
@@ -172,7 +174,7 @@ export async function cmdRecoverSubmission(argv: string[]): Promise<void> {
   // An extraction lane carries one rule the gate does not: the mis-route check
   // this verb's own `--from` makes reachable. See `charterMisRouteIssue`.
   const kind = charterKindForLane(lane);
-  const validate: (value: unknown) => SubmissionIssue | null =
+  const validateDomain: (value: unknown) => SubmissionIssue | null =
     kind === undefined
       ? schemaValidate
       : await (async () => {
@@ -180,6 +182,12 @@ export async function cmdRecoverSubmission(argv: string[]): Promise<void> {
           return (value: unknown) =>
             schemaValidate(value) ?? charterMisRouteIssue(lane, kind, delivered, value);
         })();
+
+  const reviewBinding = await auditReviewBinding(artifactsDir, lane);
+  const validate = (value: unknown): SubmissionIssue | null => {
+    const parsed = parseReviewSubmissionEnvelope(value, reviewBinding);
+    return parsed.ok ? validateDomain(parsed.result) : { code: "submission_contract_invalid", message: parsed.issue };
+  };
 
   // The gate's OWN roots, not the repo root: a rescued submission must report
   // the same bound path the gate derives and the expected set records. Taking

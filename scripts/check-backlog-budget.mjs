@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-budget-unit.test.ts, tests/shared/backlog-consolidated.test.ts
 // Size budget for the split backlog.
 //
 // WHY. The backlog grew past 1,700 lines in one file, so every pass navigated it
@@ -177,8 +178,8 @@ const PROPERTY_MARKER = /\*\*Property:\*\*/;
  * persisted identity (see entryKey / .size-baseline.json) whose 78-char
  * truncation the recorded keys already carry.
  */
-export function parseEntries(text) {
-  return splitBacklogEntries(text).map(({ line, headline, body }) => ({
+export function parseEntries(text, entries = splitBacklogEntries(text)) {
+  return entries.map(({ line, headline, body }) => ({
     line,
     bytes: sizeOf(body.replace(/\s+$/, "")),
     title: headline.replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78),
@@ -322,7 +323,7 @@ function loadBaseline() {
  * `staleAmnesty` (the `--report` list) rather than refused, because the amnesty
  * carries no recorded size and is inert while the entry is small.
  *
- * @param {{file: string, text: string, previousText?: string}[]} files
+ * @param {{file: string, text: string, previousText?: string, document?: ReturnType<typeof import("./shared/backlog-entry-grammar.mjs").parseBacklogDocument>}[]} files
  *   `previousText` is the file as HEAD holds it, or omitted when HEAD's copy is
  *   unreadable. It only ever ADDS a "bytes since HEAD" line to a refusal.
  * @param {{fileCeilings: Record<string, number>, entriesOverBudget: Set<string>,
@@ -342,8 +343,8 @@ export function evaluateBacklog(files, baseline) {
   const distribution = [];
   const presentFiles = new Set(files.map((f) => f.file));
 
-  for (const { file, text, previousText } of files) {
-    const entries = parseEntries(text);
+  for (const { file, text, previousText, document } of files) {
+    const entries = parseEntries(text, document?.entries);
     totalEntries += entries.length;
     const fileBytes = sizeOf(text);
     const sinceHead = sinceHeadLine(previousText === undefined ? null : sizeOf(previousText), fileBytes);
@@ -466,7 +467,7 @@ export function evaluateBacklog(files, baseline) {
       const file = separator === -1 ? key : key.slice(0, separator);
       const title = separator === -1 ? "" : key.slice(separator + 2);
       const source = files.find((f) => f.file === file);
-      return source === undefined || !parseEntries(source.text).some((e) => e.title === title);
+      return source === undefined || !parseEntries(source.text, source.document?.entries).some((e) => e.title === title);
     }).sort(compareCodeUnits);
     for (const key of found) {
       const file = key.slice(0, key.indexOf("::"));
@@ -569,10 +570,10 @@ export function planBaselineUpdate(nextBaseline, baseline, { raiseCeiling }) {
  * with no commits, a brand-new file, or a missing git all mean "no delta to state",
  * and a refusal must never be *invented* out of an unreadable previous copy.
  */
-function headText(file) {
+export function headText(file, root = repoRoot) {
   try {
     return execFileSync("git", ["show", `HEAD:docs/backlog/${file}`], {
-      cwd: repoRoot,
+      cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true, // INV-WH — a console child from a windowless parent pops a window

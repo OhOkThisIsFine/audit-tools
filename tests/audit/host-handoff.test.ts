@@ -1,3 +1,5 @@
+import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -212,7 +214,7 @@ async function snapshotTree(root: string): Promise<Readonly<Record<string, strin
  */
 function readyForReviewBundle(
   reviewTask: HostTask,
-  extra: Readonly<Record<string, unknown>> = {},
+  extra: Readonly<ArtifactBundle> = {},
 ): Record<string, unknown> {
   const bundle = {
     repo_manifest: {
@@ -1680,9 +1682,13 @@ describe(FAILURE_SIGNATURE, () => {
     // drain reaches the review obligation within the budget), the active
     // review-run manifest, its pending-task list — plus the binding set that
     // build wrote, which has no `tags` and an older version.
-    await writeCoreArtifacts(artifactsDir, readyForReviewBundle(oldTask), {
+    const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
+    const frontier = await buildAdvancedBundle(root, "planning_artifacts");
+    const completed = captureCompletedDesignReviews(readyForReviewBundle(oldTask, frontier));
+    await writeCoreArtifacts(artifactsDir, completed, {
       prune: true,
     });
+    await persistDesignReviewSnapshots(artifactsDir, completed);
     const runDir = join(artifactsDir, "runs", runId);
     await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
     await mkdir(runDir, { recursive: true });

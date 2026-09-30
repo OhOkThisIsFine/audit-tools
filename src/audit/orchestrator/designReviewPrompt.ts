@@ -1,11 +1,9 @@
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
-import type { CharterRegister } from "../types/charterRegister.js";
+import { projectConceptualCharterContext } from "./designReviewTask.js";
+import { designReviewInputRevision } from "./designReviewProjection.js";
 import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
-import {
-  charterReviewDisposition,
-} from "audit-tools/shared";
 import { buildReviewFileMap, renderReviewFileMap } from "../systemic/reviewFileMap.js";
 import {
   deriveUnitScopeDisposition,
@@ -197,12 +195,14 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
         `${total} structural findings from deterministic analysis — **leads, not verdicts**. ` +
         "Each is a deterministic heuristic over a generation of the repo; a heuristic can be " +
         "right about the structure and wrong about the project. Confirm one against real code " +
-        "before treating it as a finding, and when you do confirm it, say so in your own " +
-        "finding rather than re-emitting the lead unchanged.",
+        "before treating it as a finding. If confirmed, retain the lead's lens, category, title, and affected_files " +
+        "from its identity below so the tool can match the confirmation; independently determine severity, confidence, summary, and evidence " +
+        "from real code. Do not copy an unverified verdict or supply lead_lineage: the tool attaches provenance after matching.",
       (finding) =>
         `- [${finding.severity}] ${finding.title}: ${finding.summary}` +
         (finding.lead_lineage
-          ? ` _(lead: ${finding.lead_lineage.producer} @ ${finding.lead_lineage.source_hash.slice(0, 12)})_`
+          ? ` _(lead: ${finding.lead_lineage.producer} @ ${finding.lead_lineage.source_hash.slice(0, 12)})_` +
+            `\n  Confirmation identity: ${JSON.stringify({ lens: finding.lens, category: finding.category, title: finding.title, affected_files: finding.affected_files })}`
           : ""),
     ),
     // Any finding here WITHOUT a lineage record is called out rather than
@@ -295,132 +295,9 @@ function examplePath(bundle: ArtifactBundle): string {
  * parallel subagents (one perspective each), then merges via an independent
  * judge. Provider-neutral — a perspective is a *lens*, never a model.
  */
-export interface ConceptualPerspective {
-  name: string;
-  /** The value system this reviewer judges the codebase through. */
-  lens: string;
-}
-
-/**
- * Built-in conceptual perspectives. Each is a maximally dissimilar value system
- * so the union covers angles no single pass would. A reviewer may sharpen its
- * lens to the codebase, but stays in character.
- *
- * ORDER CARRIES NO MEANING. This list used to be documented as "ordered
- * most-to-least commonly useful", and the fan-out took the first N — which made
- * the last entries unreachable at any narrowed count. That ranking was never
- * measured: findings record a `lens`, never the perspective that produced them,
- * so nothing in this repo can say which reviewer contributes what. The claim was
- * removed rather than re-stated (owner, 2026-08-30), and per-perspective
- * attribution is the work that would let a future ordering be earned.
- */
-export const CONCEPTUAL_PERSPECTIVES: readonly ConceptualPerspective[] = [
-  {
-    name: "Pragmatist",
-    lens:
-      "Does this actually work for users? What's the shortest path to value? Flag anything that adds ceremony or indirection without earning its keep.",
-  },
-  {
-    name: "Mathematician seeking elegance",
-    lens:
-      "Minimal complexity, orthogonal abstractions, no redundancy. Flag overlapping concepts that should be unified and abstractions that fail to compose.",
-  },
-  {
-    name: "Short attention span",
-    lens:
-      "Frustrated by anything taking >30 seconds to understand. If a design can't be explained simply, it's too complex. Flag cognitive-load hotspots and implicit knowledge.",
-  },
-  {
-    name: "Novelty-seeker",
-    lens:
-      "Always hunting for the latest tool, pattern, or library that could replace hand-rolled machinery. Flag wheels being reinvented and standards being ignored.",
-  },
-  {
-    name: "Adversary",
-    lens:
-      "What could go wrong, what's fragile, what breaks under pressure or at scale? Flag failure modes the happy path quietly assumes away.",
-  },
-  {
-    name: "Maintainer inheriting this cold",
-    lens:
-      "A new engineer six months from now with no context. Flag what would take longest to learn, what's implicit, and what has no obvious entry point.",
-  },
-  {
-    name: "Minimalist",
-    lens:
-      "What could be deleted entirely? Flag features, layers, and options that exist but earn little, and capabilities that duplicate one another.",
-  },
-];
-
-/**
- * Default number of deep-review perspectives when the host does not specify: the
- * WHOLE roster.
- *
- * It was 5 against a 7-entry roster, with no recorded reason — the constant never
- * arrived in a commit of its own, and its comment only restated its own name. A
- * default that silently drops two reviewers is a judgement about which reviewers
- * matter least, and nothing measures that (see the roster note above). Derived
- * from the roster length so adding a perspective cannot silently re-introduce a
- * cut. An operator who wants a cheaper run still narrows the count explicitly,
- * which is a choice they made rather than one made for them.
- */
-export const DEFAULT_CONCEPTUAL_PERSPECTIVES = CONCEPTUAL_PERSPECTIVES.length;
-
-/**
- * Clamp a requested perspective count into the supported range: at least 2
- * (one perspective is just a shallow review) and at most the number of built-in
- * perspectives. Non-finite / undefined ⇒ the default.
- */
-export function clampPerspectiveCount(requested?: number): number {
-  if (requested === undefined || !Number.isFinite(requested)) {
-    return DEFAULT_CONCEPTUAL_PERSPECTIVES;
-  }
-  return Math.max(2, Math.min(CONCEPTUAL_PERSPECTIVES.length, Math.floor(requested)));
-}
-
-/**
- * The two perspectives a deep fan-out must ALWAYS contain, whatever the count:
- * structural simplification and the purpose/telos challenge. They are named, not
- * indexed, so reordering the roster cannot silently drop one.
- *
- * WHY THIS EXISTS, stated accurately. Selection was `slice(0, count)` over the
- * roster in list order, and that slice was DELIBERATE — the roster documented
- * itself as ranked by usefulness, so taking the first N was the intended design,
- * not an oversight. An earlier version of this comment called it accidental
- * starvation; that was wrong.
- *
- * What was never true is the RANKING the slice relied on. Nothing measured it,
- * and nothing can today: findings carry a `lens`, never the perspective that
- * produced them. The default now covers the whole roster, so this reservation
- * binds only when an operator deliberately narrows the count — and then it keeps
- * the two perspectives this workflow is built around rather than whichever two
- * an unmeasured ordering happened to favour. Matched by NAME, so reordering the
- * roster cannot silently drop one.
- */
-const REQUIRED_PERSPECTIVE_NAMES: readonly string[] = [
-  "Mathematician seeking elegance",
-  "Minimalist",
-];
-
-/**
- * `count` (clamped) built-in perspectives for a deep fan-out, with the two required
- * perspectives reserved and the remaining slots filled in roster order.
- *
- * Emission stays in ROSTER order rather than required-first, so the prompt sequence
- * an operator sees does not change shape — only its membership does. The clamp floor
- * of 2 is exactly the reserved count, so the guarantee holds at every legal count.
- */
-export function selectPerspectives(count?: number): ConceptualPerspective[] {
-  const limit = clampPerspectiveCount(count);
-  const chosen = new Set(
-    CONCEPTUAL_PERSPECTIVES.filter((p) => REQUIRED_PERSPECTIVE_NAMES.includes(p.name)),
-  );
-  for (const perspective of CONCEPTUAL_PERSPECTIVES) {
-    if (chosen.size >= limit) break;
-    chosen.add(perspective);
-  }
-  return CONCEPTUAL_PERSPECTIVES.filter((p) => chosen.has(p));
-}
+export { CONCEPTUAL_PERSPECTIVES, DEFAULT_CONCEPTUAL_PERSPECTIVES, clampPerspectiveCount, selectPerspectives } from "../../shared/types/conceptualPerspective.js";
+import type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
+export type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
 
 /**
  * Shared "how to think" block for the conceptual-review prompts. This is the
@@ -683,31 +560,18 @@ function conceptualOutputFormat(
  * read-only — no Phase-D (clarification) dependency.
  */
 export function renderCharterContext(bundle: ArtifactBundle): string {
-  const register: CharterRegister | undefined = bundle.charter_register;
-  if (!register || register.status === "omitted") return "";
-  const correspondences = register.correspondences ?? [];
-  if (correspondences.length === 0) return "";
-  const lanes = register.lanes ?? [];
-
-  // Three accounts SIDE BY SIDE per correspondence — never a unified sentence
-  // (design of record 2026-09-15, step 5: no reader authors a merged account).
-  const blocks = correspondences.map((corr) => {
-    const files = new Set<string>();
-    const accountLines = corr.members.flatMap((member) => {
-      const graph = lanes.find((g) => g.kind === member.kind);
-      return member.node_ids.flatMap((id) => {
-        const node = graph?.nodes.find((n) => n.node_id === id);
-        if (!node) return [];
-        for (const f of node.files ?? []) files.add(f);
-        const disposition =
-          charterReviewDisposition(node) === "flag_for_human"
-            ? " — LOW-CONFIDENCE account: FLAG for human intent input, do NOT opine on it"
-            : "";
-        return [`  - [${member.kind}] ${node.purpose}${disposition}`];
-      });
+  const context = projectConceptualCharterContext(bundle);
+  if (context.length === 0) return "";
+  const blocks = context.map((correspondence) => {
+    const files = new Set(correspondence.accounts.flatMap((account) => account.files));
+    const accountLines = correspondence.accounts.map((account) => {
+      const disposition = account.disposition === "flag_for_human"
+        ? " — LOW-CONFIDENCE account: FLAG for human intent input, do NOT opine on it"
+        : "";
+      return `  - [${account.kind}] ${account.purpose}${disposition}`;
     });
     const scope = files.size > 0 ? [...files].sort().join(", ") : "(no scoped files)";
-    return [`- **${corr.correspondence_id}** (files: ${scope})`, ...accountLines].join("\n");
+    return [`- **${correspondence.correspondence_id}** (files: ${scope})`, ...accountLines].join("\n");
   });
 
   return [
@@ -762,8 +626,14 @@ export function renderSharedStructuralContext(
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
   const prioritizedReadingList = buildPrioritizedReadingList(bundle, maxUnits);
 
+  // Bind the same complete semantic projection that controls review staleness,
+  // including entries omitted by the human-readable summaries below. Cosmetic
+  // timestamps and provenance stay outside identity under that existing policy.
+  const inputRevision = designReviewInputRevision(bundle);
+
   return [
     "## Project context",
+    `Structural input revision: ${inputRevision}`,
     "",
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
@@ -982,7 +852,7 @@ export function renderConceptualJudgePrompt(
     ...renderLensScope(options),
     "## Perspective result files",
     "",
-    "Read each of these JSON finding submissions (each a `{ \"findings\": [ ... ] }` object):",
+    "Read each of these review-submission/v1 JSON envelopes. The domain findings are in `result.findings`; `review` declares the reviewer context. If a perspective declares degraded or unavailable, stop and request an independent replacement instead of treating it as completed review:",
     "",
     ...sources,
     "",

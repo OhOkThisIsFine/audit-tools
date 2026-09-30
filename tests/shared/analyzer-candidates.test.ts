@@ -1,3 +1,4 @@
+import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
 import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1173,7 +1174,7 @@ test("inv-18: upsertExternalToolResults is the single merge helper — same tool
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// inv-15 / fail-10 / fail-11: the durable policy merge is lock-guarded and an
+// inv-15 / fail-10 / fail-11: run decisions and durable settings are lock-guarded; an
 // invalid artifact fails CLOSED. A lost decline is an unenforceable veto — exactly
 // what the admission ladder above exists to enforce.
 // ───────────────────────────────────────────────────────────────────────────
@@ -1189,8 +1190,8 @@ test("inv-15 / fail-11: concurrent consent + settings writes both land, neither 
   const root = await mkdtemp(join(tmpdir(), "cp1-policy-"));
   try {
     await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
-    // Interleave many writers against the one artifact. Without the locked
-    // read-modify-write, a plain write drops whichever decision it did not read.
+    // Interleave run-decision and durable-settings writers. Each authority must
+    // preserve its concurrent updates without moving decisions into global policy.
     await Promise.all([
       ...["eslint", "knip", "semgrep", "jscpd"].map((id) =>
         persistAnalyzerConsent(root, { [id]: "declined" }),
@@ -1198,9 +1199,11 @@ test("inv-15 / fail-11: concurrent consent + settings writes both land, neither 
       ...["clippy", "rubocop"].map((id) => persistAnalyzerSettings(root, { [id]: "skip" })),
     ]);
     const policy = await loadAnalyzerPolicy(root);
+    const run = await readRunConsentUnlocked(root, join(root, ".audit-tools", "audit"));
+    expect(policy.analyzer_consent).toBeUndefined();
     for (const id of ["eslint", "knip", "semgrep", "jscpd"]) {
       expect(
-        policy.analyzer_consent?.[id],
+        run?.decisions[id],
         `${id}'s decline must survive concurrent writers`,
       ).toBe("declined");
     }
@@ -1216,14 +1219,14 @@ test("fail-10: a malformed policy artifact throws — it never degrades to an em
   const root = await mkdtemp(join(tmpdir(), "cp1-policy-bad-"));
   try {
     await mkdir(join(root, ".audit-tools", "audit"), { recursive: true });
-    // A value outside the decision vocabulary. Degrading to `{}` here would silently
-    // discard every recorded decline, which the chokepoint could then never enforce.
+    // An invalid durable setting must fail closed. Legacy durable consent is
+    // deliberately ignored because only current-run decisions have authority.
     await writeFile(
       getAnalyzerPolicyPath(root),
-      JSON.stringify({ analyzer_consent: { eslint: "maybe" } }),
+      JSON.stringify({ analyzers: { eslint: "maybe" } }),
       "utf8",
     );
-    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/analyzer_consent/);
+    await expect(loadAnalyzerPolicy(root)).rejects.toThrow(/analyzers/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

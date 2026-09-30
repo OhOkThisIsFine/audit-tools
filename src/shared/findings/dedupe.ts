@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/cross-lens-dedupe.test.ts, tests/audit/lead-lineage.test.ts
 import type { Finding } from "../types/finding.js";
 import { severityRank, confidenceRank } from "../types/lens.js";
 import { findingIdentityKey } from "../findingIdentitySignature.js";
@@ -158,6 +159,22 @@ export function mergeAffectedFiles(survivor: Finding, absorbed: Finding, sort: b
   }
 }
 
+/**
+ * Keep a deterministic primary producer when confirmed findings collapse.
+ * The singular field records one original lead; all producers' evidence still
+ * unions through the normal evidence channel. Admission/confirmation is the
+ * caller's responsibility, just like this module's other trust preconditions.
+ */
+function mergePrimaryLeadLineage(survivor: Finding, absorbed: Finding): void {
+  const candidate = absorbed.lead_lineage;
+  if (!candidate) return;
+  const current = survivor.lead_lineage;
+  if (!current || compareCodeUnits(
+    JSON.stringify([candidate.producer, candidate.source_hash]),
+    JSON.stringify([current.producer, current.source_hash]),
+  ) < 0) survivor.lead_lineage = { ...candidate };
+}
+
 export interface AbsorbOptions {
   /** Merge grounding verdicts by precedence (audit evidence integrity). */
   mergeGrounding: boolean;
@@ -172,6 +189,7 @@ export interface AbsorbOptions {
  * Shared by the cross-lens core AND audit's same-lens pass.
  */
 export function absorbFinding(survivor: Finding, absorbed: Finding, opts: AbsorbOptions): void {
+  mergePrimaryLeadLineage(survivor, absorbed);
   mergeAffectedFiles(survivor, absorbed, opts.sortAffectedFiles);
   survivor.evidence = [
     ...new Set([...(survivor.evidence ?? []), ...(absorbed.evidence ?? [])]),
@@ -888,6 +906,7 @@ export function upsertFindingByIdentity(merged: Map<string, Finding>, finding: F
     return;
   }
 
+  mergePrimaryLeadLineage(existing, finding);
   if (severityRank(finding.severity) > severityRank(existing.severity)) {
     existing.severity = finding.severity;
   }

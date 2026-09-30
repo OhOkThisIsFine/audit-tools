@@ -325,7 +325,7 @@ describe("test_validator_plan role", () => {
 });
 
 describe("contract repair prompt", () => {
-  it("renders a full-rewrite prompt for each repair target", () => {
+  it("renders a targeted-edit prompt for each repair target", () => {
     for (const target of [
       "finalized_module_contracts",
       "obligation_ledger",
@@ -496,7 +496,7 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
       expect(result.prompt).toContain("without shared authorship");
       // The same text carries the degraded fallback; the retired
       // capability-branch wording must not resurface as a second form.
-      expect(result.prompt).toContain("explicitly-degraded fallback");
+      expect(result.prompt).toContain("report unavailable and pause");
       expect(result.prompt).not.toContain("degraded to inline self-review");
       expect(result.prompt).not.toContain("This host reported it cannot dispatch");
       // NO MECHANISM. A host without in-process subagents read an instruction it
@@ -510,8 +510,13 @@ describe("contract pipeline — mandatory independent critic (lane-class-conditi
         artifactPaths: ALL_PATHS,
         adversarialDepth: "light",
       });
-      expect(result.prompt).toContain("light inline self-check");
-      expect(result.prompt).not.toContain("Independent Review — MANDATORY");
+      if (role === "judge") {
+        expect(result.prompt).toContain("Independent Review — MANDATORY");
+        expect(result.prompt).not.toContain("light inline self-check");
+      } else {
+        expect(result.prompt).toContain("light inline self-check");
+        expect(result.prompt).not.toContain("Independent Review — MANDATORY");
+      }
     });
   }
 

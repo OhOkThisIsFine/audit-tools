@@ -75,7 +75,6 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/remediate/phases/close.ts", claim: "mutates", reason: "closing-action bodies; it WRITES closing artifacts and removes the artifacts dir on promotion, but the STEP MACHINE owns the transition and the directory — close.ts executes a close it was handed, it does not decide that the run is closing or where its artifacts live (options.artifactsDir is caller-supplied throughout)" },
   { module: "src/remediate/phases/triage.ts", claim: "mutates", reason: "triage decision bodies; it WRITES triage_batch.json / triage-outcome.json and renames quarantined files, all under a caller-supplied options.artifactsDir — the step machine owns the transition and the location" },
   { module: "src/remediate/review/autonomousGate.ts", claim: "pure", reason: "autonomous-review gating predicate; pure" },
-  { module: "src/remediate/steps/contractPipelinePrompts.ts", claim: "reads-only", reason: "prompt text for the contract pipeline; the builder reads templates and returns text — no state" },
   { module: "src/remediate/steps/intakeResolver.ts", claim: "reads-only", reason: "intake resolution; it reads intake artifacts and returns the resolution — the step machine owns the transition" },
   { module: "src/remediate/steps/sessionConfigLoad.ts", claim: "pure", reason: "session-config shaping; pure over an already-loaded config — the step machine owns the read and the transition" },
 ];

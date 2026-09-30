@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-python-imports.test.ts, tests/audit/python-logical-lines.test.ts, tests/audit/scanner-linear-boundaries.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { scanStringAware, compareCodeUnits } from "audit-tools/shared";
@@ -51,7 +52,7 @@ function pythonParenDelta(line: string): number {
   return delta;
 }
 
-function pythonLogicalLines(content: string): string[] {
+export function pythonLogicalLines(content: string): string[] {
   const logicalLines: string[] = [];
   let pending = "";
   let parenDepth = 0;
@@ -92,7 +93,7 @@ function unwrapPythonImportList(value: string): string {
   return trimmed;
 }
 
-function splitPythonImportList(value: string): string[] {
+export function splitPythonImportList(value: string): string[] {
   const items: string[] = [];
   let current = "";
   let quote: "'" | '"' | undefined;
@@ -148,7 +149,16 @@ function splitPythonImportList(value: string): string[] {
 }
 
 function stripPythonAlias(value: string): string {
-  return value.replace(/\s+as\s+[A-Za-z_]\w*$/i, "").trim();
+  let end = value.length;
+  while (end > 0 && /[A-Za-z0-9_]/.test(value[end - 1]!)) end--;
+  if (end === value.length || !/[A-Za-z_]/.test(value[end]!)) return value.trim();
+  const nameStart = end;
+  while (end > 0 && /\s/.test(value[end - 1]!)) end--;
+  if (end === nameStart || value.slice(end - 2, end).toLowerCase() !== "as") return value.trim();
+  end -= 2;
+  const aliasStart = end;
+  while (end > 0 && /\s/.test(value[end - 1]!)) end--;
+  return (end < aliasStart ? value.slice(0, end) : value).trim();
 }
 
 function isPythonIdentifier(value: string): boolean {
@@ -178,7 +188,10 @@ function resolvePythonPathCandidate(
   candidate: string,
   pathLookup: Map<string, string>,
 ): string | undefined {
-  const normalized = normalizeGraphPath(candidate).replace(/\/+$/, "");
+  const path = normalizeGraphPath(candidate);
+  let end = path.length;
+  while (end > 0 && path[end - 1] === "/") end--;
+  const normalized = path.slice(0, end);
   if (normalized.length === 0 || normalized === "." || normalized === "..") {
     return undefined;
   }
@@ -290,7 +303,7 @@ function resolvePythonRelativeModuleSpecifier(
   return resolvePythonPathCandidate(candidate, pathLookup);
 }
 
-function resolvePythonModuleSpecifier(
+export function resolvePythonModuleSpecifier(
   fromPath: string,
   specifier: string,
   pathLookup: Map<string, string>,

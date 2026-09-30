@@ -1,3 +1,5 @@
+import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
+import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * Extracted helpers for the next-step command.
@@ -7,14 +9,14 @@
  * concern.
  */
 
-import { randomUUID } from "node:crypto";
+import { AnalyzerRunConsentDecisionSchema, readRunConsentUnlocked, updateRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
   advance,
+  ANALYZER_SETTINGS,
   describeStoppedFold,
   RunLogger,
-  compareCodeUnits,
   hashContent,
   isFileMissingError,
   isJsonParseError,
@@ -22,7 +24,6 @@ import {
   readJsonFile,
   readSubmissionIngestHistory,
   readTrailingSubmissionRefusals,
-  persistAnalyzerConsent,
   persistAnalyzerSettings,
   writeJsonFile,
   type ObligationDef,
@@ -140,7 +141,8 @@ import {
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
-import { runAuditStepUnlocked, withArtifactTreeHold } from "./auditStep.js";
+import { runAuditStepUnlocked } from "./auditStep.js";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
@@ -184,7 +186,7 @@ import { recordHostResultOutcomes, renderIngestReportLines } from "audit-tools/s
 export type SubmissionConsumeAttempt<T> =
   | { status: "ok"; value: T; path: string; contentHash?: string }
   | { status: "absent" }
-  | { status: "malformed"; path: string; reason: string };
+  | { status: "malformed"; path: string; reason: string; issueCode?: "submission_malformed" | "submission_contract_invalid" };
 
 /**
  * Read a lane's submission from the TOOL-COMPUTED path its emission bound —
@@ -204,14 +206,16 @@ export async function tryConsumeSubmission<T>(
   artifactsDir: string,
   lane: string,
   tx?: FoldTransaction,
+  currentInputRevision?: CurrentReviewInputRevision,
 ): Promise<SubmissionConsumeAttempt<T>> {
   if (tx) {
     const stagedResult = await stageLaneSubmission(tx, artifactsDir, lane);
     if (stagedResult.status === "absent") return { status: "absent" };
     const { stagingPath, contentHash } = stagedResult.staged;
     try {
-      const value = await readJsonFile<T>(stagingPath);
-      return { status: "ok", value, path: stagingPath, contentHash };
+      const decoded = await decodeAuditReviewSubmission(artifactsDir, lane, await readJsonFile<unknown>(stagingPath), currentInputRevision);
+      if (!decoded.ok) return { status: "malformed", path: stagingPath, reason: decoded.issue, issueCode: "submission_contract_invalid" };
+      return { status: "ok", value: decoded.result as T, path: stagingPath, contentHash };
     } catch (error) {
       if (isJsonParseError(error)) {
         return { status: "malformed", path: stagingPath, reason: error.message };
@@ -221,8 +225,9 @@ export async function tryConsumeSubmission<T>(
   }
   const filePath = laneSubmissionPath(artifactsDir, lane);
   try {
-    const value = await readJsonFile<T>(filePath);
-    return { status: "ok", value, path: filePath };
+    const decoded = await decodeAuditReviewSubmission(artifactsDir, lane, await readJsonFile<unknown>(filePath), currentInputRevision);
+    if (!decoded.ok) return { status: "malformed", path: filePath, reason: decoded.issue, issueCode: "submission_contract_invalid" };
+    return { status: "ok", value: decoded.result as T, path: filePath };
   } catch (error) {
     if (isFileMissingError(error)) return { status: "absent" };
     if (isJsonParseError(error)) {
@@ -248,6 +253,7 @@ export type NextStepParams = {
    * acquisition executor stays a hermetic empty-marker no-op.
    */
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
+  autoFix?: { enabled?: boolean; dryRun?: boolean };
   since?: string;
   /**
    * The FOLD's git-index probe cache (see `ScopeIndexMemo`), created once by
@@ -518,6 +524,17 @@ type AnalyzerConsentBranchResult =
  *     (`return`), so applicable consent-gated candidates are never silently
  *     skipped (the silent-fail-closed defect this program exists to fix).
  */
+function applyRunConsent(
+  options: ExternalAcquisitionAdvanceOptions,
+  consent: Awaited<ReturnType<typeof readRunConsentUnlocked>>,
+): void {
+  options.analyzerConsent = {
+    ...Object.fromEntries(Object.entries(consent.decisions).filter(([, value]) => value === "declined").map(([id]) => [id, "declined" as const])),
+  };
+  const granted = Object.entries(consent.decisions).filter(([, value]) => value === "granted").map(([id]) => id);
+  options.consentToken = granted.length ? { value: consent.run_id, tools: granted } : undefined;
+}
+
 export async function handleAnalyzerConsentBranch(
   params: Pick<NextStepParams, "root" | "artifactsDir" | "externalAcquisition">,
   bundle: ArtifactBundle,
@@ -546,41 +563,10 @@ export async function handleAnalyzerConsentBranch(
     return { action: "continue" };
   }
   if (incoming.status === "ok") {
-    // The operator answers grants and declines on ONE lane, but the two have
-    // different lifetimes and the split is enforced here rather than trusted.
-    // A DECLINE is durable: it vetoes every later spawn of that tool. A GRANT
-    // binds only the run that asked (owner directive, 2026-08-21) — a durable
-    // grant keeps granting itself to runs whose operator never saw the offer,
-    // which for a network-egress analyzer turns one consent into standing
-    // consent. Grants therefore ride the per-run consent TOKEN, the channel the
-    // strict policy schema cannot hold.
-    const declined: Record<string, "declined"> = {};
-    const granted: string[] = [];
-    for (const [id, decision] of Object.entries(incoming.values)) {
-      if (decision === "declined") declined[id] = "declined";
-      else granted.push(id);
-    }
-    await persistAnalyzerConsent(params.root, declined);
-    if (params.externalAcquisition) {
-      params.externalAcquisition.analyzerConsent = {
-        ...(params.externalAcquisition.analyzerConsent ?? {}),
-        ...declined,
-      };
-      if (granted.length > 0) {
-        const existing = params.externalAcquisition.consentToken;
-        params.externalAcquisition.consentToken = {
-          value: existing?.value ?? randomUUID(),
-          // Scoped, never run-wide: the grant names exactly the ids the
-          // operator was offered and answered.
-          tools: [...new Set([...(existing?.tools ?? []), ...granted])].sort(
-            compareCodeUnits,
-          ),
-        };
-      }
-    }
-    // Deletion + the accepted ledger event are COMMIT-phase (the consent
-    // persist above is durable-by-design and idempotent, so a crash-replay
-    // re-applies it harmlessly while the staged file is restored).
+    // Both answers survive process boundaries only within this working audit.
+    // The artifact-tree lock covers this write and staged-submission replay.
+    const consent = await updateRunConsentUnlocked(params.root, params.artifactsDir, incoming.values);
+    if (params.externalAcquisition) applyRunConsent(params.externalAcquisition, consent);
     markSubmissionApplied(
       tx,
       incoming.path,
@@ -706,7 +692,7 @@ export async function handleGraphEnrichmentBranch(
         });
         await recordLaneOutcome(params.artifactsDir, GATE_LANES.edge_reasoning, {
           kind: "rejected",
-          issueCode: "submission_malformed",
+          issueCode: edgeReasoningIncoming.issueCode ?? "submission_malformed",
           message:
             edgeReasoningIncoming.reason + quarantineSurvivalNote(quarantine),
         });
@@ -799,7 +785,7 @@ type BranchActionResult =
 /** Whether a completed design-review pass has gone stale vs. its snapshot. */
 function passIsStale(bundle: ArtifactBundle, pass: DesignReviewPass): boolean {
   const snapshot = bundle.design_review_snapshots?.[pass];
-  return snapshot ? isDesignReviewStale(snapshot, bundle) : false;
+  return !snapshot || isDesignReviewStale(snapshot, bundle);
 }
 
 // ── Submission-array quarantine (malformed-submission fix) ───────────────────
@@ -944,8 +930,9 @@ export async function consumeArraySubmission<T>(
   lane: string,
   tx?: FoldTransaction,
   itemSchema?: ZodTypeAny,
+  currentInputRevision?: CurrentReviewInputRevision,
 ): Promise<ConsumeArraySubmissionResult<T>> {
-  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx, currentInputRevision);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
     const quarantine = await quarantineSubmissionFile(
@@ -955,7 +942,7 @@ export async function consumeArraySubmission<T>(
     );
     await recordLaneOutcome(artifactsDir, lane, {
       kind: "rejected",
-      issueCode: "submission_malformed",
+      issueCode: incoming.issueCode ?? "submission_malformed",
       message: incoming.reason + quarantineSurvivalNote(quarantine),
     });
     return {
@@ -1039,8 +1026,9 @@ export async function consumeObjectSubmission(
   artifactsDir: string,
   lane: string,
   tx?: FoldTransaction,
+  currentInputRevision?: CurrentReviewInputRevision,
 ): Promise<ConsumeObjectSubmissionResult> {
-  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx);
+  const incoming = await tryConsumeSubmission<unknown>(artifactsDir, lane, tx, currentInputRevision);
   if (incoming.status === "absent") return { status: "absent" };
   if (incoming.status === "malformed") {
     const quarantine = await quarantineSubmissionFile(
@@ -1055,7 +1043,7 @@ export async function consumeObjectSubmission(
     );
     await recordLaneOutcome(artifactsDir, lane, {
       kind: "rejected",
-      issueCode: "submission_malformed",
+      issueCode: incoming.issueCode ?? "submission_malformed",
       message: incoming.reason + quarantineSurvivalNote(quarantine),
     });
     return {
@@ -1111,6 +1099,7 @@ type ConsumeConceptualSubmissionResult =
 async function consumeConceptualSubmission(
   artifactsDir: string,
   tx: FoldTransaction,
+  currentInputRevision: string,
 ): Promise<ConsumeConceptualSubmissionResult> {
   const lane = GATE_LANES.design_review_conceptual;
   const manifest = await readConceptualReviewRoundManifest(artifactsDir);
@@ -1120,6 +1109,7 @@ async function consumeConceptualSubmission(
       lane,
       tx,
       SubmittedDesignFindingSchema,
+      currentInputRevision,
     );
     return result.status === "ok"
       ? { status: "ok", findings: result.value, path: result.path }
@@ -1135,7 +1125,7 @@ async function consumeConceptualSubmission(
     }
   }
 
-  const incoming = await consumeObjectSubmission(artifactsDir, lane, tx);
+  const incoming = await consumeObjectSubmission(artifactsDir, lane, tx, currentInputRevision);
   if (incoming.status === "absent") return incoming;
   if (incoming.status === "quarantined") {
     return { ...incoming, lane };
@@ -1180,7 +1170,7 @@ async function consumeConceptualSubmission(
 
   let perspectiveFindings: Map<string, Finding[]>;
   try {
-    perspectiveFindings = await loadConceptualPerspectiveFindings(manifest);
+    perspectiveFindings = await loadConceptualPerspectiveFindings(manifest, (path, lane) => readAuditReviewSubmission(path, artifactsDir, lane, currentInputRevision));
   } catch (error) {
     // Only invalid bytes are quarantinable. IO errors propagate so valid
     // submissions survive a transient filesystem failure.
@@ -1251,14 +1241,8 @@ async function consumeConceptualSubmission(
 }
 
 /** The two decision vocabularies the operator-facing analyzer gates accept. */
-const ANALYZER_CONSENT_VALUES = ["granted", "declined"] as const;
-const ANALYZER_SETTING_VALUES = [
-  "ephemeral",
-  "permanent",
-  "skip",
-  "repo",
-  "auto",
-] as const;
+const ANALYZER_CONSENT_VALUES = AnalyzerRunConsentDecisionSchema.options;
+const ANALYZER_SETTING_VALUES = ANALYZER_SETTINGS;
 
 /** Name the keys that carried no recognized value, for the ledger event. */
 function describeIgnoredKeys(
@@ -1593,15 +1577,18 @@ export async function handleDesignReviewBranch(
   // translated from the old lane. See the invalidation at load —
   // `designReviewPassState` in `orchestrator/state.ts`, which reads only the two
   // modern per-pass flags and never the retired combined one.
+  const currentReviewInputRevision = designReviewInputRevision(bundle);
   const contractResult = await consumeArraySubmission<Finding>(
     params.artifactsDir,
     GATE_LANES.design_review_contract,
     tx,
     SubmittedDesignFindingSchema,
+    currentReviewInputRevision,
   );
   const conceptualResult = await consumeConceptualSubmission(
     params.artifactsDir,
     tx,
+    designReviewInputRevision(bundle, "conceptual"),
   );
 
   if (contractResult.status === "quarantined") {
@@ -1828,6 +1815,7 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
     params.artifactsDir,
     descriptor.lane,
     tx,
+    auditLaneReviewRequirement(descriptor.lane) === "ordinary" ? undefined : () => currentAuditReviewInputRevision(params.root, bundle, descriptor.lane),
   );
   if (incoming.status === "malformed") {
     // Not-JSON submission: same quarantine-loudly lifecycle as a mis-shaped one.
@@ -2063,7 +2051,7 @@ export async function handleCharterExtractionBranch(
     // Staged per lane; an INCOMPLETE set is restored to its bound paths at
     // commit (un-applied), which is exactly the K-of-N resume the design
     // wants — pending lanes survive on disk until every lane is present.
-    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx);
+    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx, () => currentAuditReviewInputRevision(params.root, bundle, lane));
     if (incoming.status === "absent") continue;
     if (incoming.status === "malformed") {
       quarantinedAny = true;
@@ -2354,7 +2342,7 @@ export async function handleSystemicChallengeBranch(
  * lock acquisition (the deleted O2 RMW).
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "since" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "autoFix" | "since" | "scopeIndexMemo">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -2383,6 +2371,7 @@ export async function executeAndRecord(
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
       externalAcquisition: params.externalAcquisition,
+      autoFix: params.autoFix,
       since: params.since,
       lineIndex: indexes.lineIndex,
       sizeIndex: indexes.sizeIndex,
@@ -3608,6 +3597,12 @@ async function runDeterministicFold(
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
       await recoverStagedSubmissions(params.artifactsDir);
+      const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
+      const consent = params.autoFix?.enabled === undefined && !params.autoFix?.dryRun
+        ? previousConsent
+        : await updateRunConsentUnlocked(params.root, params.artifactsDir, {}, params.autoFix?.enabled, params.autoFix?.dryRun);
+      if (params.externalAcquisition?.enabled) applyRunConsent(params.externalAcquisition, consent);
+      params.autoFix = { enabled: consent.auto_fix, dryRun: consent.dry_run };
       // The PERSISTED carry, read back under the hold. A transition that ENDED
       // an earlier call left its advisories on disk for the next emission to
       // state, and that emission may be this call's — the ctx ref starts empty
@@ -3619,6 +3614,9 @@ async function runDeterministicFold(
         params.artifactsDir,
       );
       const startBundle = await loadArtifactBundle(params.artifactsDir);
+      if (consent.auto_fix && !previousConsent.auto_fix && !consent.dry_run) {
+        delete startBundle.auto_fixes_applied;
+      }
       ctx.currentBundleRef.value = startBundle;
       try {
         const engineOutcome = await advance(

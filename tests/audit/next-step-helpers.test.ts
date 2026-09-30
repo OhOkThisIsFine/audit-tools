@@ -1,3 +1,5 @@
+import { buildDesignReviewSnapshot } from "../../src/audit/orchestrator/designReviewSnapshot.js";
+import { emitAndWriteReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { commitFold, createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
@@ -244,13 +246,11 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
-    await writeFile(contractPath, JSON.stringify([designFinding()]), "utf8");
-
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, [designFinding()], bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -273,13 +273,11 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
-    await writeFile(conceptualPath, JSON.stringify([designFinding()]), "utf8");
-
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [], contract_reviewed: true }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_conceptual, [designFinding()], bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -300,15 +298,12 @@ await test("handleDesignReviewBranch returns continue after merging both lane su
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
-    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
-    await writeFile(contractPath, JSON.stringify([designFinding({ title: "contract" })]), "utf8");
-    await writeFile(conceptualPath, JSON.stringify([designFinding({ title: "conceptual" })]), "utf8");
-
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, [designFinding({ title: "contract" })], bundle);
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_conceptual, [designFinding({ title: "conceptual" })], bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -329,8 +324,11 @@ await test("handleDesignReviewBranch returns continue after merging both lane su
 await test("handleDesignReviewBranch returns single-pass design_review_conceptual when contract pass already satisfied", async () => {
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
-    // Nothing submitted, contract already done.
-    const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
+    // Nothing submitted, contract already done with evidence for this carried context.
+    const bundle: ArtifactBundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: true, conceptual_reviewed: false } };
+    bundle.design_review_snapshots = {
+      contract: buildDesignReviewSnapshot("contract", [], bundle, "2026-01-01T00:00:00Z"),
+    };
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -498,7 +496,7 @@ await test("tryConsumeSubmission returns parsed value and the bound path when a 
     const payload = { foo: "bar", count: 42 };
     const lane = GATE_LANES.charter_comparison;
     const boundPath = laneSubmissionPath(artifactsDir, lane);
-    await writeFile(boundPath, JSON.stringify(payload), "utf8");
+    await emitAndWriteReviewFixture(artifactsDir, lane, payload, {});
 
     const result = await tryConsumeSubmission(artifactsDir, lane);
 
@@ -574,16 +572,12 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     // Object-wrapped, not a bare array — the PowerShell/json_object-mode
     // single-element-array-collapses-to-object shape (memory:
     // result-json-array trap) generalized to a whole-array wrap.
-    await writeFile(
-      contractPath,
-      JSON.stringify({ findings: [designFinding()] }),
-      "utf8",
-    );
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, { findings: [designFinding()] }, bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -619,12 +613,12 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
     const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
-    await writeFile(contractPath, JSON.stringify("oops, not an array"), "utf8");
 
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, "oops, not an array", bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -653,7 +647,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     expect(quarantined.length).toBe(1);
     expect(quarantined[0].startsWith(`${GATE_LANES.design_review_contract}.`)).toBe(true);
     const quarantinedContent = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
-    expect(JSON.parse(quarantinedContent)).toBe("oops, not an array");
+    expect(JSON.parse(quarantinedContent).result).toBe("oops, not an array");
 
     // The rejection is recorded on design_assessment so it survives the
     // same-call `continue` re-derivation, and names the file + reason.
@@ -688,12 +682,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     // (unlinked), then the conceptual parse threw out of the whole branch, so
     // the merged-but-unpersisted contract findings were destroyed and the
     // contract lane had to re-run.
-    const contractPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract);
-    await writeFile(
-      contractPath,
-      JSON.stringify([designFinding({ id: "DR-101" })]),
-      "utf8",
-    );
+
     const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
     await writeFile(conceptualPath, '{"findings": [ {"id": "DR-2', "utf8");
 
@@ -701,6 +690,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, [designFinding({ id: "DR-101" })], bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -739,20 +729,14 @@ await test("handleDesignReviewBranch quarantines an ambiguous two-array-property
   await withTempDir(async (artifactsDir) => {
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
 
-    const conceptualPath = laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual);
-    await writeFile(
-      conceptualPath,
-      JSON.stringify({
-        contract_findings: [{ id: "DR-001" }],
-        conceptual_findings: [{ id: "DR-002" }],
-      }),
-      "utf8",
-    );
-
     const designAssessmentPath = join(artifactsDir, "design_assessment.json");
     await writeFile(designAssessmentPath, JSON.stringify({ generated_at: "now", findings: [] }), "utf8");
 
     const bundle = { design_assessment: { generated_at: "now", findings: [], contract_reviewed: false, conceptual_reviewed: false } };
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_conceptual, {
+        contract_findings: [{ id: "DR-001" }],
+        conceptual_findings: [{ id: "DR-002" }],
+      }, bundle);
     const state: AuditState = { status: "active", obligations: [] };
     const params = { artifactsDir };
 
@@ -857,8 +841,9 @@ await test("consumeArraySubmission accepts a bare array and LEAVES IT ON DISK fo
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
     const lane = GATE_LANES.design_review_contract;
     const filePath = laneSubmissionPath(artifactsDir, lane);
-    await writeFile(filePath, JSON.stringify([{ id: "A" }, { id: "B" }]), "utf8");
+    await emitAndWriteReviewFixture(artifactsDir, lane, [{ id: "A" }, { id: "B" }], {});
 
+    const submittedBytes = await readFile(filePath, "utf8");
     const result = await consumeArraySubmission(artifactsDir, lane);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") throw new Error("expected status=ok");
@@ -868,7 +853,7 @@ await test("consumeArraySubmission accepts a bare array and LEAVES IT ON DISK fo
     expect(
       await readFile(filePath, "utf8"),
       "an accepted submission survives the read — the caller unlinks after applying",
-    ).toBe(JSON.stringify([{ id: "A" }, { id: "B" }]));
+    ).toBe(submittedBytes);
   });
 });
 
@@ -1258,10 +1243,10 @@ for (const gate of OMITTABLE_GATES) {
       const submissionPath = laneSubmissionPath(artifactsDir, gate.lane);
       // A bare number fails every top-level object schema ("expected object,
       // received number") — a shape no gate could ever legitimately accept.
-      await writeFile(submissionPath, JSON.stringify(42), "utf8");
 
       const params = { root: artifactsDir, artifactsDir };
       const bundle = gate.bundle ?? {};
+      await emitAndWriteReviewFixture(artifactsDir, gate.lane, 42, bundle);
       const state: AuditState = { status: "active", obligations: [] };
 
       // Mute the quarantine stderr diagnostic for a clean test log.
@@ -1287,7 +1272,7 @@ for (const gate of OMITTABLE_GATES) {
       expect(quarantined.length).toBe(1);
       expect(quarantined[0].startsWith(`${gate.lane}.`)).toBe(true);
       const content = await readFile(join(artifactsDir, "quarantine", quarantined[0]), "utf8");
-      expect(JSON.parse(content)).toBe(42);
+      expect(JSON.parse(content).result ?? JSON.parse(content)).toBe(42);
     });
   });
 }
@@ -1311,7 +1296,7 @@ const {
 // The denial vocabulary is not on the shared barrel; the chokepoint module is
 // the authority for it, so this reads the callee's own constant rather than
 // re-spelling the reason string.
-const { admitSpawn, ANALYZER_DENIAL_REASONS } = await import(
+const { admitSpawn } = await import(
   "../../src/shared/analyzers/acquisitionEngine.js"
 );
 const { EXTERNAL_ANALYZER_CANDIDATES, writeBlockedStepContract } = await import(
@@ -1418,7 +1403,7 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
 
 // ── The analyzer-policy precondition on the acquisition-bearing rows ─────────
 
-test("BOTH halves of the loaded analyzer policy ride every acquisition call, and no consent token is synthesized", () => {
+test("durable analyzer settings ride acquisition, but legacy consent is not inherited", () => {
   const options = buildExternalAcquisitionOptions({
     analyzers: { typescript: "skip" },
     analyzer_consent: { semgrep: "declined" },
@@ -1429,14 +1414,14 @@ test("BOTH halves of the loaded analyzer policy ride every acquisition call, and
   expect(
     options.analyzerConsent,
     "dropping the decisions leaves a recorded decline unrepresentable at admission",
-  ).toEqual({ semgrep: "declined" });
+  ).toBeUndefined();
   expect(
     Object.prototype.hasOwnProperty.call(options, "consentToken"),
     "a consent token is never synthesized on the operator's behalf",
   ).toBe(false);
 });
 
-test("the pass-through reaches admission: a recorded decline vetoes even a DEFAULT-set candidate", () => {
+test("legacy policy declines do not veto DEFAULT-set candidates in a new run", () => {
   const options = buildExternalAcquisitionOptions({
     analyzer_consent: { gitleaks: "declined" },
   });
@@ -1451,7 +1436,7 @@ test("the pass-through reaches admission: a recorded decline vetoes even a DEFAU
     options.consentToken,
     options.analyzerConsent?.[gitleaks.id],
   );
-  expect(denied).toBe(ANALYZER_DENIAL_REASONS.consent_declined);
+  expect(denied).toBeUndefined();
 
   // Drop the pass-through and the operator's decline simply never arrives.
   const withoutPassThrough = admitSpawn(gitleaks, "auto", undefined, undefined);
@@ -1519,7 +1504,7 @@ test("an unreadable analyzer policy blocks the step instead of degrading to an e
       logged.push(String(value));
     };
     try {
-      await cmdNextStep(["node", "audit-code", "--root", root]);
+      await cmdNextStep(["--root", root]);
     } finally {
       console.log = originalLog;
     }
@@ -1564,7 +1549,7 @@ test("BOTH blocked paths carry the same operator-handoff contract, built from ON
       logged.push(String(value));
     };
     try {
-      await cmdNextStep(["node", "audit-code", "--root", root]);
+      await cmdNextStep(["--root", root]);
     } finally {
       console.log = originalLog;
     }

@@ -14,7 +14,8 @@
  * INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-export barrel (vacuous-pass guard)
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -441,14 +442,41 @@ describe("INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-expor
     expect(barrelSpyViolations(clean)).toEqual([]);
   });
 
-  it("no test file spies on the audit-tools/shared barrel namespace", () => {
+  function scanBarrelSpies(root: string): string[] {
     const violations: string[] = [];
-    for (const file of listTestFiles()) {
-      if (file === THIS_FILE) continue; // self: contains the pattern in self-check samples
-      for (const name of barrelSpyViolations(readTestFile(file))) {
-        violations.push(`${file}: vi.spyOn(${name}, …)`);
+    function visit(directory: string): void {
+      for (const entry of readdirSync(join(root, directory), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const file = directory ? `${directory}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) { visit(file); continue; }
+        if (file === `remediate/${THIS_FILE}` || !/\.test\.(?:ts|mjs)$/.test(file)) continue;
+        for (const name of barrelSpyViolations(readFileSync(join(root, file), "utf8"))) {
+          violations.push(`${file}: vi.spyOn(${name}, …)`);
+        }
       }
     }
-    expect(violations).toEqual([]);
+    visit("");
+    return violations;
+  }
+
+  it("finds barrel spies in audit, remediation and nested shared tests", () => {
+    const root = mkdtempSync(join(tmpdir(), "barrel-scope-"));
+    try {
+      const bad = 'import * as ns from "audit-tools/shared";\nvi.spyOn(ns, "someExport");\n';
+      for (const area of ["audit", "remediate", "shared/nested"]) {
+        mkdirSync(join(root, area), { recursive: true });
+        writeFileSync(join(root, area, "bad.test.ts"), bad);
+      }
+      expect(scanBarrelSpies(root)).toEqual([
+        "audit/bad.test.ts: vi.spyOn(ns, …)",
+        "remediate/bad.test.ts: vi.spyOn(ns, …)",
+        "shared/nested/bad.test.ts: vi.spyOn(ns, …)",
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("no test file spies on the audit-tools/shared barrel namespace", () => {
+    expect(scanBarrelSpies(dirname(TESTS_DIR))).toEqual([]);
   });
 });

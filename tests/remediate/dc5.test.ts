@@ -264,7 +264,7 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
           assertions: ["writeRecord returns the ack on success", "writeRecord rejects a missing id"],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -279,7 +279,7 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
           assertions: ["writeRecord returns the ack", "throws on a duplicate anywhere in the repo"],
         },
       ]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.message.includes("CE-006"))).toBe(true);
   });
@@ -288,7 +288,7 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
     const issues = validatePairedObligations(
       ledger([changeObl("O-1", "writerecord")]),
       plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["writeRecord returns the ack"] }]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
   });
@@ -297,7 +297,7 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
     const issues = validatePairedObligations(
       ledger([additionObl("O-2")]),
       plan([{ obligation_id: "O-2", name: "t", kind: "unit", assertions: ["emits a new counter"] }]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -306,12 +306,12 @@ describe("validatePairedObligations (change-scoped, CE-013/CE-006)", () => {
     const issues = validatePairedObligations(
       ledger([{ id: "writeRecord-O", description: "writeRecord stays consistent", kind: "behavioral", depends_on: [], status: "pending" }]),
       plan([{ obligation_id: "writeRecord-O", name: "t", kind: "unit", assertions: ["writeRecord returns the ack"] }]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
   });
 
   it("inv-4: an addition still fails when it has NO covering spec at all", () => {
-    const issues = validatePairedObligations(ledger([additionObl("O-2")]), plan([]));
+    const issues = validatePairedObligations(ledger([additionObl("O-2")]), plan([])).issues;
     expect(issues.some((i) => i.message.includes("no test spec"))).toBe(true);
   });
 });

@@ -1,3 +1,4 @@
+import { verifyChecksSteps } from "../../scripts/shared/verify-steps.mjs";
 // Contract tests for the generated backlog SEEK INDEX:
 // `scripts/shared/generate-backlog-index.mjs` + its trigger inside
 // `.claude/hooks/pre-commit-gate.mjs`.
@@ -504,6 +505,6 @@ describe('the gate fires at COMMIT, not only in verify:checks', () => {
   it('is wired into verify:checks as well', () => {
     const pkg = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
     expect(pkg.scripts['check:backlog-index']).toBeDefined();
-    expect(pkg.scripts['verify:checks']).toContain('check:backlog-index');
+    expect(verifyChecksSteps(pkg.scripts)).toContain('check:backlog-index');
   });
 });

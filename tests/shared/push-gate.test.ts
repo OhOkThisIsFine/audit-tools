@@ -57,7 +57,8 @@ function makeRepo({ branch = "main", stamp = "none" }: { branch?: string; stamp?
 /** Drive the hook exactly as the harness would: payload on stdin, env markers set. */
 function runHook(root: string, command: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSyncHidden(process.execPath, [HOOK], {
-    input: JSON.stringify({ tool_name: "Bash", tool_input: { command } }),
+    cwd: root,
+    input: JSON.stringify({ tool_name: "Bash", cwd: root, tool_input: { command } }),
     encoding: "utf8",
     env: {
       ...process.env,
@@ -127,6 +128,61 @@ describe("push-gate: an agent push to a protected branch needs a full-suite stam
       const r = runHook(root, cmd);
       expect(r.status, `"${cmd}" must not be gated; stderr:\n${r.stderr}`).toBe(0);
     }
+  });
+
+  it("uses the actual worktree stamp instead of the primary project directory", () => {
+    const primary = makeRepo();
+    const root = join(primary, "lap");
+    const add = spawnSyncHidden("git", ["worktree", "add", "-b", "lap", root], { cwd: primary, encoding: "utf8" });
+    expect(add.status).toBe(0);
+    writeSuiteGreenStamp(root, worktreeTree(root));
+    expect(runHook(root, "git push origin HEAD:main", { CLAUDE_PROJECT_DIR: primary }).status).toBe(0);
+    expect(runHook(primary, "git push origin main", { CLAUDE_PROJECT_DIR: root }).status).toBe(2);
+  });
+
+  it("checks the explicit source ref rather than uncommitted checkout content", () => {
+    const root = makeRepo({ stamp: "bound" });
+    writeFileSync(join(root, "package.json"), "{}\n");
+    expect(runHook(root, "git push origin HEAD:refs/heads/main").status).toBe(0);
+    writeSuiteGreenStamp(root, worktreeTree(root));
+    expect(runHook(root, "git push origin HEAD:refs/heads/main").status).toBe(2);
+  });
+
+  it("does not gate an explicit feature destination merely because HEAD is main", () => {
+    const root = makeRepo();
+    expect(runHook(root, "git push origin HEAD:feature/x").status).toBe(0);
+  });
+
+  it("checks every protected refspec, including force and fully qualified destinations", () => {
+    const root = makeRepo({ stamp: "bound" });
+    const git = (...args: string[]) => spawnSyncHidden("git", args, { cwd: root, encoding: "utf8" });
+    expect(git("branch", "old").status).toBe(0);
+    writeFileSync(join(root, "new.txt"), "new content\n");
+    expect(git("add", "new.txt").status).toBe(0);
+    expect(git("commit", "-qm", "new").status).toBe(0);
+    writeSuiteGreenStamp(root, worktreeTree(root));
+    expect(runHook(root, "git push origin +HEAD:refs/heads/main old:master").status).toBe(2);
+    expect(runHook(root, "git push origin +HEAD:refs/heads/main").status).toBe(0);
+    expect(runHook(root, "git push origin :main").status).toBe(0);
+    expect(runHook(root, "git push --delete origin main").status).toBe(0);
+  });
+
+  it("resolves implicit upstream and configured remote refspecs to protected destinations", () => {
+    const root = makeRepo({ branch: "feature/x" });
+    const config = (key: string, value: string) => {
+      expect(spawnSyncHidden("git", ["config", key, value], { cwd: root, encoding: "utf8" }).status).toBe(0);
+    };
+    config("branch.feature/x.remote", "origin");
+    config("branch.feature/x.merge", "refs/heads/main");
+    config("push.default", "upstream");
+    expect(runHook(root, "git push").status).toBe(2);
+    writeSuiteGreenStamp(root, worktreeTree(root));
+    expect(runHook(root, "git push").status).toBe(0);
+    config("remote.origin.push", "HEAD:refs/heads/main");
+    writeSuiteGreenStamp(root, "0".repeat(40));
+    expect(runHook(root, "git push origin").status).toBe(2);
+    config("remote.origin.push", "refs/heads/*:refs/heads/*");
+    expect(runHook(root, "git push origin").stderr).toContain("unsupported");
   });
 
   it("FAILS OPEN, announced, on a relocated push it cannot attribute", () => {

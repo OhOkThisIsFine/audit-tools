@@ -1,3 +1,4 @@
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 /**
  * Regression guard for A3 step 4 slice 2b — the Linux-only false-cycle.
  *
@@ -32,7 +33,7 @@ import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
-const { GATE_LANES, laneSubmissionPath } = await import(
+const { GATE_LANES } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
 const { submissionsDir } = await import(
@@ -128,30 +129,18 @@ test("regression: floor-only first next-step never false-cycles to blocked (Linu
       // walker answers those below, under their own kinds.
       if (step.step_kind === "design_review_parallel") {
         await mkdir(submissionsDir(artifactsDir), { recursive: true });
-        await writeFile(
-          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
-          JSON.stringify([], null, 2) + "\n",
-        );
-        await writeFile(
-          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual),
-          JSON.stringify([], null, 2) + "\n",
-        );
+        await writeBoundReviewFixture(artifactsDir, GATE_LANES.design_review_contract, []);
+        await writeBoundReviewFixture(artifactsDir, GATE_LANES.design_review_conceptual, []);
         continue;
       }
       if (step.step_kind === "design_review_contract") {
         await mkdir(submissionsDir(artifactsDir), { recursive: true });
-        await writeFile(
-          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
-          JSON.stringify([], null, 2) + "\n",
-        );
+        await writeBoundReviewFixture(artifactsDir, GATE_LANES.design_review_contract, []);
         continue;
       }
       if (step.step_kind === "design_review_conceptual") {
         await mkdir(submissionsDir(artifactsDir), { recursive: true });
-        await writeFile(
-          laneSubmissionPath(artifactsDir, GATE_LANES.design_review_conceptual),
-          JSON.stringify([], null, 2) + "\n",
-        );
+        await writeBoundReviewFixture(artifactsDir, GATE_LANES.design_review_conceptual, []);
         continue;
       }
       if (step.step_kind === "edge_reasoning_dispatch") {

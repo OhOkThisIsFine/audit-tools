@@ -1,4 +1,5 @@
-// sites-pinned: tests/audit/charter-fidelity-executor.test.ts
+// sites-pinned: tests/audit/charter-current-context.test.ts, tests/audit/charter-fidelity-executor.test.ts
+import { hashContent } from "../../shared/hash.js";
 // The FIDELITY PACKET (step 4, judgment half): per open finding candidate, the
 // accounts, their cited provenance, and the exact source slices at those
 // citations — materialized by the tool so the fidelity lane is blind by INPUT
@@ -72,4 +73,9 @@ export async function buildCharterFidelityPacket(
     }
   }
   return sections.join("\n");
+}
+
+/** Source slices may move while a host reviews the previously emitted packet. */
+export async function charterFidelityInputRevision(bundle: ArtifactBundle, root: string): Promise<string> {
+  return hashContent(await buildCharterFidelityPacket(bundle, root));
 }

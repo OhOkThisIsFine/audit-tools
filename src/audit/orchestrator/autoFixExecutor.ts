@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/auto-fix-executor.test.ts, tests/audit/auto-fix-write-scope.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { access, readFile } from "node:fs/promises";
@@ -144,8 +145,8 @@ function autoFixGateRefusal(options: {
   enabled?: boolean;
   dryRun?: boolean;
 }): string | null {
-  if (options.enabled === false) return "opted out";
   if (options.dryRun === true) return "dry run";
+  if (options.enabled !== true) return "not opted in";
   return null;
 }
 
@@ -154,14 +155,14 @@ export async function runAutoFixExecutor(
   root: string,
   options: {
     /**
-     * Recorded consent decisions (from the durable analyzer policy). A recorded
+     * Recorded consent decisions for the current run. A recorded
      * `declined` for a formatter's tool id vetoes its spawn at the shared
      * admitSpawn-family chokepoint — the same decline-first rule the acquired
      * analyzers face, applied to local tooling. Nothing overrides it.
      */
     analyzerConsent?: AnalyzerConsentDecisions;
     /**
-     * Host gate on the whole phase. `enabled: false` opts the phase out;
+     * Host gate on the whole phase. Only `enabled: true` opts the phase in;
      * `dryRun: true` asks what it WOULD do. Distinct from `analyzerConsent`,
      * which vetoes one named tool: this refuses the phase, whatever tools it
      * would have resolved.

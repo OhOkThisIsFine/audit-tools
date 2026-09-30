@@ -44,12 +44,30 @@ Each `next-step` invocation writes:
 Follow only the returned prompt. A review handoff also writes a versioned host
 workload and result-map path under `.audit-tools/audit/`. Result ingestion binds
 every result to its run, work item and prompt and verifies it before state
-advances; the full check set is the generated block in
+advances; the mechanical check set is the generated block in
 [`contracts.md`](contracts.md). Replaying an already accepted result is a no-op.
 
 There are no provider, model, routing, quota, context-window, worker-command, or
 headless-launch settings in audit-tools. Parallelism and concrete execution
 choices belong to the host runtime.
+
+## Functional preflight and review context
+
+The first audit `next-step` emits a `functional_preflight` prompt with the exact
+report path and current run identity. The host records source and relationship
+inspection it actually performed. Installed tool names alone do not establish
+capability. Both capabilities permit `ready`; unavailable source inspection
+requires `stop`. Limited relationship inspection permits `degraded` only with an
+explicit operator decision and a concrete limitation carried into the audit report.
+A missing or stale declaration does not permit semantic work, including through
+direct ingestion or recovery commands. Follow the emitted prompt rather than
+inventing capability fields or reusing another run's declaration.
+
+Some review lanes require an independent context. Their prompts specify a bound
+review envelope and output path; ordinary work items retain their normal result
+contract. Unavailable required review pauses instead of silently becoming self-review.
+A declaration describes the host's context, not verified reviewer identity. See
+[semantic review submissions](contracts.md#semantic-review-submissions).
 
 ## Backend fallback
 
@@ -125,9 +143,46 @@ Durable external-analyzer choices live separately at:
 .audit-tools/audit/analyzer-policy.json
 ```
 
-That strict artifact may contain `analyzers` resolution choices and
-`analyzer_consent` decisions. Per-run consent tokens are deliberately not
-persistable.
+That strict artifact retains `analyzers` resolution choices, not standing
+permission to install or run analyzers. Grants and declines apply only to the
+current audit, recorded in its tool-owned `run-consent.json`. Resume keeps that
+run's decisions; a fresh run asks again. Legacy `analyzer_consent` entries are
+ignored as authorization. Transient consent tokens are never persisted.
+
+Audits leave source bytes unchanged by default. Formatting requires explicit
+per-run `next-step --auto-fix` approval. Once `--dry-run` is selected, formatting
+stays disabled for the rest of that run, even when later continuations omit it.
+
+## Remediation control and verification
+
+From the target repository, the host can use:
+
+```bash
+remediate-code next-step --plan-only
+remediate-code pause
+remediate-code resume
+remediate-code cancel
+```
+
+Plan-only completes planning and persists a pause before implementation dispatch.
+Pause preserves the current phase, accepted work and workload binding; resume
+continues from that live state. Cancel is terminal for the current run and
+preserves its work and diagnostics. Follow the emitted continuation after each
+command; pause and cancel are not cleanup commands.
+
+Remediation runs the target repository's declared build, typecheck, lint and test
+commands at verification boundaries. If no executable verification is available,
+the workflow asks for a command or a stop instead of reporting success. An approved
+`next-step --verification-command <command>` supplies the test command without
+silently dropping other declared checks.
+
+To request independent per-result contract conformance review, set
+`conformance_review: true` in the confirmed intent checkpoint before the first
+implementation handoff. It is off by default. The tool binds that choice to the
+run; successful landed and no-change outcomes then require the bound review after
+mechanical checks. Changed result or contract content invalidates the review.
+Insufficient evidence requests repair; unavailable independent review pauses.
+Accepted review declarations survive closeout in the outcomes and report.
 
 ## Generated deliverables
 

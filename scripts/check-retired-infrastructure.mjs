@@ -9,24 +9,10 @@
 // carries one, unless the line (or the line above) states the retirement with a
 // `<!-- retired-infrastructure-exempt: <id> — <reason> -->` marker.
 //
-// SCOPE — DECLARED, and deliberately narrow. `SCANNED_DOCS` is the whole set.
-//
-// The property being enforced is about ONE file. `durable-traps.md` is a
-// standing REFERENCE read precisely when a session is unsure what to run, so a
-// stale entry there costs a wrong ACTION; that is the entry this gate closes,
-// and it names that file. Widening the scan is a one-line edit above, and the
-// reason it is not wider TODAY is coordination rather than principle: the
-// backlog entry recording this defect necessarily quotes the identifiers it is
-// about, and the generated seek index lifts that title verbatim — so a
-// repo-wide scan would redden two files that other packets own (the entry
-// itself is deleted by the backlog-reconciliation pass, the index is
-// regenerated from it) while proving nothing about a live instruction.
-//
-// The universe within that set is the doc-manifest's `excluded` row, IMPORTED
-// and never restated here, through the same helpers `check-doc-code-citations`
-// uses. Those are RECORDS — a dated review, a nightly proposal, a runtime
-// artifact — and each cites services that were live the day it was written, so
-// reddening them would make the record unmaintainable while proving nothing.
+// Scope is every tracked Markdown file, including staged additions, except the
+// canonical doc-manifest excluded records. Historical records describe services
+// as they were at the time; their exclusion is shared with citation checks.
+// Untracked scratch and deleted paths are outside the shipping document tree.
 //
 // The register itself is `.mjs` and so is outside its own scan by construction,
 // and a retirement recorded in code is the code's business, not a doc's.
@@ -126,60 +112,27 @@ function excludedMatchers() {
   );
 }
 
-/**
- * The docs this gate reads. See the SCOPE note at the top of the file for why
- * the set is this narrow and what widening it would cost.
- */
-export const SCANNED_DOCS = ["docs/backlog/durable-traps.md"];
-
-/**
- * The scanned docs that are actually present. Resolved against `git ls-files`
- * UNION the untracked-but-not-ignored set — the shape `check-doc-code-citations`
- * uses — so the gate is fresh-clone stable and a doc being ADDED in this change
- * is scanned like any other. A declared doc that exists in NEITHER set is
- * reported as missing rather than skipped: a renamed or deleted target would
- * otherwise leave the gate green over nothing, which is the failure mode a
- * hardcoded list is most prone to.
- */
-function scannedDocs() {
+/** Every present tracked Markdown document outside canonical excluded records. */
+export function scannedDocs() {
   const deleted = new Set(git(["ls-files", "-z", "--deleted"]).split("\0").filter(Boolean));
-  const present = new Set(
-    git(["ls-files", "-z"])
-      .split("\0")
-      .filter((p) => p && !deleted.has(p)),
-  );
-  for (const p of git(["ls-files", "-z", "--others", "--exclude-standard"]).split("\0")) {
-    if (p) present.add(p);
-  }
   const excluded = excludedMatchers();
-  const found = [];
-  const missing = [];
-  for (const doc of SCANNED_DOCS) {
-    if (!present.has(doc)) missing.push(doc);
-    else if (excluded.some((re) => re.test(doc))) missing.push(`${doc} (excluded by the doc manifest)`);
-    else found.push(doc);
-  }
-  return { found, missing };
+  return [...new Set(git(["ls-files", "-z"]).split("\0"))]
+    .filter((doc) => doc.endsWith(".md") && !deleted.has(doc) &&
+      !excluded.some((pattern) => pattern.test(doc)))
+    .sort();
 }
 
 function main() {
   const failures = [];
-  const { found, missing } = scannedDocs();
-  if (missing.length > 0) {
-    console.error(
-      `check-retired-infrastructure: declared scan target(s) not found in the tree:\n` +
-        missing.map((m) => `  ${m}`).join("\n") +
-        `\nSCANNED_DOCS in scripts/check-retired-infrastructure.mjs names a doc this gate must ` +
-        `read; update it in the same change that moves the doc, or the gate goes green over nothing.`,
-    );
-    process.exit(1);
-  }
+  const found = scannedDocs();
   for (const relPath of found) {
     let text;
     try {
       text = readFileSync(join(root, relPath), "utf8");
-    } catch {
-      continue; // a vanished tracked path is another gate's business
+    } catch (error) {
+      console.error(`check-retired-infrastructure: cannot read ${relPath}: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+      return;
     }
     const lines = text.split(/\r?\n/);
     lines.forEach((line, i) => {
@@ -216,7 +169,7 @@ function main() {
 
   const ids = RETIRED_INFRASTRUCTURE.map((r) => r.id).join(", ");
   console.log(
-    `check-retired-infrastructure: ${found.length} doc(s) scanned [${found.join(", ")}] against ` +
+    `check-retired-infrastructure: ${found.length} tracked doc(s) scanned against ` +
       `${RETIRED_INFRASTRUCTURE.length} retired-infrastructure row(s) [${ids}] — no mention ` +
       `without a retirement statement`,
   );

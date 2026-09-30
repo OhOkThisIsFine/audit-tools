@@ -1,3 +1,4 @@
+import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
 /**
  * Invariant tests for the audit orchestrator module.
  * Covers: INV-audit-orchestrator-01..08
@@ -585,9 +586,8 @@ test("INV-09: a NON-stale pre-split design_assessment (reviewed:true) satisfies 
   expect(conceptual!.state, "non-stale pre-split reviewed:true must NOT satisfy the conceptual pass").toBe("missing");
 });
 
-test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) satisfies both obligations regardless of staleness", () => {
-  // Current-format artifacts with explicit split flags always satisfy the
-  // obligations as long as the flags are true.
+test("INV-09: split design_assessment with matching snapshots satisfies both obligations", () => {
+  // Completed flags are backed by snapshots of this exact reviewed context.
   const bundle: ArtifactBundle = {
     design_assessment: {
       generated_at: "2026-01-01T00:00:00Z",
@@ -596,11 +596,19 @@ test("INV-09: split design_assessment (contract_reviewed + conceptual_reviewed) 
       conceptual_reviewed: true,
     },
   };
-  const state = deriveAuditState(bundle);
+  const reviewed = captureCompletedDesignReviews(bundle);
+  const state = deriveAuditState(reviewed);
   const contract = state.obligations.find((o) => o.id === "design_review_contract_completed");
   const conceptual = state.obligations.find((o) => o.id === "design_review_conceptual_completed");
   expect(contract?.state, "contract_reviewed=true must satisfy contract obligation").toBe("satisfied");
   expect(conceptual?.state, "conceptual_reviewed=true must satisfy conceptual obligation").toBe("satisfied");
+
+  const changed = deriveAuditState({
+    ...reviewed,
+    repo_manifest: { repository: { name: "changed-context" }, generated_at: "now", files: [] },
+  });
+  expect(changed.obligations.find((o) => o.id === "design_review_contract_completed")?.state).toBe("stale");
+  expect(changed.obligations.find((o) => o.id === "design_review_conceptual_completed")?.state).toBe("stale");
 });
 
 // ---------------------------------------------------------------------------

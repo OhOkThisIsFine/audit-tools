@@ -48,6 +48,8 @@ describe("the ingest-event partition", () => {
     expect(isIngestEvent("expected")).toBe(false);
     expect(isIngestEvent("dispatched")).toBe(false);
     expect(isIngestEvent("lane_outcome")).toBe(false);
+    expect(isIngestEvent("prompt_bound")).toBe(false);
+    expect(isIngestEvent("review_declared")).toBe(false);
   });
 
   it("classifies every kind in the live vocabulary", () => {
@@ -58,7 +60,7 @@ describe("the ingest-event partition", () => {
       isIngestEvent(kind),
     );
     expect(partitioned).toEqual([...INGEST_EVENT_KINDS]);
-    expect(SUBMISSION_EVENT_KINDS.length).toBe(INGEST_EVENT_KINDS.length + 3);
+    expect(SUBMISSION_EVENT_KINDS.filter(kind => !isIngestEvent(kind))).toEqual(["expected", "dispatched", "review_declared", "prompt_bound", "lane_outcome"]);
   });
 });
 

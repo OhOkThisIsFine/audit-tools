@@ -18,14 +18,24 @@
  *   - the Commander wiring for the new --root / --artifacts-dir options.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   program,
   runValidateArtifactAction,
 } from "../../src/remediate/index.js";
-import { evaluateContractPipelineCrossGateOutcomes } from "../../src/remediate/validation/contractPipelineGates.js";
+import {
+  evaluateContractPipelineCrossGateOutcomes,
+  validatePairedObligations,
+  validateEvidenceThreaded,
+  validateDigestCoverage,
+  validateReconciliationDerivation,
+  validateDesignSpecGates,
+  validateImplementationDAGIntegrity,
+  validateDecompositionFileScope,
+  validateFinalizedModuleSetPreserved,
+} from "../../src/remediate/validation/contractPipelineGates.js";
 import {
   writeContractArtifact,
   contractPipelineDir,
@@ -39,6 +49,11 @@ import {
   CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION,
   CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION,
 } from "audit-tools/shared";
+
+import {
+  bindContractReviewPrompt,
+  contractReviewBindingPath,
+} from "../../src/remediate/contractPipeline/contractReviewBinding.js";
 
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 
@@ -300,6 +315,53 @@ describe("evaluateContractPipelineCrossGateOutcomes", () => {
 // ── evaluateContractPipelineCrossGateOutcomes — per-gate evaluated/skipped ─────
 
 describe("evaluateContractPipelineCrossGateOutcomes", () => {
+  it("each evaluator owns its skipped outcome even without the runner", async () => {
+    const standalone = [
+      validatePairedObligations(undefined, undefined),
+      validateEvidenceThreaded(undefined, undefined, undefined),
+      validateDigestCoverage(undefined, undefined, undefined),
+      validateReconciliationDerivation(undefined, undefined),
+      validateDesignSpecGates(undefined),
+      validateImplementationDAGIntegrity(undefined, undefined, undefined, undefined),
+      await validateDecompositionFileScope(undefined, "/does/not/matter"),
+      validateFinalizedModuleSetPreserved(undefined, undefined),
+    ];
+    const combined = await evaluateContractPipelineCrossGateOutcomes({
+      payloads: new Map(), root: "/does/not/matter",
+    });
+    expect(standalone).toEqual(combined);
+    for (const outcome of standalone) {
+      expect(outcome.evaluated).toBe(false);
+      expect(outcome.issues).toEqual([]);
+      expect(outcome.reason).toEqual(expect.any(String));
+    }
+  });
+
+  it("empty applicable inputs stay evaluated and digest skip reasons remain distinct", async () => {
+    const clean = [
+      validatePairedObligations({ obligations: [] }, undefined),
+      validateEvidenceThreaded({}, undefined, undefined),
+      validateDigestCoverage("mixed", { findings: [] }, undefined),
+      validateReconciliationDerivation({ mismatches: [] }, undefined),
+      validateDesignSpecGates({}),
+      validateImplementationDAGIntegrity({ nodes: [] }, undefined, undefined, undefined),
+      await validateDecompositionFileScope({ modules: [] }, "/does/not/matter"),
+      validateFinalizedModuleSetPreserved(
+        { module_contracts: [{ name: "core" }] },
+        { module_contracts: [{ name: "core" }] },
+      ),
+    ];
+    for (const outcome of clean) {
+      expect(outcome.evaluated).toBe(true);
+      expect(outcome.issues).toEqual([]);
+      expect(outcome).not.toHaveProperty("reason");
+    }
+    expect(validateDigestCoverage("mixed", undefined, undefined).reason)
+      .toBe("finding-enumeration payload is absent or malformed");
+    expect(validateDigestCoverage("mixed", { is_enumerable: false }, undefined).reason)
+      .toBe("source not enumerable — is_enumerable is false");
+  });
+
   it("returns 8 outcomes, all skipped with a reason, for an empty payload map (nothing evaluated)", async () => {
     const result = await evaluateContractPipelineCrossGateOutcomes({
       payloads: new Map(),
@@ -539,7 +601,18 @@ describe("runValidateArtifactAction (validate-artifact --name X self-check)", ()
         instruction: "tighten the session contract to reject the accepted counterexample",
       },
     };
-    const file = await writeTempFile(repo, "judge.json", inFlight);
+    await bindContractReviewPrompt({
+      artifactsDir, artifact: "judge_report", role: "judge",
+      emissionId: "self-check-judge", requirement: "independent",
+      prompt: "Adjudicate the supplied counterexample before implementation planning.",
+    });
+    const binding = JSON.parse(await readFile(contractReviewBindingPath(artifactsDir, "judge_report"), "utf8"));
+    const file = await writeTempFile(repo, "judge.json", {
+      contract_version: "review-submission/v1",
+      prompt_sha256: binding.prompt_sha256,
+      review: { mode: "independent", reason: "Separate reviewing context from the contract author." },
+      result: inFlight,
+    });
 
     const { result, exitCode } = await runValidateArtifactAction({
       name: "judge_report",
@@ -548,7 +621,7 @@ describe("runValidateArtifactAction (validate-artifact --name X self-check)", ()
       artifactsDir,
     });
 
-    expect(result.status).toBe("ok");
+    expect(result.status, JSON.stringify(result.issues)).toBe("ok");
     expect(exitCode).toBe(0);
     expect(
       (result.issues ?? []).some((i) => i.path.startsWith("implementation_dag")),

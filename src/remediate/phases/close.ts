@@ -1,3 +1,5 @@
+import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema, type ContractReviewOutcome } from "../../shared/types/reviewIndependence.js";
+import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
 // sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts
 //   The landing-gate close leg (run once per declared gate, folded into
 //   `fullyGreen`, rendered in the report) is pinned by the landing-gates suite;
@@ -336,6 +338,7 @@ export function buildRemediationOutcomesReport(
   // empty set — never an omitted key, which a reader could not tell from a
   // release that did not record recovery at all.
   recovery: RunRecovery = NO_RECOVERY,
+  contractReviews: readonly ContractReviewOutcome[] = [],
 ): RemediationOutcomesReport {
   const findingsById = new Map(
     (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
@@ -441,6 +444,8 @@ export function buildRemediationOutcomesReport(
         : {}),
       ...(evidence ? { evidence } : {}),
       ...(recordedByModule ? { recorded_by_module: recordedByModule } : {}),
+      ...((outcome === "resolved" || outcome === "verified_no_change") && item.conformance_review
+        ? { conformance_review: AcceptedConformanceReviewSchema.parse(item.conformance_review) } : {}),
     };
     if (!finding) {
       // Degenerate (corrupt state): without the plan finding there is no payload
@@ -543,6 +548,7 @@ export function buildRemediationOutcomesReport(
     ...(aggregateDuration !== undefined ? { duration_ms: aggregateDuration } : {}),
     final_gate: finalGate,
     recovery,
+    ...(contractReviews.length > 0 ? { contract_reviews: contractReviews.map(review => ContractReviewOutcomeSchema.parse(review)) } : {}),
     outcomes,
   };
 }
@@ -1520,6 +1526,19 @@ function buildRemediationReportMarkdown(
     reportContent += `## Review\n\nAll code changes were accepted through the provider-neutral host handoff and corroborated as landed commits reachable from the repository HEAD. Review the resulting diff and commit history.\n\n`;
   }
 
+  const resultReviews = outcomesReport.outcomes.filter(outcome => outcome.conformance_review);
+  if (outcomesReport.contract_reviews?.length || resultReviews.length) {
+    reportContent += `## Declared Review Context\n\nThese are host-declared review contexts bound to accepted artifacts/results, not verified reviewer identities.\n\n`;
+    for (const review of outcomesReport.contract_reviews ?? []) {
+      reportContent += `- ${review.role} (${review.artifact}): required ${review.requirement}; declared ${review.review.mode}. ${review.review.reason}\n`;
+    }
+    for (const outcome of resultReviews) {
+      const review = outcome.conformance_review!;
+      reportContent += `- ${outcome.finding_id} conformance: required independent; declared ${review.review.mode}. ${review.summary}\n`;
+    }
+    reportContent += "\n";
+  }
+
   reportContent += `## Resolved — Changed Files\n\n`;
   if (entries.resolved.length === 0) {
     reportContent += `None.\n`;
@@ -2312,6 +2331,7 @@ export async function runClosePhase(
     closingResult,
     finalGate,
     recovery,
+    await readContractReviewOutcomes(options.artifactsDir),
   );
   // No run-log line for the gate here ON PURPOSE: the gate already records its
   // own outcome at evaluation time (`recordFinalGateOutcome`), so a second line

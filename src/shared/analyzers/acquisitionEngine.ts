@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/audit/analyzer-run-consent.test.ts
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -7,7 +8,7 @@ import {
   type RunTrackedResult,
   type SpawnDeadline,
 } from "../tooling/exec.js";
-import type { AnalyzerSetting } from "../analyzerPolicy.js";
+import type { AnalyzerSetting, AnalyzerConsentDecision } from "../analyzerPolicy.js";
 import {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,
@@ -273,14 +274,9 @@ export interface AcquisitionRunner {
   (argv: string[], cwd: string, timeoutMs: number): Promise<RunTrackedResult>;
 }
 
-/**
- * A recorded, durable operator decision for one analyzer. DECLINE ONLY — a grant
- * binds one run and rides the per-run {@link AnalyzerConsentTokenGrant}, so it
- * has no durable form to be recorded in.
- */
-export type AnalyzerConsentDecision = "declined";
+export type { AnalyzerConsentDecision } from "../analyzerPolicy.js";
 
-/** The recorded decisions, keyed by candidate id, as loaded from the durable policy. */
+/** Current-run declines keyed by candidate id. Grants use scoped admission tokens. */
 export type AnalyzerConsentDecisions = Record<string, AnalyzerConsentDecision>;
 
 /**

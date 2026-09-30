@@ -93,19 +93,19 @@ function decomposition(modules: Array<{ name: string; file_scope: string[] }>): 
 describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
   it("POSITIVE: passes a module scoped at the file where real logic lives", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       repo,
-    );
+    )).issues;
     expect(issues.filter((i) => i.severity === "error")).toEqual([]);
   });
 
   it("NEGATIVE: errors on a module scoped ONLY at a thin re-export shim/barrel", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/barrel.ts"] }]),
       repo,
-    );
+    )).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].message).toMatch(/re-export shim/i);
@@ -114,38 +114,38 @@ describe("INV-CVG-4: validateDecompositionFileScope (B5)", () => {
 
   it("does NOT reject when file_scope includes at least one real-logic file (rebuttable lead)", async () => {
     const repo = await makeGitRepo({ "src/real.ts": REAL_FILE, "src/barrel.ts": SHIM_FILE });
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/barrel.ts", "src/real.ts"] }]),
       repo,
-    );
+    )).issues;
     expect(issues.filter((i) => i.severity === "error")).toEqual([]);
   });
 
   it("does NOT false-reject a genuinely small non-shim module (structural check, not line-count) — fail-5", async () => {
     const repo = await makeGitRepo({ "src/tiny.ts": "export const N = 1;\n" });
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "tiny", file_scope: ["src/tiny.ts"] }]),
       repo,
-    );
+    )).issues;
     expect(issues.filter((i) => i.severity === "error")).toEqual([]);
   });
 
   it("degrades a valid-but-empty git tree to a WARNING, never a hard block — fail-4", async () => {
     const repo = await makeGitRepo({}); // git repo, nothing added → 0 tracked files
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       repo,
-    );
+    )).issues;
     expect(issues.filter((i) => i.severity === "error")).toEqual([]);
     expect(issues.some((i) => i.severity === "warning")).toBe(true);
   });
 
   it("fails CLOSED (error) on an unreadable tree — git missing / not a repo — fail-4", async () => {
     const notARepo = await makeTempDir(); // plain dir, no git init
-    const issues = await validateDecompositionFileScope(
+    const issues = (await validateDecompositionFileScope(
       decomposition([{ name: "installer", file_scope: ["src/real.ts"] }]),
       notARepo,
-    );
+    )).issues;
     expect(issues.some((i) => i.severity === "error")).toBe(true);
   });
 });
@@ -182,7 +182,7 @@ describe("INV-CVG-3: polarity-misread escape-hatch hint (B2)", () => {
         },
       ],
     };
-    const issues = validatePairedObligations(ledger, plan);
+    const issues = validatePairedObligations(ledger, plan).issues;
     const positiveError = issues.find((i) => i.path.endsWith(".positive"));
     expect(positiveError).toBeDefined();
     expect(positiveError!.message).toContain("POSITIVE:");
@@ -201,7 +201,7 @@ describe("INV-CVG-3: polarity-misread escape-hatch hint (B2)", () => {
         },
       ],
     };
-    const issues = validatePairedObligations(ledger, plan);
+    const issues = validatePairedObligations(ledger, plan).issues;
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(false);
   });

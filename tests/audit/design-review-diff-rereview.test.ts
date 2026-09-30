@@ -8,10 +8,10 @@
  *     renderDesignReReviewSection; capture→load roundtrip + buildDesignReReviewSection.
  *   - state.ts: design_review_*_completed is satisfied when the snapshot is fresh,
  *     stale when a structural input's projection changed, missing without a flag,
- *     and satisfied for the legacy (flag-but-no-snapshot) path.
+ *     and stale when a completed flag lacks current snapshot evidence.
  */
 import { test, expect } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -76,13 +76,7 @@ function snapshotFrom(
   pass: DesignReviewPass = "contract",
   priorFindings: Finding[] = [],
 ): DesignReviewSnapshot {
-  return {
-    schema_version: "audit-code/design-review-snapshot/v1alpha1",
-    pass,
-    reviewed_at: "2026-01-01T00:00:00Z",
-    prior_findings: priorFindings,
-    reviewed_inputs: projectDesignReviewInputs(b),
-  };
+  return buildDesignReviewSnapshot(pass, priorFindings, b, "2026-01-01T00:00:00Z");
 }
 
 /** Build a minimal-but-real Finding fixture (only id/title/severity vary per call site). */
@@ -294,7 +288,7 @@ test("state.ts: a cosmetic-only change keeps a completed pass satisfied (no re-s
   expect(obl.state).toBe("satisfied");
 });
 
-test("state.ts: legacy flag-but-no-snapshot path stays satisfied (never spuriously re-fires)", () => {
+test("state.ts: completed flags without current snapshots require re-review", () => {
   const b = fullBundle({
     design_assessment: {
       generated_at: "2026-01-01T00:00:00Z",
@@ -308,7 +302,7 @@ test("state.ts: legacy flag-but-no-snapshot path stays satisfied (never spurious
   for (const id of ["design_review_contract_completed", "design_review_conceptual_completed"]) {
     const obligation = state.obligations.find((o) => o.id === id);
     if (!obligation) throw new Error(`expected obligation ${id}`);
-    expect(obligation.state).toBe("satisfied");
+    expect(obligation.state).toBe("stale");
   }
 });
 
@@ -365,4 +359,34 @@ test("DESIGN_REVIEW_INPUTS covers exactly the structural artifacts the review re
       "surface_manifest",
       "unit_manifest",
     ]);
+});
+
+
+test("discarded legacy snapshots cannot preserve completed review authority", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "audit-review-migration-"));
+  try {
+    const b = fullBundle({ design_assessment: {
+      generated_at: "2026-01-01T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true,
+    } });
+    await mkdir(join(dir, "design-review-snapshots"), { recursive: true });
+    for (const pass of ["contract", "conceptual"] as const) {
+      await writeFile(join(dir, "design-review-snapshots", `${pass}.json`), JSON.stringify({
+        schema_version: "audit-code/design-review-snapshot/v1alpha1", pass,
+        reviewed_at: "2026-01-01T00:00:00Z", prior_findings: [], reviewed_inputs: projectDesignReviewInputs(b),
+      }));
+    }
+    b.design_review_snapshots = await loadDesignReviewSnapshots(dir);
+    expect(b.design_review_snapshots).toEqual({});
+    const state = deriveAuditState(b);
+    for (const id of ["design_review_contract_completed", "design_review_conceptual_completed"]) {
+      expect(state.obligations.find(o => o.id === id)?.state).toBe("stale");
+    }
+    const { handleDesignReviewBranch } = await import("../../src/audit/cli/nextStepHelpers.js");
+    const { createFoldTransaction } = await import("../../src/audit/cli/foldTransaction.js");
+    const { withArtifactTreeHold } = await import("../../src/shared/io/artifactTreeHold.js");
+    const branch = await withArtifactTreeHold(dir, undefined, () =>
+      handleDesignReviewBranch({ artifactsDir: dir }, b, state, createFoldTransaction()));
+    expect(branch.action).toBe("return");
+    if (branch.action === "return") expect(branch.result.kind).toBe("design_review_parallel");
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

@@ -714,6 +714,22 @@ export function projectAuditFindingsReportSubset(
     },
   };
 
+  if (selectedIds.size < originalIds.size) {
+    // Narrative is global unless it explicitly binds itself to retained IDs.
+    // Preserve no unbound executive summary or risk prose on a strict subset;
+    // identity projections keep the author's original narrative unchanged.
+    delete projected.executive_summary;
+    if (report.top_risks !== undefined) {
+      const references = [...originalIds].map((id) => ({ id, pattern: new RegExp(
+        `(?<![A-Za-z0-9_-])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_-])`,
+      ) }));
+      projected.top_risks = report.top_risks.filter((risk) => {
+        const mentioned = references.filter(({ pattern }) => pattern.test(risk));
+        return mentioned.length > 0 && mentioned.every(({ id }) => selectedIds.has(id));
+      });
+    }
+  }
+
   // A projection is a first-class canonical report, not a permissive internal
   // intermediate. Catch any membership/summary drift at the write boundary.
   projectApprovedFindings(projected);

@@ -1,5 +1,6 @@
 // sites-pinned: tests/remediate/n-r04-intent-checkpoint.test.ts, tests/audit/intent-checkpoint-gate.test.ts
 import { z } from "zod";
+import { ConceptualPerspectiveSelectionSchema } from "./conceptualPerspective.js";
 import { FileDispositionStatusSchema } from "./disposition.js";
 import { CeilingSchema } from "./charter.js";
 import { CLOSING_ACTIONS } from "./closingActions.js";
@@ -58,6 +59,8 @@ export const IntentCheckpointSchema = z
      * dispatch prompts (see freeFormIntentInterpreter, INV-S04).
      */
     free_form_intent: z.string().optional(),
+    /** Opt-in independent contract conformance review, snapshotted by the tool at run handoff. */
+    conformance_review: z.boolean().optional(),
     /** Paths intentionally excluded from the run, each with a reason. */
     excluded_scope: z
       .array(z.object({ path: z.string(), reason: z.string() }).strict())
@@ -149,7 +152,7 @@ export const IntentCheckpointSchema = z
      * - `conceptual_depth: "deep"` — fan out `perspectives` independent reviewers
      *   with maximally dissimilar perspectives, then compile via an independent
      *   judge.
-     * `perspectives` bounds the deep fan-out count; ignored when shallow.
+     * `perspectives` selects a legacy count or an exact named/custom deep roster.
      */
     design_review: z
       .object({
@@ -177,7 +180,7 @@ export const IntentCheckpointSchema = z
          */
         answered_at: z.string().optional(),
         conceptual_depth: z.enum(["shallow", "deep"]).optional(),
-        perspectives: z.number().int().min(1).optional(),
+        perspectives: z.union([z.number().int().min(1), ConceptualPerspectiveSelectionSchema]).optional(),
         /**
          * The premise-height consent dial (how far up a finding may reach),
          * captured at `confirm_intent`. Optional and additive — a legacy
@@ -203,6 +206,11 @@ export const IntentCheckpointSchema = z
         attention: z.union([z.number().int().min(0), z.literal("all")]).optional(),
       })
       .strict()
+      .superRefine((settings, context) => {
+        if (settings.conceptual_depth === "shallow" && Array.isArray(settings.perspectives)) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["perspectives"], message: "An explicit perspective list requires deep review; choose deep or omit the list." });
+        }
+      })
       .optional(),
   })
   .strict();

@@ -1,3 +1,4 @@
+import { driverPromptRows } from "./driverPromptFixtures.js";
 import type { ZodTypeAny } from "zod";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -39,7 +40,9 @@ import { IntentEquivalenceVerdictSchema } from "../../src/audit/orchestrator/int
 export interface PromptContractRegistryRow {
   builder: string;
   file: string;
-  disposition: "derived" | "projection" | "declared-gap";
+  disposition: "derived" | "projection" | "declared-gap" | "driver" | "dispatch";
+  renderDriver?: () => string | Promise<string>;
+  driverChecks?: { actor: RegExp; action: RegExp; inputs: string[]; outputs: string[]; choices: string[]; continuation: RegExp; exampleSchema?: ZodTypeAny };
   schema?: { name: string; file: string; object?: ZodTypeAny };
   projectionFields?: string[];
   gapReason?: string;
@@ -297,22 +300,7 @@ const pipelineProjectionRows: PromptContractRegistryRow[] = [
   disposition: "projection",
 }));
 
-const DRIVER_GAP = "driver-facing operator prompt — no worker output contract";
-
 const reconciliationGapRows: PromptContractRegistryRow[] = [
-  ["renderConfirmIntentPrompt", "src/audit/cli/confirmIntentStep.ts", DRIVER_GAP],
-  ["renderAnalyzerConsentPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderAnalyzerInstallPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderEdgeReasoningDispatchPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["renderPresentReportPrompt", "src/audit/cli/prompts.ts", DRIVER_GAP],
-  ["ambiguityReviewPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["clarificationPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["collectIntakeClarificationsPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["collectStartingPointPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["extractedPlanDiscardedPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["reviewApprovalPrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["triagePrompt", "src/remediate/steps/prompts.ts", DRIVER_GAP],
-  ["renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", DRIVER_GAP],
   ["renderContractPipelinePrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — branch projection rows are registered separately"],
   ["renderContractRepairPrompt", "src/remediate/steps/contractPipelinePrompts.ts", "multi-contract dispatcher — repair-target projection rows are registered separately"],
   ["currentPromptPath", "src/shared/io/stepContractWriter.ts", "path helper matched by the prompt-name scan — no rendered output contract"],
@@ -503,5 +491,6 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     schema: { name: "parseResult manual exact-key validator", file: "src/remediate/steps/dispatch/hostHandoff.ts" },
     gapReason: "remediation host-result and host-decision envelopes use a manual exact-key validator, not zod",
   },
+  ...driverPromptRows,
   ...reconciliationGapRows,
 ];

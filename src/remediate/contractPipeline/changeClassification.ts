@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/change-classification-backtracking.test.ts, tests/remediate/dc5.test.ts, tests/audit/scanner-linear-boundaries.test.ts
 // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * DC-5 — obligation change-vs-addition classification + paired/scoped negative
@@ -54,7 +55,11 @@ export function extractSymbolTokens(text: string): string[] {
   if (typeof text !== "string" || text.length === 0) return [];
   const out = new Set<string>();
   for (const raw of text.match(SYMBOL_TOKEN_PATTERN) ?? []) {
-    const token = raw.toLowerCase().replace(/^[./-]+|[./-]+$/g, "");
+    let start = 0;
+    let end = raw.length;
+    while (start < end && "./-".includes(raw[start]!)) start++;
+    while (end > start && "./-".includes(raw[end - 1]!)) end--;
+    const token = raw.slice(start, end).toLowerCase();
     if (token.length < 3) continue;
     if (SYMBOL_STOPWORDS.has(token)) continue;
     // <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
@@ -166,12 +171,18 @@ const SCAN_NEGATION_CUE =
  * structural read of the assertion's action, not a bare keyword veto on the words.
  */
 function usesAffirmativeGlobalScan(assertion: string): boolean {
-  const re = new RegExp(UNSCOPED_GLOBAL_SCAN_PATTERN.source, "gi");
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(assertion)) !== null) {
-    const clause = assertion.slice(0, match.index).split(/[.;,]|—|--/).pop() ?? "";
-    if (!SCAN_NEGATION_CUE.test(clause)) return true;
-    if (match.index === re.lastIndex) re.lastIndex++; // zero-width guard
+  // Scan clause boundaries and negation cues once. Repeated mentions in one
+  // clause share its first negation offset rather than rescanning prefixes.
+  const events = new RegExp(`${SCAN_NEGATION_CUE.source}|[.;,]|—|--`, "gi");
+  const scans = new RegExp(UNSCOPED_GLOBAL_SCAN_PATTERN.source, "gi");
+  let event = events.exec(assertion);
+  let negated = false;
+  for (const match of assertion.matchAll(scans)) {
+    while (event && event.index < match.index!) {
+      negated = !/^(?:[.;,]|—|--)$/.test(event[0]);
+      event = events.exec(assertion);
+    }
+    if (!negated) return true;
   }
   return false;
 }

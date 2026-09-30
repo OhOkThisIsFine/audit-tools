@@ -1,7 +1,8 @@
+// sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/review-run-lifecycle.test.ts
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent, stableStringify, writeJsonFile } from "audit-tools/shared";
-import type { AuditTask } from "../types.js";
+import { AuditTaskSchema, type AuditTask } from "../types.js";
 import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import {
   CURRENT_TASK_FILENAME,
@@ -179,6 +180,7 @@ export async function writeReviewRunFiles(
   run: ActiveReviewRun,
   pendingTasks: readonly AuditTask[],
 ): Promise<void> {
+  AuditTaskSchema.array().parse(pendingTasks);
   await mkdir(join(artifactsDir, "dispatch"), { recursive: true });
   await mkdir(join(artifactsDir, "runs", run.run_id), { recursive: true });
   const canonicalTasks = canonicalizeAuditTasks([...pendingTasks]);

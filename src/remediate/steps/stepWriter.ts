@@ -3,17 +3,17 @@ import {
   writeStepContract,
   writeBlockedStepContract,
   type BaseStepContract,
+  type StepStatus,
 } from "audit-tools/shared";
 import {
   REMEDIATION_STEP_CONTRACT_VERSION,
   type RemediationStep,
   type RemediationStepKind,
-  type RemediationStepStatus,
 } from "./types.js";
 
 export interface WriteStepInput {
   stepKind: RemediationStepKind;
-  status: RemediationStepStatus;
+  status: StepStatus;
   runId: string | null;
   repoRoot: string;
   artifactsDir: string;
@@ -21,6 +21,7 @@ export interface WriteStepInput {
   allowedCommands?: string[];
   stopCondition: string;
   artifactPaths?: Record<string, string>;
+  access?: RemediationStep["access"];
 }
 
 /**
@@ -42,6 +43,7 @@ export async function writeCurrentStep({
   allowedCommands = [],
   stopCondition,
   artifactPaths = {},
+  access,
 }: WriteStepInput): Promise<RemediationStep> {
   return writeStepContract<RemediationStep, RemediationStepKind, string>({
     contractVersion: REMEDIATION_STEP_CONTRACT_VERSION,
@@ -54,6 +56,7 @@ export async function writeCurrentStep({
     allowedCommands,
     stopCondition,
     artifactPaths,
+    extraFields: access ? { access } : undefined,
     trimPromptStart: true,
   });
 }

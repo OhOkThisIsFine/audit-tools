@@ -344,3 +344,11 @@ test("writeStepContract leaves non-path backslashes in the prompt BODY alone", a
     await cleanup();
   }
 });
+
+test("shared step writer normalizes access paths for every draw", async () => {
+  const { dir, cleanup } = await makeTempDir();
+  try {
+    const step = await writeStepContract(baseInput(dir, { extraFields: { access: { read_paths: ["C:\\repo\\input.json"], write_paths: ["C:\\repo\\answer.json"] } } }));
+    expect((step as unknown as { access: unknown }).access).toEqual({ read_paths: ["C:/repo/input.json"], write_paths: ["C:/repo/answer.json"] });
+  } finally { await cleanup(); }
+});

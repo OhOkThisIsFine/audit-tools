@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/ci-trigger-paths.test.ts
 // Generate `.github/workflows/ci.yml`'s two `paths:` trigger blocks from the
 // guard-reach registry (`scripts/guard-reach-data.mjs`).
 //
@@ -29,7 +30,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REACH } from '../guard-reach-data.mjs';
+import { GUARDS, REACH, guardReach } from '../guard-reach-data.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TARGET_RELPATH = '.github/workflows/ci.yml';
@@ -45,9 +46,9 @@ export const BEGIN_MARKER =
 export const END_MARKER = '# END generated ci-trigger-paths';
 
 /** The sorted trigger-path union: non-declared-gap REACH rows + the base. */
-export function deriveTriggerPaths(reach = REACH) {
+export function deriveTriggerPaths(reach = REACH, guards = GUARDS) {
   const paths = new Set(ALWAYS_TRIGGER);
-  for (const row of reach) {
+  for (const row of guardReach(guards, reach)) {
     if (row.guardedBy === 'declared-gap') continue;
     for (const f of row.files) paths.add(f.replace(/\\/g, '/'));
   }

@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/nightly-scope-ledger.test.ts
 // Leg 1's scope ledger — the coverage stamp and the diff window.
 //
 // WHY THIS MODULE EXISTS (owner determination 285b804c0aef617d, 2026-08-12).
@@ -30,7 +31,7 @@
 //     counts beside the ledger. A missing or `aborted` stamp means leg 1 did
 //     not cover the corpus, and saying so is the point.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { flattenManifest } from '../check-doc-manifest.mjs';
@@ -151,6 +152,12 @@ export function inScopeDocs(root, { manifest = DOC_MANIFEST } = {}) {
     const hit = patterns.find((p) => matches(p, file));
     if (!hit) continue; // unmatched is the doc gate's failure to report, not ours
     if (hit.row.type === EXCLUDED_ROW_TYPE) continue;
+    try {
+      if (!statSync(join(root, file)).isFile()) continue;
+    } catch (err) {
+      if (['ENOENT', 'ENOTDIR'].includes(/** @type {any} */ (err).code)) continue;
+      throw err; // permission and I/O failures are not evidence of retirement
+    }
     scoped.push({ path: file, type: hit.row.type, autoApply: hit.row.autoApply });
   }
   return scoped.sort((a, b) => compareCodeUnits(a.path, b.path));
@@ -173,6 +180,18 @@ export function writeScopeLedger(root, ledger) {
     version: SCOPE_LEDGER_VERSION,
     items: ledger?.items ?? {},
   });
+}
+
+/** Remove obsolete document ownership without claiming a fresh examination. */
+export function reconcileScopeLedger(root) {
+  const scoped = new Set(inScopeDocs(root).map((doc) => doc.path));
+  const ledger = readScopeLedger(root);
+  for (const [hash, entry] of Object.entries(ledger.items)) {
+    // Legacy pathless records cannot be attributed safely; preserve them.
+    if (typeof entry?.path === 'string' && !scoped.has(entry.path)) delete ledger.items[hash];
+  }
+  writeScopeLedger(root, ledger);
+  return ledger;
 }
 
 /**
@@ -354,7 +373,7 @@ function main(argv) {
   }
 
   if (verb === 'plan') {
-    const ledger = readScopeLedger(root);
+    const ledger = reconcileScopeLedger(root);
     const docs = inScopeDocs(root);
     const plan = docs.map((doc) => {
       const items = docItems(root, doc.path);
@@ -406,7 +425,7 @@ function main(argv) {
       process.stderr.write(`stamp: no reviewable items at ${relPath}\n`);
       return 1;
     }
-    let ledger = readScopeLedger(root);
+    let ledger = reconcileScopeLedger(root);
     ledger = stampExamined(ledger, items.map((i) => i.hash), { commit: head, path: relPath, run });
     writeScopeLedger(root, ledger);
     process.stdout.write(`stamped ${items.length} items from ${relPath} at ${head.slice(0, 8)} (run ${run})\n`);

@@ -61,7 +61,7 @@ import {
   readDecisions,
 } from "../nightly/items.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
-import { splitBacklogEntries } from "./backlog-entry-grammar.mjs";
+import { parseBacklogDocument } from "./backlog-entry-grammar.mjs";
 import { spliceGeneratedBlock as sharedSpliceGeneratedBlock } from "./generatedArtifacts.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -247,7 +247,7 @@ function boldTitle(body, { where, opener }) {
  * local (the roadmap needs the verbatim bold run).
  */
 export function parseBulletEntries(text, file = "<text>") {
-  return splitBacklogEntries(text).map(({ line, body }) => ({
+  return parseBacklogDocument(text).entries.map(({ line, body }) => ({
     title: boldTitle(body, { where: `${file}:${line}`, opener: "- " }),
     line,
     // The entry's own text, carried for consumers that need more than the
@@ -264,33 +264,9 @@ export function parseBulletEntries(text, file = "<text>") {
  * lead-in, so it needs its own reader. Document order reproduces entry sequence.
  */
 export function parseTrackEntries(text, file = "<text>") {
-  const lines = text.split(/\r?\n/);
-  const headingIndex = lines.findIndex((l) => l.trim() === "## Open tracks");
-  const startIndex = headingIndex === -1 ? 0 : headingIndex + 1;
-  let endIndex = lines.length;
-  for (let i = startIndex; i < lines.length; i++) {
-    if (/^## /.test(lines[i])) {
-      endIndex = i;
-      break;
-    }
-  }
-
-  const starts = [];
-  for (let i = startIndex; i < endIndex; i++) {
-    if (/^\*\*/.test(lines[i])) {
-      starts.push(i);
-    }
-  }
-
-  return starts.map((start, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : endIndex;
-    const body = lines.slice(start, end).join("\n");
-    return {
-      title: boldTitle(body, { where: `${file}:${start + 1}`, opener: "" }),
-      line: start + 1,
-      body,
-    };
-  });
+  return parseBacklogDocument(text).tracks.map(({ line, body }) => ({
+    title: boldTitle(body, { where: `${file}:${line}`, opener: "" }), line, body,
+  }));
 }
 
 /** The text of one `## <heading>` section, up to the next `## ` heading. */

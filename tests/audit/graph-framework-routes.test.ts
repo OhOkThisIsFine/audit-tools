@@ -150,7 +150,8 @@ test("Flask @route with methods expands to one route per method", () => {
   const file = "webapp/views.py";
   const routes = routesOf({
     [file]: [
-      'from flask import Blueprint',
+      'from flask import Blueprint, Flask',
+      'app = Flask(__name__)',
       'bp = Blueprint("bp", __name__)',
       '@app.route("/login", methods=["GET", "POST"])',
       "def login():",
@@ -254,7 +255,7 @@ test("inv-1: Python route detection requires a framework marker, not a .py exten
   // A Flask marker qualifies the same way.
   const flask = extractFrameworkRouteEvidence(
     "webapp/views.py",
-    'import flask\n@app.route("/health")\ndef health():\n    return None\n',
+    'import flask\napp = flask.Flask(__name__)\n@app.route("/health")\ndef health():\n    return None\n',
     new Map(),
   );
   expect(flask.routes).toEqual([
@@ -265,67 +266,47 @@ test("inv-1: Python route detection requires a framework marker, not a .py exten
 // CP-NODE-19 accepted gaps, pinned so closing either is a DELIBERATE act (this
 // test must be updated) rather than a silent side effect of widening a gate.
 // Both are leads-not-verdicts trades: missing evidence over fabricated evidence.
-test("CP-NODE-19 gap: a sibling-imported router carries no marker, so its routes are dropped", () => {
-  // Asked at the FRAMEWORK boundary, not via `routesOf`: a path segment named
-  // `routes` also trips `fallbackRouteEdge`, and that conventional route would
-  // mask what this gap is actually about (the decorator scan contributing
-  // nothing). The gap is in the marker gate, so the marker gate is what is read.
-  const { routes } = extractFrameworkRouteEvidence(
-    "app/handlers.py",
-    [
-      "from .deps import router",
-      "",
-      '@router.get("/orders")',
-      "async def list_orders(): ...",
-    ].join("\n"),
-    new Map(),
-  );
-  // The file constructs no framework object and imports no framework by name, so
-  // the positive-marker gate (which exists to stop @mock.patch fabricating routes)
-  // cannot distinguish it from a test module. Recorded as an accepted false
-  // negative; a consumption trace that identifies the sibling `router` would close
-  // it without reopening the fabricated-route hole.
-  expect(
-    routes,
-    "a sibling-imported router is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
-  ).toEqual([]);
+test("sibling router identities follow constructor and re-export aliases", () => {
+  const files = {
+    "app/deps.py": "from fastapi import APIRouter as Router\nrouter = Router()\nother = object()",
+    "app/shared.py": "from .deps import router as shared",
+    "app/handlers.py": 'from .shared import shared as api\nfrom .deps import other\n@api.get("/orders")\ndef orders(): ...\n@other.get("/fake")\ndef fake(): ...',
+  };
+  expect(routesOf(files).filter((r) => r.handler === "app/handlers.py")).toEqual([
+    { method: "GET", path: "/orders", handler: "app/handlers.py" },
+  ]);
 });
 
-test("CP-NODE-19 gap: a .vue script block contributes no route — the accepted gap", () => {
-  const vue = [
-    "<template>",
-    '  <div class="app">router.get("/not-a-route", h)</div>',
-    "</template>",
-    "<script setup>",
-    "import { router } from './router'",
-    "router.get('/users', listUsers)",
-    "</script>",
-  ].join("\n");
-  // Read at the REGISTERED-route boundary, which is where the gap actually is —
-  // `TS_LIKE_EXTENSION_PATTERN` is the gate that skips the whole SFC. The
-  // framework entry point is a different gate and is not what this pins.
-  const { routes } = extractRegisteredRouteEvidence("src/App.vue", vue, new Map());
-  expect(
-    routes,
-    "a .vue script block is an ACCEPTED false negative — seeing this fail means the gap was closed, so update this test deliberately",
-  ).toEqual([]);
+test("unrelated framework imports and comments do not establish router identities", () => {
+  const content = 'from fastapi import APIRouter\n# router = APIRouter()\n@router.get("/fake")\ndef fake(): ...';
+  expect(extractFrameworkRouteEvidence("app/handlers.py", content, new Map()).routes).toEqual([]);
+});
 
-  // WHAT CLOSING IT NAIVELY WOULD COST, measured: the same content under a
-  // TS-family extension reads the `<template>` MARKUP as route source and
-  // fabricates a `/not-a-route` edge alongside the real one. That is the
-  // prose-fabrication class this gate exists to prevent, so the gap is the
-  // cheaper error — closing it needs a real `<script>`-block extraction, never
-  // an extension addition. Pinning the mechanism here means the trade is stated
-  // as a measurement rather than as a claim in a comment.
-  const asModule = extractRegisteredRouteEvidence(
-    "src/App.svelte.ts",
-    vue,
-    new Map(),
-  );
-  expect(
-    asModule.routes.map((route) => route.path).sort(),
-    "reading the SFC as a module picks up the MARKUP's route — the fabrication the gap avoids",
-  ).toEqual(["/not-a-route", "/users"]);
+for (const extension of ["vue", "svelte", "astro"]) {
+  test(`${extension} script routes exclude markup, comments, and non-JavaScript scripts`, () => {
+    const content = [
+      '<div>router.get("/markup", h)</div>',
+      `<style>.x::after { content: '<script>router.get("/style", h)</script>'; }</style>`,
+      '<!-- <script>router.get("/html-comment", h)</script> -->',
+      '<script type="application/json">router.get("/json", h)</script>',
+      '<script lang="ts">',
+      'import { list as handler } from "./handlers";',
+      '// router.get("/comment", handler)',
+      `const example = 'router.get("/string", handler)'`,
+      '/* router.get("/block", handler) */',
+      'router.get("/users", handler)',
+      '</script>',
+    ].join("\n");
+    const result = extractRegisteredRouteEvidence(`src/App.${extension}`, content,
+      new Map([["src/handlers.ts", "src/handlers.ts"]]));
+    expect(result.routes).toEqual([{ method: "GET", path: "/users", handler: "src/handlers.ts" }]);
+    expect(result.calls).toHaveLength(1);
+  });
+}
+
+test("Astro frontmatter contributes registered routes", () => {
+  expect(extractRegisteredRouteEvidence("src/App.astro", '---\nrouter.get("/front", handler)\n---\n<div>router.get("/fake", h)</div>', new Map()).routes)
+    .toEqual([{ method: "GET", path: "/front", handler: "src/App.astro" }]);
 });
 
 test("inv-1: an unmarked .py test file contributes no fabricated route to the graph", () => {
@@ -621,3 +602,19 @@ test("FND-COR-b29c9d4f: stripJsonComments preserves character immediately after 
   expect(!result.includes("//"), "line comment must be stripped").toBeTruthy();
   expect(!result.includes("block"), "block comment content must be stripped").toBeTruthy();
 });
+
+test("cyclic sibling imports without constructor evidence do not invent routers", () => {
+  expect(routesOf({
+    "app/a.py": 'from .b import router\n@router.get("/fake")\ndef fake(): ...',
+    "app/b.py": 'from .a import router',
+  })).toEqual([]);
+});
+
+for (const statement of ["from . import deps as service", "import app.deps as service"]) {
+  test(`Python module router aliases: ${statement}`, () => {
+    expect(routesOf({
+      "app/deps.py": "import fastapi as api\nrouter = api.APIRouter()",
+      "app/handlers.py": `${statement}\n@service.router.get("/module")\ndef route(): ...`,
+    })).toContainEqual({ path: "/module", method: "GET", handler: "app/handlers.py" });
+  });
+}

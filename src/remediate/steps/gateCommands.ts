@@ -1,4 +1,8 @@
-import { existsSync, rmSync, statSync } from "node:fs";
+// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts
+import { isFileMissingError } from "../../shared/io/json.js";
+import { hashContent } from "../../shared/hash.js";
+import { discoverProjectCommands } from "../../shared/tooling/testCommand.js";
+import { existsSync, rmSync, statSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeRepoPath } from "../../shared/validation/findingGrounding.js";
@@ -26,7 +30,7 @@ export interface FinalGateCommandSpec {
   /** The package this command's unit suite targets (single-flight key), if any. */
   package_dir?: string;
   /** Which layer of the floor this belongs to. */
-  layer: "build" | "check" | "unit";
+  layer: "build" | "check" | "lint" | "unit";
 }
 
 /**
@@ -547,16 +551,21 @@ export function renderGateAttribution(
 }
 
 /**
- * The tool-owned final-gate command list (INV-RS-10) for the audit-tools
- * monorepo. Pure and deterministic so tests can assert: it is non-vacuous
- * (always > 0 build + check + unit commands) for the audit-tools structure,
- * never references `plan.test_command`, every UNIT command is build-free, and no
- * package's unit suite appears twice (single-flight — CE-001). Returns `[]` when
- * `root` is not the audit-tools monorepo (the audit-tools-specific suite is
- * inapplicable there — see `runToolOwnedFinalGate`).
+ * Repository-declared verification in build/typecheck/lint/test order. The
+ * audit-tools profile retains its build-free unit floor. An explicit test
+ * command replaces only the generic test role, never the other checks.
  */
-export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[] {
-  if (!isAuditToolsMonorepo(root)) return [];
+export function toolOwnedFinalGateCommands(root: string, testCommand?: string[]): FinalGateCommandSpec[] {
+  if (!isAuditToolsMonorepo(root)) {
+    const commands = discoverProjectCommands(root);
+    if (testCommand?.length) commands.test = testCommand;
+    const roles = [
+      ["build", "build"], ["typecheck", "check"], ["lint", "lint"], ["test", "unit"],
+    ] as const;
+    return roles.flatMap(([role, layer]) => commands[role]?.length
+      ? [{ argv: commands[role], layer, build_free: role !== "build" && role !== "test" }]
+      : []);
+  }
   return [
     { argv: ["npm", "run", "build"], build_free: false, layer: "build" },
     { argv: ["npm", "run", "check"], build_free: true, layer: "check" },
@@ -604,4 +613,19 @@ export function toolOwnedFinalGateCommands(root: string): FinalGateCommandSpec[]
       layer: "unit",
     },
   ];
+}
+
+/** Cache identity includes declarations even when the worktree probe cannot see ignored files. */
+export function finalGateBinding(root: string, testCommand?: string[]): string {
+  const canonicalRoot = realpathSync(root);
+  const declarations = ["package.json", "go.mod", "pyproject.toml", "pytest.ini"].map((name) => {
+    try { return [name, readFileSync(join(canonicalRoot, name), "utf8")]; }
+    catch (error) {
+      if (isFileMissingError(error)) return [name, null];
+      throw error;
+    }
+  });
+  return hashContent(JSON.stringify({
+    root: canonicalRoot, commands: toolOwnedFinalGateCommands(canonicalRoot, testCommand), declarations,
+  }));
 }

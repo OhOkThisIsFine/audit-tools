@@ -1,22 +1,16 @@
+import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+import { REQUIRED_TEST_MESSAGE_LIMIT, runRequiredTest, type RequiredTestFailure } from "../../src/remediate/steps/dispatch/requiredTests.js";
+import { recoverIngestHostResults } from "../../src/remediate/steps/recoverIngest.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import {
-  ingestRemediationHostResults,
-  precomputeRecoveryTestVerdicts,
-  prepareRemediationHostHandoff,
-  remediationSubmissionBinding,
-  REQUIRED_TEST_MESSAGE_LIMIT,
-  runRequiredTest,
-  type CurrentRemediationHostState,
-  type PreparedRemediationHostHandoff,
-  type RemediationHostWorkItem,
-  type RemediationRequiredTestVerdicts,
-  type RequiredTestFailure,
-} from "../../src/remediate/steps/dispatch/hostHandoff.js";
-import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
+import { ingestRemediationHostResults, precomputeRecoveryTestVerdicts, prepareRemediationHostHandoff, remediationSubmissionBinding } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { type CurrentRemediationHostState, type PreparedRemediationHostHandoff, type RemediationHostWorkItem } from "../../src/remediate/steps/dispatch/hostContracts.js";
+import { type RemediationRequiredTestVerdicts } from "../../src/remediate/steps/dispatch/requiredTests.js";
+
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {
   REMEDIATION_STATE_CONTRACT_VERSION,
@@ -354,7 +348,7 @@ function boundState(
   value: Fixture,
   record: RemediationHostHandoffRecord = value.handoff.handoff_record,
 ): CurrentRemediationHostState {
-  return { ...value.state, host_handoff: record };
+  return { ...value.state, host_handoff: record, conformance_review: value.handoff.conformance_review };
 }
 
 function legacyBoundState(
@@ -2775,4 +2769,165 @@ describe("obligation evidence-coverage floor", () => {
     expect(value.item.prompt.text).toContain("mod-a:invariant:1");
     expect(value.item.prompt.text).toContain("mod-a:output:2");
   });
+});
+
+describe("independent conformance admission and captured verification evidence", () => {
+  it("opted-in contract conformance cannot accept mechanically valid work before independent review", async () => {
+    const value = await fixture({ contractOverlays: true, beforePrepare: async root => {
+      const artifactsDir = join(root, ".audit-tools", "remediation");
+      await mkdir(artifactsDir, { recursive: true });
+      await writeFile(join(artifactsDir, "intent_checkpoint.json"), JSON.stringify({
+        schema_version: "intent-checkpoint/v1", confirmed_by: "host", confirmed_at: new Date().toISOString(),
+        scope_summary: "fixture", intent_summary: "fix and independently verify contracts", conformance_review: true,
+      }));
+    } });
+    const landed = await landA(value);
+    await writeResult(value, {
+      ...resultFor(value, landed),
+      obligation_evidence: value.item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: ["src/a.ts implements this obligation"] })),
+    });
+    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state: boundState(value) });
+    if (result === "unsupported_retired_state") throw Error(result);
+    expect(result.accepted_count).toBe(0);
+    expect(result.issues.map(issue => issue.code)).toContain("conformance_review_required");
+  });
+
+  it('retains complete captured required-test output separately from the prompt excerpt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'required-output-log-'));
+    cleanupRoots.push(root);
+    const failure = await runRequiredTest(root, `node -e "process.stdout.write('BEGIN'+ 'x'.repeat(12000)+'END'); process.exit(1)"`);
+    expect(failure).not.toBeNull();
+    const path = (failure as RequiredTestFailure & { output_log?: string }).output_log;
+    expect(path).toBeDefined();
+    const log = JSON.parse(await readFile(path!, 'utf8'));
+    expect(log.stdout).toBe('BEGIN' + 'x'.repeat(12000) + 'END');
+    expect(failure!.stdout.length).toBeLessThan(2000);
+  });
+
+
+  async function conformanceFixture(): Promise<Fixture> {
+    return fixture({ contractOverlays: true, beforePrepare: async root => {
+      const dir = join(root, ".audit-tools", "remediation");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "intent_checkpoint.json"), JSON.stringify({ schema_version: "intent-checkpoint/v1", confirmed_by: "host", confirmed_at: new Date().toISOString(), scope_summary: "fixture", intent_summary: "independent review", conformance_review: true }));
+    } });
+  }
+  async function ingestConformance(value: Fixture) {
+    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state: boundState(value) });
+    if (result === "unsupported_retired_state") throw Error(result);
+    return result;
+  }
+  async function writeConformanceResult(value: Fixture, evidence = "src/a.ts:1 preserves the required export") {
+    const landed = await landA(value);
+    const result = { ...resultFor(value, landed), obligation_evidence: value.item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: [evidence] })) };
+    await writeResult(value, result);
+    return result;
+  }
+  async function answerConformance(value: Fixture, options: { mode?: string; verdict?: string; binding?: string } = {}) {
+    const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
+    const request = JSON.parse(await readFile(paths.request, "utf8")) as { binding: string };
+    await writeFile(paths.response, JSON.stringify({
+      schema_version: "contract-conformance-review/v1", binding: options.binding ?? request.binding,
+      declaration: { mode: options.mode ?? "independent", reason: "Fresh reviewer context with no shared authorship" },
+      verdict: options.verdict ?? "pass", summary: "The cited export and test prove the required behavior",
+      obligations: value.item.obligation_ids.map(obligation_id => ({ obligation_id, verdict: "satisfied", evidence: ["src/a.ts:1 exports the required name and value"] })),
+    }));
+  }
+  describe("opt-in independent contract conformance lifecycle", () => {
+    it("a bound independent pass allows ordinary mechanical acceptance", async () => {
+      const value = await conformanceFixture(); await writeConformanceResult(value);
+      expect((await ingestConformance(value)).accepted_count).toBe(0);
+      await answerConformance(value);
+      const accepted = await ingestConformance(value);
+      expect(accepted.accepted_count).toBe(1);
+      expect(accepted.state.items.F1?.status).toBe("resolved");
+      expect(accepted.state.conformance_review?.enabled).toBe(true);
+      expect(accepted.state.items.F1).toHaveProperty("conformance_review");
+    });
+    it("unavailable and degraded review pause instead of silently self-reviewing", async () => {
+      const value = await conformanceFixture(); await writeConformanceResult(value); await ingestConformance(value);
+      for (const mode of ["unavailable", "degraded"]) {
+        await answerConformance(value, { mode });
+        const outcome = await ingestConformance(value);
+        expect(outcome.accepted_count).toBe(0);
+        expect(outcome.issues.map(issue => issue.code)).toContain("conformance_review_unavailable");
+      }
+    });
+    it("insufficient evidence can be corrected and reviewed without poisoning acceptance", async () => {
+      const value = await conformanceFixture(); const result = await writeConformanceResult(value);
+      await ingestConformance(value); await answerConformance(value, { verdict: "insufficient" });
+      expect((await ingestConformance(value)).issues.map(issue => issue.code)).toContain("conformance_review_insufficient");
+      await writeResult(value, { ...result, obligation_evidence: value.item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: ["src/a.ts:1 corrected and tests checked"] })) });
+      expect((await ingestConformance(value)).issues.map(issue => issue.code)).toContain("conformance_review_required");
+      await answerConformance(value);
+      expect((await ingestConformance(value)).accepted_count).toBe(1);
+    });
+    it("tampered binding and incomplete mechanical obligations never authorize acceptance", async () => {
+      const value = await conformanceFixture(); const result = await writeConformanceResult(value);
+      await ingestConformance(value); await answerConformance(value, { binding: "0".repeat(64) });
+      expect((await ingestConformance(value)).accepted_count).toBe(0);
+      await answerConformance(value);
+      await writeResult(value, { ...result, obligation_evidence: [] });
+      const bad = await ingestConformance(value);
+      expect(bad.accepted_count).toBe(0);
+      expect(bad.issues.some(issue => issue.check === "obligation_evidence")).toBe(true);
+    });
+    it("editing the checkpoint cannot switch off an already-bound run requirement", async () => {
+      const value = await conformanceFixture(); await writeConformanceResult(value);
+      const checkpointPath = join(value.artifactsDir, "intent_checkpoint.json");
+      const checkpoint = JSON.parse(await readFile(checkpointPath, "utf8")) as Record<string, unknown>;
+      await writeFile(checkpointPath, JSON.stringify({ ...checkpoint, conformance_review: false }));
+      expect((await ingestConformance(value)).issues.map(issue => issue.code)).toContain("conformance_review_required");
+    });
+    it("the ordinary default-off run adds no review request", async () => {
+      const value = await fixture({ contractOverlays: true }); await writeConformanceResult(value);
+      expect((await ingestConformance(value)).accepted_count).toBe(1);
+      await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    it("production next-step emits the independent review step before accepting work", async () => {
+      const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
+      await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "resume" }));
+      const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, finalGateRunner: () => ({ status: 0 }) });
+      expect(step.step_kind).toBe("review_contract_conformance");
+      expect(await readFile(step.prompt_path, "utf8")).toContain("context that did not author");
+    });
+  });
+
+  it("opt-in no-change success also waits for independent conformance review", async () => {
+    const value = await conformanceFixture();
+    await writeResult(value, decisionFor(value, { status: "resolved_no_change", evidence: ["src/a.ts already preserves the required export and behavior"] }));
+    const pending = await ingestConformance(value);
+    expect(pending.accepted_count).toBe(0);
+    expect(pending.issues.map(issue => issue.code)).toContain("conformance_review_required");
+    await answerConformance(value);
+    expect((await ingestConformance(value)).accepted_count).toBe(1);
+  });
+  it("blocked outcomes do not wait for success conformance review", async () => {
+    const value = await conformanceFixture();
+    await writeResult(value, decisionFor(value, { status: "blocked", failure_reason: "Missing owner decision" }));
+    const outcome = await ingestConformance(value);
+    expect(outcome.accepted_count).toBe(1);
+    expect(outcome.state.items.F1?.status).toBe("blocked");
+    await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+  it("a changed carried contract invalidates the old mechanical workload and review", async () => {
+    const value = await conformanceFixture(); await writeConformanceResult(value); await ingestConformance(value); await answerConformance(value);
+    const state = structuredClone(boundState(value));
+    const contract = state.plan.blocks[0]!.module_contracts![0]!;
+    contract.contract = { ...contract.contract, unexpected_new_requirement: "must be independently reviewed" };
+    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state });
+    if (result === "unsupported_retired_state") throw Error(result);
+    expect(result.accepted_count).toBe(0);
+    expect(result.issues.some(issue => issue.code === "workload_invalid")).toBe(true);
+  });
+
+
+  it("a required-review handoff cannot be accepted with its run snapshot dropped", async () => {
+    const value = await conformanceFixture(); await writeConformanceResult(value);
+    const state = boundState(value);
+    delete state.conformance_review;
+    const outcome = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state });
+    expect(outcome).toBe("unsupported_retired_state");
+  });
+
 });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/intent-equivalence-executor.test.ts
 /**
  * DD-9 — the intent-equivalence obligation's executor.
  *
@@ -40,6 +41,7 @@ import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 export const IntentEquivalenceVerdictSchema = z
   .object({
     verdict: z.enum(["equivalent", "changed"]),
+    rationale: z.string().optional(),
     judged_pair: z
       .object({
         prior_hash: z.string(),

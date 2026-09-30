@@ -306,7 +306,8 @@ resumes in any host without replanning.
 ## Host review handoff
 
 Planning emits every eligible review item as one complete
-`audit-host-workload/v1alpha1` artifact. Work items carry stable ids, lens and
+`audit-host-workload` artifact (revision defined by `WORKLOAD_CONTRACT_VERSION` in
+`src/audit/cli/dispatch/hostHandoff.ts`). Work items carry stable ids, lens and
 scope, deterministic complexity/risk/token-estimate metadata, the full prompt,
 its SHA-256 binding, and a repository-contained result path. Metadata describes
 the work; it never selects an executor or asserts a fit against an execution

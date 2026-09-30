@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/free-form-intent-escalation.test.ts, tests/remediate/intent-constraint-clauses.test.ts
 /**
  * Constraint-clause resolution — the SHARED half of the blocking-escalation
  * gate for unencodable free_form_intent clauses.
@@ -14,6 +15,7 @@
  * checkpoints keep working.
  */
 
+import type { IntentClause } from "./clauseInterpreter.js";
 import type { IntentCheckpoint } from "../types/intentCheckpoint.js";
 
 /** One unencodable clause with its identity and blocking question. */
@@ -24,6 +26,15 @@ export interface ConstraintClauseRecord {
   text: string;
   /** The blocking question that must be answered before planning proceeds. */
   checkpoint_question: string;
+}
+
+/** Project unanswered semantic clauses without changing their stable identity. */
+export function constraintClausesFromIntent(clauses: readonly IntentClause[]): ConstraintClauseRecord[] {
+  return clauses.flatMap((clause) => clause.encodable || !clause.checkpoint_question ? [] : [{
+    clause_id: clause.clause_id,
+    text: clause.text,
+    checkpoint_question: clause.checkpoint_question,
+  }]);
 }
 
 /**

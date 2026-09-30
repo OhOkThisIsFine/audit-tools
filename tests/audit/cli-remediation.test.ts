@@ -1,3 +1,4 @@
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
@@ -54,7 +55,7 @@ test("ingest-results rejects a value-less --results alongside --batch-results (C
   const tempRoot = await mkdtemp(join(tmpdir(), "ingest-mutex-"));
   try {
     // `--results` is present as a token but value-less (the next token is the
-    // end of argv). The mutual-exclusion guard must still fire rather than
+    // end of argv). The required-value guard must fire rather than
     // silently running the batch path. runCli catches the thrown Error, prints
     // its message to stderr, and sets exitCode=1.
     const { stderr, exitCode } = await captureRunCli([
@@ -65,7 +66,7 @@ test("ingest-results rejects a value-less --results alongside --batch-results (C
       tempRoot,
       "--results",
     ]);
-    expect(stderr).toMatch(/not both/i);
+    expect(stderr).toMatch(/--results requires a value/i);
     expect(exitCode).toBe(1);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
@@ -106,6 +107,7 @@ test("next-step starts intake for manifestless source repositories", async () =>
   try {
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "app.js"), "export const ok = true;\n");
+    await satisfyFunctionalPreflight(root);
 
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -136,6 +138,7 @@ test("next-step blocks empty or documentation-only repositories after intake val
   const root = await mkdtemp(join(tmpdir(), "audit-code-no-auditable-"));
   try {
     await writeFile(join(root, "README.md"), "# Notes only\n");
+    await satisfyFunctionalPreflight(root);
 
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/final-gate-extraction-equivalence.test.ts
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10)
 // ---------------------------------------------------------------------------
@@ -131,10 +132,8 @@ export interface ToolOwnedFinalGateResult {
    */
   outcome: Exclude<FinalGateOutcomeKind, "disabled">;
   /**
-   * True when the audit-tools-specific suite did not apply (target is not the
-   * audit-tools monorepo). The gate then does not block; it is a declared scope,
-   * not a vacuous pass. Kept alongside {@link outcome} as the boolean draw of
-   * the same fact for the branches that only need "did anything run".
+   * True when no command could be derived. This is a blocking non-verdict;
+   * the operator must supply a command or leave the run paused.
    */
   scoped_out: boolean;
   /**
@@ -204,24 +203,23 @@ export const RUNTIME_RESIDUAL_DECLARATION: ToolOwnedFinalGateResult["runtime_res
  * header; the host's session variables reach the child unchanged).
  * The first failing command short-circuits the floor (a broken build makes the
  * later layers meaningless). A `runner` may be injected for tests. When the
- * audit-tools suite does not apply (non-monorepo target), the gate is
- * `scoped_out` (does not block) rather than vacuously passing.
+ * target declares no executable gates, it returns a non-verdict that blocks
+ * for an explicit operator command rather than vacuously passing.
  */
 export async function runToolOwnedFinalGate(
   root: string,
-  opts: { runner?: GateRunner } = {},
+  opts: { runner?: GateRunner; testCommand?: string[] } = {},
 ): Promise<ToolOwnedFinalGateResult> {
-  const runtime_residual = RUNTIME_RESIDUAL_DECLARATION;
+  const runtime_residual = isAuditToolsMonorepo(root)
+    ? RUNTIME_RESIDUAL_DECLARATION
+    : { surface: "verification roles not declared by the target repository", commands: [] };
 
-  const commands = toolOwnedFinalGateCommands(root);
+  const commands = toolOwnedFinalGateCommands(root, opts.testCommand);
   if (commands.length === 0) {
-    // Audit-tools-specific suite does not apply here — declared scope, not a
-    // vacuous pass (it never substitutes for a real gate on the audit-tools repo).
-    // `passed: true` keeps it NON-BLOCKING, which is the declared design; the
-    // `outcome` beside it is what stops that non-blocking value from being
-    // recorded as if a floor had run green.
+    // No declared command is not a verdict. The consumer emits an operator
+    // decision and preserves the run, rather than treating zero checks as green.
     return {
-      passed: true,
+      passed: false,
       results: [],
       outcome: "scoped_out",
       scoped_out: true,
@@ -356,6 +354,7 @@ export interface FinalGateVerdictRecord {
   outcome: Exclude<FinalGateOutcomeKind, "disabled">;
   /** The per-command results the red record is rebuilt from. */
   results: FinalGateCommandResult[];
+  binding?: string;
   recorded_at: string;
 }
 
@@ -381,6 +380,7 @@ export async function readFinalGateVerdict(
   artifactsDir: string,
   scope: string,
   tree: string | null,
+  binding?: string,
 ): Promise<FinalGateVerdictRecord | undefined> {
   if (tree === null) return undefined;
   const raw = await readOptionalJsonFile<FinalGateVerdictRecord>(
@@ -389,6 +389,7 @@ export async function readFinalGateVerdict(
   const record = discardOnSchemaVersionMismatch(raw, FINAL_GATE_VERDICT_VERSION);
   if (record === undefined || record === null) return undefined;
   if (record.scope !== scope) return undefined;
+  if (binding !== undefined && (record.binding !== binding || record.scoped_out)) return undefined;
   if (record.tree === null || record.tree !== tree) return undefined;
   if (!Array.isArray(record.results)) return undefined;
   return record;
@@ -410,6 +411,7 @@ export async function writeFinalGateVerdict(
     scoped_out: boolean;
     outcome: Exclude<FinalGateOutcomeKind, "disabled">;
     results: FinalGateCommandResult[];
+    binding?: string;
   },
 ): Promise<string> {
   const path = finalGateVerdictPath(artifactsDir);
@@ -421,6 +423,7 @@ export async function writeFinalGateVerdict(
     scoped_out: verdict.scoped_out,
     outcome: verdict.outcome,
     results: verdict.results,
+    binding: verdict.binding,
     recorded_at: new Date().toISOString(),
   };
   try {

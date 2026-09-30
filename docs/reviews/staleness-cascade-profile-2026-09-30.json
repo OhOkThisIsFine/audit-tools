@@ -1,0 +1,413 @@
+{
+  "schema_version": "staleness-cascade-profile/v1",
+  "node": "v24.19.0",
+  "fixture": {
+    "doc_lines": 400,
+    "doc_bytes": 49892,
+    "source_files": 2,
+    "charter_members": 1
+  },
+  "limits": "Single deterministic fixture. Bound prose verdicts are synthetic test inputs. No host or LLM is invoked; packet bytes are materialized, not delivered. Metadata timing and two producer reruns exclude remaining cascade/host cost. No repository-wide invalidation conclusion.",
+  "rows": [
+    {
+      "scenario": "provenance-only",
+      "changed_field": "intent_checkpoint.confirmed_at",
+      "judgment": "none",
+      "direct_dependency_edges": [
+        [
+          "intent_checkpoint.json",
+          "charter_register.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "charter_clarification.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "systemic_challenge.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "coverage_matrix.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_tasks.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_plan_metrics.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "requeue_tasks.json"
+        ]
+      ],
+      "stale": [],
+      "deferred": [],
+      "actually_rederived": [],
+      "remaining_stale": [],
+      "measured_ms": {
+        "detection_and_metadata": 2.5096469999999726,
+        "deterministic_producers": 0.006400000000098771,
+        "stated_packet_materialization": 3.504505999999992
+      },
+      "materialized_context_utf8_bytes": 53668,
+      "input_bundle_json_bytes": 106079,
+      "supplied_to_host_bytes": 0,
+      "actual_llm_tokens": null,
+      "estimated_tokens": null
+    },
+    {
+      "scenario": "equivalent-prose",
+      "changed_field": "intent_checkpoint.scope_summary",
+      "judgment": "equivalent",
+      "direct_dependency_edges": [
+        [
+          "intent_checkpoint.json",
+          "charter_register.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "charter_clarification.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "systemic_challenge.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "coverage_matrix.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_tasks.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_plan_metrics.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "requeue_tasks.json"
+        ]
+      ],
+      "stale": [],
+      "deferred": [],
+      "actually_rederived": [],
+      "remaining_stale": [],
+      "measured_ms": {
+        "detection_and_metadata": 2.1989560000000665,
+        "deterministic_producers": 0.004627000000027692,
+        "stated_packet_materialization": 1.0738190000000714
+      },
+      "materialized_context_utf8_bytes": 53668,
+      "input_bundle_json_bytes": 106087,
+      "supplied_to_host_bytes": 0,
+      "actual_llm_tokens": null,
+      "estimated_tokens": null
+    },
+    {
+      "scenario": "changed-prose",
+      "changed_field": "intent_checkpoint.scope_summary",
+      "judgment": "changed",
+      "direct_dependency_edges": [
+        [
+          "intent_checkpoint.json",
+          "charter_register.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "charter_clarification.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "systemic_challenge.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "coverage_matrix.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_tasks.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "audit_plan_metrics.json"
+        ],
+        [
+          "intent_checkpoint.json",
+          "requeue_tasks.json"
+        ]
+      ],
+      "stale": [
+        "charter_clarification.json",
+        "charter_register.json",
+        "systemic_challenge.json"
+      ],
+      "deferred": [],
+      "actually_rederived": [
+        "charter_clarification.json",
+        "systemic_challenge.json"
+      ],
+      "remaining_stale": [
+        "charter_clarification.json",
+        "charter_register.json",
+        "systemic_challenge.json"
+      ],
+      "measured_ms": {
+        "detection_and_metadata": 4.501299000000017,
+        "deterministic_producers": 6.357024999999908,
+        "stated_packet_materialization": 3.5119980000000623
+      },
+      "materialized_context_utf8_bytes": 53668,
+      "input_bundle_json_bytes": 106087,
+      "supplied_to_host_bytes": 0,
+      "actual_llm_tokens": null,
+      "estimated_tokens": null
+    },
+    {
+      "scenario": "document-content",
+      "changed_field": "repo_manifest.files[README.md].hash/size_bytes",
+      "judgment": "none",
+      "direct_dependency_edges": [
+        [
+          "repo_manifest.json",
+          "file_disposition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "graph_bundle.json"
+        ],
+        [
+          "repo_manifest.json",
+          "unit_manifest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "surface_manifest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "critical_flows.json"
+        ],
+        [
+          "repo_manifest.json",
+          "risk_register.json"
+        ],
+        [
+          "repo_manifest.json",
+          "git_history.json"
+        ],
+        [
+          "repo_manifest.json",
+          "external_analyzer_acquisition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "docs_digest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "structure_decomposition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "charter_register.json"
+        ],
+        [
+          "repo_manifest.json",
+          "charter_clarification.json"
+        ],
+        [
+          "repo_manifest.json",
+          "systemic_challenge.json"
+        ],
+        [
+          "repo_manifest.json",
+          "coverage_matrix.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit_plan_metrics.json"
+        ],
+        [
+          "repo_manifest.json",
+          "flow_coverage.json"
+        ],
+        [
+          "repo_manifest.json",
+          "requeue_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "runtime_validation_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "runtime_validation_report.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit-report.md"
+        ]
+      ],
+      "stale": [
+        "charter_clarification.json",
+        "charter_register.json",
+        "file_disposition.json",
+        "graph_bundle.json",
+        "structure_decomposition.json",
+        "systemic_challenge.json"
+      ],
+      "deferred": [],
+      "actually_rederived": [
+        "charter_clarification.json",
+        "systemic_challenge.json"
+      ],
+      "remaining_stale": [
+        "charter_clarification.json",
+        "charter_register.json",
+        "file_disposition.json",
+        "graph_bundle.json",
+        "structure_decomposition.json",
+        "systemic_challenge.json"
+      ],
+      "measured_ms": {
+        "detection_and_metadata": 2.920569999999998,
+        "deterministic_producers": 1.795443999999975,
+        "stated_packet_materialization": 2.103501000000051
+      },
+      "materialized_context_utf8_bytes": 53711,
+      "input_bundle_json_bytes": 106079,
+      "supplied_to_host_bytes": 0,
+      "actual_llm_tokens": null,
+      "estimated_tokens": null
+    },
+    {
+      "scenario": "unrelated-code-content",
+      "changed_field": "repo_manifest.files[src/other.ts].hash",
+      "judgment": "none",
+      "direct_dependency_edges": [
+        [
+          "repo_manifest.json",
+          "file_disposition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "graph_bundle.json"
+        ],
+        [
+          "repo_manifest.json",
+          "unit_manifest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "surface_manifest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "critical_flows.json"
+        ],
+        [
+          "repo_manifest.json",
+          "risk_register.json"
+        ],
+        [
+          "repo_manifest.json",
+          "git_history.json"
+        ],
+        [
+          "repo_manifest.json",
+          "external_analyzer_acquisition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "docs_digest.json"
+        ],
+        [
+          "repo_manifest.json",
+          "structure_decomposition.json"
+        ],
+        [
+          "repo_manifest.json",
+          "charter_register.json"
+        ],
+        [
+          "repo_manifest.json",
+          "charter_clarification.json"
+        ],
+        [
+          "repo_manifest.json",
+          "systemic_challenge.json"
+        ],
+        [
+          "repo_manifest.json",
+          "coverage_matrix.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit_plan_metrics.json"
+        ],
+        [
+          "repo_manifest.json",
+          "flow_coverage.json"
+        ],
+        [
+          "repo_manifest.json",
+          "requeue_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "runtime_validation_tasks.json"
+        ],
+        [
+          "repo_manifest.json",
+          "runtime_validation_report.json"
+        ],
+        [
+          "repo_manifest.json",
+          "audit-report.md"
+        ]
+      ],
+      "stale": [
+        "charter_clarification.json",
+        "file_disposition.json",
+        "graph_bundle.json",
+        "structure_decomposition.json",
+        "systemic_challenge.json"
+      ],
+      "deferred": [
+        "charter_register.json"
+      ],
+      "actually_rederived": [
+        "charter_clarification.json",
+        "systemic_challenge.json"
+      ],
+      "remaining_stale": [
+        "file_disposition.json",
+        "graph_bundle.json",
+        "structure_decomposition.json"
+      ],
+      "measured_ms": {
+        "detection_and_metadata": 1.6576939999999922,
+        "deterministic_producers": 1.1107050000000527,
+        "stated_packet_materialization": 1.1445669999999382
+      },
+      "materialized_context_utf8_bytes": 53668,
+      "input_bundle_json_bytes": 106079,
+      "supplied_to_host_bytes": 0,
+      "actual_llm_tokens": null,
+      "estimated_tokens": null
+    }
+  ]
+}

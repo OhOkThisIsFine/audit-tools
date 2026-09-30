@@ -39,7 +39,7 @@ async function runAutoFixExecutor(
   bundle: ArtifactBundle,
   root: string,
 ): Promise<AutoFixExecutorResult> {
-  const result = await runAutoFixExecutorSource(bundle, root);
+  const result = await runAutoFixExecutorSource(bundle, root, { autoFix: { enabled: true } });
   const applied = result.updated.auto_fixes_applied;
   if (!isAutoFixesApplied(applied)) {
     throw new TypeError("auto_fixes_applied did not match the executor contract");

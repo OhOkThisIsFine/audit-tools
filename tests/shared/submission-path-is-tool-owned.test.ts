@@ -1,3 +1,5 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "../audit/helpers/designReviewSnapshotFixture.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 /**
  * P25-a — the submission path is TOOL-OWNED, never host-typed.
  *
@@ -118,7 +120,9 @@ async function persistSoloDesignReviewState(root: string, artifactsDir: string):
   };
   delete bundle.artifact_metadata;
   await mkdir(artifactsDir, { recursive: true });
-  await writeCoreArtifacts(artifactsDir, bundle);
+  const completed = captureCompletedDesignReviews(bundle);
+  await writeCoreArtifacts(artifactsDir, completed);
+  await persistDesignReviewSnapshots(artifactsDir, completed);
   await writeFile(
     join(artifactsDir, "analyzer-policy.json"),
     JSON.stringify(
@@ -437,14 +441,17 @@ describe("path containment is the tool's, not the caller's", () => {
     };
     map.entries[0]!.result_path = "../escaped.json";
     await writeFile(mapPath, JSON.stringify(map), "utf8");
-    await expect(
-      ingestAuditHostResults({
-        root: fixture.root,
-        artifactsDir: fixture.artifactsDir,
-        runId: AUDIT_RUN_ID,
+    const refused = await ingestAuditHostResults({
+      root: fixture.root,
+      artifactsDir: fixture.artifactsDir,
+      runId: AUDIT_RUN_ID,
       auditTasks: auditManifest(fixture.items.map((item) => item.id)),
-      }),
-    ).rejects.toThrow(/Invalid audit host result binding/u);
+    });
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues).toEqual([expect.objectContaining({
+      code: "workload_stale", check: "workload_binding",
+      message: expect.stringMatching(/Invalid audit host result binding.*re-prepare/u),
+    })]);
   });
 });
 
@@ -705,6 +712,32 @@ describe("the audit accepted-results ledger", () => {
   // The result id is DERIVED from the work item and its prompt digest, so a
   // second item that reuses the first item's id fails the identity check at
   // `result_id` — before the duplicate check could see it.
+  it("refuses a new full prompt binding whose short result id collides with a prior accepted binding", async () => {
+    const fixture = await auditFixture(["T1"]);
+    const item = fixture.items[0]!;
+    await submit(fixture, item, auditSubmission(item));
+    const params = { root: fixture.root, artifactsDir: fixture.artifactsDir, runId: AUDIT_RUN_ID,
+      auditTasks: auditManifest([item.id]) };
+    expect((await ingestAuditHostResults(params)).accepted_count).toBe(1);
+    const ledger = JSON.parse(await readFile(fixture.ledgerPath, "utf8"));
+    // Model a prior, distinct full SHA with the same 12-character prefix. No
+    // cryptographic collision search is needed to exercise this valid ledger state.
+    const oldDigest = item.prompt.sha256.slice(0, -1) + (item.prompt.sha256.endsWith("0") ? "1" : "0");
+    expect(oldDigest.slice(0, 12)).toBe(item.prompt.sha256.slice(0, 12));
+    const prior = ledger.entries[0];
+    prior.prompt_sha256 = oldDigest;
+    prior.result.prompt_sha256 = oldDigest;
+    prior.result_sha256 = contentSha256(prior.result);
+    await writeFile(fixture.ledgerPath, JSON.stringify(ledger));
+    const retry = await ingestAuditHostResults(params);
+    expect(retry.accepted_count).toBe(0);
+    expect(retry.issues.map(issue => issue.code)).toContain("duplicate_submission_id");
+    expect(retry.raw_issues.find(issue => issue.code === "duplicate_submission_id")?.check).toBe("duplicate_result");
+    const unchanged = JSON.parse(await readFile(fixture.ledgerPath, "utf8"));
+    expect(unchanged.entries).toHaveLength(1);
+    expect(unchanged.entries[0].prompt_sha256).toBe(oldDigest);
+  });
+
   it("refuses a second submission that reuses another item's result id", async () => {
     const fixture = await auditFixture(["T1", "T2"]);
     const [first, second] = fixture.items;
@@ -839,7 +872,7 @@ describe("the audit accepted-results ledger", () => {
     expect(events.map((event) => event.note)).toContain("stale_lock_removed");
   });
 
-  it("throws, never returns a success shape, on a structural or identity violation", async () => {
+  it("fails closed on structural violations and classifies repairable binding corruption", async () => {
     const root = await tempRoot("audit-structural-");
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(join(root, "src"), { recursive: true });
@@ -863,16 +896,19 @@ describe("the audit accepted-results ledger", () => {
       }),
     ).rejects.toThrow(`T1 is missing the line count for ${AUDITED_FILE}`);
 
-    // A malformed result map propagates rather than degrading to an empty map.
+    // A malformed result map is refused with its repair, never degraded to an empty successful map.
     const fixture = await auditFixture(["T1"]);
     await writeFile(join(fixture.runDir, "host-result-map.json"), "{}", "utf8");
-    await expect(
-      ingestAuditHostResults({
-        root: fixture.root,
-        artifactsDir: fixture.artifactsDir,
-        runId: AUDIT_RUN_ID,
+    const refused = await ingestAuditHostResults({
+      root: fixture.root,
+      artifactsDir: fixture.artifactsDir,
+      runId: AUDIT_RUN_ID,
       auditTasks: auditManifest(fixture.items.map((item) => item.id)),
-      }),
-    ).rejects.toThrow("Invalid audit host result map");
+    });
+    expect(refused.accepted_count).toBe(0);
+    expect(refused.issues).toEqual([expect.objectContaining({
+      code: "workload_stale", check: "workload_binding",
+      message: expect.stringMatching(/Invalid audit host result map.*re-prepare/u),
+    })]);
   });
 });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loader-fragments-gate.test.ts
 // Canonical loader-instruction fragments, declared as DATA so the shipped
 // loader assets can be reconciled against them mechanically.
 //
@@ -85,8 +86,9 @@ export const LOADER_FRAGMENTS = [
     verbatimIn: [REMEDIATE_PROMPT],
     pointers: [{ path: REMEDIATE_SKILL, home: REMEDIATE_PROMPT }],
     text:
-      "pass an existing path with `--input <path>`; write conversational feedback to a " +
-      "temporary file and pass it with `--guidance-file <path>`.",
+      "pass an existing path with `--input <path>`; pass conversational feedback directly " +
+      "with `--guidance <text>`. The tool creates and selects its intake file. Use " +
+      "`--guidance-file <path>` only for an existing guidance document.",
   },
 ];
 

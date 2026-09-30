@@ -737,7 +737,7 @@ describe("the boundary gate's verdict is cached against the tree it judged", () 
     // Prompt 19 (owner, 2026-09-18): the cache is explained ONCE, the two
     // actions are numbered, and the retired claim that the gate always re-runs
     // (false while the tree is unchanged) is gone.
-    expect(prompt).toMatch(/At the phase \d+ boundary, the tool ran the repository's build/u);
+    expect(prompt).toMatch(/At the phase \d+ boundary, the tool ran the repository's declared verification commands/u);
     expect(prompt).toContain("1. Fix the failing command");
     expect(prompt).not.toContain("re-runs from scratch");
     expect(prompt.match(/runs the full build and suite again/gu)?.length).toBe(1);
@@ -888,7 +888,7 @@ describe("the gate's unit leg reads a trustworthy verdict", () => {
     });
     // Scoped out, so the failing runner is never consulted: no command ran.
     expect(gate.scoped_out).toBe(true);
-    expect(gate.passed).toBe(true);
+    expect(gate.passed).toBe(false);
     expect(gate.results).toEqual([]);
   });
 
@@ -896,5 +896,37 @@ describe("the gate's unit leg reads a trustworthy verdict", () => {
     await makeRepoLookLikeAuditTools();
     expect(isAuditToolsMonorepo(REPO_DIR)).toBe(true);
     expect(toolOwnedFinalGateCommands(REPO_DIR).length).toBeGreaterThan(0);
+  });
+});
+
+describe("arbitrary repository phase-boundary gates", () => {
+  async function establishGeneric(scripts: Record<string, string> = {}): Promise<void> {
+    await writeFile(join(REPO_DIR, "package.json"), JSON.stringify({ scripts }));
+    await saveState(makeBoundaryState());
+    await writeIntentCheckpoint();
+    await acknowledgeResume();
+  }
+  it("production next-step runs declared roles and preserves all work on red", async () => {
+    await establishGeneric({ build: "build", typecheck: "types", lint: "lint", test: "test" });
+    const calls: string[][] = [];
+    const step = await decideNextStep({ root: REPO_DIR, finalGateRunner: argv => {
+      calls.push(argv); return { status: argv[1] === "test" ? 1 : 0 };
+    } });
+    expect(step.step_kind).toBe("final_gate_red");
+    expect(calls).toEqual([["npm", "run", "build"], ["npm", "run", "typecheck"], ["npm", "run", "lint"], ["npm", "test"]]);
+    const state = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(state?.items?.["F-000"]?.status).toBe("resolved");
+    expect(state?.items?.["F-001"]?.status).toBe("pending");
+  });
+  it("no commands asks an operator, then an explicit command recovers the same run", async () => {
+    await establishGeneric();
+    const first = await decideNextStep({ root: REPO_DIR, finalGateRunner: () => { throw Error("no spawn"); } });
+    expect(first.step_kind).toBe("final_gate_red");
+    expect(await readFile(first.prompt_path, "utf8")).toContain("Verification command required");
+    const calls: string[][] = [];
+    const recovered = await decideNextStep({ root: REPO_DIR, verificationCommand: 'node "test suite.mjs"', finalGateRunner: argv => { calls.push(argv); return { status: 0 }; } });
+    expect(calls).toEqual([["node", "test suite.mjs"]]);
+    expect(recovered.step_kind).not.toBe("final_gate_red");
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.plan?.test_command).toBe('node "test suite.mjs"');
   });
 });

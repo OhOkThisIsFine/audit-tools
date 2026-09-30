@@ -51,6 +51,16 @@ human-readable render (markdown):
   lighter path.
 - Artifacts are continuity: staleness propagates along an explicit dependency map, never ad-hoc
   freshness checks.
+- The tool owns structure, IDs, cross-references and validation; the host supplies bounded judgment.
+  Contract assessment and conceptual design critique are distinct review jobs.
+- Decomposition keeps source and its tests together, with bounded work units, dependency ordering and
+  enforced write scope. Shared-file work may proceed optimistically; serialized acceptance detects
+  conflicts and requires retry against the updated tree, rather than trusting predicted edit regions.
+- Multiple host agents can contribute to the same run through persisted bindings and idempotent
+  ingestion; no provider-specific claim registry or lease is required.
+- Audit preserves source by default. Formatting requires current-run opt-in, and dry-run prevents it.
+  Analyzer grants and declines are scoped to the current run. Remediation must run the target's
+  declared verification commands or pause for an explicit verification decision.
 
 <!-- END philosophy-brief -->
 
@@ -156,12 +166,32 @@ a summary before anything is committed.
 - **Results are untrusted input.** Prompt bindings, file coverage, worktree identity, commit
   evidence, and test evidence are checked before host-produced work changes persisted state.
 
+### Review context and result conformance
+
+For optional independent contract conformance review during remediation, set
+`conformance_review: true` in the confirmed intent checkpoint before the first
+implementation handoff. The tool binds that choice to the run. Successful landed
+and no-change results then need a content-bound independent review after mechanical
+checks; missing review pauses, insufficient evidence requests repair, and unavailable
+independent review cannot silently fall back to self-review. Independence is declared
+by the host; audit-tools verifies the declaration and binding, not reviewer identity.
+
+Required contract reviews use a prompt-bound review submission envelope. Full-depth
+critique/critic reviews and the final judge require an independent context; unavailable
+review pauses instead of falling back to self-review. The explicit light critique/critic
+policy permits declared degraded review. Downstream roles read validated canonical
+artifact `payload` fields, while authors write only the separate submission paths.
+
 ### The pipelines, step by step
 
 **audit-code:**
 
+Before the audit starts, the host records observed source and relationship inspection
+capabilities. Missing capabilities require an explicit stop or an operator-approved,
+reported limitation; an installed tool name alone is not evidence.
+
 1. **Understand the repo** — deterministically maps files, public surfaces, the dependency
-   graph, critical flows, and a risk register; runs available static analyzers and auto-fixes.
+   graph, critical flows, and a risk register; runs available static analyzers. Audits preserve source files by default; formatting requires explicit per-run `next-step --auto-fix` approval, and `--dry-run` prevents formatting for the rest of that run. Analyzer grants and declines apply only to the current audit.
 2. **Confirm intent** — you review the scope and pick the review lenses.
 3. **Map the subsystems** — deterministically clusters the code into real subsystems by
    overlaying how it actually behaves (call/import, co-change, shared state) against how it's

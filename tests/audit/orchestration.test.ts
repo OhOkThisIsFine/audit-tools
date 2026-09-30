@@ -1,3 +1,4 @@
+import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
@@ -99,7 +100,7 @@ function createAuditTask(
 }
 
 function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
-  return {
+  return captureCompletedDesignReviews({
     repo_manifest: createRepoManifest(),
     file_disposition: { files: [] },
     auto_fixes_applied: { applied: [] },
@@ -173,7 +174,7 @@ function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
     audit_tasks: [createAuditTask()],
     requeue_tasks: [],
     ...overrides,
-  };
+  });
 }
 
 const { runIntentEquivalenceResolve } = await import(

@@ -1,3 +1,4 @@
+import { FindingSelectionSchema } from "./intakeSelection.js";
 // sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-sources-and-digest.test.ts
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -43,6 +44,13 @@ const IntakeSourceManifestSchema = z
     schema_version: z.literal(INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION),
     created_from: z.enum(["input", "default_candidates", "conversation", "mixed"]),
     sources: z.array(IntakeSourceSchema).min(1),
+    finding_selection: z.object({
+      criteria: FindingSelectionSchema,
+      source_path: z.string().min(1),
+      source_hash: z.string().min(1),
+      projected_path: z.string().min(1),
+      selected_count: z.number().int().nonnegative(),
+    }).strict().optional(),
   })
   .strict();
 export type IntakeSourceManifest = z.infer<typeof IntakeSourceManifestSchema>;
@@ -345,6 +353,7 @@ export function buildMixedSourceManifest(
   return {
     schema_version: INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
     created_from: "mixed",
+    ...(inputSourceManifest.finding_selection ? { finding_selection: inputSourceManifest.finding_selection } : {}),
     sources: [
       ...inputSourceManifest.sources,
       {
@@ -372,6 +381,7 @@ export function sourceManifestsEquivalent(
 ): boolean {
   if (!a || !b) return false;
   if (a.sources.length !== b.sources.length) return false;
+  if (JSON.stringify(a.finding_selection) !== JSON.stringify(b.finding_selection)) return false;
   return a.sources.every((source, index) => {
     const other = b.sources[index];
     return source.type === other.type && source.path === other.path;
@@ -389,7 +399,10 @@ export function resolveManifestSources(
   const missing: IntakeSource[] = [];
 
   for (const source of manifest.sources) {
-    const absolutePath = resolve(root, source.path);
+    const selectedPath = source.type === "structured_audit" &&
+      source.path === manifest.finding_selection?.source_path
+      ? manifest.finding_selection.projected_path : source.path;
+    const absolutePath = resolve(root, selectedPath);
     const normalized = { ...source, path: absolutePath };
     if (existsSync(absolutePath)) {
       resolved.push(normalized);

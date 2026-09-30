@@ -27,6 +27,7 @@ const {
 } = await import("../../src/audit/orchestrator/designReviewProjection.js");
 const {
   isDesignReviewStale,
+  buildDesignReviewSnapshot,
 } = await import("../../src/audit/orchestrator/designReviewSnapshot.js");
 const {
   renderSharedStructuralContext,
@@ -122,13 +123,7 @@ function projStr(b: DesignReviewBundle): string {
 
 /** Snapshot a bundle so isDesignReviewStale can diff a later bundle against it. */
 function snapshotFrom(b: DesignReviewBundle): DesignReviewSnapshot {
-  return {
-    schema_version: "audit-code/design-review-snapshot/v1alpha1",
-    pass: "contract",
-    reviewed_at: "2026-01-01T00:00:00Z",
-    prior_findings: [],
-    reviewed_inputs: projectDesignReviewInputs(b),
-  };
+  return buildDesignReviewSnapshot("contract", [], b, "2026-01-01T00:00:00Z");
 }
 
 // ── 1. Per-excluded-field byte-identical (cosmetic / provenance churn) ──────────

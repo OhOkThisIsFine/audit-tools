@@ -1,0 +1,22 @@
+import { afterEach, expect, test } from "vitest";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as bootstrap from "../../src/shared/intake/guidanceBootstrap.js";
+const roots: string[] = [];
+afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
+test("conversation guidance is created by the shared bootstrap, idempotent and collision-safe", async () => {
+  const root = await mkdtemp(join(tmpdir(), "guidance-text-"));
+  roots.push(root);
+  const api = bootstrap as typeof bootstrap & { applyGuidanceText: (dir: string, text: string) => string };
+  const text = "Fix the login flow.\nKeep the API stable.\n";
+  const path = api.applyGuidanceText(root, text);
+  expect(path).toBe(join(root, "intake", "conversation-start.md"));
+  expect(await readFile(path, "utf8")).toBe(text);
+  expect(api.applyGuidanceText(root, text)).toBe(path);
+  expect(() => api.applyGuidanceText(root, "different scope")).toThrow(/Refusing to overwrite/);
+  const source = join(root, "source.md");
+  await writeFile(source, text);
+  expect(bootstrap.applyGuidanceFile(root, source)).toBe(path);
+  expect(await readFile(path, "utf8")).toBe(text);
+});

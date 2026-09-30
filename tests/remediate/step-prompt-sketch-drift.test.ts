@@ -141,6 +141,7 @@ const DECLARED_VOCABULARIES = [
   "CONTRACT_REPAIR_TARGETS_LEGACY",
   "CONTEXT_ENTRY_KINDS",
   "COUNTEREXAMPLE_CLASSIFICATIONS",
+  "CONCEPTUAL_CRITIQUE_REPAIR_TARGETS",
   "CRITIQUE_ITEM_KINDS",
   "CRITIQUE_ITEM_SEVERITIES",
   "CRITIQUE_VERDICTS",
@@ -363,6 +364,7 @@ function seamReconciliationPayload(decision: string): unknown {
 }
 
 function critiquePayload(patch: {
+  repairTarget?: unknown;
   kind?: unknown;
   severity?: unknown;
   verdict?: unknown;
@@ -379,6 +381,7 @@ function critiquePayload(patch: {
       },
     ],
     verdict: patch.verdict ?? "approved",
+    repair_target: patch.repairTarget ?? "finalized_module_contracts",
     created_at: STAMP,
   };
 }
@@ -770,6 +773,13 @@ const VOCABULARIES: readonly Vocabulary[] = [
     build: (candidate) => dagPayload("pending", candidate),
     validate: validateImplementationDAG,
     path: "implementation_dag.edges[0].kind",
+  },
+  {
+    role: "critique",
+    field: "repair_target",
+    build: (candidate) => critiquePayload({ repairTarget: candidate }),
+    validate: validateConceptualDesignCritique,
+    path: "conceptual_design_critique.repair_target",
   },
 ];
 
@@ -1764,6 +1774,7 @@ describe("step prompt sketches derive from the validators that read their output
     const expectedOffered = [
       "contract_assessment_report",
       "finalized_module_contracts",
+      "module_decomposition",
       "obligation_ledger",
     ];
     expect(

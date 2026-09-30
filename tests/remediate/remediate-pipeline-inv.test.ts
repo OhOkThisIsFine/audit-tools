@@ -1,3 +1,4 @@
+import { writeContractHostFixture } from "./helpers/contractHostFixture.js";
 /**
  * INV-remediate-pipeline-01..08: contract invariants for the remediation contract pipeline
  *
@@ -22,7 +23,6 @@ import {
 } from "../../src/remediate/steps/contractPipeline.js";
 import { CONTRACT_PIPELINE_PHASE_ORDER } from "../../src/remediate/steps/contractPipelinePrompts.js";
 import {
-  contractInputFilePath,
   contractPipelineDir,
   type ContractPipelineArtifactName,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
@@ -79,13 +79,8 @@ const STEP_OPTIONS = {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-async function writeRawArtifact(
-  name: ContractPipelineArtifactName,
-  payload: unknown,
-): Promise<void> {
-  const path = contractInputFilePath(ARTIFACTS_DIR, name);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
+async function writeRawArtifact(name: ContractPipelineArtifactName, payload: unknown): Promise<void> {
+  await writeContractHostFixture(STEP_OPTIONS, name, payload);
 }
 
 function makeApprovedChainPayloads() {

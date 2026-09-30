@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/lane-demand.test.ts, tests/audit/semantic-review-step.test.ts
 import { z } from "zod";
 
 import { compareCodeUnits } from "../compareCodeUnits.js";
@@ -51,6 +52,9 @@ export const LaneDemandSchema = z
   .strict();
 
 export type LaneDemand = z.infer<typeof LaneDemandSchema>;
+
+/** Judgment-heavy contract, charter, conceptual and second-order review share this floor. */
+export const SEMANTIC_REVIEW_DEMAND = { riskScore: 0.8, semanticComplexity: "deep" as const };
 
 /**
  * The exact key set a lane's demand ranking contributes to an emitted lane —
@@ -115,6 +119,7 @@ export function deriveLaneDemand(params: {
   readonly tokenEstimate: number;
   readonly fileCount: number;
   readonly riskScore: number;
+  readonly minimumComplexity?: LaneDemand["complexity"];
 }): LaneDemand {
   const tokenEstimate = Number.isFinite(params.tokenEstimate)
     ? Math.max(0, params.tokenEstimate)
@@ -127,7 +132,7 @@ export function deriveLaneDemand(params: {
     : 0;
   return {
     size: laneSize(tokenEstimate, fileCount),
-    complexity: laneComplexity(tokenEstimate),
+    complexity: LANE_COMPLEXITY_VALUES[Math.max(LANE_COMPLEXITY_VALUES.indexOf(laneComplexity(tokenEstimate)), LANE_COMPLEXITY_VALUES.indexOf(params.minimumComplexity ?? "focused"))]!,
     risk: laneRisk(riskScore),
   };
 }

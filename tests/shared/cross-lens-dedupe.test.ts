@@ -669,3 +669,30 @@ describe("upsertFindingByIdentity — escalate severity/confidence, OR systemic,
     expect(entry.likelihood, "an unset likelihood must be backfilled from a later re-emission").toBe("backfilled likelihood");
   });
 });
+
+describe("lead lineage survives semantic deduplication", () => {
+  it("copies the original lead stamp when an ordinary higher-severity finding survives", () => {
+    const lineage = { producer: "detector", source_hash: "generation", confirmation: "lead" as const };
+    const result = crossLensDedupe([
+      makeFinding({ id: "high", severity: "high", lens: "correctness" }),
+      makeFinding({ id: "confirmed", severity: "low", lens: "reliability", lead_lineage: lineage, evidence: ["lead evidence"] }),
+    ], AUDIT_POLICY).findings;
+    expect(result).toHaveLength(1);
+    expect(result[0]!.lead_lineage).toEqual(lineage);
+    expect(result[0]!.lead_lineage).not.toBe(lineage);
+    expect(result[0]!.evidence).toEqual(expect.arrayContaining(["ev-1", "lead evidence"]));
+  });
+
+  it("chooses one deterministic primary lineage without dropping other evidence", () => {
+    for (const producers of [["z-detector", "a-detector"], ["a-detector", "z-detector"]]) {
+      const merged = new Map<string, Finding>();
+      for (const producer of producers) upsertFindingByIdentity(merged, makeFinding({
+        lead_lineage: { producer, source_hash: "generation", confirmation: "lead" },
+        evidence: [producer],
+      }));
+      const result = [...merged.values()][0]!;
+      expect(result.lead_lineage?.producer).toBe("a-detector");
+      expect(result.evidence).toEqual(expect.arrayContaining(producers));
+    }
+  });
+});

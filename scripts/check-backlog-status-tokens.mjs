@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-status-tokens.test.ts
 // Refuse status MARKERS in docs/backlog/**.
 //
 // WHY. Every backlog file's own header says the same thing — "A living to-do list,
@@ -86,9 +87,8 @@ const HAS_BLOCK_MARKER = /^[\s>]*(?:[-*+]\s+|\d+\.\s+|#{1,6}\s+)/;
  * Every status MARKER in one file's text.
  * @returns {{line:number, column:number, kind:string, snippet:string}[]}
  */
-export function findStatusMarkers(text) {
+export function findStatusMarkers(text, lines = text.split(/\r?\n/)) {
   const found = [];
-  const lines = text.split(/\r?\n/);
   let inFence = false;
   lines.forEach((raw, i) => {
     if (/^\s*(```|~~~)/.test(raw)) {

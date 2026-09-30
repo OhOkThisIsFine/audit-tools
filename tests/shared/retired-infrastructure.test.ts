@@ -16,14 +16,15 @@
 // REAL recognizer by tests/shared/guard-form-reach.test.ts, and a test placed
 // outside tests/ never runs in CI.
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import {
   EXEMPT_MARKER,
-  SCANNED_DOCS,
+  scannedDocs,
   findRetiredMentions,
 } from '../../scripts/check-retired-infrastructure.mjs';
 import { RETIRED_INFRASTRUCTURE } from '../../scripts/shared/retired-infrastructure-data.mjs';
@@ -180,24 +181,55 @@ describe('retired-infrastructure — the live tree', () => {
     }
   });
 
-  it('every declared scan target exists — a renamed doc must not go green over nothing', () => {
-    // A hardcoded scan list is most prone to exactly this: the file moves, the
-    // gate scans zero files, and "no mentions found" reads as a pass.
-    for (const doc of SCANNED_DOCS) {
+  it('the tracked scan covers owner skills and public docs as well as backlog references', () => {
+    expect(scannedDocs()).toContain('.claude/skills/design-check/SKILL.md');
+    expect(scannedDocs()).toContain('README.md');
+    expect(scannedDocs()).toContain('docs/backlog/durable-traps.md');
+    for (const doc of scannedDocs()) {
       expect(() => readFileSync(join(REPO_ROOT, doc), 'utf8'), doc).not.toThrow();
     }
   });
 
-  it('the scanned doc is genuinely clean — no unexempted mention survives', () => {
+  it('the scanned documents are genuinely clean — no unexempted mention survives', () => {
     // Keeps HEAD demonstrably green under plain `npm test`, not only in
     // verify:checks: the drift this gate exists to catch is a HAND edit, and an
     // author meets a broken test immediately while meeting a CI-only gate late.
-    for (const doc of SCANNED_DOCS) {
+    for (const doc of scannedDocs()) {
       const lines = readFileSync(join(REPO_ROOT, doc), 'utf8').split(/\r?\n/);
       const offenders = lines.flatMap((line, i) =>
         findRetiredMentions(line, i > 0 ? lines[i - 1] : '').map((m) => `${doc}:${i + 1} ${m.pointer}`),
       );
       expect(offenders).toEqual([]);
+    }
+  });
+});
+
+
+describe('retired-infrastructure — repository-wide scope', () => {
+  it('refuses retired instructions outside the old singleton while preserving dated records', () => {
+    const root = mkdtempSync(join(tmpdir(), 'retired-scope-'));
+    try {
+      spawnSyncHidden('git', ['init', '-q'], { cwd: root });
+      mkdirSync(join(root, 'docs/backlog'), { recursive: true });
+      mkdirSync(join(root, 'docs/reviews'), { recursive: true });
+      writeFileSync(join(root, 'docs/backlog/durable-traps.md'), 'Clean reference.');
+      writeFileSync(join(root, 'guide.md'), 'Run claude.ps1 now.');
+      spawnSyncHidden('git', ['add', '.'], { cwd: root });
+      const run = () => spawnSyncHidden(process.execPath, [SCRIPT], { cwd: root, encoding: 'utf8' });
+      expect(run().status).toBe(1);
+      expect(run().stderr).toContain('guide.md:1');
+      writeFileSync(join(root, 'guide.md'), 'Historical claude.ps1 <!-- retired-infrastructure-exempt: freellmapi — replaced by agent-dispatch -->');
+      writeFileSync(join(root, 'docs/reviews/scope-2026-09-30.md'), 'Historical claude.ps1');
+      expect(run().status).toBe(0);
+      writeFileSync(join(root, 'new-guide.md'), 'Use llm-relay');
+      expect(run().status).toBe(0);
+      spawnSyncHidden('git', ['add', 'new-guide.md'], { cwd: root });
+      expect(run().status).toBe(1);
+      rmSync(join(root, 'new-guide.md'));
+      rmSync(join(root, 'guide.md'));
+      expect(run().status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

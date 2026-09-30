@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/review-outcome-provenance.test.ts
 // Phase 7B — per-finding remediation outcome capture. The remediator emits one
 // of these per finding into `remediation-outcomes.json` at close time. This is
 // capture/surface only: it records what happened so a human (or a later
@@ -5,6 +6,7 @@
 // auditor does not consume it automatically.
 
 import { z } from "zod";
+import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema } from "./reviewIndependence.js";
 
 // CDC-25: the run's terminal-disposition vocabulary is
 // T = { fixed, verified-already-fixed-at-HEAD, refuted-against-HEAD }. `fixed`
@@ -300,6 +302,7 @@ export type MechanicalVerification = z.infer<typeof MechanicalVerificationSchema
 export const RemediationOutcomeSchema = z
   .object({
     finding_id: z.string(),
+    conformance_review: AcceptedConformanceReviewSchema.optional(),
     /** Audit lens the finding came from (free string in the wire contract). */
     lens: z.string(),
     /** Distinct file extensions of the finding's affected files (e.g. [".ts"]). */
@@ -391,6 +394,7 @@ export const RemediationOutcomesReportSchema = z.object({
    * artifact cannot read as clean either.
    */
   recovery: RunRecoverySchema,
+  contract_reviews: z.array(ContractReviewOutcomeSchema).optional(),
   outcomes: z.array(RemediationOutcomeSchema),
 });
 export type RemediationOutcomesReport = z.infer<

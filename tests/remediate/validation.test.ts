@@ -737,13 +737,13 @@ describe("validateDesignSpecGates", () => {
   };
 
   it("passes when no optional annotation fields are present", () => {
-    const issues = validateDesignSpecGates(minimalDesignSpec);
+    const issues = validateDesignSpecGates(minimalDesignSpec).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
   it("errors when a module entry lacks inputs", () => {
     const spec = { ...minimalDesignSpec, modules: [{ id: "M-1", inputs: [], outputs: ["out"] }] };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("modules[0].inputs"))).toBe(true);
@@ -755,7 +755,7 @@ describe("validateDesignSpecGates", () => {
       ...minimalDesignSpec,
       module_contracts: [{ id: "M-1", inputs: [], outputs: ["out"] }],
     };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     const issue = errors.find((e) => e.path === "module_contracts[0].inputs");
@@ -767,7 +767,7 @@ describe("validateDesignSpecGates", () => {
 
   it("errors when a module entry lacks outputs", () => {
     const spec = { ...minimalDesignSpec, modules: [{ id: "M-1", inputs: ["in"], outputs: [] }] };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("modules[0].outputs"))).toBe(true);
@@ -775,7 +775,7 @@ describe("validateDesignSpecGates", () => {
 
   it("errors when a side_effect entry has no owner", () => {
     const spec = { ...minimalDesignSpec, side_effects: [{ id: "SE-1", owner: "" }] };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("side_effects[0].owner"))).toBe(true);
@@ -783,7 +783,7 @@ describe("validateDesignSpecGates", () => {
 
   it("errors when an external_dependency entry lacks failure_semantics", () => {
     const spec = { ...minimalDesignSpec, external_dependencies: [{ id: "DEP-1", failure_semantics: "" }] };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("external_dependencies[0].failure_semantics"))).toBe(true);
@@ -794,7 +794,7 @@ describe("validateDesignSpecGates", () => {
       ...minimalDesignSpec,
       trust_boundaries: [{ id: "TB-1", untrusted_inputs: ["user_data"], validation_ref: "" }],
     };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("trust_boundaries[0].validation_ref"))).toBe(true);
@@ -805,7 +805,7 @@ describe("validateDesignSpecGates", () => {
       ...minimalDesignSpec,
       trust_boundaries: [{ id: "TB-1", untrusted_inputs: [], validation_ref: "vr-1" }],
     };
-    const issues = validateDesignSpecGates(spec);
+    const issues = validateDesignSpecGates(spec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     const issue = errors.find((e) => e.path === "trust_boundaries[0].untrusted_inputs");
@@ -835,7 +835,7 @@ describe("validateDesignSpecGates", () => {
     };
 
     it("errors when invariant has no corresponding obligation in ledger", () => {
-      const issues = validateDesignSpecGates(minimalDesignSpec, ledgerWithoutInvariantObl);
+      const issues = validateDesignSpecGates(minimalDesignSpec, ledgerWithoutInvariantObl).issues;
       const errors = issues.filter((i) => i.severity === "error");
       expect(errors.length).toBeGreaterThan(0);
       expect(errors.some((e) => e.message.includes("INV-1"))).toBe(true);
@@ -843,7 +843,7 @@ describe("validateDesignSpecGates", () => {
     });
 
     it("passes when invariant has a corresponding invariant-kind obligation referencing its id", () => {
-      const issues = validateDesignSpecGates(minimalDesignSpec, ledgerWithInvariantObl);
+      const issues = validateDesignSpecGates(minimalDesignSpec, ledgerWithInvariantObl).issues;
       expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
     });
   });
@@ -864,7 +864,7 @@ describe("validateDesignSpecGates", () => {
       // pass a ledger that references O-1/O-2, so INV-1 is still uncovered → error).
       // Use a design_spec with no invariants for a clean circular-only test.
       const specNoInvariants = { ...minimalDesignSpec, invariants: [] };
-      const issues = validateDesignSpecGates(specNoInvariants, circularLedger);
+      const issues = validateDesignSpecGates(specNoInvariants, circularLedger).issues;
       const warnings = issues.filter((i) => i.severity === "warning");
       const errors = issues.filter((i) => i.severity === "error");
       expect(warnings.length).toBeGreaterThan(0);
@@ -873,7 +873,7 @@ describe("validateDesignSpecGates", () => {
 
     it("warning message names the diagnostic and the action, never an internal record id", () => {
       const specNoInvariants = { ...minimalDesignSpec, invariants: [] };
-      const issues = validateDesignSpecGates(specNoInvariants, circularLedger);
+      const issues = validateDesignSpecGates(specNoInvariants, circularLedger).issues;
       const warnings = issues.filter((i) => i.severity === "warning");
       expect(warnings.some((w) => w.message.includes("Circular interface-definition dependency"))).toBe(true);
       expect(warnings.some((w) => w.message.includes("re-drafting the interface definitions"))).toBe(true);
@@ -898,7 +898,7 @@ describe("validateDesignSpecGates", () => {
       external_dependencies: [{ id: "DEP-1", failure_semantics: "Returns 503 on timeout." }],
       trust_boundaries: [{ id: "TB-1", untrusted_inputs: ["user_data"], validation_ref: "input-validation-schema-v1" }],
     };
-    const issues = validateDesignSpecGates(specFull, ledgerFull);
+    const issues = validateDesignSpecGates(specFull, ledgerFull).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 });
@@ -1102,7 +1102,7 @@ describe("validateImplementationDAGIntegrity", () => {
       obligation_ledger,
       counterexample,
       judge_report,
-    );
+    ).issues;
     expect(unwaived.filter((i) => i.severity === "error").some((e) => e.message.includes("CE-1"))).toBe(true);
 
     const waived = validateImplementationDAGIntegrity(
@@ -1111,7 +1111,7 @@ describe("validateImplementationDAGIntegrity", () => {
       counterexample,
       judge_report,
       new Set(["CE-1"]),
-    );
+    ).issues;
     expect(waived.filter((i) => i.severity === "error").some((e) => e.message.includes("CE-1"))).toBe(false);
   });
 
@@ -1138,7 +1138,7 @@ describe("validateImplementationDAGIntegrity", () => {
       obligation_ledger,
       { counterexamples: [] },
       emptyIdJudgeReport,
-    );
+    ).issues;
     expect(
       issues
         .filter((i) => i.severity === "error")
@@ -1147,13 +1147,13 @@ describe("validateImplementationDAGIntegrity", () => {
   });
 
   it("returns no errors for a fully valid DAG", () => {
-    const issues = validateImplementationDAGIntegrity(validDag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(validDag, obligation_ledger, counterexample, judge_report).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
   it("returns no errors when dag has no nodes (empty DAG — structural validtor handles this)", () => {
     const emptyDag = { nodes: [] };
-    const issues = validateImplementationDAGIntegrity(emptyDag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(emptyDag, obligation_ledger, counterexample, judge_report).issues;
     // Empty nodes: obligations and counterexamples are uncovered — errors expected
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("O-1"))).toBe(true);
@@ -1163,7 +1163,7 @@ describe("validateImplementationDAGIntegrity", () => {
     const dag = {
       nodes: [{ id: "N-1", satisfies_obligations: ["GHOST-OBL"], verification_obligation_ids: [], addresses_counterexamples: ["CE-1"] }],
     };
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("GHOST-OBL"))).toBe(true);
     expect(errors.some((e) => e.path.includes("satisfies_obligations"))).toBe(true);
@@ -1173,7 +1173,7 @@ describe("validateImplementationDAGIntegrity", () => {
     const dag = {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: ["GHOST-VER"], addresses_counterexamples: ["CE-1"] }],
     };
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("GHOST-VER"))).toBe(true);
     expect(errors.some((e) => e.path.includes("verification_obligation_ids"))).toBe(true);
@@ -1183,7 +1183,7 @@ describe("validateImplementationDAGIntegrity", () => {
     const dag = {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: ["CE-GHOST"] }],
     };
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("CE-GHOST"))).toBe(true);
     expect(errors.some((e) => e.path.includes("addresses_counterexamples"))).toBe(true);
@@ -1194,7 +1194,7 @@ describe("validateImplementationDAGIntegrity", () => {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: [], addresses_counterexamples: ["CE-1"] }],
     };
     // O-2 is in the ledger but no node satisfies or verifies it
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("O-2"))).toBe(true);
     expect(errors.some((e) => e.path === "implementation_dag.coverage")).toBe(true);
@@ -1205,7 +1205,7 @@ describe("validateImplementationDAGIntegrity", () => {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: [] }],
     };
     // CE-1 is accepted but no node addresses it
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.some((e) => e.message.includes("CE-1"))).toBe(true);
     expect(errors.some((e) => e.path === "implementation_dag.coverage")).toBe(true);
@@ -1216,20 +1216,19 @@ describe("validateImplementationDAGIntegrity", () => {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-UNKNOWN"], verification_obligation_ids: [], addresses_counterexamples: [] }],
     };
     // No obligation_ledger — referential check is skipped
-    const issues = validateImplementationDAGIntegrity(dag, undefined, undefined, undefined);
+    const issues = validateImplementationDAGIntegrity(dag, undefined, undefined, undefined).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
-  it("does not flag counterexample referential issues when counterexample artifact is absent", () => {
+  it("refuses a named counterexample reference without its source artifact", () => {
     const dag = {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: ["CE-GHOST"] }],
     };
-    // No counterexample artifact — referential check skipped for addresses_counterexamples
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, undefined, undefined);
+    // A named reference must resolve even when the source artifact is absent.
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, undefined, undefined).issues;
     const errors = issues.filter((i) => i.severity === "error");
-    // Should NOT error on CE-GHOST (no counterexample artifact), but SHOULD still check coverage
-    // No judge_report → no accepted counterexamples → coverage check not applicable
-    expect(errors.filter((e) => e.message.includes("CE-GHOST"))).toHaveLength(0);
+    // No judge report adds no coverage demand, but cannot legitimize CE-GHOST.
+    expect(errors.filter((e) => e.message.includes("CE-GHOST"))).toHaveLength(1);
   });
 
   it("counts verification_obligation_ids toward coverage", () => {
@@ -1237,12 +1236,12 @@ describe("validateImplementationDAGIntegrity", () => {
     const dag = {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1"], verification_obligation_ids: ["O-2"], addresses_counterexamples: ["CE-1"] }],
     };
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judge_report).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
   it("returns no errors when dag is not a record", () => {
-    const issues = validateImplementationDAGIntegrity(null, obligation_ledger, counterexample, judge_report);
+    const issues = validateImplementationDAGIntegrity(null, obligation_ledger, counterexample, judge_report).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 
@@ -1256,7 +1255,7 @@ describe("validateImplementationDAGIntegrity", () => {
       nodes: [{ id: "N-1", satisfies_obligations: ["O-1", "O-2"], verification_obligation_ids: [], addresses_counterexamples: [] }],
     };
     // CE-1 is not accepted — no coverage needed
-    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judgeWithNonAccepted);
+    const issues = validateImplementationDAGIntegrity(dag, obligation_ledger, counterexample, judgeWithNonAccepted).issues;
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
   });
 });

@@ -11,7 +11,6 @@ import {
   isJsonParseError,
   isRecord,
   laneAssetsDir,
-  readJsonFile,
   readOptionalJsonFile,
   writeJsonFile,
 } from "audit-tools/shared";
@@ -308,6 +307,7 @@ export class MalformedConceptualPerspectivesError extends Error {
  */
 export async function loadConceptualPerspectiveFindings(
   manifestInput: ConceptualReviewRoundManifest,
+  readSubmission: (path: string, lane: string) => Promise<unknown>,
 ): Promise<Map<string, Finding[]>> {
   const manifest = ConceptualReviewRoundManifestSchema.parse(manifestInput);
   const out = new Map<string, Finding[]>();
@@ -319,7 +319,7 @@ export async function loadConceptualPerspectiveFindings(
     }
     seen.add(contributor.contributor_id);
     try {
-      const value = await readJsonFile<unknown>(contributor.result_path);
+      const value = await readSubmission(contributor.result_path, contributor.lane_id);
       out.set(contributor.contributor_id, submissionFindings(value));
     } catch (error) {
       // Do not turn an unreadable or missing file into a malformed submission.

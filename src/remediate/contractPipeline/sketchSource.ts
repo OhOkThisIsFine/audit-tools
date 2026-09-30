@@ -1,3 +1,4 @@
+export { CONCEPTUAL_CRITIQUE_REPAIR_TARGETS } from "../../shared/types/contractPipeline/design.js";
 // sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts
 /**
  * The value vocabularies a step prompt's schema sketch and its VALIDATOR both

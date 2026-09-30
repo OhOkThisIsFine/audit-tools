@@ -1136,13 +1136,7 @@ describe("promoted findings carry nothing the dispatch boundary strips", () => {
   });
 });
 
-// The former "N-R12: propagates preconditions and expected_changes" block is
-// DELETED with the producer it pinned. Both fields are DAG-node facts read by
-// the node-side gates; copied onto a finding they were declared on no schema,
-// read by no consumer, and dropped at the dispatch boundary. The property that
-// replaces the block — "the promotion computes no finding field FindingSchema
-// would drop" — is asserted by the suite above, and it covers these two fields
-// rather than naming them, so the next one added here is caught too.
+// Distinct node instructions are covered through real promotion and handoff in host-handoff.test.ts.
 describe("N-R12: promoteImplementationDagToExtractedPlan — graceful fallback when obligation_ledger absent", () => {
   it("completes without throwing and uses lens=correctness, severity=medium when no obligation_ledger", async () => {
     await writeContractArtifact(ARTIFACTS_DIR, "implementation_dag", {
@@ -1221,7 +1215,7 @@ describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
       ],
     };
 
-    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+    const issues = validateDesignSpecGates(designSpec, obligationLedger).issues;
 
     // INV-10's id is not an exact match for INV-1; the invariant must be flagged.
     const found = issues.some((i) => i.path.includes("INV-1") && !i.path.includes("INV-10"));
@@ -1238,7 +1232,7 @@ describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
       ],
     };
 
-    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+    const issues = validateDesignSpecGates(designSpec, obligationLedger).issues;
 
     const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
     expect(uncovered).toHaveLength(0);
@@ -1254,7 +1248,7 @@ describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
       ],
     };
 
-    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+    const issues = validateDesignSpecGates(designSpec, obligationLedger).issues;
 
     const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
     expect(uncovered).toHaveLength(0);
@@ -1270,7 +1264,7 @@ describe("validateDesignSpecGates Gate 3 — exact invariant id match", () => {
       ],
     };
 
-    const issues = validateDesignSpecGates(designSpec, obligationLedger);
+    const issues = validateDesignSpecGates(designSpec, obligationLedger).issues;
 
     const uncovered = issues.filter((i) => i.path.includes("invariants[INV-1]"));
     expect(uncovered).toHaveLength(1);
@@ -2552,5 +2546,19 @@ describe("F7: the Path-A gate and the Path-A promoter agree on every declaration
     // reads from a wedged fold and the sentence the pre-promotion gate renders
     // are one string, not two spellings of one rule.
     expect(promoterFailure).toBe(refusals.join("\n"));
+  });
+});
+
+
+describe("node context references refuse before promotion", () => {
+  it("the production integrity gate diagnoses a missing reference even in an empty artifact", async () => {
+    const { validateImplementationDAGIntegrity } = await import("../../src/remediate/validation/contractPipelineGates.js");
+    const issues = validateImplementationDAGIntegrity(
+      { ...CHAIN_PAYLOADS.implementation_dag, nodes: [{ ...CHAIN_PAYLOADS.implementation_dag.nodes[0], addresses_counterexamples: ["CE-missing"] }] },
+      CHAIN_PAYLOADS.obligation_ledger,
+      CHAIN_PAYLOADS.counterexample,
+      CHAIN_PAYLOADS.judge_report,
+    ).issues;
+    expect(issues.some(issue => issue.message.includes("CE-missing") && issue.message.includes("no such counterexample"))).toBe(true);
   });
 });

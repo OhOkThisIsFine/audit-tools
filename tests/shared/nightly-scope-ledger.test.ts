@@ -5,13 +5,14 @@
 // refused, a never-examined item reports NO window rather than a fake one, a
 // reword changes identity, and the coverage record carries the real counts
 // including `aborted`. Lives under tests/ because vitest excludes `.claude/**`.
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import {
+  reconcileScopeLedger,
   coveragePath,
   diffWindow,
   docItems,
@@ -252,4 +253,24 @@ describe("the in-scope corpus", () => {
     writeFileSync(join(root, "docs", "scratch.md"), "# Scratch\n");
     expect(inScopeDocs(root, { manifest }).map((d) => d.path)).toEqual(["docs/concept.md"]);
   });
+});
+
+it('prunes deleted and renamed document paths from the canonical scope idempotently', () => {
+  writeFileSync(join(root, 'README.md'), '# Current');
+  git('add', '.');
+  const ledger = { items: {
+    keep: { path: 'README.md', lastCheckedCommit: 'abc' },
+    retired: { path: 'docs/retired.md', lastCheckedCommit: 'abc' },
+    renamed: { path: 'docs/old-name.md', lastCheckedCommit: 'abc' },
+  } };
+  writeScopeLedger(root, ledger);
+  const first = reconcileScopeLedger(root);
+  expect(Object.keys(first.items)).toEqual(['keep']);
+  expect(reconcileScopeLedger(root)).toEqual(first);
+  renameSync(join(root, 'README.md'), join(root, 'CLAUDE.md'));
+  git('add', '-A');
+  expect(reconcileScopeLedger(root).items).toEqual({});
+  writeScopeLedger(root, { items: { current: { path: 'CLAUDE.md', lastCheckedCommit: 'abc' } } });
+  rmSync(join(root, 'CLAUDE.md'));
+  expect(reconcileScopeLedger(root).items).toEqual({});
 });

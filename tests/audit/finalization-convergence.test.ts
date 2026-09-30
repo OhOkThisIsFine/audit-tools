@@ -1,3 +1,5 @@
+import { buildDesignReviewSnapshot } from "../../src/audit/orchestrator/designReviewSnapshot.js";
+import { persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { test, expect } from "vitest";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -155,6 +157,10 @@ test("finalization converges through the real persist/reload loop without oscill
               [`${pass}_findings`]: [],
               [`${pass}_reviewed`]: true,
             },
+            design_review_snapshots: {
+              ...bundle.design_review_snapshots,
+              [pass]: buildDesignReviewSnapshot(pass, [], bundle, "2026-04-22T00:00:00Z"),
+            },
           },
           { root, lineIndex: LINE_INDEX, analyzers: ANALYZERS },
         );
@@ -188,6 +194,7 @@ test("finalization converges through the real persist/reload loop without oscill
       }
       lastUpdated = res.updated_bundle;
       await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });
+      await persistDesignReviewSnapshots(artDir, res.updated_bundle);
     }
 
     expect(completedAt >= 0, `finalization must converge to complete within ${MAX_ITERS} iterations; trail: ${trail.join(" -> ")}`).toBeTruthy();

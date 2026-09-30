@@ -1,73 +1,48 @@
-// Contract test for check:agents-region (P64, owner decision 2026-09-10).
-//
-// The property: the ONE generated region in this tree whose generator lives
-// outside the repository is still watched by something. `check:generated-artifacts`
-// reconciles TRACKED generators against declared freshness authorities, and
-// `~/.agent-config/sync.mjs` is not tracked here — so before this gate, a
-// CLAUDE.md edit that left AGENTS.md holding the old size was noticed by nobody.
-// It cost three catch-up commits and two consecutive nightly runs.
-//
-// The check is EXACT because in pointer mode the printed byte length is the only
-// CLAUDE.md-derived input to the region body: equal figure = fresh, different
-// figure = stale. These cases pin both polarities and both refusal shapes.
 import { describe, expect, test } from "vitest";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  POINTER_SENTENCE,
-  actualPointerKb,
-  statedPointerKb,
-  validateAgentsRegion,
-} from "../../scripts/check-agents-region.mjs";
+import { validateAgentsRegion } from "../../scripts/check-agents-region.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
+const pointer = '> **Start with [`CLAUDE.md`](CLAUDE.md).** Canonical instructions live there.\n';
 
-const sentence = (kb: string) =>
-  `\`CLAUDE.md\` is the canonical instruction file for this repository. It is ${kb} KB,\n` +
-  `so this file points at it instead of repeating it.`;
-
-describe("check:agents-region — the untracked generator's region has a freshness authority", () => {
-  test("a stated size equal to the real size is fresh", () => {
-    expect(validateAgentsRegion({ agentsText: sentence("38.5"), claudeBytes: 39431 })).toEqual({
-      ok: true,
-    });
+describe("check:agents-region — stable canonical instruction pointer", () => {
+  test("the same pointer remains valid after the canonical instructions change", () => {
+    for (const claudeText of ["Original rules", "Different, longer rules".repeat(3000)]) {
+      expect(validateAgentsRegion({ agentsText: pointer, claudeText })).toEqual({ ok: true });
+    }
   });
 
-  test("a stale stated size is refused, naming both figures and the remedy", () => {
-    const verdict = validateAgentsRegion({ agentsText: sentence("38.3"), claudeBytes: 39431 });
-    expect(verdict.ok).toBe(false);
-    expect(verdict.reason).toContain("38.3");
-    expect(verdict.reason).toContain("38.5");
-    expect(verdict.reason).toContain("sync.mjs");
+  test("missing, commented, fenced or wrong-target opening links refuse", () => {
+    for (const agentsText of ["No pointer", `<!-- ${pointer} -->`, `\`\`\`md\n${pointer}\`\`\``, "Read [rules](../CLAUDE.md)", "Read [rules](OTHER.md)"]) {
+      const result = validateAgentsRegion({ agentsText, claudeText: "Live rules" });
+      expect(result.ok, agentsText).toBe(false);
+      expect(result.reason).toContain("repo-local CLAUDE.md");
+    }
   });
 
-  test("a region with no pointer sentence fails closed rather than passing vacuously", () => {
-    // The machine-wide half of the P64 decision may retire this sentence. A
-    // missing sentence must be loud — a green check over an unrecognized region
-    // is the exact false-green this gate exists to remove.
-    const verdict = validateAgentsRegion({
-      agentsText: "<!-- shared:start -->\n<!-- shared:end -->\n",
-      claudeBytes: 39431,
-    });
-    expect(verdict.ok).toBe(false);
-    expect(verdict.reason).toContain("no generated pointer sentence");
+  test("a valid pointer cannot certify a missing or empty canonical file", () => {
+    for (const claudeText of [undefined, "", " \n\t"]) {
+      const result = validateAgentsRegion({ agentsText: pointer, claudeText });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("missing or empty");
+    }
   });
 
-  test("the size arithmetic is the generator's own (bytes/1024, one decimal)", () => {
-    expect(actualPointerKb(39431)).toBe("38.5");
-    expect(actualPointerKb(1024)).toBe("1.0");
-    expect(statedPointerKb(sentence("38.5"))).toBe("38.5");
-    expect(statedPointerKb("no sentence here")).toBeNull();
-    // A whole-number size still carries the generator's forced decimal, so a
-    // rounded form ("39 KB") cannot masquerade as fresh.
-    expect(POINTER_SENTENCE.test(sentence("39"))).toBe(false);
+  test("external sync metadata is not an instruction freshness authority", () => {
+    // A machine-global sync may append metadata later; its opaque marker and
+    // historical size do not decide whether the live canonical file is read.
+    expect(validateAgentsRegion({
+      agentsText: pointer + "\n<!-- shared:start -->\nshared-region-id: old\nIt is 1.0 KB\n<!-- shared:end -->",
+      claudeText: "Current live instructions",
+    })).toEqual({ ok: true });
   });
 
-  test("the REAL tree is fresh — the gate and this test agree about the tracked pair", () => {
-    const verdict = validateAgentsRegion({
+  test("the real tree opens with the live canonical instruction pointer", () => {
+    const result = validateAgentsRegion({
       agentsText: readFileSync(join(REPO_ROOT, "AGENTS.md"), "utf8"),
-      claudeBytes: statSync(join(REPO_ROOT, "CLAUDE.md")).size,
+      claudeText: readFileSync(join(REPO_ROOT, "CLAUDE.md"), "utf8"),
     });
-    expect(verdict.ok, verdict.reason ?? "").toBe(true);
+    expect(result.ok, result.reason ?? "").toBe(true);
   });
 });

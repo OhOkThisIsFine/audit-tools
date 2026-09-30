@@ -107,7 +107,6 @@ describe("the analyzer-policy store never lets a token become durable", () => {
     }
     expect(parsed).toEqual({
       analyzers: { eslint: "permanent" },
-      analyzer_consent: { eslint: "declined" },
     });
   });
 
@@ -157,7 +156,7 @@ describe("a consent GRANT is not durable either", () => {
     expect(
       policy.analyzer_consent,
       "the refused write must not partially land",
-    ).toEqual({ knip: "declined" });
+    ).toBeUndefined();
   });
 
   it("the decision schema admits declines only", () => {

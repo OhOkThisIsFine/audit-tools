@@ -59,9 +59,12 @@ test("every remediate-code command declaring --root leaves it defaultless", () =
   // Guard the guard: if the option disappears from every command this test must
   // fail loudly rather than pass vacuously over an empty list.
   expect(withRoot.map((entry) => entry.name).sort()).toEqual([
+    "cancel",
     "next-step",
+    "pause",
     "recover-ingest",
     "recover-submission",
+    "resume",
     "validate-artifact",
     "validate-artifacts",
   ]);

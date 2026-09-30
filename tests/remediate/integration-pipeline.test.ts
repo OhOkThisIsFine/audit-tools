@@ -704,7 +704,7 @@ describe("deterministic design gates: circular interface detection via validateD
         },
       ],
     };
-    const issues = validateDesignSpecGates(designSpec);
+    const issues = validateDesignSpecGates(designSpec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("inputs"))).toBe(true);
@@ -725,7 +725,7 @@ describe("deterministic design gates: circular interface detection via validateD
         },
       ],
     };
-    const issues = validateDesignSpecGates(designSpec);
+    const issues = validateDesignSpecGates(designSpec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.path.includes("outputs"))).toBe(true);
@@ -746,7 +746,7 @@ describe("deterministic design gates: circular interface detection via validateD
         },
       ],
     };
-    const issues = validateDesignSpecGates(designSpec);
+    const issues = validateDesignSpecGates(designSpec).issues;
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors).toHaveLength(0);
   });

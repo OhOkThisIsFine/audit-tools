@@ -1,3 +1,4 @@
+import { emitAndWriteReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 /**
  * A design-review findings submission is parsed ITEM BY ITEM, not only as an
  * array envelope.
@@ -25,7 +26,7 @@
  * The CONTROL below is what stops the refusal being satisfied by a check that
  * refuses everything.
  */
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -35,7 +36,6 @@ import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { handleDesignReviewBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import {
   GATE_LANES,
-  laneSubmissionPath,
 } from "../../src/audit/cli/laneSubmissions.js";
 import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -69,11 +69,6 @@ async function ingestContractSubmission(
   try {
     const artifactsDir = join(dir, "audit");
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
-    await writeFile(
-      laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
-      JSON.stringify(findings),
-      "utf8",
-    );
 
     const bundle = {
       design_assessment: {
@@ -83,6 +78,7 @@ async function ingestContractSubmission(
         conceptual_reviewed: false,
       },
     } as unknown as ArtifactBundle;
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, findings, bundle);
     const state: AuditState = { status: "active", obligations: [] };
 
     const branch = await handleDesignReviewBranch(

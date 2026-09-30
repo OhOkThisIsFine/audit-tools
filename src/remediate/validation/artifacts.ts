@@ -1,6 +1,7 @@
 // sites-pinned: tests/remediate/artifacts-validation.test.ts
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { stat } from "node:fs/promises";
+import { collectFilesSorted } from "../../shared/io/collectFilesSorted.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   absoluteSubmissionPath,
@@ -105,17 +106,10 @@ async function readJsonForValidation(
 
 async function collectFiles(dir: string): Promise<string[]> {
   if (!existsSync(dir)) return [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await collectFiles(path)));
-    } else {
-      files.push(path);
-    }
+  if (!(await stat(dir)).isDirectory()) {
+    throw new Error(`Artifact directory is not a directory: ${dir}`);
   }
-  return files;
+  return collectFilesSorted(dir, { onMissing: () => [] });
 }
 
 function validateStringArray(

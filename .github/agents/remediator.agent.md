@@ -25,12 +25,18 @@ Preserve user arguments:
   root from the working directory on its own, so normal usage passes no `--root`.
   Pass the user-supplied target directory with `--root <path>` only when running
   from outside that repository.
-- pass an existing path with `--input <path>`; write conversational feedback to a
-  temporary file and pass it with `--guidance-file <path>`.
+- pass an existing path with `--input <path>`; pass conversational feedback directly
+  with `--guidance <text>`. The tool creates and selects its intake file. Use
+  `--guidance-file <path>` only for an existing guidance document.
 
-The target-directory rule above is one shared fragment, rendered into this body
-and the `audit-code` loader body in the same words; both skills point at the
-loader bodies instead of restating it.
+Honor operator lifecycle intent through the backend: for “plan only,” add
+`--plan-only` to `next-step`; planning will finish at a persisted pause before
+implementation. For an explicit pause, resume, or cancellation request, run
+`remediate-code pause`, `remediate-code resume`, or `remediate-code cancel`, then
+follow its returned `prompt_path`. Do not resume a paused run without the
+operator asking, or advance a cancelled run. Optional `--worktree <path>` and
+`--outcome <text>` record host-reported context only; they never authorize branch
+creation, deletion, or cleanup.
 
 Then ask for exactly one step:
 

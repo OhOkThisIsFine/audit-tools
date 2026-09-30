@@ -1,3 +1,4 @@
+import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
 // sites-pinned: tests/audit/host-handoff.test.ts
 // (the steward-lane verification contract: the lane-aware prompt, the one
 // optional envelope key, the refusal of that key on a lane whose contract never
@@ -18,6 +19,7 @@ import {
   hostHandoffResultPath,
   identityFailureDiagnostic,
   isFileMissingError,
+  isJsonParseError,
   isRecord,
   isSha256,
   LaneDemandSchema,
@@ -461,7 +463,7 @@ function resolveBoundaryPaths(
 }
 
 /**
- * The accepted-results read-modify-write, SERIALIZED.
+ * The binding publication, ingestion reads, and accepted-results write, SERIALIZED.
  *
  * `host-accepted-results.json` and its ledger are one logical record written as
  * two files, and both prepare and ingest used to load a snapshot, work from it,
@@ -470,7 +472,9 @@ function resolveBoundaryPaths(
  * predates the earlier writer's additions, and every duplicate-binding and
  * duplicate-result_id guard downstream derives from that stale snapshot.
  *
- * So the read, the merge and both writes happen inside ONE acquisition of the
+ * The workload/bindings/map publish and ingest read set also share this hold,
+ * so a concurrent prepare cannot replace a binding during acceptance.
+ * The read, the merge and both writes happen inside ONE acquisition of the
  * shared lock substrate. No backoff, retry or stale-lock logic lives here — all
  * of it is `withFileLock`'s, and the caller's RunLogger is threaded straight
  * through so the primitive's heartbeat and stale-lock-reclaim events land in the
@@ -1075,21 +1079,6 @@ export async function prepareAuditHostHandoff(params: {
   };
 
   await mkdir(paths.resultDir, { recursive: true });
-  await writeJsonFile(paths.taskBindingsPath, taskBindings);
-
-  // Say out loud whether this wave has drained. The caller hands in the run's
-  // still-OWED partition, so an EMPTY one is the wave's own statement that every
-  // work item it published has been accepted — and that is the only evidence
-  // there is: from the review-run resolution, a fully-accepted wave and a wave
-  // with one lane still out look identical (both are "fewer pending than
-  // published"). The next wave's identity is derived from this, so it is written
-  // where the run itself lives and never inferred. A comment stating this does
-  // NOT survive; the marker is what does.
-  await writeJsonFile(reviewWaveClosedPath(params.artifactsDir, params.runId), {
-    contract_version: REVIEW_WAVE_CLOSED_CONTRACT_VERSION,
-    run_id: params.runId,
-    closed: allWorkItems.length === 0,
-  });
 
   // What is PUBLISHED is every task this caller handed in. This boundary does
   // not suppress work items the accepted ledger names, and deliberately so —
@@ -1105,6 +1094,23 @@ export async function prepareAuditHostHandoff(params: {
   // acquisition: a prepare that snapshotted before a concurrent ingest's
   // additions must not replace them with its stale copy.
   return withAcceptedResultsLock(paths, params.logger, async (accepted) => {
+    if (allWorkItems.length > 0) await recordHostRootLogBoundary({ ...paths, phase: "prepare", logger: params.logger });
+    await writeJsonFile(paths.taskBindingsPath, taskBindings);
+
+    // Say out loud whether this wave has drained. The caller hands in the run's
+    // still-OWED partition, so an EMPTY one is the wave's own statement that every
+    // work item it published has been accepted — and that is the only evidence
+    // there is: from the review-run resolution, a fully-accepted wave and a wave
+    // with one lane still out look identical (both are "fewer pending than
+    // published"). The next wave's identity is derived from this, so it is written
+    // where the run itself lives and never inferred. A comment stating this does
+    // NOT survive; the marker is what does.
+    await writeJsonFile(reviewWaveClosedPath(params.artifactsDir, params.runId), {
+      contract_version: REVIEW_WAVE_CLOSED_CONTRACT_VERSION,
+      run_id: params.runId,
+      closed: allWorkItems.length === 0,
+    });
+
     const workload: AuditHostWorkload = {
       contract_version: WORKLOAD_CONTRACT_VERSION,
       run_id: params.runId,
@@ -1329,7 +1335,7 @@ function parseResultMap(value: unknown, runId: string): AuditHostResultMap {
         typeof entry.result_path === "string",
     )
   ) {
-    throw new Error("Invalid audit host result map");
+    throw bindingFailure("workload_binding", "Invalid audit host result map");
   }
   return value as unknown as AuditHostResultMap;
 }
@@ -1390,7 +1396,7 @@ function parseTaskBindings(
     value.run_id !== runId ||
     !Array.isArray(value.entries)
   ) {
-    throw new Error("Invalid audit host task bindings");
+    throw bindingFailure("workload_binding", "Invalid audit host task bindings");
   }
   // The VERSION is checked on its OWN, before the shape walk, so a binding set
   // written under an older version is refused for THAT reason and carries the
@@ -1409,7 +1415,7 @@ function parseTaskBindings(
   for (const rawEntry of value.entries) {
     const entry = parseTaskBinding(rawEntry);
     if (entry === null || bindings.has(entry.work_item_id)) {
-      throw new Error("Invalid or duplicate audit host task binding");
+      throw bindingFailure("workload_binding", "Invalid or duplicate audit host task binding");
     }
     bindings.set(entry.work_item_id, entry);
   }
@@ -1463,14 +1469,18 @@ function validateHandoffBinding(
   return items;
 }
 
-/**
- * A persisted-binding failure is a THROW, not an issue: nothing about a host
- * result can be judged until the tool's own workload, result map and task
- * bindings re-derive. The check id is what the throw cites, so the failure is
- * still attributable to a registered ingestion check.
- */
+/** Recognized tool-owned binding corruption; the owning emitter can re-prepare it. */
+class AuditHostBindingError extends Error {
+  readonly code = "workload_stale" as const;
+  constructor(readonly check: IngestionCheckId, message: string) {
+    super(`${message} [${check}]; re-prepare the handoff to restore its canonical binding set. ` +
+      "No submission was accepted against these invalid bindings.");
+    this.name = "AuditHostBindingError";
+  }
+}
+
 function bindingFailure(check: IngestionCheckId, message: string): Error {
-  return new Error(`${message} [${check}]`);
+  return new AuditHostBindingError(check, message);
 }
 
 /**
@@ -1828,276 +1838,247 @@ export async function ingestAuditHostResults(params: {
   readonly logger?: RunLogger;
 }): Promise<AuditHostIngestSummary> {
   const paths = resolveBoundaryPaths(params);
-  const accepted = await loadAcceptedResults(
-    paths.acceptedLedgerPath,
-    params.runId,
-  );
-  // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
-  // throw. These are the refusals with a named repair — re-prepare, which this
-  // fold performs on its way to the next emission — so they must reach the host
-  // as rendered diagnostics rather than as unclassified stacks out of the fold.
-  // Nothing is accepted: a document this build did not mint cannot be
-  // re-derived, so no submission has a binding to be judged against.
-  //
-  // The BINDING SET is in this class for one more reason than the workload is:
-  // on the fold, a throw here lands BEFORE the one path that re-prepares, so it
-  // wedges the run rather than surfacing anything (see
-  // {@link StaleAuditHostTaskBindingsError}). A result the host already wrote
-  // under the old bindings is therefore REFUSED as stale — it is never accepted
-  // against the new contract, because the new contract's binding is what the
-  // re-prepare mints, and the item is re-published under it.
-  const stale = (error: {
-    code: AuditIngestIssueCode;
-    check: IngestionCheckId;
-    message: string;
-  }): AuditHostIngestSummary => ({
-    accepted_count: 0,
-    accepted_results: accepted.entries.map((entry) => entry.audit_result),
-    accepted_results_path: paths.acceptedResultsPath,
-    completed_work_item_ids: [
-      ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
-    ].sort(compareCodeUnits),
-    issues: [error],
-    raw_issues: [error],
-    validation_warnings: [],
-  });
-  let workload: AuditHostWorkload;
-  try {
-    workload = parseWorkload(
-      await readJsonFile<unknown>(paths.workloadPath),
-      params.runId,
-    );
-  } catch (error) {
-    if (!(error instanceof StaleAuditHostWorkloadError)) throw error;
-    return stale(error);
-  }
-  const resultMap = parseResultMap(
-    await readJsonFile<unknown>(paths.resultMapPath),
-    params.runId,
-  );
-  let taskBindings: Map<string, AuditHostTaskBinding>;
-  try {
-    taskBindings = parseTaskBindings(
-      await readJsonFile<unknown>(paths.taskBindingsPath),
-      params.runId,
-    );
-  } catch (error) {
-    if (!(error instanceof StaleAuditHostTaskBindingsError)) throw error;
-    return stale(error);
-  }
-  const items = validateHandoffBinding(
-    paths,
-    workload,
-    resultMap,
-    taskBindings,
-  );
-  const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
-  const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
-  const additions: AcceptedResultEntry[] = [];
-  const issues: AuditHostIngestIssue[] = [];
-  const validation_warnings: AuditHostValidationWarning[] = [];
-  // One memoized reader for the whole ingest: N findings citing one file read it once.
-  const readSource = createMemoizedSourceReader();
-  const activeTaskIds = new Set(params.auditTasks.map((task) => task.task_id));
-
-  for (const entry of resultMap.entries) {
-    if (acceptedBindings.has(bindingIdentity(entry))) continue;
-    const item = items.get(entry.work_item_id);
-    const binding = taskBindings.get(entry.work_item_id);
-    if (item === undefined || binding === undefined) continue;
-    const outcome = await scanBoundSubmission<AuditHostResult>({
-      root: paths.root,
-      artifactsDir: paths.artifactsDir,
-      workItemId: entry.work_item_id,
-      resultPath: entry.result_path,
-      parse: (value) => {
-        const parsed = parseHostResult(value, params.runId, item, binding);
-        return parsed.ok ? { ok: true, parsed: parsed.result } : parsed;
-      },
-      resultId: (result) => result.result_id,
-      // CHECK only. The id is consumed further down, after conversion,
-      // validation and grounding — a result refused there must stay re-submittable.
-      seen: (resultId) => resultIds.has(resultId),
-      messages: auditScanMessages(entry.work_item_id),
-    });
-    if (!outcome.ok) {
-      issues.push(outcome.issue);
-      continue;
-    }
-    const result = outcome.parsed;
-    const converted = toAuditResult(result, binding);
-    if (!converted.ok) {
-      issues.push({
-        code: "submission_contract_invalid",
-        check: "result_schema",
-        message:
-          `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
-          `an AuditResult: ${converted.detail}`,
-        work_item_id: entry.work_item_id,
-        result_path: entry.result_path,
-      });
-      continue;
-    }
-
-    // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
-    // contract (`FindingSchema` admits an evidence-less finding); these are the
-    // per-result rules the downstream batch gate applies, applied HERE so an
-    // error-severity issue never reaches the accepted pair. A rejected item is
-    // simply never in the ledger, so the corrected file at the same bound path
-    // is re-read on the next fold — acceptance used to be terminal instead, and
-    // a failed batch gate then wedged the run permanently.
+  return withAcceptedResultsLock(paths, params.logger, async (accepted) => {
+    // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
+    // throw. These are the refusals with a named repair — re-prepare, which this
+    // fold performs on its way to the next emission — so they must reach the host
+    // as rendered diagnostics rather than as unclassified stacks out of the fold.
+    // Nothing is accepted: a document this build did not mint cannot be
+    // re-derived, so no submission has a binding to be judged against.
     //
-    // Orphans (task pruned by a re-plan) pass through UNVALIDATED with the same
-    // stderr notice the batch gate uses — never newly rejected: refusing one
-    // here would strand it outside the append-only ledger entirely.
-    if (!activeTaskIds.has(entry.work_item_id)) {
-      process.stderr.write(
-        `audit host-handoff ingest: result for '${entry.work_item_id}' is not in the ` +
-          `active task manifest (orphaned by re-planning); retained in the accepted pair ` +
-          `but skipped at the validation gate\n`,
-      );
-    } else {
-      const validationIssues = validateOneAuditResult(converted.auditResult, [
-        ...params.auditTasks,
-      ], {
-        lineIndex: params.lineIndex,
+    // The BINDING SET is in this class for one more reason than the workload is:
+    // on the fold, a throw here lands BEFORE the one path that re-prepares, so it
+    // wedges the run rather than surfacing anything (see
+    // {@link StaleAuditHostTaskBindingsError}). A result the host already wrote
+    // under the old bindings is therefore REFUSED as stale — it is never accepted
+    // against the new contract, because the new contract's binding is what the
+    // re-prepare mints, and the item is re-published under it.
+    const stale = (error: {
+      code: AuditIngestIssueCode;
+      check: IngestionCheckId;
+      message: string;
+    }): AuditHostIngestSummary => ({
+      accepted_count: 0,
+      accepted_results: accepted.entries.map((entry) => entry.audit_result),
+      accepted_results_path: paths.acceptedResultsPath,
+      completed_work_item_ids: [
+        ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
+      ].sort(compareCodeUnits),
+      issues: [error],
+      raw_issues: [error],
+      validation_warnings: [],
+    });
+    let workload: AuditHostWorkload;
+    let resultMap: AuditHostResultMap;
+    let taskBindings: Map<string, AuditHostTaskBinding>;
+    let items: Map<string, AuditHostWorkItem>;
+    try {
+      workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), params.runId);
+      resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), params.runId);
+      taskBindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), params.runId);
+      items = validateHandoffBinding(paths, workload, resultMap, taskBindings);
+    } catch (error) {
+      if (error instanceof StaleAuditHostWorkloadError ||
+          error instanceof StaleAuditHostTaskBindingsError ||
+          error instanceof AuditHostBindingError) return stale(error);
+      if (isJsonParseError(error)) {
+        return stale(new AuditHostBindingError("workload_binding", error.message));
+      }
+      // Infrastructure failures and corrupt accepted ledgers remain strict.
+      throw error;
+    }
+    const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
+    const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
+    const additions: AcceptedResultEntry[] = [];
+    const issues: AuditHostIngestIssue[] = [];
+    const validation_warnings: AuditHostValidationWarning[] = [];
+    // One memoized reader for the whole ingest: N findings citing one file read it once.
+    const readSource = createMemoizedSourceReader();
+    const activeTaskIds = new Set(params.auditTasks.map((task) => task.task_id));
+
+    for (const entry of resultMap.entries) {
+      if (acceptedBindings.has(bindingIdentity(entry))) continue;
+      const item = items.get(entry.work_item_id);
+      const binding = taskBindings.get(entry.work_item_id);
+      if (item === undefined || binding === undefined) continue;
+      const outcome = await scanBoundSubmission<AuditHostResult>({
+        root: paths.root,
+        artifactsDir: paths.artifactsDir,
+        workItemId: entry.work_item_id,
+        resultPath: entry.result_path,
+        parse: (value) => {
+          const parsed = parseHostResult(value, params.runId, item, binding);
+          return parsed.ok ? { ok: true, parsed: parsed.result } : parsed;
+        },
+        resultId: (result) => result.result_id,
+        // CHECK only. The id is consumed further down, after conversion,
+        // validation and grounding — a result refused there must stay re-submittable.
+        seen: (resultId) => resultIds.has(resultId),
+        messages: auditScanMessages(entry.work_item_id),
       });
-      const errors = validationIssues.filter((issue) => issue.severity === "error");
-      if (errors.length > 0) {
+      if (!outcome.ok) {
+        issues.push(outcome.issue);
+        continue;
+      }
+      const result = outcome.parsed;
+      const converted = toAuditResult(result, binding);
+      if (!converted.ok) {
         issues.push({
-          code: "result_validation_failed",
-          check: "result_validation",
+          code: "submission_contract_invalid",
+          check: "result_schema",
           message:
-            `work item '${entry.work_item_id}' failed audit-results validation ` +
-            `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +
-            formatAuditResultIssues(errors),
+            `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
+            `an AuditResult: ${converted.detail}`,
           work_item_id: entry.work_item_id,
           result_path: entry.result_path,
         });
         continue;
       }
-      // Warnings are NOT rejections: an accepted result never refused anything,
-      // so a warning must never reach the rejection-classified issue list — the
-      // ONE ledger recorder would otherwise record kind:'rejected' for a result
-      // that was accepted, manufacturing a repair story that never happened.
-      // They ride the separate advisory channel instead (rendered for the
-      // operator; never counted as a submission that could not be accepted).
-      validation_warnings.push(
-        ...validationIssues
-          .filter((issue) => issue.severity === "warning")
-          .map(
-            (warning): AuditHostValidationWarning => ({
-              work_item_id: entry.work_item_id,
-              result_path: entry.result_path,
-              message: `${warning.message} (${warning.field})`,
-            }),
-          ),
-      );
+
+      // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
+      // contract (`FindingSchema` admits an evidence-less finding); these are the
+      // per-result rules the downstream batch gate applies, applied HERE so an
+      // error-severity issue never reaches the accepted pair. A rejected item is
+      // simply never in the ledger, so the corrected file at the same bound path
+      // is re-read on the next fold — acceptance used to be terminal instead, and
+      // a failed batch gate then wedged the run permanently.
+      //
+      // Orphans (task pruned by a re-plan) pass through UNVALIDATED with the same
+      // stderr notice the batch gate uses — never newly rejected: refusing one
+      // here would strand it outside the append-only ledger entirely.
+      if (!activeTaskIds.has(entry.work_item_id)) {
+        process.stderr.write(
+          `audit host-handoff ingest: result for '${entry.work_item_id}' is not in the ` +
+            `active task manifest (orphaned by re-planning); retained in the accepted pair ` +
+            `but skipped at the validation gate\n`,
+        );
+      } else {
+        const validationIssues = validateOneAuditResult(converted.auditResult, [
+          ...params.auditTasks,
+        ], {
+          lineIndex: params.lineIndex,
+        });
+        const errors = validationIssues.filter((issue) => issue.severity === "error");
+        if (errors.length > 0) {
+          issues.push({
+            code: "result_validation_failed",
+            check: "result_validation",
+            message:
+              `work item '${entry.work_item_id}' failed audit-results validation ` +
+              `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +
+              formatAuditResultIssues(errors),
+            work_item_id: entry.work_item_id,
+            result_path: entry.result_path,
+          });
+          continue;
+        }
+        // Warnings are NOT rejections: an accepted result never refused anything,
+        // so a warning must never reach the rejection-classified issue list — the
+        // ONE ledger recorder would otherwise record kind:'rejected' for a result
+        // that was accepted, manufacturing a repair story that never happened.
+        // They ride the separate advisory channel instead (rendered for the
+        // operator; never counted as a submission that could not be accepted).
+        validation_warnings.push(
+          ...validationIssues
+            .filter((issue) => issue.severity === "warning")
+            .map(
+              (warning): AuditHostValidationWarning => ({
+                work_item_id: entry.work_item_id,
+                result_path: entry.result_path,
+                message: `${warning.message} (${warning.field})`,
+              }),
+            ),
+        );
+      }
+
+      // S7 quote-and-verify: the tool re-reads each cited span from disk and
+      // stamps the verdict. It NEVER rejects — a quote that does not re-verify
+      // rides through as `ungrounded` and synthesis surfaces it under "Ungrounded
+      // Findings (not confirmed)"; refusing here would discard the whole
+      // submission over one bad citation.
+      for (const finding of converted.auditResult.findings) {
+        finding.grounding = await verifyFindingGrounding(
+          paths.root,
+          finding,
+          readSource,
+        );
+      }
+      resultIds.add(result.result_id);
+      // construction-site: AuditResult
+      // construction-site: Finding (the `findings` array; `lens` defaults from the enclosing contract, already spread in)
+      additions.push({
+        work_item_id: entry.work_item_id,
+        prompt_sha256: entry.prompt_sha256,
+        result_path: entry.result_path,
+        result_id: result.result_id,
+        result_sha256: contentSha256(result),
+        result,
+        audit_result: converted.auditResult,
+      });
     }
 
-    // S7 quote-and-verify: the tool re-reads each cited span from disk and
-    // stamps the verdict. It NEVER rejects — a quote that does not re-verify
-    // rides through as `ungrounded` and synthesis surfaces it under "Ungrounded
-    // Findings (not confirmed)"; refusing here would discard the whole
-    // submission over one bad citation.
-    for (const finding of converted.auditResult.findings) {
-      finding.grounding = await verifyFindingGrounding(
-        paths.root,
-        finding,
-        readSource,
-      );
+    // Binding reads, validation and this accepted pair write share ONE hold.
+    // A concurrent prepare cannot replace the task bindings mid-ingestion.
+    const currentBindings = new Set(accepted.entries.map(bindingIdentity));
+    const currentResultIds = new Set(accepted.entries.map((entry) => entry.result_id));
+    const landed = additions.filter(
+      (addition) => !currentBindings.has(bindingIdentity(addition)) &&
+        !currentResultIds.has(addition.result_id),
+    );
+    const ledger: AcceptedResultsLedger = {
+      contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
+      run_id: params.runId,
+      entries: [...accepted.entries, ...landed].sort((left, right) => {
+        const item = compareCodeUnits(left.work_item_id, right.work_item_id);
+        return item !== 0 ? item : compareCodeUnits(left.prompt_sha256, right.prompt_sha256);
+      }),
+    };
+    if (landed.length > 0) await writeAcceptedResults(paths, ledger);
+    for (const addition of additions) {
+      if (landed.includes(addition)) continue;
+      issues.push({
+        code: "duplicate_submission_id",
+        message:
+          `work item '${addition.work_item_id}' was already accepted by a concurrent ` +
+          `ingest of this run, so this submission was not accepted a second time`,
+        work_item_id: addition.work_item_id,
+        result_path: addition.result_path,
+      });
     }
-    resultIds.add(result.result_id);
-    // construction-site: AuditResult
-    // construction-site: Finding (the `findings` array; `lens` defaults from the enclosing contract, already spread in)
-    additions.push({
-      work_item_id: entry.work_item_id,
-      prompt_sha256: entry.prompt_sha256,
-      result_path: entry.result_path,
-      result_id: result.result_id,
-      result_sha256: contentSha256(result),
-      result,
-      audit_result: converted.auditResult,
-    });
-  }
 
-  // The submission reading, contract checking and grounding re-verification
-  // above run UNLOCKED — they only read. The read-modify-write does not: the
-  // ledger is re-read under the lock and the additions are re-filtered against
-  // that fresh copy, so a concurrent writer's entries are merged rather than
-  // replaced, and a binding or result id it accepted in the meantime is not
-  // accepted a second time here.
-  let landed: AcceptedResultEntry[] = [];
-  const ledger = await withAcceptedResultsLock(
-    paths,
-    params.logger,
-    async (current) => {
-      const currentBindings = new Set(current.entries.map(bindingIdentity));
-      const currentResultIds = new Set(
-        current.entries.map((entry) => entry.result_id),
-      );
-      landed = additions.filter(
-        (addition) =>
-          !currentBindings.has(bindingIdentity(addition)) &&
-          !currentResultIds.has(addition.result_id),
-      );
-      if (landed.length === 0) return current;
-      const next: AcceptedResultsLedger = {
-        contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
-        run_id: params.runId,
-        entries: [...current.entries, ...landed].sort((left, right) => {
-          const item = compareCodeUnits(left.work_item_id, right.work_item_id);
-          return item !== 0
-            ? item
-            : compareCodeUnits(left.prompt_sha256, right.prompt_sha256);
-        }),
-      };
-      await writeAcceptedResults(paths, next);
-      return next;
-    },
-  );
-  for (const addition of additions) {
-    if (landed.includes(addition)) continue;
-    issues.push({
-      code: "duplicate_submission_id",
-      message:
-        `work item '${addition.work_item_id}' was already accepted by a concurrent ` +
-        `ingest of this run, so this submission was not accepted a second time`,
-      work_item_id: addition.work_item_id,
-      result_path: addition.result_path,
-    });
-  }
+    // Ledger recording is NOT done here. The shared submission ledger is written
+    // by the ONE recorder, `recordHostResultOutcomes`, at this ingest's only
+    // production caller — fed these very `issues` and `completed_work_item_ids` —
+    // so every rejection below already lands there in arrival order. A second
+    // writer inside the boundary would double-record the same fact.
 
-  // Ledger recording is NOT done here. The shared submission ledger is written
-  // by the ONE recorder, `recordHostResultOutcomes`, at this ingest's only
-  // production caller — fed these very `issues` and `completed_work_item_ids` —
-  // so every rejection below already lands there in arrival order. A second
-  // writer inside the boundary would double-record the same fact.
+    const raw_issues = [...issues];
+    const refusals = await readTrailingSubmissionRefusals(
+      paths.artifactsDir,
+      raw_issues
+        .map((issue) => issue.work_item_id ?? issue.submission_id)
+        .filter((id): id is string => id !== undefined),
+    );
+    const reportedIssues = enrichMissingSubmissionIssues(
+      raw_issues,
+      refusals,
+      "submission_rejected",
+    );
 
-  const raw_issues = [...issues];
-  const refusals = await readTrailingSubmissionRefusals(
-    paths.artifactsDir,
-    raw_issues
-      .map((issue) => issue.work_item_id ?? issue.submission_id)
-      .filter((id): id is string => id !== undefined),
-  );
-  const reportedIssues = enrichMissingSubmissionIssues(
-    raw_issues,
-    refusals,
-    "submission_rejected",
-  );
+    await recordHostRootLogBoundary({ ...paths, phase: "ingest", logger: params.logger });
+    return {
+      accepted_count: landed.length,
+      accepted_results: ledger.entries.map((entry) => entry.audit_result),
+      accepted_results_path: paths.acceptedResultsPath,
+      validation_warnings,
+      completed_work_item_ids: [
+        ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
+      ].sort(compareCodeUnits),
+      issues: reportedIssues,
+      raw_issues,
+    };
 
-  return {
-    accepted_count: landed.length,
-    accepted_results: ledger.entries.map((entry) => entry.audit_result),
-    accepted_results_path: paths.acceptedResultsPath,
-    validation_warnings,
-    completed_work_item_ids: [
-      ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
-    ].sort(compareCodeUnits),
-    issues: reportedIssues,
-    raw_issues,
-  };
+  });
 }
 
 /**

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/script-argv-refusal.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
 // Gate-boundary smoke: the tool-owned final gate, executed for real, against a
 // fixture repository — so a gate that cannot pass on a clean tree (or cannot
 // FAIL on a broken one) fails the RELEASE, not a dogfood run.
@@ -25,9 +26,9 @@
 //   2. RED, with the failing command NAMED and the floor SHORT-CIRCUITED, on a
 //      broken tree. A gate that always passes is the false green the floor
 //      exists to prevent; a red gate that names nothing is unattributable.
-//   3. SCOPED OUT — not vacuously passed — when the target is not this monorepo.
-//      `passed: true` with `outcome: scoped_out` is a declared scope; the two
-//      must never be confusable (the all-terminal funnel's easiest misread).
+//   3. Generic targets run their declared gates. A target with no commands has
+//      a blocking non-verdict (`scoped_out`, `passed: false`), never a vacuous
+//      green. A missing monorepo marker must not suppress valid generic gates.
 import "../shared/hermetic-state-dir.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
@@ -69,8 +70,8 @@ const { runToolOwnedFinalGate, toolOwnedFinalGateCommands } = await import(
 /**
  * A repository shaped exactly like the audit-tools monorepo — the five layout
  * markers `isAuditToolsMonorepo` looks for, plus the vitest gate script it also
- * checks for (a five-marker tree WITHOUT the script must scope out, not run a
- * missing path — see the negative case below).
+ * checks for. Without that script the generic project commands apply instead;
+ * the missing monorepo-only script must never be invoked.
  *
  * The four gate commands are stubs driven by `state.json`, so this smoke decides
  * which layer fails without a real tsc/vitest ever running.
@@ -106,14 +107,16 @@ function writeFixture(root) {
   );
   writeFileSync(
     join(root, "stub-layer.mjs"),
-    "import { readFileSync } from \"node:fs\";\n" +
+    "import { readFileSync, appendFileSync } from \"node:fs\";\n" +
       "const [layer] = process.argv.slice(2);\n" +
       "const state = JSON.parse(readFileSync(new URL(\"./state.json\", import.meta.url), \"utf8\"));\n" +
       "if (state[layer] !== \"pass\") {\n" +
       "  process.stderr.write(`fixture-${layer}-layer-failed\\n`);\n" +
       "  process.exit(1);\n" +
       "}\n" +
-      "process.stdout.write(`fixture-${layer}-layer-passed\\n`);\n",
+      "const output = `fixture-${layer}-layer-passed\\n`;\n" +
+      "appendFileSync(new URL(\"./successful-output.log\", import.meta.url), output);\n" +
+      "process.stdout.write(output);\n",
   );
   writeState(root, { build: "pass", check: "pass", "check:tests": "pass", unit: "pass" });
 }
@@ -222,33 +225,67 @@ try {
     );
   });
 
-  // ── 4. a non-monorepo target SCOPES OUT rather than passing vacuously ──────
+  // ── 4. no declared commands means a BLOCKING non-verdict ─────────────────
   const bare = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-bare-"));
   try {
     writeFileSync(join(bare, "README.md"), "# not a monorepo\n");
     const scoped = await runToolOwnedFinalGate(bare);
-    await check("a non-monorepo target is scoped_out, never a vacuous green", () => {
+    await check("a target with no declared commands is blocked, never a vacuous green", () => {
       assert(scoped.outcome === "scoped_out", `expected scoped_out, got "${scoped.outcome}"`);
       assert(scoped.scoped_out === true, "scoped_out must be stated");
+      assert(scoped.passed === false, "a no-command target must block completion, never pass");
       assert(scoped.results.length === 0, "a scoped-out gate runs nothing");
     });
   } finally {
     rmSync(bare, { recursive: true, force: true });
   }
 
-  // A five-marker tree with NO gate script must ALSO scope out: judging it
-  // in-scope would run `node <missing path>`, exit 1, and report a whole-repo RED
-  // on a healthy repository — the false-red class this predicate exists to avoid.
+  // Missing the monorepo-only gate script selects generic discovery. All four
+  // explicitly declared legs still run, without inferring that `check` means
+  // typechecking or attempting to execute a nonexistent monorepo script.
   const partial = mkdtempSync(join(tmpdir(), "remediate-gate-smoke-partial-"));
   try {
     writeFixture(partial);
     rmSync(join(partial, "scripts"), { recursive: true, force: true });
-    const missingScript = await runToolOwnedFinalGate(partial);
-    await check("a marker-complete tree WITHOUT the gate script scopes out instead of reporting a false red", () => {
-      assert(
-        missingScript.outcome === "scoped_out",
-        `expected scoped_out, got "${missingScript.outcome}" (a missing gate script must not be a red)`,
-      );
+    const manifest = JSON.parse(readFileSync(join(partial, "package.json"), "utf8"));
+    for (const role of ["typecheck", "lint", "test"]) {
+      manifest.scripts[role] = `node stub-layer.mjs ${role}`;
+    }
+    writeFileSync(join(partial, "package.json"), JSON.stringify(manifest) + "\n");
+    const healthy = { build: "pass", typecheck: "pass", lint: "pass", test: "pass" };
+    writeState(partial, healthy);
+    const genericSpecs = toolOwnedFinalGateCommands(partial);
+    const generic = await runToolOwnedFinalGate(partial);
+    await check("a target WITHOUT the monorepo gate script executes every declared generic gate", () => {
+      const roles = ["build", "typecheck", "lint", "test"];
+      assert(generic.outcome === "executed" && generic.scoped_out === false,
+        "declared generic gates must execute instead of scoping out");
+      assert(generic.passed === true, "healthy declared commands must pass");
+      assert(genericSpecs.length === roles.length && generic.results.length === roles.length,
+        "all four declared legs must run, without undeclared monorepo commands");
+      // Successful gate results deliberately omit output tails. The spawned
+      // fixture records the same bytes it writes to stdout, so execution/output
+      // evidence does not depend on a failure-only result field.
+      const observedOutput = readFileSync(join(partial, "successful-output.log"), "utf8");
+      assert(observedOutput === roles.map(role => `fixture-${role}-layer-passed\n`).join(""),
+        "each declared command must actually produce its expected output in order");
+      for (const [index, role] of roles.entries()) {
+        const result = generic.results[index];
+        assert(result.argv.join(" ") === genericSpecs[index].argv.join(" "),
+          "executed command must match its declaration");
+        assert(result.exit_code === 0 && result.passed === true,
+          `declared ${role} leg must actually execute successfully in order`);
+      }
+    });
+    writeState(partial, { ...healthy, typecheck: "fail" });
+    const genericRed = await runToolOwnedFinalGate(partial);
+    await check("a failed generic typecheck blocks completion and short-circuits later declared gates", () => {
+      assert(genericRed.outcome === "executed" && genericRed.passed === false,
+        "a failed declared command must never become a green or a non-verdict");
+      assert(genericRed.results.length === 2, "build runs, typecheck fails, lint and test must not run");
+      const failure = genericRed.results[1];
+      assert(failure.exit_code !== 0 && failure.stderr_tail.includes("fixture-typecheck-layer-failed"),
+        "the generic failure must preserve its attributable output");
     });
   } finally {
     rmSync(partial, { recursive: true, force: true });

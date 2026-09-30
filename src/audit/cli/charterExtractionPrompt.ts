@@ -95,6 +95,20 @@ export function renderCharterKindLanePrompt(opts: {
 }): string {
   const lane = KIND_LANE_TEXT[opts.kind];
   const exampleKind = exampleProvenanceKind(opts.kind);
+  const examples = opts.kind === "stated" ? [
+    { ref: "README.md", quote: "We promise customers only deliveries the fleet can complete." },
+    { ref: "README.md", quote: "Dispatchers offer delivery windows backed by available fleet capacity." },
+    { ref: "README.md", quote: "Keepable windows make our delivery promises trustworthy." },
+  ] : opts.kind === "structural" ? [
+    { ref: "src/scheduling/promise.ts#Promise", quote: "class Promise {" },
+    { ref: "src/scheduling/window.ts#DeliveryWindow", quote: "class DeliveryWindow {" },
+    { ref: "src/scheduling/window.ts", quote: 'import { canFleetKeep } from "./fleet";' },
+  ] : [
+    { ref: "src/scheduling/promise.ts#promiseDelivery", quote: "return reserveFleetCapacity(window);" },
+    { ref: "src/scheduling/window.ts#offerWindow", quote: "if (!canFleetKeep(window)) return undefined;" },
+    { ref: "src/scheduling/window.ts", quote: "return promiseDelivery(window);" },
+  ];
+  const provenanceExample = (index: number): string => JSON.stringify([{ kind: exampleKind, ...examples[index]! }]);
 
   return [
     `# Design review — charter extraction, the **${opts.kind}** lane`,
@@ -164,7 +178,7 @@ export function renderCharterKindLanePrompt(opts: {
     ...(opts.kind === "stated"
       ? []
       : ['      "files": ["src/scheduling/promise.ts"],']),
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/promise.ts#Promise", "quote": "class Promise {" }],`,
+    `      "provenance": ${provenanceExample(0)},`,
     '      "confidence": "medium"',
     "    },",
     "    {",
@@ -175,7 +189,7 @@ export function renderCharterKindLanePrompt(opts: {
       : [
           '      "files": ["src/scheduling/window.ts", "src/scheduling/fleet.ts"],',
         ]),
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts#DeliveryWindow", "quote": "class DeliveryWindow {" }],`,
+    `      "provenance": ${provenanceExample(1)},`,
     '      "confidence": "high"',
     "    }",
     "  ],",
@@ -183,7 +197,7 @@ export function renderCharterKindLanePrompt(opts: {
     "    {",
     '      "from": "keepable-delivery-windows",',
     '      "to": "promises-the-customer-can-trust",',
-    `      "provenance": [{ "kind": "${exampleKind}", "ref": "src/scheduling/window.ts", "quote": "canFleetKeep(window)" }]`,
+    `      "provenance": ${provenanceExample(2)}`,
     "    }",
     "  ]",
     "}",

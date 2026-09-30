@@ -361,6 +361,58 @@ describe("the name binding — and the admission about it", () => {
     }
   });
 
+  it("checks a late binding beyond one MiB of staged diff without truncating the subject", async () => {
+    const { execFileSync, spawnSync } = await import("node:child_process");
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const repo = mkdtempSync(join(tmpdir(), "sites-pinned-large-"));
+    const gate = fileURLToPath(new URL("../../scripts/check-sites-pinned.mjs", import.meta.url));
+    try {
+      const git = (args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      git(["init", "-q"]);
+      git(["config", "user.email", "t@example.invalid"]);
+      git(["config", "user.name", "fixture"]);
+      mkdirSync(join(repo, "scripts"));
+      mkdirSync(join(repo, "tests"));
+      writeFileSync(join(repo, "tests/real.test.ts"), 'it("real", () => {});\n');
+      writeFileSync(join(repo, "README.md"), "baseline\n");
+      git(["add", "-A"]);
+      git(["commit", "-qm", "base"]);
+      // README sorts before scripts/, placing the checked source after the old
+      // default capture bound. It is intentionally outside the source set.
+      writeFileSync(join(repo, "README.md"), "padding\n".repeat(150_000));
+      const source = join(repo, "scripts/z-gate.mjs");
+      writeFileSync(source, `// ${PIN_MARKER}: tests/missing.test.ts\nexport const late = true;\n`);
+      git(["add", "-A"]);
+      const diff = git(["diff", "--cached", "-U0"]);
+      expect(diff.indexOf("diff --git a/scripts/z-gate.mjs")).toBeGreaterThan(1024 * 1024);
+      const check = () => spawnSync(process.execPath, [gate], { cwd: repo, encoding: "utf8", windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      const refused = check();
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain("tests/missing.test.ts");
+      expect(refused.stderr).toContain("NOT a tracked file");
+      expect(refused.stderr).not.toContain("ENOBUFS");
+      writeFileSync(source, `// ${PIN_MARKER}: tests/real.test.ts\nexport const late = true;\n`);
+      git(["add", "-A"]);
+      const accepted = check();
+      expect(accepted.status, accepted.stderr).toBe(0);
+      expect(accepted.stdout).toContain("scripts/z-gate.mjs");
+      expect(accepted.stdout).toContain("all bound");
+      // The larger capture remains finite and fails closed, without dumping
+      // partially captured diff contents into an operator diagnostic.
+      writeFileSync(join(repo, "README.md"), "x".repeat(17 * 1024 * 1024) + "\n");
+      git(["add", "-A"]);
+      const oversized = check();
+      expect(oversized.status).not.toBe(0);
+      expect(oversized.stderr).toContain("16 MiB");
+      expect(oversized.stderr).toContain("no partial diff was checked");
+      expect(oversized.stderr.length).toBeLessThan(4000);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a declaration with no names — a binding to nothing", () => {
     // A bare `// sites-pinned:` with no operand reads as a binding while
     // obliging nothing, so it is refused by name rather than treated as absent:

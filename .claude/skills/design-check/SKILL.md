@@ -51,6 +51,7 @@ retirement still holds.
 Delegate — do not self-assess; the point is a reader who did not author the plan. Pass the plan plus
 the evidence files from step 2 as file PATHS in the prompt; never paste file bodies into it.
 
+<!-- retired-infrastructure-exempt: llm-relay — historical measurement; replaced by agent-dispatch -->
 ⚠ **Use an `agy` lane first.** Measured twice, on two different laps: llm-relay's `claude-free-pool`
 lane (retired 2026-09-22) ran 14 min and then 23 min without returning, and both times an AGY run
 given the identical prompt

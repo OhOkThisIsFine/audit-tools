@@ -1,3 +1,5 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 // N1 (A2 re-review F1-1): in `runHostDelegationObligation`, when the same fold
@@ -247,13 +249,15 @@ async function setup() {
   const { runIntentEquivalenceResolve } = await import(
     "../../src/audit/orchestrator/intentEquivalenceExecutor.js"
   );
-  const settled = runIntentEquivalenceResolve({
+  const settled = captureCompletedDesignReviews(runIntentEquivalenceResolve({
     ...bundle,
     artifact_metadata: computeArtifactMetadata(bundle as never),
-  }).updated;
+  }).updated);
   const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
   await writeCoreArtifacts(artifactsDir, settled as never);
+  await persistDesignReviewSnapshots(artifactsDir, settled);
 
+  await satisfyFunctionalPreflight(root, artifactsDir);
   return { root, artifactsDir };
 }
 

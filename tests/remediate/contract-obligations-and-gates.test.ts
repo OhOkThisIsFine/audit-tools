@@ -82,7 +82,7 @@ describe("validatePairedObligations", () => {
           assertions: ["returns the widget on success", "rejects an invalid widget"],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -90,7 +90,7 @@ describe("validatePairedObligations", () => {
     const issues = validatePairedObligations(
       ledger([changeObl("invariant")]),
       plan([]),
-    );
+    ).issues;
     expect(issues.length).toBeGreaterThan(0);
     expect(issues.every((i) => i.severity === "error")).toBe(true);
     expect(issues[0].message).toContain("no test spec");
@@ -100,7 +100,7 @@ describe("validatePairedObligations", () => {
     const issues = validatePairedObligations(
       ledger([changeObl()]),
       plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["returns the widget"] }]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
   });
@@ -109,7 +109,7 @@ describe("validatePairedObligations", () => {
     const issues = validatePairedObligations(
       ledger([changeObl()]),
       plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["throws on a bad widget"] }]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(false);
   });
@@ -118,7 +118,7 @@ describe("validatePairedObligations", () => {
     const issues = validatePairedObligations(
       ledger([{ id: "O-1", description: "x", kind: "structural", depends_on: [], status: "pending" }]),
       plan([]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -135,7 +135,7 @@ describe("validatePairedObligations", () => {
           assertions: ["POSITIVE: the widget count stays under the cap", "NEGATIVE: the widget count over the cap is caught"],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -153,7 +153,7 @@ describe("validatePairedObligations", () => {
           assertions: ["POSITIVE: the widget must not exceed N"],
         },
       ]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
   });
@@ -169,7 +169,7 @@ describe("validatePairedObligations", () => {
           assertions: ["  positive : the widget is produced", "\tNegAtIvE: the bad widget path is handled"],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -184,7 +184,7 @@ describe("validatePairedObligations", () => {
           assertions: ["POSITIVE: the widget is produced"],
         },
       ]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.endsWith(".negative"))).toBe(true);
     expect(issues.some((i) => i.path.endsWith(".positive"))).toBe(false);
   });
@@ -201,7 +201,7 @@ describe("validatePairedObligations", () => {
           inapplicable_claim: { obligation_id: "O-1", reason: "no code path exists for this in the target" },
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -218,7 +218,7 @@ describe("validatePairedObligations", () => {
         },
       ]),
       plan([{ obligation_id: "O-1", name: "t", kind: "unit", assertions: ["emits a new counter"] }]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 });
@@ -253,7 +253,7 @@ describe("validateEvidenceThreaded", () => {
       verdict: "failed",
       created_at: CREATED_AT,
     };
-    const issues = validateEvidenceThreaded(assessment, undefined, undefined);
+    const issues = validateEvidenceThreaded(assessment, undefined, undefined).issues;
     expect(issues.some((i) => i.path.includes("evidence"))).toBe(true);
   });
 
@@ -273,7 +273,7 @@ describe("validateEvidenceThreaded", () => {
           status: "pending",
         },
       ]),
-    );
+    ).issues;
     expect(issues.some((i) => i.message.includes("CE-1"))).toBe(true);
   });
 
@@ -294,12 +294,12 @@ describe("validateEvidenceThreaded", () => {
           status: "pending",
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
   it("is fail-closed: accepted counterexamples but a missing DAG => violation", () => {
-    const issues = validateEvidenceThreaded(undefined, judge(["CE-1"]), undefined);
+    const issues = validateEvidenceThreaded(undefined, judge(["CE-1"]), undefined).issues;
     expect(issues.some((i) => i.message.includes("CE-1"))).toBe(true);
   });
 
@@ -319,7 +319,7 @@ describe("validateEvidenceThreaded", () => {
           status: "pending",
         },
       ]),
-    );
+    ).issues;
     expect(issues.some((i) => i.path.includes("description"))).toBe(true);
   });
 });
@@ -343,7 +343,7 @@ describe("validateDigestCoverage", () => {
       "structured_audit",
       enumeration([{ id: "FND-1" }, { id: "FND-2" }]),
       ledger([{ id: "O-1", description: "covers FND-1", kind: "behavioral", depends_on: [], status: "pending", source_finding_ids: ["FND-1"] }]),
-    );
+    ).issues;
     expect(issues.some((i) => i.message.includes("FND-2"))).toBe(true);
     expect(issues.some((i) => i.message.includes("FND-1"))).toBe(false);
   });
@@ -353,7 +353,7 @@ describe("validateDigestCoverage", () => {
       "structured_audit",
       enumeration([{ id: "FND-1" }]),
       ledger([{ id: "O-1", description: "x", kind: "behavioral", depends_on: [], status: "pending", source_finding_ids: ["FND-1"] }]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -362,7 +362,7 @@ describe("validateDigestCoverage", () => {
       "structured_audit",
       enumeration([{ id: "FND-1" }]),
       ledger([{ id: "O-1", description: "Addresses FND-1 directly.", kind: "behavioral", depends_on: [], status: "pending" }]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -371,7 +371,7 @@ describe("validateDigestCoverage", () => {
       "conversation",
       enumeration([{ id: "FND-1" }]),
       ledger([]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -380,7 +380,7 @@ describe("validateDigestCoverage", () => {
       "structured_audit",
       enumeration([], false),
       ledger([]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 });
@@ -423,7 +423,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -449,7 +449,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues.length).toBeGreaterThan(0);
     expect(issues.every((i) => i.severity === "error")).toBe(true);
     expect(issues[0].message).toContain("INV-CO-12");
@@ -480,7 +480,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -508,7 +508,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues.length).toBeGreaterThan(0);
     expect(issues[0].message).toContain("INV-CO-12");
   });
@@ -525,13 +525,13 @@ describe("validateReconciliationDerivation", () => {
         },
       ]),
       undefined,
-    );
+    ).issues;
     expect(issues.length).toBeGreaterThan(0);
     expect(issues[0].message).toContain("INV-CO-12");
   });
 
   it("passes when there are no mismatches to derive", () => {
-    const issues = validateReconciliationDerivation(report([]), finalized([]));
+    const issues = validateReconciliationDerivation(report([]), finalized([])).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -560,7 +560,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues).toHaveLength(0);
   });
 
@@ -587,7 +587,7 @@ describe("validateReconciliationDerivation", () => {
           failure_modes: [],
         },
       ]),
-    );
+    ).issues;
     expect(issues.length).toBeGreaterThan(0);
     expect(issues.every((i) => i.severity === "error")).toBe(true);
     expect(issues[0].message).toContain("INV-CO-12");
@@ -688,19 +688,19 @@ describe("validateFinalizedModuleSetPreserved (INV-CO-13)", () => {
 
   it("passes when the finalized contracts carry exactly the drafted module names", () => {
     expect(
-      validateFinalizedModuleSetPreserved(drafted("a", "b", "c"), drafted("a", "b", "c")),
+      validateFinalizedModuleSetPreserved(drafted("a", "b", "c"), drafted("a", "b", "c")).issues,
     ).toEqual([]);
   });
 
   it("ignores ORDER — the gate is a set comparison, not a sequence comparison", () => {
-    expect(validateFinalizedModuleSetPreserved(drafted("a", "b"), drafted("b", "a"))).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(drafted("a", "b"), drafted("b", "a")).issues).toEqual([]);
   });
 
   it("names every dropped module, listing the full drafted set as the fix", () => {
     const issues = validateFinalizedModuleSetPreserved(
       drafted("attribution-contract", "verdict-capture-audit", "effectiveness-render"),
       drafted("attribution-contract"),
-    );
+    ).issues;
     expect(issues).toHaveLength(2);
     expect(issues.every((i) => i.severity === "error")).toBe(true);
     const rendered = issues.map((i) => `${i.path} ${i.message}`).join("\n");
@@ -713,7 +713,7 @@ describe("validateFinalizedModuleSetPreserved (INV-CO-13)", () => {
     const issues = validateFinalizedModuleSetPreserved(
       drafted("verdict-capture-audit", "verdict-capture-remediate"),
       drafted("verdict-capture"),
-    );
+    ).issues;
     const rendered = issues.map((i) => i.message).join("\n");
     expect(rendered).toMatch(/verdict-capture-audit/);
     expect(rendered).toMatch(/verdict-capture-remediate/);
@@ -725,7 +725,7 @@ describe("validateFinalizedModuleSetPreserved (INV-CO-13)", () => {
     const issues = validateFinalizedModuleSetPreserved(
       drafted("a", "b"),
       { module_contracts: [{ name: "a" }, { name: "b" }, { name: "b" }] },
-    );
+    ).issues;
     expect(issues).toHaveLength(1);
     expect(issues[0].message).toMatch(/appears more than once/);
     expect(issues[0].message).toMatch(/keeps the FIRST entry/);
@@ -733,13 +733,13 @@ describe("validateFinalizedModuleSetPreserved (INV-CO-13)", () => {
 
   it("is absent-tolerant on both sides so a partial pipeline never false-fails", () => {
     // Every shape a run reaches BEFORE finalization, plus malformed payloads.
-    expect(validateFinalizedModuleSetPreserved(undefined, undefined)).toEqual([]);
-    expect(validateFinalizedModuleSetPreserved(drafted("a"), undefined)).toEqual([]);
-    expect(validateFinalizedModuleSetPreserved(undefined, drafted("a"))).toEqual([]);
-    expect(validateFinalizedModuleSetPreserved({}, {})).toEqual([]);
-    expect(validateFinalizedModuleSetPreserved("nonsense", 42)).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(undefined, undefined).issues).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(drafted("a"), undefined).issues).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(undefined, drafted("a")).issues).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved({}, {}).issues).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved("nonsense", 42).issues).toEqual([]);
     // A drafted payload naming no module cannot establish ground truth.
-    expect(validateFinalizedModuleSetPreserved(drafted(), drafted("a"))).toEqual([]);
+    expect(validateFinalizedModuleSetPreserved(drafted(), drafted("a")).issues).toEqual([]);
   });
 });
 

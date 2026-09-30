@@ -451,8 +451,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("f66d7e2b1ad7f3d43042526f7eac66bf61857b319ae530dd7406b4a103f5b512");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v9");
+  ).toBe("82b3d043ffd83c535be6096a004eaa7ffd19ca5ee7866b85093d0d8c54c2a511");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {
@@ -475,4 +475,21 @@ test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () =
 
   const plain = fullBuild(m2, contents2);
   expect(bundle, "invalidated incremental build must equal the full build").toEqual(plain);
+});
+
+test("sibling router identity changes invalidate unchanged handler contributions", () => {
+  const deps = "app/deps.py";
+  const handler = "app/handlers.py";
+  const contents = {
+    [deps]: "from fastapi import APIRouter\nrouter = APIRouter()",
+    [handler]: 'from .deps import router\n@router.get("/orders")\ndef orders(): ...',
+  };
+  const firstManifest = manifest([file(deps, { hash: "router" }), file(handler, { hash: "same" })]);
+  const first = incrementalBuild(firstManifest, contents, undefined);
+  expect(first.bundle.graphs.routes?.some((r) => r.path === "/orders")).toBe(true);
+  const changed = { ...contents, [deps]: "router = object()" };
+  const secondManifest = manifest([file(deps, { hash: "object" }), file(handler, { hash: "same" })]);
+  const second = incrementalBuild(secondManifest, changed, first.cache);
+  expect(second.bundle).toEqual(fullBuild(secondManifest, changed));
+  expect(second.bundle.graphs.routes?.some((r) => r.path === "/orders")).toBe(false);
 });

@@ -1,3 +1,5 @@
+import { emitAndWriteReviewFixture } from "./helpers/reviewSubmissionFixture.js";
+import { laneSubmissionPath } from "../../src/audit/cli/laneSubmissions.js";
 // `recover-submission` and the MIS-ROUTE door the retired `kind` field left open.
 //
 // Until 2026-09-17 an extraction submission stated its own `kind`, and the gate
@@ -19,7 +21,7 @@
 // packet delivered, and a payload authored against a different packet cites
 // outside it.
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -84,9 +86,7 @@ async function fixture(deliver: string[] | undefined): Promise<string> {
 /** A payload shaped exactly as an obedient lane writes one. */
 async function payload(dir: string, refs: string[]): Promise<string> {
   const path = join(dir, "payload.json");
-  await writeFile(
-    path,
-    JSON.stringify({
+  await emitAndWriteReviewFixture(dir, "charter_extraction_stated", {
       nodes: [
         {
           node_id: "top",
@@ -100,9 +100,8 @@ async function payload(dir: string, refs: string[]): Promise<string> {
         },
       ],
       edges: [],
-    }),
-    "utf8",
-  );
+    }, {});
+  await rename(laneSubmissionPath(dir, "charter_extraction_stated"), path);
   return path;
 }
 

@@ -11,7 +11,7 @@
  * acquisition goes through `withArtifactTreeHold`, so this test pins:
  *
  * 1. `artifactTreeLockPath` is REFERENCED only by its definition module, the
- *    shared re-export barrel, and `auditStep.ts` (the wrapper) — a new direct
+ *    shared re-export barrel, and `artifactTreeHold.ts` (the wrapper) — a new direct
  *    `withFileLock(artifactTreeLockPath(...))` call site anywhere else is red.
  * 2. `withArtifactTreeHold` passes `ARTIFACT_TREE_LOCK_TIMEOUT_MS` to
  *    `withFileLock`.
@@ -23,7 +23,7 @@ import { test, expect } from "vitest";
 
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
-import { ARTIFACT_TREE_LOCK_TIMEOUT_MS } from "../../src/audit/cli/auditStep.js";
+import { ARTIFACT_TREE_LOCK_TIMEOUT_MS } from "../../src/shared/io/artifactTreeHold.js";
 
 const ROOT = process.cwd();
 
@@ -31,7 +31,7 @@ const ROOT = process.cwd();
 const ALLOWED_REFERENCING_FILES = new Set([
   "src/shared/io/auditToolsPaths.ts", // the definition
   "src/shared/index.ts", // the re-export barrel
-  "src/audit/cli/auditStep.ts", // the ONE acquisition surface
+  "src/shared/io/artifactTreeHold.ts", // the ONE acquisition surface
 ]);
 
 function trackedSourceFilesReferencing(needle: string): string[] {
@@ -55,7 +55,7 @@ test("artifactTreeLockPath is referenced only by its definition, the barrel, and
 
 test("withArtifactTreeHold passes the widened waiter window to withFileLock", async () => {
   const source = await readFile(
-    join(ROOT, "src", "audit", "cli", "auditStep.ts"),
+    join(ROOT, "src", "shared", "io", "artifactTreeHold.ts"),
     "utf8",
   );
   const holdBody = source.slice(source.indexOf("export async function withArtifactTreeHold"));

@@ -98,7 +98,7 @@ describe('every retired hand-coded trigger is reproduced', () => {
 
   it('a staged backlog file fires the whole backlog family: index, budget, status, handoff parity', () => {
     const ids = triggeredIds(['docs/backlog/open-bugs.md']);
-    for (const g of ['check:backlog-index', 'check:backlog-budget', 'check:backlog-status', 'check:handoff-roadmap']) {
+    for (const g of ['check:backlog-index', 'check:backlog', 'check:handoff-roadmap']) {
       expect(ids, `staged backlog md must trigger ${g}`).toContain(g);
     }
     // docs/backlog.md (the router/index file) fires the family too.

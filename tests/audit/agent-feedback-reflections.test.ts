@@ -1,3 +1,5 @@
+import { persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { readOptionalTextFile } from "../../src/shared/io/json.js";
 import { test, expect } from "vitest";
 import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -171,6 +173,7 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
     // charter, or design-review results.
     const preplanningBundle = await buildAdvancedBundle(root, "planning_artifacts");
     await writeCoreArtifacts(artDir, preplanningBundle, { prune: true });
+    await persistDesignReviewSnapshots(artDir, preplanningBundle);
 
     // Advance one bounded step, supplying explicit scripted-host results at the
     // semantic review and synthesis-narrative boundaries, while mirroring the
@@ -219,13 +222,18 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
 
     // Drive until the first synthesis has produced a report.
     const preTrail = [];
+    let initialReport: string | undefined;
     for (let i = 0; i < 25; i++) {
       const obligation = await step();
-      expect(obligation, `run completed before synthesis? trail: ${preTrail.join(" -> ")}`).not.toBe(null);
       preTrail.push(obligation);
-      if (obligation === "synthesis_current") break;
+      initialReport = await readOptionalTextFile(join(artDir, "audit-report.md"));
+      // A clean audit can render its first report in the narrative transition;
+      // the production artifact, not a separately scheduled synthesis label,
+      // establishes the point after which this regression appends feedback.
+      if (initialReport !== undefined) break;
+      expect(obligation, `run completed without a report? trail: ${preTrail.join(" -> ")}`).not.toBe(null);
     }
-    expect(preTrail.includes("synthesis_current"), `synthesis should have run; trail: ${preTrail.join(" -> ")}`).toBeTruthy();
+    expect(initialReport, `synthesis should produce a report; trail: ${preTrail.join(" -> ")}`).toBeDefined();
     expect(await readFile(join(artDir, "audit-report.md"), "utf8"), "no reflections yet → no Process Feedback section").not.toMatch(/## Process Feedback/);
 
     // Worker appends a reflection while the run is still active, then a

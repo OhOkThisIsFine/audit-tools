@@ -175,6 +175,18 @@ describe("backlog friction-tag vocabulary", () => {
     expect(hits[1]?.entry).toContain("Second entry");
   });
 
+  test("a fixed nonempty corpus counts all tags and rejects its invalid member", () => {
+    const result = evaluateFrictionTags([{ file: "probe.md", text: [
+      "- **First (friction: tool_should_decide).** detail",
+      "- **Second (friction: inefficient-feeding).** detail",
+      "- **Third (friction: false_red).** detail",
+    ].join("\n") }]);
+    expect(result.tags).toBe(3);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0]).toContain("friction: false_red");
+    expect(result.violations[0]).toContain("entry: Third");
+  });
+
   test("the live backlog is clean and every tag it carries is counted", () => {
     const files = readdirSync(BACKLOG_DIR)
       .filter((f) => f.endsWith(".md"))
@@ -182,7 +194,12 @@ describe("backlog friction-tag vocabulary", () => {
       .map((f) => ({ file: f, text: readFileSync(join(BACKLOG_DIR, f), "utf8") }));
     const result = evaluateFrictionTags(files);
     expect(result.violations, result.violations.join("\n")).toEqual([]);
-    // A vacuous pass would be a gate guarding nothing: the corpus DOES carry tags.
-    expect(result.tags).toBeGreaterThan(20);
+    // The queue is expected to shrink. Count literal, complete canonical tags
+    // independently of the scanner; a historical minimum would forbid closure.
+    // This corpus uses parenthetical tags on one line, with either accepted spelling.
+    const expectedTags = files.reduce((count, { text }) => count +
+      [...ACCEPTED_TAG_FORMS.keys()].reduce((subtotal, tag) =>
+        subtotal + text.split(`friction: ${tag})`).length - 1, 0), 0);
+    expect(result.tags).toBe(expectedTags);
   });
 });

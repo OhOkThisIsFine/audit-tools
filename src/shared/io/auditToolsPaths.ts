@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/audit-tools-path-guard.test.ts, tests/remediate/host-handoff.test.ts
 import { dirname, join, resolve, sep } from "node:path";
 
 /**
@@ -80,6 +81,11 @@ export function remediationArtifactsDir(root: string): string {
   return join(auditToolsDir(root), "remediation");
 }
 
+/** Bounded captured output from tool-owned remediation required-test reruns. */
+export function remediationRequiredTestLogsDir(root: string): string {
+  return join(remediationArtifactsDir(root), "required-test-logs");
+}
+
 /**
  * `<root>/.audit-tools/worktrees` — the gitignored home for tool-created git
  * worktrees (remediate's per-node implement worktrees; audit's disposable
@@ -102,7 +108,7 @@ export function stepsDir(artifactsDir: string): string {
 /**
  * `<artifactsDir>/artifact-tree.lock` — the single pessimistic lock guarding
  * every artifact-tree read-modify-write (advance/persist/ingest, O2). All
- * mutators acquire THIS lock via `withFileLock` so concurrent next-step and
+ * mutators acquire THIS lock via the canonical artifact-tree hold so concurrent next-step and
  * result-ingestion calls can never interleave a load against another writer's
  * partially-written bundle (the staleness-cascade wipe trap). Single-sourced so
  * every mutator agrees on the exact path.

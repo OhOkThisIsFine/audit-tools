@@ -17,6 +17,7 @@ import {
 export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
 
 export const StepKindSchema = z.enum([
+  "functional_preflight",
   "dispatch_review",
   "design_review",
   "design_review_parallel",

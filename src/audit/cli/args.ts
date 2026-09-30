@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/cli-args-utils.test.ts, tests/audit/functional-preflight.test.ts
 import { createReadStream, existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -36,15 +37,17 @@ export function getFlag(
   name: string,
   fallback?: string,
 ): string | undefined {
-  const index = argv.indexOf(name);
+  const index = argv.findIndex(token => token === name || token.startsWith(`${name}=`));
   if (index < 0) return fallback;
+  const token = argv[index]!;
+  if (token.startsWith(`${name}=`)) return token.slice(name.length + 1) || fallback;
   const candidate = argv[index + 1];
   if (!candidate || isLongFlagToken(candidate)) return fallback;
   return candidate;
 }
 
 export function hasFlag(argv: string[], name: string): boolean {
-  return argv.includes(name);
+  return argv.some(token => token === name || token.startsWith(`${name}=`));
 }
 
 export { digestId, safeArtifactStem } from "audit-tools/shared";

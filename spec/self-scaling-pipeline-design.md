@@ -18,10 +18,10 @@ eligible/ineligible gate rather than a point on the Dial A/B continuum). Per the
 ("self-scaling pipeline, not forked paths"), the lowest-risk case is the lowest point of the dial,
 not separate code — see Mechanisms, Dial A/B below for the shape.
 
-That fork is GONE: its plan producer, its bypass branch and its light-review gate were deleted
-together, so every run now enters the pipeline and the tier decides only how deeply it is
-traversed. The fold costs gated host turns on the cheapest case, and the owner took that trade
-knowingly: the conviction outranks the saving.
+Every run enters the same pipeline, and the tier decides only how deeply it is
+traversed. A separate plan producer, bypass branch, or light-review gate would
+fork that authority and is rejected. The extra gated host turns for the cheapest
+case are an accepted cost of keeping one pipeline.
 
 ## Two distinct cost drivers (measured)
 

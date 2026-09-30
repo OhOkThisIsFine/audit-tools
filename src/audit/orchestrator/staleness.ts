@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/staleness.test.ts, tests/audit/dependency-slices.test.ts
+import { propagateReachability } from "../../shared/graph/orderedReachability.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import {
@@ -534,49 +536,42 @@ export function computeStaleArtifacts(
     }
   }
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [upstream, downstreamList] of Object.entries(
-      ARTIFACT_DEPENDENTS_MAP,
-    )) {
-      if (!downstreamList) continue;
-      if (!stale.has(upstream)) {
-        continue;
-      }
-      for (const downstream of downstreamList) {
-        if (!present(bundle, downstream) || stale.has(downstream)) continue;
-        // A slice-protected edge blocks TRANSITIVE propagation too: the
-        // downstream's staleness across this edge is decided by the slice
-        // compare AFTER the upstream re-derives, not pre-emptively while the
-        // upstream is merely pending (the pre-emptive mark was the live
-        // re-fire chain: manifest churn → structure stale → charter re-fired
-        // over a byte-identical subsystem set). Safe under PRIORITY ordering:
-        // every slice-projected upstream's obligation runs before the
-        // downstream's, and staleness re-derives each drain iteration, so a
-        // slice moved by the upstream's re-derivation still fires the per-edge
-        // compare before the downstream's obligation is reached.
-        //
-        // That deferral is a DECISION POSTPONED, not a verdict of "fresh", so it
-        // is REPORTED rather than silent: the downstream is recorded as deferred
-        // and rides out on the result (INV-SSP-DEFERRED-SET-REPORTED). This
-        // module states the ordering it is safe under; it does not police it —
-        // the PRIORITY-ordering guarantee is the CALLER's precondition, owned and
-        // tested there. What this module owes the caller is that a held-back
-        // downstream is never mistaken for a decided-clean one.
-        const entry = metadata?.artifacts[downstream];
-        if (
-          entry?.dependency_slices?.[upstream] !== undefined &&
-          hasDependencySliceProjection(downstream, upstream)
-        ) {
-          deferred.add(downstream);
-          continue;
-        }
-        stale.add(downstream);
-        changed = true;
-      }
+  // Preserve the existing upstream-then-downstream scan order.
+  const edges = Object.entries(ARTIFACT_DEPENDENTS_MAP).flatMap(
+    ([upstream, downstreams]) => (downstreams ?? []).map(
+      (downstream) => [upstream, downstream] as const,
+    ),
+  );
+  propagateReachability(stale, edges, (upstream, downstream) => {
+    if (!present(bundle, downstream)) return false;
+    // A slice-protected edge blocks TRANSITIVE propagation too: the
+    // downstream's staleness across this edge is decided by the slice
+    // compare AFTER the upstream re-derives, not pre-emptively while the
+    // upstream is merely pending (the pre-emptive mark was the live
+    // re-fire chain: manifest churn → structure stale → charter re-fired
+    // over a byte-identical subsystem set). Safe under PRIORITY ordering:
+    // every slice-projected upstream's obligation runs before the
+    // downstream's, and staleness re-derives each drain iteration, so a
+    // slice moved by the upstream's re-derivation still fires the per-edge
+    // compare before the downstream's obligation is reached.
+    //
+    // That deferral is a DECISION POSTPONED, not a verdict of "fresh", so it
+    // is REPORTED rather than silent: the downstream is recorded as deferred
+    // and rides out on the result (INV-SSP-DEFERRED-SET-REPORTED). This
+    // module states the ordering it is safe under; it does not police it —
+    // the PRIORITY-ordering guarantee is the CALLER's precondition, owned and
+    // tested there. What this module owes the caller is that a held-back
+    // downstream is never mistaken for a decided-clean one.
+    const entry = metadata?.artifacts[downstream];
+    if (
+      entry?.dependency_slices?.[upstream] !== undefined &&
+      hasDependencySliceProjection(downstream, upstream)
+    ) {
+      deferred.add(downstream);
+      return false;
     }
-  }
+    return true;
+  });
 
   const result = new StaleArtifactSet(stale, deferred);
   if (emit) emitStalenessRecord(result);

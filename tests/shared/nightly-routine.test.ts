@@ -5,7 +5,7 @@
 // by the findings file's commit SHA and expired whenever the routine regenerated
 // that file, so a settled question returned every night and the whole channel
 // became noise. These tests pin the durable half.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +22,7 @@ import {
   recordViewed,
   recordReply,
 } from '../../scripts/nightly/items.mjs';
+import * as handoffGenerator from '../../scripts/shared/generate-handoff-roadmap.mjs';
 import { renderInbox, writeInbox } from '../../scripts/nightly/render-inbox.mjs';
 import { ingestAnswers } from '../../scripts/nightly/ingest-answers.mjs';
 
@@ -753,4 +754,44 @@ describe('viewed state', () => {
     const data = JSON.parse(readFileSync(join(root, '.audit-tools/nightly/last-viewed.json'), 'utf8'));
     expect(data.keys).toEqual(['a', 'b']);
   });
+});
+
+it('reports failed HANDOFF regeneration without losing the successful queue write', () => {
+  mkdirSync(join(root, 'docs'), { recursive: true });
+  writeFileSync(join(root, 'docs/HANDOFF.md'), '# Broken handoff');
+  const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    expect(readOpenItems(root).items).toHaveLength(1);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('')).toMatch(/queue.*saved.*HANDOFF.*failed/is);
+  } finally { warn.mockRestore(); }
+});
+
+it('reports a nonzero HANDOFF refusal as well as thrown failures', () => {
+  mkdirSync(join(root, 'docs'), { recursive: true });
+  writeFileSync(join(root, 'docs/HANDOFF.md'), '# Handoff');
+  const generate = vi.spyOn(handoffGenerator, 'runGenerator').mockImplementation(({ err }: any) => {
+    err('projection refused');
+    return 1;
+  });
+  const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    expect(readOpenItems(root).items).toHaveLength(1);
+    expect(warn.mock.calls.map((c) => String(c[0])).join('')).toContain('HANDOFF regeneration failed: projection refused');
+  } finally { warn.mockRestore(); generate.mockRestore(); }
+});
+
+it('one queue write also refreshes the answering inbox without a second call', () => {
+  writeOpenItems(root, { items: [item({ id: 'DOC-ONE' })] });
+  const inbox = readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8');
+  expect(inbox).toContain('DOC-ONE');
+  writeOpenItems(root, { items: [] });
+  expect(readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8')).toContain('Nothing to answer');
+});
+
+it('propagates inbox write failure while preserving the accepted queue', () => {
+  mkdirSync(join(root, 'docs/nightly-inbox.md'), { recursive: true });
+  expect(() => writeOpenItems(root, { items: [item({ id: 'DOC-ONE' })] })).toThrow();
+  expect(readOpenItems(root).items[0].id).toBe('DOC-ONE');
 });

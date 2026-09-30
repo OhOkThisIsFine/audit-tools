@@ -1,3 +1,6 @@
+// sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/functional-preflight.test.ts, tests/audit/host-handoff-unaccept-results.test.ts
+import { validateAuditArguments, auditArgumentNames, NEXT_STEP_ARGUMENTS, type AuditArgumentContract } from "./cli/argumentContract.js";
+import { requireFunctionalPreflight } from "./cli/functionalPreflight.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertCliCommandAllowedFromCwd } from "audit-tools/shared";
@@ -69,27 +72,27 @@ const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set();
  * never a second hand-maintained copy that drifts when a verb is added.
  */
 export const COMMAND_ROUTES: ReadonlyArray<
-  readonly [string, (argv: string[]) => Promise<void>]
+  readonly [string, (argv: string[]) => Promise<void>, AuditArgumentContract]
 > = [
-  ["sample-run", runSample],
-  ["next-step", cmdNextStep],
-  ["import-external-analyzer", cmdImportExternalAnalyzer],
-  ["intake", cmdIntake],
-  ["plan", cmdPlan],
-  ["ingest-results", cmdIngestResults],
-  ["explain-task", cmdExplainTask],
-  ["update-runtime-validation", cmdUpdateRuntimeValidation],
-  ["validate", cmdValidate],
-  ["validate-results", cmdValidateResults],
-  ["requeue", cmdRequeue],
-  ["synthesize", cmdSynthesize],
-  ["force-synthesis", cmdForceSynthesis],
-  ["resynthesize", cmdResynthesize],
-  ["cleanup", cmdCleanup],
-  ["status", cmdStatus],
-  ["score-audit", cmdScoreAudit],
-  ["recover-submission", cmdRecoverSubmission],
-  ["unaccept-results", cmdUnacceptResults],
+  ["sample-run", runSample, { switches: ["--force"] }],
+  ["next-step", cmdNextStep, NEXT_STEP_ARGUMENTS],
+  ["import-external-analyzer", cmdImportExternalAnalyzer, { values: ["--external-analyzer-results"] }],
+  ["intake", cmdIntake, {}],
+  ["plan", cmdPlan, { values: ["--since"] }],
+  ["ingest-results", cmdIngestResults, { values: ["--results", "--batch-results"], acceptsSemanticResults: true }],
+  ["explain-task", cmdExplainTask, { values: ["--task-id"], positionals: 1 }],
+  ["update-runtime-validation", cmdUpdateRuntimeValidation, { values: ["--updates"], acceptsSemanticResults: true }],
+  ["validate", cmdValidate, {}],
+  ["validate-results", cmdValidateResults, { values: ["--results"] }],
+  ["requeue", cmdRequeue, {}],
+  ["synthesize", cmdSynthesize, {}],
+  ["force-synthesis", cmdForceSynthesis, {}],
+  ["resynthesize", cmdResynthesize, { values: ["--input"] }],
+  ["cleanup", cmdCleanup, { switches: ["--force", "--dry-run"] }],
+  ["status", cmdStatus, {}],
+  ["score-audit", cmdScoreAudit, { values: ["--findings", "--labels", "--baseline", "--out"] }],
+  ["recover-submission", cmdRecoverSubmission, { values: ["--lane", "--submission-id", "--from"], acceptsSemanticResults: true }],
+  ["unaccept-results", cmdUnacceptResults, { values: ["--work-item", "--run-id"], switches: ["--all"] }],
 ];
 
 async function main(argv: string[]): Promise<void> {
@@ -97,6 +100,7 @@ async function main(argv: string[]): Promise<void> {
   const route = COMMAND_ROUTES.find(([verb]) => verb === command);
   if (argv.slice(2).some((arg) => arg === "--help" || arg === "-h")) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
+    if (route) console.log(`Options: ${auditArgumentNames(route[2]).join(", ")}`);
     console.log(
       `Available commands: ${COMMAND_ROUTES.map(([verb]) => verb).join(", ")}`,
     );
@@ -118,6 +122,8 @@ async function main(argv: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  validateAuditArguments(command, argv.slice(3), route[2]);
+  if (route[2].acceptsSemanticResults) await requireFunctionalPreflight(getRootDir(argv), getArtifactsDir(argv));
   await route[1](argv);
 }
 

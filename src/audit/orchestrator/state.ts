@@ -1,3 +1,4 @@
+import { resolveDesignReviewBinding } from "../../shared/types/intentCheckpoint.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -39,16 +40,7 @@ function staleOrSatisfied(
   return deps.some((dep) => staleArtifacts.has(dep)) ? "stale" : "satisfied";
 }
 
-/**
- * Satisfaction state of a design-review pass (B2 parity port). A pass that has
- * not completed is `missing`. A completed pass is `stale` when a snapshot exists
- * and the semantic projection of any structural input it reviewed has changed —
- * which triggers a *diff-based* re-review, not a blind full re-run — otherwise
- * `satisfied`. A completed pass with no snapshot stays `satisfied` (never
- * spuriously re-fires) — reachable only for a pass the CURRENT release completed
- * before snapshots existed for it, since the pre-split combined flag is
- * invalidated at load and never reaches here as `completed`.
- */
+/** A completed review needs a current snapshot proving which task it covered. */
 function designReviewPassState(
   bundle: ArtifactBundle,
   pass: DesignReviewPass,
@@ -56,7 +48,7 @@ function designReviewPassState(
 ): ObligationState {
   if (!completed) return "missing";
   const snapshot = bundle.design_review_snapshots?.[pass];
-  if (snapshot && isDesignReviewStale(snapshot, bundle)) return "stale";
+  if (!snapshot || isDesignReviewStale(snapshot, bundle)) return "stale";
   return "satisfied";
 }
 
@@ -248,13 +240,15 @@ export function deriveAuditState(
     intentCheckpointBase === "satisfied"
       ? unresolvedConstraintClauses(bundle.intent_checkpoint)
       : [];
+  const reviewBinding = resolveDesignReviewBinding(bundle.intent_checkpoint);
+  const needsReviewConfirmation = reviewBinding.kind === "unbound";
   obligations.push(
     obligation(
       "intent_checkpoint_current",
-      unresolvedClauses.length > 0 ? "missing" : intentCheckpointBase,
+      unresolvedClauses.length > 0 || needsReviewConfirmation ? "missing" : intentCheckpointBase,
       unresolvedClauses.length > 0
         ? `${unresolvedClauses.length} free_form_intent clause(s) could not be encoded as planning signals and need a host answer in constraint_clauses before planning proceeds.`
-        : undefined,
+        : needsReviewConfirmation ? `Confirm design-review choices again: ${reviewBinding.reason}` : undefined,
     ),
   );
 
@@ -264,7 +258,7 @@ export function deriveAuditState(
   // derives `stale` (changed-resolve arm), and structured/prose deltas derive
   // `missing` with the arm named so the drain's reason line says why.
   const equivalenceStatus =
-    intentCheckpointBase === "satisfied" && unresolvedClauses.length === 0
+    intentCheckpointBase === "satisfied" && unresolvedClauses.length === 0 && !needsReviewConfirmation
       ? deriveIntentEquivalenceStatus(bundle)
       : ({ kind: "satisfied" } as const);
   obligations.push(
