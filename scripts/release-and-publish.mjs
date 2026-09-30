@@ -1081,12 +1081,13 @@ function releaseExists(repoSlug, tag) {
  * the postinstall's observable effect, so a missing one re-runs the global
  * package's own postinstall explicitly and a still-missing one refuses.
  */
-/** @param {string} npm @param {string} packageName */
-async function finishGlobalInstall(npm, packageName) {
+/** @param {string} npm @param {string} packageName @param {string} version */
+async function finishGlobalInstall(npm, packageName, version) {
   const globalRoot = run(npm, ["root", "-g"], { capture: true }).stdout.trim();
+  const globalPrefix = run(npm, ["prefix", "-g"], { capture: true }).stdout.trim();
   // `--allow-scripts=<pkg>` is npm 12+'s per-package approval for the install
   // lifecycle scripts; older npm ignores the unknown config and runs them.
-  run(npm, ["install", "-g", `--allow-scripts=${packageName}`, packageName]);
+  run(npm, ["install", "-g", `--allow-scripts=${packageName}`, `${packageName}@${version}`]);
 
   const globalPackageRoot = join(globalRoot, packageName);
   const deployedCommands = ["audit-code", "remediate-code"].map((name) =>
@@ -1111,34 +1112,35 @@ async function finishGlobalInstall(npm, packageName) {
     );
   }
 
-  // sites-pinned: none — this phase runs only after a real publish, reinstall and registry
-  //   propagation; no unit test reaches it. Its proof is the release itself (0.51.11 hit EINVAL
-  //   here on 2026-09-16; the shim form below returned the installed version in a live probe).
-  // Both binaries, executed from the GLOBAL install — `--version` is the one
-  // command that proves the bin resolves and the package loads. MODULE_NOT_FOUND
-  // here means a dangling npm-link junction, not a bad release.
-  //
-  // Through `resolveSpawn`, like every other shim spawn in this script: on win32
-  // the global bin is a `.cmd` shim, and Node (≥ 20.12, 22, 26) refuses to spawn
-  // a `.cmd`/`.bat` without the shell — `spawnSync … EINVAL`. The 0.51.11 release
-  // (2026-09-16) published, propagated and reinstalled correctly and then failed
-  // HERE, on a form the script itself had already retired at its `npm view` site.
+  // sites-pinned: tests/audit/release-resume-main.test.ts
+  // Exercise the GLOBAL shims, not package entry paths. A silent no-op can exit
+  // zero, so require the exact release version and the CLI's own usage line.
+  // resolveSpawn preserves Windows .cmd support as well as POSIX symlink coverage.
   for (const bin of ["audit-code", "remediate-code"]) {
-    const resolved = resolveSpawn(commandName(bin), ["--version"]);
-    const result = spawnSync(resolved.command, resolved.args, {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    if (result.error || (result.status ?? 1) !== 0) {
-      throw new Error(
-        `\`${bin} --version\` failed after the global reinstall (` +
-          `${result.error?.message ?? `exit ${result.status}`}). MODULE_NOT_FOUND usually means a ` +
-          "dangling npm-link junction to a deleted worktree — clear it and reinstall.",
-      );
+    for (const flag of ["--version", "--help"]) {
+      const globalBin = join(globalPrefix, ...(process.platform === "win32" ? [] : ["bin"]), commandName(bin));
+      const resolved = resolveSpawn(globalBin, [flag]);
+      const result = spawnSync(resolved.command, resolved.args, {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      if (result.error || (result.status ?? 1) !== 0) {
+        throw new Error(
+          `\`${bin} ${flag}\` failed after the global reinstall (` +
+            `${result.error?.message ?? `exit ${result.status}`}). Check the installed shim and package.`,
+        );
+      }
+      const output = result.stdout.trim();
+      const valid = flag === "--version"
+        ? output === version
+        : new RegExp(`^Usage: .*\\b${bin}\\b`, "m").test(output);
+      if (!valid) {
+        throw new Error(`\`${bin} ${flag}\` returned unexpected output after the global reinstall: ${JSON.stringify(output)}`);
+      }
+      console.log(`[release] global smoke ok: ${bin} ${flag}${flag === "--version" ? ` ${output}` : ""}`);
     }
-    console.log(`[release] global smoke ok: ${bin} ${result.stdout.trim()}`);
   }
 }
 
@@ -1348,7 +1350,7 @@ export async function main() {
   recordReleasePhase(repoRoot, "await-npm-propagation", { version: packageAfter.version });
 
   // ── the finish: reinstall + host assets + both binary smokes ───────────────
-  await runPhase("reinstall+smoke", () => finishGlobalInstall(npm, packageAfter.name));
+  await runPhase("reinstall+smoke", () => finishGlobalInstall(npm, packageAfter.name, packageAfter.version));
   recordReleasePhase(repoRoot, "reinstall+smoke", { packageName: packageAfter.name });
 
   writeProfileLedger("release", phases, releaseMeta);

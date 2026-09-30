@@ -5,9 +5,8 @@
 // to dist/remediate/index.js.
 
 import { fileURLToPath } from "url";
-import { pathToFileURL } from "url";
 import { dirname, join } from "path";
-import { existsSync, readdirSync, statSync } from "fs";
+import { existsSync, readdirSync, statSync, realpathSync } from "fs";
 import { spawnSync } from "child_process";
 
 // The installer (B2) is imported LAZILY inside main() only when an install verb
@@ -190,7 +189,21 @@ export async function main(argv = process.argv.slice(2)) {
   applyWrapperExitAction(getWrapperExitAction(result));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+// sites-pinned: tests/remediate/remediate-code.test.ts
+// npm's POSIX bin is a symlink. Node resolves the module URL, but argv[1]
+// retains the bin path; compare filesystem identities while keeping imports inert.
+function invokedDirectly() {
+  try {
+    return process.argv[1] != null &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error &&
+        (error.code === "ENOENT" || error.code === "ENOTDIR")) return false;
+    throw error; // unexpected filesystem failures must not become a silent CLI success
+  }
+}
+
+if (invokedDirectly()) {
   main().catch((error) => {
     console.error(error?.stack ?? String(error));
     process.exit(1);
