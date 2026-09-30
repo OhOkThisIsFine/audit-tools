@@ -183,12 +183,16 @@ describe("the fan-out lane carries the same demand ranking", () => {
         {
           id: "tiny",
           label: "Tiny lane",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "tiny-prompt.md",
           promptText: "# tiny\n",
         },
         {
           id: "huge",
           label: "Huge lane",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "huge-prompt.md",
           promptText: "x".repeat(200_000),
         },
@@ -197,6 +201,8 @@ describe("the fan-out lane carries the same demand ranking", () => {
           // as emitted as any other — a worker still has to be sized for it.
           id: "unexpected",
           label: "Host-side intermediate",
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: "unexpected-prompt.md",
           promptText: "y".repeat(50_000),
           expected: false,

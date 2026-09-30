@@ -1,3 +1,5 @@
+import type { JudgeRepairTarget } from "../../shared/types/contractPipeline/obligations.js";
+import type { ReviewRequirement } from "../../shared/types/reviewIndependence.js";
 // sites-pinned: tests/remediate/contract-pipeline-prompts.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-validation-gates.test.ts
 /**
  * Bounded prompt renderers for each of the contract-pipeline roles.
@@ -13,6 +15,7 @@ import {
   CONTRACT_REPAIR_TARGETS_OFFERED,
   CONTEXT_ENTRY_KINDS,
   COUNTEREXAMPLE_CLASSIFICATIONS,
+  CONCEPTUAL_CRITIQUE_REPAIR_TARGETS,
   CRITIQUE_ITEM_KINDS,
   CRITIQUE_ITEM_SEVERITIES,
   CRITIQUE_VERDICTS,
@@ -72,7 +75,7 @@ interface ContractPipelineRole {
    */
   pathASeed?: string;
   /** Whether this phase requires independent review (not the author). Defaults to false. */
-  isIndependentCritic?: boolean;
+  reviewPolicy?: { full: ReviewRequirement; light: ReviewRequirement };
 }
 
 /**
@@ -256,14 +259,15 @@ export const ROLES: Record<string, ContractPipelineRole> = {
   "contract_version": "remediate-code-contract-pipeline/conceptual-design-critique/v1alpha1",
   "goal_id": "<from goal_spec>",
   "items": [{ "id": "<id>", "kind": "${sketchValues(CRITIQUE_ITEM_KINDS)}", "description": "...", "severity": "${sketchValues(CRITIQUE_ITEM_SEVERITIES)}" }],
+  "repair_target": "${sketchValues(CONCEPTUAL_CRITIQUE_REPAIR_TARGETS)}",
   "verdict": "${sketchValues(CRITIQUE_VERDICTS)}"
 }`,
     description:
-      "Critique the finalized module contracts: philosophy, alternatives, direction.",
+      "Critique the finalized module contracts and their owning module decomposition: philosophy, alternatives, direction, and declared file scope.",
     fieldRules: [
-      "Mark an item `blocking` only when the finalized contracts must change and can express the change. Mark every other item `advisory`.",
+      "For blocking interface changes, set `repair_target` to `finalized_module_contracts`. For module ownership, module-set, or `file_scope` changes, select the owning `module_decomposition` artifact; never invent these fields in finalized interfaces. Mark genuinely optional concerns `advisory`.",
     ],
-    isIndependentCritic: true,
+    reviewPolicy: { full: "independent", light: "degraded_allowed" },
   },
   test_validator_plan: {
     title: "Test and Validator Plan",
@@ -319,7 +323,7 @@ export const ROLES: Record<string, ContractPipelineRole> = {
 }`,
     description:
       "Adversarially attack the design: produce concrete counterexamples that falsify design invariants, obligations, or assessment claims. Each counterexample must name the claim it falsifies, concrete reproduction steps, and the obligation(s) it violates. Search hard for inputs, orderings, and edge states the design mishandles; an empty counterexamples array is only acceptable when you genuinely cannot falsify anything.",
-    isIndependentCritic: true,
+    reviewPolicy: { full: "independent", light: "degraded_allowed" },
   },
   judge: {
     title: "Adversarial Judge",
@@ -342,9 +346,9 @@ export const ROLES: Record<string, ContractPipelineRole> = {
       "Judge every counterexample from the critic: `accepted` (a real flaw the contract must address), `out_of_scope` (outside the goal spec), `duplicate`, `invalid` (does not falsify the claim), or `residual_risk` (real but tolerable; recorded, not repaired). The verdict is `approved` only when no accepted counterexample needs a contract repair; then omit `repair_directive`. Otherwise the verdict is `needs_repair`, and `repair_directive` names the one artifact whose rewrite addresses the accepted counterexamples.",
     fieldRules: [
       `\`repair_directive.target\` is one of ${CONTRACT_REPAIR_TARGETS_OFFERED.map((t) => `\`${t}\``).join(", ")}.`,
-      "A repair must be expressible in the target's own schema. For `finalized_module_contracts`, that is the seven interface fields, prose `seam_adjustments`, and implementation order only as `artifact:<name>` tokens in `inputs` and `outputs`, with the module set kept. A counterexample whose remedy needs anything else (a new schema field, a new module, structured per-block data) is `residual_risk`, not `accepted`.",
+      "A repair must be expressible in the target's own schema. For `finalized_module_contracts`, that is the seven interface fields, prose `seam_adjustments`, and implementation order only as `artifact:<name>` tokens in `inputs` and `outputs`, with the module set kept. For module ownership, a new module, or `file_scope`, target `module_decomposition`; downstream contracts and obligations are re-derived by the tool. Never invent unsupported schema fields or classify an otherwise blocking defect as tolerated merely because its fix belongs upstream.",
     ],
-    isIndependentCritic: true,
+    reviewPolicy: { full: "independent", light: "independent" },
   },
   implementation_planning: {
     title: "Implementation Planning (DAG)",
@@ -384,6 +388,8 @@ export interface ContractPipelineRenderInput {
   role: string;
   /** Resolved file paths for all contract-pipeline artifacts. */
   artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
+  /** Tool-owned canonical read paths; outputs remain host submission paths. */
+  artifactReadPaths?: Partial<Record<ContractPipelineArtifactName, string>>;
   /** Sources available to the worker (remediation brief, conversation, etc.). */
   sourcePaths?: string[];
   /** Repository root path — passed to workers for cwd anchoring. */
@@ -405,7 +411,7 @@ export interface ContractPipelineRenderInput {
 
 /**
  * Phases whose value is adversarial independence — the reviewer must NOT be the
- * author of the design under review. Derived from ROLES' isIndependentCritic flag
+ * author of the design under review. Declared in ROLES' explicit reviewPolicy
  * so the set is always in sync with the phase definitions and never hand-maintained.
  *
  * Currently includes 'critique' (conceptual design critique), 'critic' (counterexample search), and
@@ -414,28 +420,21 @@ export interface ContractPipelineRenderInput {
  * adjudication is only worth anything from an independent reviewer; memory:
  * delegate the judge too). The 'assessment' phase is the author's OWN coverage
  * self-assessment (not an adversarial review of someone else's work), so it is
- * intentionally excluded (isIndependentCritic is not set).
+ * intentionally excluded (no review policy).
  */
-function getIndependentCriticPhases(): Set<string> {
-  const phases = new Set<string>();
-  for (const [roleName, role] of Object.entries(ROLES)) {
-    if (role.isIndependentCritic) {
-      phases.add(roleName);
-    }
-  }
-  return phases;
+export function reviewRequirementForRole(role: string, depth?: AdversarialDepth): ReviewRequirement {
+  const policy = ROLES[role]?.reviewPolicy;
+  return policy ? policy[depth === "light" ? "light" : "full"] : "ordinary";
 }
-
-const INDEPENDENT_CRITIC_PHASES = getIndependentCriticPhases();
 
 /**
  * Render the independent-review directive for an adversarial review phase.
  *
  * Depth-gated (T1 slice 3): when `adversarialDepth` is `light` (a low-risk run),
  * the phase runs as a lightweight inline self-check — the floor, never skipped.
- * Otherwise (`full`, the fail-safe default) it requires an INDEPENDENT CONTEXT
- * (no shared authorship), degrading to an explicit inline-self-review
- * instruction the host can honestly take. Empty for any non-adversarial phase.
+ * Full review and the final judge require an INDEPENDENT CONTEXT. Only the
+ * explicit light critique/critic policy permits declared self-review. Empty
+ * for any non-adversarial phase.
  *
  * The mandate text itself is single-sourced in `audit-tools/shared`
  * (`renderIndependentReviewMandate`) and states the NEED, not a mechanism —
@@ -445,7 +444,8 @@ function renderIndependentCriticDirective(
   role: string,
   adversarialDepth: AdversarialDepth | undefined,
 ): string {
-  if (!INDEPENDENT_CRITIC_PHASES.has(role)) return "";
+  const requirement = reviewRequirementForRole(role, adversarialDepth);
+  if (requirement === "ordinary") return "";
   // LANE-CLASS-conditional, never capability-conditional (design resolution 2,
   // gate-resolved 2026-08-05): the shared mandate text carries both the
   // independent-context requirement and the explicitly-degraded fallback in one
@@ -453,6 +453,7 @@ function renderIndependentCriticDirective(
   // keeps its proportionate inline self-check.
   return renderIndependentReviewMandate(
     adversarialDepth === "light" ? "light" : "full",
+    requirement,
   );
 }
 
@@ -544,8 +545,9 @@ export function renderContractPipelinePrompt(
   }
 
   const inputSections = requiredInputKeys.map((key) => {
-    const path = input.artifactPaths[key]!;
-    return `- \`${path}\` (${key})`;
+    const canonical = input.artifactReadPaths?.[key];
+    const path = canonical ?? input.artifactPaths[key]!;
+    return `- \`${path}\` (${key}${input.artifactReadPaths ? canonical ? "; canonical envelope: read payload" : "; staged raw domain artifact" : ""})`;
   });
 
   const sourceSections =
@@ -573,6 +575,7 @@ ${role.description}
 ${renderCwdNote(input.repoRoot)}${independentCriticDirective}
 ## Required Inputs
 ${inputSections.length > 0 ? inputSections.join("\n") : "_No artifact inputs required for this role._"}
+${input.artifactReadPaths ? "For inputs marked canonical, read the `payload` field as domain data; review provenance is metadata. Inputs marked staged are raw artifacts authored earlier in this same round trip. Do not edit canonical files." : ""}
 ${sourceSections}${pathASeedSection}
 ## What You May Read
 
@@ -644,11 +647,13 @@ export interface ContractRepairRenderInput {
   /** Which gate ordered the repair — selects the framing and the input set. */
   trigger: ContractRepairTrigger;
   /** The contract artifact the gate ordered regenerated. */
-  target: "finalized_module_contracts" | "obligation_ledger" | "contract_assessment_report";
+  target: Exclude<JudgeRepairTarget, "design_spec">;
   /** The gate's bounded regeneration instruction. */
   instruction: string;
   /** Resolved file paths for all contract-pipeline artifacts. */
   artifactPaths: Partial<Record<ContractPipelineArtifactName, string>>;
+  /** Tool-owned canonical read paths; outputs remain host submission paths. */
+  artifactReadPaths?: Partial<Record<ContractPipelineArtifactName, string>>;
   /** Repository root path — passed to workers for cwd anchoring. */
   repoRoot?: string;
 }
@@ -690,7 +695,7 @@ const REPAIR_TRIGGER_CONTRACT: Record<
 > = {
   judge: {
     lead: (target) =>
-      `The adversarial judge rejected the current contract. Rewrite \`${target}\` in full so that it addresses every accepted counterexample.`,
+      `The adversarial judge rejected the current contract. Make targeted edits to \`${target}\` so that it addresses every accepted counterexample.`,
     instructionHeading: "Judge Instruction",
     requiredInputs: [
       "goal_spec",
@@ -704,7 +709,7 @@ const REPAIR_TRIGGER_CONTRACT: Record<
   },
   critique: {
     lead: (target) =>
-      `The conceptual design critique raised blocking concerns. Rewrite \`${target}\` in full so that no blocking concern still applies.`,
+      `The conceptual design critique raised blocking concerns. Make targeted edits to \`${target}\` so that no blocking concern still applies.`,
     instructionHeading: "Blocking Concerns",
     // The critique gate runs BEFORE any downstream artifact is derived, so the
     // judge-side artifacts do not exist yet. Listing them is what sent workers
@@ -725,14 +730,15 @@ const REPAIR_TRIGGER_CONTRACT: Record<
  * set of rules from one place.
  */
 const REPAIR_TARGET_ROLE: Record<ContractRepairRenderInput["target"], ContractPipelineRole> = {
+  module_decomposition: ROLES.decomposition,
   finalized_module_contracts: ROLES.contract_finalization,
   obligation_ledger: ROLES.obligation_ledger,
   contract_assessment_report: ROLES.assessment,
 };
 
 /**
- * Render the bounded repair step for a failing gate: rewrite the named contract
- * artifact in full, addressing the gate's instruction. The worker edits only the
+ * Render the bounded repair step for a failing gate: targeted edits to the named
+ * artifact, serialized as complete JSON. The worker edits only the
  * target; the pipeline brings every later artifact back on its own.
  */
 export function renderContractRepairPrompt(
@@ -745,7 +751,9 @@ export function renderContractRepairPrompt(
     );
   }
   const contract = REPAIR_TRIGGER_CONTRACT[input.trigger];
-  const requiredInputs = contract.requiredInputs;
+  const requiredInputs = input.target === "module_decomposition"
+    ? [...new Set([...contract.requiredInputs, "context_bundle", "module_decomposition"] as const)]
+    : contract.requiredInputs;
   for (const key of requiredInputs) {
     if (!input.artifactPaths[key]) {
       throw new Error(
@@ -765,11 +773,12 @@ ${input.instruction}
 
 ## Required Inputs
 
-${requiredInputs.map((key) => `- \`${input.artifactPaths[key]}\` (${key})`).join("\n")}
+${requiredInputs.map((key) => `- \`${(input.artifactReadPaths ?? input.artifactPaths)[key]}\` (${key})`).join("\n")}
+${input.artifactReadPaths ? "Read the `payload` field of each canonical input envelope as its domain artifact; do not edit the canonical files." : ""}
 
 ## Your Task
 
-Read the inputs above. Attend to ${contract.readingNote}. Write the complete artifact, not a diff, to exactly:
+Read the inputs above. Attend to ${contract.readingNote}. Apply targeted edits; preserve the canonical goal identity and every untouched module/obligation identity. Do not regenerate or collapse the existing module set when repairing finalized interfaces. Serialize the complete updated JSON, not a diff, to exactly:
 
 \`${outputPath}\`
 

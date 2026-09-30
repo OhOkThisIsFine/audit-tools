@@ -63,6 +63,9 @@ a bad thing to discover at 3am. So autonomy narrows as blast radius widens.
 
 The rubric is [`doc-review-guidelines.md`](doc-review-guidelines.md). Its scope
 ledger is implemented in [`scripts/nightly/scope-ledger.mjs`](../scripts/nightly/scope-ledger.mjs):
+its plan and stamp paths prune retired or deleted document ownership against the
+canonical in-scope manifest, without recording a new examination. Renamed docs
+are reviewed cold rather than inheriting obsolete path ownership.
 `plan` enumerates the in-scope corpus through the doc manifest and reports each
 item's evidence window, `stamp <doc>` records a doc as examined at HEAD, and the
 run writes `leg1-<date>-coverage.json` beside leg 2's stamp. **Coverage is read
@@ -104,15 +107,24 @@ the real provider LiteLLM routed to, so each record names the tier (`litellm/med
 which endpoint answered it. It preflights once (opening the agent-dispatch bridge or its
 first call can fail — a missing checkout, an old Node, an unreachable worker — and the
 sweep aborts before entry 0 with that failure's own message, an aborted coverage stamp,
-and no attempt made), retries a call that died in
-transport once within the same invocation (so a partial sweep is the lane's
-verdict, not a hand-run's to recover), and writes `<out>-coverage.json`
+and no attempt made), and retries transport failures or completed malformed
+replies once within the same invocation. Both causes share one retry budget;
+timeouts and valid negative verdicts never retry. It writes `<out>-coverage.json`
 — model, attempted, classified, errored, aborted, retried, a per-lane count, and
 one count per premise class (`holds`, `partial`, `premise_unconfirmed`,
 `probes_unusable`, `unprobed`) — beside the JSONL as it runs. Report leg-2 coverage from that
 stamp; a missing or aborted stamp means the sweep did NOT cover the backlog,
 and saying so is the honest sentence three partial runs had to reconstruct by
 hand (P11, sol-4 decision 2026-08-06; transport retry 2026-08-22).
+
+The five premise-class counters include retained, re-normalized records for the
+current input IDs plus newly classified records, counted once each. Their sum is
+`classified_total`; lane totals count that same population where lane provenance is available.
+`attempted`, `classified`, `errored`, and `retried` describe only this invocation.
+A zero-new-item resume still reports the complete classified
+population. Historical IDs remain in the output but do not inflate current
+coverage. Rejected records do not contribute to premise totals; failed revival
+preserves the accepted output and refuses completion rather than silently dropping it.
 
 ### Leg 3 — recurring-problem solutions
 
@@ -236,9 +248,9 @@ The routine runs as a local scheduled task on the owner's box
   HEAD is the tree the docs actually describe.
 
 **Clean-tree rule.** Review against HEAD. If the working tree is dirty, the run
-still reviews and still reports, but applies **nothing** and says so in the
-inbox's *What the last run could NOT cover* block — reviewing a dirty tree is fine, writing to one
-is how you lose the owner's uncommitted work.
+still reviews and reports, but applies **no review-derived document edits** and
+says so in the inbox's *What the last run could NOT cover* block. Routine-owned
+generated outputs still update, as distinguished below.
 
 The rule blocks one class and not the other, and both are named here so no run has
 to judge it (2026-08-22: a run had to decide for itself that emitting its own
@@ -247,8 +259,7 @@ queue is not an "apply", which is the host-discretion shape this repo bans):
 - **BLOCKED — the review's own derived edits.** Anything a leg proposes to change
   *because of what it found*: a stale-factual doc fix, a backlog entry deletion or
   status-strip, an instruction-file edit. These are the writes that would land on
-  top of the owner's uncommitted work, and they are what "applies **nothing**"
-  means.
+  top of the owner's uncommitted work, and they are the edits the clean-tree rule blocks.
 - **ALWAYS WRITTEN — the routine's own generated output.** The run still writes
   everything it generates about *itself*, dirty tree or not, because these files
   are reports of the run rather than edits derived from the review, and because
@@ -260,14 +271,18 @@ queue is not an "apply", which is the host-discretion shape this repo bans):
   `docs/HANDOFF.md` block silently stale and redden a gate the dirty tree did not
   cause.
 
+A queue write remains successful if HANDOFF regeneration fails; the writer reports
+the failure immediately so the stale projection can be repaired without losing the queue.
+
 A leg that could not run still goes in the *skipped* list; "the tree was dirty" is
 never a reason to leave the queue unwritten.
 
 ## Machine output contract
 
-Write `.audit-tools/nightly/open-items.json` through `writeOpenItems()`; it is
-the machine contract behind the inbox and the SessionStart notice. Each candidate item has this
-shape:
+Write `.audit-tools/nightly/open-items.json` through `writeOpenItems()`; the call
+also renders the answering inbox as its last step. Inbox-write errors propagate
+after the durable queue is saved. The queue is the machine contract behind the
+inbox and the SessionStart notice. Each candidate item has this shape:
 
 ```text
 { id, leg (docs|backlog|solutions), subject_key, path, title, eli5, question,

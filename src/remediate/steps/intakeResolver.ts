@@ -1,8 +1,9 @@
+import { requestedFindingSelection, selectAuditFindings, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 
 // sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import { hashContent, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import { isAuditFindingsReport } from "../phases/plan.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { InputResolution, RemediationStep } from "./types.js";
@@ -64,6 +65,7 @@ export async function resolveIntakeStep(params: {
   root: string;
   artifactsDir: string;
   input?: string | string[];
+  findingSelection?: FindingSelectionOptions;
   inputResolution: InputResolution;
   loaderCommand: (cmd: string) => string;
   randomRunId: (prefix?: string) => string;
@@ -85,6 +87,7 @@ export async function resolveIntakeStep(params: {
 }): Promise<IntakeResult> {
   const { root, artifactsDir, inputResolution } = params;
   const paths = intakePaths(artifactsDir);
+  const requestedSelection = requestedFindingSelection(params.findingSelection ?? {});
 
   // MNT-e6c289ae: every "collect_starting_point" branch emits the identical
   // blocked step (same stepKind/allowedCommands/artifactPaths and prompt source),
@@ -280,7 +283,7 @@ export async function resolveIntakeStep(params: {
     const shouldTryAuditFastPath =
       inputResolution.existing.length === 1 &&
       singleInput.toLowerCase().endsWith(".json") &&
-      !intake.conversationStart;
+      (!intake.conversationStart || requestedSelection !== undefined || previousManifest?.finding_selection !== undefined);
 
     if (shouldTryAuditFastPath) {
       const content = await readFile(singleInput, "utf8");
@@ -323,18 +326,12 @@ export async function resolveIntakeStep(params: {
       manifest = nextManifest;
     }
 
-    await writeJsonFile(paths.sourceManifest, manifest);
-    if (!sourceManifestsEquivalent(previousManifest, manifest)) {
-      manifestRefreshed = true;
-    }
+    // Persist after the optional selection has been validated below.
   }
 
   if (!manifest && intake.conversationStart) {
     manifest = buildConversationSourceManifest(paths.conversationStart);
-    await writeJsonFile(paths.sourceManifest, manifest);
-    if (!sourceManifestsEquivalent(previousManifest, manifest)) {
-      manifestRefreshed = true;
-    }
+    // Persist after the optional selection has been validated below.
   }
 
   if (!manifest) {
@@ -342,6 +339,36 @@ export async function resolveIntakeStep(params: {
       [],
       "Stop after collecting a remediation starting point and rerunning next-step.",
     );
+  }
+
+  const sameSources = previousManifest?.sources.length === manifest.sources.length &&
+    previousManifest.sources.every((source, index) => source.path === manifest!.sources[index]?.path && source.type === manifest!.sources[index]?.type);
+  const criteria = requestedSelection ?? (sameSources ? previousManifest?.finding_selection?.criteria : undefined);
+  if (criteria) {
+    const audits = manifest.sources.filter((source) => source.type === "structured_audit");
+    if (audits.length !== 1 || manifest.sources.some((source) => source.type === "document")) {
+      throw new Error("Finding selection requires one structured audit report supplied with --input.");
+    }
+    const source = audits[0]!;
+    const content = await readFile(source.path, "utf8");
+    const selected = selectAuditFindings(JSON.parse(content), criteria);
+    const projectedPath = join(paths.dir, "selected-audit-findings.json");
+    manifest = { ...manifest, finding_selection: {
+      criteria, source_path: source.path, source_hash: hashContent(content),
+      projected_path: projectedPath, selected_count: selected.findings.length,
+    } };
+    await writeJsonFile(projectedPath, selected);
+  }
+  await writeJsonFile(paths.sourceManifest, manifest);
+  manifestRefreshed = !sourceManifestsEquivalent(previousManifest, manifest);
+  if (manifest.finding_selection?.selected_count === 0) {
+    return { kind: "step", step: await writeCurrentStep({
+      stepKind: "zero_documentable_findings", status: "complete",
+      runId: params.randomRunId("EMPTY"), repoRoot: root, artifactsDir,
+      prompt: "No findings match the selected severities or finding IDs. No remediation work was started.",
+      allowedCommands: [], stopCondition: "No work remains in the selected finding subset.",
+      artifactPaths: { selected_audit_findings: manifest.finding_selection.projected_path },
+    }) };
   }
 
   const sourceResolution = resolveManifestSources(root, manifest);
@@ -435,7 +462,7 @@ export async function resolveIntakeStep(params: {
         sourceResolution.resolved,
         paths,
         Boolean(clarificationResolution),
-      )}${reason ? `\n**Rewrite required.** ${reason}\n` : ""}`,
+      )}${renderFindingSelection(manifest.finding_selection)}${reason ? `\n**Rewrite required.** ${reason}\n` : ""}`,
       allowedCommands: [params.loaderCommand("next-step")],
       stopCondition: reason
         ? "Stop after rewriting the intake summary, then rerunning next-step."

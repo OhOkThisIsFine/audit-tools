@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/pre-commit-gate-derived-legs.test.ts, tests/shared/pre-commit-gate-branch-strand.test.ts, tests/shared/pre-commit-gate-child-session.test.ts
 // The commit gate at GIT'S OWN BOUNDARY: block a commit until `npm run check`
 // is green on the staged snapshot and every structural refusal below is
 // satisfied. Run by git through the tracked `.githooks/pre-commit`,
@@ -244,6 +245,18 @@ function bindStagedTreeSha() {
   return boundStagedTreeSha;
 }
 
+/** Load a tree-bound record; callers retain their distinct approval policies. */
+function readAttestation(directory, sha) {
+  const path = join(root, '.claude', directory, sha + '.json');
+  if (!existsSync(path)) return { kind: 'missing', record: null };
+  try {
+    const record = JSON.parse(readFileSync(path, 'utf8'));
+    return { kind: record?.staged_tree === sha ? 'bound' : 'stale', record };
+  } catch {
+    return { kind: 'corrupt', record: null };
+  }
+}
+
 function computeStagedTreeSha() {
   const wt = git(['write-tree']);
   return wt.ok ? wt.stdout.trim() : null;
@@ -483,145 +496,152 @@ function runGate(committedPaths) {
   // second one: a record bound to the exact staged tree, naming who issued it and
   // what the owner decided. FAIL-CLOSED on a missing/stale/incomplete record;
   // FAIL-OPEN only on a genuine git write-tree fault.
-  const constitutionalStaged = attestationPaths.filter(isConstitutionalDocPath);
-  if (constitutionalStaged.length > 0) {
-    const sha = bindStagedTreeSha();
-    const overrideHint =
-      `node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> ` +
-      `--attester-class <agent|human> --owner-decision "<the owner's call, and where it was escalated>"`;
-    if (!sha) {
-      noteFailOpen(
-        'cannot bind the staged tree (`git write-tree` failed) — the CONSTITUTIONAL-DOC refusal was SKIPPED ' +
-          `for ${constitutionalStaged.length} normative doc(s). This commit carries NO override record.`,
-      );
-    } else {
-      const overridePath = join(root, '.claude', 'constitutional-doc-review', sha + '.json');
-      const blockMessage = (why, extra = '') => ({
-        blocked: true,
-        message:
-          `commit gate: commit blocked — it rewrites CONSTITUTIONAL doc(s), and ${why}.\n` +
-          constitutionalStaged.map((p) => `  - ${p}`).join('\n') +
-          `\nThese state what this project IS; the doc-review manifest routes every one of them as ` +
-          `escalate-only ("never silently rewritten to match code"). Editing one to match current code ` +
-          `destroys the thing the code is measured against — which is exactly what commit 6fc2e453 did to ` +
-          `spec/remediate/remediation-goals.md inside a routine doc-review sweep.\n` +
-          `If the owner has decided this change, record that decision and retry:\n  ${overrideHint}\n` +
-          `Otherwise: unstage the constitutional doc(s), ship the rest, and escalate the change.` +
-          extra,
-      });
-      if (!existsSync(overridePath)) {
-        return blockMessage(
-          'no owner-decision override record exists for the staged tree',
-          `\n(The override binds to the exact staged tree ${sha.slice(0, 12)} — restaging invalidates it.)`,
+  // Both policies judge one bound staged tree; report all refusals together.
+  const constitutionalVerdict = (() => {
+    const constitutionalStaged = attestationPaths.filter(isConstitutionalDocPath);
+    if (constitutionalStaged.length > 0) {
+      const sha = bindStagedTreeSha();
+      const overrideHint =
+        `node scripts/attest-constitutional-doc-change.mjs --reviewed-by <id> ` +
+        `--attester-class <agent|human> --owner-decision "<the owner's call, and where it was escalated>"`;
+      if (!sha) {
+        noteFailOpen(
+          'cannot bind the staged tree (`git write-tree` failed) — the CONSTITUTIONAL-DOC refusal was SKIPPED ' +
+            `for ${constitutionalStaged.length} normative doc(s). This commit carries NO override record.`,
         );
-      }
-      let override;
-      try {
-        override = JSON.parse(readFileSync(overridePath, 'utf8'));
-      } catch {
-        return blockMessage(
-          `the override record at .claude/constitutional-doc-review/${sha}.json is unreadable/corrupt`,
+      } else {
+        const loaded = readAttestation('constitutional-doc-review', sha);
+        const blockMessage = (why, extra = '') => ({
+          blocked: true,
+          message:
+            `commit gate: commit blocked — it rewrites CONSTITUTIONAL doc(s), and ${why}.\n` +
+            constitutionalStaged.map((p) => `  - ${p}`).join('\n') +
+            `\nThese state what this project IS; the doc-review manifest routes every one of them as ` +
+            `escalate-only ("never silently rewritten to match code"). Editing one to match current code ` +
+            `destroys the thing the code is measured against — which is exactly what commit 6fc2e453 did to ` +
+            `spec/remediate/remediation-goals.md inside a routine doc-review sweep.\n` +
+            `If the owner has decided this change, record that decision and retry:\n  ${overrideHint}\n` +
+            `Otherwise: unstage the constitutional doc(s), ship the rest, and escalate the change.` +
+            extra,
+        });
+        if (loaded.kind === 'missing') {
+          return blockMessage(
+            'no owner-decision override record exists for the staged tree',
+            `\n(The override binds to the exact staged tree ${sha.slice(0, 12)} — restaging invalidates it.)`,
+          );
+        }
+        if (loaded.kind === 'corrupt') {
+          return blockMessage(
+            `the override record at .claude/constitutional-doc-review/${sha}.json is unreadable/corrupt`,
+          );
+        }
+        const override = loaded.record;
+        if (override?.staged_tree !== sha) {
+          return blockMessage(
+            `the override record is STALE (binds tree ${String(override?.staged_tree).slice(0, 12)}, staged ` +
+              `tree is ${sha.slice(0, 12)})`,
+          );
+        }
+        if (typeof override.owner_decision !== 'string' || override.owner_decision.trim() === '') {
+          return blockMessage('the override record names no owner decision');
+        }
+        // A record written before this commit grew a NEW constitutional path can
+        // only exist if the tree hash matched — which it cannot, since staging a
+        // file changes the tree. Assert coverage anyway: the record is the audit
+        // trail, and a path it does not name is a path nobody signed off on.
+        const uncovered = constitutionalStaged.filter(
+          (p) => !(override.constitutional_files ?? []).includes(p),
         );
-      }
-      if (override?.staged_tree !== sha) {
-        return blockMessage(
-          `the override record is STALE (binds tree ${String(override?.staged_tree).slice(0, 12)}, staged ` +
-            `tree is ${sha.slice(0, 12)})`,
-        );
-      }
-      if (typeof override.owner_decision !== 'string' || override.owner_decision.trim() === '') {
-        return blockMessage('the override record names no owner decision');
-      }
-      // A record written before this commit grew a NEW constitutional path can
-      // only exist if the tree hash matched — which it cannot, since staging a
-      // file changes the tree. Assert coverage anyway: the record is the audit
-      // trail, and a path it does not name is a path nobody signed off on.
-      const uncovered = constitutionalStaged.filter(
-        (p) => !(override.constitutional_files ?? []).includes(p),
-      );
-      if (uncovered.length > 0) {
-        return blockMessage(
-          `the override record does not cover ${uncovered.join(', ')}`,
-        );
+        if (uncovered.length > 0) {
+          return blockMessage(
+            `the override record does not cover ${uncovered.join(', ')}`,
+          );
+        }
       }
     }
-  }
 
-  // 3. Loop-core adversarial-review attestation — only when the STAGED set
-  // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
-  // staged-tree-hash-bound review attestation. This enforces attestation
-  // existence + freshness + binding MECHANICALLY; review QUALITY is carried by
-  // an attributable, tree-bound audit record — the attestation records the
-  // attester's CLASS (agent or human) and the reviewing identities, it cannot
-  // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
-  // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
-  // write-tree fault.
-  if (attestationPaths.some(isLoopCorePath)) {
-    const loopCoreStaged = attestationPaths.filter(isLoopCorePath);
-    const sha = bindStagedTreeSha();
-    if (!sha) {
-      noteFailOpen(
-        'cannot bind the staged tree (`git write-tree` failed) — the LOOP-CORE ATTESTATION check was SKIPPED ' +
-          `for ${loopCoreStaged.length} loop-core path(s). This commit is NOT attested.`,
-      );
-      return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+    return { blocked: false };
+  })();
+  const loopCoreVerdict = (() => {
+    // 3. Loop-core adversarial-review attestation — only when the STAGED set
+    // touches a loop-core path. Hand-authored loop-core edits must carry a FRESH,
+    // staged-tree-hash-bound review attestation. This enforces attestation
+    // existence + freshness + binding MECHANICALLY; review QUALITY is carried by
+    // an attributable, tree-bound audit record — the attestation records the
+    // attester's CLASS (agent or human) and the reviewing identities, it cannot
+    // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
+    // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
+    // write-tree fault.
+    if (attestationPaths.some(isLoopCorePath)) {
+      const loopCoreStaged = attestationPaths.filter(isLoopCorePath);
+      const sha = bindStagedTreeSha();
+      if (!sha) {
+        noteFailOpen(
+          'cannot bind the staged tree (`git write-tree` failed) — the LOOP-CORE ATTESTATION check was SKIPPED ' +
+            `for ${loopCoreStaged.length} loop-core path(s). This commit is NOT attested.`,
+        );
+        return { blocked: false }; // can't bind → don't wedge (infra fail-open)
+      }
+      const loaded = readAttestation('loop-core-review', sha);
+      const runHint =
+        `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> ` +
+        `--attester-class <agent|human> --checked "<what was adversarially checked>"`;
+      if (loaded.kind === 'missing') {
+        return {
+          blocked: true,
+          message:
+            `commit gate: loop-core commit blocked — no adversarial-review attestation for the staged tree.\n` +
+            `The staged set touches loop-core (dispatch/quota/rolling/orchestrator substrate):\n` +
+            loopCoreStaged.map((p) => `  - ${p}`).join('\n') +
+            `\nHand-authored loop-core edits require a FRESH, staged-tree-bound review. Run:\n  ${runHint}\n` +
+            `then retry the commit (the attestation binds to the exact staged tree ${sha.slice(0, 12)}).`,
+        };
+      }
+      if (loaded.kind === 'corrupt') {
+        return {
+          blocked: true,
+          message: `commit gate: loop-core commit blocked — the review attestation at ` +
+            `.claude/loop-core-review/${sha}.json is unreadable/corrupt. Re-run:\n  ${runHint}`,
+        };
+      }
+      const attest = loaded.record;
+      if (attest?.staged_tree !== sha) {
+        return {
+          blocked: true,
+          message:
+            `commit gate: loop-core commit blocked — the review attestation is STALE (binds tree ` +
+            `${String(attest?.staged_tree).slice(0, 12)}, staged tree is ${sha.slice(0, 12)}). ` +
+            `Re-review the current staged snapshot:\n  ${runHint}`,
+        };
+      }
+      // Destination-keyed strictness: the gate protects what can LAND on main,
+      // not the act of committing. A `concerns` verdict without an override blocks
+      // only when the commit can reach main (current branch IS main) — preserving
+      // review-blocked WIP on a side branch is the wanted path and must not force
+      // an override, or the override trains into a reflex and stops signalling.
+      // `block` always blocks; an unreadable branch state stays strict (fail-closed).
+      let concernsBlocks = attest.verdict === 'concerns' && !attest.override;
+      if (concernsBlocks) {
+        const br = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+        if (br.ok && br.stdout.trim() !== 'main') concernsBlocks = false;
+      }
+      if (attest.verdict === 'block' || concernsBlocks) {
+        return {
+          blocked: true,
+          message:
+            `commit gate: loop-core commit blocked — the review recorded verdict "${attest.verdict}"` +
+            (attest.checked ? ` (checked: ${attest.checked})` : '') +
+            `. Resolve the concerns and re-attest, or re-run with --override "<reason>" if intentional ` +
+            `(a \`concerns\` attestation is accepted without an override on a non-main branch — WIP preservation):\n  ${runHint}`,
+        };
+      }
     }
-    const attestPath = join(root, '.claude', 'loop-core-review', sha + '.json');
-    const runHint =
-      `node .claude/hooks/attest-loop-core-review.mjs --reviewed-by <id> ` +
-      `--attester-class <agent|human> --checked "<what was adversarially checked>"`;
-    if (!existsSync(attestPath)) {
-      return {
-        blocked: true,
-        message:
-          `commit gate: loop-core commit blocked — no adversarial-review attestation for the staged tree.\n` +
-          `The staged set touches loop-core (dispatch/quota/rolling/orchestrator substrate):\n` +
-          loopCoreStaged.map((p) => `  - ${p}`).join('\n') +
-          `\nHand-authored loop-core edits require a FRESH, staged-tree-bound review. Run:\n  ${runHint}\n` +
-          `then retry the commit (the attestation binds to the exact staged tree ${sha.slice(0, 12)}).`,
-      };
-    }
-    let attest;
-    try {
-      attest = JSON.parse(readFileSync(attestPath, 'utf8'));
-    } catch {
-      return {
-        blocked: true,
-        message:
-          `commit gate: loop-core commit blocked — the review attestation at ` +
-          `.claude/loop-core-review/${sha}.json is unreadable/corrupt. Re-run:\n  ${runHint}`,
-      };
-    }
-    if (attest?.staged_tree !== sha) {
-      return {
-        blocked: true,
-        message:
-          `commit gate: loop-core commit blocked — the review attestation is STALE (binds tree ` +
-          `${String(attest?.staged_tree).slice(0, 12)}, staged tree is ${sha.slice(0, 12)}). ` +
-          `Re-review the current staged snapshot:\n  ${runHint}`,
-      };
-    }
-    // Destination-keyed strictness: the gate protects what can LAND on main,
-    // not the act of committing. A `concerns` verdict without an override blocks
-    // only when the commit can reach main (current branch IS main) — preserving
-    // review-blocked WIP on a side branch is the wanted path and must not force
-    // an override, or the override trains into a reflex and stops signalling.
-    // `block` always blocks; an unreadable branch state stays strict (fail-closed).
-    let concernsBlocks = attest.verdict === 'concerns' && !attest.override;
-    if (concernsBlocks) {
-      const br = git(['rev-parse', '--abbrev-ref', 'HEAD']);
-      if (br.ok && br.stdout.trim() !== 'main') concernsBlocks = false;
-    }
-    if (attest.verdict === 'block' || concernsBlocks) {
-      return {
-        blocked: true,
-        message:
-          `commit gate: loop-core commit blocked — the review recorded verdict "${attest.verdict}"` +
-          (attest.checked ? ` (checked: ${attest.checked})` : '') +
-          `. Resolve the concerns and re-attest, or re-run with --override "<reason>" if intentional ` +
-          `(a \`concerns\` attestation is accepted without an override on a non-main branch — WIP preservation):\n  ${runHint}`,
-      };
-    }
+
+    return { blocked: false };
+  })();
+  const attestationFailures = [constitutionalVerdict, loopCoreVerdict].filter((v) => v.blocked);
+  if (attestationFailures.length > 0) {
+    return { blocked: true, message: attestationFailures.map((v) => v.message).join("\n\n") };
   }
 
   // 4. Phase-'final' derived legs — today exactly check:doc-links (relative

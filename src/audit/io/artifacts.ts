@@ -1,6 +1,10 @@
+// sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts
+import type { ZodTypeAny } from "zod";
+import { AuditTaskSchema, AuditResultSchema, CoverageMatrixSchema } from "../types.js";
 import { cp, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  AuditFindingsReportSchema,
   AUDIT_REPORT_FILENAME,
   AUDIT_FINDINGS_FILENAME,
   archiveFrictionRecords,
@@ -210,6 +214,7 @@ interface ArtifactDefinition<K extends ArtifactBundleKey = ArtifactBundleKey> {
   phase: ArtifactPhase;
   read: (path: string) => Promise<ArtifactPayloadMap[K] | undefined>;
   write: (path: string, value: ArtifactPayloadMap[K]) => Promise<void>;
+  validate?: (value: unknown) => void;
 }
 
 // Canonical filename for the rendered findings report. Single-sourced in the
@@ -223,30 +228,42 @@ export { AUDIT_REPORT_FILENAME };
 function jsonArtifact<K extends ArtifactBundleKey>(
   fileName: string,
   phase: ArtifactPhase,
+  schema?: ZodTypeAny,
 ): ArtifactDefinition<K> {
+  const validate = schema ? (value: unknown): void => { schema.parse(value); } : undefined;
   return {
     fileName,
     phase,
+    validate,
     read: (path) => readOptionalJsonFile<ArtifactPayloadMap[K]>(path),
-    write: (path, value) => writeJsonFile(path, value),
+    write: async (path, value) => {
+      validate?.(value);
+      await writeJsonFile(path, value);
+    },
   };
 }
 
 function ndjsonArtifact<K extends ArtifactBundleKey>(
   fileName: string,
   phase: ArtifactPhase,
+  schema?: ZodTypeAny,
 ): ArtifactDefinition<K> {
   type NdjsonItem = ArtifactPayloadMap[K] extends Array<infer Item>
     ? Item
     : never;
+  const validate = schema ? (value: unknown): void => { schema.parse(value); } : undefined;
   return {
     fileName,
     phase,
+    validate,
     read: (path) =>
       readOptionalNdjsonFile<NdjsonItem>(path) as Promise<
         ArtifactPayloadMap[K] | undefined
       >,
-    write: (path, value) => writeNdjsonFile(path, value as NdjsonItem[]),
+    write: async (path, value) => {
+      validate?.(value);
+      await writeNdjsonFile(path, value as NdjsonItem[]);
+    },
   };
 }
 
@@ -290,7 +307,7 @@ export const ARTIFACT_DEFINITIONS = {
   systemic_challenge: jsonArtifact("systemic_challenge.json", "analysis"),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   scope: jsonArtifact("scope.json", "execution"),
-  coverage_matrix: jsonArtifact("coverage_matrix.json", "execution"),
+  coverage_matrix: jsonArtifact("coverage_matrix.json", "execution", CoverageMatrixSchema),
   runtime_validation_tasks: jsonArtifact(
     "runtime_validation_tasks.json",
     "execution",
@@ -311,14 +328,14 @@ export const ARTIFACT_DEFINITIONS = {
     "syntax_resolution_status.json",
     "execution",
   ),
-  audit_results: ndjsonArtifact("audit_results.jsonl", "execution"),
-  audit_tasks: jsonArtifact("audit_tasks.json", "execution"),
+  audit_results: ndjsonArtifact("audit_results.jsonl", "execution", AuditResultSchema.array()),
+  audit_tasks: jsonArtifact("audit_tasks.json", "execution", AuditTaskSchema.array()),
   audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
   task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
-  requeue_tasks: jsonArtifact("requeue_tasks.json", "execution"),
+  requeue_tasks: jsonArtifact("requeue_tasks.json", "execution", AuditTaskSchema.array()),
   access_memory: jsonArtifact("access_memory.json", "execution"),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
-  audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting"),
+  audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting", AuditFindingsReportSchema),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),
   audit_state: jsonArtifact("audit_state.json", "supervisor"),
   artifact_metadata: jsonArtifact("artifact_metadata.json", "supervisor"),
@@ -443,6 +460,13 @@ export async function writeCoreArtifacts(
   options: { prune?: boolean } = {},
 ): Promise<void> {
   const bundleRecord = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
+  // Validate the whole supplied draw before the first write or prune. Missing
+  // artifacts are legitimate intermediate state; only defined payloads are
+  // checked. The writer checks again for callers using a registry entry directly.
+  for (const [key, definition] of ARTIFACT_ENTRIES) {
+    const value = bundleRecord[key];
+    if (value !== undefined) definition.validate?.(value);
+  }
   for (const entry of ARTIFACT_ENTRIES) {
     const [key, definition] = entry;
     const value = bundleRecord[key];

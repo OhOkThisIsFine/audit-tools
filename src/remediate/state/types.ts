@@ -1,3 +1,5 @@
+import type { AcceptedConformanceReview } from "../../shared/types/reviewIndependence.js";
+import { ImplementationContextSchema } from "../../shared/types/contractPipeline/implementation.js";
 // sites-pinned: tests/remediate/audit-read-plan-stamp.test.ts
 import { z } from "zod";
 import { CLOSING_ACTIONS } from "audit-tools/shared";
@@ -12,7 +14,7 @@ import type {
   RemediationOutcome,
   MechanicalVerification,
 } from "audit-tools/shared";
-import { AuditReadSchema, FindingSchema, FindingThemeSchema } from "audit-tools/shared";
+import { AuditReadSchema, FindingSchema } from "audit-tools/shared";
 export type { Finding };
 
 // `Evidence` is a brand-new export of `src/shared/types/remediationOutcome.ts`
@@ -83,6 +85,8 @@ export const RemediationBlockSchema = z
      * files. It is metadata for the host, never a backend-fit claim.
      */
     token_estimate: z.number().int().nonnegative().optional(),
+    /** Distinct instructions from the implementation node, carried into the bound prompt. */
+    implementation_context: ImplementationContextSchema.optional(),
     /**
      * The APPROVED finalized module contract(s) this block implements (the
      * evidence-coverage entry in docs/backlog/open-bugs.md). Attached VERBATIM at promotion by resolving each DAG
@@ -122,8 +126,6 @@ export const RemediationPlanSchema = z
     block_strategy: z
       .enum(["test_graph", "git_cocommit", "file_overlap", "manual"])
       .optional(),
-    /** Synthesis themes carried from audit-findings.json (Phase 6/7 fix hints). */
-    themes: z.array(FindingThemeSchema).optional(),
     /**
      * What the AUDIT read (`AuditRead`), stamped by the TOOL at plan application
      * from the validated source findings report — never taken from the
@@ -151,11 +153,21 @@ export const REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2 =
 export const REMEDIATION_HOST_SCOPE_SEMANTICS =
   "explicit-directory-markers/v1" as const;
 
+export const ConformanceReviewBindingSchema = z.object({
+  run_id: z.string().min(1),
+  enabled: z.boolean(),
+  checkpoint_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+}).strict();
+export type ConformanceReviewBinding = z.infer<typeof ConformanceReviewBindingSchema>;
+
 const RemediationHostHandoffBindingFields = {
   run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
   baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
   workload_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  /** Enforces persistence of the tool-minted required-review snapshot alongside this handoff. */
+  conformance_policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   work_item_ids: z.array(z.string()).min(1),
+
 };
 
 const LegacyRemediationHostHandoffRecordSchema = z
@@ -387,6 +399,8 @@ export interface RemediationItemState {
   failure_reason?: string;
   /** Prompt-bound evidence supplied for a verified no-change host outcome. */
   host_result_evidence?: string[];
+  /** Validated successful semantic review receipt, retained through final outcomes. */
+  conformance_review?: AcceptedConformanceReview;
   /**
    * WHAT LANDED for this item, persisted at acceptance — the corroborated
    * worktree outcome, not the host's claim. The result's `landed_commit` was

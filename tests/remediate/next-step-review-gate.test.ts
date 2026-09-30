@@ -567,10 +567,15 @@ describe("up-front ambiguity gate (note 3, part A)", () => {
 
     expect(step.step_kind).toBe("collect_clarifications");
     const request = JSON.parse(await readFile(ambiguityRequestPath, "utf8"));
-    const ids = request.map((c: { finding_id: string }) => c.finding_id);
+    const ids = request.candidates.map((c: { finding_id: string }) => c.finding_id);
+    expect(request.findings.map((finding: { id: string }) => finding.id)).toEqual([AMBIG_ID, CLEAR_ID]);
+    expect(request.findings[0].summary).toBe("Restructure the store/db seam.");
+    expect(request.findings[0].evidence).toEqual(["obligation O-ARCH"]);
+    expect(step.access?.read_paths).toContain(ambiguityRequestPath.replaceAll("\\", "/"));
+    expect(await readFile(step.prompt_path, "utf8")).toContain(ambiguityRequestPath.replaceAll("\\", "/"));
     expect(ids).toContain(AMBIG_ID); // ambiguous arch finding flagged
     expect(ids).not.toContain(CLEAR_ID); // clear security finding not flagged
-    expect(request.find((c: { finding_id: string }) => c.finding_id === AMBIG_ID).category).toBe(
+    expect(request.candidates.find((c: { finding_id: string }) => c.finding_id === AMBIG_ID).category).toBe(
       "scope_of_fix",
     );
   });

@@ -1,3 +1,4 @@
+import { catalogGates, verifyChecksSteps } from "../../scripts/shared/verify-steps.mjs";
 /**
  * A-7 multi-host install/integration validation gate.
  *
@@ -121,8 +122,8 @@ test("verify:release runs verify:hosts ahead of the publish smoke steps", () => 
   // lives in verify:checks; verify:release composes it with the vitest suite, and CI
   // runs verify:checks + a sharded vitest matrix as parallel jobs. The hosts-ahead-of
   // -smokes ordering therefore lives in verify:checks.
-  expect(verifyRelease, "verify:release must compose the verify:checks gate").toMatch(/\bnpm run verify:checks\b/);
-  const verifyChecks = pkg.scripts["verify:checks"];
+  expect(verifyRelease).toContain("--catalog=release");
+  const verifyChecks = verifyChecksSteps(pkg.scripts).join(" ");
   expect(verifyChecks, "package.json must define a verify:checks script").toBeTruthy();
   // verify:checks runs its sub-steps through the profiled runner
   // (scripts/shared/profile-run.mjs), which invokes each named npm script in order,
@@ -140,12 +141,8 @@ test("verify:release runs verify:hosts ahead of the publish smoke steps", () => 
 
 test("verify:release retains both linked-install smoke contracts", () => {
   const pkg = readPackageJson();
-  const verifyRelease = pkg.scripts["verify:release"];
-  expect(verifyRelease, "package.json must define a verify:release script").toBeTruthy();
-  expect(verifyRelease, "verify:release must run the linked audit-code smoke").toMatch(
-    /\bnpm run smoke:linked-audit-code\b/,
-  );
-  expect(verifyRelease, "verify:release must run the linked remediate-code smoke").toMatch(
-    /\bnpm run smoke:linked-remediate-code\b/,
-  );
+  expect(pkg.scripts["verify:release"]).toContain("--catalog=release");
+  const gates = catalogGates("release").map((g) => g.id);
+  expect(gates).toContain("smoke:linked-audit-code");
+  expect(gates).toContain("smoke:linked-remediate-code");
 });

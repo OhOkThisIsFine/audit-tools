@@ -1,3 +1,8 @@
+import { writeBoundReviewFixture } from "./reviewSubmissionFixture.js";
+import { readAuditReviewBinding } from "../../../src/audit/cli/auditReviewBindings.js";
+import { GATE_LANES, laneSubmissionPath } from "../../../src/audit/cli/laneSubmissions.js";
+import { satisfyFunctionalPreflight } from "../../helpers/functionalPreflightFixture.js";
+import { functionalPreflightPath } from "../../../src/audit/cli/functionalPreflight.js";
 // The one step-walking driver the audit test harnesses share.
 //
 // Three harnesses independently drove the same walk — answer each scripted host
@@ -111,6 +116,16 @@ async function submit(step: any, key: string, body: string): Promise<void> {
   await writeFile(path, body);
 }
 
+/** Preserve both bindings: the emitted step's destination and the live review authority. */
+async function submitReview(step: any, key: string, lane: string): Promise<void> {
+  if (typeof step.artifacts_dir !== "string") throw new Error("Review step declares no artifacts_dir");
+  const binding = await readAuditReviewBinding(step.artifacts_dir, lane);
+  if (!binding) throw new Error(`Review step has no live emitted binding for ${lane}`);
+  const expected = laneSubmissionPath(step.artifacts_dir, lane, binding.runId).replaceAll("\\", "/");
+  if (declaredArtifactPath(step, key).replaceAll("\\", "/") !== expected) throw new Error(`Review destination does not match emitted binding for ${lane}`);
+  await writeBoundReviewFixture(step.artifacts_dir, lane, []);
+}
+
 /**
  * Answer one scripted host pause. Returns false when the kind is not a pause
  * this driver knows how to answer, leaving the decision to the caller.
@@ -121,6 +136,12 @@ async function submit(step: any, key: string, body: string): Promise<void> {
  */
 export async function answerHostPause(step: any): Promise<boolean> {
   switch (step.step_kind) {
+    case "functional_preflight":
+      if (typeof step.repo_root !== "string" || typeof step.artifacts_dir !== "string") throw new Error("Preflight step declares no repository/artifact root");
+      if (declaredArtifactPath(step, "functional_preflight").replaceAll("\\", "/") !== functionalPreflightPath(step.artifacts_dir).replaceAll("\\", "/")) throw new Error("Preflight destination does not match this run");
+      await satisfyFunctionalPreflight(step.repo_root, step.artifacts_dir);
+      return true;
+
     case "analyzer_consent":
       await submit(step, "analyzer_consent_decisions", pretty(DECLINED_ANALYZERS));
       return true;
@@ -143,16 +164,16 @@ export async function answerHostPause(step: any): Promise<boolean> {
       return true;
 
     case "design_review_parallel":
-      await submit(step, "contract_results", EMPTY_JSON_ARRAY);
-      await submit(step, "conceptual_results", EMPTY_JSON_ARRAY);
+      await submitReview(step, "contract_results", GATE_LANES.design_review_contract);
+      await submitReview(step, "conceptual_results", GATE_LANES.design_review_conceptual);
       return true;
 
     case "design_review_contract":
-      await submit(step, "contract_results", EMPTY_JSON_ARRAY);
+      await submitReview(step, "contract_results", GATE_LANES.design_review_contract);
       return true;
 
     case "design_review_conceptual":
-      await submit(step, "conceptual_results", EMPTY_JSON_ARRAY);
+      await submitReview(step, "conceptual_results", GATE_LANES.design_review_conceptual);
       return true;
 
     case "edge_reasoning_dispatch":

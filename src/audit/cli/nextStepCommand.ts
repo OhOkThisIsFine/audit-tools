@@ -1,3 +1,11 @@
+import { hashContent } from "../../shared/hash.js";
+import { charterComparisonInputRevision } from "./charterComparisonPrompt.js";
+import { systemicReviewInputRevision } from "../orchestrator/systemicChallengeExecutor.js";
+import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
+import { ReviewUnavailableError } from "./reviewSubmission.js";
+import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "./argumentContract.js";
+import { functionalPreflightStep } from "./functionalPreflight.js";
+import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -5,6 +13,7 @@ import {
   loadAnalyzerPolicy,
   loadSessionIntent,
   applyGuidanceFile,
+  applyGuidanceText,
   runWithBlockedStepBackstop,
   writeBlockedStepContract,
   laneAssetsDir,
@@ -91,6 +100,7 @@ import {
 import {
   getArtifactsDir,
   getFlag,
+  hasFlag,
   getRootDir,
   getTimeoutMs,
   warnIfNotGitRepo,
@@ -231,6 +241,9 @@ async function prepareContractDispatch(opts: {
     lanes: [
       {
         id: GATE_LANES.design_review_contract,
+        semanticInputRevision: designReviewInputRevision(opts.bundle),
+        fileCount: opts.bundle.repo_manifest?.files.length ?? 0,
+        ...SEMANTIC_REVIEW_DEMAND,
         label: "Contract review (adversarial)",
         promptFilename: "design-review-contract-prompt.md",
         // No results-path section here: `materializeFanoutLanes` appends the one
@@ -264,6 +277,7 @@ async function prepareContractDispatch(opts: {
 }
 
 export async function cmdNextStep(argv: string[]): Promise<void> {
+  validateAuditArguments("next-step", argv[2] === "next-step" ? argv.slice(3) : argv, NEXT_STEP_ARGUMENTS);
   const root = getRootDir(argv);
   warnIfNotGitRepo(root);
   const artifactsDir = getArtifactsDir(argv);
@@ -277,7 +291,21 @@ export async function cmdNextStep(argv: string[]): Promise<void> {
   // the engine reports its bound as an outcome, so that path emits its own
   // resumable blocked step rather than throwing.
   await runWithBlockedStepBackstop(
-    () => cmdNextStepBody(argv, root, artifactsDir),
+    async () => {
+      try { await cmdNextStepBody(argv, root, artifactsDir); }
+      catch (error) {
+        if (!(error instanceof ReviewUnavailableError)) throw error;
+        const continueCommand = nextStepCommand(root, artifactsDir);
+        await NEXT_STEP_EMISSION.emitPlan(currentStepPlan({
+          artifactsDir, repoRoot: root, runId: null, stepKind: "blocked", status: "blocked",
+          allowedCommands: [continueCommand],
+          stopCondition: "Stop until an independent reviewer is available. Preserve the existing response and completed work.",
+          artifactPaths: { review_prompt: error.promptPath ?? null, review_result: error.resultPath },
+          access: { read_paths: error.promptPath ? [error.promptPath] : [], write_paths: [error.resultPath] },
+          prompt: ["# Independent review unavailable", "", error.message, "", `The current review prompt is ${error.promptPath ?? "the prompt previously issued for this lane"}.`, `When an independent context is available, run the actual review and replace ${error.resultPath} with its bound response. Do not merely relabel a self-review.`, `Then run: ${continueCommand}`].join("\n"),
+        }));
+      }
+    },
     (reason) =>
       writeBlockedStepContract({
         tool: "audit-code",
@@ -315,6 +343,9 @@ async function cmdNextStepBody(
   // intake/conversation-start.md in this same invocation, then decide the step —
   // no separate write-then-call dance for the host to remember.
   const guidanceFile = getFlag(argv, "--guidance-file");
+  const guidanceText = getFlag(argv, "--guidance");
+  if (guidanceFile && guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
+  if (guidanceText !== undefined) applyGuidanceText(artifactsDir, guidanceText);
   if (guidanceFile) {
     applyGuidanceFile(artifactsDir, guidanceFile);
   }
@@ -348,6 +379,12 @@ async function cmdNextStepBody(
     return;
   }
 
+  const preflight = await functionalPreflightStep(root, artifactsDir);
+  if (preflight) {
+    await NEXT_STEP_EMISSION.emitPlan(currentStepPlan(preflight));
+    return;
+  }
+
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
@@ -360,6 +397,10 @@ async function cmdNextStepBody(
     // adapter when no fetcher is injected. The unit/integration suite never reaches
     // here, so acquisition stays a hermetic no-op in tests.
     externalAcquisition: buildExternalAcquisitionOptions(analyzerPolicy),
+    autoFix: {
+      ...(hasFlag(argv, "--auto-fix") ? { enabled: true } : {}),
+      dryRun: hasFlag(argv, "--dry-run"),
+    },
     since: getFlag(argv, "--since"),
   });
 
@@ -643,24 +684,13 @@ function requireLoadedAnalyzerPolicy(
   );
 }
 
-/**
- * The acquisition chokepoint's declared caller obligation, discharged in ONE
- * place: BOTH halves of the loaded policy ride every acquisition call — the
- * per-analyzer settings AND the recorded consent decisions. Dropping the
- * decisions leaves a recorded decline unrepresentable at admission (the
- * chokepoint would see `undefined` and read it as "not yet decided"), and no
- * consent token is synthesized here on the operator's behalf: the field is
- * absent, never an empty string.
- */
+/** Durable settings select resolution; only the active run record supplies consent. */
 export function buildExternalAcquisitionOptions(
   policy: AnalyzerPolicy,
 ): ExternalAcquisitionAdvanceOptions {
   return {
     enabled: true,
     analyzers: policy.analyzers,
-    // Item B: recorded consent decisions ride into admission (granted admits
-    // without a token) and into the consent fold's pending computation.
-    analyzerConsent: policy.analyzer_consent,
   };
 }
 
@@ -894,13 +924,8 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
     // material. Packets are (re)written on every emission — they derive from
     // the bundle + disk, so re-materializing is idempotent and keeps a resumed
     // lane's evidence current.
-    // DERIVED from `kinds` AFTER the Promise.all, never pushed as IO completes:
-    // a push inside the concurrent callback fires in completion order, and this
-    // array is persisted into the step contract's `read_paths`, so a slower disk
-    // would silently reorder a recorded artifact.
-    const packetPaths = kinds.map((kind) =>
-      join(laneAssetsDir(artifactsDir), charterExtractionPacketFilename(kind)),
-    );
+    // Promise.all retains `kinds` order. The materializer derives the packet
+    // read paths from that ordered lane list, never from IO completion order.
     const laneSpecs = await Promise.all(
       kinds.map(async (kind) => {
         const lane = charterExtractionLane(kind);
@@ -927,6 +952,10 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
         );
         return {
           id: lane,
+          semanticInputRevision: hashContent(packet.markdown),
+          fileCount: new Set(packet.excerpts.map(excerpt => excerpt.source_path)).size,
+          ...SEMANTIC_REVIEW_DEMAND,
+          contextPaths: [packetPath],
           label: `Charter ${kind} author (blind lane)`,
           promptFilename: `charter-extraction-${kind}-prompt.md`,
           promptText: renderCharterKindLanePrompt({
@@ -950,7 +979,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute each pending charter lane prompt (one blind agent per kind — subagents if available, else sequentially), write each lane's submission to its results path, then run next-step.",
+        "Execute each pending charter lane prompt (one blind agent per kind — independent contexts, never self-review), write each lane's submission to its results path, then run next-step.",
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [
@@ -965,6 +994,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
             promptPath: lane.promptPath,
             resultPath: lane.resultPath,
             demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
           })),
         }),
         "",
@@ -986,7 +1016,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
       access: {
         // Prompts + packets only: the lanes' whole input is materialized, so no
         // repo/artifact read grant exists to leak another channel's evidence.
-        read_paths: [...fanout.readPaths, ...packetPaths],
+        read_paths: fanout.readPaths,
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,
@@ -1021,6 +1051,10 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
       lanes: [
         {
           id: GATE_LANES.charter_comparison,
+          semanticInputRevision: charterComparisonInputRevision(result.bundle),
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          ...SEMANTIC_REVIEW_DEMAND,
+          contextPaths: Object.values(laneGraphPaths),
           label: "Charter comparison reader",
           promptFilename: "charter-comparison-prompt.md",
           promptText: lanePrompt,
@@ -1048,6 +1082,7 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
               label: lane.label,
               promptPath: lane.promptPath,
               demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
             })),
           }),
           writeSentence: "The executor must write its CharterComparisonSubmission JSON to:",
@@ -1058,7 +1093,6 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
       access: {
         read_paths: [
           ...fanout.readPaths,
-          ...Object.values(laneGraphPaths),
           join(artifactsDir, "charter_register.json"),
         ],
         write_paths: fanout.writePaths,
@@ -1077,7 +1111,8 @@ const emitCharterFidelity = emissionRow<"charter_fidelity">(
     const continueCommand = nextStepCommand(root, artifactsDir);
     const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_fidelity);
     const packetPath = join(laneAssetsDir(artifactsDir), "charter-fidelity-packet.md");
-    await writeFile(packetPath, await buildCharterFidelityPacket(result.bundle, root), "utf8");
+    const fidelityPacket = await buildCharterFidelityPacket(result.bundle, root);
+    await writeFile(packetPath, fidelityPacket, "utf8");
     const lanePrompt = renderCharterFidelityPrompt({ submissionPath, packetPath });
     const fanout = await materializeFanoutLanes({
       artifactsDir,
@@ -1085,6 +1120,10 @@ const emitCharterFidelity = emissionRow<"charter_fidelity">(
       lanes: [
         {
           id: GATE_LANES.charter_fidelity,
+          semanticInputRevision: hashContent(fidelityPacket),
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          ...SEMANTIC_REVIEW_DEMAND,
+          contextPaths: [packetPath],
           label: "Charter fidelity lane",
           promptFilename: "charter-fidelity-prompt.md",
           promptText: lanePrompt,
@@ -1112,6 +1151,7 @@ const emitCharterFidelity = emissionRow<"charter_fidelity">(
               label: lane.label,
               promptPath: lane.promptPath,
               demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
             })),
           }),
           writeSentence: "The executor must write its CharterFidelitySubmission JSON to:",
@@ -1120,7 +1160,7 @@ const emitCharterFidelity = emissionRow<"charter_fidelity">(
         }),
       ].join("\n"),
       access: {
-        read_paths: [...fanout.readPaths, packetPath],
+        read_paths: fanout.readPaths,
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,
@@ -1189,12 +1229,11 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       artifactsDir,
       lane,
     );
-  const metrics =
-    result.bundle.systemic_challenge?.metrics ?? aggregateMetricsDigest(result.bundle);
+  const metrics = aggregateMetricsDigest(result.bundle);
   const evidencePaths = [
-    join(artifactsDir, "charter_register.json"),
-    join(artifactsDir, "design_assessment.json"),
-    join(artifactsDir, "conceptual_review_adjudication.json"),
+    ...(result.bundle.charter_register ? [join(artifactsDir, "charter_register.json")] : []),
+    ...(result.bundle.design_assessment ? [join(artifactsDir, "design_assessment.json")] : []),
+    ...(result.bundle.conceptual_review_adjudication ? [join(artifactsDir, "conceptual_review_adjudication.json")] : []),
     ...(result.bundle.conceptual_review_adjudication?.contributors
       .filter((contributor) => contributor.role === "perspective")
       .map((contributor) => contributor.result_path) ?? []),
@@ -1215,6 +1254,10 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       lanes: [
         {
           id: lane,
+          semanticInputRevision: systemicReviewInputRevision(result.bundle),
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          ...SEMANTIC_REVIEW_DEMAND,
+          contextPaths: evidencePaths,
           label: "Second-order adversary (improvement-seeking challenge)",
           promptFilename: "systemic-challenge-prompt.md",
           promptText: adversaryPrompt,
@@ -1251,6 +1294,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
               label: lane.label,
               promptPath: lane.promptPath,
               demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
             })),
           }),
           writeSentence: "The executor must write its findings JSON to:",
@@ -1261,11 +1305,10 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
         }),
       ].join("\n"),
       access: {
-      read_paths: [
-        ...fanout.readPaths,
-        join(artifactsDir, "systemic_challenge.json"),
-        ...evidencePaths,
-      ],
+        read_paths: [...new Set([
+          ...fanout.readPaths,
+          join(artifactsDir, "systemic_challenge.json"),
+        ])],
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,
@@ -1432,6 +1475,10 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
       lanes: [
         {
           id: GATE_LANES.edge_reasoning,
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          riskScore: 0.5,
+          semanticComplexity: "standard",
+
           label: "Edge-reasoning rewrites",
           promptFilename: "edge-reasoning-prompt.md",
           promptText: rejectionNotice
@@ -1525,7 +1572,7 @@ export function renderIntentEquivalencePrompt(
     "```json",
     JSON.stringify(
       {
-        verdict: "equivalent | changed",
+        verdict: "equivalent",
         judged_pair: {
           prior_hash: pending?.prior_hash ?? "",
           new_hash: pending?.new_hash ?? "",
@@ -1536,6 +1583,7 @@ export function renderIntentEquivalencePrompt(
     ),
     "```",
     "",
+    "Choose exactly one verdict: `equivalent` or `changed`. The example shows `equivalent`.",
     "`judged_pair` must carry the two hashes shown above verbatim — they bind",
     "the verdict to this exact pair; a checkpoint edited again mid-judgment is",
     "detected and re-judged.",
@@ -1593,8 +1641,9 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
       GATE_LANES.critical_flow_fallback,
     );
     const continueCommand = nextStepCommand(root, artifactsDir);
+    const manifestPath = toPromptPathToken(join(artifactsDir, "critical_flows.json"));
     const basePrompt = result.bundle.critical_flows
-      ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows)
+      ? renderCriticalFlowFallbackPrompt(result.bundle.critical_flows, manifestPath)
       : "# Critical-flow fallback\n\nNo critical_flows manifest is available; write an empty flows array.";
     // Always-materialized (design resolution 2): the (potentially ~340-line)
     // flow-stub prompt is a lane FILE, never inlined into the step prompt. The
@@ -1606,6 +1655,10 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
       lanes: [
         {
           id: GATE_LANES.critical_flow_fallback,
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          riskScore: 0.5,
+          semanticComplexity: "standard",
+          contextPaths: result.bundle.critical_flows ? [manifestPath] : [],
           label: "Critical-flow fallback enrichment",
           promptFilename: "critical-flow-fallback-prompt.md",
           promptText: lanePrompt,
@@ -1621,7 +1674,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
       stopCondition:
         "Execute the critical-flow lane prompt (subagent if available, else yourself), write the enrichment to the results path, then run next-step.",
       repoRoot: root,
-      artifactPaths: fanout.artifactPaths,
+      artifactPaths: { ...fanout.artifactPaths, critical_flows: manifestPath },
       prompt: [
         ...singleLaneDispatchEnvelope({
           title: "# audit-code critical-flow fallback",
@@ -1631,6 +1684,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
               label: lane.label,
               promptPath: lane.promptPath,
               demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
             })),
           }),
           writeSentence:
@@ -1677,6 +1731,10 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
       lanes: [
         {
           id: GATE_LANES.synthesis_narrative,
+          fileCount: result.bundle.repo_manifest?.files.length ?? 0,
+          riskScore: 0.5,
+          semanticComplexity: "standard",
+          contextPaths: result.bundle.audit_findings ? [findingsPath] : [],
           label: "Synthesis narrative (themes / exec summary / top risks)",
           promptFilename: "synthesis-narrative-prompt.md",
           promptText: lanePrompt,
@@ -1702,6 +1760,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
               label: lane.label,
               promptPath: lane.promptPath,
               demand: lane.demand,
+            reviewRequirement: lane.reviewRequirement,
             })),
           }),
           writeSentence: "The executor must write the SynthesisNarrative JSON object to:",
@@ -1713,7 +1772,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
         // The lane's own prompt file, PLUS the findings report its overflow line
         // names. A path stated in a prompt the reader cannot open is worse than
         // no path at all.
-        read_paths: [...fanout.readPaths, findingsPath],
+        read_paths: fanout.readPaths,
         write_paths: fanout.writePaths,
       },
       submissionShortfall: fanout.shortfall,

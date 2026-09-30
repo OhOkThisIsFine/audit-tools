@@ -1,3 +1,4 @@
+import { recoverIngestHostResults } from "../../src/remediate/steps/recoverIngest.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -9,7 +10,7 @@ import {
   resolveArtifactsDirOption,
   resolveRootOption,
 } from "../../src/remediate/index.js";
-import { recoverIngestHostResults } from "../../src/remediate/steps/nextStep.js";
+
 import { prepareRemediationHostHandoff } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {

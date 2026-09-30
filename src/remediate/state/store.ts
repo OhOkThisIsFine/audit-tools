@@ -1,4 +1,6 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts
+import { z } from "zod";
+import { isTerminalStatus } from "./itemStatus.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -8,8 +10,12 @@ import {
   SchemaVersionMismatchError,
   SKIP_WRITE,
   assertNotNodeWorktreeCwd,
+  readOptionalJsonFile,
+  writeJsonFile,
+  withFileLock,
 } from "audit-tools/shared";
 import {
+  type ConformanceReviewBinding,
   RemediationPlan,
   RemediationItemState,
   ClosingPlan,
@@ -63,6 +69,30 @@ export const REMEDIATION_STATE_CONTRACT_VERSION =
 /** The file this store owns, named once so the version error can name it too. */
 const STATE_FILENAME = "state.json";
 
+export const OPERATOR_LIFECYCLE_FILENAME = "operator-lifecycle.json";
+export const OPERATOR_LIFECYCLE_VERSION = "remediation-operator-lifecycle/v1" as const;
+const OperatorLifecycleSchema = z.object({
+  contract_version: z.literal(OPERATOR_LIFECYCLE_VERSION),
+  mode: z.enum(["active", "paused", "cancelled"]),
+  plan_only: z.boolean(),
+  updated_at: z.string().datetime(),
+  reason: z.enum(["operator", "plan-only"]).optional(),
+  // Diagnostic only. Live state/items/host_handoff remain continuation truth;
+  // resume must never restore this snapshot over accepted work.
+  diagnostic_continuation: z.object({
+    phase: z.enum(REMEDIATION_RUN_STATUSES).nullable(),
+    plan_id: z.string().nullable(),
+    active_item_ids: z.array(z.string()),
+    workload_sha256: z.string().optional(),
+  }).strict().optional(),
+  host_report: z.object({
+    worktree: z.string().min(1).optional(),
+    outcome: z.string().min(1).optional(),
+  }).strict().optional(),
+}).strict();
+export type OperatorLifecycle = z.infer<typeof OperatorLifecycleSchema>;
+export type OperatorLifecycleAction = "pause" | "resume" | "cancel" | "plan-only";
+
 export interface RemediationState {
   /**
    * Schema version of this persisted state. Optional on the TYPE because a
@@ -71,6 +101,8 @@ export interface RemediationState {
    */
   contract_version?: typeof REMEDIATION_STATE_CONTRACT_VERSION;
   status: RemediationRunStatus;
+  /** Tool-minted current-run snapshot; survives handoff/frontier replacement. */
+  conformance_review?: ConformanceReviewBinding;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
   closing_plan?: ClosingPlan;
@@ -465,6 +497,64 @@ export class StateStore {
 
   async init(): Promise<void> {
     await mkdir(this.artifactsDir, { recursive: true });
+  }
+
+  async loadOperatorLifecycle(): Promise<OperatorLifecycle | null> {
+    const raw = await readOptionalJsonFile<unknown>(join(this.artifactsDir, OPERATOR_LIFECYCLE_FILENAME));
+    return raw === undefined ? null : OperatorLifecycleSchema.parse(raw);
+  }
+
+  async assertOperatorActive(): Promise<void> {
+    const control = await this.loadOperatorLifecycle();
+    if (control && control.mode !== "active") {
+      throw new Error(`Remediation is ${control.mode}; ${control.mode === "cancelled" ? "a cancelled run cannot advance" : "resume it before accepting work"}.`);
+    }
+  }
+
+  /** Recovery writers share the advance mutex, then take the state lock. */
+  async withActiveOperator<T>(body: () => Promise<T>): Promise<T> {
+    return withFileLock(join(this.artifactsDir, "phase.lock"), async () => {
+      await this.assertOperatorActive();
+      return body();
+    });
+  }
+
+  /** Caller MUST hold phase.lock, including automatic plan-only boundaries. */
+  async setOperatorLifecycleUnderPhaseLock(
+    action: OperatorLifecycleAction,
+    hostReport?: OperatorLifecycle["host_report"],
+    reason: "operator" | "plan-only" = "operator",
+  ): Promise<OperatorLifecycle> {
+    assertNotNodeWorktreeCwd("a remediation operator lifecycle transition");
+    const current = await this.loadOperatorLifecycle();
+    if (current?.mode === "cancelled") {
+      if (action === "resume" || action === "plan-only") throw new Error("A cancelled remediation run cannot be resumed.");
+      return current;
+    }
+    const next: OperatorLifecycle = current ? { ...current } : {
+      contract_version: OPERATOR_LIFECYCLE_VERSION,
+      mode: "active", plan_only: false, updated_at: new Date().toISOString(),
+    };
+    if (hostReport) next.host_report = { ...next.host_report, ...hostReport };
+    if (action === "plan-only") next.plan_only = true;
+    else if (action === "resume") { next.mode = "active"; next.plan_only = false; }
+    else if (next.mode !== (action === "pause" ? "paused" : "cancelled")) {
+      next.mode = action === "pause" ? "paused" : "cancelled";
+      next.reason = reason;
+      if (action === "cancel") next.plan_only = false;
+      const state = await this.loadState();
+      next.diagnostic_continuation = {
+        phase: state?.status ?? null,
+        plan_id: state?.plan?.plan_id ?? null,
+        active_item_ids: Object.values(state?.items ?? {})
+          .filter((item) => !isTerminalStatus(item.status)).map((item) => item.finding_id).sort(),
+        ...(state?.host_handoff ? { workload_sha256: state.host_handoff.workload_sha256 } : {}),
+      };
+    }
+    if (current && JSON.stringify(next) === JSON.stringify(current)) return current;
+    next.updated_at = new Date().toISOString();
+    await writeJsonFile(join(this.artifactsDir, OPERATOR_LIFECYCLE_FILENAME), OperatorLifecycleSchema.parse(next));
+    return next;
   }
 
   /**

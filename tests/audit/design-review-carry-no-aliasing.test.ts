@@ -1,3 +1,4 @@
+import { emitAndWriteReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 /**
  * CX-02 preservation constraint — every transition produces a FRESH bundle,
  * and no handler mutates a carried bundle's nested objects in place.
@@ -16,7 +17,7 @@
  * mode, so the handler passing at all proves the no-aliasing rule; the
  * identity assertions pin the fresh-carry half.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,7 +27,6 @@ import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { handleDesignReviewBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import {
   GATE_LANES,
-  laneSubmissionPath,
 } from "../../src/audit/cli/laneSubmissions.js";
 import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
 import { designFinding } from "./helpers/designFinding.js";
@@ -51,11 +51,6 @@ test("a consumed design-review submission never mutates the carried bundle in pl
   try {
     const artifactsDir = join(dir, "audit");
     await mkdir(submissionsDir(artifactsDir), { recursive: true });
-    await writeFile(
-      laneSubmissionPath(artifactsDir, GATE_LANES.design_review_contract),
-      JSON.stringify([designFinding()]),
-      "utf8",
-    );
 
     const assessment = {
       generated_at: "now",
@@ -64,6 +59,7 @@ test("a consumed design-review submission never mutates the carried bundle in pl
       conceptual_reviewed: false,
     };
     const bundle: ArtifactBundle = deepFreeze({ design_assessment: assessment });
+    await emitAndWriteReviewFixture(artifactsDir, GATE_LANES.design_review_contract, [designFinding()], bundle);
     const state: AuditState = { status: "active", obligations: [] };
 
     // Frozen input: an in-place mutation anywhere in the handler throws.
@@ -93,7 +89,7 @@ test.each([GATE_LANES.design_review_contract])(
     const artifactsDir = await mkdtemp(join(tmpdir(), "dr-baseline-"));
     try {
       await mkdir(submissionsDir(artifactsDir), { recursive: true });
-      await writeFile(laneSubmissionPath(artifactsDir, lane), JSON.stringify([designFinding({ id: "DR-new" })]));
+
       const bundle: ArtifactBundle = {
         unit_manifest: { units: [] },
         critical_flows: { flows: [] },
@@ -104,6 +100,7 @@ test.each([GATE_LANES.design_review_contract])(
           candidate_disposition_breakdown: {}, candidate_verification_status_breakdown: {},
         },
       };
+      await emitAndWriteReviewFixture(artifactsDir, lane, [designFinding({ id: "DR-new" })], bundle);
       bundle.artifact_metadata = computeArtifactMetadata(bundle);
       // This handler is also directly callable: consuming a review does not
       // authorize it to certify a pending structural rebuild.

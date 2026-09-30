@@ -21,7 +21,7 @@
 
 import { describe, it, expect } from "vitest";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FileDispositionStatus } from "audit-tools/shared";
 import { advanceAudit } from "../../src/audit/orchestrator/advance.js";
@@ -69,13 +69,14 @@ async function prepareRepo(root: string): Promise<string> {
 }
 
 describe("phase-1 auto-fix opt-out and dry-run gate", () => {
-  it("the ungated run DOES spawn the formatter (the control that keeps the gate tests honest)", async () => {
+  it("an explicitly opted-in run spawns the formatter", async () => {
     await withTempDir("auto-fix-ungated-", async (root: string) => {
       const marker = await prepareRepo(root);
 
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
+        autoFix: { enabled: true },
       });
 
       expect(result.selected_executor).toBe("auto_fix_executor");
@@ -83,6 +84,19 @@ describe("phase-1 auto-fix opt-out and dry-run gate", () => {
         existsSync(marker),
         "without a gate the formatter must run — otherwise the gate assertions below prove nothing",
       ).toBe(true);
+    });
+  });
+
+  it("default audit never spawns a source-mutating formatter", async () => {
+    await withTempDir("auto-fix-default-", async (root: string) => {
+      const marker = await prepareRepo(root);
+      const source = await readFile(join(root, "src/api/auth.ts"));
+      await advanceAudit(bundleWith(["src/api/auth.ts"]), {
+        root,
+        preferredExecutor: "auto_fix_executor",
+      });
+      expect(existsSync(marker)).toBe(false);
+      expect(await readFile(join(root, "src/api/auth.ts"))).toEqual(source);
     });
   });
 
@@ -113,7 +127,7 @@ describe("phase-1 auto-fix opt-out and dry-run gate", () => {
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
-        autoFix: { dryRun: true },
+        autoFix: { enabled: true, dryRun: true },
       });
 
       expect(
@@ -133,7 +147,7 @@ describe("phase-1 auto-fix opt-out and dry-run gate", () => {
       const result = await advanceAudit(bundleWith(["src/api/auth.ts"]), {
         root,
         preferredExecutor: "auto_fix_executor",
-        autoFix: { dryRun: true },
+        autoFix: { enabled: true, dryRun: true },
       });
 
       expect(result.progress_summary.toLowerCase()).toContain("dry run");

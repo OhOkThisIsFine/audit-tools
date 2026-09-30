@@ -73,6 +73,7 @@ test("lens_selection / excluded_scope / must_not_touch / filters / disposition_o
       ],
     },
     { schema_version: "intent-checkpoint/v2" },
+    { conformance_review: true },
   ] as Array<Partial<IntentCheckpoint>>) {
     const a = normalizeCheckpointForms(baseCheckpoint);
     const b = normalizeCheckpointForms({ ...baseCheckpoint, ...delta });

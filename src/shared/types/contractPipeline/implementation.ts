@@ -1,3 +1,6 @@
+// sites-pinned: tests/remediate/host-handoff.test.ts, tests/remediate/contract-pipeline.test.ts
+import { z } from "zod";
+import { CounterexampleSchema } from "./obligations.js";
 /**
  * Contract-pipeline artifact: implementation phase.
  *
@@ -73,3 +76,12 @@ export interface ImplementationDAG {
   /** ISO-8601 timestamp when this DAG was created. */
   created_at: string;
 }
+
+/** Node-specific implementation facts not already present in findings or module contracts. */
+export const ImplementationContextSchema = z.object({
+  description: z.string().optional(),
+  preconditions: z.array(z.string()).optional(),
+  expected_changes: z.string().optional(),
+  counterexamples: z.array(CounterexampleSchema).optional(),
+}).strict();
+export type ImplementationContext = z.infer<typeof ImplementationContextSchema>;

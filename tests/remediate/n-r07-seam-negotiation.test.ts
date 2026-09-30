@@ -1,3 +1,4 @@
+import { writeContractHostFixture } from "./helpers/contractHostFixture.js";
 /**
  * N-R07: Multi-agent seam negotiation replaces the monolithic design pass.
  *
@@ -12,7 +13,7 @@
  * - CP_ARTIFACT_NAMES ordering enforces dependency order
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -25,7 +26,6 @@ import {
   detectStaleArtifacts,
   writeContractArtifact,
   contractArtifactExists,
-  contractInputFilePath,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
@@ -57,9 +57,7 @@ const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const STEP_OPTIONS = { root: TEST_DIR, artifactsDir: ARTIFACTS_DIR, runId: "N-R07-TEST" };
 
 async function writeRaw(name: ContractPipelineArtifactName, payload: unknown): Promise<void> {
-  const path = contractInputFilePath(ARTIFACTS_DIR, name);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
+  await writeContractHostFixture(STEP_OPTIONS, name, payload);
 }
 
 function makeGoalSpec() {

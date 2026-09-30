@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/contract-pipeline-adversarial.test.ts, tests/remediate/step-prompt-sketch-drift.test.ts
 /**
  * Contract-pipeline artifact: design phase.
  *
@@ -6,6 +7,7 @@
  */
 
 import type { FindingSeverity } from "../finding.js";
+import type { JudgeRepairTarget } from "./obligations.js";
 
 // ── Version constants ────────────────────────────────────────────────────────
 
@@ -75,6 +77,12 @@ export interface DesignSpec {
 
 // ── ConceptualDesignCritique ──────────────────────────────────────────────────
 
+/** The owning artifacts a conceptual critique can ask to repair. */
+export const CONCEPTUAL_CRITIQUE_REPAIR_TARGETS = [
+  "finalized_module_contracts", "module_decomposition",
+] as const satisfies readonly JudgeRepairTarget[];
+export type ConceptualCritiqueRepairTarget = typeof CONCEPTUAL_CRITIQUE_REPAIR_TARGETS[number];
+
 /** Philosophy/alternatives/directions critique of the proposed design. */
 export interface DesignCritiqueItem {
   id: string;
@@ -87,6 +95,8 @@ export interface ConceptualDesignCritique {
   contract_version: typeof CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION;
   goal_id: string;
   items: DesignCritiqueItem[];
+  /** Absent legacy reports repair finalized interfaces; scope/module changes name decomposition. */
+  repair_target?: ConceptualCritiqueRepairTarget;
   /** Overall assessment of the design. */
   verdict: "approved" | "approved_with_concerns" | "rejected";
   /** ISO-8601 timestamp when this critique was created. */

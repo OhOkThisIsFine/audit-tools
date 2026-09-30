@@ -1,3 +1,4 @@
+import { INTENT_INTERPRETATION_FILENAME } from "../../src/remediate/intent/intentPersistence.js";
 /**
  * Unencodable free_form_intent clauses BLOCK remediation planning until the
  * host answers them via `constraint_clauses` (owner decision 896100e34412fa40:
@@ -16,10 +17,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { IntentCheckpoint } from "audit-tools/shared";
 import { interpretIntent } from "../../src/shared/intent/clauseInterpreter.js";
-import {
-  decideNextStep,
-  INTENT_INTERPRETATION_FILENAME,
-} from "../../src/remediate/steps/nextStep.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION } from "../../src/remediate/intake.js";
 import { scratchDir } from "../helpers/scratch.js";
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";

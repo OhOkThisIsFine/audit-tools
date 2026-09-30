@@ -291,7 +291,7 @@ export {
   clauseIdentity,
 } from "./intent/clauseInterpreter.js";
 export type { ConstraintClauseRecord } from "./intent/constraintClauses.js";
-export { unresolvedFromClauses } from "./intent/constraintClauses.js";
+export { unresolvedFromClauses, constraintClausesFromIntent } from "./intent/constraintClauses.js";
 export type {
   RemediationOutcomeStatus,
   RemediationOutcome,
@@ -333,6 +333,7 @@ export {
 export type { LaneDemand, StepStatus } from "./types/stepContract.js";
 export {
   deriveLaneDemand,
+  SEMANTIC_REVIEW_DEMAND,
   LANE_COMPLEXITY_VALUES,
   LANE_DEMAND_KEYS,
   LANE_RISK_VALUES,
@@ -1363,7 +1364,7 @@ export {
   deriveEngineBound,
 } from "./engine/obligationEngine.js";
 export { LOOP_CORE_PATTERNS, isLoopCorePath } from "./loopCorePaths.js";
-export { applyGuidanceFile } from "./intake/guidanceBootstrap.js";
+export { applyGuidanceFile, applyGuidanceText } from "./intake/guidanceBootstrap.js";
 
 // External analyzer acquisition substrate (one core, two draws: audit's read
 // draw and remediate's close-verify draw both run analyzers through this).
@@ -1460,3 +1461,10 @@ export {
 } from "./analyzers/candidates.js";
 export { parseClippy } from "./analyzers/clippy.js";
 export { parseRubocop } from "./analyzers/rubocop.js";
+
+export { ReviewRequirementSchema, ReviewDeclarationSchema, reviewIndependenceIssue } from "./types/reviewIndependence.js";
+export type { ReviewRequirement, ReviewDeclaration } from "./types/reviewIndependence.js";
+export { ReviewSubmissionEnvelopeSchema, parseReviewSubmissionEnvelope } from "./types/reviewIndependence.js";
+export type { ReviewSubmissionEnvelope, ReviewSubmissionParseResult, ReviewSubmissionFailureCode } from "./types/reviewIndependence.js";
+export { ContractReviewProvenanceSchema, ContractReviewOutcomeSchema, AcceptedConformanceReviewSchema } from "./types/reviewIndependence.js";
+export type { ContractReviewProvenance, ContractReviewDeclaration, ContractReviewOutcome, AcceptedConformanceReview } from "./types/reviewIndependence.js";

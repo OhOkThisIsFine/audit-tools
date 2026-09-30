@@ -141,6 +141,8 @@ describe("the expected-submission set", () => {
         lanes: CHARTER_LANES.map((lane) => ({
           id: `charter_${lane}`,
           label: `Charter extraction — ${lane}`,
+          fileCount: 0,
+          riskScore: 0,
           promptFilename: `charter-extraction-${lane}-packet.md`,
           promptText: `Author the ${lane} charter lane.`,
         })),

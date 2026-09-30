@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-submission.test.ts, tests/audit/design-review-diff-rereview.test.ts
 /**
  * Semantic / structural projection for audit-code's design-review passes
  * (B2/B3 parity port).
@@ -28,6 +29,7 @@
  */
 import {
   stableStringifyProjection,
+  hashContent,
   type CriticalFlowManifest,
   type GraphBundle,
   type IntentCheckpoint,
@@ -35,6 +37,7 @@ import {
   type SurfaceManifest,
   compareCodeUnits,
 } from "audit-tools/shared";
+import { projectDesignReviewTask, type DesignReviewTaskBundle } from "./designReviewTask.js";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import { deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
@@ -46,7 +49,7 @@ import { deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
  * bundle loader imports — do not form an import cycle with `io/artifacts.ts`.
  * `ArtifactBundle` is structurally assignable to this.
  */
-export interface DesignReviewBundle {
+export interface DesignReviewBundle extends DesignReviewTaskBundle {
   repo_manifest?: RepoManifest;
   unit_manifest?: UnitManifest;
   graph_bundle?: GraphBundle;
@@ -54,13 +57,7 @@ export interface DesignReviewBundle {
   critical_flows?: CriticalFlowManifest;
   risk_register?: RiskRegister;
   design_assessment?: DesignAssessment;
-  /**
-   * The confirmed intent checkpoint, read ONLY to derive each unit's structured
-   * in-scope/excluded disposition (see `projectUnitManifest`). The cosmetic
-   * bracket-tag reason text is not projected — only the disposition KIND, which
-   * the prompt renders as `[in scope]` vs `[excluded: …]` and which the review
-   * actually reasons about (which units to skip).
-   */
+  /** Confirmed scope and effective review choices; timestamps remain provenance. */
   intent_checkpoint?: IntentCheckpoint;
 }
 
@@ -287,4 +284,9 @@ export function projectDesignReviewInputs(
     out[input] = PROJECTORS[input](bundle);
   }
   return out;
+}
+
+/** The complete structural input identity shared by issuance and acceptance. */
+export function designReviewInputRevision(bundle: DesignReviewBundle, pass: "contract" | "conceptual" = "contract"): string {
+  return hashContent(stableStringifyProjection({ inputs: projectDesignReviewInputs(bundle), task: projectDesignReviewTask(bundle, pass) }));
 }

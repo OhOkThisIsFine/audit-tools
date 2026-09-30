@@ -1,3 +1,4 @@
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -48,20 +49,6 @@ import {
  * assertion detects an asymptotic regression rather than a constant factor.
  */
 
-/**
- * A single Angular route object holding `markerCount` repeats of the lazy-import
- * key and NO `import(` anywhere. Every start position inside the gap must scan
- * to the end of the object and fail — the quadratic the bound removes.
- */
-function routeObjectSource(markerCount: number): string {
-  return [
-    "import { Routes } from '@angular/router';",
-    "export const routes: Routes = [",
-    `  { path: 'far', ${"loadChildren:".repeat(markerCount)} },`,
-    "];",
-  ].join("\n");
-}
-
 function elapsedMsOf(run: () => void): number {
   const started = process.hrtime.bigint();
   run();
@@ -69,35 +56,26 @@ function elapsedMsOf(run: () => void): number {
 }
 
 describe("framework route extraction is linear on adversarial input", () => {
-  it("scans a long route object without quadratic backtracking", () => {
-    // Pre-correction the 16k-marker object took ~181ms and grew 4x per doubling;
-    // bounded it is ~5ms. The ceiling sits an order of magnitude above the fixed
-    // figure and 3x below the broken one.
-    const content = routeObjectSource(16_000);
-    expect(content.length).toBeGreaterThan(200_000);
-    const elapsed = elapsedMsOf(() =>
-      extractFrameworkRouteEvidence("src/app/routes.ts", content, new Map()),
-    );
-    expect(
-      elapsed,
-      `scanning a ${content.length}-char route object took ${elapsed.toFixed(1)}ms`,
-    ).toBeLessThan(60);
-  });
-
-  it("grows linearly, not quadratically, across a doubling", () => {
-    const smallMs = elapsedMsOf(() =>
-      extractFrameworkRouteEvidence("src/app/routes.ts", routeObjectSource(8_000), new Map()),
-    );
-    const largeMs = elapsedMsOf(() =>
-      extractFrameworkRouteEvidence("src/app/routes.ts", routeObjectSource(16_000), new Map()),
-    );
-    // Linear doubles (~2.0 measured both bounded and across the whole scan);
-    // quadratic quadruples (~4.0 measured with the unbounded gap).
-    expect(
-      largeMs,
-      `8k=${smallMs.toFixed(2)}ms 16k=${largeMs.toFixed(2)}ms`,
-    ).toBeLessThan(Math.max(smallMs * 3, 30));
-  }, 120_000);
+  it("scans growing route objects in a bounded subprocess and preserves their paths", () => {
+    // A hard process ceiling bounds regressions without 60ms scheduler-sensitive
+    // assertions. The former unbounded lazy-import gap exceeds this ceiling at
+    // 200k markers; the bounded extractor handles all three sizes comfortably.
+    const script = `
+      import assert from 'node:assert/strict';
+      import { extractFrameworkRouteEvidence } from './src/audit/extractors/graphRoutes.ts';
+      for (const size of [50000, 100000, 200000]) {
+        const source = "const routes: Routes = [{path: 'far', " + 'loadChildren:'.repeat(size) + '}];';
+        const result = extractFrameworkRouteEvidence('src/app/routes.ts', source, new Map());
+        assert.deepEqual(result.routes, [{path:'/far', handler:'src/app/routes.ts'}]);
+        assert.deepEqual(result.calls, []);
+      }
+    `;
+    const result = spawnSync(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", script], {
+      cwd: process.cwd(), encoding: "utf8", timeout: 8000,
+    });
+    expect(result.error, result.stderr).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  }, 12000);
 
   it("still resolves a real lazy import inside the bounded window", () => {
     // The correction must not cost the shape it exists to read: a genuine
@@ -123,7 +101,7 @@ describe("framework route extraction is linear on adversarial input", () => {
     // No braces in the filler: the route object is `[^{}]*`, so an inner brace
     // would drop the object entirely and the test would prove nothing about the
     // window.
-    const filler = "// ".padEnd(300, "x");
+    const filler = " ".repeat(300);
     const source = [
       "import { Routes } from '@angular/router';",
       "export const routes: Routes = [",
@@ -256,4 +234,14 @@ describe("the destructuring-require scan is linear on adversarial input", () => 
     expect(targets, "a single destructured binding must still resolve").toContain("src/app/one.ts");
     expect(targets, "an aliased destructured binding must still resolve").toContain("src/app/two.ts");
   });
+});
+
+it("preserves alias case, colon, and multiline initializer boundaries", () => {
+  const lookup = new Map([["src/handler.ts", "src/handler.ts"]]);
+  for (const binding of ["exported AS local", "exported : local", "exported: local = fallback", "exported: local\n = fallback"]) {
+    const source = `const { ${binding} } = require('./handler'); router.get('/ok', local)`;
+    expect(extractRegisteredRouteEvidence("src/app.ts", source, lookup).routes[0]?.handler).toBe("src/handler.ts");
+  }
+  const source = "const { local =\n fallback } = require('./handler'); router.get('/ok', local)";
+  expect(extractRegisteredRouteEvidence("src/app.ts", source, lookup).routes[0]?.handler).toBe("src/app.ts");
 });

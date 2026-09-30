@@ -53,15 +53,15 @@ describe("CP-NODE-1: final-gate extraction is a behaviour-preserving move", () =
     expect(toolOwnedFinalGateCommandsNext).toBe(toolOwnedFinalGateCommandsGate);
   });
 
-  it("runToolOwnedFinalGate scopes out (does not block) on a non-monorepo target via both paths", async () => {
+  it("runToolOwnedFinalGate blocks without executable commands on a non-monorepo target via both paths", async () => {
     const noRepo = "/definitely/not/the/audit-tools/repo/root";
     const runner = () => ({ status: 0 });
     const viaNext = await runToolOwnedFinalGateNext(noRepo, { runner });
     const viaGate = await runToolOwnedFinalGateGate(noRepo, { runner });
     expect(viaNext.scoped_out).toBe(true);
     expect(viaGate.scoped_out).toBe(true);
-    expect(viaNext.passed).toBe(true);
-    expect(viaGate.passed).toBe(true);
+    expect(viaNext.passed).toBe(false);
+    expect(viaGate.passed).toBe(false);
   });
 });
 
@@ -118,12 +118,12 @@ describe("OBL-…-inv-2: the gate's command list is derived, not transcribed", (
     );
   });
 
-  it("NEGATIVE: no argv can carry a plan-supplied test command — the derivation's only input is `root`", () => {
+  it("audit-tools retains its pinned profile despite an explicit generic test override", () => {
     // Structural, not a string search for a value we happened to think of: the
     // function's ONLY parameter is the root, so there is no channel through
     // which a `plan.test_command` could reach an argv. The determinism check
     // beside it closes the other half (nothing is rewritten per call).
-    expect(toolOwnedFinalGateCommandsGate.length, "arity is the channel count").toBe(1);
+    expect(toolOwnedFinalGateCommandsGate(REPO_ROOT, ["false"])).toEqual(toolOwnedFinalGateCommandsGate(REPO_ROOT));
     const first = toolOwnedFinalGateCommandsGate(REPO_ROOT);
     const second = toolOwnedFinalGateCommandsGate(REPO_ROOT);
     expect(second).toEqual(first);
@@ -336,9 +336,9 @@ describe("OBL-…-inv-1/inv-13/fail-7: executed, scoped-out and disabled are thr
     const executed = await runToolOwnedFinalGateGate(REPO_ROOT, {
       runner: () => ({ status: 0 }),
     });
-    // Both are `passed: true` — which is exactly why the boolean alone cannot
-    // carry the distinction and `outcome` has to.
-    expect(scoped.passed).toBe(executed.passed);
+    // Zero commands must block rather than sharing the executed green value.
+    expect(scoped.passed).toBe(false);
+    expect(executed.passed).toBe(true);
     expect(scoped.outcome).toBe("scoped_out");
     expect(executed.outcome).toBe("executed");
   });

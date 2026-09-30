@@ -70,9 +70,9 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   each and returned no answer at all. The two that completed had spent ~460k and ~250k tokens.
   The cost is asymmetric: a killed lane wastes its entire spend, because the verdict is the last
   thing it writes. **Practice:** run deep codex lanes in small batches, not a full fan-out, and put
-  the cheapest lanes first so a quota death costs the least. `agy` has separate quota and is the
-  fallback — but it has `read_file` only, so it cannot grep or glob: name every file by absolute
-  path and hand it any enumeration it would otherwise have to search for.
+  the cheapest lanes first so a quota death costs the least. Use another authorized lane only after checking its current quota and capabilities;
+  provide bounded source paths and existing enumeration evidence rather than assuming that
+  a historical lane capability limit still applies.
   [[design-gate-lane-depth-differs-sharply]]
 
 - **Mechanical-analyzer acquisitions decided against — do not re-propose without new evidence
@@ -508,18 +508,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   the rendered HOST assets, not a second copy of the list. Diagnostic, not a silent trap: if
   `smoke:packaged` errors on a missing module or path, this is why.
 
-- **A `vi.spyOn` on the `audit-tools/shared` re-export barrel passes VACUOUSLY.** Spying a symbol on the
-  barrel namespace does not intercept a consumer that imported that symbol directly — the source holds its
-  own bound reference, so the spy records zero calls and every assertion over `spy.mock.calls` is green
-  while exercising nothing. Mechanically guarded ONLY under `tests/remediate` (INV-remediate-tests-12,
-  `tests/remediate/remediate-tests-invariants.test.ts`, which scans its own dir); `tests/audit` and
-  `tests/shared` are unguarded — verify by hand there. Everything else about vitest mocking is normal
-  practice at HEAD: `vi.spyOn` on built-ins, prototypes and relative source-module namespaces,
-  `vi.mock("node:child_process")` (an explicitly sanctioned exception in INV-WH,
-  `tests/shared/shared-tests-invariants.test.mjs`) and `vi.useFakeTimers({ toFake: [...] })` are all in
-  live use. Injectable-deps seams remain the right tool where the seam is IO or a step boundary,
-  but they are no longer a blanket rule: their original rationale was a retired test runner that
-  could not mock modules.
 
 - **Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/
   module_decomposition, not just a targeted one.** A narrow Explore before contract authoring is the top
@@ -717,27 +705,16 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   So a slow agy lane and a wedged one look identical until the timeout, and the only real signal is
   the lane's own `timeout_s` (660s). Budget for that before dispatching a lane on the critical path.
 
-- **The MCP `pool` offload lane's `--model auto` alias warns, and its `model` override is INERT
-  (2026-08-27, mechanism corrected 2026-08-29).** The lane template spawns
-  `claude.exe -p … --model auto`. On 2026-08-27 the alias read as fatal: the 71-byte
-  `unrecognized_model` stderr with 0 stdout while the job stayed `running`. On 2026-08-29 the SAME
-  stderr signature appeared on two runs and BOTH completed with correct repo-grounded answers — so
-  the signature alone is not death; check whether stdout arrives before cancelling. Still true:
-  `offload_start`'s `model` parameter substitutes only into lane args that carry a `{model}` token,
-  and this lane's args carry none, so the override lands nowhere and the argv shows `--model auto`
-  regardless. The lane-config fix lives in the lane registry, outside this repo
-  (`~/.agent-config/offload-lane-data.mjs`).
+- **An execution override can be accepted without affecting the launched command.** Historical
+  offload lanes accepted a model field that their command templates never substituted. Check the
+  current dispatch contract and effective command rather than assuming an accepted field took
+  effect. Lane configuration belongs to its machine-wide owner, outside this repository.
 
-- **A free-pool reply that returns nothing usable is usually `finish_reason: max_tokens`, not a weak
-  model (2026-08-09).** The router's `auto` alias resolves to a reasoning model that spends its whole
-  budget thinking **in the visible channel** — 7 of 7 contract-drafting jobs came back ~10,200 chars
-  of prose having never reached the JSON they were asked for. Always record `finish_reason` /
-  `stop_reason`; a `max_tokens` stop means raise the cap or pin a non-reasoning model, and reading it
-  as "the free model can't do this" is the myth a standing open-bugs entry already warns about.
-  ⚠ **Assistant PREFILL is not honoured as continuation here** — the reply restarts with its own `{`,
-  producing `{"name":"x",{"name":"x",…`, so salvage must take the largest balanced object rather than
-  assuming the prefill opened it. ⚠ **`/v1/models` listing a model is not a reachability claim**:
-  `glm-4.7` is listed and 401s upstream on every call.
+- **A reply that returns nothing usable can have exhausted its output budget.** Record the
+  completion reason and validate the requested result, rather than treating an empty or
+  prose-only answer as evidence that a model lacks the capability. A truncation signal supports
+  reducing the task or adjusting a supported output cap. Historical prefill behavior and model
+  listings do not establish the current provider's continuation or reachability contract.
 
 - **`.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between
   its markers is silently wiped (2026-07-30).** The wrapper's install path rewrites the whole block,
@@ -748,30 +725,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   missing. Put custom rules **after** the closing marker; later rules win, so a negation there still
   overrides the block's `.audit-tools/*` / `.audit-tools/*/*` patterns.
 
-- **The contract-pipeline repair prompt orders the OPPOSITE of the repair invariant (2026-08-09).**
-  A critique repair renders `Regenerate \`finalized_module_contracts\` IN FULL`
-  (`renderContractRepairPrompt`, reached from `src/remediate/steps/contractPipeline.ts`), while the
-  standing requirement — and the reason INV-CO-13 exists — is a TARGETED EDIT, because regeneration is
-  what silently collapsed a 7-module set to 4. A host that follows the prompt does the banned thing.
-  Until the prompt text is fixed: repair by editing the payload, and assert the module-name list before
-  and after.
 
-- **A critique can prescribe a remedy the pipeline structurally cannot perform (2026-08-09).**
-  CDC-T1 said to widen a module's `file_scope`, but `file_scope` lives in the module decomposition —
-  finalized-contract interface prose remains prose, though since P38 path-parseable `outputs` /
-  `side_effects` entries are unioned into node write scope by `buildNodeWriteScopeResolver` — and the
-  only route back to the
-  decomposition is the pre-critic citation-grounding gate, which fires on a non-existent cited path,
-  never on a critique repair. So the repair step could not do what its own critique asked. Nothing
-  validates that a critique's remedy is reachable from the phase it is dispatched to; when one is not,
-  the fix is a decomposition re-cut, not another repair round.
 
 - **The per-project memory store has NO locking, and a concurrent session silently reverts your edits
   (2026-08-09).** Two Claude sessions purging `~/.claude/projects/<slug>/memory/` at once: three files
   deleted at 17:29 were re-created byte-identical at 17:30:57, and `~/.claude/…/memory/MEMORY.md` was rewritten three
-  times by the other session mid-pass. There is no lock and no conflict signal — the loser's work just
-  disappears. Detect it by `stat`-ing mtimes before and after a write; when a second session is live,
-  stop and let one own the store rather than interleaving.
+  times by the other session mid-pass. That incident had no lock or conflict signal. This repository cannot establish the
+  current machine-wide store's locking contract. Until its owner verifies atomic writes and
+  coordination, serialize writers; checking mtimes can reveal a conflict but does not prevent one.
 
 - **The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).** The index
   is bounded by a ~24.4KB read limit with no check enforcing it; adding one index line plus a note
@@ -794,16 +755,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (`test:doc-contract`, up to 240s) is deliberately excluded — including it would make attest cost as
   much as the gate — so a doc-contract failure can still void an attestation and force a second attest.
 
-- **`docs/backlog.md` is NOT a record path to `writeOpenItems`, but `docs/backlog/*` is** (hit
-  2026-08-13). `isRecordPath` (`scripts/nightly/items.mjs`) matches the `docs/backlog/` prefix, so
-  the split item files are record paths and the router file one directory up is not. The two
-  refusals are opposite and both fire at write: an item probing `docs/backlog/durable-traps.md`
-  MUST declare `auto_close: false`, and an item probing `docs/backlog.md` must NOT — declaring it
-  is refused as "not a positive probe on a record path". Nothing about the two filenames signals
-  which side a given item falls on, so authoring a queue item against the router file is a
-  guess-then-retry. Enforceable half: the refusal message already names the record set, but it
-  fires only after the batch is assembled; a `recordPathHint(file)` export would let an author
-  check the classification up front.
 
 - **Git-bash `/tmp` and node's `C:	mp` are different directories (hit 2026-08-18).** A Bash-tool
   redirect to `/tmp/x.log` lands in the msys temp root, but a node script reading `/tmp/x.log`
@@ -897,20 +848,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   and the steps a light variant drops are the ones that catch things.
   [[ph01-rejected-one-core-two-draws-stands]]
 
-- **Two offload lanes fail SUCCESS-SHAPED, and neither reports why in its status (2026-08-28).**
-  Both burned a dispatch on a design gate and returned nothing usable while the job status said
-  `running` then finished cleanly. The `pool` lane passes `--model auto`, which this Claude Code
-  build rejects — `[claude-code:unrecognized_model]` on stderr, zero stdout, and the job runs to its
-  full 900s timeout before anyone learns it never started. The `agy-opus` lane exited 0 after 19s
-  having emitted only its own preamble ("I'll start by reading…"), 741 output tokens, no answer.
-  **Classify by OUTPUT SIZE before blaming quota**, and read `stderr_tail` on any lane whose
-  `stdoutBytes` is 0 — the status field will not tell you. Pass an explicit `model` to `pool` rather
-  than relying on its default. Neither failure is quota, and neither is the prompt.
-  ⚠ The `--model auto` half is INTERMITTENT, not absolute: four `pool` jobs on 2026-08-28 (same
-  build, same flag) each printed the same `[claude-code:unrecognized_model]` stderr line and still
-  returned full, correct answers in 3-11 minutes. So the warning alone is not the failure signal —
-  `stdoutBytes` is. Treat zero stdout as the trap firing; treat the warning with non-zero stdout as
-  noise.
+- **A successful process exit does not establish a usable review result.** Historical lanes
+  returned zero bytes or only a preamble while reporting successful completion. Inspect output
+  and diagnostics, then validate the requested verdict shape before admitting the result.
+  A warning alone is not failure when a complete valid result exists; empty output alone does
+  not prove quota exhaustion. Current lane configuration and failure classification belong to
+  the dispatch contract, not a remembered model override.
 
 - **A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it
   before the shell ever sees it (2026-08-28).** A quoted heredoc is literal to the shell, so the
@@ -928,18 +871,3 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   again at Sep 1st, 2026", and wrote that lane off for the run. On 2026-08-28 the same lane answered
   a probe in seconds. **Probe every lane at run start; never carry a quota verdict forward from a
   previous run's record** — a stale one silently shrinks coverage while looking like diligence.
-
-- **"File missing" is classified from ENOENT alone, and a path that traverses a FILE does not report
-  ENOENT on both platforms (2026-09-03).** Measured on Node 26: reading `<a-file>/x.json` gives
-  **ENOENT on win32** and **ENOTDIR on POSIX**, so `isFileMissingError` (`src/shared/io/json.ts`)
-  calls the identical filesystem state "absent" here and an IO failure in Linux CI —
-  `readOptionalJsonFile` returns `undefined` on one and throws `Failed to read <path>` on the other.
-  That asymmetry alone turned a green Windows suite red in CI. **A test that injects a failure by
-  putting a file where a DIRECTORY belongs is platform-dependent and proves nothing about the other
-  platform; inject a DIRECTORY where a FILE belongs instead** — that is EISDIR on win32 and POSIX
-  alike (also measured), so both run the same arm. Same for `mkdir` over an existing file: EEXIST on
-  both, but `mkdir` THROUGH one is ENOTDIR on both. The open property is that the shared classifier
-  is still platform-asymmetric; every `readOptionalJsonFile` caller inherits it, so a never-throw
-  contract must guard the call rather than trust the classifier.
-
-## Doc-set hygiene (enforced)

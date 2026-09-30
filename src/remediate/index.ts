@@ -1,3 +1,7 @@
+import { recoverIngestHostResults } from "./steps/recoverIngest.js";
+import { resolveAdversarialDepth } from "./steps/contractPipeline.js";
+import { PHASE_TO_ARTIFACT, reviewRequirementForRole } from "./steps/contractPipelinePrompts.js";
+import { validateContractReviewInput } from "./contractPipeline/contractReviewBinding.js";
 // sites-pinned: tests/remediate/recover-verb-branches.test.ts
 // (the
 // ACCEPTED-WITH-ISSUES arm — its status token and exit code)
@@ -5,7 +9,7 @@ import { Command } from "commander";
 import { readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { decideNextStep, recoverIngestHostResults } from "./steps/nextStep.js";
+import { changeOperatorLifecycle, decideNextStep } from "./steps/nextStep.js";
 import { validateArtifacts } from "./validation/artifacts.js";
 import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
 import { evaluateContractPipelineCrossGateOutcomes } from "./validation/contractPipelineGates.js";
@@ -21,10 +25,10 @@ import {
   envelopePayload,
   type ContractPipelineArtifactName,
 } from "./contractPipeline/artifactStore.js";
+import { StateStore } from "./state/store.js";
 import { intakePaths } from "./intake.js";
 import type { ValidationIssue } from "audit-tools/shared";
 import {
-  applyGuidanceFile,
   assertCliCommandAllowedFromCwd,
   callerWorkingDirectory,
   discoverRepoRoot,
@@ -37,10 +41,8 @@ import {
   runWithBlockedStepBackstop,
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
-import {
-  remediationSubmissionBinding,
-  type RemediationHostIngestSummary,
-} from "./steps/dispatch/hostHandoff.js";
+import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
+import { type RemediationHostIngestSummary } from "./steps/dispatch/hostContracts.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -100,7 +102,9 @@ program.hook("preAction", (_thisCommand, actionCommand) => {
 
 program
   .command("next-step")
+  .option("--plan-only", "Finish planning, then persist a pause before implementation")
   .description("Write and print one backend-rendered remediation step")
+  .option("--verification-command <command>", "Operator-approved test command for this run; declared build/typecheck/lint checks remain")
   .option("--root <path>", ROOT_OPTION_DESCRIPTION)
   .option(
     "--artifacts-dir <path>",
@@ -121,6 +125,11 @@ program
       (previous ?? []).concat([value]),
     [] as string[],
   )
+  .option("--severity <level>", "Select this audit severity (repeatable; unioned with --finding-id)",
+    (value: string, previous: string[] | undefined) => [...(previous ?? []), value])
+  .option("--finding-id <id>", "Select this audit finding ID (repeatable; unioned with --severity)",
+    (value: string, previous: string[] | undefined) => [...(previous ?? []), value])
+  .option("--guidance <text>", "Use conversational feedback directly; the tool writes its canonical intake file")
   .option(
     "--guidance-file <path>",
     "Single-step bootstrap: write this file's contents to intake/conversation-start.md (sole, idempotent writer) before deciding the step",
@@ -146,16 +155,19 @@ program
         // Single-step bootstrap: fold the optional guidance file into
         // intake/conversation-start.md in this same invocation, then decide the
         // step — no separate write-then-call dance for the host to remember.
-        if (options.guidanceFile) {
-          applyGuidanceFile(artifactsDir, options.guidanceFile);
-        }
         return withBackendLogsOnStderr(() =>
           decideNextStep({
             root,
             artifactsDir,
             input: options.input,
-            guidanceFileSupplied: Boolean(options.guidanceFile),
+            severity: options.severity,
+            findingIds: options.findingId,
+            guidanceFileSupplied: options.guidance !== undefined || Boolean(options.guidanceFile),
+            guidanceText: options.guidance,
+            guidanceFile: options.guidanceFile,
+            planOnly: options.planOnly === true,
             finalizeClosing: options.finalizeClosing === true,
+            verificationCommand: options.verificationCommand,
             forceReplan: options.forceReplan === true,
           }),
         );
@@ -164,6 +176,27 @@ program
     );
     console.log(JSON.stringify(step, null, 2));
   });
+
+for (const action of ["pause", "resume", "cancel"] as const) {
+  program.command(action)
+    .description(`${action} the persisted remediation run without changing accepted work or owning host worktrees`)
+    .option("--root <path>", ROOT_OPTION_DESCRIPTION)
+    .option("--artifacts-dir <path>", "Artifacts directory", ".audit-tools/remediation")
+    .option("--worktree <path>", "Host-reported worktree location (metadata only)")
+    .option("--outcome <text>", "Host-reported work outcome (metadata only)")
+    .action(async (options) => {
+      const root = resolveRootOption(options.root);
+      const artifactsDir = resolveArtifactsDirOption(root, options.artifactsDir);
+      const step = await changeOperatorLifecycle({
+        root, artifactsDir, action,
+        ...((options.worktree || options.outcome) ? { hostReport: {
+          ...(options.worktree ? { worktree: options.worktree } : {}),
+          ...(options.outcome ? { outcome: options.outcome } : {}),
+        } } : {}),
+      });
+      console.log(JSON.stringify(step, null, 2));
+    });
+}
 
 // The four installer verbs are intercepted by the remediate-code bin BEFORE the
 // dist CLI is reached (`remediate-code.mjs` main), so nothing registered here can
@@ -347,17 +380,20 @@ export async function runValidateArtifactAction(options: {
       exitCode: 2,
     };
   }
-  // Unwrap a stored content-hash envelope so the bare payload is validated
-  // against its contract; a plain payload validates as-is. Uses the canonical
-  // isEnvelope predicate so CLI self-check and ingest unwrap identically.
-  const unwrapped = isEnvelope(parsed) ? parsed.payload : parsed;
-  // Stamp the tool-owned `created_at` (host has no clock) so the self-check
-  // matches ingest: a host payload without a timestamp is valid here too (B4).
-  const payload = stampToolCreatedAt(unwrapped, new Date().toISOString());
-  const structuralIssues = validator(payload, name);
-
   const root = resolveRootOption(options.root);
   const artifactsDir = resolveArtifactsDirOption(root, options.artifactsDir);
+  const role = Object.entries(PHASE_TO_ARTIFACT).find(([, artifact]) => artifact === name)?.[0] ?? "";
+  const depth = (await resolveAdversarialDepth(artifactsDir)).adversarialDepth;
+  const requirement = reviewRequirementForRole(role, depth);
+  const reviewed = await validateContractReviewInput({
+    artifactsDir, artifact: name, role, requirement,
+    raw: requirement === "ordinary" && isEnvelope(parsed) ? parsed.payload : parsed,
+  });
+  if (!reviewed.ok) {
+    return { result: { status: "error", name, issue_count: 1, issues: [{ path: `${name}.review`, severity: "error", message: reviewed.issue }] }, exitCode: 1 };
+  }
+  const payload = stampToolCreatedAt(reviewed.payload, new Date().toISOString());
+  const structuralIssues = validator(payload, name);
 
   let crossGateIssues: ValidationIssue[];
   try {
@@ -693,6 +729,8 @@ export async function recoverSubmissionVerb(options: {
   submissionId: string;
   from: string;
 }): Promise<RecoveryVerbResult> {
+  const store = new StateStore(options.artifactsDir);
+  return store.withActiveOperator(async (): Promise<RecoveryVerbResult> => {
   const binding = await remediationSubmissionBinding({
     root: options.root,
     artifactsDir: options.artifactsDir,
@@ -737,6 +775,7 @@ export async function recoverSubmissionVerb(options: {
       submission_path: outcome.submission_path,
     },
   };
+  });
 }
 
 export function runValidateCommand(

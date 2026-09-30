@@ -31,6 +31,9 @@ export const REMEDIATION_HOST_DECISION_CONTRACT_VERSION =
   "remediation-host-decision/v1alpha1" as const;
 
 export type RemediationStepKind =
+  | "operator_resumed"
+  | "operator_paused"
+  | "operator_cancelled"
   | "confirm_intent"
   | "confirm_auto_discovered_input"
   | "confirm_resume_or_restart"
@@ -42,6 +45,8 @@ export type RemediationStepKind =
   | "collect_review_approval"
   | "collect_clarifications"
   | "dispatch_implement"
+  | "repair_handoff"
+  | "review_contract_conformance"
   | "phase_busy"
   | "collect_triage"
   | "close_run"
@@ -112,12 +117,10 @@ import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 // listing — that was the duplicate this consolidates.
 export type { AccessDeclaration };
 
-export type RemediationStepStatus = StepStatus;
-
 export interface RemediationStep {
   contract_version: typeof REMEDIATION_STEP_CONTRACT_VERSION;
   step_kind: RemediationStepKind;
-  status: RemediationStepStatus;
+  status: StepStatus;
   prompt_path: string;
   run_id: string | null;
   repo_root: string;

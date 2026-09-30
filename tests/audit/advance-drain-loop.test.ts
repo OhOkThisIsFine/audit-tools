@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
 import type { AnalyzerSetting } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
+import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -369,4 +373,88 @@ test("an executor throw surfaces as ExecutorFailure naming the ACTUAL failing ex
   expect((failure?.cause as Error | undefined)?.message).toBe(
     "stub executor blew up",
   );
+});
+
+
+// O22: exercise the real drain, not two manually sequenced state derivations.
+// Only the structure producer is controlled; metadata refresh, slice comparison,
+// downstream charter omission and shared-engine continuation remain production.
+test.each([true, false])("a populated deferred slice is resolved within one drain (membership changes: %s)", async (changed) => {
+  await withTempDir("advance-deferred-slice-", async (root) => {
+    await writeFixtureRepo(root);
+    const initial = await advanceAudit({}, { root, analyzers: SKIP_ANALYZERS });
+    const member = "src/api/auth.ts";
+    const outside = "src/lib/session.ts";
+    const prepared: ArtifactBundle = {
+      ...initial.updated_bundle,
+      structure_decomposition: {
+        generated_at: "2026-07-23T00:00:00Z",
+        target: "structure",
+        node_universe_size: 2,
+        source_ids: ["call_import"],
+        consensus: [{ node_id: member, members: [member], agreed_across_source: 1,
+          stable_across_scale: 1, contested: false }],
+        contested: [], findings: [],
+      },
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1", confirmed_at: "2026-07-23T00:00:00Z",
+        confirmed_by: "host", scope_summary: "fixture", intent_summary: "fixture",
+        design_review: { answered_at: "2026-07-23T00:00:00Z", ceiling: { rung: "shallow" } },
+      },
+      charter_register: {
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+        generated_at: "2026-07-23T00:00:00Z", target: "charter",
+        ceiling: { rung: "shallow" }, status: "omitted", ...EMPTY_REGISTER_BODY,
+      },
+    };
+    const baseline = runIntentEquivalenceResolve(prepared).updated;
+    const names = [...new Set([
+      ...Object.keys(baseline.artifact_metadata!.artifacts),
+      "intent_checkpoint.json", "charter_register.json",
+    ])];
+    baseline.artifact_metadata = computeArtifactMetadata(baseline, baseline.artifact_metadata, names);
+    const pending: ArtifactBundle = {
+      ...baseline,
+      repo_manifest: {
+        ...baseline.repo_manifest!,
+        files: baseline.repo_manifest!.files.map((file) => file.path === outside
+          ? { ...file, hash: "unrelated-content-churn" } : file),
+      },
+    };
+    // All other producers are already current. Structure alone still owes a
+    // regeneration; charter's protected membership/content slices haven't moved.
+    pending.artifact_metadata = computeArtifactMetadata(pending, baseline.artifact_metadata,
+      names.filter((name) => !["structure_decomposition.json", "charter_register.json"].includes(name)));
+    const before = computeStaleArtifacts(pending, { emit: false });
+    expect(before.has("structure_decomposition.json")).toBe(true);
+    expect(before.has("charter_register.json")).toBe(false);
+    expect([...before.deferred]).toContain("charter_register.json");
+    expect(decideNextStep(pending).selected_obligation).toBe("structure_decomposition_current");
+
+    const executions: string[] = [];
+    const realCharter = EXECUTOR_RUNNERS.charter_extraction_executor!;
+    const result = await withStubbedRunner("structure_decomposition_executor", async (bundle) => {
+      executions.push("structure");
+      return {
+        updated: { ...bundle, structure_decomposition: {
+          ...bundle.structure_decomposition!,
+          consensus: [{ ...bundle.structure_decomposition!.consensus[0]!,
+            members: changed ? [member, outside] : [member] }],
+        } },
+        artifacts_written: ["structure_decomposition.json"],
+        progress_summary: "Controlled structure regeneration",
+      };
+    }, () => withStubbedRunner("charter_extraction_executor", async (...args) => {
+      executions.push("charter");
+      expect(computeStaleArtifacts(args[0], { emit: false }).deferred.size).toBe(0);
+      return realCharter(...args);
+    }, () => advanceAudit(pending, { root, analyzers: SKIP_ANALYZERS })));
+
+    expect(executions).toEqual(changed ? ["structure", "charter"] : ["structure"]);
+    expect(result.artifacts_written.includes("charter_register.json")).toBe(changed);
+    const after = computeStaleArtifacts(result.updated_bundle, { emit: false });
+    expect(after.deferred.size).toBe(0);
+    expect(after.has("structure_decomposition.json")).toBe(false);
+    expect(after.has("charter_register.json")).toBe(false);
+  });
 });

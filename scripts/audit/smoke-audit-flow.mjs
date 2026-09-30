@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/smoke-fixture-root.test.ts, tests/audit/smoke-producer-contract.test.ts
 // The audit-code smoke FLOW — one home for the sequence both audit smokes run.
 //
 // `smoke-linked-audit-code.mjs` and `smoke-packaged-audit-code.mjs` differ only
@@ -19,6 +20,7 @@
 // change break cheaply, at `npm test`, instead of in a packaged smoke in CI.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -101,6 +103,24 @@ export async function buildSyntheticResults(tasks, root, smokeLabel) {
   return results;
 }
 
+// Scripted hosts copy the actual emitted contract, never mint a request binding.
+async function emittedExample(promptPath, contractVersion) {
+  const prompt = await readFile(promptPath, "utf8");
+  for (const match of prompt.matchAll(/```json\s*([\s\S]*?)```/gu)) {
+    let value;
+    try { value = JSON.parse(match[1]); } catch { continue; }
+    if (value?.contract_version === contractVersion) return value;
+  }
+  throw new Error(`Prompt ${promptPath} carries no ${contractVersion} example`);
+}
+
+async function submitIndependentReview(promptPath, resultPath) {
+  const envelope = await emittedExample(promptPath, "review-submission/v1");
+  envelope.review = { mode: "independent", reason: "Hermetic smoke models a reviewer context separate from the fixture author." };
+  envelope.result = [];
+  await writeFile(resultPath, JSON.stringify(envelope, null, 2) + "\n");
+}
+
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause with scripted host inputs (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
@@ -110,6 +130,18 @@ async function advanceToDispatchReady(runNextStep, log) {
     const step = JSON.parse((await runNextStep()).stdout);
     assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
     log.detail(`next-step -> ${step.step_kind} (${step.status})`);
+    if (step.step_kind === "functional_preflight") {
+      const report = await emittedExample(step.prompt_path, "audit-functional-preflight/v1");
+      const inspected = ["src/api/auth.ts", "src/lib/session.ts"];
+      const sources = await Promise.all(inspected.map(path => readFile(join(report.repository_root, path), "utf8")));
+      const imports = sources.flatMap(source => source.match(/^\s*import\b.*$/gmu) ?? []);
+      report.source_inspection = { available: true, evidence: `Read fixture sources ${inspected.join(" and ")} (${sources.map(source => Buffer.byteLength(source)).join(", ")} bytes).` };
+      report.relationship_inspection = { available: true, evidence: `Inspected their import relationships: ${imports.join("; ") || "neither module declares an import"}.` };
+      report.decision = "ready";
+      report.operator_approved_degraded = false;
+      await writeFile(step.artifact_paths.functional_preflight, JSON.stringify(report, null, 2) + "\n");
+      continue;
+    }
     if (step.step_kind === "critical_flow_fallback") {
       // Deterministic flow inference fell below the confidence bar; answer the
       // host fallback gate with an empty enrichment (nothing to add).
@@ -151,16 +183,16 @@ async function advanceToDispatchReady(runNextStep, log) {
       continue;
     }
     if (step.step_kind === "design_review_parallel") {
-      await writeFile(step.artifact_paths.contract_results, "[]\n");
-      await writeFile(step.artifact_paths.conceptual_results, "[]\n");
+      await submitIndependentReview(step.artifact_paths.contract_prompt, step.artifact_paths.contract_results);
+      await submitIndependentReview(step.artifact_paths.conceptual_prompt, step.artifact_paths.conceptual_results);
       continue;
     }
     if (step.step_kind === "design_review_contract") {
-      await writeFile(step.artifact_paths.contract_results, "[]\n");
+      await submitIndependentReview(step.artifact_paths.contract_prompt, step.artifact_paths.contract_results);
       continue;
     }
     if (step.step_kind === "design_review_conceptual") {
-      await writeFile(step.artifact_paths.conceptual_results, "[]\n");
+      await submitIndependentReview(step.artifact_paths.conceptual_prompt, step.artifact_paths.conceptual_results);
       continue;
     }
     if (step.step_kind === "edge_reasoning_dispatch") {
@@ -394,6 +426,21 @@ export async function withTempRepo(tempDirPrefix, fn) {
         "",
       ].join("\n"),
     );
+
+    // Root discovery intentionally climbs to the nearest repository marker.
+    // Give this fixture its own real repository so ambient parent markers cannot
+    // redirect ensure, legacy cleanup or git-backed audit observations elsewhere.
+    const hooksDir = join(tempDir, "empty-hooks");
+    await mkdir(hooksDir);
+    const gitEnv = Object.fromEntries(Object.entries(process.env)
+      .filter(([key]) => !key.startsWith("GIT_")));
+    const git = (...args) => execFileSync("git", [
+      "-C", root, "-c", `core.hooksPath=${hooksDir}`, ...args,
+    ], { env: gitEnv, encoding: "utf8", windowsHide: true, timeout: 10_000 });
+    git("init", "--quiet");
+    git("add", "--", "package.json", "src", "infra");
+    git("-c", "user.name=Smoke Fixture", "-c", "user.email=smoke@example.invalid",
+      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Seed smoke fixture");
 
     return await fn(root);
   } finally {

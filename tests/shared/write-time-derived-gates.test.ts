@@ -84,9 +84,7 @@ describe('the write-time leg set is drawn from the guard registry', () => {
     expect(writeTimeIds('docs/backlog/open-bugs.md')).toEqual([
       'check:doc-code-citations',
       'check:retired-infrastructure',
-      'check:backlog-budget',
-      'check:backlog-friction-tags',
-      'check:backlog-line-numbers',
+      'check:backlog',
       'check:memory-citations',
     ]);
   });
@@ -102,9 +100,7 @@ describe('the write-time leg set is drawn from the guard registry', () => {
       expect(writeTimeIds(file), `${file} must draw the backlog family`).toEqual([
         'check:doc-code-citations',
         'check:retired-infrastructure',
-        'check:backlog-budget',
-        'check:backlog-friction-tags',
-        'check:backlog-line-numbers',
+        'check:backlog',
         'check:memory-citations',
       ]);
     }
@@ -113,7 +109,7 @@ describe('the write-time leg set is drawn from the guard registry', () => {
   it('the baseline file its own ratchet reads is a write-time trigger too', () => {
     // The budget's own INPUT — an edit to the recorded ceilings is exactly the
     // edit whose consequence the gate has to state.
-    expect(writeTimeIds('docs/backlog/.size-baseline.json')).toContain('check:backlog-budget');
+    expect(writeTimeIds('docs/backlog/.size-baseline.json')).toContain('check:backlog');
   });
 
   it('a source .ts edit draws no advisory leg at all', () => {
@@ -129,7 +125,7 @@ describe('the runner reports findings as data and never owns a verdict', () => {
 
   it('a failing leg becomes a finding carrying the gate id, its output and its fix hint', () => {
     const execute = vi.fn((command: string) => {
-      if (command.includes('check:backlog-line-numbers')) {
+      if (command.includes('check:backlog')) {
         const error = new Error('red') as Error & { stdout?: string; stderr?: string };
         error.stderr = 'line-number citation `src/x.ts:123`';
         throw error;
@@ -144,7 +140,7 @@ describe('the runner reports findings as data and never owns a verdict', () => {
     });
 
     expect(result.findings).toHaveLength(1);
-    expect(result.findings[0]?.id).toBe('check:backlog-line-numbers');
+    expect(result.findings[0]?.id).toBe('check:backlog');
     expect(result.findings[0]?.tail).toContain('line-number citation');
     expect(result.findings[0]?.fix).toBeTruthy();
   });
@@ -161,7 +157,7 @@ describe('the runner reports findings as data and never owns a verdict', () => {
       legRunnable: wired,
       legCommand,
     });
-    expect(commands).toContain('npm run check:backlog-line-numbers');
+    expect(commands).toContain('npm run check:backlog -- --write-time');
   });
 
   it('an unwired leg is announced as skipped rather than counted as a pass', () => {
@@ -175,7 +171,7 @@ describe('the runner reports findings as data and never owns a verdict', () => {
     expect(result.ran).toEqual([]);
     // The deferred leg is never probed for wiring — it does not run here at all,
     // so reporting it as "unwired" would be an announcement about nothing.
-    expect(result.skipped).toHaveLength(legs.length - result.deferred.length);
+    expect(result.skipped).toHaveLength(legs.length);
     expect(result.skipped.length).toBeGreaterThan(0);
     expect(result.findings).toEqual([]);
   });
@@ -197,7 +193,7 @@ describe('the size budget RATCHETS at commit only', () => {
     // The point of the deferral: the gate that WRITES the baseline never runs here.
     expect(delivered).not.toContain('npm run check:backlog-budget');
     // …while every sibling still does.
-    expect(delivered).toContain('npm run check:backlog-line-numbers');
+    expect(delivered).toContain('npm run check:backlog -- --write-time');
     expect(delivered).toContain('npm run check:doc-code-citations');
   });
 
@@ -225,9 +221,8 @@ describe('the size budget RATCHETS at commit only', () => {
       const scripts = Object.fromEntries(
         [
           'check:doc-code-citations',
-          'check:backlog-line-numbers',
+          'check:backlog',
           'check:memory-citations',
-          'check:backlog-friction-tags',
         ].map((name) => [name, 'node -e "process.exit(1)"']),
       );
       writeFileSync(join(fixture, 'package.json'), JSON.stringify({ scripts }), 'utf8');

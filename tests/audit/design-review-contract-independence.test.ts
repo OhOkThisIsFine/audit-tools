@@ -1,3 +1,6 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { readAuditReviewBinding } from "../../src/audit/cli/auditReviewBindings.js";
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 /**
  * Design-review independence — the SOLO `design_review_contract` branch.
  *
@@ -54,8 +57,10 @@ interface DesignReviewStep {
 }
 
 /** OS-agnostic tail match — the step contract forward-slashes host-facing paths. */
-function endsWithPath(candidate: string, tail: string): boolean {
-  return String(candidate).replace(/\\/g, "/").endsWith(tail);
+async function boundContractPromptPath(artifactsDir: string): Promise<string> {
+  const binding = await readAuditReviewBinding(artifactsDir, GATE_LANES.design_review_contract);
+  if (!binding) throw new Error("Expected a live tool-issued contract review binding");
+  return binding.promptPath.replaceAll("\\", "/");
 }
 
 /**
@@ -73,7 +78,7 @@ async function persistDesignReviewState(
   artifactsDir: string,
   { conceptualDone }: { conceptualDone: boolean },
 ): Promise<void> {
-  const bundle: ArtifactBundle = await buildAdvancedBundle(
+  let bundle: ArtifactBundle = await buildAdvancedBundle(
     root,
     "design_review_contract_completed",
   );
@@ -87,9 +92,12 @@ async function persistDesignReviewState(
       conceptual_findings: [],
     };
   }
+  bundle = captureCompletedDesignReviews(bundle);
   delete bundle.artifact_metadata;
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, bundle);
+  await persistDesignReviewSnapshots(artifactsDir, bundle);
+  await satisfyFunctionalPreflight(root, artifactsDir);
   await writeFile(
     join(artifactsDir, "analyzer-policy.json"),
     JSON.stringify(
@@ -124,6 +132,7 @@ test(
         await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
       );
       expect(step.step_kind).toBe("design_review_contract");
+      const expectedPacketPath = await boundContractPromptPath(artifactsDir);
 
       // A dispatched worker packet exists at all — the solo pass is delegated,
       // not folded into the host's own prompt.
@@ -132,7 +141,7 @@ test(
         packetPath,
         "solo contract pass must emit a worker packet (contract_prompt), not review inline",
       ).toBeTruthy();
-      expect(endsWithPath(packetPath, "lanes/design-review-contract-prompt.md")).toBe(true);
+      expect(packetPath.replaceAll("\\", "/")).toBe(expectedPacketPath);
 
       const packet = await readFile(packetPath, "utf8");
       expect(packet).toContain("Project contract review (adversarial pass)");
@@ -160,7 +169,7 @@ test(
       // Packet readable / results writable are pre-declared, as in the parallel branch.
       expect(
         (step.access?.read_paths ?? []).some((p) =>
-          endsWithPath(p, "lanes/design-review-contract-prompt.md"),
+          p.replaceAll("\\", "/") === expectedPacketPath,
         ),
         "the contract packet must be declared readable",
       ).toBe(true);
@@ -190,6 +199,7 @@ test(
         await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
       );
       expect(step.step_kind).toBe("design_review_parallel");
+      const expectedPacketPath = await boundContractPromptPath(artifactsDir);
 
       const packet = await readFile(step.artifact_paths.contract_prompt, "utf8");
       expect(packet).toContain("Project contract review (adversarial pass)");
@@ -202,7 +212,7 @@ test(
 
       expect(
         (step.access?.read_paths ?? []).some((p) =>
-          endsWithPath(p, "lanes/design-review-contract-prompt.md"),
+          p.replaceAll("\\", "/") === expectedPacketPath,
         ),
       ).toBe(true);
       expect(

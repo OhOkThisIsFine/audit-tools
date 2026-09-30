@@ -1,3 +1,4 @@
+import { buildAuditFindingsReport, buildAuditReportModel } from "../../src/audit/reporting/synthesis.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
@@ -289,6 +290,13 @@ test("buildToolingManifest: a directory that vanishes mid-walk is skipped and RE
   });
 });
 
+test("buildToolingManifest: an unreadable input root is not silently treated as absent", async () => {
+  await withTempDir("audit-code-tooling-root-denied-", async (tempDir: string) => {
+    await mkdir(join(tempDir, DENIED_BY_STAT));
+    await assert.rejects(() => hashToolingInputs(tempDir, [DENIED_BY_STAT]), /EACCES/);
+  });
+});
+
 test("buildToolingManifest: a walk failure that is NOT a missing entry still throws", async () => {
   await withTempDir("audit-code-tooling-walk-race-", async (tempDir: string) => {
     const inputDir = join(tempDir, "tree");
@@ -399,7 +407,7 @@ test("promoteFinalAuditReport announces a failed audit-findings.json copy AND ex
       // The findings file must EXIST for the copy stub below to be the thing
       // that fails: the archive reads its source first, so an absent source is
       // the ordinary legacy branch, not the real-failure branch under test.
-      audit_findings: { contract_version: "audit-findings/v1alpha1" },
+      audit_findings: buildAuditFindingsReport(buildAuditReportModel({ results: [] }), null),
     } as never);
     // Every archive SOURCE must exist, or its archive short-circuits at the
     // source read and never reaches the copy — which would silently weaken the

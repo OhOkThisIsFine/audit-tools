@@ -1,3 +1,4 @@
+import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
 /**
  * Suite hermeticity for the ACQUIRED (external) analyzer set.
  *
@@ -24,7 +25,7 @@ import { describe, expect, test } from "vitest";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { EXTERNAL_ANALYZER_CANDIDATES, loadAnalyzerPolicy } from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import { ANALYZER_DENIAL_REASONS } from "../../src/shared/analyzers/acquisitionEngine.js";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
@@ -61,13 +62,13 @@ describe("shared CLI fixtures record the operator decline before any CLI call", 
   for (const [label, createFixture] of FIXTURE_CREATORS) {
     test(`${label} declines every default acquired analyzer`, async () => {
       await createFixture(async (root) => {
-        const policy = await loadAnalyzerPolicy(root);
+        const policy = await readRunConsentUnlocked(root, join(root, ".audit-tools", "audit"));
         // Derived from the registry: a new `defaultRun: true` candidate must be
         // declined by every fixture the day it lands.
         expect(DEFAULT_ACQUIRED_ANALYZER_IDS.length).toBeGreaterThan(0);
         for (const id of DEFAULT_ACQUIRED_ANALYZER_IDS) {
           expect(
-            policy.analyzer_consent?.[id],
+            policy.decisions[id],
             `${label} left default acquired analyzer '${id}' undeclined — the fold ` +
               "would admit it with no consent token and spawn npx/a release download",
           ).toBe("declined");

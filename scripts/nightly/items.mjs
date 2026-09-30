@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/nightly-items-mandatory-fields.test.ts, tests/shared/nightly-completion-ledger.test.ts, tests/shared/nightly-decision-key.test.ts, tests/shared/nightly-routine.test.ts, tests/shared/nightly-probe-target.test.ts, tests/shared/nightly-probe-retired-doc.test.ts
 // Shared state for the nightly maintenance routine: the open-items file, the
 // durable decisions ledger, and the subject key that ties them together.
 //
@@ -16,12 +17,14 @@
 // changes and the question legitimately returns — the same "a reword is a new
 // item" rule the doc-review ledger already used, applied to the durable side.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { hashContent } from '../shared/primitives.mjs';
 // Cycle-safe: `runGenerator` is called only from `regenerateHandoffRoadmap`,
 // long after both modules have evaluated. See that function's header.
 import { runGenerator } from '../shared/generate-handoff-roadmap.mjs';
+// Call-time cycle only: the renderer reads this module, but never calls this writer.
+import { writeInbox } from './render-inbox.mjs';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
 export const OPEN_ITEMS_RELPATH = '.audit-tools/nightly/open-items.json';
@@ -828,6 +831,7 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
   // afterwards, by the closeout gate. So the write that invalidates the block is
   // the write that refreshes it.
   regenerateHandoffRoadmap(root);
+  writeInbox(root);
 
   return payload;
 }
@@ -844,16 +848,22 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
  *
  * A failed regeneration must NOT fail the queue write — the queue is the
  * durable record and the generated block is re-derivable from it — so the error
- * is swallowed here, not thrown. `check:handoff-roadmap` (in `verify:checks`,
+ * is reported here without throwing. `check:handoff-roadmap` (in `verify:checks`,
  * at commit, and at closeout) is the gate that makes a stale block loud, and a
  * root with no `docs/HANDOFF.md` at all (a test fixture) simply has nothing to
  * regenerate.
  */
 function regenerateHandoffRoadmap(root) {
   try {
-    runGenerator({ root, check: false, out: () => {}, err: () => {} });
-  } catch {
-    // See above: the gate is the gate.
+    try { statSync(join(root, 'docs/HANDOFF.md')); } catch (err) {
+      if (['ENOENT', 'ENOTDIR'].includes(/** @type {any} */ (err).code)) return;
+      throw err;
+    }
+    const diagnostics = [];
+    const status = runGenerator({ root, check: false, out: () => {}, err: (message) => diagnostics.push(message) });
+    if (status !== 0) throw new Error(diagnostics.join('').trim() || `generator exited ${status}`);
+  } catch (err) {
+    process.stderr.write(`nightly queue saved; HANDOFF regeneration failed: ${/** @type {any} */ (err).message ?? err}\n`);
   }
 }
 

@@ -29,7 +29,7 @@ test("records an empty tool_timings array when no formatter runs", async () => {
     const bundle: ArtifactBundle = {
       file_disposition: { files: [{ path: "notes/readme.txt", status: "included" }] },
     };
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, { autoFix: { enabled: true } });
     const applied = result.updated.auto_fixes_applied;
     if (!isAutoFixesAppliedTimings(applied)) {
       throw new TypeError("auto_fixes_applied did not match the executor contract");
@@ -62,7 +62,7 @@ test("keeps tool_timings aligned with executed_tools", async () => {
     const bundle: ArtifactBundle = {
       file_disposition: { files: [{ path: "src/index.js", status: "included" }] },
     };
-    const result = await runAutoFixExecutor(bundle, root);
+    const result = await runAutoFixExecutor(bundle, root, { autoFix: { enabled: true } });
     const applied = result.updated.auto_fixes_applied;
     if (!isAutoFixesAppliedTimings(applied)) {
       throw new TypeError("auto_fixes_applied did not match the executor contract");

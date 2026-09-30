@@ -30,10 +30,46 @@ run, allowed commands, stop condition, repository root, artifact directory, and
 relevant artifact paths. The conversation loader reads only `prompt_path` and
 follows the rendered prompt.
 
+## Functional capability declaration
+
+The `functional_preflight` step emits the report path and a complete
+`audit-functional-preflight/v1` example. The declaration binds the current run and
+canonical repository root to observed source/relationship inspection, a
+`ready`, `degraded` or `stop` decision, and any approved limitation. It is a host
+declaration of observed capability, not automatic proof of the host's tools.
+Missing, malformed or differently bound reports return to this entry step;
+`stop` remains stopped until the operator changes the decision.
+
+## Semantic review submissions
+
+An independence-required review prompt asks for `review-submission/v1`, containing
+its exact `prompt_sha256`, a `review` declaration (`mode` and `reason`), and the
+complete domain object in `result`. Do not send that envelope to an ordinary
+workload item unless its own prompt asks for it. It is distinct from the
+`audit-host-result/v1alpha1` work-item contract below.
+
+The tool's current binding determines the requirement. An independent lane cannot
+accept `degraded` or `unavailable` as success; explicitly permitted light remediation
+critique/critic roles may declare degraded review. The final judge requires an
+independent context. The tool verifies binding, shape and domain validation, not
+the declared reviewer's identity. Identical complete audit task/context content may
+reuse a matching review after current authority is re-emitted; this is not a claim
+that a fresh reviewer executed on every run. Design reviews use the existing
+semantic/structural input projection, which excludes per-file content hashes and
+provenance timestamps; this is not an identity over every repository byte.
+
+Remediation persists accepted domain content in the canonical artifact's `payload`
+with validated review provenance. Downstream prompts read that accepted payload;
+workers write only their separately emitted submission path. Optional per-result
+conformance review is another bound acceptance step after mechanical corroboration,
+not a replacement for commit, scope, test or obligation-evidence checks. Its run
+choice and result/contract binding cannot be disabled by changing a copied checkpoint.
+
 ## Provider-neutral host workload
 
 When semantic review is ready, audit-tools writes a complete
-`audit-host-workload/v1alpha2` artifact. Each work item contains:
+`audit-host-workload` artifact (revision defined by `WORKLOAD_CONTRACT_VERSION` in
+`src/audit/cli/dispatch/hostHandoff.ts`). Each work item contains:
 
 - a stable id and lens
 - the shared provider-neutral lane demand ranking (size, complexity, risk) beside
@@ -52,7 +88,7 @@ digest, and result path. No backend, model, routing, quota, transport, launch
 command, or worker identity is part of either contract.
 
 The host writes `audit-host-result/v1alpha1` records. Ingestion verifies every
-result before it accepts it; the check set below is the one list, rendered from
+result before it accepts it; the mechanical check set below is rendered from
 the registry both the audit and the remediation ingest cite on every refusal.
 Malformed, fabricated, stale, or replayed-with-different-bytes records do not
 advance the run.

@@ -1,6 +1,7 @@
+// sites-pinned: tests/audit/io-remediation.test.ts
+import { collectFilesSorted } from "../../shared/io/collectFilesSorted.js";
 import { createHash } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolingManifest } from "../types/toolingManifest.js";
@@ -29,8 +30,9 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isFileMissingError(error)) return false;
+    throw error;
   }
 }
 
@@ -113,32 +115,10 @@ function recordAbsentEntry(
  * concurrent rebuild, and swallowing them would hide a real defect.
  */
 async function collectFiles(path: string): Promise<string[]> {
-  let info: Awaited<ReturnType<typeof stat>>;
-  try {
-    info = await stat(path);
-  } catch (error) {
-    if (!isFileMissingError(error)) throw error;
-    return [vanishedEntry(path)];
-  }
-  if (info.isFile()) {
-    return [path];
-  }
-  if (!info.isDirectory()) {
-    return [];
-  }
-
-  let entries: Dirent[];
-  try {
-    entries = await readdir(path, { withFileTypes: true });
-  } catch (error) {
-    if (!isFileMissingError(error)) throw error;
-    return [vanishedEntry(path)];
-  }
-  const files: string[] = [];
-  for (const entry of entries.sort((a, b) => compareCodeUnits(a.name, b.name))) {
-    files.push(...(await collectFiles(join(path, entry.name))));
-  }
-  return files;
+  return collectFilesSorted(path, {
+    followSymlinks: true,
+    onMissing: (missing) => [vanishedEntry(missing)],
+  });
 }
 
 /**

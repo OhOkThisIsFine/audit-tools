@@ -485,7 +485,7 @@ describe("contract_finalization — deterministic derivation (no wave)", () => {
     const derivationIssues = validateReconciliationDerivation(
       (seamEnv as any).payload,
       finalized,
-    ).filter((i) => i.severity === "error");
+    ).issues.filter((i) => i.severity === "error");
     expect(derivationIssues).toEqual([]);
   });
 });

@@ -1,4 +1,7 @@
-import { isAbsolute } from "node:path";
+// sites-pinned: tests/audit/analyzer-run-consent.test.ts, tests/audit/analyzer-consent-offer.test.ts
+import { withArtifactTreeHold } from "./io/artifactTreeHold.js";
+import { AnalyzerRunConsentDecisionSchema, updateRunConsentUnlocked } from "./analyzerRunConsent.js";
+import { join, isAbsolute } from "node:path";
 import { z } from "zod";
 import { createLockedJsonStore, type LockedJsonStore } from "./io/lockedJsonStore.js";
 import { assertWithinRoot } from "./io/pathContainment.js";
@@ -21,19 +24,8 @@ export const ANALYZER_POLICY_RELATIVE_PATH =
 const ANALYZER_POLICY_LOCK_RELATIVE_PATH =
   ".audit-tools/audit/analyzer-policy.lock" as const;
 
-/**
- * The DURABLE analyzer decision. Deliberately a one-member enum: a decline is
- * the only analyzer answer that outlives the run that was asked.
- *
- * An operator's grant binds THE RUN THAT WAS ASKED and nothing else (owner
- * directive, 2026-08-21). A durable grant silently keeps granting itself to
- * later runs whose operator never saw the offer — and for a network-egress
- * analyzer that converts one consent into standing consent. A grant therefore
- * travels on the per-run consent TOKEN, which the strict schema below cannot
- * hold; there is no shape here for it to be written into, so the rule is
- * enforced by the type rather than remembered.
- */
-export const AnalyzerConsentDecisionSchema = z.enum(["declined"]);
+/** A current-run decline used by the shared admission boundary. Never standing consent. */
+export const AnalyzerConsentDecisionSchema = AnalyzerRunConsentDecisionSchema.exclude(["granted"]);
 export type AnalyzerConsentDecision = z.infer<
   typeof AnalyzerConsentDecisionSchema
 >;
@@ -77,7 +69,10 @@ function parseAnalyzerPolicy(
   raw: unknown | undefined,
   policyPath: string,
 ): AnalyzerPolicy {
-  const parsed = AnalyzerPolicySchema.safeParse(raw ?? {});
+  const input = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "analyzer_consent"))
+    : raw;
+  const parsed = AnalyzerPolicySchema.safeParse(input ?? {});
   if (!parsed.success) {
     throw new Error(
       `Invalid ${policyPath}: ${formatSchemaFailure(parsed.error)}`,
@@ -105,7 +100,10 @@ function analyzerPolicyStore(
 export async function loadAnalyzerPolicy(
   repositoryRoot: string,
 ): Promise<AnalyzerPolicy> {
-  return await analyzerPolicyStore(repositoryRoot).read();
+  const policy = await analyzerPolicyStore(repositoryRoot).read();
+  // Legacy decisions are neither permission nor a veto in a new run.
+  const { analyzer_consent: _legacyConsent, ...settings } = policy;
+  return settings;
 }
 
 /**
@@ -122,16 +120,16 @@ export async function persistAnalyzerSettings(
   }));
 }
 
-/**
- * Durably merge consent DECLINES. Neither a grant nor a per-run consent token is
- * accepted or representable here — see {@link AnalyzerConsentDecisionSchema}.
- */
+/** Record a decline for the active audit only. Kept for existing library callers. */
 export async function persistAnalyzerConsent(
   repositoryRoot: string,
   decisions: Readonly<Record<string, AnalyzerConsentDecision>>,
 ): Promise<AnalyzerPolicy> {
-  return await analyzerPolicyStore(repositoryRoot).mutate((current) => ({
-    ...current,
-    analyzer_consent: { ...current.analyzer_consent, ...decisions },
-  }));
+  getAnalyzerPolicyPath(repositoryRoot); // Validate the root before any current-run write.
+  const parsed = z.record(z.string(), AnalyzerConsentDecisionSchema).parse(decisions);
+  const artifactsDir = join(repositoryRoot, ".audit-tools", "audit");
+  await withArtifactTreeHold(artifactsDir, undefined, async () => {
+    await updateRunConsentUnlocked(repositoryRoot, artifactsDir, parsed);
+  });
+  return await loadAnalyzerPolicy(repositoryRoot);
 }

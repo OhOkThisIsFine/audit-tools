@@ -653,3 +653,13 @@ await test("confirm prompt renders depth proposal from intent inputs", async () 
   expect(prompt).toMatch(/proposed.*deep/i);
   expect(prompt).toMatch(/"conceptual_depth": "deep"/);
 });
+
+
+test("present unbound design review returns to confirmation rather than downgrading", () => {
+  for (const answered_at of [undefined, "2025-01-01T00:00:00Z"]) {
+    const checkpoint: IntentCheckpoint = { schema_version: "intent-checkpoint/v1", confirmed_at: "2026-09-30T00:00:00Z", confirmed_by: "host", scope_summary: "all", intent_summary: "audit", design_review: { conceptual_depth: "deep", answered_at } };
+    const bundle = settleIntentBaseline({ ...readyForIntentBundle(), intent_checkpoint: checkpoint });
+    expect(obligationState(bundle, "intent_checkpoint_current")).toBe("missing");
+    expect(decideNextStep(bundle).selected_executor).toBe("intent_checkpoint_executor");
+  }
+});

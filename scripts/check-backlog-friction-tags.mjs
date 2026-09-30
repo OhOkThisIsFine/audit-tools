@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-status-tokens.test.ts, tests/shared/backlog-tooling-closed-frictions.test.ts
 // Refuse a `friction:` tag in docs/backlog/ that is not drawn from the canonical
 // category vocabulary.
 //
@@ -83,14 +84,15 @@ export const ACCEPTED_TAG_FORMS = new Map(
  *
  * @param {string} file the backlog file name (only used to label the findings)
  * @param {string} text
+ * @param {ReturnType<typeof import("./shared/backlog-entry-grammar.mjs").parseBacklogDocument>} [document]
  * @returns {{file: string, line: number, column: number, tag: string, entry: string}[]}
  */
-export function findFrictionTags(file, text) {
+export function findFrictionTags(file, text, document) {
   const found = [];
-  const lines = text.split(/\r?\n/);
+  const lines = document?.lines ?? text.split(/\r?\n/);
   let inFence = false;
   // Entry line ranges, in 1-indexed line numbers, from the one grammar.
-  const entries = splitBacklogEntries(text);
+  const entries = document?.entries ?? splitBacklogEntries(text);
   const entryAt = (line) => {
     const owner = entries.filter((entry) => entry.line <= line).at(-1) ?? null;
     return owner === null ? "(no entry)" : owner.headline.replace(/^- \*\*/, "").replace(/\*\*/g, "").slice(0, 78);
@@ -125,14 +127,14 @@ export function findFrictionTags(file, text) {
  * gate's behavior is testable against synthetic corpora instead of by editing the
  * real backlog.
  *
- * @param {{file: string, text: string}[]} files
+ * @param {{file: string, text: string, document?: ReturnType<typeof import("./shared/backlog-entry-grammar.mjs").parseBacklogDocument>}[]} files
  * @returns {{violations: string[], tags: number, files: number}}
  */
 export function evaluateFrictionTags(files) {
   const violations = [];
   let tags = 0;
   for (const source of files) {
-    for (const hit of findFrictionTags(source.file, source.text)) {
+    for (const hit of findFrictionTags(source.file, source.text, source.document)) {
       tags += 1;
       if (ACCEPTED_TAG_FORMS.has(hit.tag)) continue;
       violations.push(

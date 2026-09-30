@@ -1,3 +1,5 @@
+import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,11 +43,11 @@ it("reports every malformed perspective together and keeps IO failures distinct"
   };
   await writeFile(round.perspectives[0]!.result_path, JSON.stringify({ findings: [{ id: "missing-title" }] }));
   await writeFile(round.perspectives[1]!.result_path, "{broken JSON");
-  await expect(loadConceptualPerspectiveFindings(round)).rejects.toMatchObject({
+  await expect(loadConceptualPerspectiveFindings(round, async path => (await import("../../src/shared/io/json.js")).readJsonFile(path))).rejects.toMatchObject({
     failures: round.perspectives.map((p) => ({ lane: p.lane_id, path: p.result_path })),
   });
   await rm(round.perspectives[1]!.result_path);
-  await expect(loadConceptualPerspectiveFindings(round)).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(loadConceptualPerspectiveFindings(round, async path => (await import("../../src/shared/io/json.js")).readJsonFile(path))).rejects.toMatchObject({ code: "ENOENT" });
 });
 afterEach(async () => {
   while (cleanups.length > 0) {
@@ -374,7 +376,7 @@ describe("conceptual review adjudication", () => {
         },
       ],
     };
-    const loaded = await loadConceptualPerspectiveFindings(currentManifest);
+    const loaded = await loadConceptualPerspectiveFindings(currentManifest, async path => (await import("../../src/shared/io/json.js")).readJsonFile(path));
     expect([...loaded.values()].flat().map((entry) => entry.id)).toEqual(["CURRENT"]);
     expect([...loaded.values()].flat().map((entry) => entry.id)).not.toContain("STALE");
   });
@@ -385,14 +387,14 @@ describe("conceptual review adjudication", () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
 
-    const bundle: ArtifactBundle = {
+    const bundle: ArtifactBundle = captureCompletedDesignReviews({
       design_assessment: {
         generated_at: "now",
         findings: [],
         contract_reviewed: true,
         conceptual_reviewed: false,
       },
-    };
+    });
     await prepareConceptualDispatch({
       artifactsDir,
       bundle,
@@ -402,11 +404,7 @@ describe("conceptual review adjudication", () => {
     if (!current) throw new Error("missing conceptual round manifest");
     await Promise.all(
       current.perspectives.map((contributor, index) =>
-        writeFile(
-          contributor.result_path,
-          JSON.stringify({ findings: [finding(`DR-00${index + 1}`)] }),
-          "utf8",
-        ),
+        writeBoundReviewFixture(artifactsDir, contributor.lane_id, { findings: [finding(`DR-00${index + 1}`)] }),
       ),
     );
 
@@ -445,7 +443,7 @@ describe("conceptual review adjudication", () => {
         },
       ],
     };
-    await writeFile(current.judge.result_path, JSON.stringify(submission), "utf8");
+    await writeBoundReviewFixture(artifactsDir, current.judge.lane_id, submission);
 
     const tx = createFoldTransaction();
     const state: AuditState = { status: "active", obligations: [] };
@@ -488,7 +486,7 @@ describe("conceptual review adjudication", () => {
       submission: validSubmission(),
       generatedAt: "prior",
     });
-    const bundle: ArtifactBundle = {
+    const bundle: ArtifactBundle = captureCompletedDesignReviews({
       design_assessment: {
         generated_at: "now",
         findings: [],
@@ -496,22 +494,18 @@ describe("conceptual review adjudication", () => {
         conceptual_reviewed: false,
       },
       conceptual_review_adjudication: priorAdjudication,
-    };
+    });
     await writeFile(
       join(artifactsDir, "conceptual_review_adjudication.json"),
       JSON.stringify(priorAdjudication),
       "utf8",
     );
-    const dispatch = await prepareConceptualDispatch({
+    await prepareConceptualDispatch({
       artifactsDir,
       bundle,
       settings: { conceptual_depth: "shallow", perspectives: 1 },
     });
-    await writeFile(
-      dispatch.conceptualResultsPath,
-      JSON.stringify({ findings: [finding("SHALLOW-001")] }),
-      "utf8",
-    );
+    await writeBoundReviewFixture(artifactsDir, "design_review_conceptual", { findings: [finding("SHALLOW-001")] });
 
     const tx = createFoldTransaction();
     const branch = await handleDesignReviewBranch(

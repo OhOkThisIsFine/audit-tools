@@ -1,10 +1,12 @@
+// sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/cli-remediation.test.ts
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { getArtifactsDir, getFlag } from "./args.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 
 export async function cmdExplainTask(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
-  const taskId = getFlag(argv, "--task-id") ?? argv[3];
+  const delimiter = argv.indexOf("--");
+  const taskId = getFlag(argv, "--task-id") ?? (delimiter >= 0 ? argv[delimiter + 1] : argv[3]);
   if (!taskId) {
     throw new Error("explain-task requires <task_id> or --task-id <task_id>");
   }

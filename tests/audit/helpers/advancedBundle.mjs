@@ -1,3 +1,4 @@
+const { buildDesignReviewSnapshot } = await import("../../../src/audit/orchestrator/designReviewSnapshot.ts");
 // The real priority chain — imported from source (not dist) so these helpers
 // guard un-rebuilt changes and stay in lockstep with the orchestrator.
 const { PRIORITY } = await import("../../../src/audit/orchestrator/nextStep.ts");
@@ -103,6 +104,10 @@ function injectDesignReviewPass(bundle, pass) {
       [`${pass}_findings`]: [],
       [`${pass}_reviewed`]: true,
     },
+    design_review_snapshots: {
+      ...bundle.design_review_snapshots,
+      [pass]: buildDesignReviewSnapshot(pass, [], bundle, "2026-04-22T00:00:00Z"),
+    },
   };
 }
 
@@ -128,6 +133,9 @@ const forcedStep = (executor, { withRoot = false } = {}) => async (b, root) =>
   (
     await advanceAudit(b, {
       preferredExecutor: executor,
+      // The scripted host uses this same hermetic policy when it resumes.
+      // Capture review evidence after graph capability reflects those choices.
+      analyzers: { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" },
       ...(withRoot ? { root } : {}),
     })
   ).updated_bundle;

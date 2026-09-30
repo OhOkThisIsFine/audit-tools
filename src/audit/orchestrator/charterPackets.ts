@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/charter-current-context.test.ts
+import { hashContent } from "../../shared/hash.js";
 // Channel-pure charter-extraction PACKETS (design resolution 4, 2026-08-05):
 // blindness enforced by FEEDING, never instruction. Each extraction lane gets a
 // materialized packet holding ONLY its evidence channel —
@@ -568,3 +570,8 @@ const OMISSION_PROSE: Record<OmissionReason, string> = {
   unreadable_or_oversized: "unreadable or oversized",
   no_content: "no content of this evidence class in the file",
 };
+
+/** Re-read the exact channel-pure packet before consuming an in-flight answer. */
+export async function charterExtractionInputRevision(params: MaterializeCharterPacketParams): Promise<string> {
+  return hashContent((await materializeCharterPacket(params)).markdown);
+}

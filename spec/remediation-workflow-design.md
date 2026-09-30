@@ -164,8 +164,8 @@ with the run's risk tier rather than branching to a separate path. EVERY run ent
 the contract pipeline; the tier sets how deeply it is traversed. No tier skips a
 phase, and none skips traceability or verification.
 
-This is not a parallel path, and no longer even a shallow one that bypasses the
-engine. The tier is the SINGLE classifier: finding-level risk evidence is folded
+A separate shallow path that bypasses the engine is rejected because it can
+disagree with the shared risk dial. The tier is the SINGLE classifier: finding-level risk evidence is folded
 into the shared risk signal before the run proceeds, so there is no separate
 eligibility boolean that can disagree with the dial — a grounded handful touching a
 risk subsystem stays `high` and is traversed at full depth. Read this section's
@@ -300,7 +300,8 @@ bulk-dispositioned invisibly. The gate operates before that collapse.
 ## Host implementation handoff — dependency-safe and evidence-verified
 
 The backend emits every currently eligible DAG node in one
-`remediation-host-workload/v1alpha3` artifact. Eligibility is deterministic: a
+`remediation-host-workload` artifact (revision defined by
+`REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION` in `src/remediate/steps/types.ts`). Eligibility is deterministic: a
 node is emitted only after every dependency and lower phase is verified complete.
 Each work item contains its obligations, declared write scope, complete prompt,
 prompt digest, baseline commit, and repository-contained result path; the

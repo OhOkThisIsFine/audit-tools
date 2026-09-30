@@ -288,8 +288,7 @@ describe("the leg set is the gate's, derived from the registry — single-source
     for (const expected of [
       "check:doc-manifest",
       "check:backlog-index",
-      "check:backlog-budget",
-      "check:backlog-status",
+      "check:backlog",
       "check:handoff-roadmap",
       "check:doc-links",
       "check:guard-reach",

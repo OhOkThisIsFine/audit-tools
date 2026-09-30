@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/intent-equivalence-executor.test.ts, tests/audit/intent-checkpoint-gate.test.ts
 /**
  * O2 — the intent_checkpoint semantic-equivalence gate (DD-9, wired).
  *
@@ -70,7 +71,7 @@ export interface NormalizeConfig {
  * reinterpretation, not provenance).
  */
 export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
-  version: 'intent-checkpoint-normalize/v4',
+  version: 'intent-checkpoint-normalize/v5',
   structuredFields: [
     'schema_version',
     'excluded_scope',
@@ -83,6 +84,7 @@ export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
     // a `custom` choice runs: a changed closing action or command is a
     // deterministic delta, never a judged rephrase.
     'closing_action',
+    'conformance_review',
     'closing_custom_command',
   ],
   // `constraint_clauses` is PROSE per DD-9's explicit listing (host_answer
@@ -99,7 +101,7 @@ export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
 };
 
 /** Static prompt-template version — bump on any judge-prompt change. */
-export const INTENT_GATE_PROMPT_TEMPLATE_VERSION = 'intent-checkpoint-judge-prompt/v1';
+export const INTENT_GATE_PROMPT_TEMPLATE_VERSION = 'intent-checkpoint-judge-prompt/v2';
 
 /**
  * The locally-resolved judge id (conversation-first: the host agent is always

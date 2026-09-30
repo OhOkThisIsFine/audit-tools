@@ -1,49 +1,15 @@
 #!/usr/bin/env node
-// PreToolUse hook: refuse an AGENT push to \`main\` unless a full-suite green
-// stamp binds the tree being pushed.
-//
-// THE GAP. "Before any push: \`npm run build && npm run check\` → zero errors" is
-// enforced at git's own boundary (the commit gate), and every narrow gate runs
-// against the touched area. Neither can see a CROSS-AREA invariant: a change to
-// area A breaks a contract test in area B, every touched-area leg is green, and
-// the breakage surfaces only in the full suite — which nothing local runs before
-// a push. The two-tag burn of 2026-08-27 is the measured instance. The touched
-// area's suite is not a substitute for the full suite, and no list of "the areas
-// a change touches" can be made complete by hand.
-//
-// WHAT THIS DOES. \`scripts/shared/suiteGreenStamp.mjs\` already records a
-// full-suite green bound to the worktree TREE it ran on (\`writeSuiteGreenStamp\`
-// from the one gate runner), and \`suiteGreenVerdict\` already decides whether that
-// record certifies the current tree. The closeout challenge consumes that
-// evidence; this hook is the PUSH boundary consuming the same single-sourced
-// verdict — never a second reading of what "green" or "this tree" means.
-//
-// WHY A HOOK AND NOT PROSE. A needed manual flag is a bug signal, and "remember
-// to run the full suite before pushing" is exactly a rule enforced by memory.
-// The stamp is written by the gate runner itself, so the only way to satisfy
-// this hook is to actually run the suite.
-//
-// SCOPE — stated because a partly-enforced trap is not deletable:
-//   • AGENT sessions only. A human at a terminal pushes as they always have;
-//     the discipline this replaces was the agent's, and gating a person's own
-//     shell is not this project's business.
-//   • a push that plainly runs in THIS repository: a bare \`git push\` statement
-//     with no \`cd\`/\`Set-Location\`/\`pushd\` prefix and no \`git -C\` hop. A chained or
-//     relocated push is NOT judged — it FAILS OPEN, ANNOUNCED, so the skip can
-//     never read as a pass (see below).
-//   • a push whose target is the PROTECTED branch: \`main\`/\`master\`, named in the
-//     refspec, or a bare \`git push\` while HEAD is that branch. A feature-branch
-//     push is not gated — the stamp is about what reaches \`main\`.
-//   • \`--force\`/\`-f\` does not widen this: a force-push to \`main\` is gated like
-//     any other, since the refspec still names it.
-//
-// FAIL-OPEN, ANNOUNCED, on infra faults: no stamp machinery reachable, an
-// unreadable stamp, an uncomputable tree. A silent fail-open is
-// indistinguishable from a clean pass, so every such path prints why.
+// sites-pinned: tests/shared/push-gate.test.ts
+// Agent-only protected-branch push boundary. Bind the checkout-local suite
+// stamp to each local source tree actually sent to main/master. The payload cwd
+// (or process cwd) identifies the checkout; CLAUDE_PROJECT_DIR may name another
+// worktree and must never provide evidence for this push.
+// Unsupported relocated/complex shell selection is announced fail-open, as are
+// git infrastructure faults. Plain terminal pushes and content-free deletions
+// remain outside this policy. Explicit feature destinations do not arm it.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { readSuiteGreenStamp, suiteGreenVerdict } from '../../scripts/shared/suiteGreenStamp.mjs';
-import { worktreeTree } from '../../scripts/shared/worktree-tree.mjs';
 import { splitShellStatements, stripHeredocBodies, stripQuoted } from './shell-split.mjs';
 
 const PROTECTED = ['main', 'master'];
@@ -69,7 +35,13 @@ const isAgentSession = Boolean(
 );
 if (!isAgentSession) process.exit(0);
 
-const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+let root = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
+const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8', windowsHide: true });
+if (top.status !== 0) {
+  noteFailOpen('cannot resolve the push working directory');
+  process.exit(0);
+}
+root = top.stdout.trim();
 
 const statements = splitShellStatements(stripHeredocBodies(command));
 
@@ -78,7 +50,7 @@ const statements = splitShellStatements(stripHeredocBodies(command));
 // gate's jurisdiction machinery, and guessing it would refuse a push into an
 // unrelated repository (the 2026-08-19 false-red class). Announced, never
 // silent — the one case where a skip would otherwise read as a pass.
-if (/\bgit\s+push\b/.test(command) && /\bgit\s+-C\b|\b(?:cd|chdir|pushd|set-location|push-location)\b/i.test(command)) {
+if (/\bgit\b[^\n]*\bpush\b/.test(command) && /\bgit\s+-C\b|\b(?:cd|chdir|pushd|set-location|push-location)\b/i.test(command)) {
   noteFailOpen(
     'a relocated push (a \`cd\`/\`Set-Location\` prefix or a \`git -C\` hop) is not judged here — ' +
       'establish the target repository and run the full suite before pushing to main.',
@@ -102,44 +74,103 @@ const git = (args) => {
   return { ok: r.status === 0, stdout: r.stdout ?? '' };
 };
 
-// Which branch does this push put on the protected ref? A refspec naming one
-// (\`HEAD:main\`, \`main\`, \`+main\`) decides it; a bare push falls back to HEAD.
-const namesProtected = (s) => {
-  const t = stripQuoted(collapse(s));
-  const parts = t.split(/\s+/).slice(t.split(/\s+/).findIndex((x) => x === 'push') + 1);
-  for (const p of parts) {
-    if (p.startsWith('-')) continue;
-    const ref = p.includes(':') ? p.slice(p.indexOf(':') + 1) : p;
-    if (PROTECTED.includes(ref.replace(/^\+/, ''))) return true;
+// Resolve each explicit local source, not the current checkout content. A
+// protected destination may receive a different branch or an older commit.
+const sources = [];
+for (const statement of pushes) {
+  const words = statement.match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/g)?.map((word) => word.replace(/^(['"])(.*)\1$/, '$2')) ?? [];
+  const args = words.slice(words.indexOf('push') + 1);
+  const positional = [];
+  let remoteOption = '';
+  let deletion = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--delete' || arg === '-d') { deletion = true; continue; }
+    if (['--repo', '--receive-pack', '--exec', '--push-option', '-o'].includes(arg)) {
+      if (arg === '--repo') remoteOption = args[i + 1] ?? '';
+      i++;
+      continue;
+    }
+    if (arg.startsWith('--repo=')) remoteOption = arg.slice('--repo='.length);
+    if (['--all', '--mirror', '--tags', '--prune'].includes(arg) || /[$`*?]/.test(arg)) {
+      noteFailOpen('unsupported push ref selection — the protected-branch check was SKIPPED');
+      process.exit(0);
+    }
+    if (arg.startsWith('-')) continue;
+    positional.push(arg);
   }
-  return false;
-};
-function collapse(s) {
-  return s.replace(/\s+/g, ' ');
+  if (deletion) continue; // Deletes send no content tree to certify.
+  let refs = remoteOption ? positional : positional.slice(1);
+  if (refs.length === 0) {
+    const head = git(['rev-parse', '--abbrev-ref', 'HEAD']);
+    if (!head.ok) {
+      noteFailOpen('cannot resolve HEAD — the protected-branch check was SKIPPED');
+      process.exit(0);
+    }
+    const branch = head.stdout.trim();
+    const config = (key) => {
+      const value = git(['config', '--get', key]);
+      return value.ok ? value.stdout.trim() : '';
+    };
+    const remote = remoteOption || positional[0] || config(`branch.${branch}.pushRemote`) ||
+      config('remote.pushDefault') || config(`branch.${branch}.remote`) || 'origin';
+    const configured = git(['config', '--get-all', `remote.${remote}.push`]);
+    if (config(`remote.${remote}.mirror`) === 'true') {
+      noteFailOpen('configured mirror push selection is unsupported — suite check SKIPPED');
+      process.exit(0);
+    }
+    if (configured.ok && configured.stdout.trim()) {
+      refs = configured.stdout.trim().split(/\r?\n/);
+    } else {
+      const mode = config('push.default') || 'simple';
+      if (mode === 'nothing') continue;
+      if (!['simple', 'upstream', 'current'].includes(mode)) {
+        noteFailOpen(`configured push.default=${mode} is unsupported — suite check SKIPPED`);
+        process.exit(0);
+      }
+      const upstreamRemote = config(`branch.${branch}.remote`);
+      const upstream = config(`branch.${branch}.merge`);
+      // A triangular simple push uses the current branch name. Upstream mode
+      // names the upstream destination; git itself refuses a mismatched remote.
+      const target = mode !== 'current' && upstream && (!upstreamRemote || upstreamRemote === remote)
+        ? upstream : branch;
+      refs = [`HEAD:${target}`];
+    }
+  }
+  for (const raw of refs) {
+    if (raw === ':' || /[$`*?]/.test(raw)) {
+      noteFailOpen('configured matching/wildcard push selection is unsupported — suite check SKIPPED');
+      process.exit(0);
+    }
+    const ref = raw.replace(/^\+/, '');
+    const colon = ref.indexOf(':');
+    const source = colon < 0 ? ref : ref.slice(0, colon);
+    const target = (colon < 0 ? ref : ref.slice(colon + 1)).replace(/^refs\/heads\//, '');
+    if (source && PROTECTED.includes(target)) sources.push(source);
+  }
 }
-const targetsProtected = pushes.some(namesProtected);
-if (!targetsProtected) {
-  // No refspec named a protected branch: the pushed branch is HEAD's.
-  const head = git(['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (!head.ok) {
-    noteFailOpen('cannot resolve HEAD (\`git rev-parse --abbrev-ref HEAD\` failed) — the protected-branch check was SKIPPED.');
+if (sources.length === 0) process.exit(0);
+const stamp = readSuiteGreenStamp(root);
+let verdict;
+for (const source of sources) {
+  const resolved = git(['rev-parse', '--verify', '--end-of-options', `${source}^{tree}`]);
+  if (!resolved.ok) {
+    noteFailOpen(`cannot resolve pushed source ${source} — the suite check was SKIPPED`);
     process.exit(0);
   }
-  if (!PROTECTED.includes(head.stdout.trim())) process.exit(0);
+  verdict = suiteGreenVerdict(stamp, resolved.stdout.trim());
+  if (!verdict.ok) break;
 }
-
-const tree = worktreeTree(root);
-const verdict = suiteGreenVerdict(readSuiteGreenStamp(root), tree);
-if (verdict.ok) process.exit(0);
+if (verdict?.ok) process.exit(0);
 
 console.error(
-  `[push gate] push to a PROTECTED branch (${PROTECTED.join('/')}) refused — ${verdict.reason}.\n` +
+  `[push gate] push to a PROTECTED branch (${PROTECTED.join('/')}) refused — ${verdict && !verdict.ok ? verdict.reason : 'no pushed tree evidence'}.\n` +
     `Every narrow gate passes on a touched area; a CROSS-AREA invariant is only reachable by the\n` +
     `full suite, which nothing local runs before a push (two commits shipped red this way on\n` +
     `2026-08-27). Run the full suite, then push again:\n` +
     `  npm test\n` +
-    `A green FULL run writes the stamp this gate reads, bound to the tree it ran on — so any edit\n` +
-    `after it invalidates it and the suite has to be re-run. A FILTERED run (a file path, --shard,\n` +
+    `A green FULL run writes the stamp this gate reads, bound to the tree it ran on. The local\n` +
+    `source ref being pushed must carry that exact content. A FILTERED run (a file path, --shard,\n` +
     `--exclude) mints no stamp by design: a subset is not whole-tree evidence.`,
 );
 process.exit(2);

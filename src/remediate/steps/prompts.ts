@@ -149,6 +149,7 @@ export function ambiguityReviewPrompt(
   resolutionPath: string,
   validFindingIds: readonly string[] = [],
   refusal?: string,
+  requestPath?: string,
 ): string {
   const count = candidates.length;
   const intro = count
@@ -172,6 +173,7 @@ the findings in the set below yourself.`;
 # Resolve ambiguity in the plan before implementation
 ${refusalBanner(refusal, "applied")}
 ${intro}
+${requestPath ? `Read the complete findings, evidence, confidence, cited paths and candidate ambiguities in \`${requestPath}\` before deciding what needs clarification.` : ""}
 ${candidateBlock}
 Do these steps:
 
@@ -301,7 +303,9 @@ export function triagePrompt(state: RemediationState, resolutionPath: string): s
 Ask the user for one decision per blocked item: \`retry\`, \`ignore\`, or \`halt\`.
 Use \`retry\` for blocked, deferred, retry-later, or prerequisite-dependent work.
 Use \`ignore\` only when the user explicitly says the finding should not be
-remediated.
+remediated. Use \`halt\` only to stop the whole run, not just this item. It
+routes to a partial closeout: unresolved and omitted items retain their status
+and are not reported as fixed. No further implementation is dispatched.
 
 ${blocked
   .map((item) => {
@@ -364,6 +368,8 @@ export function extractedPlanDiscardedPrompt(
 
   return `
 # Extracted Plan Discarded
+
+Host: read the rejection and repair the extracted plan. Do not restart intake.
 
 The extracted plan was read and could not be used, so it was removed. **This is
 not a missing input** — an input was supplied and parsed. Do not go looking for

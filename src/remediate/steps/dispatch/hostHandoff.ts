@@ -1,27 +1,33 @@
+import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
+import { AcceptedConformanceReviewSchema, type AcceptedConformanceReview } from "../../../shared/types/reviewIndependence.js";
+import type { CurrentRemediationHostState, PreparedRemediationHostHandoff, RemediationHostDecision, RemediationHostIngestIssue, RemediationHostIngestSummary, RemediationHostResult, RemediationHostWorkItem, RemediationHostWorkload, RemediationIssueCode, UnsupportedRetiredRemediationState } from "./hostContracts.js";
+import type { RemediationRequiredTestVerdicts } from "./requiredTests.js";
+import { corroborateHostResult, corroborateNoChangeClaim } from "./hostCorroboration.js";
+import { runRequiredTest, rerunRequiredTests, requiredTestIssue, requiredTestVerdictKey, type RequiredTestFailure } from "./requiredTests.js";
+import { readIntentCheckpoint } from "../../../shared/types/intentCheckpoint.js";
+import { checkContractConformance, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
+import type { ImplementationContext } from "../../../shared/types/contractPipeline/implementation.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff.test.ts
 //   host-handoff-corroboration: the bounded required-test failure message.
 //   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line
 //   or the id-glossary write scope is reverted.
 import { mkdir } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import {
-  AUDIT_TOOLS_DIRNAME,
   headCommit,
   commandLeavesDeclaredShape,
   FindingSchema,
-  SUBMISSION_ISSUE_CODES,
   SUBMISSION_ISSUE_REMEDY,
-  WORKLOAD_ISSUE_CODES,
   WORKLOAD_ISSUE_REMEDY,
   bindWorkerPrompt,
   deriveResultId,
   type IssueRemedy,
+  type WorkItemOutcome,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   appendSubmissionEvent,
   enrichMissingSubmissionIssues,
   isMissingObservation,
-  type WorkItemOutcome,
   compareCodeUnits,
   contentSha256,
   declaredInvariantIds,
@@ -38,9 +44,9 @@ import {
   LaneDemandSchema,
   normalizeRepoPath,
   parseAllWorkloadItems,
-  parseCommandString,
   parseWorkloadEnvelope,
   readSubmissionDocument,
+  readJsonFile,
   readSubmissionLedger,
   readTrailingSubmissionRefusals,
   recoveryMarkMatches,
@@ -48,20 +54,17 @@ import {
   repoRelativePath,
   resolveContainedPath,
   resolveHostHandoffPaths,
-  runTrackedAsync,
   sameStrings,
   scanBoundSubmission,
   SEVERITIES,
   severityRank,
   stringArray,
   stableStringify,
-  TRACKED_CHILD_DEADLINE_MS,
   withGlossaryScope,
   writeJsonFile,
   type FindingSeverity,
   type HostHandoffPaths,
   type IngestionCheckId,
-  type LaneDemand,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
   type SubmissionScanMessages,
@@ -75,12 +78,11 @@ import {
   REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
   REMEDIATION_HOST_SCOPE_SEMANTICS,
   RemediationHostHandoffRecordSchema,
+  ConformanceReviewBindingSchema,
   RemediationPlanSchema,
   isClarificationCategory,
   type RemediationBlock,
   type RemediationHostHandoffRecord,
-  type RemediationItemState,
-  type RemediationPlan,
 } from "../../state/types.js";
 import {
   ITEM_STATUSES,
@@ -100,156 +102,13 @@ import {
 // "does the constant equal itself".
 const STATE_CONTRACT_VERSION = REMEDIATION_STATE_CONTRACT_VERSION;
 
-export type UnsupportedRetiredRemediationState = "unsupported_retired_state";
-
-export type CurrentRemediationHostState = RemediationState & {
-  readonly contract_version: typeof STATE_CONTRACT_VERSION;
-  readonly status: "implementing";
-  readonly plan: RemediationPlan;
-  readonly items: Record<string, RemediationItemState>;
-};
-
-export interface RemediationHostWorkItem {
-  readonly id: string;
-  readonly finding_ids: readonly string[];
-  readonly allowed_files: readonly string[];
-  readonly baseline_commit: string;
-  /**
-   * The contract obligation ids this item's landed work must satisfy — the
-   * sorted, deduplicated union of `contract_obligation_ids` over the block's
-   * findings (what promotion mints from each DAG node's
-   * `satisfies_obligations`). Empty for a plan without contract overlays. The
-   * result's `obligation_evidence` must cover exactly this set.
-   */
-  readonly obligation_ids: readonly string[];
-  readonly prompt: {
-    readonly text: string;
-    readonly sha256: string;
-  };
-  readonly required_tests: readonly string[];
-  readonly result_path: string;
-  /**
-   * The lane's demand ranking (size / complexity / risk) — the same shared
-   * shape the audit draw emits, so a host matching a backend to work reads one
-   * vocabulary from both halves of the pipeline. Names DEMAND only: never a
-   * backend, provider, model or tier (see `LaneDemandSchema`).
-   */
-  readonly demand: LaneDemand;
-  readonly token_estimate: number;
+/** A recognized preparation defect, emitted as a bounded repair step by next-step. */
+export class RemediationHostPreparationError extends Error {
+  constructor(readonly code: "plan_repair_required" | "handoff_rebind_required", message: string) {
+    super(message);
+    this.name = "RemediationHostPreparationError";
+  }
 }
-
-export interface RemediationHostWorkload {
-  readonly contract_version: typeof WORKLOAD_CONTRACT_VERSION;
-  readonly run_id: string;
-  readonly work_items: readonly RemediationHostWorkItem[];
-}
-
-export interface PreparedRemediationHostHandoff {
-  readonly workload: RemediationHostWorkload;
-  readonly workload_path: string;
-  /** Persist this in RemediationState before exposing the workload to the host. */
-  readonly handoff_record: RemediationHostHandoffRecord;
-}
-
-/**
- * Remediation's issue vocabulary: the SHARED submission codes plus this draw's
- * own domain corroboration codes.
- *
- * The submission half is imported, never restated — a submission that is
- * missing, unparseable, contract-invalid, or a duplicate identity means exactly
- * the same thing on both sides of the pipeline, and the two used to spell it
- * differently (`result_missing` here, a bare `null` in the audit ingest). The
- * git/worktree/test half stays here: audit has no analogue and dragging
- * `commit_not_landed` into the shared core would suggest it could emit one.
- */
-export const REMEDIATION_ISSUE_CODES = [
-  ...SUBMISSION_ISSUE_CODES,
-  "workload_missing",
-  "workload_invalid",
-  "trusted_binding_missing",
-  "commit_missing",
-  "commit_not_landed",
-  "baseline_not_ancestor",
-  "changed_files_mismatch",
-  "run_start_dirty_overlap",
-  "required_test_failed",
-  /**
-   * A required test exceeded its deadline. DISTINCT from `required_test_failed`
-   * by code alone: a hung suite and a genuine red are different facts about the
-   * work, and telling them apart must not require parsing a joined message.
-   */
-  "required_test_timed_out",
-  /**
-   * A required test produced more output than the capture buffer holds, so the
-   * runner killed it. NOT a verdict on the tests: the child was terminated by
-   * the capture cap, and whether the suite would have passed is unknown. It has
-   * its own code because it was previously indistinguishable from a hang — node
-   * kills an over-buffer child with a signal, which the old discriminator read
-   * as a deadline miss.
-   */
-  "required_test_output_overflow",
-  /**
-   * A plan block declares a dependency id that exists in NO block of the plan.
-   * The block is unschedulable — never level 0 — and the producer bug is named
-   * rather than absorbed.
-   */
-  "dependency_missing",
-  /**
-   * A block arrived outside the normalized write-scope / declared-command shape
-   * this boundary consumes (artifact:normalized-block-write-scope). Refused, not
-   * silently normalized: a silently sorted, deduped or re-rooted write scope
-   * hides the producer bug and widens what a host may touch.
-   */
-  "block_contract_invalid",
-  /**
-   * A recovery-mode acceptance could not be marked on the submission ledger, so
-   * it was refused. An acceptance that used the relaxation MUST stay
-   * distinguishable from a clean one; an unrecordable mark is a refusal, never
-   * a silent acceptance.
-   */
-  "recovery_unrecorded",
-  /**
-   * The repository HEAD moved between the recovery verb's unlocked test phase
-   * and its locked write phase, so the pre-computed test verdicts describe a
-   * tree that is no longer current. The whole recovery aborts.
-   */
-  "tree_moved_between_phases",
-  /**
-   * The run's own WORKLOAD BINDING changed between the recovery verb's unlocked
-   * test phase and its locked write phase — the sibling of
-   * `tree_moved_between_phases` for a concurrent state writer that settles items
-   * and re-mints the binding without moving a commit. The pre-computed verdicts
-   * describe work that is no longer pending, so the whole recovery aborts.
-   */
-  "state_moved_between_phases",
-  /**
-   * The work item's baseline commit is not in this repository, so nothing can
-   * be corroborated against it. The run's recorded state is at fault, not the
-   * result.
-   */
-  "baseline_missing",
-  /**
-   * The work item's baseline commit exists but is no longer an ancestor of HEAD
-   * (history was rewritten under the run). The spawn-free `recover-ingest` verb
-   * is the named repair; no worker can make it.
-   */
-  "baseline_orphaned",
-  /**
-   * `landed_commit` names a commit that cannot be this item's landed work: the
-   * baseline itself, or a commit whose diff against the baseline is empty.
-   */
-  "landed_commit_invalid",
-  /**
-   * A result names a work item that the persisted workload binds but that is no
-   * longer pending (it settled, or its dependencies are not complete).
-   */
-  "work_item_not_eligible",
-  // `workload_stale` is shared with the audit draw: its meaning and its remedy
-  // live beside `WORKLOAD_ISSUE_CODES`.
-  ...WORKLOAD_ISSUE_CODES,
-] as const;
-
-export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
 
 /**
  * What the host must DO about each remediation ingest code (owner review of
@@ -260,6 +119,9 @@ export type RemediationIssueCode = (typeof REMEDIATION_ISSUE_CODES)[number];
 const REMEDIATION_ISSUE_REMEDY: Readonly<Record<RemediationIssueCode, IssueRemedy>> = {
   ...SUBMISSION_ISSUE_REMEDY,
   ...WORKLOAD_ISSUE_REMEDY,
+  conformance_review_required: "none",
+  conformance_review_unavailable: "none",
+  conformance_review_insufficient: "repair",
   // Here a duplicate is two result files carrying one result_id in the same
   // call, and NEITHER is accepted — so the item is still pending and the fix is
   // a corrected file. (The audit draw raises it only after an acceptance, so
@@ -299,27 +161,6 @@ export function remediationIssueRemedy(
   return REMEDIATION_ISSUE_REMEDY[issue.code];
 }
 
-export type RemediationHostIngestIssue = SubmissionIssue<RemediationIssueCode>;
-
-export interface RemediationHostIngestSummary {
-  readonly accepted_count: number;
-  readonly completed_work_item_ids: readonly string[];
-  readonly pending_work_item_ids: readonly string[];
-  readonly issues: readonly RemediationHostIngestIssue[];
-  /**
-   * Every work item this ingest OBSERVED, by the outcome it observed — so a
-   * caller never has to re-derive progress from the issue list, where an item
-   * with no result file and an item whose write succeeded but whose result is
-   * missing both used to read as the same absence.
-   *
-   * Keyed by work item id; content-sorted on insertion so a re-ingest of an
-   * unchanged frontier produces byte-identical content.
-   */
-  readonly work_item_outcomes: ReadonlyMap<string, WorkItemOutcome>;
-  readonly state_changed: boolean;
-  readonly state: CurrentRemediationHostState;
-}
-
 /**
  * The remediate draw's boundary paths are the CORE's, whole.
  *
@@ -332,50 +173,6 @@ export interface RemediationHostIngestSummary {
  */
 type BoundaryPaths = HostHandoffPaths;
 
-interface RemediationHostResult {
-  readonly contract_version: typeof RESULT_CONTRACT_VERSION;
-  readonly result_id: string;
-  readonly run_id: string;
-  readonly work_item_id: string;
-  readonly prompt_sha256: string;
-  /**
-   * The full id of the one commit that carries this item's edits, on HEAD.
-   * The ONLY fact about the work the host states (v1alpha3, owner review of
-   * prompt 20, 2026-09-18): the changed files come from git, the tests from the
-   * tool's own rerun of `required_tests`, and the landing from ancestry — so a
-   * host is never asked to restate what the tool derives and then checks.
-   */
-  readonly landed_commit: string;
-  /**
-   * Cited evidence per satisfied contract obligation — the evidence-coverage
-   * floor between "received" and "accepted". Must cover exactly the work
-   * item's bound `obligation_ids` (empty when none are bound); each entry
-   * cites at least one non-empty string. Coverage is validated mechanically at
-   * ingestion; judging the citations' semantic sufficiency is the per-run
-   * conformance review's job, never this parser's.
-   */
-  readonly obligation_evidence: readonly {
-    readonly obligation_id: string;
-    readonly evidence: readonly string[];
-  }[];
-}
-
-interface RemediationHostDecision {
-  readonly contract_version: typeof DECISION_CONTRACT_VERSION;
-  readonly result_id: string;
-  readonly run_id: string;
-  readonly work_item_id: string;
-  readonly prompt_sha256: string;
-  readonly outcome:
-    | { readonly status: "resolved_no_change"; readonly evidence: readonly string[] }
-    | { readonly status: "blocked"; readonly failure_reason: string }
-    | {
-        readonly status: "needs_clarification";
-        readonly question: string;
-        readonly category?: string;
-      };
-}
-
 const CURRENT_STATE_KEYS = new Set([
   "applied_edit_surface",
   "closing_context",
@@ -383,6 +180,7 @@ const CURRENT_STATE_KEYS = new Set([
   "contract_version",
   "items",
   "host_handoff",
+  "conformance_review",
   "plan",
   "plan_coverage",
   "run_start_dirty",
@@ -405,6 +203,7 @@ const CURRENT_ITEM_KEYS = new Set([
   "host_landed_commit",
   "host_landed_files",
   "host_result_evidence",
+  "conformance_review",
   "finding_id",
   "incomplete_coverage_attempts",
   "last_successful_step",
@@ -431,6 +230,7 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
     return null;
   }
 
+  if (value.conformance_review !== undefined && !ConformanceReviewBindingSchema.safeParse(value.conformance_review).success) return null;
   const parsedPlan = RemediationPlanSchema.safeParse(value.plan);
   if (!parsedPlan.success || !isRecord(value.items)) return null;
   const stateItems = value.items;
@@ -440,6 +240,8 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
       value.host_handoff,
     );
     if (!parsedHandoff.success) return null;
+    if (parsedHandoff.data.conformance_policy_sha256 !== undefined &&
+      (value.conformance_review === undefined || contentSha256(value.conformance_review) !== parsedHandoff.data.conformance_policy_sha256)) return null;
     const ids = parsedHandoff.data.work_item_ids;
     if (
       new Set(ids).size !== ids.length ||
@@ -468,6 +270,7 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
     ) {
       return null;
     }
+    if (item.conformance_review !== undefined && !AcceptedConformanceReviewSchema.safeParse(item.conformance_review).success) return null;
     const block = blockById.get(item.block_id);
     if (!block || !block.items.includes(findingId)) return null;
   }
@@ -492,25 +295,6 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
   }
   const normalized = repoRelativePath(root, candidate, label);
   return candidate.endsWith("/") ? `${normalized}/` : normalized;
-}
-
-function pathIsAllowedByWriteScope(
-  root: string,
-  candidate: string,
-  allowedFiles: readonly string[],
-): boolean {
-  let normalized: string;
-  try {
-    normalized = repoRelativePath(root, candidate, "landed file");
-  } catch {
-    return false;
-  }
-  if (normalized !== candidate) return false;
-  return allowedFiles.some((allowed) =>
-    allowed.endsWith("/")
-      ? normalized.startsWith(allowed)
-      : normalized === allowed,
-  );
 }
 
 /**
@@ -1069,8 +853,10 @@ function buildPrompt(item: {
    */
   readonly hasLandingGates: boolean;
   readonly moduleContracts: readonly { module: string; contract: Record<string, unknown> }[];
+  readonly implementationContext?: ImplementationContext;
 }): string {
   const assignment = stableStringify({
+    ...(item.implementationContext ? { implementation_context: item.implementationContext } : {}),
     allowed_files: item.allowedFiles,
     assignments: item.assignments,
     baseline_commit: item.baselineCommit,
@@ -1341,6 +1127,7 @@ function buildWorkItem(
     hasLandingGates,
     resultPath,
     moduleContracts: block.module_contracts ?? [],
+    implementationContext: block.implementation_context,
   }), (promptDigest) =>
     renderResultTemplate({
       runId,
@@ -1737,294 +1524,6 @@ function parseResult(
   };
 }
 
-type CorroboratedHostResult =
-  | {
-      readonly ok: true;
-      readonly changedFiles: readonly string[];
-      /**
-       * True only when the baseline→landed ancestry check was WAIVED under an
-       * orphaned baseline. The caller must record the acceptance on the
-       * submission ledger before it lands.
-       */
-      readonly usedRecovery: boolean;
-    }
-  | {
-      readonly ok: false;
-      readonly code: RemediationHostIngestIssue["code"];
-      readonly check: IngestionCheckId;
-      readonly message: string;
-    };
-
-// The corroboration probes below run while the remediation state lock (and, on
-// the fold path, the phase lock) is held — ASYNC with the shared deadline
-// (INV-SSF), so the held lock's mtime heartbeat keeps beating through each
-// probe and a git that never answers cannot hang the ingest.
-async function gitCommitExists(root: string, commit: string): Promise<boolean> {
-  const result = await runTrackedAsync(
-    ["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  return !result.error && result.status === 0;
-}
-
-// INV-WTS-3 (landed-node ancestry): a landed node's commit must be an ancestor
-// of the ref it claims to have landed on. `git merge-base --is-ancestor` exits 0
-// exactly when that holds.
-async function gitCommitIsAncestor(
-  root: string,
-  ancestor: string,
-  descendant: string,
-): Promise<boolean> {
-  const result = await runTrackedAsync(
-    ["git", "merge-base", "--is-ancestor", ancestor, descendant],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  return !result.error && result.status === 0;
-}
-
-/**
- * Is this commit ORPHANED — unreachable from anything the repository still
- * keeps?
- *
- * "Not an ancestor of HEAD" is NOT orphanhood. A baseline sitting on an
- * unmerged `feature` branch while the work landed on trunk fails the ancestry
- * test exactly like a rewritten-away commit does, and treating that as orphaned
- * would hand the relaxation to the ordinary cross-branch case — precisely the
- * stale-worker situation the ancestry check exists to catch.
- *
- * So orphanhood is the CONJUNCTION of two probes: `git for-each-ref --contains`
- * lists every branch/tag/remote ref whose history contains the commit (empty
- * output = no live ref keeps it), and the HEAD ancestry check rides alongside
- * it.
- *
- * A THIRD source of reachability sits outside `for-each-ref` entirely: the
- * HEADs of this repository's OTHER worktrees, checked into no ref at all. In a
- * linked worktree git DETACHES HEAD (or parks a per-worktree branch), so a
- * baseline that is the live HEAD of a sibling worktree — exactly the state a
- * parallel remediation lane is in — would be reported as contained by nothing,
- * i.e. orphaned, and the relaxation would be handed out for a commit the
- * repository is actively keeping. `git worktree list --porcelain` enumerates
- * every worktree with its current HEAD, so it is read and compared. The linked
- * worktree's own HEAD is included by this probe, which is why the ordinary
- * detached-HEAD case needs no separate arm.
- *
- * RESIDUAL, deliberately not closed: that probe compares HEAD for EQUALITY, so
- * it covers a worktree detached at the baseline ONLY when its HEAD *is* the
- * baseline. A sibling worktree detached at a DESCENDANT of the baseline — a
- * lane that landed further commits on top — keeps the baseline reachable while
- * matching no ref and no worktree HEAD, and is still reported orphaned. Closing
- * it means an ancestry probe per enumerated worktree HEAD; the residual is
- * stated here rather than left as an implied full cover.
- *
- * A failed scan is not evidence of orphanhood — any probe that cannot answer
- * fails closed, so a git that cannot answer never unlocks the relaxation.
- */
-async function gitCommitIsOrphaned(
-  root: string,
-  commit: string,
-): Promise<boolean> {
-  if (await gitCommitIsAncestor(root, commit, "HEAD")) return false;
-  const result = await runTrackedAsync(
-    ["git", "for-each-ref", "--contains", commit, "--format=%(refname)"],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  if (result.error || result.status !== 0) return false;
-  if (result.stdout.trim().length > 0) return false;
-  // Reached only when no REF keeps the commit. Every worktree HEAD is then
-  // checked, so the detached (and per-worktree-branch) HEADs git does not
-  // enumerate as refs are still seen.
-  const worktrees = await runTrackedAsync(
-    ["git", "worktree", "list", "--porcelain"],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  if (worktrees.error || worktrees.status !== 0) return false;
-  return !worktrees.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("HEAD "))
-    .some((line) => line.slice("HEAD ".length).trim() === commit);
-}
-
-async function gitChangedFilesOfCommit(
-  root: string,
-  commit: string,
-): Promise<readonly string[] | null> {
-  const result = await runTrackedAsync(
-    [
-      "git",
-      "diff-tree",
-      "--root",
-      "--no-commit-id",
-      "--name-only",
-      "-r",
-      "-z",
-      commit,
-    ],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  if (result.error || result.status !== 0) return null;
-  return [...new Set(result.stdout.split("\0").filter(Boolean))].sort(
-    compareCodeUnits,
-  );
-}
-
-/**
- * Every repo-relative path the tree shows as touched since `baseline` — the
- * commits baseline→HEAD, the working tree's own deviation from HEAD (staged and
- * unstaged alike), and the untracked files git considers repository content.
- *
- * All three legs are needed to falsify a no-change claim, and they enumerate the
- * three ways a host can have edited: committed (leg 1), edited a TRACKED file
- * and left it uncommitted (leg 2), and CREATED a file (leg 3). A new `src/*.ts`
- * is a real edit and the most natural shape a remediation takes; without leg 3
- * the cheapest way to smuggle one past a no-change claim was simply never to
- * `git add` it. `null` means git could not answer, which callers must treat as
- * "cannot corroborate" rather than as "nothing changed".
- *
- * The untracked leg honours `--exclude-standard`, so it enumerates only what git
- * itself treats as content — a repo's `.gitignore`d build and coverage output is
- * already invisible to it. Two exemptions cover the remainder, both ground
- * truth rather than the host's word:
- *
- *  - THIS TOOL'S OWN ARTIFACT TREE ({@link AUDIT_TOOLS_DIRNAME}) is subtracted
- *    here, explicitly. In a real repository the tool writes a managed
- *    `.gitignore` block covering it, so it never reaches this probe at all; the
- *    explicit subtraction is what makes that independent of whether the block
- *    has been written yet, so a bare root (a fixture, a first run) cannot
- *    manufacture a false refusal out of the tool's own workload, prompt and
- *    result documents.
- *  - PRE-EXISTING untracked strays are excused by the caller's `excusedPaths`,
- *    for free: `run_start_dirty` is captured from `stagedAndUntracked` before
- *    any remediation edit exists, so it already enumerates untracked files.
- *    What survives both is an untracked file that appeared DURING the run — the
- *    only untracked class that can be this host's edit.
- */
-async function gitChangedFilesSince(
-  root: string,
-  baseline: string,
-): Promise<readonly string[] | null> {
-  const files = new Set<string>();
-  for (const args of [
-    // baseline → HEAD: what the host committed.
-    ["diff", "--name-only", "-z", baseline, "HEAD"],
-    // HEAD → working tree: what the host edited and did not commit.
-    ["diff", "--name-only", "-z", "HEAD"],
-    // Never added: what the host CREATED. `--exclude-standard` keeps git's own
-    // ignore rules authoritative.
-    ["ls-files", "--others", "--exclude-standard", "-z"],
-  ]) {
-    const probe = await runTrackedAsync(["git", ...args], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: TRACKED_CHILD_DEADLINE_MS,
-    });
-    if (probe.error || probe.status !== 0) return null;
-    for (const file of probe.stdout.split("\0").filter(Boolean)) {
-      if (isAuditToolsArtifactPath(file)) continue;
-      files.add(file);
-    }
-  }
-  return [...files].sort(compareCodeUnits);
-}
-
-/** Whether a repo-relative path lives inside this tool's own artifact tree. */
-function isAuditToolsArtifactPath(path: string): boolean {
-  const normalized = normalizeRepoPath(path);
-  return (
-    normalized === AUDIT_TOOLS_DIRNAME ||
-    normalized.startsWith(`${AUDIT_TOOLS_DIRNAME}/`)
-  );
-}
-
-/**
- * Corroborate an explicit `resolved_no_change` decision against the repository.
- *
- * A no-change decision used to be accepted on its evidence STRINGS alone, with
- * only the required tests re-run — so a host that had in fact edited and then
- * declared "nothing to do" was recorded as verified-no-change, and the edit
- * rode into the run unattributed. The claim is mechanically falsifiable, so it
- * is FALSIFIED.
- *
- * The scope of the falsification is the FULL write-scope corroboration every
- * other acceptance path gets, NOT a narrowing to this item's `allowed_files`.
- * `corroborateHostResult` refuses a landed commit that touched anything outside
- * `allowed_files`; a no-change decision that narrowed the check to files INSIDE
- * `allowed_files` would be the inverse rule — the out-of-scope edit, the more
- * serious of the two, would be the one silently admitted. So EVERY path the
- * tree shows as moved since the workload baseline refuses the claim.
- *
- * `excusedPaths` is the only exemption, and it is ground truth rather than the
- * host's word: `run_start_dirty` (already dirty before the run began, so not
- * evidence that this host edited anything — and because it is captured from
- * `stagedAndUntracked`, it excuses pre-existing UNTRACKED strays too) unioned
- * with the accepted edit surface — `applied_edit_surface` plus whatever this
- * same ingest has already corroborated and accepted, so a sibling work item's
- * legitimately landed files do not falsify this item's claim.
- *
- * Fails CLOSED, like every other corroboration here: a git that cannot answer
- * refuses the claim rather than admitting it.
- */
-async function corroborateNoChangeClaim(params: {
-  readonly root: string;
-  readonly workItem: RemediationHostWorkItem;
-  /** Repo-relative paths whose movement is already accounted for. */
-  readonly excusedPaths: ReadonlySet<string>;
-}): Promise<
-  | { readonly ok: true }
-  | {
-      readonly ok: false;
-      readonly code: RemediationHostIngestIssue["code"];
-      readonly check: IngestionCheckId;
-      readonly message: string;
-    }
-> {
-  const { root, workItem, excusedPaths } = params;
-  if (!(await isGitRepo(root))) return { ok: true };
-  const baseline = workItem.baseline_commit;
-  if (!(await gitCommitExists(root, baseline))) {
-    return {
-      ok: false,
-      code: "commit_missing",
-      check: "no_change_corroboration",
-      message:
-        "resolved_no_change cannot be corroborated: baseline_commit does not resolve to a real commit",
-    };
-  }
-  const changed = await gitChangedFilesSince(root, baseline);
-  if (changed === null) {
-    return {
-      ok: false,
-      code: "commit_missing",
-      check: "no_change_corroboration",
-      message:
-        "resolved_no_change cannot be corroborated: git could not enumerate the changes since the workload baseline",
-    };
-  }
-  const violating = changed.filter(
-    (path) => !excusedPaths.has(normalizeRepoPath(path)),
-  );
-  if (violating.length > 0) {
-    const inScope = violating.filter((path) =>
-      pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
-    );
-    const outOfScope = violating.filter(
-      (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
-    );
-    return {
-      ok: false,
-      code: "changed_files_mismatch",
-      check: "no_change_corroboration",
-      message:
-        "resolved_no_change is contradicted by the tree — these files changed since the " +
-        `workload baseline: ${violating.join(", ")}` +
-        (outOfScope.length > 0
-          ? ` (outside the prompt-bound allowed_files: ${outOfScope.join(", ")}` +
-            (inScope.length > 0 ? `; inside: ${inScope.join(", ")})` : ")")
-          : ""),
-    };
-  }
-  return { ok: true };
-}
-
 /**
  * Pre-computed required-test verdicts, keyed by `root` + command: `null` =
  * green, a string = the failure detail.
@@ -2046,10 +1545,7 @@ async function corroborateNoChangeClaim(params: {
  * The normal lane passes `null` and stays byte-identical to the pre-recovery
  * behavior — every command spawns once per work item, exactly as before.
  */
-export type RemediationRequiredTestVerdicts = ReadonlyMap<
-  string,
-  RequiredTestFailure | null
->;
+
 
 /**
  * The MINTED verdict table: a Map subclass that exists only inside this module.
@@ -2144,302 +1640,6 @@ function unresolvedFrontierWorkItemIds(
 }
 
 /**
- * A required-test rerun that did not pass, CLASSIFIED.
- *
- * `outcome` is the whole point. A suite that exceeded its deadline, a suite that
- * outran the capture buffer, and a suite that returned non-zero are different
- * facts — the first two are environment signals, only the last is the work being
- * wrong — and they used to arrive as one joined string (`"<cmd> (exit 1)"` /
- * `"<cmd> (ETIMEDOUT)"`) that a caller could only tell apart by parsing prose.
- * Output was not captured at all (`stdio: "ignore"`), so an operator staring at
- * a red ingest had nothing to read.
- *
- * `output_overflow` is separate from `timed_out` because node kills BOTH an
- * over-deadline and an over-`maxBuffer` child with a signal: a discriminator
- * that read `signal !== null` as "the deadline fired" reported a command that
- * was running fine and merely verbose as a hang. `output_overflow` does
- * NOT claim the tests were fine — see {@link describeRequiredTestFailure}; the
- * verdict is simply unknown, because a child killed mid-stream may equally have
- * been on its way to exit 3.
- */
-export interface RequiredTestFailure {
-  readonly command: string;
-  readonly outcome: "failed" | "timed_out" | "output_overflow" | "spawn_error";
-  readonly exit_code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-  /**
-   * The signal that killed the child, when one did and the runner's own caps did
-   * not (an operator `kill`, an OOM reaper). Absent on every other outcome —
-   * there is no signal to report — which is why it is optional rather than
-   * `string | null`: a caller that reads it gets a name or nothing, never a
-   * placeholder to special-case.
-   */
-  readonly signal?: string;
-}
-
-/**
- * Per-command deadline. A required test is host-authored and may legitimately be
- * a full suite, so the bound is generous; what changed is that hitting it is now
- * a NAMED outcome instead of an unlabelled failure string.
- */
-const REQUIRED_TEST_TIMEOUT_MS = 10 * 60 * 1_000;
-
-/**
- * Captured output is bounded and TAIL-biased: a failing suite's verdict is at
- * the end, and an unbounded capture would put a whole test log into state and
- * into every rendered issue.
- */
-const CAPTURED_OUTPUT_LIMIT = 4_000;
-
-/**
- * The bound on the MESSAGE a required-test failure produces.
- *
- * `CAPTURED_OUTPUT_LIMIT` bounds one STREAM; the message is a different thing —
- * `requiredTestIssue` joins every failing command, and a work item may bind any
- * number of them, so the rendered message grew with the number of failures. A
- * message is a HOST-FACING delivery (it is rendered into the step prompt an
- * operator reads), so its size cannot be a function of how many commands
- * happened to fail.
- *
- * The bound TRUNCATES the excerpt and says so; it never drops the verdict. What
- * survives at the front is the part that identifies the failure — the command
- * and its outcome — and the marker tells the operator the rest was elided and
- * where to look instead.
- */
-export const REQUIRED_TEST_MESSAGE_LIMIT = 8_000;
-
-/** The marker that names an elided excerpt, so truncation is never silent. */
-const REQUIRED_TEST_TRUNCATION_MARKER =
-  "… [excerpt truncated — re-run the command to see the full output]";
-
-/**
- * The spawn's raw capture buffer. Exceeding it does not truncate — node KILLS
- * the child — so the cap is a named constant the `output_overflow` message can
- * quote, rather than a literal buried in the spawn options.
- */
-const REQUIRED_TEST_MAX_BUFFER_BYTES = 8 * 1_024 * 1_024;
-
-function tail(value: string | undefined): string {
-  const text = value ?? "";
-  return text.length <= CAPTURED_OUTPUT_LIMIT
-    ? text
-    : `…${text.slice(text.length - CAPTURED_OUTPUT_LIMIT)}`;
-}
-
-/**
- * Render one classified failure for a host-facing issue message.
- *
- * `output_overflow` says the verdict is UNKNOWN, not that the tests were fine: a
- * child killed at the buffer cap may have been heading for exit 0 or exit 3, and
- * the runner cannot tell which. Either way the item is refused — the honest
- * report is "we could not find out", and it fails closed.
- *
- * A signal-killed child renders the SIGNAL, not `exit null`: `exit_code` is null
- * for every non-exit outcome, so printing it there described nothing.
- */
-function describeRequiredTestFailure(failure: RequiredTestFailure): string {
-  const head =
-    failure.outcome === "timed_out"
-      ? `${failure.command} (timed out)`
-      : failure.outcome === "output_overflow"
-        ? `${failure.command} (killed after exceeding the ${String(REQUIRED_TEST_MAX_BUFFER_BYTES)}-byte ` +
-          "output buffer — the run ended at the capture cap, so whether the tests pass is UNKNOWN)"
-        : failure.outcome === "spawn_error"
-          ? `${failure.command} (could not be started)`
-          : failure.exit_code === null
-            ? `${failure.command} (terminated by ${failure.signal ?? "an unreported signal"})`
-            : `${failure.command} (exit ${String(failure.exit_code)})`;
-  const captured = [failure.stdout, failure.stderr]
-    .filter((stream) => stream.trim().length > 0)
-    .join("\n");
-  return captured.length > 0 ? `${head}: ${captured}` : head;
-}
-
-/**
- * Length-prefixed so the root/command boundary is unambiguous for any path, and
- * printable so the source stays text (a raw separator byte would make the file
- * binary to git and invisible to grep). The root is part of the key because a
- * verdict is a fact about one command in one working tree, and nothing
- * guarantees a single process only ever ingests for one root.
- */
-function requiredTestVerdictKey(root: string, command: string): string {
-  return `${String(root.length)}:${root}:${command}`;
-}
-
-/**
- * The ONE place a required-test command is spawned.
- *
- * `timeoutMs` is a parameter so the deadline is exercisable: a hang is a
- * first-class outcome of this function, and an outcome that can only be reached
- * by waiting ten real minutes is an outcome nothing ever tests.
- */
-export async function runRequiredTest(
-  root: string,
-  command: string,
-  timeoutMs: number = REQUIRED_TEST_TIMEOUT_MS,
-): Promise<RequiredTestFailure | null> {
-  // AWAITED, never `spawnSync`: ingestion runs with the remediation state lock
-  // held, and a synchronous child blocks the event loop for the whole suite —
-  // starving the lock's mtime heartbeat until a LIVE lock is classified stale
-  // and stolen mid-ingest.
-  //
-  // argv + `shell: false`, never a shell string. A required test is a workload
-  // command that already cleared the declared-shape gate at the producer, so
-  // splitting it is unambiguous, and dropping the shell removes the last place
-  // an ingest hands a declared string to `sh`/`cmd.exe`. `resolveExecArgv`
-  // inside the runner is what keeps the npm/npx shims resolvable on win32.
-  const result = await runTrackedAsync(parseCommandString(command), {
-    cwd: root,
-    // Captured, not discarded: without it a red ingest reports that something
-    // failed and nothing about why.
-    encoding: "utf8",
-    maxBuffer: REQUIRED_TEST_MAX_BUFFER_BYTES,
-    timeout: timeoutMs,
-    windowsHide: true,
-  });
-  const stdout = tail(result.stdout);
-  const stderr = tail(result.stderr);
-  // The ERROR CODE discriminates, never `signal`. node kills an over-deadline
-  // child AND an over-`maxBuffer` child, and an external `kill` sets `signal`
-  // too — so `signal !== null` was true for three unrelated facts and reported
-  // all of them as a hang, including a command killed purely for printing more
-  // than the buffer holds.
-  //
-  // ASSUMPTION, stated: a deadline miss reports `ETIMEDOUT`. Verified on win32;
-  // it is node's documented contract, not a platform quirk this code confirmed
-  // everywhere. On a platform that killed a child at the deadline WITHOUT that
-  // code, the case degrades to `spawn_error` — a less specific refusal, still a
-  // refusal, so the fail direction holds and only the label is lost.
-  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
-  if (code === "ETIMEDOUT") {
-    return { command, outcome: "timed_out", exit_code: null, stdout, stderr };
-  }
-  if (code === "ENOBUFS") {
-    return {
-      command,
-      outcome: "output_overflow",
-      exit_code: null,
-      stdout,
-      stderr,
-    };
-  }
-  if (result.error) {
-    return {
-      command,
-      outcome: "spawn_error",
-      exit_code: null,
-      stdout,
-      stderr: stderr.length > 0 ? stderr : result.error.message,
-    };
-  }
-  // Killed by something outside this runner (an operator `kill`, an OOM reaper).
-  // Reported as FAILED with the signal named: the command did not complete, and
-  // calling it a deadline miss would attribute it to a bound this runner set.
-  //
-  // POSIX-ONLY IN PRACTICE, and UNTESTED for that reason: Windows has no signal
-  // delivery to report here — a killed child surfaces as an ordinary non-zero
-  // `status` with `signal` null — so this branch is unreachable on the platform
-  // this repo runs its suites on, and no test exercises it. It is kept because
-  // the runner is OS-agnostic by contract, not because it has been observed.
-  if (result.signal !== null && result.signal !== undefined) {
-    return {
-      command,
-      outcome: "failed",
-      exit_code: null,
-      stdout,
-      stderr,
-      signal: result.signal,
-    };
-  }
-  if (result.status !== 0) {
-    return {
-      command,
-      outcome: "failed",
-      exit_code: result.status,
-      stdout,
-      stderr,
-    };
-  }
-  return null;
-}
-
-async function rerunRequiredTests(
-  root: string,
-  commands: readonly string[],
-  /** `null` on the normal lane — see {@link RemediationRequiredTestVerdicts}. */
-  verdicts: RemediationRequiredTestVerdicts | null,
-): Promise<readonly RequiredTestFailure[]> {
-  const failures: RequiredTestFailure[] = [];
-  for (const command of commands) {
-    if (verdicts) {
-      const verdict = verdicts.get(requiredTestVerdictKey(root, command));
-      if (verdict === undefined) {
-        failures.push({
-          command,
-          outcome: "spawn_error",
-          exit_code: null,
-          stdout: "",
-          stderr:
-            "no pre-computed verdict — refusing to spawn a test while the state lock is held",
-        });
-      } else if (verdict !== null) {
-        failures.push(verdict);
-      }
-      continue;
-    }
-    const failure = await runRequiredTest(root, command);
-    if (failure !== null) failures.push(failure);
-  }
-  return failures;
-}
-
-/**
- * The classified issue for a set of required-test failures. An ENVIRONMENT fact
- * anywhere in the set wins over a red sibling, timeout first: a hung or
- * buffer-killed suite is the fact that explains the ingest, and burying it under
- * a sibling's exit code is exactly the conflation the code split exists to end.
- * Only a set where every failure is a genuine non-zero exit reads as
- * `required_test_failed`.
- */
-function requiredTestIssue(
-  workItem: RemediationHostWorkItem,
-  failures: readonly RequiredTestFailure[],
-): RemediationHostIngestIssue {
-  // Bounded at the point the message is BUILT, not left to the caller: the
-  // failure count is a property of the work item's bound commands, so bounding
-  // anywhere downstream would still have carried an unbounded string through
-  // state and into the ledger. See REQUIRED_TEST_MESSAGE_LIMIT.
-  const body = `mechanical required-test rerun failed: ${failures
-    .map(describeRequiredTestFailure)
-    .join("; ")}`;
-  return {
-    code: failures.some((failure) => failure.outcome === "timed_out")
-      ? "required_test_timed_out"
-      : failures.some((failure) => failure.outcome === "output_overflow")
-        ? "required_test_output_overflow"
-        : "required_test_failed",
-    check: "required_tests",
-    work_item_id: workItem.id,
-    result_path: workItem.result_path,
-    message: boundRequiredTestMessage(body),
-  };
-}
-
-/**
- * Truncate a required-test failure message to {@link REQUIRED_TEST_MESSAGE_LIMIT},
- * marking the elision. The head is kept because it is what identifies the
- * failure — the command and its classified outcome — and the marker replaces
- * the tail rather than being appended past the cap, so the result is bounded by
- * construction.
- */
-function boundRequiredTestMessage(message: string): string {
-  if (message.length <= REQUIRED_TEST_MESSAGE_LIMIT) return message;
-  const room = REQUIRED_TEST_MESSAGE_LIMIT - REQUIRED_TEST_TRUNCATION_MARKER.length;
-  return `${message.slice(0, room)}${REQUIRED_TEST_TRUNCATION_MARKER}`;
-}
-
-/**
  * Run every required-test command a recovery ingest could need, ONCE each, and
  * return the finished verdict table. Call this OUTSIDE the state lock — that is
  * the entire point (see {@link RemediationRequiredTestVerdicts}).
@@ -2499,144 +1699,6 @@ export async function precomputeRecoveryTestVerdicts(params: {
   return verdicts;
 }
 
-async function corroborateHostResult(params: {
-  readonly root: string;
-  readonly state: CurrentRemediationHostState;
-  readonly workItem: RemediationHostWorkItem;
-  readonly result: RemediationHostResult;
-  readonly verdicts: RemediationRequiredTestVerdicts | null;
-  /** See `ingestRemediationHostResults`'s `recovery` option. */
-  readonly recovery: boolean;
-}): Promise<CorroboratedHostResult> {
-  const { root, state, workItem, result, verdicts } = params;
-  const baseline = workItem.baseline_commit;
-  const landed = result.landed_commit;
-  let usedRecovery = false;
-  if (!(await gitCommitExists(root, baseline))) {
-    return {
-      ok: false,
-      code: "baseline_missing",
-      check: "landed_commit",
-      message: "the work item's baseline_commit is not in this repository",
-    };
-  }
-  if (!(await gitCommitExists(root, landed))) {
-    return {
-      ok: false,
-      code: "commit_missing",
-      check: "landed_commit",
-      message: "landed_commit is not a commit in this repository",
-    };
-  }
-  if (landed === baseline) {
-    return {
-      ok: false,
-      code: "landed_commit_invalid",
-      check: "landed_commit",
-      message:
-        "landed_commit is the baseline commit; name the commit that carries this item's edits",
-    };
-  }
-  if (!(await gitCommitIsAncestor(root, baseline, landed))) {
-    if (!params.recovery) {
-      // An ORPHANED baseline (no ref contains it, HEAD cannot reach it) is a
-      // fault in the run, not in the work: no commit could ever descend from
-      // it. The spawn-free recovery verb is its named repair.
-      if (await gitCommitIsOrphaned(root, baseline)) {
-        return {
-          ok: false,
-          code: "baseline_orphaned",
-          check: "landed_commit",
-          message:
-            "the work item's baseline_commit is orphaned (history was rewritten under the run); " +
-            "the operator can run `recover-ingest` to accept the landed work",
-        };
-      }
-      return {
-        ok: false,
-        code: "baseline_not_ancestor",
-        check: "landed_commit",
-        message: "the trusted workload baseline is not an ancestor of the claimed landed commit",
-      };
-    }
-    // The relaxation is precondition-bound: it applies ONLY when the trusted
-    // baseline is genuinely ORPHANED — contained by no ref AND unreachable from
-    // HEAD (see gitCommitIsOrphaned). That is the one state in which no landed
-    // commit could ever descend from it, so the item is unacceptable under
-    // every preparable binding. A baseline the repository still keeps — on an
-    // unmerged branch, a tag, a remote ref, or HEAD itself — is a HEALTHY
-    // binding, and a landed commit that does not descend from it is exactly the
-    // stale-worker case the ancestry check exists to catch; recovery refuses it
-    // identically to the normal lane.
-    if (!(await gitCommitIsOrphaned(root, baseline))) {
-      return {
-        ok: false,
-        code: "baseline_not_ancestor",
-        check: "landed_commit",
-        message:
-          "the trusted workload baseline is not an ancestor of the claimed landed commit, " +
-          "and the baseline is NOT orphaned (a ref still contains it, or it is reachable " +
-          "from HEAD), so the stale-worker protection stands and recovery cannot waive it",
-      };
-    }
-    usedRecovery = true;
-  }
-  if (!(await gitCommitIsAncestor(root, landed, "HEAD"))) {
-    return {
-      ok: false,
-      code: "commit_not_landed",
-      check: "landed_commit",
-      message: "landed_commit is not reachable from the repository HEAD",
-    };
-  }
-  const actualFiles = await gitChangedFilesOfCommit(root, landed);
-  if (!actualFiles || actualFiles.length === 0) {
-    return {
-      ok: false,
-      code: "landed_commit_invalid",
-      check: "landed_commit",
-      message: "landed_commit changes no file; name the commit that carries this item's edits",
-    };
-  }
-  const outOfScope = actualFiles.filter(
-    (path) => !pathIsAllowedByWriteScope(root, path, workItem.allowed_files),
-  );
-  if (outOfScope.length > 0) {
-    return {
-      ok: false,
-      code: "changed_files_mismatch",
-      check: "write_scope",
-      message:
-        "the landed commit changed files outside the prompt-bound allowed_files: " +
-        outOfScope.join(", "),
-    };
-  }
-  const runStartDirty = new Set(
-    (state.run_start_dirty ?? []).map(normalizeRepoPath),
-  );
-  const dirtyOverlap = actualFiles.filter((path) =>
-    runStartDirty.has(normalizeRepoPath(path)),
-  );
-  if (dirtyOverlap.length > 0) {
-    return {
-      ok: false,
-      code: "run_start_dirty_overlap",
-      check: "run_start_dirt",
-      message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
-    };
-  }
-  const failedTests = await rerunRequiredTests(
-    root,
-    workItem.required_tests,
-    verdicts,
-  );
-  if (failedTests.length > 0) {
-    const issue = requiredTestIssue(workItem, failedTests);
-    return { ok: false, code: issue.code, check: "required_tests", message: issue.message };
-  }
-  return { ok: true, changedFiles: actualFiles, usedRecovery };
-}
-
 /**
  * Was this persisted workload written under an earlier workload contract
  * version? Only a document that NAMES a different version counts: a document
@@ -2650,9 +1712,21 @@ function persistedWorkloadIsStale(value: unknown): boolean {
   );
 }
 
-async function persistedWorkloadFileIsStale(workloadPath: string): Promise<boolean> {
-  const read = await readSubmissionDocument(workloadPath);
-  return read.kind === "value" && persistedWorkloadIsStale(read.value);
+async function persistedWorkloadAllowsRebind(
+  workloadPath: string, expected: RemediationHostHandoffRecord,
+): Promise<boolean> {
+  const value = await readJsonFile<unknown>(workloadPath);
+  // A version change can alter shape, never the run/baseline/work identities.
+  if (!isRecord(value) || value.run_id !== expected.run_id || !Array.isArray(value.work_items)) return false;
+  const ids: string[] = [];
+  for (const item of value.work_items) {
+    if (!isRecord(item) || typeof item.id !== "string" || item.baseline_commit !== expected.baseline_commit) return false;
+    ids.push(item.id);
+  }
+  if (new Set(ids).size !== ids.length ||
+      !sameStrings(ids.sort(compareCodeUnits), [...expected.work_item_ids].sort(compareCodeUnits))) return false;
+  // Ordinary state movement also proves the predecessor's complete digest.
+  return persistedWorkloadIsStale(value) || contentSha256(value) === expected.workload_sha256;
 }
 
 export async function prepareRemediationHostHandoff(params: {
@@ -2701,7 +1775,7 @@ export async function prepareRemediationHostHandoff(params: {
     // classified aggregate form the empty-workload branch below uses, so both
     // producer-defect exits read alike.
     if (!(error instanceof BlockContractError)) throw error;
-    throw new Error(cannotPrepareMessage(paths.root, state, error));
+    throw new RemediationHostPreparationError("plan_repair_required", cannotPrepareMessage(paths.root, state, error));
   }
   if (workload.work_items.length === 0) {
     // Name the producer defect when it is the cause. An empty level 0 that is
@@ -2709,7 +1783,8 @@ export async function prepareRemediationHostHandoff(params: {
     // exist" used to surface as a bare "empty workload", sending the operator
     // to look at scheduling rather than at the plan.
     const blocked = planBlockIssues(paths.root, state);
-    throw new Error(
+    throw new RemediationHostPreparationError(
+      "plan_repair_required",
       blocked.length === 0
         ? "Cannot prepare an empty remediation host workload"
         : `Cannot prepare a remediation host workload: ${blocked
@@ -2724,15 +1799,36 @@ export async function prepareRemediationHostHandoff(params: {
   const remintStaleDigest =
     existingRecord !== undefined &&
     existingRecord.workload_sha256 !== workloadDigest &&
-    (await persistedWorkloadFileIsStale(paths.workloadPath));
+    (await persistedWorkloadAllowsRebind(paths.workloadPath, existingRecord));
   if (
     existingRecord &&
     existingRecord.workload_sha256 !== workloadDigest &&
     !remintStaleDigest
   ) {
-    throw new Error(
-      "Trusted remediation host workload no longer matches the persisted state binding",
+    throw new RemediationHostPreparationError(
+      "handoff_rebind_required",
+      `Trusted remediation host workload no longer matches the persisted state binding; ${paths.workloadPath} cannot prove its trusted identity`,
     );
+  }
+  let conformanceReview = state.conformance_review;
+  if (conformanceReview && conformanceReview.run_id !== params.runId) {
+    throw new Error("Conformance review policy belongs to another run; restore coherent run state or confirm a new run.");
+  }
+  if (!conformanceReview) {
+    // A lost snapshot must not reset a review already requested for this run.
+    for (const item of workload.work_items) {
+      const priorReview = await readSubmissionDocument(conformanceReviewPaths(paths.artifactsDir, params.runId, item.id).request);
+      if (priorReview.kind !== "missing") {
+        throw new Error("The conformance review has begun but the trusted run policy is missing. Restore the run state before continuing; review cannot be silently disabled.");
+      }
+    }
+    const checkpoint = await readIntentCheckpoint(join(paths.artifactsDir, "intent_checkpoint.json"));
+    conformanceReview = { run_id: params.runId, enabled: checkpoint?.conformance_review === true,
+      ...(checkpoint ? { checkpoint_sha256: contentSha256(checkpoint) } : {}) };
+  }
+  const conformancePolicyDigest = conformanceReview.enabled ? contentSha256(conformanceReview) : undefined;
+  if (existingRecord?.conformance_policy_sha256 && existingRecord.conformance_policy_sha256 !== conformancePolicyDigest) {
+    throw new Error("The conformance review snapshot no longer matches its trusted handoff binding.");
   }
   const handoffRecord: RemediationHostHandoffRecord = existingRecord
     ? remintStaleDigest
@@ -2748,11 +1844,13 @@ export async function prepareRemediationHostHandoff(params: {
     };
 
   await mkdir(paths.resultDir, { recursive: true });
+  await recordHostRootLogBoundary({ ...paths, runId: params.runId, phase: "prepare" });
   await writeJsonFile(paths.workloadPath, workload);
   return {
     workload,
     workload_path: paths.workloadPath,
-    handoff_record: handoffRecord,
+    handoff_record: conformancePolicyDigest ? { ...handoffRecord, conformance_policy_sha256: conformancePolicyDigest } : handoffRecord,
+    conformance_review: conformanceReview,
   };
 }
 
@@ -2835,6 +1933,15 @@ export async function ingestRemediationHostResults(params: {
   }
 
   const paths = resolveBoundaryPaths(params);
+  if (state.conformance_review && state.conformance_review.run_id !== params.runId) {
+    throw new Error("Conformance review policy belongs to another run; refusing result acceptance.");
+  }
+  if (!state.conformance_review && state.host_handoff) {
+    for (const id of state.host_handoff.work_item_ids) {
+      const priorReview = await readSubmissionDocument(conformanceReviewPaths(paths.artifactsDir, params.runId, id).request);
+      if (priorReview.kind !== "missing") throw new Error("Required conformance review policy is missing; restore the trusted run state.");
+    }
+  }
   const nextState = structuredClone(state);
   const validated = await validateHostResultBundle({
     state,
@@ -2850,6 +1957,7 @@ export async function ingestRemediationHostResults(params: {
       validated.summary.issues,
       validated.summary.completed_work_item_ids,
     );
+    if (state.host_handoff) await recordHostRootLogBoundary({ ...paths, runId: params.runId, phase: "ingest" });
     return { ...validated.summary, issues };
   }
 
@@ -2869,7 +1977,9 @@ export async function ingestRemediationHostResults(params: {
     acc.issues,
     acc.completed,
   );
-  return commitRemediationStateUpdates(validated.ctx, acc, verdicts, issues);
+  const summary = await commitRemediationStateUpdates(validated.ctx, acc, verdicts, issues);
+  await recordHostRootLogBoundary({ ...paths, runId: params.runId, phase: "ingest" });
+  return summary;
 }
 
 /** Record raw observations first, then decorate only the returned diagnostics. */
@@ -2949,6 +2059,7 @@ type HostItemVerdict =
       readonly workItem: RemediationHostWorkItem;
       readonly pendingItems: readonly string[];
       readonly at: string;
+      readonly conformance_review?: AcceptedConformanceReview;
       readonly outcome: RemediationHostDecision["outcome"];
     }
   | {
@@ -2956,6 +2067,7 @@ type HostItemVerdict =
       readonly workItem: RemediationHostWorkItem;
       readonly pendingItems: readonly string[];
       readonly at: string;
+      readonly conformance_review?: AcceptedConformanceReview;
       /**
        * The CORROBORATED landing — read from the result only after
        * `corroborateHostResult` verified the commit resolves, is reachable from
@@ -3211,6 +2323,18 @@ function hasLandedCommitFor(
   );
 }
 
+async function requiredConformanceReview(
+  ctx: HostIngestContext, workItem: RemediationHostWorkItem,
+  result: RemediationHostResult | RemediationHostDecision,
+): Promise<ConformanceReviewCheck> {
+  if (!ctx.state.conformance_review?.enabled) return { ok: true };
+  return checkContractConformance({
+    root: ctx.paths.root, artifactsDir: ctx.paths.artifactsDir, runId: ctx.runId,
+    item: workItem, result,
+    contracts: ctx.state.plan.blocks.find(block => block.block_id === workItem.id)?.module_contracts ?? [],
+  });
+}
+
 async function executeHostVerificationReruns(
   ctx: HostIngestContext,
   acc: HostIngestAccumulators,
@@ -3323,6 +2447,9 @@ async function executeHostVerificationReruns(
           continue;
         }
       }
+      const review: ConformanceReviewCheck = outcome.status === "resolved_no_change"
+        ? await requiredConformanceReview(ctx, workItem, result) : { ok: true };
+      if (!review.ok) { acc.issues.push(review.issue); continue; }
       for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
       verdicts.push({
         kind: "decision",
@@ -3330,6 +2457,7 @@ async function executeHostVerificationReruns(
         pendingItems,
         at: new Date().toISOString(),
         outcome,
+        conformance_review: review.receipt,
       });
       acc.completed.push(workItem.id);
       continue;
@@ -3365,6 +2493,8 @@ async function executeHostVerificationReruns(
       });
       continue;
     }
+    const review = await requiredConformanceReview(ctx, workItem, result);
+    if (!review.ok) { acc.issues.push(review.issue); continue; }
     if (corroborated.usedRecovery) {
       // No acceptance without a record. The mark goes down BEFORE the item is
       // marked resolved, and an append that throws refuses this item rather
@@ -3426,6 +2556,7 @@ async function executeHostVerificationReruns(
     for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
     verdicts.push({
       kind: "landed",
+      conformance_review: review.receipt,
       workItem,
       pendingItems,
       at: new Date().toISOString(),
@@ -3460,6 +2591,8 @@ function commitRemediationStateUpdates(
       const outcome = verdict.outcome;
       for (const findingId of verdict.pendingItems) {
         const item = nextState.items[findingId]!;
+        if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
+        else delete item.conformance_review;
         item.started_at ??= verdict.at;
         if (outcome.status === "resolved_no_change") {
           item.status = "resolved_no_change";
@@ -3488,6 +2621,8 @@ function commitRemediationStateUpdates(
     }
     for (const findingId of verdict.pendingItems) {
       const item = nextState.items[findingId]!;
+        if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
+        else delete item.conformance_review;
       item.status = "resolved";
       item.started_at ??= verdict.at;
       item.completed_at = verdict.at;

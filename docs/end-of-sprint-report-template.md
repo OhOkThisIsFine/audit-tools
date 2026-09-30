@@ -31,8 +31,8 @@ must carry a value — content, or the literal `"none"` — or the render fails 
 missing. Only the sections with content render. So an omission in the report is always a decision
 that was stated, and the report is still short.
 
-Two sections are `required: true` and may not be `"none"`: **Verification** and **Landed this
-sprint**. There an absence is not "nothing to say", it is "nobody looked".
+Sections marked `required: true` in the registry may not be `"none"`; the renderer names them when
+content is missing.
 
 Section order is the registry's order, and it is bottom-weighted on purpose: chat shows the end of
 a long message first, so mechanics come first and what the owner must act on comes last.
@@ -51,34 +51,22 @@ writes. That record binds two ways, and both matter:
 So hand-writing the report instead is not a quiet way around the check. The behavior is pinned by
 [`tests/shared/closeout-render.test.ts`](../tests/shared/closeout-render.test.ts).
 
-## What each section is for
+## Current sections and input shape
 
-- **Verification** — input key `verification`, always renders — what was run, what it returned, and the clean pushed commit it
-  ran on.
-- **Cleanup** — input key `cleanup` — dead code, orphaned helpers, and stray debug/TODO removed. Any
-  intermediate state that is there on purpose belongs in this same section, worded so it does not
-  read as a bug. (There is no separate key for it — the input keys are exactly the ones named in this list.)
-- **Friction this sprint** — input key `friction`, an OBJECT keyed by bullet id, not a string — bullets keyed by the single-sourced friction vocabulary
-  (`FRICTION_CATEGORIES`, `src/shared/friction/frictionRecord.ts`), one taxonomy for sprint retros
-  and the product's mechanical capture. The named categories are seeds, not an exhaustive schema —
-  the open-ended bullet is load-bearing whenever it has content.
-- **Docs synced** — input key `docs` — HANDOFF / backlog / memory + index, only the ones that actually changed.
-- **Landed this sprint** — input key `landed`, always renders — what this sprint did and its outcome, with
-  commits/versions. "nothing — investigation/docs only" is a real answer; an empty section is not.
-- **Decisions needed from you** — input key `decisions` — every decision only the owner can make, posed as an actual
-  answerable question with its options spelled out, via AskUserQuestion where the harness offers it.
-  "Your decision: see queue X / run command Y" is a pointer, not a question, and does not satisfy
-  this section. Record each answer in its durable home once given.
-- **Remaining next steps, and where each lives** — input key `next_steps` — every remaining step WITH the document that will
-  hold it after the session ends: immediate-next → `docs/HANDOFF.md`; open bugs →
-  `docs/backlog/open-bugs.md`; forward tracks → `docs/backlog/forward-tracks.md`; durable
-  design/status → project memory + its index; durable how-to → `CLAUDE.md`. A step living only in
-  chat is lost.
+Read the registry-backed prompts and generate an input with:
+
+```bash
+node scripts/render-closeout.mjs --help
+node scripts/render-closeout.mjs --template
+```
+
+The renderer is the authoritative section list, key shape and required-content contract. This document
+does not maintain a second enumeration.
 
 ## Notes
 
 - **Adding or removing a section is a registry edit**, not a prose edit — the renderer, the refusal
-  message, and this document's list all follow from `closeout-sections-data.mjs`.
+  message, help and blank template all follow from `closeout-sections-data.mjs`.
 - **Owner decisions are asked, not referenced.** The recurring failure that section exists to stop:
   hand-backs that say "your decision — item X" while the actual question (which the agent holds,
   options and all) never reaches the owner. If the owner would have to open a file or run a command

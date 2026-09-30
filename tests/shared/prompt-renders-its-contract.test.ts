@@ -773,6 +773,29 @@ describe("prompt-contract registry: projection rows", () => {
   }
 });
 
+describe("prompt-contract registry: operator drivers and dispatchers", () => {
+  for (const row of promptContractRegistry.filter(row => row.disposition === "driver" || row.disposition === "dispatch")) {
+    it(`${row.file} :: ${row.builder}`, async () => {
+      expect(row.renderDriver, "a driver needs a real render fixture").toBeDefined();
+      expect(row.driverChecks, "a driver needs concrete action/input/output checks").toBeDefined();
+      const prompt = await row.renderDriver!();
+      const checks = row.driverChecks!;
+      expect(prompt, "responsible actor").toMatch(checks.actor);
+      expect(prompt, "immediate action").toMatch(checks.action);
+      for (const value of [...checks.inputs, ...checks.outputs, ...checks.choices]) expect(prompt, `${row.builder}: ${value}`).toContain(value);
+      expect(prompt, "continuation or terminal instruction").toMatch(checks.continuation);
+      if (checks.exampleSchema) {
+        const example = /```json\n([\s\S]*?)\n```/u.exec(prompt);
+        expect(example, "driver output example").not.toBeNull();
+        expect(checks.exampleSchema.safeParse(JSON.parse(example![1]!)).success, "example must satisfy actual validator").toBe(true);
+      }
+    });
+  }
+  it("operator prompts cannot be exempted because they lack a worker-result schema", () => {
+    expect(promptContractRegistry.filter(row => row.gapReason?.includes("driver-facing operator prompt"))).toHaveLength(0);
+  });
+});
+
 describe("prompt-contract registry: declared gaps", () => {
   for (const row of declaredGapRows) {
     it(`${row.file} :: ${row.builder}`, () => {

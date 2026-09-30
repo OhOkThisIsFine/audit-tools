@@ -1,3 +1,7 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
+import { charterExtractionLane } from "../../src/audit/cli/laneSubmissions.js";
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 /**
  * The deep conceptual pass's perspective lanes are ROUND-scoped, and the tool is
  * owed nothing on them.
@@ -155,7 +159,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     const root = dirname(dirname(dir));
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "app.ts"), "export const app = true;\n");
-    await writeCoreArtifacts(dir, {
+    const completed = captureCompletedDesignReviews({
       repo_manifest: {
         repository: { name: "retry-fixture" },
         generated_at: "2026-01-01T00:00:00.000Z",
@@ -203,6 +207,8 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
         },
       },
     } as ArtifactBundle);
+    await writeCoreArtifacts(dir, completed);
+    await persistDesignReviewSnapshots(dir, completed);
     await persistAnalyzerConsent(root, {
       semgrep: "declined",
       eslint: "declined",
@@ -211,6 +217,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       "osv-scanner": "declined",
     });
 
+    await satisfyFunctionalPreflight(root, dir);
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const firstStep = JSON.parse(
       await readFile(join(dir, "steps", "current-step.json"), "utf8"),
@@ -219,9 +226,8 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       // One EMPTY goal DAG per lane. A lane submission states NO kind: the tool
       // stamps it at merge, from the lane-bound path the file arrived on (owner
       // review of prompt 8, 2026-09-17). So every lane writes the same shape.
-      for (const path of firstStep.access.write_paths as string[]) {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, JSON.stringify({ nodes: [], edges: [] }) + "\n", "utf8");
+      for (const kind of ["stated", "structural", "revealed"] as const) {
+        await writeBoundReviewFixture(dir, charterExtractionLane(kind), { nodes: [], edges: [] });
       }
       await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
       Object.assign(
@@ -234,27 +240,29 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     expect(firstStep.step_kind).toBe("design_review_conceptual");
     const firstManifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
     const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];
-    return { dir, root, firstStep, firstPerspectivePaths };
+    return { dir, root, firstStep, firstPerspectivePaths, firstManifest };
   }
 
   it("keeps perspective paths stable after next-step rejects a malformed judge", async () => {
-    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
-    for (const path of firstPerspectivePaths) await writeFile(path, "[]\n", "utf8");
-    await writeFile(firstStep.artifact_paths.conceptual_results, "{}\n", "utf8");
+    const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
+    for (const path of firstPerspectivePaths) await writeBoundReviewFixture(dir, firstManifest.perspectives.find((entry: { result_path: string }) => entry.result_path === path)!.lane_id, []);
+    await writeBoundReviewFixture(dir, firstManifest.judge.lane_id, {});
+    const perspectiveBytes = await Promise.all(firstPerspectivePaths.map(path => readFile(path, "utf8")));
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const retryStep = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
     expect(retryStep.access.write_paths).toEqual(firstStep.access.write_paths);
     expect(await readFile(retryStep.artifact_paths.conceptual_judge_prompt, "utf8")).toMatch(/prior submission rejected|expected shape/i);
     expect(await readFile(retryStep.artifact_paths.current_prompt, "utf8")).toContain("All 3 perspective lanes have already delivered");
-    for (const path of firstPerspectivePaths) expect(await readFile(path, "utf8")).toBe("[]\n");
+    for (const [index, path] of firstPerspectivePaths.entries()) expect(await readFile(path, "utf8")).toBe(perspectiveBytes[index]);
   });
 
   it("reopens every malformed perspective while preserving valid current-round work", async () => {
-    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
+    const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
     await mkdir(dirname(firstPerspectivePaths[0]!), { recursive: true });
-    await writeFile(firstPerspectivePaths[0]!, "[]\n", "utf8");
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[0].lane_id, []);
+    const validPerspectiveBytes = await readFile(firstPerspectivePaths[0]!, "utf8");
     await mkdir(dirname(firstPerspectivePaths[1]!), { recursive: true });
-    await writeFile(firstPerspectivePaths[1]!, "{}\n", "utf8");
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[1].lane_id, {});
     await mkdir(dirname(firstPerspectivePaths[2]!), { recursive: true });
     await writeFile(firstPerspectivePaths[2]!, "{\n", "utf8");
     await mkdir(dirname(firstStep.artifact_paths.conceptual_results), {
@@ -263,16 +271,12 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     const manifest = JSON.parse(
       await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"),
     );
-    await writeFile(
-      firstStep.artifact_paths.conceptual_results,
-      JSON.stringify({
+    await writeBoundReviewFixture(dir, firstManifest.judge.lane_id, {
         round_id: manifest.round_id,
         findings: [],
         candidate_dispositions: [],
         final_finding_shares: [],
-      }) + "\n",
-      "utf8",
-    );
+      });
 
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const retryStep = JSON.parse(
@@ -280,7 +284,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     );
     expect(retryStep.step_kind).toBe("design_review_conceptual");
     expect(retryStep.access.write_paths).toEqual(firstStep.access.write_paths);
-    expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe("[]\n");
+    expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe(validPerspectiveBytes);
     for (const path of firstPerspectivePaths.slice(1)) {
       await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     }
@@ -303,10 +307,10 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
           event.lane === "design_review_conceptual",
       ),
     ).toBe(true);
-    for (const path of firstPerspectivePaths.slice(1)) await writeFile(path, "[]\n", "utf8");
-    await writeFile(firstStep.artifact_paths.conceptual_results, JSON.stringify({
+    for (const path of firstPerspectivePaths.slice(1)) await writeBoundReviewFixture(dir, firstManifest.perspectives.find((entry: { result_path: string }) => entry.result_path === path)!.lane_id, []);
+    await writeBoundReviewFixture(dir, firstManifest.judge.lane_id, {
       round_id: manifest.round_id, findings: [], candidate_dispositions: [], final_finding_shares: [],
-    }));
+    });
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const repairedLedger = await readSubmissionLedger(dir);
     for (const contributor of manifest.perspectives.slice(1)) {
@@ -323,16 +327,16 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
   });
 
   it("never quarantines a manifest path outside its tool-computed lane binding", async () => {
-    const { dir, root, firstStep, firstPerspectivePaths } = await prepareRetryFixture();
-    for (const path of firstPerspectivePaths) await writeFile(path, "[]\n", "utf8");
+    const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
+    for (const path of firstPerspectivePaths) await writeBoundReviewFixture(dir, firstManifest.perspectives.find((entry: { result_path: string }) => entry.result_path === path)!.lane_id, []);
     const unrelated = join(root, "unrelated.json");
     await writeFile(unrelated, "{}\n", "utf8");
     const manifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
     manifest.perspectives[1].result_path = unrelated;
     await writeFile(firstStep.artifact_paths.conceptual_round_manifest, JSON.stringify(manifest));
-    await writeFile(firstStep.artifact_paths.conceptual_results, JSON.stringify({
+    await writeBoundReviewFixture(dir, firstManifest.judge.lane_id, {
       round_id: manifest.round_id, findings: [], candidate_dispositions: [], final_finding_shares: [],
-    }));
+    });
     await expect(cmdNextStep(["--root", root, "--artifacts-dir", dir])).rejects.toThrow(/bound.*path|path.*bound/i);
     expect(await readFile(unrelated, "utf8")).toBe("{}\n");
   });

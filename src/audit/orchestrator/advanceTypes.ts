@@ -77,8 +77,7 @@ export interface AdvanceAuditOptions {
   externalAcquisition?: ExternalAcquisitionAdvanceOptions;
   /**
    * Host gate on the phase-1 deterministic auto-fix, which is the one audit
-   * phase that WRITES to the audited tree. Absent ⇒ the phase runs, preserving
-   * today's default. `enabled: false` opts it out; `dryRun: true` reports what
+   * phase that WRITES to the audited tree. Only `enabled: true` opts it in; `dryRun: true` reports what
    * it would do without spawning a formatter. Both are checked before the first
    * formatter, never applied as a revert afterwards.
    *

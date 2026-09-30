@@ -1,3 +1,6 @@
+import { systemicPremiseToken } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
+import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 /**
  * Systemic challenge rounds need two identities at once:
  *
@@ -8,9 +11,9 @@
  * step contract. They therefore exercise the emitter's renderer and the
  * handler's independent derivation without spelling a proposed lane helper.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { bindCandidateTerminalStep, driveCandidateLoop } from "../helpers/candidateDriver.js";
@@ -96,7 +99,9 @@ function openRegister(
 async function makeRoot(): Promise<{ root: string; artifactsDir: string }> {
   const root = await mkdtemp(join(tmpdir(), "systemic-round-identity-"));
   cleanupRoots.push(root);
-  return { root, artifactsDir: join(root, ".audit-tools", "audit") };
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  await satisfyFunctionalPreflight(root, artifactsDir);
+  return { root, artifactsDir };
 }
 
 async function emitSystemicStep(
@@ -126,14 +131,89 @@ function resultPath(step: Record<string, any>): string {
   return path;
 }
 
-async function submit(path: string, findings: readonly unknown[]): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify({ findings }), "utf8");
-}
 
 const emptyState: AuditState = { status: "active", obligations: [] };
 
 describe("systemic challenge round identity", () => {
+  test.each([false, true])("an emitted response is checked against the live premise before folding without re-emission (changed: %s)", async (changed) => {
+    const { root, artifactsDir } = await makeRoot();
+    const emittedBundle = systemicBundle(openRegister([
+      { round: 1, new_finding_ids: ["SYS-1"], dry: false },
+    ]));
+    const premiseA = systemicPremiseToken(emittedBundle);
+    emittedBundle.systemic_challenge!.round_token = premiseA;
+    const step = await emitSystemicStep(root, artifactsDir, emittedBundle);
+    const lane = systemicChallengeLane(emittedBundle.systemic_challenge!.rounds);
+    await writeBoundReviewFixture(artifactsDir, lane, { findings: [] });
+    expect(JSON.parse(await readFile(resultPath(step), "utf8")).contract_version)
+      .toBe("review-submission/v1");
+
+    // No new emission occurs. The same pending lane still carries the answer
+    // to A, while the fold may now carry a different upstream intent B.
+    const current = structuredClone(emittedBundle);
+    if (changed) current.intent_checkpoint!.intent_summary = "changed systemic premise B";
+    expect(systemicPremiseToken(current) === premiseA).toBe(!changed);
+    const before = structuredClone(current.systemic_challenge);
+    const tx = createFoldTransaction();
+    const outcome = await handleSystemicChallengeBranch({ root, artifactsDir }, current, emptyState, tx);
+    expect(outcome.action).toBe(changed ? "return" : "continue");
+    if (changed) {
+      if (outcome.action !== "return") throw new Error("stale premise was consumed");
+      expect(outcome.result.kind).toBe("systemic_challenge");
+      expect(outcome.result.bundle.systemic_challenge).toEqual(before);
+      expect(tx.staged.some(submission => submission.applied)).toBe(false);
+    } else {
+      if (outcome.action !== "continue") throw new Error("current premise was refused");
+      expect(outcome.bundle.systemic_challenge?.rounds).toHaveLength(2);
+      expect(outcome.bundle.systemic_challenge?.rounds[1]?.dry).toBe(true);
+      expect(outcome.bundle.systemic_challenge?.round_token).toBe(premiseA);
+      expect(tx.staged.some(submission => submission.applied)).toBe(true);
+    }
+    expect(current.systemic_challenge).toEqual(before);
+  });
+
+  test.each(["contract_findings", "conceptual_findings", "timestamp"] as const)("systemic acceptance binds the carried prior findings without re-emission (%s)", async (change) => {
+    const { root, artifactsDir } = await makeRoot();
+    const issued = systemicBundle(openRegister([{ round: 1, new_finding_ids: ["SYS-1"], dry: false }]));
+    const finding = {
+      id: "DESIGN-A", title: "Original reviewed assessment A", category: "design",
+      severity: "medium" as const, confidence: "high" as const, lens: "design",
+      summary: "Previously banked assessment A", affected_files: [],
+    };
+    issued.design_assessment = {
+      generated_at: "2026-01-01T00:00:00Z", findings: [],
+      contract_findings: [finding], conceptual_findings: [],
+    };
+    const premise = systemicPremiseToken(issued);
+    issued.systemic_challenge!.round_token = premise;
+    const assessmentPath = join(artifactsDir, "design_assessment.json");
+    await writeFile(assessmentPath, JSON.stringify(issued.design_assessment), "utf8");
+    const step = await emitSystemicStep(root, artifactsDir, issued);
+    const prompt = await readFile(step.artifact_paths.systemic_challenge_prompt, "utf8");
+    expect(prompt).toContain(finding.title);
+    await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(issued.systemic_challenge!.rounds), { findings: [] });
+
+    const current = structuredClone(issued);
+    if (change === "timestamp") current.design_assessment!.generated_at = "2026-02-01T00:00:00Z";
+    else current.design_assessment![change] = [{ ...finding, id: "DESIGN-B", title: "New carried assessment B" }];
+    // Premise/round identity and the on-disk evidence stay A. Only the live
+    // assessment consumed by the prompt changes; no emitter refresh can save us.
+    expect(systemicPremiseToken(current)).toBe(premise);
+    expect(current.systemic_challenge).toEqual(issued.systemic_challenge);
+    expect(JSON.parse(await readFile(assessmentPath, "utf8"))).toEqual(issued.design_assessment);
+    const tx = createFoldTransaction();
+    const outcome = await handleSystemicChallengeBranch({ root, artifactsDir }, current, emptyState, tx);
+    expect(outcome.action).toBe(change === "timestamp" ? "continue" : "return");
+    if (change !== "timestamp") {
+      if (outcome.action !== "return") throw new Error("stale prior findings were accepted");
+      expect(outcome.result.bundle.systemic_challenge).toEqual(issued.systemic_challenge);
+      expect(tx.staged.some(submission => submission.applied)).toBe(false);
+    } else {
+      if (outcome.action !== "continue") throw new Error("cosmetic timestamp change was refused");
+      expect(outcome.bundle.systemic_challenge?.rounds).toHaveLength(2);
+    }
+  });
+
   test("the adversary dispatch preserves independence when no independent context is available", async () => {
     const { root, artifactsDir } = await makeRoot();
     const step = await emitSystemicStep(root, artifactsDir, systemicBundle(openRegister()));
@@ -208,7 +288,8 @@ describe("systemic challenge round identity", () => {
     // handler/executor/transaction path.
     const round2Step = await emitSystemicStep(root, artifactsDir, prior);
     const round2Path = resultPath(round2Step);
-    await submit(round2Path, []);
+    await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(prior.systemic_challenge!.rounds), { findings: [] });
+    const round2Bytes = await readFile(round2Path, "utf8");
     const tx2 = createFoldTransaction();
     const round2 = await handleSystemicChallengeBranch(
       { root, artifactsDir },
@@ -231,8 +312,8 @@ describe("systemic challenge round identity", () => {
     // accepted round-2 payload at its old path, as a crash recovery sweep can
     // do. The current round must still be read from its newly emitted path.
     const round3Step = await emitSystemicStep(root, artifactsDir, round2.bundle);
-    const round3Path = resultPath(round3Step);
-    await submit(round2Path, []);
+    resultPath(round3Step);
+    await writeFile(round2Path, round2Bytes);
     const replayTx = createFoldTransaction();
     const replay = await handleSystemicChallengeBranch(
       { root, artifactsDir }, round2.bundle, emptyState, replayTx,
@@ -240,7 +321,7 @@ describe("systemic challenge round identity", () => {
     expect(replay.action).toBe("return");
     expect(replayTx.staged).toHaveLength(0);
     expect(round2.bundle.systemic_challenge?.rounds).toHaveLength(2);
-    await submit(round3Path, []);
+    await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(round2.bundle.systemic_challenge!.rounds), { findings: [] });
     const tx3 = createFoldTransaction();
     const round3 = await handleSystemicChallengeBranch(
       { root, artifactsDir },
@@ -259,7 +340,7 @@ describe("systemic challenge round identity", () => {
     expect(round3.bundle.systemic_challenge?.converged).toBe(true);
     // The restored accepted payload remains forensic at its old path; it was
     // not consumed as a fourth round and was not deleted by the commit.
-    expect(await readFile(round2Path, "utf8")).toBe(JSON.stringify({ findings: [] }));
+    expect(await readFile(round2Path, "utf8")).toBe(round2Bytes);
     expect(round3.bundle.systemic_challenge?.rounds).toHaveLength(3);
   });
 });

@@ -25,6 +25,7 @@ interface CriticalFlowFallbackStep {
   artifact_paths: Record<string, string>;
   access?: {
     write_paths?: string[];
+    read_paths?: string[];
   };
 }
 
@@ -123,6 +124,9 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
     expect(lanePromptPath).toMatch(/critical-flow-fallback-prompt\.md$/);
     const lanePrompt = await readFile(lanePromptPath, "utf8");
     expect(lanePrompt).toMatch(/Critical-flow fallback/i);
+    const manifestPath = join(artifactsDir, "critical_flows.json").replaceAll("\\", "/");
+    expect(lanePrompt).toContain(manifestPath);
+    expect(paused.access?.read_paths).toContain(manifestPath);
     expect(lanePrompt).toMatch(/"flows"/);
     // Lane files are advance-free — the continue lives in the step prompt.
     expect(lanePrompt).not.toMatch(/next-step/);
@@ -217,5 +221,17 @@ test.concurrent("structure merges the host critical-flow submission into critica
     expect(flows.length).toBeGreaterThan(1);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("critical-flow prompt binds the complete artifact at the 80/81 boundary", async () => {
+  const { renderCriticalFlowFallbackPrompt } = await import("../../src/audit/reporting/criticalFlowFallbackPrompt.js");
+  const manifestPath = "/repo/custom artifacts/critical_flows.json";
+  for (const count of [80, 81]) {
+    const manifest = { flows: Array.from({ length: count }, (_, index) => ({ ...HOST_FLOW, id: `flow:${index}` })) };
+    const prompt = renderCriticalFlowFallbackPrompt(manifest as Parameters<typeof renderCriticalFlowFallbackPrompt>[0], manifestPath);
+    expect(prompt).toContain(manifestPath);
+    expect(prompt.includes("1 more flows")).toBe(count === 81);
+    if (count === 81) expect(renderCriticalFlowFallbackPrompt(manifest as Parameters<typeof renderCriticalFlowFallbackPrompt>[0])).toContain("flow:80");
   }
 });

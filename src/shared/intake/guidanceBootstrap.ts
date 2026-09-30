@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/guidance-bootstrap.test.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -24,6 +25,16 @@ export function applyGuidanceFile(
     return target;
   }
   const incoming = readFileSync(resolvedSource);
+  return writeGuidance(artifactsDir, incoming, resolvedSource);
+}
+
+/** Create canonical conversation input directly; the host never chooses a temporary filename. */
+export function applyGuidanceText(artifactsDir: string, text: string): string {
+  return writeGuidance(artifactsDir, Buffer.from(text, "utf8"), "conversation guidance");
+}
+
+function writeGuidance(artifactsDir: string, incoming: Buffer, source: string): string {
+  const target = join(artifactsDir, "intake", "conversation-start.md");
   if (existsSync(target)) {
     const existing = readFileSync(target);
     if (existing.equals(incoming)) {
@@ -31,7 +42,7 @@ export function applyGuidanceFile(
       return target;
     }
     throw new Error(
-      `Refusing to overwrite existing ${target} with differing guidance from ${resolvedSource}. ` +
+      `Refusing to overwrite existing ${target} with differing guidance from ${source}. ` +
         `Remove or reconcile the existing conversation-start.md before re-bootstrapping.`,
     );
   }

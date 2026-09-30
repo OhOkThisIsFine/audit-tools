@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-submission.test.ts, tests/audit/submission-staging.test.ts, tests/audit/host-handoff-unaccept-results.test.ts
 /**
  * The append-only record of what happened to each submission.
  *
@@ -71,6 +72,10 @@ export const SUBMISSION_EVENT_KINDS = [
    * events.
    */
   "dispatched",
+  /** A prompt-bound host declaration was validated; domain acceptance is recorded separately. */
+  "review_declared",
+  /** Current prompt binding, separate from the count of dispatched lanes. */
+  "prompt_bound",
   /**
    * What a dispatched lane actually delivered, observed once at the fold that
    * ingests its round's terminal submission. Carries `outcome`. A `dispatched`
@@ -101,6 +106,8 @@ const EVENT_KIND_IS_INGEST: Record<SubmissionEventKind, boolean> = {
   expected: false,
   // Facts about dispatch and delivery; the tool consumed nothing.
   dispatched: false,
+  review_declared: false,
+  prompt_bound: false,
   lane_outcome: false,
   accepted: true,
   rejected: true,
@@ -175,6 +182,12 @@ export interface SubmissionLedgerEvent<
    * `recoveryMarkMatches`).
    */
   readonly landed_commit?: string;
+  readonly review_requirement?: string;
+  readonly review_mode?: string;
+  readonly review_reason?: string;
+  readonly prompt_sha256?: string;
+  readonly prompt_path?: string;
+  readonly content_sha256?: string;
   /** ISO-8601. A faithful event record is allowed to say when. */
   readonly recorded_at: string;
 }
@@ -240,6 +253,7 @@ const SUBMISSION_LEDGER_EVENT_STRING_FIELDS = [
   "message",
   "round_id",
   "landed_commit",
+  "review_requirement", "review_mode", "review_reason", "prompt_sha256", "prompt_path", "content_sha256",
   "outcome",
 ] as const;
 

@@ -1,4 +1,5 @@
-// sites-pinned: tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-emit-order.test.ts
+// sites-pinned: tests/audit/charter-current-context.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-emit-order.test.ts
+import { hashContent } from "../../shared/hash.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { CharterProvenanceSchema } from "audit-tools/shared";
 import type { CorrespondenceCandidate } from "audit-tools/shared";
@@ -167,4 +168,12 @@ export function renderCharterComparisonPrompt(
     '- If no candidate and no addition corresponds anywhere, write `"correspondences": []` and `"differences": []` and set `"no_correspondences": true`. Set that flag ONLY then — alongside a confirmed correspondence it contradicts itself and the tool refuses the submission.',
     "",
   ].join("\n");
+}
+
+/** Bind every candidate and complete graph the comparison reader actually sees. */
+export function charterComparisonInputRevision(bundle: ArtifactBundle): string {
+  return hashContent(JSON.stringify({
+    candidates: bundle.charter_register?.candidates ?? [],
+    lanes: bundle.charter_register?.lanes ?? [],
+  }));
 }

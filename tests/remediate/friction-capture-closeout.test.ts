@@ -1,3 +1,4 @@
+import { decideRemediateFrictionCloseout } from "../../src/remediate/steps/frictionCloseout.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -28,7 +29,7 @@ function coverAllCategories(record: TriagedFrictionArtifact): void {
   }));
 }
 import { decideAuditFrictionCloseout } from "../../src/audit/orchestrator/nextStep.js";
-import { decideNextStep, decideRemediateFrictionCloseout } from "../../src/remediate/steps/nextStep.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 
 // OFF-TREE, per invocation. This suite used to root its scratch tree at
 // `join(dirname(fileURLToPath(import.meta.url)), ".test-friction-capture-closeout")`

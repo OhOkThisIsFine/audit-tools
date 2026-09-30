@@ -8,8 +8,7 @@
  * mock-blanking failure mode the pin exists for lives here.)
  */
 export const DISPATCH_BARREL_EXPORTS = [
-  "REMEDIATION_ISSUE_CODES",
-  "REQUIRED_TEST_MESSAGE_LIMIT",
+  "RemediationHostPreparationError",
   "hostDependencyLevels",
   "ingestRemediationHostResults",
   "permanentlyDeadPendingBlocks",
@@ -18,7 +17,6 @@ export const DISPATCH_BARREL_EXPORTS = [
   "remediationHostResultFilePath",
   "remediationIssueRemedy",
   "remediationSubmissionBinding",
-  "runRequiredTest",
   "severityRiskWeight",
   "workloadBindingIdentity",
 ] as const;

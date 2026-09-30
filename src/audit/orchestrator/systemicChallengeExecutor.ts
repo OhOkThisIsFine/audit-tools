@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/audit/systemic-round-identity.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -13,6 +13,7 @@ import type {
 import { hashContent, stableStringify } from "audit-tools/shared";
 import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
+import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import {
   SYSTEMIC_ROUND_CEILING,
@@ -57,7 +58,7 @@ function appliedConvergenceRule(): NonNullable<
  * non-semantic stripping the metadata manifest uses — so provenance stamps
  * (`generated_at`) and key order cannot mint a new run.
  */
-function systemicPremiseToken(bundle: ArtifactBundle): string {
+export function systemicPremiseToken(bundle: ArtifactBundle): string {
   // The adjudication is projected here rather than hashed as it stands: the
   // metadata manifest's non-semantic table does not strip `generated_at` for
   // `conceptual_review_adjudication.json`, so an identical adjudication
@@ -91,6 +92,20 @@ function systemicPremiseToken(bundle: ArtifactBundle): string {
       : `${artifact}:${hashArtifactValue(artifact, payload)}`,
   );
   return hashContent(stableStringify(parts), { length: 12 });
+}
+
+/** Pending review identity includes the actual carried evidence; it never resets loop history. */
+export function systemicReviewInputRevision(bundle: ArtifactBundle): string {
+  return hashContent(stableStringify({
+    premise: systemicPremiseToken(bundle),
+    prompt: renderSecondOrderAdversaryPrompt({
+      round: (bundle.systemic_challenge?.rounds.length ?? 0) + 1,
+      metrics: aggregateMetricsDigest(bundle),
+      submissionPath: "<tool-owned-submission>",
+      evidencePaths: [],
+      bundle,
+    }),
+  }));
 }
 
 function omittedRegister(ceiling: Ceiling, generated_at: string): SystemicChallengeRegister {

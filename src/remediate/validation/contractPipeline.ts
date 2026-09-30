@@ -1,3 +1,4 @@
+import { CounterexampleSchema } from "../../shared/types/contractPipeline/obligations.js";
 // sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-pipeline.test.ts
 /**
  * Validation helpers for contract-pipeline artifacts.
@@ -19,6 +20,7 @@ import {
   CONTRACT_REPAIR_TARGETS_OFFERED,
   CONTEXT_ENTRY_KINDS,
   COUNTEREXAMPLE_CLASSIFICATIONS,
+  CONCEPTUAL_CRITIQUE_REPAIR_TARGETS,
   CRITIQUE_ITEM_KINDS,
   CRITIQUE_ITEM_SEVERITIES,
   CRITIQUE_VERDICTS,
@@ -384,6 +386,9 @@ export function validateConceptualDesignCritique(
       requireOneOf(item.severity, CRITIQUE_ITEM_SEVERITIES, `${path}.items[${i}].severity`, issues);
     }
   }
+  if (v.repair_target !== undefined) {
+    requireOneOf(v.repair_target, CONCEPTUAL_CRITIQUE_REPAIR_TARGETS, `${path}.repair_target`, issues);
+  }
   requireOneOf(v.verdict, CRITIQUE_VERDICTS, `${path}.verdict`, issues);
   requireString(v.created_at, `${path}.created_at`, issues);
   return issues;
@@ -525,12 +530,10 @@ export function validateCounterexample(
         pushValidationIssue(issues, `${path}.counterexamples[${i}]`, `${path}.counterexamples[${i}] must be an object.`);
         continue;
       }
-      requireString(entry.id, `${path}.counterexamples[${i}].id`, issues);
-      requireString(entry.claim, `${path}.counterexamples[${i}].claim`, issues);
-      requireStringArray(entry.reproduction_steps, `${path}.counterexamples[${i}].reproduction_steps`, issues);
-      requireString(entry.expected, `${path}.counterexamples[${i}].expected`, issues);
-      requireString(entry.actual, `${path}.counterexamples[${i}].actual`, issues);
-      requireStringArray(entry.violated_obligation_ids, `${path}.counterexamples[${i}].violated_obligation_ids`, issues);
+      const parsed = CounterexampleSchema.safeParse(entry);
+      if (!parsed.success) for (const issue of parsed.error.issues) {
+        pushValidationIssue(issues, `${path}.counterexamples[${i}].${issue.path.join(".")}`, issue.message);
+      }
     }
   }
   requireString(v.created_at, `${path}.created_at`, issues);

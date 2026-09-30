@@ -1,14 +1,14 @@
+import { ImplementationContextSchema } from "../../shared/types/contractPipeline/implementation.js";
 // sites-pinned: tests/remediate/validation.test.ts, tests/remediate/clarification-round-contract.test.ts
 import {
   type ValidationIssue,
+  VALID_SEVERITIES,
+  VALID_CONFIDENCES,
   isRecord,
   pushValidationIssue,
   prefixValidationIssues,
   requireKeys,
 } from "audit-tools/shared";
-
-const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
-const VALID_CONFIDENCES = new Set(["high", "medium", "low"]);
 
 export function validateFinding(
   value: unknown,
@@ -90,6 +90,12 @@ export function validateRemediationBlock(
 
   if (!Array.isArray(value.items)) {
     pushValidationIssue(issues, `${path}.items`, "Expected an array.");
+  }
+  if (value.implementation_context !== undefined) {
+    const parsed = ImplementationContextSchema.safeParse(value.implementation_context);
+    if (!parsed.success) for (const issue of parsed.error.issues) {
+      pushValidationIssue(issues, `${path}.implementation_context.${issue.path.join(".")}`, issue.message);
+    }
   }
   if (typeof value.parallel_safe !== "boolean") {
     pushValidationIssue(issues, `${path}.parallel_safe`, "Expected a boolean.");

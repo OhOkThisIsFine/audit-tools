@@ -1,20 +1,21 @@
+// sites-pinned: tests/remediate/contract-pipeline-artifact-store.test.ts, tests/remediate/contract-review-independence.test.ts, tests/remediate/contract-pipeline.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts
+import { propagateReachability } from "../../shared/graph/orderedReachability.js";
+import { ContractReviewProvenanceSchema, type ContractReviewProvenance, type ContractReviewDeclaration, reviewIndependenceIssue } from "../../shared/types/reviewIndependence.js";
 /**
  * Typed read/write helpers for the contract-pipeline artifacts.
  *
  * Two distinct, non-overlapping path roles live under
  * `<artifactsDir>/intake/contract/` (D3):
  *
- * - **Host input** `<name>.input.json` — the plain payload the host *writes*,
- *   and the plain payload a downstream host *reads* for its upstreams. The
- *   host's world is entirely plain `.input.json` files; it never sees or
- *   touches an envelope.
- * - **Canonical envelope** `<name>.json` — the tool-owned content-hash envelope
- *   the tool derives at ingest. Purely internal bookkeeping (staleness DAG,
- *   dependency hashes); every tool-side read goes through `readContractArtifact`.
+ * - **Host input** `<name>.input.json` — the authored submission. Ordinary roles
+ *   write a raw payload; review roles write the bound review-submission envelope.
+ * - **Canonical envelope** `<name>.json` — tool-owned validated domain payload,
+ *   dependency hashes and accepted review provenance. Downstream roles read its
+ *   `payload` field and never write this file.
  *
- * No file is ever both: the host writes `<name>.input.json`, the tool owns the
- * canonical `<name>.json` envelope. This keeps the host-authored INPUT path and
- * the tool-derived envelope path cleanly separated (no in-place re-wrap).
+ * No host input is rewritten in place. Collapsed ordinary authoring sections
+ * may read earlier raw inputs in the same round trip before ingestion; this
+ * exception never admits an unvalidated review envelope as canonical data.
  *
  * Independence from StateStore is intentional: these helpers operate on the
  * contract-pipeline subdirectory only and do not touch the remediation
@@ -56,13 +57,13 @@ export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipeli
   module_contracts: ["goal_spec", "context_bundle", "module_decomposition"],
   seam_reconciliation_report: ["module_decomposition", "module_contracts"],
   finalized_module_contracts: ["module_contracts", "seam_reconciliation_report"],
-  conceptual_design_critique: ["goal_spec", "finalized_module_contracts"],
+  conceptual_design_critique: ["goal_spec", "module_decomposition", "finalized_module_contracts"],
   obligation_ledger: ["goal_spec", "finalized_module_contracts"],
   cyclic_seam_resolution: ["obligation_ledger"],
   test_validator_plan: ["goal_spec", "obligation_ledger"],
   contract_assessment_report: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan"],
   counterexample: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan", "contract_assessment_report"],
-  judge_report: ["goal_spec", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan", "contract_assessment_report", "counterexample"],
+  judge_report: ["goal_spec", "module_decomposition", "finalized_module_contracts", "obligation_ledger", "cyclic_seam_resolution", "test_validator_plan", "contract_assessment_report", "counterexample"],
   implementation_dag: [
     "goal_spec",
     "context_bundle",
@@ -88,6 +89,7 @@ export const DEPENDENCY_MAP: Record<ContractPipelineArtifactName, ContractPipeli
 
 export interface ContractPipelineArtifactEnvelope {
   artifact_name: ContractPipelineArtifactName;
+  review_provenance?: ContractReviewProvenance;
   /**
    * Identity of this exact emission: `hashContent(stableStringify(payload))`.
    * KEY-ORDER INDEPENDENT — the same payload assembled in a different field
@@ -175,7 +177,8 @@ export function isEnvelope(
     typeof value.content_hash === "string" &&
     value.content_hash.length > 0 &&
     "payload" in value &&
-    isDependencyHashes(value.dependency_hashes)
+    isDependencyHashes(value.dependency_hashes) &&
+    (value.review_provenance === undefined || ContractReviewProvenanceSchema.safeParse(value.review_provenance).success)
   );
 }
 
@@ -342,6 +345,7 @@ export async function writeContractArtifact(
   artifactsDir: string,
   name: ContractPipelineArtifactName,
   payload: unknown,
+  review?: ContractReviewDeclaration,
 ): Promise<ContractPipelineArtifactEnvelope> {
   await mkdir(contractPipelineDir(artifactsDir), { recursive: true });
   const content_hash = computeHash(payload);
@@ -362,6 +366,7 @@ export async function writeContractArtifact(
     content_hash,
     dependency_hashes,
     payload,
+    ...(review ? { review_provenance: { ...review, reviewed_content_hash: content_hash } } : {}),
   };
   await writeJsonFile(contractArtifactFilePath(artifactsDir, name), envelope);
   return envelope;
@@ -473,6 +478,8 @@ export async function readContractArtifact(
   // second copy of the hash definition, which is how a write and a read come to
   // disagree about what "the same payload" means.
   const actualHash = computeHash(raw.payload);
+  if (raw.review_provenance && (raw.review_provenance.reviewed_content_hash !== actualHash ||
+    reviewIndependenceIssue(raw.review_provenance.requirement, raw.review_provenance.review) !== null)) return null;
   if (actualHash !== raw.content_hash) {
     reportContentHashMismatch(name, raw.content_hash, actualHash);
     return { ...raw, content_hash: actualHash };
@@ -533,24 +540,16 @@ export async function detectStaleArtifacts(
     }
   }
 
-  // Propagate transitively: if a dependency is stale, all downstream are stale.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const name of CP_ARTIFACT_NAMES) {
-      if (stale.has(name) || absent.has(name)) continue;
-      for (const dep of DEPENDENCY_MAP[name]) {
-        if (stale.has(dep) || absent.has(dep)) {
-          stale.add(name);
-          changed = true;
-          break;
-        }
-      }
-    }
-  }
+  // Absence participates in reachability, but remains separate in the result.
+  // Preserve the old name-outer/dependency-inner edge order and Set insertion order.
+  const reached = new Set([...stale, ...absent]);
+  const edges = CP_ARTIFACT_NAMES.flatMap((name) =>
+    DEPENDENCY_MAP[name].map((dep) => [dep, name] as const),
+  );
+  propagateReachability(reached, edges, () => true);
 
   return {
-    stale: [...stale],
+    stale: [...reached].filter((name) => !absent.has(name)),
     absent: [...absent],
   };
 }

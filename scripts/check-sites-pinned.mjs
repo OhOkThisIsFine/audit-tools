@@ -476,6 +476,27 @@ export const ADMISSIBILITY_NOTE =
   'rather than "a test asserting THIS behaviour went red". A `--checked "red-green validated"` ' +
   'citing this gate is still the author\'s word about their own work.';
 
+// A review-sized staged tree can exceed Node's default 1 MiB capture. Keep a
+// finite ceiling and fail before parsing on overflow: partial evidence can
+// never establish that every changed site is pinned.
+const GIT_CAPTURE_LIMIT = 16 * 1024 * 1024;
+
+/** @param {string} root @param {string[]} args */
+function captureGit(root, args) {
+  try {
+    return execFileSync('git', args, {
+      encoding: 'utf8', cwd: root, windowsHide: true, maxBuffer: GIT_CAPTURE_LIMIT,
+    });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOBUFS') {
+      // Do not attach the original error: its stdout contains megabytes of
+      // partial diff and Node would print that captured payload with the stack.
+      throw new Error('sites-pinned: git capture exceeded the 16 MiB limit; no partial diff was checked. Reduce the review subject and rerun.');
+    }
+    throw error;
+  }
+}
+
 /**
  * @param {{base: string|null, root: string}} options
  */
@@ -495,14 +516,10 @@ function main({ base, root: repoArg }) {
     ? ['diff', '-U0', '--diff-filter=ACMR', `${base}`, '--']
     : ['diff', '--cached', '-U0', '--diff-filter=ACMR', '--'];
 
-  const diffText = execFileSync('git', diffArgs, {
-    encoding: 'utf8',
-    cwd: root,
-    windowsHide: true, // INV-WH — a console child from a windowless parent pops a window
-  });
+  const diffText = captureGit(root, diffArgs);
 
   const tracked = new Set(
-    execFileSync('git', ['ls-files'], { encoding: 'utf8', cwd: root, windowsHide: true })
+    captureGit(root, ['ls-files'])
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter(Boolean),

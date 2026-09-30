@@ -1,3 +1,4 @@
+import { parseReviewSubmissionEnvelope, ReviewRequirementSchema } from "../../shared/types/reviewIndependence.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 /**
  * The audit draw of the shared submission core: how a GATE lane's bound path is
@@ -458,31 +459,30 @@ export async function recordDispatchedLanes(
   runId: string,
   lanes: readonly string[],
   roundId?: string,
+  bindings?: ReadonlyMap<string, { promptSha256: string; reviewRequirement: string; promptPath: string }>,
 ): Promise<void> {
   if (lanes.length === 0) return;
-  const alreadyDispatched = new Set(
-    (await readSubmissionLedger(artifactsDir))
-      .filter((event) => event.kind === "dispatched")
-      .map((event) => event.submission_id),
-  );
+  const events = await readSubmissionLedger(artifactsDir);
+  const alreadyDispatched = new Set(events.filter(event => event.kind === "dispatched").map(event => event.submission_id));
+  const currentBindings = new Map(events.filter(event => event.kind === "prompt_bound").map(event => [event.submission_id, `${event.prompt_sha256}:${event.review_requirement}`]));
   for (const lane of lanes) {
     const submissionId = laneSubmissionId(lane, runId);
-    if (alreadyDispatched.has(submissionId)) continue;
-    alreadyDispatched.add(submissionId);
-    await appendSubmissionEvent(artifactsDir, {
-      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-      run_id: runId,
-      submission_id: submissionId,
-      lane,
-      kind: "dispatched",
-      ...(roundId === undefined ? {} : { round_id: roundId }),
-      recorded_at: new Date().toISOString(),
-    });
+    const common = { contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION, run_id: runId, submission_id: submissionId, lane, ...(roundId === undefined ? {} : { round_id: roundId }), recorded_at: new Date().toISOString() };
+    if (!alreadyDispatched.has(submissionId)) {
+      alreadyDispatched.add(submissionId);
+      await appendSubmissionEvent(artifactsDir, { ...common, kind: "dispatched" });
+    }
+    const binding = bindings?.get(lane);
+    const key = `${binding?.promptSha256}:${binding?.reviewRequirement}`;
+    if (binding && currentBindings.get(submissionId) !== key) {
+      currentBindings.set(submissionId, key);
+      await appendSubmissionEvent(artifactsDir, { ...common, kind: "prompt_bound", prompt_sha256: binding.promptSha256, prompt_path: binding.promptPath, review_requirement: binding.reviewRequirement });
+    }
   }
 }
 
 /** What the bytes at a lane's bound path say it delivered. */
-async function observeLaneDelivery(path: string): Promise<MeasuredOutcome> {
+async function observeLaneDelivery(path: string, binding?: SubmissionLedgerEvent): Promise<MeasuredOutcome> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -498,6 +498,11 @@ async function observeLaneDelivery(path: string): Promise<MeasuredOutcome> {
     // Present and unusable — the lane that returned the single word "Let".
     return "degraded";
   }
+  const requirement = ReviewRequirementSchema.safeParse(binding?.review_requirement ?? "ordinary");
+  if (!requirement.success) return "degraded";
+  const reviewed = parseReviewSubmissionEnvelope(value, { requirement: requirement.data, promptSha256: binding?.prompt_sha256 });
+  if (!reviewed.ok) return "degraded";
+  value = reviewed.result;
   const items = Array.isArray(value)
     ? value
     : isRecord(value)
@@ -558,6 +563,7 @@ export async function closeDispatchedLaneOutcomes(
       kind: "lane_outcome",
       outcome: await observeLaneDelivery(
         laneSubmissionPath(artifactsDir, lane, runId),
+        [...events].reverse().find(event => event.kind === "prompt_bound" && event.submission_id === submissionId),
       ),
       ...(params.roundId === undefined ? {} : { round_id: params.roundId }),
       recorded_at: new Date().toISOString(),
@@ -645,31 +651,36 @@ export async function recordLaneOutcome(
   // repair failed again), then re-enters the fold has an accepted behind it; a
   // trailing-only test would read the rejection, decide nothing had landed, and
   // append a SECOND accepted for one staged submission.
+  let alreadyAccepted = false;
   if (outcome.kind === "accepted") {
     const ledger =
       history ??
       (await readSubmissionIngestHistory(artifactsDir, { runId }));
-    if (ledger.accepted.has(submissionId)) return;
+    alreadyAccepted = ledger.accepted.has(submissionId);
   }
-  await appendSubmissionEvent(artifactsDir, {
-    contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
-    run_id: runId,
-    submission_id: submissionId,
-    lane,
-    kind: outcome.kind,
-    ...(outcome.kind === "rejected"
-      ? { issue_code: outcome.issueCode, message: outcome.message }
-      : {}),
-    ...(outcome.kind === "accepted" && outcome.message
-      ? { message: outcome.message }
-      : {}),
-    recorded_at: new Date().toISOString(),
-  });
+  if (!alreadyAccepted) {
+    await appendSubmissionEvent(artifactsDir, {
+      contract_version: SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+      run_id: runId,
+      submission_id: submissionId,
+      lane,
+      kind: outcome.kind,
+      ...(outcome.kind === "rejected"
+        ? { issue_code: outcome.issueCode, message: outcome.message }
+        : {}),
+      ...(outcome.kind === "accepted" && outcome.message
+        ? { message: outcome.message }
+        : {}),
+      recorded_at: new Date().toISOString(),
+    });
+  }
   if (outcome.kind !== "accepted") return;
   // Keep the caller's shared view consistent with what just landed, so the
   // next lane in the same batch (and a re-entry that re-walks the register)
   // asks against a ledger that includes this row.
   history?.accepted.add(submissionId);
+  // Always reconcile the expected set, including a retry after an accepted
+  // append landed but this removal failed. Only the append is deduplicated.
   // The drop runs under the store's lock, so it cannot race a concurrent
   // emission's merge (which would otherwise re-add the lane being closed out).
   await expectedSetStore(artifactsDir).mutate((current) =>

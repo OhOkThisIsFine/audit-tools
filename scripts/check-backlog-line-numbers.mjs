@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/backlog-line-numbers.test.ts
 // Refuse bare LINE NUMBERS in citation position in docs/backlog/*.md.
 //
 // WHY. The durable-traps rule is explicit: "Cite a SYMBOL, never a bare line
@@ -70,9 +71,8 @@ function looksLikeRepoPath(prefix) {
  * Every line-number citation in one file's text.
  * @returns {{line:number, column:number, kind:string, span:string, source:string}[]}
  */
-export function findLineNumberCitations(text) {
+export function findLineNumberCitations(text, lines = text.split(/\r?\n/)) {
   const found = [];
-  const lines = text.split(/\r?\n/);
   let inFence = false;
   lines.forEach((raw, i) => {
     if (/^\s*(```|~~~)/.test(raw)) {

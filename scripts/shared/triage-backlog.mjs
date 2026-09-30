@@ -76,8 +76,8 @@
 // which the bridge answers directly, so a retry there would only delay the
 // honest abort); (2) a per-ENTRY transport
 // retry (2026-08-22 entry): a call that dies before the lane answers is retried
-// ONCE inside the same invocation, and a lane that ANSWERED unusably is not —
-// see the driver header for the line and its reason; (3) a COVERAGE
+// ONCE inside the same invocation; completed malformed replies share that
+// budget, while terminal failures and valid negative verdicts never retry; (3) a COVERAGE
 // STAMP (<out>-coverage.json) records model/attempted/classified/errored/
 // aborted/retried plus a per-lane count, rewritten as the sweep progresses, so
 // "did leg 2 actually cover the backlog" is a number the routine reads, never a
@@ -255,6 +255,7 @@ export const TRIAGE_STAMP_INIT = Object.freeze({
  * missing counter was invisible to the suite for 30 sweeps.
  */
 export function countTriageStamp(stamp, rec) {
+  if (rec?.error) return stamp;
   if (PREMISE_STAMP_CLASSES.includes(rec?.premise)) stamp[rec.premise] += 1;
   if (typeof rec?.lane === 'string') stamp.lanes[rec.lane] = (stamp.lanes[rec.lane] ?? 0) + 1;
   return stamp;
@@ -410,6 +411,7 @@ function applyCodePathResolution(rec, tracked) {
   const { resolved, unresolved, recovered } = resolveCodePaths(rec.code_paths, tracked);
   rec.code_paths = resolved;
   if (unresolved.length > 0) rec.code_paths_unresolved = unresolved;
+  else delete rec.code_paths_unresolved;
   return recovered;
 }
 
@@ -447,6 +449,30 @@ export function finishTriageRecord(rec, { lane, servedBy, root = ROOT } = {}) {
   const pathsRecovered = applyCodePathResolution(rec, (args) => trackedMatches(root, args));
   if (pathsRecovered.length > 0) rec.code_paths_recovered = pathsRecovered;
   return downgradeUnearnedShippedVerdict(rec);
+}
+
+class MalformedTriageReply extends Error {}
+
+/** The production callbacks used for both fresh dispatch and persisted revival. */
+export function triageRecordCallbacks({ root = ROOT } = {}) {
+  return {
+    retryRecordError: (error) => error instanceof MalformedTriageReply,
+    reviveRecord: (rec) => finishTriageRecord({
+      ...rec,
+      // Restore the lane's unresolved words before classifying the current tree.
+      code_paths: [...new Set([...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)])],
+    }, { root }),
+    buildRecord: (entry, { raw, finishReason, lane, error }) => {
+      if (finishReason !== 'completed') {
+        throw new Error(`dispatch ${finishReason} on lane ${lane}: ${error ?? raw.slice(0, 200)}`);
+      }
+      let record;
+      try { record = buildTriageRecord(entry, raw); } catch (error) {
+        throw new MalformedTriageReply(/** @type {any} */ (error).message, { cause: error });
+      }
+      return finishTriageRecord(record, { root, lane });
+    },
+  };
 }
 
 function chunk(file) {
@@ -603,7 +629,7 @@ function triageTask(e) {
   );
 }
 
-// The sweep itself — resume, worker pool, coverage stamp, and the ONE transport
+// The sweep itself — resume, worker pool, coverage stamp, and the ONE bounded
 // retry — is the shared one-item-per-call driver
 // (scripts/shared/lane-dispatch.mjs). This file owns only the triage DOMAIN:
 // backlog chunking, the schema, premise probing, path resolution, and the
@@ -611,7 +637,7 @@ function triageTask(e) {
 //
 // WHICH CONCRETE ENDPOINT answers a dispatch is still LiteLLM's, within the
 // bridge's own default tier: the driver retries the SAME call once when it
-// dies in transport, and never re-routes or names a tier itself — duplicating
+// dies in transport or a completed reply fails parsing/shape, and never re-routes — duplicating
 // LiteLLM's failover in the caller would hide a bridge defect. The retry
 // exists because the recovery that worked (the 2026-08-22 re-run that
 // recovered 20 of 22, under the retired llm-relay transport) was the
@@ -642,7 +668,7 @@ async function main() {
       classified_total: 0,
       errored: 0,
       retried: 0,
-      probes_unusable: 0,
+      ...TRIAGE_STAMP_INIT,
       lanes: {},
     });
     process.stderr.write(
@@ -677,24 +703,6 @@ async function main() {
       // script IS the presentation event for triage verdicts, so a record
       // whose quoted code vanished since the last run must read as
       // unconfirmed now, not carry last week's stamp.
-      reviveRecord: (rec) => {
-        // `code_paths` is a claim about the TREE, so it is re-resolved on load
-        // for the same reason the probes are re-evaluated: running the sweep is
-        // the presentation event for its records, and a path that no longer
-        // resolves must read as unresolved NOW rather than carry last week's
-        // resolution. The model's original words are re-taken from
-        // `code_paths_unresolved` so a revived record is not resolved from an
-        // already-filtered list (which would lose the unresolved half forever).
-        //
-        // That restore is genuinely revive-only, so it stays HERE; everything
-        // after it is the shared fold (P68), which ends with the P65 downgrade
-        // reading the premise it just re-derived.
-        const revived = {
-          ...rec,
-          code_paths: [...(rec.code_paths ?? []), ...(rec.code_paths_unresolved ?? []).map((u) => u.written)],
-        };
-        return finishTriageRecord(revived);
-      },
       preflight: async () => {
         // 2 min: carried over unchanged from the retired llm-relay lane's
         // preflight ceiling — a labelled existing value, not a number this
@@ -720,31 +728,7 @@ async function main() {
         // near-zero = dialect death, large-but-truncated = a cap to raise).
         return { raw: r.raw, finishReason: r.status, lane: r.lane, error: r.error };
       },
-      buildRecord: (e, { raw, finishReason, lane: laneId, error }) => {
-        // A job that did not complete is the lane's verdict on itself, so it
-        // is judged HERE, never in the lane-agnostic driver — but AFTER the
-        // lane returned, so the error row still carries finish_reason and
-        // output_bytes.
-        if (finishReason !== 'completed') {
-          throw new Error(`dispatch ${finishReason} on lane ${laneId}: ${error ?? raw.slice(0, 200)}`);
-        }
-        // Some lanes prepend prose before the JSON despite the schema. Salvage +
-        // parse + shape-validate live in buildTriageRecord — only a response that
-        // finished cleanly (checked above) reaches it, so a truncated body can
-        // never be laundered into a valid-looking record.
-        const rec = buildTriageRecord(e, raw);
-        // The SAME fold the load path runs (P68): provenance, premise stamp,
-        // path resolution, then the P65 downgrade last.
-        //
-        // Provenance: the record names the TIER the bridge applied
-        // (`<providerID>/<modelID>`, e.g. `litellm/medium`) — LiteLLM still
-        // chooses the concrete endpoint within that tier, but which one
-        // answered is not visible on this surface (see the module header).
-        // `served_by` (a llm-relay answer-mode deployment name) has no
-        // opencode_fire/opencode_wait analogue and is never set going forward
-        // — `rec.served_by` stays the optional field it already was.
-        return finishTriageRecord(rec, { lane: laneId });
-      },
+      ...triageRecordCallbacks(),
       onProgress: (e, rec) => {
         process.stderr.write(
           `${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}] via ${rec.lane}` : 'ERR:' + rec.error}\n`,
@@ -770,7 +754,7 @@ async function main() {
       `${stamp.errored} errored / ${stamp.probes_unusable} probes-unusable / ` +
       `${stamp.unprobed} unprobed of ` +
       `${stamp.attempted} attempted (${stamp.prior_classified} prior, ${stamp.total_entries} total) — ` +
-      `${stamp.retried} transport retr(y/ies) — ` +
+      `${stamp.retried} retr(y/ies) — ` +
       `lanes ${JSON.stringify(stamp.lanes)} — ${stampPath}\n`,
   );
 }

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { verifyChecksSteps } from "../../scripts/shared/verify-steps.mjs";
 import { resolveSmokeTarball } from "../../scripts/shared/smoke-tarball.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -129,7 +130,8 @@ describe("packaged smokes share one tarball", () => {
     const pkg = await readPackageJson();
     expect(pkg.scripts["pack:smoke"], "a single pack step must own the tarball").toBeTruthy();
 
-    const chain = pkg.scripts["verify:checks"];
+    const chain = verifyChecksSteps(pkg.scripts);
+    expect(chain.filter(step => step === "pack:smoke")).toHaveLength(1);
     const packIdx = chain.indexOf("pack:smoke");
     expect(packIdx >= 0, "verify:checks must run the shared pack step").toBe(true);
     for (const smoke of ["smoke:packaged-audit-code", "smoke:packaged-remediate-code"]) {

@@ -913,3 +913,47 @@ describe("decideNextStep — contract pipeline, dispatch, closing, and CLI", () 
     expect(savedState.items["F-001"].rework_count).toBe(1);
   });
 });
+
+describe("public host handoff repair resume", () => {
+  it.each(['/outside/unsafe.ts', '/outside/' + 'x'.repeat(10000)])('emits bounded upstream plan repair for malformed frontier without resetting completed work (%#)', async (scopePath) => {
+    const state = makePlanningState({ status: 'implementing' });
+    state.plan!.blocks![0]!.touched_files = [scopePath];
+    state.items!['F-002']!.status = 'resolved';
+    await saveState(state);
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe('repair_handoff');
+    expect(step.status).toBe('blocked');
+    const prompt = await readFile(step.prompt_path, 'utf8');
+    expect(prompt).toContain('B-001');
+    expect(prompt).toMatch(/planning|upstream/i);
+    expect(prompt).not.toContain('--force-replan');
+    expect(prompt.length).toBeLessThan(5000);
+    expect(await readFile(step.artifact_paths.repair_diagnostics!, 'utf8')).toContain(scopePath);
+    const saved = JSON.parse(await readFile(join(ARTIFACTS_DIR, 'state.json'), 'utf8'));
+    expect(saved.items['F-002'].status).toBe('resolved');
+  });
+
+  it('public next-step re-prepares an old workload and repeated resume stays idempotent', async () => {
+    await saveState(makePlanningState());
+    await acknowledgeResume();
+    await writeIntentCheckpoint();
+    await approveReviewGate();
+    const first = await decideNextStep({ root: REPO_DIR });
+    expect(first.step_kind).toBe('dispatch_implement');
+    expect(first.access?.read_paths.some((path) => path.endsWith('/required-test-logs'))).toBe(true);
+    expect(first.access?.write_paths).not.toContain(REPO_DIR.replaceAll('\\', '/'));
+    const workloadPath = first.artifact_paths.host_workload!;
+    const old = JSON.parse(await readFile(workloadPath, 'utf8'));
+    old.contract_version = 'remediation-host-workload/v1alpha1';
+    await writeFile(workloadPath, JSON.stringify(old));
+    const resumed = await decideNextStep({ root: REPO_DIR });
+    expect(resumed.step_kind).toBe('dispatch_implement');
+    const repaired = await readFile(workloadPath, 'utf8');
+    expect(JSON.parse(repaired).contract_version).not.toBe(old.contract_version);
+    const again = await decideNextStep({ root: REPO_DIR });
+    expect(again.step_kind).toBe('dispatch_implement');
+    expect(await readFile(workloadPath, 'utf8')).toBe(repaired);
+  });
+});

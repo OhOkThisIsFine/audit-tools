@@ -1,3 +1,6 @@
+// sites-pinned: tests/shared/write-time-derived-gates.test.ts
+import { GUARDS } from '../guard-reach-data.mjs';
+
 // The backlog gates that run AT WRITE TIME, and the one thing that differs
 // between their write-time and commit-time verdicts.
 //
@@ -32,7 +35,7 @@
 // cannot RAISE a recorded ceiling without `--raise-ceiling` (see
 // `planBaselineUpdate` in scripts/check-backlog-budget.mjs), so deferring the budget
 // leg cannot let a grown file's ceiling be laundered upward at write time.
-export const WRITE_TIME_DEFERRED_LEGS = new Set(["check:backlog-budget"]);
+export const WRITE_TIME_DEFERRED_LEGS = new Set(GUARDS.flatMap((guard) => guard.writeTime?.deferredChecks ?? []));
 
 /** The one-line note printed for a deferred leg, in place of its output. */
 export const DEFERRAL_NOTE =
@@ -43,7 +46,7 @@ export const DEFERRAL_NOTE =
 /**
  * Draw the write-time backlog advisories for one edited path.
  *
- * @param {{legs: {id: string, script: string, maxMs: number, fix: string}[], root: string,
+ * @param {{legs: {id: string, script: string, maxMs: number, fix: string, deferredChecks?: string[]}[], root: string,
  *   execute: Function, legRunnable: Function, legCommand: Function}} input
  *   `legs` is the registry-derived draw (buildWriteTimeLegs), already filtered to
  *   reach the edited path; the four callables are injected so a test can drive the
@@ -57,6 +60,7 @@ export function runBacklogWriteTimeGates({ legs, root, execute, legRunnable, leg
   const deferred = [];
   const skipped = [];
   for (const leg of legs) {
+    deferred.push(...(leg.deferredChecks ?? []));
     if (WRITE_TIME_DEFERRED_LEGS.has(leg.id)) {
       deferred.push(leg.id);
       continue;

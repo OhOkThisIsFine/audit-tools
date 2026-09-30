@@ -1,19 +1,11 @@
+// sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/host-handoff.test.ts, tests/audit/orchestrator-remediation.test.ts, tests/audit/schema-contracts.test.ts, tests/audit/review-packet-sizing.test.ts
 import { z } from "zod";
 import type { Finding as SharedFinding } from "audit-tools/shared";
 import { FindingSchema } from "audit-tools/shared";
 
-export type Lens =
-  | "correctness"
-  | "architecture"
-  | "maintainability"
-  | "security"
-  | "reliability"
-  | "performance"
-  | "data_integrity"
-  | "tests"
-  | "operability"
-  | "config_deployment"
-  | "observability";
+import type { Lens } from "audit-tools/shared";
+export type { Lens } from "audit-tools/shared";
+export { isLens } from "audit-tools/shared";
 
 /** Single authoritative record for one audit lens. `order_weight` governs task
  * priority ordering — lower values sort earlier (higher urgency). */
@@ -25,34 +17,30 @@ export interface LensDefinition {
   default_enabled: boolean;
 }
 
-/** Single source of truth for all lens metadata. Adding or renaming a lens
- * requires a single edit here; `ALL_LENSES` (below) and `LENS_ORDER` (in
- * auditTaskUtils) are both derived from this registry. */
-export const LENS_REGISTRY: readonly LensDefinition[] = [
-  { id: "security",           display_name: "Security",           order_weight: 10, default_enabled: true },
-  { id: "correctness",        display_name: "Correctness",        order_weight: 20, default_enabled: true },
-  { id: "reliability",        display_name: "Reliability",        order_weight: 30, default_enabled: true },
-  { id: "data_integrity",     display_name: "Data Integrity",     order_weight: 40, default_enabled: true },
-  { id: "performance",        display_name: "Performance",        order_weight: 50, default_enabled: true },
-  { id: "architecture",       display_name: "Architecture",       order_weight: 60, default_enabled: true },
-  { id: "operability",        display_name: "Operability",        order_weight: 70, default_enabled: true },
-  { id: "config_deployment",  display_name: "Config & Deployment",order_weight: 80, default_enabled: true },
-  { id: "observability",      display_name: "Observability",      order_weight: 90, default_enabled: true },
-  { id: "maintainability",    display_name: "Maintainability",    order_weight: 100, default_enabled: true },
-  { id: "tests",              display_name: "Tests",              order_weight: 110, default_enabled: true },
-];
+/** Audit-specific metadata is exhaustive over the shared lens vocabulary. */
+const LENS_METADATA = {
+  security: { display_name: "Security", order_weight: 10, default_enabled: true },
+  correctness: { display_name: "Correctness", order_weight: 20, default_enabled: true },
+  reliability: { display_name: "Reliability", order_weight: 30, default_enabled: true },
+  data_integrity: { display_name: "Data Integrity", order_weight: 40, default_enabled: true },
+  performance: { display_name: "Performance", order_weight: 50, default_enabled: true },
+  architecture: { display_name: "Architecture", order_weight: 60, default_enabled: true },
+  operability: { display_name: "Operability", order_weight: 70, default_enabled: true },
+  config_deployment: { display_name: "Config & Deployment", order_weight: 80, default_enabled: true },
+  observability: { display_name: "Observability", order_weight: 90, default_enabled: true },
+  maintainability: { display_name: "Maintainability", order_weight: 100, default_enabled: true },
+  tests: { display_name: "Tests", order_weight: 110, default_enabled: true },
+} satisfies Record<Lens, Omit<LensDefinition, "id">>;
+
+export const LENS_REGISTRY: readonly LensDefinition[] = Object.entries(LENS_METADATA)
+  .map(([id, metadata]) => ({ id: id as Lens, ...metadata }))
+  .sort((left, right) => left.order_weight - right.order_weight);
 
 /** Canonical list of every valid {@link Lens}. Derived from {@link LENS_REGISTRY}
  * — import {@link isLens} / `ALL_LENSES` instead of hand-copying lens lists into
  * local guards, which drift (a copy omitting "observability" caused it to be
  * wrongly rejected in flow requeue). */
 export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
-
-export function isLens(value: unknown): value is Lens {
-  return (
-    typeof value === "string" && (ALL_LENSES as readonly string[]).includes(value)
-  );
-}
 
 export const FileRecordSchema = z.object({
   path: z.string(),
@@ -161,7 +149,6 @@ export const AuditTaskSchema = z.object({
   lens: z.string(),
   file_paths: z.array(z.string()),
   file_line_counts: z.record(z.string(), z.number()).optional(),
-  // sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/host-handoff.test.ts, tests/audit/orchestrator-remediation.test.ts
   /**
    * How much of `file_paths` the reviewer must cover.
    *

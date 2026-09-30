@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/json-io.test.ts, tests/audit/host-handoff-atomic-publication.test.ts
 import {
   mkdir,
   readFile,
@@ -19,7 +20,7 @@ function ioError(
   path: string,
   error: unknown,
 ): Error {
-  return new Error(`Failed to ${action} ${path}: ${errorMessage(error)}`);
+  return new Error(`Failed to ${action} ${path}: ${errorMessage(error)}`, { cause: error });
 }
 
 async function ensureParentDirectory(path: string): Promise<void> {
@@ -305,13 +306,22 @@ export async function readNdjsonFile<T>(path: string): Promise<T[]> {
   }
 }
 
+/** Optional reads may treat a non-directory ancestor as unavailable too.
+ * Strict readers still throw it, and other IO/parse failures remain errors. */
+function isOptionalPathUnavailable(error: unknown): boolean {
+  const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+  return isFileMissingError(cause) || (
+    typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOTDIR"
+  );
+}
+
 export async function readOptionalJsonFile<T>(
   path: string,
 ): Promise<T | undefined> {
   try {
     return await readJsonFile<T>(path);
   } catch (error) {
-    if (isFileMissingError(error)) {
+    if (isOptionalPathUnavailable(error)) {
       return undefined;
     }
     throw error;
@@ -324,7 +334,7 @@ export async function readOptionalNdjsonFile<T>(
   try {
     return await readNdjsonFile<T>(path);
   } catch (error) {
-    if (isFileMissingError(error)) {
+    if (isOptionalPathUnavailable(error)) {
       return undefined;
     }
     throw error;
@@ -348,7 +358,7 @@ export async function readOptionalTextFile(
   try {
     return await readFile(path, "utf8");
   } catch (error) {
-    if (isFileMissingError(error)) {
+    if (isOptionalPathUnavailable(error)) {
       return undefined;
     }
     throw ioError("read", path, error);

@@ -7,13 +7,17 @@
 
 The backlog has an owner-approved implementation sequence and frozen entry inventory in
 [`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
-Existing unfinished edits are preserved separately; recovery details are in
-`C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`.
+The historical preparation record reports separately preserved unfinished edits and points to
+`C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`. That Windows recovery location
+is unavailable, unverified and untouched from this cloud workspace. Its owner must verify
+preservation and review unregistered worktree ownership, unique changes and reachability before
+any cleanup; retain unknown work.
 
 ## Immediate next
 
-Start at packet 3; preparation and release recovery are complete. Include the M09 intake packet after packet 4.
-Audit source changes are opt-in; analyzer consent is per-run. Preserve these settled choices.
+Complete exact final-head remote CI, merge, and verify `main`. Local validation and its
+limits are recorded in the [reconciliation evidence](reviews/backlog-reconciliation-2026-09-30.md).
+Release publication and global installation remain outside this task.
 
 **Live owner decision for the completed slice:** none.
 

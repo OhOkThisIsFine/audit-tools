@@ -1,3 +1,4 @@
+import { z } from "zod";
 // sites-pinned: tests/remediate/step-prompt-sketch-drift.test.ts, tests/remediate/contract-pipeline.test.ts
 /**
  * Contract-pipeline artifact: obligations phase.
@@ -184,19 +185,15 @@ export interface ContractAssessmentReport {
 // ── Counterexample ────────────────────────────────────────────────────────────
 
 /** A concrete example produced by the adversarial critic that falsifies a design claim. */
-export interface Counterexample {
-  /** Stable identifier (referenced by the judge report and implementation DAG). */
-  id: string;
-  /** The design claim being falsified. */
-  claim: string;
-  /** Concrete steps that reproduce the failure. */
-  reproduction_steps: string[];
-  /** Expected vs. actual behavior. */
-  expected: string;
-  actual: string;
-  /** Which obligation(s) this counterexample violates. */
-  violated_obligation_ids: string[];
-}
+export const CounterexampleSchema = z.object({
+  id: z.string().min(1),
+  claim: z.string().min(1),
+  reproduction_steps: z.array(z.string()),
+  expected: z.string().min(1),
+  actual: z.string().min(1),
+  violated_obligation_ids: z.array(z.string()),
+});
+export type Counterexample = z.infer<typeof CounterexampleSchema>;
 
 /** The critic phase's output artifact: all counterexamples found against the design. */
 export interface CounterexampleReport {
@@ -243,10 +240,11 @@ export interface JudgedCounterexample {
  *
  * `counterexample` is NOT a member. The judge rules on the critic's report, so
  * it cannot order that report rewritten, and the repair loop can regenerate only
- * the three contract artifacts. It was admitted once and then swapped for an
+ * the declared owning contract artifacts. It was admitted once and then swapped for an
  * inferred target in silence; the validator now refuses it with that reason.
  */
 export const CONTRACT_REPAIR_TARGETS = [
+  "module_decomposition",
   "finalized_module_contracts",
   "obligation_ledger",
   "contract_assessment_report",

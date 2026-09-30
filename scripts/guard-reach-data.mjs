@@ -39,6 +39,9 @@ import {
 
 /**
  * @typedef {object} GuardRow
+ * @property {number} [releaseOrder] executable release order
+ * @property {'checks'|'release'} [releaseStage] release draw
+ * @property {string[]} [paths] additional declared trigger reach
  * @property {string} id
  * @property {'gate'|'hook'|'git-hook'|'contract-test'} kind
  * @property {string} impl gate: npm script name, or a repo path referenced
@@ -65,9 +68,10 @@ import {
  *   `'final'` = reach-triggered but runs AFTER every structural refusal
  *               (check:doc-links only — the broadest trigger in the gate must
  *               never mask a more specific refusal behind it).
- * @property {{scope:'file', maxMs:number}} [writeTime] gates only. Declares a
+ * @property {{scope:'file', maxMs:number, args?:string[], deferredChecks?:string[]}} [writeTime] gates only. Declares a
  *   reach-triggered gate safe to run after one edited file. `maxMs` must be at
  *   most 1000: write-time feedback is advisory, but it must also stay cheap.
+ * @property {{script:string, module:string, purpose:string}[]} [diagnosticAliases] supported standalone diagnostics, not additional release gates
  * @property {string} [fix] one-line remediation hint printed by the pre-commit
  *   gate leg and the attest preflight when this gate fails. Gates: REQUIRED
  *   (reconciled — the regenerate-shaped meta-test
@@ -143,6 +147,8 @@ export const GUARDS = [
   // ── gates (npm scripts reachable from verify:release) ──────────────────────
   {
     id: 'build',
+    releaseOrder: 44,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'build',
     preCommit: false,
@@ -153,6 +159,8 @@ export const GUARDS = [
   },
   {
     id: 'check:tests',
+    releaseOrder: 43,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:tests',
     preCommit: 'reach',
@@ -163,6 +171,8 @@ export const GUARDS = [
   },
   {
     id: 'check:control-bytes',
+    releaseOrder: 0,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:control-bytes',
     preCommit: 'always',
@@ -182,6 +192,8 @@ export const GUARDS = [
   },
   {
     id: 'check:shared-primitives',
+    releaseOrder: 1,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       { name: 'comparator body', drive: 'export', module: 'scripts/check-shared-primitives.mjs',
@@ -220,27 +232,24 @@ export const GUARDS = [
   },
   {
     id: 'check:agents-region',
+    releaseOrder: 2,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:agents-region',
     preCommit: 'reach',
     fix:
-      "AGENTS.md's generated region states a CLAUDE.md size that no longer matches the tree — run " +
-      '`node ~/.agent-config/sync.mjs --projects` and stage AGENTS.md in the SAME commit as the ' +
-      'CLAUDE.md edit (the generator lives outside this repository, so nothing else can fix it)',
+      'Keep the opening AGENTS.md directive linked to repo-local CLAUDE.md, and restore that ' +
+      'canonical file if it is missing or empty. Do not copy its contents or generated size metadata.',
     note:
-      'the ONE generated region whose generator is not tracked here: `~/.agent-config/sync.mjs` ' +
-      'writes the shared:start/shared:end block, and check:generated-artifacts can only reconcile ' +
-      'TRACKED generators — so this file had no freshness authority at all. In POINTER mode the ' +
-      'printed byte length is the only CLAUDE.md-derived input to the region body (the generator ' +
-      'computes bytes/1024 to one decimal and hashes the body into shared-region-id), which makes ' +
-      'comparing the stated figure exact rather than a proxy. UNCOVERED HALF: only the pointer-mode ' +
-      'size sentence is checked — the rest of the region (the shared-region-id hash, the ' +
-      'remediate-code/audit-code blocks above it) is unverified, and if the machine-wide fix retires ' +
-      'the sentence this gate fails closed with the message saying so rather than passing vacuously ' +
-      '(P64, owner decision 2026-09-10; the machine-wide half is filed separately)',
+      'Checks the active opening Read/Start with link and the nonempty canonical instruction file. ' +
+      'The pointer has no byte-count or revision freshness state, so source edits need no external ' +
+      'generator. UNCOVERED: instruction semantics, machine-global synchronization, and host ' +
+      'command blocks remain outside this check.',
   },
   {
     id: 'check:deadcode',
+    releaseOrder: 23,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:deadcode',
     preCommit: false,
@@ -252,6 +261,8 @@ export const GUARDS = [
   },
   {
     id: 'check:orphan-modules',
+    releaseOrder: 24,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:orphan-modules',
     preCommit: 'reach',
@@ -275,6 +286,8 @@ export const GUARDS = [
   },
   {
     id: 'check:pin-obligations',
+    releaseOrder: 7,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:pin-obligations',
     preCommit: 'reach',
@@ -290,6 +303,8 @@ export const GUARDS = [
   },
   {
     id: 'check:doc-manifest',
+    releaseOrder: 28,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:doc-manifest',
     preCommit: 'reach',
@@ -308,6 +323,8 @@ export const GUARDS = [
   },
   {
     id: 'check:doc-links',
+    releaseOrder: 29,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       { name: 'inline link', drive: 'script', script: 'scripts/check-doc-links.mjs',
@@ -329,6 +346,8 @@ export const GUARDS = [
   },
   {
     id: 'check:doc-code-citations',
+    releaseOrder: 30,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       // A tracked src/ file keeps `src/…` a repo path rather than a third-party token.
@@ -370,6 +389,8 @@ export const GUARDS = [
   },
   {
     id: 'check:philosophy-brief',
+    releaseOrder: 31,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:philosophy-brief',
     preCommit: 'reach',
@@ -379,6 +400,8 @@ export const GUARDS = [
   },
   {
     id: 'check:readme-sample-report',
+    releaseOrder: 32,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:readme-sample-report',
     preCommit: 'reach',
@@ -388,6 +411,8 @@ export const GUARDS = [
   },
   {
     id: 'check:proposal-red-at',
+    releaseOrder: 33,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:proposal-red-at',
     preCommit: 'reach',
@@ -398,6 +423,8 @@ export const GUARDS = [
   },
   {
     id: 'check:loop-core-patterns',
+    releaseOrder: 14,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:loop-core-patterns',
     preCommit: 'reach',
@@ -407,6 +434,8 @@ export const GUARDS = [
   },
   {
     id: 'check:loop-core-closure',
+    releaseOrder: 15,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:loop-core-closure',
     preCommit: 'reach',
@@ -417,6 +446,8 @@ export const GUARDS = [
   },
   {
     id: 'check:constitutional-doc-paths',
+    releaseOrder: 16,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:constitutional-doc-paths',
     preCommit: 'reach',
@@ -427,6 +458,8 @@ export const GUARDS = [
   },
   {
     id: 'check:runtime-artifact-names',
+    releaseOrder: 17,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:runtime-artifact-names',
     preCommit: 'reach',
@@ -434,6 +467,8 @@ export const GUARDS = [
   },
   {
     id: 'check:friction-categories',
+    releaseOrder: 18,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:friction-categories',
     preCommit: 'reach',
@@ -444,6 +479,8 @@ export const GUARDS = [
   },
   {
     id: 'check:executor-producers',
+    releaseOrder: 19,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:executor-producers',
     preCommit: 'reach',
@@ -453,6 +490,8 @@ export const GUARDS = [
   },
   {
     id: 'check:ingestion-checks',
+    releaseOrder: 22,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:ingestion-checks',
     preCommit: 'reach',
@@ -463,6 +502,8 @@ export const GUARDS = [
   },
   {
     id: 'check:spec-mirrors',
+    releaseOrder: 20,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:spec-mirrors',
     preCommit: 'reach',
@@ -477,6 +518,8 @@ export const GUARDS = [
   },
   {
     id: 'check:loader-fragments',
+    releaseOrder: 3,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:loader-fragments',
     preCommit: 'reach',
@@ -494,6 +537,8 @@ export const GUARDS = [
   },
   {
     id: 'check:cli-surface',
+    releaseOrder: 21,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:cli-surface',
     preCommit: 'reach',
@@ -511,6 +556,8 @@ export const GUARDS = [
   },
   {
     id: 'check:handoff-roadmap',
+    releaseOrder: 34,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       { name: 'dated bullet', drive: 'export', module: 'scripts/shared/generate-handoff-roadmap.mjs',
@@ -558,6 +605,8 @@ export const GUARDS = [
   },
   {
     id: 'check:retired-infrastructure',
+    releaseOrder: 35,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       { name: 'a live-sounding mention of a retired service', drive: 'export',
@@ -578,10 +627,8 @@ export const GUARDS = [
       'sends the reader to a wrong action',
     note:
       'the register is the DECLARATION half and this gate is the ENFORCEMENT half, so a retirement ' +
-      'is a one-line edit there rather than a sweep somebody remembers to do. SCOPE IS DECLARED ' +
-      'AND NARROW (SCANNED_DOCS in the gate): docs/backlog/durable-traps.md only, because that is ' +
-      'the standing REFERENCE a session reads to decide what to run, where a stale entry costs a ' +
-      'wrong action. UNCOVERED HALVES, stated: (1) a retirement nobody ADDS A ROW FOR is invisible — ' +
+      'is a one-line edit there rather than a sweep somebody remembers to do. All tracked Markdown ' +
+      'is scanned except canonical manifest-excluded records. UNCOVERED HALVES, stated: (1) a retirement nobody ADDS A ROW FOR is invisible — ' +
       'the gate cannot see a service being shut down, only a declaration that it was; (2) the ' +
       'exemption marker is a line-level assertion and the gate does not judge whether the stated ' +
       'replacement is real, so a marker with a false successor passes; (3) the scan is a literal ' +
@@ -590,6 +637,8 @@ export const GUARDS = [
   },
   {
     id: 'check:backlog-index',
+    releaseOrder: 36,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:backlog-index',
     preCommit: 'reach',
@@ -599,113 +648,118 @@ export const GUARDS = [
       'next backlog edit moves them again',
   },
   {
-    id: 'check:backlog-budget',
-    kind: 'gate',
-    forms: [
-      // The states-the-property half (second backlog-clearance lap, 2026-07-24):
-      // a prescription with no `**Property:**` marker beside it. Driven through
-      // the pure detector — `evaluateBacklog` takes a file LIST, which no form
-      // kind supplies, and the detector is what decides either leg's refusal.
-      { name: 'prescribed fix with no property', drive: 'export',
-        module: 'scripts/check-backlog-budget.mjs',
-        exportName: 'prescribedFixShapes', call: 'text',
-        sample: '- **An entry.** The fix is to move it into one module.' },
-      { name: 'imperative remedy instead of a property', drive: 'export',
-        module: 'scripts/check-backlog-budget.mjs',
-        exportName: 'prescribedFixShapes', call: 'text',
-        sample: '- **An entry.** Anchor the deletion on the next bullet instead of a count.' },
+    "id": "check:backlog",
+    "releaseOrder": 39,
+    "releaseStage": "checks",
+    "kind": "gate",
+    "impl": "check:backlog",
+    "preCommit": "reach",
+    "writeTime": {
+      "scope": "file",
+      "maxMs": 1000,
+      "args": [
+        "--write-time"
+      ],
+      "deferredChecks": [
+        "check:backlog-budget"
+      ]
+    },
+    "diagnosticAliases": [
+      {
+        "script": "check:backlog-budget",
+        "module": "scripts/check-backlog-budget.mjs",
+        "purpose": "Standalone budget diagnostics and baseline maintenance"
+      },
+      {
+        "script": "check:backlog-status",
+        "module": "scripts/check-backlog-status-tokens.mjs",
+        "purpose": "Standalone focused diagnostic without other refusal classes"
+      },
+      {
+        "script": "check:backlog-line-numbers",
+        "module": "scripts/check-backlog-line-numbers.mjs",
+        "purpose": "Standalone focused diagnostic without other refusal classes"
+      },
+      {
+        "script": "check:backlog-friction-tags",
+        "module": "scripts/check-backlog-friction-tags.mjs",
+        "purpose": "Standalone focused diagnostic without other refusal classes"
+      }
     ],
-    impl: 'check:backlog-budget',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a staged backlog entry or file is over its size ceiling, and an over-budget file may only ' +
-      'shrink — condense at write time: keep the MECHANISM and the open PROPERTY, link the primary ' +
-      'record (git log, docs/reviews/) instead of retelling it. There is no per-entry ceiling to raise. ' +
-      'A refusal naming a PRESCRIBED FIX MECHANISM is the states-the-property leg instead: the entry ' +
-      'says how to change the code without saying what must become true, so add `**Property:** …` — ' +
-      'the prescribed mechanism is the part that does not survive contact with the tree (a lap opened ' +
-      'on one whose fix would have regressed the run)',
-    note:
-      'TWO legs, one gate, because both are entry WRITE-TIME shape rules over the same parsed corpus ' +
-      '(the size budget, and the states-the-property rule from the 2026-07-24 second-backlog-clearance ' +
-      'lap). The property leg is DELIBERATELY NARROW: it refuses an entry that prescribes a fix ' +
-      '(PRESCRIBED_FIX_SHAPES — three literal shapes drawn from live entries) without a `**Property:**` ' +
-      'marker, not "every entry needs a marker" — half the corpus is measurements, residual lists and ' +
-      'live-run watches that prescribe nothing, and requiring the marker there would red 100+ entries ' +
-      'for a rule they cannot satisfy. Pre-existing prescriptions are amnestied BY NAME in ' +
-      '`entries_prescribing_mechanism` (the same shape as the byte amnesty, and it drops a key as soon ' +
-      'as the entry gains its marker). UNCOVERED HALF, stated: the leg detects the marker\'s PRESENCE, ' +
-      'never whether the sentence after it states a property rather than a mechanism in different ' +
-      'words — nor an entry that states a property and then prescribes a mechanism anyway in its body. ' +
-      'The shape list errs toward false NEGATIVES by construction (a wider net flags legitimate ' +
-      '`**Property:** a lap can …` prose, and a gate that cries wolf on its own corpus gets disabled). ' +
-      'Those are readings; the nightly doc leg is the semantic backstop',
-  },
-  {
-    id: 'check:backlog-status',
-    kind: 'gate',
-    forms: [
-      { name: 'status glyph', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- ✅ the fix landed' },
-      { name: 'emphasised status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- **SHIPPED 2026-07-19.** the entry' },
-      { name: 'leading status label', drive: 'export', module: 'scripts/check-backlog-status-tokens.mjs',
-        exportName: 'findStatusMarkers', call: 'text', sample: '- DONE: the entry' },
+    "forms": [
+      {
+        "name": "prescribed fix with no property",
+        "drive": "export",
+        "module": "scripts/check-backlog-budget.mjs",
+        "exportName": "prescribedFixShapes",
+        "call": "text",
+        "sample": "- **An entry.** The fix is to move it into one module."
+      },
+      {
+        "name": "imperative remedy instead of a property",
+        "drive": "export",
+        "module": "scripts/check-backlog-budget.mjs",
+        "exportName": "prescribedFixShapes",
+        "call": "text",
+        "sample": "- **An entry.** Anchor the deletion on the next bullet instead of a count."
+      },
+      {
+        "name": "status glyph",
+        "drive": "export",
+        "module": "scripts/check-backlog-status-tokens.mjs",
+        "exportName": "findStatusMarkers",
+        "call": "text",
+        "sample": "- ✅ the fix landed"
+      },
+      {
+        "name": "emphasised status label",
+        "drive": "export",
+        "module": "scripts/check-backlog-status-tokens.mjs",
+        "exportName": "findStatusMarkers",
+        "call": "text",
+        "sample": "- **SHIPPED 2026-07-19.** the entry"
+      },
+      {
+        "name": "leading status label",
+        "drive": "export",
+        "module": "scripts/check-backlog-status-tokens.mjs",
+        "exportName": "findStatusMarkers",
+        "call": "text",
+        "sample": "- DONE: the entry"
+      },
+      {
+        "name": "backticked path with line suffix",
+        "drive": "export",
+        "module": "scripts/check-backlog-line-numbers.mjs",
+        "exportName": "findLineNumberCitations",
+        "call": "text",
+        "sample": "see `src/x.ts:123` for the write"
+      },
+      {
+        "name": "backticked bare line suffix",
+        "drive": "export",
+        "module": "scripts/check-backlog-line-numbers.mjs",
+        "exportName": "findLineNumberCitations",
+        "call": "text",
+        "sample": "the anchor at `:21` moved"
+      },
+      {
+        "name": "off-vocabulary friction tag",
+        "drive": "export",
+        "module": "scripts/check-backlog-friction-tags.mjs",
+        "exportName": "findFrictionTags",
+        "call": "file-content",
+        "fixturePath": "open-bugs.md",
+        "sample": "- **A thing (2026-08-30, low, friction: false_red).** prose"
+      }
     ],
-    impl: 'check:backlog-status',
-    preCommit: 'reach',
-    fix:
-      'a staged backlog entry leads with a status label, and the backlog is a living to-do list, not a ' +
-      'status log — a fully-closed entry is DELETED (durables move to their real home first), a ' +
-      'partial one is TRIMMED to its open remainder. Only the leading-label form is refused',
-  },
-  {
-    id: 'check:backlog-friction-tags',
-    kind: 'gate',
-    forms: [
-      { name: 'off-vocabulary friction tag', drive: 'export', module: 'scripts/check-backlog-friction-tags.mjs',
-        exportName: 'findFrictionTags', call: 'file-content', fixturePath: 'open-bugs.md',
-        sample: '- **A thing (2026-08-30, low, friction: false_red).** prose' },
-    ],
-    impl: 'check:backlog-friction-tags',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a backlog entry tags a `friction:` category the vocabulary does not hold — map it onto the ' +
-      'canonical three (ambiguous_direction | tool_should_decide | inefficient_feeding) whose ' +
-      'definition it fits; do NOT add a category, the list is single-sourced in ' +
-      'src/shared/friction/frictionRecord.ts and the close-out gate counts coverage per category',
-    note:
-      'the tag is the field a closeout walk or a triage sweep GROUPS BY, and nothing read it: the ' +
-      'vocabulary existed in three places already (the TS source, its generated sibling, the ' +
-      'close-out gate) while seven off-vocabulary tags accumulated in docs/backlog/ — five of them ' +
-      'synonyms of the canonical three, which made any grouping silently incomplete. The gate ' +
-      'imports the GENERATED sibling, never audit-tools/shared, so it runs in a never-built ' +
-      'checkout. UNCOVERED HALF: an untagged entry is not refused (the tag is a grouping aid, not ' +
-      'a required field), and the tags a friction WALK writes into its own prose line are matched ' +
-      'only in `friction: <word>` form — a tag phrased some other way is not seen. Whether a tag ' +
-      'is the RIGHT one of the three remains a reading, not a mechanism',
-  },
-  {
-    id: 'check:backlog-line-numbers',
-    kind: 'gate',
-    forms: [
-      { name: 'backticked path with line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
-        exportName: 'findLineNumberCitations', call: 'text', sample: 'see `src/x.ts:123` for the write' },
-      { name: 'backticked bare line suffix', drive: 'export', module: 'scripts/check-backlog-line-numbers.mjs',
-        exportName: 'findLineNumberCitations', call: 'text', sample: 'the anchor at `:21` moved' },
-    ],
-    impl: 'check:backlog-line-numbers',
-    preCommit: 'reach',
-    writeTime: { scope: 'file', maxMs: 1000 },
-    fix:
-      'a staged backlog entry cites a bare line number (a backticked `path:123` or a bare `:21` span) — ' +
-      'cite the SYMBOL instead, or the file alone when no good symbol exists; never auto-resolve a ' +
-      'drifted number to the nearest declaration (dropping the number beats false precision)',
+    "fix": "Fix each named backlog diagnostic. Condense oversized entries and state their property; update the size baseline only after the intended changes settle. Replace status labels, line citations and noncanonical friction tags.",
+    "note": "One loaded corpus supplies budget/property, status, line-citation and friction checks. The curated recognizers retain their existing false-negative limits. Budget accounting remains bullet-based; track paragraphs have their own shared grammar view. Write-time checks preserve the line/friction-only draw and explicitly defer the baseline ratchet."
   },
   {
     id: 'check:review-routing',
+    releaseOrder: 38,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       { name: 'routing declaration in a review record', drive: 'export', module: 'scripts/check-review-routing.mjs',
@@ -732,6 +786,8 @@ export const GUARDS = [
   },
   {
     id: 'check:memory-citations',
+    releaseOrder: 37,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       // The store is pointed at an EMPTY fixture dir, so every cited name is dangling by construction.
@@ -777,6 +833,8 @@ export const GUARDS = [
   },
   {
     id: 'check:version-gates',
+    releaseOrder: 4,
+    releaseStage: 'checks',
     kind: 'gate',
     forms: [
       // A version constant, a payload type stamped with it, and a read-back that never compares it.
@@ -802,6 +860,8 @@ export const GUARDS = [
   },
   {
     id: 'check:contract-sites',
+    releaseOrder: 9,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:contract-sites',
     preCommit: 'reach',
@@ -822,6 +882,8 @@ export const GUARDS = [
   },
   {
     id: 'check:sites-pinned',
+    releaseOrder: 8,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:sites-pinned',
     preCommit: 'reach',
@@ -842,6 +904,8 @@ export const GUARDS = [
   },
   {
     id: 'check:guard-reach-paths',
+    releaseOrder: 6,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:guard-reach-paths',
     preCommit: 'reach',
@@ -866,6 +930,8 @@ export const GUARDS = [
   },
   {
     id: 'check:guard-reach',
+    releaseOrder: 5,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:guard-reach',
     preCommit: 'always',
@@ -876,6 +942,8 @@ export const GUARDS = [
   },
   {
     id: 'check:generated-artifacts',
+    releaseOrder: 10,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:generated-artifacts',
     preCommit: 'always',
@@ -886,6 +954,8 @@ export const GUARDS = [
   },
   {
     id: 'check:invariant-glossary',
+    releaseOrder: 11,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:invariant-glossary',
     preCommit: 'reach',
@@ -895,6 +965,8 @@ export const GUARDS = [
   },
   {
     id: 'check:nightly-inbox',
+    releaseOrder: 12,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:nightly-inbox',
     preCommit: 'reach',
@@ -902,6 +974,8 @@ export const GUARDS = [
   },
   {
     id: 'check:ci-trigger-paths',
+    releaseOrder: 13,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:ci-trigger-paths',
     preCommit: 'reach',
@@ -914,6 +988,8 @@ export const GUARDS = [
   },
   {
     id: 'check:lint',
+    releaseOrder: 25,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:lint',
     preCommit: false,
@@ -927,6 +1003,8 @@ export const GUARDS = [
   },
   {
     id: 'check:scripts',
+    releaseOrder: 45,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:scripts',
     preCommit: 'reach',
@@ -937,6 +1015,8 @@ export const GUARDS = [
   },
   {
     id: 'check:dup',
+    releaseOrder: 26,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:dup',
     preCommit: false,
@@ -947,6 +1027,8 @@ export const GUARDS = [
   },
   {
     id: 'check:depgraph',
+    releaseOrder: 27,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'check:depgraph',
     preCommit: false,
@@ -959,6 +1041,8 @@ export const GUARDS = [
   },
   {
     id: 'verify:hosts',
+    releaseOrder: 46,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'verify:hosts',
     preCommit: 'reach',
@@ -968,6 +1052,8 @@ export const GUARDS = [
   },
   {
     id: 'verify:remediate-hosts',
+    releaseOrder: 47,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'verify:remediate-hosts',
     preCommit: 'reach',
@@ -977,6 +1063,8 @@ export const GUARDS = [
   },
   {
     id: 'pack:smoke',
+    releaseOrder: 48,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'pack:smoke',
     preCommit: false,
@@ -987,6 +1075,8 @@ export const GUARDS = [
   },
   {
     id: 'smoke:packaged-audit-code',
+    releaseOrder: 49,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'smoke:packaged-audit-code',
     preCommit: false,
@@ -996,6 +1086,8 @@ export const GUARDS = [
   },
   {
     id: 'smoke:packaged-remediate-code',
+    releaseOrder: 50,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'smoke:packaged-remediate-code',
     preCommit: false,
@@ -1005,6 +1097,8 @@ export const GUARDS = [
   },
   {
     id: 'smoke:remediate-gate',
+    releaseOrder: 51,
+    releaseStage: 'checks',
     kind: 'gate',
     impl: 'smoke:remediate-gate',
     preCommit: false,
@@ -1016,6 +1110,8 @@ export const GUARDS = [
   },
   {
     id: 'smoke:linked-audit-code',
+    releaseOrder: 53,
+    releaseStage: 'release',
     kind: 'gate',
     impl: 'smoke:linked-audit-code',
     preCommit: false,
@@ -1025,6 +1121,8 @@ export const GUARDS = [
   },
   {
     id: 'smoke:linked-remediate-code',
+    releaseOrder: 54,
+    releaseStage: 'release',
     kind: 'gate',
     impl: 'smoke:linked-remediate-code',
     preCommit: false,
@@ -1034,6 +1132,8 @@ export const GUARDS = [
   },
   {
     id: 'vitest-gate',
+    releaseOrder: 52,
+    releaseStage: 'release',
     kind: 'gate',
     impl: 'scripts/shared/run-vitest-gate.mjs',
     preCommit: false,
@@ -1641,42 +1741,6 @@ export const GUARDS = [
       'as topical discussion rather than enumeration) and non-.ts files are outside the scan',
   },
   {
-    id: 'check:doc-test-consumers',
-    kind: 'gate',
-    forms: [
-      // The map recognises a STAGED DOC as one whose consumers must be named.
-      { name: 'a staged doc with declared test consumers', drive: 'export', module: 'scripts/check-doc-test-consumers.mjs',
-        exportName: 'describeStagedHits', call: 'text', sample: 'docs/HANDOFF.md',
-        expect: 'docs/HANDOFF.md → asserts:' },
-    ],
-    impl: 'check:doc-test-consumers',
-    // No reach semantics: it validates a repo-wide MAP and surfaces it for the
-    // staged docs. A staged-path trigger would make the map's own rows the only
-    // thing that fires it, which is not what it checks.
-    preCommit: false,
-    fix:
-      'the declared doc → test consumer map names a doc or test that is not tracked, a duplicate doc, ' +
-      'a row with no consumer, or a row with no `what` — fix the row in ' +
-      'scripts/doc-test-consumers-data.mjs, or drop it and declare the doc UNCLAIMED',
-    note:
-      'A map plus a stderr SURFACE, never an enforcement. When a mapped doc is staged the map is ' +
-      'printed with the tests that assert it (`--staged`), so the editor is handed the list without ' +
-      'grepping — which is the cost the record names (a nightly-routine.md edit green through every ' +
-      'local doc gate, red in release CI on a parity test that pinned the retired helper, burning tag ' +
-      'v0.34.40). Uncovered, declared: it does NOT check that the named tests still ASSERT the doc, nor ' +
-      'that an unmapped doc is uncovered — it is only UNCLAIMED. Both need assertion-level provenance ' +
-      '(which string in a test came from which doc), the undecidable class the acquired-analyzer ' +
-      'boundary already declares, so the map is CURATED and only its SHAPE is checked (2026-09-10)',
-  },
-  {
-    id: 'doc-test-consumers-map-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/doc-test-consumers-gate.test.ts',
-    note:
-      'P09: pins the map check itself — a row must name a tracked doc, tracked tests, and a `what`; ' +
-      'duplicates are refused, because a second row for one doc is how a map grows two answers',
-  },
-  {
     id: 'review-routing-gate-test',
     kind: 'contract-test',
     impl: 'tests/shared/review-routing-gate.test.ts',
@@ -1980,14 +2044,14 @@ export const REACH = [
     uncovered:
       'checkJs:false excludes the deliberate .mjs holdout(s) from the typecheck (the 563/564 floor), ' +
       'and check:lint likewise lints only tests/**/*.ts; ' +
-      'the vi.spyOn barrel guard (INV-remediate-tests-12) scans only tests/remediate',
+      'the vi.spyOn barrel guard (INV-remediate-tests-12) scans the entire test tree; its recognizer covers declared namespace imports',
   },
   {
     area: 'markdown corpus',
     files: ['**/*.md'],
-    guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations', 'check:memory-citations'],
+    guardedBy: ['check:doc-manifest', 'check:doc-links', 'check:doc-code-citations', 'check:memory-citations', 'check:retired-infrastructure'],
     note:
-      'the four whole-corpus doc gates (memory-citations scans every tracked *.md for memory-file ' +
+      'the whole-corpus doc gates (memory-citations scans every tracked *.md for memory-file ' +
       'cites); backlog, HANDOFF and README are additionally claimed by ' +
       'their own precise rows below',
   },
@@ -2345,16 +2409,15 @@ export const REACH = [
     note: 'hook registrations reconciled against tracked hook files and this registry',
   },
   {
-    area: 'generated AGENTS.md region (untracked generator)',
+    area: 'canonical AGENTS.md instruction pointer',
     files: ['AGENTS.md', 'CLAUDE.md'],
     guardedBy: ['check:agents-region', 'agents-region-gate-test'],
     note:
-      'the pointer-mode size sentence in AGENTS.md is the one region body input derived from ' +
-      'CLAUDE.md, so comparing the two IS the freshness check; the generator that writes the region ' +
-      'is machine-wide and untracked, which is why no GENERATED row can claim it',
+      'AGENTS.md opens with a stable link to the live, nonempty canonical CLAUDE.md; no instruction ' +
+      'copy, byte-count or revision requires regeneration after a source edit.',
     uncovered:
-      'only the size sentence. The shared-region-id hash beside it, and the audit-code / ' +
-      'remediate-code blocks above the region, are outside the scan (P64 scope)',
+      'Semantic correctness of the instructions, external machine-global sync behavior, and ' +
+      'audit-code/remediate-code host command blocks are not validated by this pointer check.',
   },
   {
     area: 'owner skills',
@@ -2371,23 +2434,15 @@ export const REACH = [
     files: ['docs/backlog/*.md'],
     guardedBy: [
       'check:backlog-index',
-      'check:backlog-budget',
-      'check:backlog-status',
-      'check:backlog-line-numbers',
-      'check:backlog-friction-tags',
+      'check:backlog',
       'check:handoff-roadmap',
-      // Reads exactly ONE of these files today (docs/backlog/durable-traps.md — SCANNED_DOCS
-      // in the gate); cited here because that is the glob its scan target lives under.
-      'check:retired-infrastructure',
     ],
     note:
       'the gates that actually read the split backlog files (seek-index parity, size budget, ' +
       'status-label ban, line-number-citation ban, friction-category vocabulary, roadmap title ' +
       'lift, retired-infrastructure mentions); the markdown-corpus row carries the generic doc ' +
-      'gates. Four of them (doc-code-' +
-      'citations, budget, line-numbers, memory-citations) additionally carry writeTime metadata, ' +
-      'so the PostToolUse hook runs them against the file the moment it is edited — the budget leg ' +
-      'reported there and DEFERRED to commit, because its remedy rewrites lap-scoped baseline state',
+      'gates. The write-time draw runs the aggregate line/friction checks and reports the budget ' +
+      'DEFERRED to commit because its remedy rewrites lap-scoped baseline state',
   },
   {
     area: 'backlog seek index',
@@ -2453,7 +2508,7 @@ export const REACH = [
   {
     area: 'backlog size ratchet baseline',
     files: ['docs/backlog/.size-baseline.json'],
-    guardedBy: ['check:backlog-budget'],
+    guardedBy: ['check:backlog'],
     note: 'the per-file ratchet data the budget gate compares against',
   },
   {
@@ -2665,3 +2720,11 @@ export const GENERATED = [
       'rewrite it deliberately with `npm run generate:shard-baseline` when suite shape changes.',
   },
 ];
+
+/** Project per-gate declared paths into the existing coverage partition. */
+export function guardReach(guards = GUARDS, reach = REACH) {
+  return [...reach, ...guards.filter((g) => g.paths?.length).map((g) => ({
+    area: `gate:${g.id}`, files: g.paths ?? [], guardedBy: [g.id],
+    uncovered: 'Declared reach is not proof of complete defect coverage.',
+  }))];
+}

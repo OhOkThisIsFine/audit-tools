@@ -1,11 +1,17 @@
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { auditLaneReviewRequirement } from "./reviewSubmission.js";
+import { bindWorkerPrompt } from "../../shared/submission/workerPromptBinding.js";
+import { hashContent } from "../../shared/hash.js";
 // sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts
 //
 // This module is the SECOND prompt-writing boundary in the tool (writeStepContract
 // is the first): every lane prompt file on disk is written here, so the path form
 // a lane reader sees is decided here.
 
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeTextFile } from "../../shared/io/json.js";
+import { publishAuditReviewBindings, type AuditReviewBinding } from "./auditReviewBindings.js";
 
 import {
   deriveLaneDemand,
@@ -18,6 +24,7 @@ import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
 
 import {
   laneSubmissionPath,
+  laneSubmissionId,
   recordDispatchedLanes,
   recordExpectedLanes,
   type LaneSubmissionShortfall,
@@ -69,20 +76,14 @@ export interface FanoutLaneSpec {
    * says otherwise.
    */
   expected?: boolean;
-  /**
-   * The lane's per-mode DEMAND inputs, beyond what the prompt text itself
-   * already says.
-   *
-   * Size and judgment come from the lane's prompt text, which the tool holds —
-   * every lane's prompt is on disk before its demand is derived, so the biggest
-   * term is content-derived and no caller can forget it. What a caller may
-   * still know and the text does not is genuinely per-mode: which files the
-   * lane will read, and how much is riding on it. Both default to `0`, which
-   * the shared deriver reads as "no signal" — honestly the smallest band, never
-   * a guess. Never a model, provider, or tier: see `LaneDemandSchema`.
-   */
-  fileCount?: number;
-  riskScore?: number;
+  /** Explicit scope and risk inputs; callers cannot silently default unknown work to small/low. */
+  fileCount: number;
+  riskScore: number;
+  /** Complete artifact/packet files read in addition to the prompt. */
+  contextPaths?: readonly string[];
+  semanticComplexity?: LaneDemand["complexity"];
+  /** Complete current input identity, independently checked against the carried bundle at acceptance. */
+  semanticInputRevision?: string;
 }
 
 export interface MaterializedFanoutLane {
@@ -102,6 +103,7 @@ export interface MaterializedFanoutLane {
    * ranking whether the work arrives as a review task or a fan-out lane.
    */
   demand: LaneDemand;
+  reviewRequirement: ReturnType<typeof auditLaneReviewRequirement>;
 }
 
 export interface MaterializedFanout {
@@ -216,36 +218,58 @@ export async function materializeFanoutLanes(params: {
   const lanes: MaterializedFanoutLane[] = [];
   /** The text actually written per lane — footed, so the record matches the file. */
   const writtenText = new Map<string, string>();
+  const reviewBindings = new Map<string, { promptSha256: string; reviewRequirement: string; promptPath: string }>();
+  const activeBindings = new Map<string, AuditReviewBinding>();
   for (const spec of params.lanes) {
-    const promptPath = join(promptDir, spec.promptFilename);
     const resultPath = laneSubmissionPath(
       params.artifactsDir,
       spec.id,
       params.runId,
     );
     const resultExists = await fileExists(resultPath);
-    const promptText = footedPromptText(spec.promptText, resultPath);
-    writtenText.set(spec.id, promptText);
-    // Pending lanes always get a fresh prompt. A COMPLETED lane's prompt is
-    // left untouched (its content matches the result that was produced) —
-    // unless the file is missing, in which case it is re-materialized so
-    // `artifact_paths` never names a path that does not exist on disk.
-    if (!resultExists || !(await fileExists(promptPath))) {
-      await writeFile(promptPath, promptText, "utf8");
+    const requirement = auditLaneReviewRequirement(spec.id);
+    const contextInputs = await Promise.all([...new Set(spec.contextPaths ?? [])].sort().map(async path => {
+      const bytes = await readFile(path);
+      return { path, sha256: hashContent(bytes), bytes: bytes.length };
+    }));
+    const inputBindingText = requirement === "ordinary" || contextInputs.length === 0 ? "" : `\n\n## Bound input fingerprints\n${contextInputs.map(input => `${input.path}: ${input.sha256}`).join("\n")}`;
+    const revisionText = spec.semanticInputRevision === undefined ? "" : `\n\nReview input revision: ${spec.semanticInputRevision}`;
+    const body = footedPromptText(spec.promptText + revisionText + inputBindingText, resultPath) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
+    const bound = requirement === "ordinary" ? { text: body, sha256: hashContent(body) } : bindWorkerPrompt(body, digest => [
+      "## Bound review submission",
+      "Place the domain result described above inside `result` in this envelope. Copy the prompt binding exactly. The review declaration reports the host's execution context; it is not proof of identity.",
+      "```json",
+      JSON.stringify({ contract_version: "review-submission/v1", prompt_sha256: digest, review: { mode: "independent", reason: "Explain how this context was independent of the author." }, result: {} }, null, 2),
+      "```",
+      "Review modes are independent, degraded, unavailable. This lane requires independent; degraded or unavailable cannot satisfy it.",
+    ].join("\n"));
+    const promptText = bound.text;
+    const promptPath = requirement === "ordinary" ? join(promptDir, spec.promptFilename) : join(promptDir, "prompts", bound.sha256, spec.promptFilename);
+    if (requirement !== "ordinary") activeBindings.set(spec.id, { requirement, ...(spec.semanticInputRevision === undefined ? {} : { semanticInputRevision: spec.semanticInputRevision }), promptSha256: bound.sha256, promptContentSha256: hashContent(promptText), promptPath, runId: params.runId, submissionId: laneSubmissionId(spec.id, params.runId), inputs: contextInputs.map(({ path, sha256 }) => ({ path, sha256 })) });
+    writtenText.set(spec.id, body);
+    reviewBindings.set(spec.id, { promptSha256: bound.sha256, reviewRequirement: requirement, promptPath });
+    // Required review assets are content-addressed and repaired to their exact
+    // canonical bytes before publication, even when a response already exists.
+    // Ordinary completed lanes retain the legacy K-of-N prompt reuse rule.
+    if (requirement !== "ordinary" || !resultExists || !(await fileExists(promptPath))) {
+      await writeTextFile(promptPath, promptText);
     }
+    const contextBytes = contextInputs.reduce((sum, input) => sum + input.bytes, 0);
     lanes.push({
       id: spec.id,
       label: spec.label,
       promptPath,
       resultPath,
       resultExists,
+      reviewRequirement: requirement,
       // Derived from the prompt text the tool just wrote — the lane's own
       // bytes, not the caller's claim about them — plus whatever per-mode
       // signal the caller had. See {@link FanoutLaneSpec}.
       demand: deriveLaneDemand({
-        tokenEstimate: estimateTokensFromBytes(Buffer.byteLength(promptText, "utf8")),
-        fileCount: spec.fileCount ?? 0,
-        riskScore: spec.riskScore ?? 0,
+        tokenEstimate: estimateTokensFromBytes(Buffer.byteLength(promptText, "utf8") + contextBytes),
+        fileCount: spec.fileCount,
+        riskScore: spec.riskScore,
+        minimumComplexity: spec.semanticComplexity,
       }),
     });
   }
@@ -257,11 +281,16 @@ export async function materializeFanoutLanes(params: {
   // `expected-submissions.json`, and shortfall is a diff over the expected SET
   // that never reads ledger events, so this cannot recreate the permanent false
   // shortfall P25 removed.
+  // Bindings linearize under the same hold as production review acceptance and
+  // fold commit. Immutable prompts are already complete; external input writes
+  // are not serialized here and are checked by their content hashes at decode.
+  if (activeBindings.size > 0) await withArtifactTreeHold(params.artifactsDir, undefined, () => publishAuditReviewBindings(params.artifactsDir, activeBindings));
   await recordDispatchedLanes(
     params.artifactsDir,
     params.runId,
     params.lanes.map((spec) => spec.id),
     params.roundId,
+    reviewBindings,
   );
 
   const shortfall = await recordExpectedLanes(
@@ -286,7 +315,7 @@ export async function materializeFanoutLanes(params: {
     lanes,
     pendingLanes,
     artifactPaths,
-    readPaths: pendingLanes.map((lane) => lane.promptPath),
+    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? [])])],
     writePaths: pendingLanes.map((lane) => lane.resultPath),
     shortfall,
   };

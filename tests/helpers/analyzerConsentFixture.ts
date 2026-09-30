@@ -1,3 +1,4 @@
+import { satisfyFunctionalPreflight } from "./functionalPreflightFixture.js";
 /**
  * Fixture hermeticity for the ACQUIRED analyzer set.
  *
@@ -18,8 +19,8 @@
  * hatch: a recorded operator `declined` is consulted FIRST in `admitSpawn`,
  * ahead of the settings channel, the DEFAULT-set short-circuit and any consent
  * token, so it refuses the spawn outright. The fixture states that operator
- * decision through `persistAnalyzerConsent` — the same durable policy store
- * (`.audit-tools/audit/analyzer-policy.json`) the CLI itself reads — before the
+ * decision through `persistAnalyzerConsent` — the same current-run decision record
+ * (`.audit-tools/audit/run-consent.json`) the CLI itself reads — before the
  * first `next-step`. Production admission logic is untouched, and there is no
  * environment flag to remember.
  *
@@ -48,6 +49,8 @@ export const DEFAULT_ACQUIRED_ANALYZER_IDS: readonly string[] =
  * created and before any CLI invocation against it.
  */
 export async function declineDefaultAcquiredAnalyzers(root: string): Promise<void> {
+  // CLI fixtures explicitly satisfy the versioned host capability entry step.
+  await satisfyFunctionalPreflight(root);
   await persistAnalyzerConsent(
     root,
     Object.fromEntries(

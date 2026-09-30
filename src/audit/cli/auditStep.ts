@@ -1,13 +1,14 @@
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./reviewSubmission.js";
+import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { access } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
-  artifactTreeLockPath,
   createMemoizedSourceReader,
   readJsonFile,
   RunLogger,
   verifyFindingGrounding,
-  withFileLock,
   CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
@@ -104,45 +105,6 @@ export async function runAuditStep(
   // lock only covers local artifact derivation and result ingestion.
   return await withArtifactTreeHold(options.artifactsDir, runLogger, () =>
     runAuditStepLocked(options, runLogger),
-  );
-}
-
-/**
- * Waiter window for the artifact-tree lock (owner decision, 2026-08-29, from
- * the CX-02 live measurement — `docs/reviews/cx02-hold-time-measurement-2026-08-29.md`):
- * frontier folds legitimately hold this lock for 22–58.5 s on a 1,051-file
- * repo, and hold time scales with repo size, so the 10 s `withFileLock`
- * default converted every concurrent waiter into a deterministic failure.
- * WAITER-SIDE ONLY: `STALE_LOCK_MS` (30 s) and the heartbeat are untouched
- * (owner, 2026-08-28) — a wedged holder is still detected at the same speed;
- * a live one is simply waited out.
- */
-export const ARTIFACT_TREE_LOCK_TIMEOUT_MS = 120_000;
-
-/**
- * The ONE artifact-tree hold, exported for the unified `next-step` fold.
- *
- * `nextStepHelpers.ts` is banned (import-boundary contract) from importing
- * `withFileLock` or the locking `runAuditStep`; this wrapper is its sanctioned
- * entry to the lock, and the dynamic lock-count acceptance test keeps it
- * honest — one deterministic fold acquires the artifact-tree lock exactly
- * once, through here.
- *
- * It is also the ONLY acquisition surface for this lock anywhere in the tree
- * (contract test: `tests/audit/artifact-tree-lock-single-surface.test.ts`), so
- * the widened waiter window ({@link ARTIFACT_TREE_LOCK_TIMEOUT_MS}) cannot be
- * missed by a new call site.
- */
-export async function withArtifactTreeHold<T>(
-  artifactsDir: string,
-  runLogger: RunLogger | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  return await withFileLock(
-    artifactTreeLockPath(artifactsDir),
-    fn,
-    ARTIFACT_TREE_LOCK_TIMEOUT_MS,
-    runLogger,
   );
 }
 
@@ -297,12 +259,12 @@ async function executeAdvance(
     : undefined;
   const charterComparisonSubmission = options.charterComparisonSubmissionPath
     ? CharterComparisonSubmissionSchema.parse(
-        await readJsonFile<unknown>(options.charterComparisonSubmissionPath),
+        await readAuditReviewSubmission<unknown>(options.charterComparisonSubmissionPath, options.artifactsDir, GATE_LANES.charter_comparison, () => currentAuditReviewInputRevision(options.root, bundle, GATE_LANES.charter_comparison)),
       )
     : undefined;
   const charterFidelitySubmission = options.charterFidelitySubmissionPath
     ? CharterFidelitySubmissionSchema.parse(
-        await readJsonFile<unknown>(options.charterFidelitySubmissionPath),
+        await readAuditReviewSubmission<unknown>(options.charterFidelitySubmissionPath, options.artifactsDir, GATE_LANES.charter_fidelity, () => currentAuditReviewInputRevision(options.root, bundle, GATE_LANES.charter_fidelity)),
       )
     : undefined;
   const clarificationAnswers = options.clarificationAnswersPath
@@ -314,7 +276,7 @@ async function executeAdvance(
     ? (systemicChallengeSchema(
         repoPathUniverse(bundle.repo_manifest),
       ).parse(
-        await readJsonFile<unknown>(options.systemicChallengePath),
+        await readAuditReviewSubmission<unknown>(options.systemicChallengePath, options.artifactsDir, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []), () => currentAuditReviewInputRevision(options.root, bundle, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []))),
       ) as SystemicChallengeSubmission)
     : undefined;
   const result = await advanceAudit(bundle, {

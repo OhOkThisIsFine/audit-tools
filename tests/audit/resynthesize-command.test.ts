@@ -200,7 +200,7 @@ test("resynthesize does not require the .audit-tools/audit working directory", a
   });
 });
 
-test("resynthesize: a dangling --input followed by another flag falls back to the default (COR-bc35a171)", async () => {
+test("resynthesize refuses a dangling --input rather than silently choosing a default", async () => {
   await withTempRoot(async (root) => {
     const auditToolsDir = join(root, ".audit-tools");
     await mkdir(auditToolsDir, { recursive: true });
@@ -211,14 +211,14 @@ test("resynthesize: a dangling --input followed by another flag falls back to th
     );
 
     // `--input` with no value, immediately followed by `--root`, must NOT
-    // resolve the input path to the literal "--root"; the shared getFlag guard
-    // makes it fall back to the default <root>/.audit-tools/audit-findings.json.
+    // resolve the input path to the literal "--root" or silently substitute a default.
+    // The explicit argument contract refuses it before loading any report.
     const argv = [process.execPath, "cli.ts", "resynthesize", "--input", "--root", root];
     const { stdout, exitCode, stderr } = await runResynthesize(argv);
 
-    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
-    const parsed = JSON.parse(stdout);
-    expect(parsed.source).toBe(join(auditToolsDir, "audit-findings.json"));
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/--input requires a value/);
+    expect(stdout).toBe("");
   });
 });
 

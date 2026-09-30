@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -1805,12 +1805,12 @@ describe("the dispatch host-handoff module's published export surface", () => {
     // Type-only, so it is the typecheck gate (`npm run check:tests`) that binds
     // this — a removed type export makes this file fail to compile.
     type Surface = {
-      state: import("../../src/remediate/steps/dispatch/hostHandoff.js").CurrentRemediationHostState;
-      prepared: import("../../src/remediate/steps/dispatch/hostHandoff.js").PreparedRemediationHostHandoff;
-      summary: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostIngestSummary;
-      item: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostWorkItem;
-      workload: import("../../src/remediate/steps/dispatch/hostHandoff.js").RemediationHostWorkload;
-      retired: import("../../src/remediate/steps/dispatch/hostHandoff.js").UnsupportedRetiredRemediationState;
+      state: import("../../src/remediate/steps/dispatch/hostContracts.js").CurrentRemediationHostState;
+      prepared: import("../../src/remediate/steps/dispatch/hostContracts.js").PreparedRemediationHostHandoff;
+      summary: import("../../src/remediate/steps/dispatch/hostContracts.js").RemediationHostIngestSummary;
+      item: import("../../src/remediate/steps/dispatch/hostContracts.js").RemediationHostWorkItem;
+      workload: import("../../src/remediate/steps/dispatch/hostContracts.js").RemediationHostWorkload;
+      retired: import("../../src/remediate/steps/dispatch/hostContracts.js").UnsupportedRetiredRemediationState;
     };
     const retired: Surface["retired"] = "unsupported_retired_state";
     expect(retired).toBe("unsupported_retired_state");
@@ -2284,5 +2284,87 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
     );
     expect(reminted.workload.contract_version).toBe("remediation-host-workload/v1alpha3");
     expect(reminted.handoff_record).toEqual(handoff.handoff_record);
+  });
+});
+
+describe("implementation context survives the real promotion and handoff", () => {
+  it.each([false, true])("preserves node semantics without adding finding fields (audit seed=%s)", async (seeded) => {
+    const root = await mkdtemp(join(tmpdir(), "implementation-context-"));
+    cleanupRoots.push(root);
+    const baselineCommit = await initGitRoot(root);
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    const { writeContractArtifact } = await import("../../src/remediate/contractPipeline/artifactStore.js");
+    const { promoteImplementationDagToExtractedPlan, writePathASeedFromFindings } = await import("../../src/remediate/steps/contractPipeline.js");
+    const { buildAuditFindingsDeliverable } = await import("../../src/shared/reporting/auditDeliverable.js");
+    const { RemediationPlanSchema } = await import("../../src/remediate/state/types.js");
+    const { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION, CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION } = await import("../../src/shared/types/contractPipeline.js");
+    const counterexample = { id: "CE-unique", claim: "refresh race", reproduction_steps: ["refresh twice"], expected: "one session", actual: "duplicate sessions", violated_obligation_ids: [] };
+    if (seeded) {
+      const { FindingSchema } = await import("../../src/shared/types/finding.js");
+      const report = buildAuditFindingsDeliverable([FindingSchema.parse(finding("finding-a", "src/a.ts"))], null);
+      const reportPath = join(root, "audit-findings.json");
+      await writeFile(reportPath, JSON.stringify(report));
+      await writePathASeedFromFindings(artifactsDir, reportPath, report);
+    }
+    await writeContractArtifact(artifactsDir, "counterexample", { contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION, goal_id: FIXTURE_RUN_ID, counterexamples: [counterexample], created_at: "2026-09-30T00:00:00Z" });
+    await writeContractArtifact(artifactsDir, "implementation_dag", { contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION, goal_id: FIXTURE_RUN_ID, nodes: [{ id: "N1", title: "Repair refresh", description: "Serialize refresh attempts", satisfies_obligations: [], addresses_counterexamples: [counterexample.id], depends_on: [], verification_obligation_ids: [], targeted_commands: [], status: "pending", output_files: ["src/a.ts"], ...(seeded ? { source_finding_ids: ["finding-a"] } : {}), preconditions: ["session exists"], expected_changes: "atomic refresh" }], edges: [], created_at: "2026-09-30T00:00:00Z" });
+    await promoteImplementationDagToExtractedPlan(artifactsDir, root);
+    const raw = JSON.parse(await readFile(join(artifactsDir, "extracted-plan.json"), "utf8"));
+    delete raw.traceability;
+    const plan = RemediationPlanSchema.parse(raw);
+    const state = { contract_version: CURRENT_STATE_VERSION, status: "implementing", plan, items: Object.fromEntries(plan.blocks.flatMap(block => block.items.map(id => [id, { finding_id: id, block_id: block.block_id, status: "pending" }]))) };
+    const boundary = await loadBoundary();
+    const handoff = requirePrepared(await boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId: FIXTURE_RUN_ID, baselineCommit, state }));
+    const text = handoff.workload.work_items[0]!.prompt.text;
+    for (const fact of ["session exists", "atomic refresh", "refresh twice", "Serialize refresh attempts"]) expect(text).toContain(fact);
+    expect(plan.findings[0]).not.toHaveProperty("concrete_change");
+    expect(plan.findings[0]).not.toHaveProperty("preconditions");
+    expect(RemediationPlanSchema.safeParse({ ...plan, blocks: [{ ...plan.blocks[0], implementation_context: { preconditions: 42 } }] }).success).toBe(false);
+  });
+});
+
+describe("host handoff repair and root observations", () => {
+  it('rebinds ordinary trusted state movement and refuses the old prompt result', async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } = await prepareFixture();
+    const changed = {
+      ...state,
+      plan: { ...state.plan, findings: (state.plan.findings as Array<Record<string, unknown>>).map((finding) => ({ ...finding, summary: `${finding.summary} Updated required behavior.` })) },
+    };
+    const rebound = requirePrepared(await boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit }));
+    expect(rebound.handoff_record.workload_sha256).not.toBe(handoff.handoff_record.workload_sha256);
+    expect(rebound.handoff_record.work_item_ids).toEqual(handoff.handoff_record.work_item_ids);
+    expect(rebound.handoff_record.baseline_commit).toBe(handoff.handoff_record.baseline_commit);
+    const oldItem = handoff.workload.work_items[0]!;
+    await writeFile(expectContained(root, oldItem.result_path, 'old result'), JSON.stringify(resultShape(runId, oldItem, baselineCommit)));
+    const ingested = requireIngested(await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state: { ...changed, host_handoff: rebound.handoff_record } }));
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.issues.some((issue) => /identity|prompt/i.test(issue.message))).toBe(true);
+  });
+
+  it.each(['run', 'baseline', 'items'])('refuses a stale-version rebind with invalid prior %s identity', async (part) => {
+    const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } = await prepareFixture();
+    const old = JSON.parse(await readFile(handoff.workload_path, 'utf8'));
+    old.contract_version = 'remediation-host-workload/v1alpha1';
+    if (part === 'run') old.run_id = 'another-run';
+    if (part === 'baseline') old.work_items[0].baseline_commit = 'f'.repeat(40);
+    if (part === 'items') old.work_items[0].id = 'unexpected-block';
+    await writeFile(handoff.workload_path, JSON.stringify(old));
+    const changed = { ...state, plan: { ...state.plan,
+      findings: (state.plan.findings as Array<Record<string, unknown>>).map((finding) => ({ ...finding, summary: 'Changed requirement' })),
+    } };
+    await expect(boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit })).rejects.toThrow(/trusted identity|binding/i);
+    expect(JSON.parse(await readFile(handoff.workload_path, 'utf8'))).toEqual(old);
+  });
+
+  it('reports newly observed ignored root logs on remediation ingestion without claiming their creator', async () => {
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const ignorePath = join(root, '.gitignore');
+    const ignore = existsSync(ignorePath) ? await readFile(ignorePath, 'utf8') : '';
+    await writeFile(ignorePath, ignore + '\n*.log\n');
+    await writeFile(join(root, 'peer-created.log'), 'unattributed output');
+    await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state });
+    const record = JSON.parse(await readFile(join(dirname(handoff.workload_path), 'root-log-observations.json'), 'utf8'));
+    expect(record.observations).toEqual([expect.objectContaining({ name: 'peer-created.log', creator: 'unknown' })]);
+    expect(await readFile(join(root, 'peer-created.log'), 'utf8')).toBe('unattributed output');
   });
 });

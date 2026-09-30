@@ -46,9 +46,8 @@ export interface ExternalAcquisitionAdvanceOptions {
   /** Per-analyzer resolution policy (auto|ephemeral|permanent|skip|repo). */
   analyzers?: Record<string, AnalyzerSetting>;
   /**
-   * Item B: recorded consent decisions from session config. A recorded
-   * "granted" admits a non-default candidate without a per-run grant; a
-   * recorded "declined" is terminal — no grant overrides it.
+   * Current-run declines veto admission, including for default tools.
+   * Grants use the scoped token above; no durable policy grants admission.
    */
   analyzerConsent?: AnalyzerConsentDecisions;
   /** Override the binary cache dir / platform / arch (tests). */

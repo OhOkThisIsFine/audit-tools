@@ -1,3 +1,4 @@
+import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
 import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
 /**
  * N-A08: Audit pipeline integration tests.
@@ -48,10 +49,10 @@ import { resolveEffectiveLenses } from "../../src/audit/orchestrator/lensSelecti
 // is satisfied and the decision reaches the obligation the test targets. The full
 // computeArtifactMetadata manifest (not an empty one) keeps the staleness pass clean.
 function settleIntentBaseline(bundle: ArtifactBundle): ArtifactBundle {
-  return runIntentEquivalenceResolve({
+  return captureCompletedDesignReviews(runIntentEquivalenceResolve({
     ...bundle,
     artifact_metadata: computeArtifactMetadata(bundle),
-  }).updated;
+  }).updated);
 }
 
 // ── Shared bundle factory helpers ─────────────────────────────────────────────
@@ -172,14 +173,14 @@ interface PostDesignReviewOptions {
 
 /** Bundle ready for planning (all obligations up to and including design reviews satisfied). */
 function makePostDesignReviewBundle(opts: PostDesignReviewOptions = {}): ArtifactBundle {
-  return {
+  return captureCompletedDesignReviews({
     ...makePostDesignAssessmentBundle({
       contract_reviewed: true,
       conceptual_reviewed: true,
     }),
     intent_checkpoint: makeValidCheckpoint(opts.checkpointOverrides),
     ...(opts.extra ?? {}),
-  };
+  });
 }
 
 // ── Scenario 1: Batch-deterministic block ─────────────────────────────────────
@@ -558,7 +559,7 @@ test("S5: omitted narrative run terminates cleanly — audit_report present, syn
     // synthesis_narrative NOT yet present — that's what we're testing
   };
 
-  const run = runSynthesisNarrativeExecutor(synthReadyBundle, undefined, { auditRead: null });
+  const run = runSynthesisNarrativeExecutor(captureCompletedDesignReviews(synthReadyBundle), undefined, { auditRead: null });
   const bundle = run.updated;
 
   // audit_report must be retained (from synthesis)

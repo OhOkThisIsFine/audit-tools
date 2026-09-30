@@ -1,3 +1,4 @@
+import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
 /**
  * Tests for the parallel design-review split (N-A05):
  *   - deriveAuditState obligation derivation
@@ -36,7 +37,7 @@ function preSplitDesignAssessment(): DesignAssessment {
 function minimalBundle(
   designAssessmentOverrides: Partial<DesignAssessment> = {},
 ): ArtifactBundle {
-  return {
+  return captureCompletedDesignReviews({
     repo_manifest: {
       generated_at: "2026-01-01T00:00:00Z",
       repository: { name: "test-repo" },
@@ -47,7 +48,7 @@ function minimalBundle(
       findings: [],
       ...designAssessmentOverrides,
     },
-  };
+  });
 }
 
 function requireDefined<T>(
@@ -72,7 +73,7 @@ test("state.ts: design_review_contract_completed is missing when contract_review
   expect(obl.state).toBe("missing");
 });
 
-test("state.ts: design_review_conceptual_completed is satisfied when conceptual_reviewed is true", () => {
+test("state.ts: design_review_conceptual_completed is satisfied when conceptual_reviewed has a current snapshot", () => {
   const bundle = minimalBundle({ contract_reviewed: true, conceptual_reviewed: true });
   const state = deriveAuditState(bundle);
   const obl = state.obligations.find(
@@ -83,7 +84,7 @@ test("state.ts: design_review_conceptual_completed is satisfied when conceptual_
   expect(obl.state).toBe("satisfied");
 });
 
-test("state.ts: both design_review obligations satisfied when both flags are true", () => {
+test("state.ts: both design_review obligations satisfied when both flags have current snapshots", () => {
   const bundle = minimalBundle({ contract_reviewed: true, conceptual_reviewed: true });
   const state = deriveAuditState(bundle);
   const contract = state.obligations.find(

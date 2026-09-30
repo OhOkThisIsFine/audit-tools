@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/testCommand.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,6 +13,7 @@ export interface ProjectCommands {
   e2e?: string[];
   build?: string[];
   lint?: string[];
+  typecheck?: string[];
 }
 
 // npm script names, in preference order, for each command role.
@@ -165,6 +167,8 @@ export function discoverProjectCommands(root: string): ProjectCommands {
     if (e2e) result.e2e = e2e;
     const build = pickScript(scripts, BUILD_SCRIPT_NAMES);
     if (build) result.build = build;
+    const typecheck = pickScript(scripts, ["typecheck", "check:types"]);
+    if (typecheck) result.typecheck = typecheck;
     const lint = pickScript(scripts, LINT_SCRIPT_NAMES);
     if (lint) result.lint = lint;
   }

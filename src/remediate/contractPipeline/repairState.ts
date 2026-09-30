@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/contract-pipeline-artifact-store.test.ts, tests/remediate/critique-gate.test.ts, tests/remediate/contract-pipeline-adversarial.test.ts
 /**
  * Contract-pipeline repair-state ledger + counterexample waivers.
  *
@@ -76,12 +77,13 @@ export interface ContractRepairState {
   /**
    * One entry per conceptual-design-critique-driven design repair (keyed by
    * critique hash). `blocking_ids` records the blocking critique-item ids the
-   * repair was dispatched to address — the cumulative union is the
+   * repair was dispatched to address. Target-scoped history permits upstream-to-interface
+   * progress without resetting the global iteration bound. The per-target union is the
    * "already-addressed" set the critique convergence gate diffs each fresh
    * critique against, so a re-raised (un-resolved) blocking concern is detected
    * as a stall rather than silently re-repaired forever.
    */
-  critique_repairs: { critique_hash: string; at: string; blocking_ids: string[] }[];
+  critique_repairs: { critique_hash: string; at: string; blocking_ids: string[]; target?: "finalized_module_contracts" | "module_decomposition" }[];
   /** One entry per implementation_dag traceability rejection. */
   dag_regenerations: { violations: string[]; at: string }[];
   /** Recorded owner waivers — absent on ledgers written before the verb existed. */

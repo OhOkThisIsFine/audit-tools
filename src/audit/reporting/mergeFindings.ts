@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/lead-lineage.test.ts, tests/audit/merge-findings-dedup.test.ts
 import type { AuditResult, Finding } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
@@ -11,6 +12,8 @@ import {
   sameLensDedupe,
   upsertFindingByIdentity,
   compareCodeUnits,
+  findingIdentityKey,
+  findingReEmissionKey,
 } from "audit-tools/shared";
 
 function relevantRuntimeEvidence(
@@ -57,6 +60,18 @@ export function mergeFindings(
 ): Finding[] {
   const merged = new Map<string, Finding>();
 
+  // These arrays are semantic-review outputs, never deterministic producers.
+  // Refuse a forged stamp even if a caller bypassed normal submission parsing.
+  for (const finding of [
+    ...(designAssessment?.contract_findings ?? []),
+    ...(designAssessment?.conceptual_findings ?? []),
+    ...(systemicChallenge?.findings ?? []),
+  ]) {
+    if (finding.lead_lineage !== undefined) {
+      throw new Error("Submitted semantic findings must not supply tool lead_lineage");
+    }
+  }
+
   const allDesignFindings = [
     ...(designAssessment?.findings ?? []),
     // The two review passes, each carrying its own findings. A pre-split
@@ -77,8 +92,37 @@ export function mergeFindings(
     // routed to its real lens rather than collapsed into an architecture bucket.
     ...(systemicChallenge?.findings ?? []),
   ];
+  // A structural anchor alone is too broad (two defects can share a file),
+  // and a title alone is too broad (two files can have the same defect label).
+  // Promotion requires both existing exact identities, never fuzzy dedupe.
+  const confirmationKey = (finding: Finding): string =>
+    JSON.stringify([findingIdentityKey(finding), findingReEmissionKey(finding)]);
+  const leads = new Map<string, Finding[]>();
   for (const finding of allDesignFindings) {
+    if (!finding.lead_lineage) continue;
+    const key = confirmationKey(finding);
+    const matching = leads.get(key) ?? [];
+    matching.push(finding);
+    leads.set(key, matching);
+  }
+  const mergeSemanticFinding = (finding: Finding): void => {
+    if (finding.lead_lineage !== undefined) {
+      throw new Error("Submitted semantic findings must not supply tool lead_lineage");
+    }
+    const matching = leads.get(confirmationKey(finding)) ?? [];
+    // Only the semantic verdict determines severity/confidence/summary. The
+    // original stamp continues to describe the detector's lead, not a new
+    // host-authored confirmation state; evidence is attached by this tool.
     upsertFindingByIdentity(merged, finding);
+    for (const lead of matching) {
+      upsertFindingByIdentity(merged, {
+        ...finding, affected_files: lead.affected_files, evidence: lead.evidence,
+        lead_lineage: lead.lead_lineage,
+      });
+    }
+  };
+  for (const finding of allDesignFindings) {
+    if (!finding.lead_lineage) mergeSemanticFinding(finding);
   }
 
   // Callers pass the supersession-resolved ledger (`selectCurrentResults`) so a
@@ -87,7 +131,7 @@ export function mergeFindings(
   // result set it is given.
   for (const result of results) {
     for (const finding of result.findings) {
-      upsertFindingByIdentity(merged, finding);
+      mergeSemanticFinding(finding);
     }
   }
 

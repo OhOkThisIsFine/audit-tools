@@ -468,3 +468,35 @@ describe("deep conceptual resume narrows the instruction surface, not the access
     expect(resumed.readPaths).toContain(deliveredPath);
   });
 });
+
+
+describe("explicit conceptual perspective selections", () => {
+  const at = "2026-09-30T00:00:00Z";
+  const cp = (perspectives: unknown, depth?: string) => ({ schema_version: "intent-checkpoint/v1", confirmed_at: at, confirmed_by: "host", scope_summary: "all", intent_summary: "audit", design_review: { answered_at: at, perspectives, ...(depth ? { conceptual_depth: depth } : {}) } });
+  it("preserves an exact named/custom selection through confirmation and dispatch", async () => {
+    const { IntentCheckpointSchema } = await import("../../src/shared/types/intentCheckpoint.js");
+    const { selectPerspectives } = await import("../../src/audit/orchestrator/designReviewPrompt.js");
+    const selection = ["Pragmatist", { name: "Accessibility", lens: "Can every user operate this?" }];
+    const checkpoint = IntentCheckpointSchema.parse(cp(selection));
+    const settings = resolveConceptualReviewSettings({ intent_checkpoint: checkpoint });
+    expect(settings.conceptual_depth).toBe("deep");
+    expect(selectPerspectives(settings.perspectives).map(p => p.name)).toEqual(["Pragmatist", "Accessibility"]);
+    const dir = await mkdtemp(join(tmpdir(), "exact-perspectives-"));
+    try {
+      const first = await prepareConceptualDispatch({ artifactsDir: dir, bundle: { intent_checkpoint: checkpoint }, settings });
+      const resumed = await prepareConceptualDispatch({ artifactsDir: dir, bundle: { intent_checkpoint: checkpoint }, settings });
+      expect(first.deep).toBe(true);
+      expect(first.instructionLines.join("\n")).toContain("Pragmatist");
+      expect(first.instructionLines.join("\n")).toContain("Accessibility");
+      expect(first.writePaths).toHaveLength(3);
+      expect(resumed.writePaths).toEqual(first.writePaths);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+  it("refuses unknown names, duplicates, built-in custom collisions and shallow lists", async () => {
+    const { IntentCheckpointSchema } = await import("../../src/shared/types/intentCheckpoint.js");
+    for (const selection of [["Unknown"], ["Pragmatist", "Pragmatist"], [{ name: " pragmatist ", lens: "different" }], [{ name: "Custom", lens: "one" }, { name: "custom", lens: "two" }], []]) {
+      expect(IntentCheckpointSchema.safeParse(cp(selection)).success).toBe(false);
+    }
+    expect(IntentCheckpointSchema.safeParse(cp(["Pragmatist"], "shallow")).success).toBe(false);
+  });
+});

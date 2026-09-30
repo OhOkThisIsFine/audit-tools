@@ -6,7 +6,7 @@ import {
   readJsonFile,
   writeJsonFile,
 } from "audit-tools/shared";
-import { withArtifactTreeHold } from "./auditStep.js";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import {
   type ArtifactBundle,
   loadArtifactBundle,

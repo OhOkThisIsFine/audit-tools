@@ -44,8 +44,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isGlob, globToRegExp } from './check-doc-manifest.mjs';
-import { GUARDS, REACH } from './guard-reach-data.mjs';
-import { verifyChecksSteps } from './shared/verify-steps.mjs';
+import { GUARDS, REACH, guardReach } from './guard-reach-data.mjs';
+import { catalogGates, verifyChecksSteps } from './shared/verify-steps.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_FILE = 'scripts/guard-reach-data.mjs';
@@ -62,7 +62,7 @@ const matches = (pattern, matcher, file) => (matcher ? matcher.test(file) : patt
  * `npm run <name>` references and the gate names listed as arguments to
  * profile-run.mjs. Returns the visited script names.
  */
-function reachableScripts(packageScripts, root = 'verify:release') {
+function reachableScripts(packageScripts, root = 'verify:release', guards = GUARDS) {
   const visited = new Set();
   const stack = [root];
   while (stack.length) {
@@ -70,6 +70,8 @@ function reachableScripts(packageScripts, root = 'verify:release') {
     if (visited.has(name) || !(name in packageScripts)) continue;
     visited.add(name);
     const cmd = packageScripts[name];
+    const mode = cmd.match(/--catalog=(checks|release)/)?.[1];
+    if (mode) for (const gate of catalogGates(mode, guards)) stack.push(gate.impl);
     for (const m of cmd.matchAll(/npm run ([A-Za-z0-9:._-]+)/g)) stack.push(m[1]);
     if (cmd.includes('profile-run.mjs')) {
       // `profile-run.mjs <label> <script> <script> …` — every arg after the
@@ -80,6 +82,27 @@ function reachableScripts(packageScripts, root = 'verify:release') {
     }
   }
   return visited;
+}
+
+// An alias is a supported diagnostic entrypoint, never another release gate.
+// Require an exact invocation of a positively exercised recognizer module: a
+// generic alias must not hide arbitrary unregistered executable checks.
+function diagnosticAliases(guards, packageScripts) {
+  const valid = [];
+  const errors = [];
+  const seen = new Set();
+  for (const guard of guards) for (const alias of guard.diagnosticAliases ?? []) {
+    const good = guard.kind === 'gate' && typeof alias.script === 'string' &&
+      !seen.has(alias.script) && alias.script.startsWith(`${guard.id}-`) && alias.script !== guard.impl &&
+      typeof alias.module === 'string' && /^scripts\/[^\s]+\.mjs$/.test(alias.module) &&
+      typeof alias.purpose === 'string' && alias.purpose.trim().length > 0 &&
+      guard.forms?.some((form) => form.module === alias.module) &&
+      packageScripts[alias.script] === `node ${alias.module}`;
+    seen.add(alias.script);
+    if (good) valid.push(alias);
+    else errors.push(`Invalid diagnostic alias ${String(alias.script)}: require a unique family-prefixed exact node invocation of a declared positive-fixture module and a purpose.`);
+  }
+  return { valid, errors };
 }
 
 /**
@@ -108,17 +131,18 @@ function reachableScripts(packageScripts, root = 'verify:release') {
 export function gateHomeGaps({ guards, reach, packageScripts }) {
   let steps;
   try {
-    steps = new Set(verifyChecksSteps(packageScripts));
+    steps = new Set(verifyChecksSteps(packageScripts, guards));
   } catch {
     // verify:checks is unrunnable — the wiring rules below report that loudly
     // and this aggregate has no step list to reconcile against.
     steps = new Set();
   }
-  const cited = new Set(reach.flatMap((row) => (row.guardedBy === 'declared-gap' ? [] : row.guardedBy)));
+  const cited = new Set(guardReach(guards, reach).flatMap((row) => (row.guardedBy === 'declared-gap' ? [] : row.guardedBy)));
   const gateRows = guards.filter((g) => g.kind === 'gate' && g.impl === g.id);
 
+  const aliases = new Set(diagnosticAliases(guards, packageScripts).valid.map((alias) => alias.script));
   const ids = new Set(gateRows.map((g) => g.id));
-  for (const name of Object.keys(packageScripts)) if (name.startsWith('check:')) ids.add(name);
+  for (const name of Object.keys(packageScripts)) if (name.startsWith('check:') && !aliases.has(name)) ids.add(name);
 
   const gaps = [];
   for (const id of [...ids].sort()) {
@@ -141,7 +165,9 @@ export function gateHomeGaps({ guards, reach, packageScripts }) {
  * strings; returns error strings (empty = clean).
  */
 export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookCommands, gitHookTexts = {} }) {
-  const errors = [];
+  reach = guardReach(guards, reach);
+  const aliases = diagnosticAliases(guards, packageScripts);
+  const errors = [...aliases.errors];
   const files = onDisk.map(norm);
   const hookCommands = settingsHookCommands.map(norm);
   // `.githooks/<name>` → its text, for the git-hook wiring check (P53): git
@@ -269,8 +295,11 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
   }
 
   // ── wiring: every guard is enforced somewhere ──────────────────────────────
-  const reachable = reachableScripts(packageScripts);
+  const reachable = reachableScripts(packageScripts, 'verify:release', guards);
   const reachableCmds = [...reachable].map((name) => norm(packageScripts[name]));
+  if (packageScripts['verify:release']?.includes('--catalog=release')) {
+    reachableCmds.push(...catalogGates('release', guards).map((g) => g.impl));
+  }
   for (const g of guards) {
     const impl = norm(g.impl);
     if (g.kind === 'gate') {
@@ -370,6 +399,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
   const gateCmds = guards
     .filter((g) => g.kind === 'gate')
     .map((g) => (norm(g.impl).includes('/') ? norm(g.impl) : norm(packageScripts[g.impl] ?? '')));
+  gateCmds.push(...aliases.valid.map((alias) => packageScripts[alias.script]));
   for (const f of files) {
     if (/^scripts\/check-[^/]+\.mjs$/.test(f) && !gateCmds.some((cmd) => cmd.includes(f))) {
       errors.push(
@@ -378,7 +408,7 @@ export function reconcile({ guards, reach, onDisk, packageScripts, settingsHookC
       );
     }
   }
-  const gateIds = new Set(guards.filter((g) => g.kind === 'gate').flatMap((g) => [g.id, g.impl]));
+  const gateIds = new Set([...guards.filter((g) => g.kind === 'gate').flatMap((g) => [g.id, g.impl]), ...aliases.valid.map((alias) => alias.script)]);
   for (const name of Object.keys(packageScripts)) {
     if (name.startsWith('check:') && !gateIds.has(name)) {
       errors.push(

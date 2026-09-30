@@ -1,3 +1,6 @@
+import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js";
+import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
+import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts
 import {
   type DesignReviewBinding,
@@ -37,7 +40,7 @@ import {
 export interface ConceptualReviewSettings {
   max_units?: number;
   conceptual_depth: "shallow" | "deep";
-  perspectives?: number;
+  perspectives?: NonNullable<IntentCheckpoint["design_review"]>["perspectives"];
   /**
    * True when any confirmed charter is low-confidence (Phase A conceptual spine):
    * a review depending on a low-confidence charter must "flag for human intent
@@ -155,8 +158,8 @@ export function resolveConceptualReviewSettings(
   const flagForHuman = (bundle.charter_register?.lanes ?? []).some((lane) =>
     lane.nodes.some((node) => charterReviewDisposition(node) === "flag_for_human"),
   );
-  const conceptualDepth =
-    checkpoint?.conceptual_depth ?? "shallow";
+  const choices = resolveDesignReviewChoices(bundle);
+  const conceptualDepth = choices.conceptual_depth;
   // Surface a notice only when the CONFIRMED block drives the workload. The
   // notice is purely informational — it is derived AFTER the decision fields
   // above so it can never change them (the resolution stays identical with and
@@ -173,7 +176,7 @@ export function resolveConceptualReviewSettings(
     : undefined;
   return {
     conceptual_depth: conceptualDepth,
-    perspectives: checkpoint?.perspectives,
+    perspectives: choices.perspectives,
     ...(flagForHuman ? { flag_for_human: true } : {}),
     ...(reuseNotice ? { reuse_notice: reuseNotice } : {}),
     ...(ignoredReviewNotice ? { ignored_review_notice: ignoredReviewNotice } : {}),
@@ -268,6 +271,9 @@ export async function prepareConceptualDispatch(opts: {
       lanes: [
         {
           id: GATE_LANES.design_review_conceptual,
+          semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
+          fileCount: bundle.repo_manifest?.files.length ?? 0,
+          ...SEMANTIC_REVIEW_DEMAND,
           label: "Conceptual review (generative)",
           promptFilename: "design-review-conceptual-prompt.md",
           promptText:
@@ -357,6 +363,9 @@ export async function prepareConceptualDispatch(opts: {
   const laneSpecs: FanoutLaneSpec[] = [
     ...perspectiveFiles.map((f) => ({
       id: f.lane,
+      semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
+      fileCount: bundle.repo_manifest?.files.length ?? 0,
+      ...SEMANTIC_REVIEW_DEMAND,
       label: `Conceptual perspective — ${f.name}`,
       promptFilename: f.promptFilename,
       promptText: f.promptText + (perspectiveRefusals.has(laneSubmissionId(f.lane))
@@ -371,6 +380,9 @@ export async function prepareConceptualDispatch(opts: {
       // The judge PRODUCES the conceptual submission, so it is that lane — a
       // separate judge lane id would mint a bound path nothing reads.
       id: GATE_LANES.design_review_conceptual,
+      semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
+      fileCount: bundle.repo_manifest?.files.length ?? 0,
+      ...SEMANTIC_REVIEW_DEMAND,
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",
       promptText: judgePromptText,

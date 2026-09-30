@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/attest-derived-file-preflight.test.ts, tests/shared/write-time-derived-gates.test.ts
 // Single source for the pre-commit gate's DERIVED leg set — imported by
 // `.claude/hooks/pre-commit-gate.mjs` AND both attest scripts (P19, owner
 // decision sol-1, 2026-08-12; leg DERIVATION P34+P26, owner decision
@@ -32,9 +33,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
-import { GUARDS, REACH } from '../guard-reach-data.mjs';
+import { GUARDS, REACH, guardReach } from '../guard-reach-data.mjs';
 import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
-import { DOC_TEST_CONSUMERS } from '../doc-test-consumers-data.mjs';
 import { worktreeTree } from './worktree-tree.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -177,18 +177,27 @@ const PINS = new Map([
     ],
   ],
   ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
-  // The DECLARED doc → test consumer map, projected into the pin graph. The map
-  // and this graph answer the same question — "which test asserts this doc's
-  // content?" — so they are ONE declaration rather than two that drift: staging
-  // a mapped doc obliges exactly the tests the map names, and
-  // `check:pin-obligations` reconciles every row against the tracked tree.
-  //
-  // WHY THE MAP HAS TO BE PROJECTED HERE AT ALL. The map's own gate
-  // (`check:doc-test-consumers`) runs at CONFIGURATION time and only checks the
-  // rows' SHAPE; it cannot oblige a test, because a repo-wide check has no
-  // staged subject. The pin graph is what has a subject, and a subject is what
-  // "before it ships" requires. Without this projection the map is a comment.
-  ...DOC_TEST_CONSUMERS.map((row) => /** @type {[string, string[]]} */ ([row.doc, row.tests])),
+  // Curated content pins: unlisted documents are unclaimed, not proven uncovered.
+  // the roadmap block is generated from `▶`-pinned backlog entries and the live nightly block renders nothing when the queue is empty; the closeout render reproduces it verbatim
+  ["docs/HANDOFF.md",["tests/shared/handoff-roadmap.test.ts","tests/shared/closeout-render.test.ts"]],
+  // README's Philosophy section is GENERATED from the brief's Product half, and the doc's citations are backticked so check:doc-code-citations can see them
+  ["docs/project-philosophy.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/glossary-citations-backticked.test.ts"]],
+  // every path-shaped token in a table row is backticked, so a deleted file cannot stay green in the citation gate
+  ["docs/glossary-ids.md",["tests/shared/glossary-citations-backticked.test.ts"]],
+  // the routine's lane dispatch and the doc's approved lane swap are asserted together
+  ["docs/nightly-routine.md",["tests/shared/lane-dispatch.test.ts"]],
+  // the seek index is GENERATED from docs/backlog/, and the size baseline is a ratchet
+  ["docs/backlog.md",["tests/shared/backlog-index.test.ts","tests/shared/backlog-budget-unit.test.ts"]],
+  // the routing table is RENDERED from scripts/doc-manifest-data.mjs and byte-compared
+  ["docs/doc-review-guidelines.md",["tests/shared/doc-manifest-gate.test.ts"]],
+  // routed by the manifest and named as a constitutional doc; an edit is escalate-only
+  ["docs/documentation-philosophy.md",["tests/shared/doc-manifest-gate.test.ts"]],
+  // AGENTS.md's generated region states CLAUDE.md's current size, and CLAUDE.md is routed + constitutional
+  ["CLAUDE.md",["tests/shared/agents-region-gate.test.ts","tests/shared/doc-manifest-gate.test.ts"]],
+  // the generated region must state CLAUDE.md's current size
+  ["AGENTS.md",["tests/shared/agents-region-gate.test.ts"]],
+  // the Philosophy section is a generated render of the brief, and the README sample-report block is a registered generated artifact (scripts/check-readme-sample-report.mjs)
+  ["README.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/generated-artifact-registry.test.ts"]],
 ]);
 
 /** Repo-relative path with backslashes normalized and any leading `./` dropped. */
@@ -262,13 +271,13 @@ export function reconcilePinObligations(tracked, readText, pins = PINS) {
 // here so the commit gate and the attest preflight cannot disagree about which
 // kind a leg is — and so a future leg kind is one branch in one place.
 /**
- * @param {{script: string, testPath?: string}} leg
+ * @param {{script: string, testPath?: string, args?: string[]}} leg
  * @returns {{kind: 'npm', command: string} | {kind: 'test', command: string}}
  */
 export function legCommand(leg) {
   return leg.testPath
     ? { kind: 'test', command: `node scripts/shared/run-vitest-gate.mjs ${leg.testPath}` }
-    : { kind: 'npm', command: `npm run ${leg.script}` };
+    : { kind: 'npm', command: `npm run ${leg.script}${leg.args?.length ? ` -- ${leg.args.join(' ')}` : ''}` };
 }
 
 // Per-gate custom widening predicates, OR-ed onto the derived reach trigger.
@@ -338,8 +347,8 @@ export function buildPreCommitLegs({ guards = GUARDS, reach = REACH, packageScri
       legs.push({ id: g.id, script: g.impl, phase, fix, triggered: (_ctx) => true });
       continue;
     }
-    const patterns = new Set(['package.json']);
-    for (const row of reach) {
+    const patterns = new Set(['package.json', ...(g.diagnosticAliases ?? []).map((alias) => alias.module)]);
+    for (const row of guardReach(guards, reach)) {
       if (row.guardedBy === 'declared-gap' || !row.guardedBy.includes(g.id)) continue;
       for (const f of row.files) patterns.add(norm(f));
     }
@@ -420,7 +429,8 @@ export function buildWriteTimeLegs(
   );
   return buildPreCommitLegs({ guards, reach, packageScripts })
     .filter((leg) => writeTime.has(leg.id) && leg.triggered({ root, staged: [normalized] }))
-    .map((leg) => ({ ...leg, maxMs: writeTime.get(leg.id)?.maxMs ?? 1000 }));
+    .map((leg) => ({ ...leg, maxMs: writeTime.get(leg.id)?.maxMs ?? 1000,
+      args: writeTime.get(leg.id)?.args, deferredChecks: writeTime.get(leg.id)?.deferredChecks }));
 }
 
 function readPackageScripts(root) {

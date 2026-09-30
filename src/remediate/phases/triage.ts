@@ -1,3 +1,5 @@
+// sites-pinned: tests/remediate/phase-triage.test.ts
+import { runRequiredTest } from "../steps/dispatch/requiredTests.js";
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
 import { join } from "node:path";
@@ -7,10 +9,7 @@ import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetr
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { isTerminalStatus } from "../state/itemStatus.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
-import {
-  remediationHostResultFilePath,
-  runRequiredTest,
-} from "../steps/dispatch/hostHandoff.js";
+import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
 
 interface TriageResolution {
   /**

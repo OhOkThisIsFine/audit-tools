@@ -1,3 +1,4 @@
+import type { ReviewRequirement } from "./types/reviewIndependence.js";
 // sites-pinned: tests/remediate/contract-pipeline-prompts.test.ts
 //   The independence mandate's wording (an independent CONTEXT, never a
 //   mechanism) is pinned by the contract-pipeline prompts suite, which renders
@@ -56,9 +57,8 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  * CP-BLOCK-IMPL-mandatory-independent-critic). The mandate keys on what the lane
  * IS (an adversarial review of work an agent authored), not on what the host
  * reports it can do: one capability-neutral text carries both the mandate and
- * the explicitly-degraded no-independent-context fallback, so the same artifact
- * renders on every host and an author self-review is never licensed at full
- * strength. Single-sourced so audit-code and remediate-code stay in parity.
+ * an explicit unavailable pause, so the same artifact renders on every host
+ * and an author self-review is never licensed at full strength. Single-sourced so audit-code and remediate-code stay in parity.
  *
  * ⚠ THE MANDATE STATES THE NEED, NEVER A MECHANISM. It used to say "dispatch it
  * to a fresh, independent sub-agent", which names one way to get independence
@@ -67,9 +67,8 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  * contract-pipeline fan-out carried; see `module_contract_drafting`'s "what this
  * work needs" line in contractPipeline.ts). Independence is a property of the
  * CONTEXT, so that is what the text requires and the host owns the mechanism.
- * The fallback instruction stays — not as a capability claim the tool cannot
- * verify, but as the one escape a host can honestly take, with the degraded
- * independence recorded in the output.
+ * Required independent review has no self-review escape. Degraded review is
+ * available only through an explicit role policy, and its provenance is recorded.
  *
  * `depth: "light"` is remediate's proportionate low-risk floor (T1 slice 3) — a
  * lightweight inline self-check, never skipped; it is a DEPTH policy, orthogonal
@@ -77,8 +76,10 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  */
 export function renderIndependentReviewMandate(
   depth?: "light" | "full",
+  requirement: ReviewRequirement = depth === "light" ? "degraded_allowed" : "independent",
 ): string {
-  if (depth === "light") {
+  if (requirement === "ordinary") return "";
+  if (requirement === "degraded_allowed") {
     return `\n## Adversarial Review — light inline self-check
 
 The assessed risk for this change is low, so this adversarial phase runs as a **lightweight inline self-check** rather than a full independent review. Do a quick, honest adversarial pass yourself: scan the design for obvious gaps, contradictions, or unhandled cases and record any real concern you find. Keep it proportionate — this is a floor (never skipped), not an exhaustive independent counterexample search. If your self-check surfaces a genuine concern, treat that as evidence the change is harder than assessed and escalate to a full independent review.
@@ -88,7 +89,7 @@ The assessed risk for this change is low, so this adversarial phase runs as a **
 
 This is an adversarial review lane: its value comes from a reviewer who is **not** the author of the work under review. **What this needs is an independent context** — a review produced without shared authorship of the work and without the author's reasoning in view. An author grading their own work systematically misses the gaps this lane exists to catch, and that failure is a property of sharing the authorship, not of any particular execution mechanism.
 
-Produce the review from a context that did not author the work and cannot see the author's reasoning — the host chooses how that context is obtained. If the host genuinely cannot produce one, execute it inline as the explicitly-degraded fallback — adopt a fresh adversarial stance, set aside the author's reasoning, and attack the work as a hostile outside reviewer would — and say in the output that the review was self-conducted, so the degraded independence is visible rather than assumed. Inline self-review is the degraded fallback, never the intended path.
+Produce the review from a context that did not author the work and cannot see the author's reasoning — the host chooses how that context is obtained. If an independent context is unavailable, report unavailable and pause. Self-review or degraded review cannot satisfy this required lane. Record how the context meets this requirement in the bound review declaration; that declaration is evidence supplied by the host, not proof of reviewer identity.
 `;
 }
 
@@ -115,6 +116,7 @@ export function renderFanoutExecutionLines(params: {
     promptPath: string;
     resultPath?: string;
     demand?: { size: string; complexity: string; risk: string };
+    reviewRequirement?: "ordinary" | "independent" | "degraded_allowed";
   }[];
   /** Host-declared max concurrent subagents, when known. */
   concurrencyHint?: number | null;
@@ -140,7 +142,7 @@ export function renderFanoutExecutionLines(params: {
         ]
       : [];
   return [
-    params.independenceRequired
+    (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
       ? `Execute the ${n} lane prompt file${plural} below in an independent context that did not drive this audit. The host chooses how to obtain that context. If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.`
       : `Execute the ${n} lane prompt file${plural} below: dispatch one subagent per file if a subagent facility exists, else read and follow each file sequentially yourself. The same files and result paths apply either way.`,
     "",
@@ -160,7 +162,7 @@ export function renderFanoutExecutionLines(params: {
         (lane.resultPath ? ` → write results to ${lane.resultPath}` : ""),
     ),
     "",
-    params.independenceRequired
+    (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
       ? "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once the independently produced lane results exist."
       : "When dispatching a lane to a subagent, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
   ];

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/generated-artifact-registry.test.ts
 // Reconcile every tracked generator with exactly one declared freshness
 // authority. Individual check legs and contract tests compare bytes; this gate
 // makes the SET of generators and authorities mechanically complete.
@@ -7,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { catalogGates } from './shared/verify-steps.mjs';
 import { GENERATED } from './guard-reach-data.mjs';
 
 const GENERATOR_DECLARATION = /^\s*\/\/\s*@generated-artifact\b/m;
@@ -59,7 +61,9 @@ export function validateGeneratedRegistry({ rows, generators, trackedFiles, pack
     if (count > 1) failures.push(`${generator}: claimed by ${count} rows`);
   }
 
-  const verifySteps = (packageScripts['verify:checks'] ?? '').split(/\s+/);
+  const verifySteps = packageScripts['verify:checks']?.includes('--catalog=checks')
+    ? catalogGates().map((g) => g.impl)
+    : (packageScripts['verify:checks'] ?? '').split(/\s+/);
   for (const row of rows) {
     if (!trackedFiles.has(row.generator)) {
       failures.push(`${row.generator}: row names a generator that is not tracked`);

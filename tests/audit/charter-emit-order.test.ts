@@ -1,3 +1,5 @@
+import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 // The charter-emission step's TOOL-side properties: what the step contract
 // persists, and what the merge stamps onto each lane it consumed. Both are
 // properties of one bounded fixture, so they share it.
@@ -20,7 +22,7 @@ import {
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
 import { charterExtractionKindsForCeiling } from "../../src/audit/cli/charterExtractionPrompt.js";
-import { charterExtractionPacketFilename } from "../../src/audit/cli/laneSubmissions.js";
+import { charterExtractionLane, charterExtractionPacketFilename } from "../../src/audit/cli/laneSubmissions.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 
 function deepCeilingBundle(): ArtifactBundle {
@@ -81,7 +83,7 @@ function deepCeilingBundle(): ArtifactBundle {
       confirmed_by: "host",
       scope_summary: "s",
       intent_summary: "i",
-      design_review: { ceiling: { rung: "deep" } },
+      design_review: { answered_at: "2026-01-01T00:00:00Z", ceiling: { rung: "deep" } },
     },
   } as ArtifactBundle;
 }
@@ -103,7 +105,9 @@ test("charter packet read_paths are persisted in KIND order, not IO-completion o
       "utf8",
     );
     await mkdir(artifactsDir, { recursive: true });
-    await writeCoreArtifacts(artifactsDir, deepCeilingBundle());
+    const completed = captureCompletedDesignReviews(deepCeilingBundle());
+    await writeCoreArtifacts(artifactsDir, completed);
+    await persistDesignReviewSnapshots(artifactsDir, completed);
 
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
     const step = JSON.parse(
@@ -149,7 +153,9 @@ test("the merge stamps each lane with the kind of the PATH it arrived on", async
       "utf8",
     );
     await mkdir(artifactsDir, { recursive: true });
-    await writeCoreArtifacts(artifactsDir, deepCeilingBundle());
+    const completed = captureCompletedDesignReviews(deepCeilingBundle());
+    await writeCoreArtifacts(artifactsDir, completed);
+    await persistDesignReviewSnapshots(artifactsDir, completed);
 
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
     const step = JSON.parse(
@@ -165,9 +171,7 @@ test("the merge stamps each lane with the kind of the PATH it arrived on", async
     expect(writePaths).toHaveLength(kinds.length);
     for (const [i, path] of writePaths.entries()) {
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(
-        path,
-        JSON.stringify({
+      await writeBoundReviewFixture(artifactsDir, charterExtractionLane(kinds[i]!), {
           nodes: [
             {
               node_id: `authored-by-${kinds[i]}`,
@@ -183,9 +187,7 @@ test("the merge stamps each lane with the kind of the PATH it arrived on", async
             },
           ],
           edges: [],
-        }) + "\n",
-        "utf8",
-      );
+        });
     }
 
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);

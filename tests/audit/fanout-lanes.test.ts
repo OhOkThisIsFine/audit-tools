@@ -24,12 +24,16 @@ describe("materializeFanoutLanes", () => {
     {
       id: "alpha",
       label: "Alpha lane",
+      fileCount: 0,
+      riskScore: 0,
       promptFilename: "alpha-prompt.md",
       promptText: `# alpha lane (${dir})`,
     },
     {
       id: "beta",
       label: "Beta lane",
+      fileCount: 0,
+      riskScore: 0,
       promptFilename: "beta-prompt.md",
       promptText: "# beta lane",
     },

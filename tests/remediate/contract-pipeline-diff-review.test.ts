@@ -1,3 +1,4 @@
+import { writeContractHostFixture } from "./helpers/contractHostFixture.js";
 /**
  * B2 — diff-based re-review guard.
  *
@@ -21,7 +22,6 @@ import { join } from "node:path";
 import {
   writeContractArtifact,
   readContractArtifact,
-  contractInputFilePath,
   envelopePayload,
   stampToolCreatedAt,
   type ContractPipelineArtifactName,
@@ -136,11 +136,9 @@ describe("B2 diff-based re-review — snapshot membership + capture", () => {
 
   it("ingestContractArtifacts captures a snapshot when a review artifact is ingested", async () => {
     await seedCounterexampleDeps();
-    // Write a RAW (un-enveloped) counterexample, as a worker would.
-    await writeFile(
-      contractInputFilePath(artifactsDir, "counterexample"),
-      JSON.stringify(makeCounterexamplePayload()),
-    );
+    // Submit the domain payload in the required tool-bound review envelope.
+    await writeContractHostFixture({ root: tmpDir, artifactsDir, runId: "diff-review" },
+      "counterexample", makeCounterexamplePayload());
     const result = await ingestContractArtifacts(artifactsDir);
     expect(result.ingested).toContain("counterexample");
     expect(reviewSnapshotExists(artifactsDir, "counterexample")).toBe(true);
@@ -244,10 +242,8 @@ describe("B4 tool-stamped created_at — host has no clock", () => {
     // A worker writes the bare payload WITHOUT a created_at (it has no clock).
     const payload = makeCounterexamplePayload();
     delete payload.created_at;
-    await writeFile(
-      contractInputFilePath(artifactsDir, "counterexample"),
-      JSON.stringify(payload),
-    );
+    await writeContractHostFixture({ root: tmpDir, artifactsDir, runId: "diff-review" },
+      "counterexample", payload);
     const result = await ingestContractArtifacts(artifactsDir);
     expect(result.ingested).toContain("counterexample");
     expect(result.invalid).toEqual([]);

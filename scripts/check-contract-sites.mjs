@@ -9,9 +9,9 @@
 // different question with a different derivation:
 //
 //   check:sites-pinned    — for each site this CHANGE touched, is it pinned?
-//   check:contract-sites  — for each validated CONTRACT TYPE, is every producer
-//                           site derived FROM THE CONTRACT, so a producer cannot
-//                           miss a field the contract added?
+//   check:contract-sites  — for each REGISTERED contract type, do declared
+//                           producer markers and rendered schema fields agree?
+//                           This is a census aid, not runtime enforcement.
 //
 // Two contract types are walked, and each walk is the doc-manifest shape (data +
 // refusal, `2adc716c`) rather than a typecheck — a cast makes a typecheck inert,
@@ -42,9 +42,10 @@
 // deletable: a site marker says a producer CONSTRUCTS this contract here — it
 // does not prove the construction passes every field (a spread of a partial
 // still compiles), and it does not prove the site is REACHED at runtime. The
-// half this closes is the DENOMINATOR: the set of sites is derived from the
-// contract, so a producer can no longer be missing from the list because nobody
-// remembered it.
+// census covers declared sites of registered contracts only. An unmarked
+// producer or unregistered contract is not discovered by this gate. Runtime
+// completeness belongs at serialized-output boundaries: audit's artifact and
+// review-run writers validate their declared payloads with the owning schemas.
 //
 //   node scripts/check-contract-sites.mjs        # verify
 //

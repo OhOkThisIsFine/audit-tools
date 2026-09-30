@@ -1,12 +1,12 @@
+import { writeContractHostFixture } from "./helpers/contractHostFixture.js";
 /**
  * C2 (sol-10 / P35) — a contract-pipeline prompt may only name inputs that a
  * producer actually WROTE to disk.
  *
- * The ENOENT class this pins: every host-facing artifact path the pipeline
- * renders is `<name>.input.json` (D3 — the host's world is entirely plain input
- * files), but five artifacts are DERIVED by the tool and were written only to
- * the canonical envelope `<name>.json`. Any prompt listing one of them under
- * "## Required Inputs" therefore pointed a worker at a file that never existed.
+ * Accepted inputs now use the canonical envelope's payload, retaining review
+ * provenance beside it. Submission outputs remain separate .input.json files.
+ * Every accepted-input path must exist and explicitly tell its reader where the
+ * validated payload lives, including artifacts derived entirely by the tool.
  *
  * This is the INTEGRATION half: drive the real pipeline from host-authored
  * inputs through the deterministic obligation-ledger / cyclic-seam / seam
@@ -25,8 +25,8 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { buildNextContractPipelineStep } from "../../src/remediate/steps/contractPipeline.js";
 import {
-  contractInputFilePath,
-  contractPipelineDir,
+  contractArtifactFilePath,
+  readContractArtifact,
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
 import {
@@ -38,7 +38,6 @@ import {
   CONTRACT_PIPELINE_GOAL_SPEC_VERSION,
   CONTRACT_PIPELINE_CONTEXT_BUNDLE_VERSION,
   CONTRACT_PIPELINE_CONCEPTUAL_DESIGN_CRITIQUE_VERSION,
-  writeJsonFile,
 } from "audit-tools/shared";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -52,17 +51,9 @@ const STEP_OPTIONS = {
   runId: "CONTRACT-REQUIRED-INPUTS",
 };
 
-/**
- * Seed one artifact the way a HOST does: a plain payload at the input path. The
- * tool's own ingest derives the canonical envelope, so nothing here pre-empts
- * the production path.
- */
-async function seedHostArtifact(
-  name: ContractPipelineArtifactName,
-  payload: unknown,
-): Promise<void> {
-  await mkdir(contractPipelineDir(ARTIFACTS_DIR), { recursive: true });
-  await writeJsonFile(contractInputFilePath(ARTIFACTS_DIR, name), payload);
+/** Host payloads keep their domain shape inside any required review envelope. */
+async function seedHostArtifact(name: ContractPipelineArtifactName, payload: unknown): Promise<void> {
+  await writeContractHostFixture(STEP_OPTIONS, name, payload);
 }
 
 function moduleContractEntries() {
@@ -152,12 +143,12 @@ async function seedConceptualCritique(): Promise<void> {
   });
 }
 
-/** The `- \`<path>\` (<key>)` entries a rendered "## Required Inputs" block lists. */
+/** Accepted input paths explicitly identify the canonical envelope's payload. */
 export function requiredInputPathsIn(prompt: string): string[] {
   const section = prompt.split(/^## Required Inputs$/m)[1];
   if (section === undefined) return [];
   const body = section.split(/^## /m)[0]!;
-  return [...body.matchAll(/^- `([^`]+)` \(([a-z_]+)\)$/gm)].map((m) => m[1]!);
+  return [...body.matchAll(/^- `([^`]+)` \(([a-z_]+); canonical envelope: read payload\)$/gm)].map((m) => m[1]!);
 }
 
 beforeEach(async () => {
@@ -214,26 +205,30 @@ describe("C2: a rendered Required Input names a file some producer wrote", () =>
     expectEveryRequiredInputOnDisk(prompt);
   });
 
-  it("a tool-derived artifact is readable as a PLAIN payload at the path the prompt names", async () => {
+  it("a tool-derived artifact is readable through the canonical payload at the named path", async () => {
     await seedHostAuthoredUpstreams();
     await buildNextContractPipelineStep(STEP_OPTIONS);
     await seedConceptualCritique();
-    await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await nextPrompt();
+    const namedPaths = requiredInputPathsIn(prompt);
+    expect(namedPaths.length).toBeGreaterThan(0);
 
     for (const name of [
       "finalized_module_contracts",
       "obligation_ledger",
       "cyclic_seam_resolution",
     ] as const) {
-      const inputPath = contractInputFilePath(ARTIFACTS_DIR, name);
-      expect(existsSync(inputPath), `${name}.input.json must exist`).toBe(true);
-      const payload = JSON.parse(await readFile(inputPath, "utf8")) as Record<
-        string,
-        unknown
-      >;
-      // The host's world is the PLAIN payload — never the tool's envelope.
-      expect(payload.content_hash, `${name} input must not be an envelope`).toBeUndefined();
-      expect(typeof payload.contract_version).toBe("string");
+      const inputPath = contractArtifactFilePath(ARTIFACTS_DIR, name);
+      expect(existsSync(inputPath), `${name}.json must exist`).toBe(true);
+      const envelope = JSON.parse(await readFile(inputPath, "utf8")) as {
+        content_hash: string; payload: { contract_version: string };
+      };
+      expect(envelope.content_hash.length).toBeGreaterThan(0);
+      expect(await readContractArtifact(ARTIFACTS_DIR, name)).toEqual(envelope);
+      expect(typeof envelope.payload.contract_version).toBe("string");
+      // The next phase uses the ledger; the other two remain canonical inputs
+      // for their own consumers, without requiring duplicate payload copies.
+      if (name === "obligation_ledger") expect(namedPaths).toContain(inputPath);
     }
   });
 });

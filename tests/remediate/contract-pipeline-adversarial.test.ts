@@ -1,3 +1,5 @@
+import { contractReviewBindingPath } from "../../src/remediate/contractPipeline/contractReviewBinding.js";
+import { writeContractHostFixture } from "./helpers/contractHostFixture.js";
 /**
  * The adversarial critic → judge → repair loop (WS3). These tests drive
  * buildNextContractPipelineStep the way a host does — one bounded invocation
@@ -18,6 +20,8 @@ import {
   validateImplementationDagTraceability,
   promoteImplementationDagToExtractedPlan,
   inferRepairTarget,
+  evaluateCritiqueGate,
+  evaluateJudgeGate,
   MAX_CONTRACT_REPAIR_ITERATIONS,
   MAX_DAG_REGENERATION_ATTEMPTS,
   archiveContractArtifact,
@@ -33,6 +37,7 @@ import {
 } from "../../src/remediate/contractPipeline/artifactStore.js";
 import { counterexampleFingerprint } from "../../src/remediate/contractPipeline/counterexampleFingerprint.js";
 import {
+  validateConceptualDesignCritique,
   validateContractCitationGrounding,
   enumerateRepoTreePaths,
   isInsideGitWorkTree,
@@ -76,14 +81,8 @@ const STEP_OPTIONS = {
   runId: "CONTRACT-TEST",
 };
 
-/** Write a RAW worker payload (not an envelope) at the artifact path. */
-async function writeRawArtifact(
-  name: ContractPipelineArtifactName,
-  payload: unknown,
-): Promise<void> {
-  const path = contractInputFilePath(ARTIFACTS_DIR, name);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(payload, null, 2) + "\n", "utf8");
+async function writeRawArtifact(name: ContractPipelineArtifactName, payload: unknown): Promise<void> {
+  await writeContractHostFixture(STEP_OPTIONS, name, payload);
 }
 
 function payloads(overrides: {
@@ -345,6 +344,8 @@ describe("clean run: approved judge verdict proceeds to implementation planning"
 
     const criticStep = await buildNextContractPipelineStep(STEP_OPTIONS);
     expect(await promptOf(criticStep!)).toMatch(/Adversarial Critic/);
+    const expectedReview = JSON.parse(await readFile(contractReviewBindingPath(ARTIFACTS_DIR, "counterexample"), "utf8"));
+    expect(await promptOf(criticStep!)).toContain(expectedReview.prompt_sha256);
 
     await writeRawArtifact("counterexample", all.counterexample);
     const judgeStep = await buildNextContractPipelineStep(STEP_OPTIONS);
@@ -1669,4 +1670,82 @@ describe("D2: archiveContractArtifact + rejectionRewriteInstruction", () => {
     expect(prompt).toContain("do NOT Edit the previous file");
     expect(prompt).toContain("Write a fresh complete artifact at its original path");
   });
+});
+
+describe("upstream repair ownership and bound independent review", () => {
+  it.each(['critique', 'judge'])('routes explicit %s upstream repair through decomposition and invalidates downstream artifacts', async (trigger) => {
+    const all = payloads({
+      counterexamples: [{ id: 'CE-UPSTREAM', claim: 'Module scope covers goal', reproduction_steps: ['Inspect missing scope'], expected: 'Owned scope', actual: 'Missing scope', violated_obligation_ids: ['O-1'] }],
+      judge: {
+        contract_version: CONTRACT_PIPELINE_JUDGE_REPORT_VERSION, goal_id: 'G1', verdict: 'needs_repair',
+        classifications: [{ counterexample_id: 'CE-UPSTREAM', classification: 'accepted', rationale: 'Change module file_scope at its owner' }],
+        repair_directive: { target: 'module_decomposition', instruction: 'Correct the owning module file_scope.' }, created_at: CREATED_AT,
+      },
+    });
+    for (const name of CHAIN_THROUGH_JUDGE) {
+      await writeRawArtifact(name, trigger === 'critique' && name === 'conceptual_design_critique'
+        ? { ...all.conceptual_design_critique, repair_target: 'module_decomposition', verdict: 'rejected', items: [{ id: 'CDC-UPSTREAM', kind: 'concern', severity: 'blocking', description: 'Correct module file_scope in decomposition' }] }
+        : all[name]);
+    }
+    const repair = await buildNextContractPipelineStep(STEP_OPTIONS);
+    const prompt = await promptOf(repair!);
+    expect(prompt).toContain('Contract Repair: module_decomposition');
+    expect(prompt).toMatch(/targeted|preserve/i);
+    await writeContractArtifact(ARTIFACTS_DIR, 'implementation_dag', traceableDag());
+    expect(existsSync(contractArtifactFilePath(ARTIFACTS_DIR, 'implementation_dag'))).toBe(true);
+    const decomposition = all.module_decomposition;
+    await writeRawArtifact('module_decomposition', { ...decomposition, modules: decomposition.modules.map((module) => ({ ...module, file_scope: [...module.file_scope, 'src/authFlow.ts'] })) });
+    const next = await buildNextContractPipelineStep(STEP_OPTIONS);
+    expect(await promptOf(next!)).toMatch(/Contract Drafting/);
+    for (const name of ['finalized_module_contracts', 'obligation_ledger', 'implementation_dag'] as const) {
+      expect(existsSync(contractArtifactFilePath(ARTIFACTS_DIR, name))).toBe(false);
+    }
+  });
+
+  it('refuses an unknown upstream critique repair target rather than silently choosing finalized contracts', () => {
+    const issues = validateConceptualDesignCritique({ ...payloads().conceptual_design_critique, repair_target: 'counterexample' });
+    expect(issues.some((issue) => issue.path.includes('repair_target'))).toBe(true);
+  });
+
+  it("an independent critic raw payload cannot bypass its bound review declaration", async () => {
+    const path = contractInputFilePath(ARTIFACTS_DIR, "counterexample");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(payloads().counterexample));
+    const result = await ingestContractArtifacts(ARTIFACTS_DIR);
+    expect(result.ingested).not.toContain("counterexample");
+    expect(result.invalid.some(entry => entry.name === "counterexample")).toBe(true);
+  });
+
+  it.each(['critique', 'judge'])('allows %s repair ownership progress without resetting the bounded history', async (kind) => {
+    const id = 'SAME-ISSUE';
+    const all = payloads();
+    if (kind === 'critique') {
+      await writeContractArtifact(ARTIFACTS_DIR, 'conceptual_design_critique', {
+        ...all.conceptual_design_critique, repair_target: 'finalized_module_contracts', verdict: 'rejected',
+        items: [{ id, kind: 'concern', severity: 'blocking', description: 'The scope is fixed; adjust its interface now' }],
+      });
+    } else {
+      await writeContractArtifact(ARTIFACTS_DIR, 'judge_report', {
+        ...all.judge_report as object, verdict: 'needs_repair',
+        classifications: [{ counterexample_id: id, classification: 'accepted', rationale: 'Adjust the final interface' }],
+        repair_directive: { target: 'finalized_module_contracts', instruction: 'Adjust the interface' },
+      });
+    }
+    const historyPath = join(contractPipelineDir(ARTIFACTS_DIR), 'repair-state.json');
+    const entry = (target: string, index: number) => kind === 'critique'
+      ? { critique_hash: `prior-${index}`, at: CREATED_AT, target, blocking_ids: [id] }
+      : { judge_hash: `prior-${index}`, at: CREATED_AT, target, accepted_ce_ids: [id] };
+    const writeHistory = (entries: unknown[]) => writeFile(historyPath, JSON.stringify({
+      schema_version: 'remediate-code-contract-pipeline/repair-state/v1alpha1',
+      repairs: kind === 'judge' ? entries : [], critique_repairs: kind === 'critique' ? entries : [], dag_regenerations: [],
+    }));
+    const evaluate = () => kind === 'critique' ? evaluateCritiqueGate(ARTIFACTS_DIR) : evaluateJudgeGate(ARTIFACTS_DIR);
+    await writeHistory([entry('module_decomposition', 0)]);
+    expect((await evaluate()).kind).toBe('repair');
+    await writeHistory([entry('module_decomposition', 0), entry('finalized_module_contracts', 1)]);
+    expect(await evaluate()).toMatchObject({ kind: 'escalate', reason: 'stall' });
+    await writeHistory(Array.from({ length: MAX_CONTRACT_REPAIR_ITERATIONS }, (_, i) => entry(i % 2 ? 'module_decomposition' : 'finalized_module_contracts', i)));
+    expect(await evaluate()).toMatchObject({ kind: 'escalate', reason: 'runaway' });
+  });
+
 });

@@ -168,3 +168,15 @@ describe("plan application stamps state.plan.audit_read from the tool's read", (
     expect(extracted).not.toHaveProperty("audit_read");
   });
 });
+
+
+describe("remediation plan contract ownership", () => {
+  it("rejects unused top-level themes while retaining the live intent filter", async () => {
+    const { RemediationPlanSchema } = await import("../../src/remediate/state/types.js");
+    const { IntentFiltersSchema } = await import("../../src/shared/types/intentCheckpoint.js");
+    const plan = { plan_id: "contract-test", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: [] };
+    expect(RemediationPlanSchema.safeParse(plan).success).toBe(true);
+    expect(RemediationPlanSchema.safeParse({ ...plan, themes: [] }).success).toBe(false);
+    expect(IntentFiltersSchema.parse({ themes: ["T-1"] })).toEqual({ themes: ["T-1"] });
+  });
+});

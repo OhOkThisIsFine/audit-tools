@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/graph-edge-cache.test.ts, tests/audit/graph-framework-routes.test.ts
+import { pythonRouterIdentities } from "./graphRouteSources.js";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { posix } from "node:path";
@@ -665,6 +667,7 @@ function extractContentEdgesForFile(
   pathLookup: Map<string, string>,
   acc: GraphEdgeAccumulator,
   fileRoutes: RouteEdge[],
+  routers?: ReadonlySet<string>,
 ): void {
   acc.imports.push(...extractImportEdges(filePath, content, pathLookup));
   acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup));
@@ -719,6 +722,7 @@ function extractContentEdgesForFile(
     filePath,
     content,
     pathLookup,
+    routers,
   );
   acc.calls.push(...frameworkRoutes.calls);
   fileRoutes.push(...frameworkRoutes.routes);
@@ -734,6 +738,7 @@ function extractPerFileContribution(
   filePath: string,
   content: string | undefined,
   pathLookup: Map<string, string>,
+  routers?: ReadonlySet<string>,
 ): PerFileGraphContribution {
   const local: GraphEdgeAccumulator = {
     imports: [],
@@ -747,7 +752,7 @@ function extractPerFileContribution(
   const fileRoutes: RouteEdge[] = [];
   let metrics: NodeMetrics[string] | undefined;
   if (hasExtractableContent(content)) {
-    extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes);
+    extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes, routers);
     metrics = computeNodeMetricsForFile(filePath, content);
   }
   fileRoutes.push(...extractConventionalRouteEvidence(filePath, content));
@@ -776,7 +781,7 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v9";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v10";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
@@ -1017,6 +1022,7 @@ export function buildGraphBundle(
       ? options.priorEdgeCache.entries
       : undefined;
   const freshEntries: Record<string, GraphEdgeCacheEntry> = {};
+  const routerIdentities = pythonRouterIdentities(options.fileContents ?? {}, pathLookup);
 
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
@@ -1031,16 +1037,18 @@ export function buildGraphBundle(
     // or reused — it always re-extracts (fail-safe). The cache thus stays sound
     // regardless of whether the upstream manifest enabled hashing (auditor-agnostic
     // robustness: never rely on the caller having passed hash_files).
+    const routers = routerIdentities.get(file.path) ?? new Set<string>();
     const contentHash = file.hash;
     const cacheKey =
       contentHash === undefined
         ? undefined
-        : graphEdgeCacheKey(contentHash, hasExtractableContent(content));
+        : graphEdgeCacheKey(contentHash, hasExtractableContent(content)) +
+          (/\.py$/i.test(file.path) ? `:${JSON.stringify([...routers].sort())}` : "");
     const cached = cacheKey !== undefined ? reusableEntries?.[file.path] : undefined;
     const contribution =
       cacheKey !== undefined && isReusableCacheEntry(cached, cacheKey)
         ? cached!.contribution
-        : extractPerFileContribution(file.path, content, pathLookup);
+        : extractPerFileContribution(file.path, content, pathLookup, routers);
 
     acc.imports.push(...contribution.imports);
     acc.calls.push(...contribution.calls);

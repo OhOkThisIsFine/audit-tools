@@ -9,6 +9,7 @@ import type {
 import type { IntentCheckpoint } from "../../src/shared/index.js";
 
 const {
+  IntentEquivalenceVerdictSchema,
   deriveIntentEquivalenceStatus,
   runIntentEquivalenceResolve,
 } = await import("../../src/audit/orchestrator/intentEquivalenceExecutor.js");
@@ -344,4 +345,36 @@ test("a stale-gate baseline does NOT mirror (ordinary bump rules apply)", () => 
   const bundle: ArtifactBundle = { intent_checkpoint: next, artifact_metadata: previous };
   const manifest = computeArtifactMetadata(bundle, previous, []);
   expect(manifest.artifacts["intent_checkpoint.json"].revision).toBe(4);
+});
+
+
+test("bound intent verdict accepts an optional rationale at the lane ingestion boundary", async () => {
+  const { laneSubmissionValidator } = await import("../../src/audit/cli/laneValidators.js");
+  const { GATE_LANES } = await import("../../src/audit/cli/laneSubmissions.js");
+  const prior = checkpoint();
+  const bundle = bundleWith(checkpoint({ scope_summary: "Equivalent scope wording" }), baselineFor(prior));
+  const status = deriveIntentEquivalenceStatus(bundle);
+  if (status.kind !== "prose_judgment_pending") throw new Error("expected pending judgment");
+  const verdict = { verdict: "equivalent", judged_pair: { prior_hash: status.prior_hash, new_hash: status.new_hash }, rationale: "Only the wording changed." };
+  const validate = laneSubmissionValidator(GATE_LANES.intent_equivalence, { repoFiles: new Set() });
+  expect(validate?.(verdict)).toBeNull();
+  const result = runIntentEquivalenceResolve(bundle, IntentEquivalenceVerdictSchema.parse(verdict));
+  expect(deriveIntentEquivalenceStatus(result.updated).kind).toBe("satisfied");
+  expect(result.updated.artifact_metadata?.intent_baseline?.revision).toBe(3);
+  expect(validate?.({ ...verdict, rationale: 42 })?.code).toBe("submission_contract_invalid");
+});
+
+test("intent-equivalence prompt example is admissible to the actual verdict consumer", async () => {
+  const { renderIntentEquivalencePrompt } = await import("../../src/audit/cli/nextStepCommand.js");
+  const prompt = renderIntentEquivalencePrompt({
+    verdictPath: "/fixture/verdict.json", continueCommand: "audit-code next-step",
+    pending: { prior_prose: "prior", current_prose: "current", prior_hash: "prior-hash", new_hash: "new-hash" },
+  });
+  const outputContract = prompt.slice(prompt.indexOf("## Verdict contract"));
+  const examples = [...outputContract.matchAll(/```json\s*([\s\S]*?)```/gu)].map(match => JSON.parse(match[1]!));
+  expect(examples).toHaveLength(1);
+  expect(IntentEquivalenceVerdictSchema.safeParse(examples[0]).success).toBe(true);
+  expect(examples[0].judged_pair).toEqual({ prior_hash: "prior-hash", new_hash: "new-hash" });
+  expect(prompt).toContain("equivalent");
+  expect(prompt).toContain("changed");
 });

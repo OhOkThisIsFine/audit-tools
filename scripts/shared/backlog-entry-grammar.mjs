@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/backlog-budget-unit.test.ts, tests/shared/backlog-consolidated.test.ts
 // The ONE definition of "a backlog entry", shared by the budget gate
 // (scripts/check-backlog-budget.mjs) and the roadmap/seek-index generators
 // (scripts/shared/generate-handoff-roadmap.mjs). Both files previously carried a
@@ -20,8 +21,7 @@
  *   `line` is 1-indexed; `headline` is the opening line alone; `body` is the
  *   entry's full text including its continuation lines.
  */
-export function splitBacklogEntries(text) {
-  const lines = text.split(/\r?\n/);
+export function splitBacklogEntries(text, lines = text.split(/\r?\n/)) {
   const starts = [];
   lines.forEach((l, i) => {
     if (/^- \*\*/.test(l)) starts.push(i);
@@ -34,6 +34,28 @@ export function splitBacklogEntries(text) {
       body: lines.slice(start, end).join("\n"),
     };
   });
+}
+
+/** One parsed document; consumers retain their bullet/track/full-text policies.
+ * @param {string} text
+ */
+export function parseBacklogDocument(text) {
+  const lines = text.split(/\r?\n/);
+  const entries = splitBacklogEntries(text, lines);
+  const headingIndex = lines.findIndex((line) => line.trim() === "## Open tracks");
+  const startIndex = headingIndex === -1 ? 0 : headingIndex + 1;
+  let endIndex = lines.length;
+  for (let i = startIndex; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) { endIndex = i; break; }
+  }
+  const starts = [];
+  for (let i = startIndex; i < endIndex; i++) if (/^\*\*/.test(lines[i])) starts.push(i);
+  const tracks = starts.map((start, k) => ({
+    line: start + 1,
+    headline: lines[start],
+    body: lines.slice(start, k + 1 < starts.length ? starts[k + 1] : endIndex).join("\n"),
+  }));
+  return { text, lines, entries, tracks };
 }
 
 // ── entry-boundary damage ────────────────────────────────────────────────────
@@ -151,8 +173,7 @@ const PARAGRAPH_ENTRY_SECTION = /^## Open tracks\b/;
  * @returns {{kind: 'lost_opener' | 'stray_continuation', line: number, text: string}[]}
  *   1-indexed `line` into `text`; `text` is the offending line, trimmed.
  */
-export function findEntryBoundaryDamage(text) {
-  const lines = text.split(/\r?\n/);
+export function findEntryBoundaryDamage(text, lines = text.split(/\r?\n/)) {
   const damaged = [];
   let seenEntry = false;
   let paragraphEntries = false;

@@ -4,14 +4,18 @@
     "answer": "Sanctioned exception. The mid-run needs_clarification pause is correct shipped behavior; amend the goals doc with an explicit carve-out naming it. No code change.",
     "subject": "A normative \"no prompts during implementation\" rule is contradicted by a shipped mid-run clarification path",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-07-26T00:11:09.705Z"
+    "decided_at": "2026-07-26T00:11:09.705Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. spec/remediate/remediation-goals.md explicitly records clarification return without stopping siblings, e2e failure returning to triage, and artifact preservation; matching next-step lifecycle regressions remain required in final suite. This timestamp records reconciliation, not the original implementation date."
   },
   "3846efadcaea79a1": {
     "disposition": "settled",
     "answer": "The doc is stale. Amend it to four end states: resolved, resolved_no_change, deemed inappropriate, user-confirmed ignored -- plus the force_closed_unresolved disposition. The code is right.",
     "subject": "The goals doc says remediation is binary with three end states; the code has four plus a force-closed disposition",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-07-26T00:11:09.753Z"
+    "decided_at": "2026-07-26T00:11:09.753Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. spec/remediate/remediation-goals.md Completion and src/remediate/state/types.ts use current resolved/resolved_no_change/deemed_inappropriate/ignored/abandoned vocabulary; do not restore historical force_closed_unresolved spelling. This timestamp records reconciliation, not the original implementation date."
   },
   "7fc1c1d310dda95d": {
     "disposition": "settled",
@@ -27,266 +31,342 @@
     "answer": "Already resolved: the per-entry ratchet was retired; the ratchet is per-FILE and shrink-only, so an entry may grow provided its file shrinks. A verified factual correction is never refused for size.",
     "subject": "FRICTION HIT TONIGHT: the shrink-only size ratchet refused a correct stale-reference fix for costing 14 bytes",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T00:11:09.850Z"
+    "decided_at": "2026-07-26T00:11:09.850Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/check-backlog-budget.mjs and scripts/shared/generate-backlog-index.mjs preserve file-level budget and generated seek index; backlog-budget-unit and backlog-index tests passed in packet 23 focused suite. Original historical outcome is recorded in answer; no size split or entry ratchet restored. This timestamp records reconciliation, not the original implementation date."
   },
   "5496115851346eca": {
     "disposition": "settled",
     "answer": "Already fixed at HEAD: src/shared/quota/coverage.ts:82 emits spec/cross-provider-quota-matrix.md. Verified by reading the file. No change needed.",
     "subject": "Code defect: a runtime message sends the host agent to a doc path that does not exist (one-character fix, held back on remit)",
     "path": "src/shared/quota/coverage.ts",
-    "decided_at": "2026-07-26T00:12:59.702Z"
+    "decided_at": "2026-07-26T00:12:59.702Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "3592dcb75b2d1300": {
     "disposition": "settled",
     "answer": "Already fixed at HEAD: ripgrep over the whole repo finds no leaked </content> or </invoke> lines; both named files end cleanly. Separately YES -- the manifest exclusion should not cover file-integrity defects, tracked as its own item.",
     "subject": "Leaked tool-call XML sits at the end of two tracked docs — and the manifest exclusion is why nothing reviews them",
     "path": "docs/reviews/g3-dispatch-policy-plan-2026-07-16.md",
-    "decided_at": "2026-07-26T00:12:59.752Z"
+    "decided_at": "2026-07-26T00:12:59.752Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. Recorded July25 correction plus current exact-line search shows no leaked closing content/invoke tags in the named review. Whole-corpus doc-integrity final gate remains required; do not exempt dated records from integrity checking. This timestamp records reconciliation, not the original implementation date."
   },
   "9d36874b81175de3": {
     "disposition": "settled",
     "answer": "Settled: generated index, no split. Keep open-bugs.md as one file and generate a seekable index (id, title, severity, anchor) so it is navigable in bounded reads. Splitting for size is what the condensation bias argues against, and every split file would need a manifest routing row. The older stale-premised entry can be deleted once the index ships.",
     "subject": "The open-bugs file is still over budget, and the two entries that discuss it prescribe different fixes",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T00:24:40.947Z"
+    "decided_at": "2026-07-26T00:24:40.947Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/check-backlog-budget.mjs and scripts/shared/generate-backlog-index.mjs preserve file-level budget and generated seek index; backlog-budget-unit and backlog-index tests passed in packet 23 focused suite. Original historical outcome is recorded in answer; no size split or entry ratchet restored. This timestamp records reconciliation, not the original implementation date."
   },
   "4752a4d7524dd394": {
     "disposition": "settled",
     "answer": "Already fixed at HEAD: AuditorSelf.provider is typed HostProviderName = Exclude<ProviderName,\"claude-worker\"> (auditorDescriptor.ts:32, sessionConfig.ts:26), matching assertHostProviderName. The docblock states the property. No change needed; operator-guide.md:153-164 is correct as written.",
     "subject": "PREMISE REFUTED — the operator guide was right; the residual is a type looser than its own validator",
     "path": "src/shared/types/auditorDescriptor.ts",
-    "decided_at": "2026-07-26T00:33:19.903Z"
+    "decided_at": "2026-07-26T00:33:19.903Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "115ec89691c8f7ec": {
     "disposition": "settled",
     "answer": "Cut the lap narration. Live state rewritten 2026-07-25 from 150 lines/20 bullets to 59/8. THE RULE, not just this instance: a Live-state bullet must be the immediate next step, or a currently-live gate/trap that will bite the next lap. Anything else has another home -- durable traps to durable-traps.md, durable design to project memory, durable how-to to CLAUDE.md, per-release detail to git log. If a bullet is none of the three and is not the next step, delete it. That rule is now stated at the foot of the section.",
     "subject": "Changelog creep re-accreted in HANDOFF Live state — 27 fresh lines narrating what the last lap shipped",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-07-26T00:59:55.538Z"
+    "decided_at": "2026-07-26T00:59:55.538Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. docs/HANDOFF.md contains immediate state and generated pointer-only roadmap; scripts/shared/generate-handoff-roadmap.mjs is canonical projection; handoff-roadmap tests passed in packet 23 focused suite. This timestamp records reconciliation, not the original implementation date."
   },
   "7e706f05f7e31c27": {
     "disposition": "settled",
     "answer": "Resolved by the same rewrite: the \"code tracks closed\" framing is GONE. The real ordering is the actionable backlog queue, worked from the triage record and the seek index; the live-validation dogfood run is the OWNER-owned half and is named as such.",
     "subject": "HANDOFF contradicts itself about what the current work is — \"code tracks closed\" vs a 90-entry active queue",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-07-26T00:59:55.586Z"
+    "decided_at": "2026-07-26T00:59:55.586Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. docs/HANDOFF.md contains immediate state and generated pointer-only roadmap; scripts/shared/generate-handoff-roadmap.mjs is canonical projection; handoff-roadmap tests passed in packet 23 focused suite. This timestamp records reconciliation, not the original implementation date."
   },
   "075493b11dd655ec": {
     "disposition": "settled",
     "answer": "The BACKLOG keeps the full spec in every case; HANDOFF carries pointers only. Live state no longer restates either the touched_files contract or the per-node token estimate as a spec -- the token-estimate bullet is now a one-paragraph live-watch warning, and the roadmap below it is generated pointers by construction.",
     "subject": "Two open items are written out as full specs in BOTH HANDOFF and the backlog",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-07-26T00:59:55.636Z"
+    "decided_at": "2026-07-26T00:59:55.636Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. docs/HANDOFF.md contains immediate state and generated pointer-only roadmap; scripts/shared/generate-handoff-roadmap.mjs is canonical projection; handoff-roadmap tests passed in packet 23 focused suite. This timestamp records reconciliation, not the original implementation date."
   },
   "5e2d0d8da4e33edc": {
     "disposition": "settled",
     "answer": "backend-identity-axes.md owns the exclusion grammar; unified-dispatch-worker-model.md and operator-guide.md now point at it. Gate compare key row corrected to backendIdentity (service:model, else bare service). Shipped 80b59b7b.",
     "subject": "Two specs still give opposite answers on the exclusion grammar; only one matches the shipped code",
     "path": "spec/unified-dispatch-worker-model.md",
-    "decided_at": "2026-07-26T02:39:37.034Z"
+    "decided_at": "2026-07-26T02:39:37.034Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "b42bfc339605632c": {
     "disposition": "settled",
     "answer": "backend-identity-axes.md owns the exclusion grammar; unified-dispatch-worker-model.md and operator-guide.md now point at it. Gate compare key row corrected to backendIdentity (service:model, else bare service). Shipped 80b59b7b.",
     "subject": "The gate-compare-key row was REFUSED for auto-apply — its fallback is still live and the paragraph below it would contradict any fix",
     "path": "spec/unified-dispatch-worker-model.md",
-    "decided_at": "2026-07-26T02:39:37.086Z"
+    "decided_at": "2026-07-26T02:39:37.086Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "1520a17c7282322b": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The manifest cell still calls a salvage record \"currently load-bearing\" and points into a backlog section that no longer exists",
     "path": "docs/doc-review-guidelines.md",
-    "decided_at": "2026-07-26T02:39:37.137Z"
+    "decided_at": "2026-07-26T02:39:37.137Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/doc-manifest-data.mjs owns routing; docs/documentation-philosophy.md names all tracked Markdown; whole-tree citation gate passed. Historical resolved-at-source answer retained; generated and hand-authored documents remain separately routed. This timestamp records reconciliation, not the original implementation date."
   },
   "16c518f14d62ba29": {
     "disposition": "settled",
     "answer": "Retire the obsolete proxy guide (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
     "subject": "A tracked doc sits in no manifest row, and the gate meant to prevent that structurally cannot see it",
     "path": "examples/README.md",
-    "decided_at": "2026-07-26T02:39:37.188Z"
+    "decided_at": "2026-07-26T02:39:37.188Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Original retirement shipped80b59b7b per recorded answer; proxy guide and execution substrate are retired. Do not restore obsolete examples to satisfy historical paths. This timestamp records reconciliation, not the original implementation date."
   },
   "c3bcc992b3794a9a": {
     "disposition": "settled",
     "answer": "Retire the obsolete proxy guide (owner call); examples/README fixed and its design rationale replaced with pointers. Shipped 80b59b7b.",
     "subject": "examples/README has a pointer that no longer resolves, an incomplete contents list, and half its body is spec prose",
     "path": "examples/README.md",
-    "decided_at": "2026-07-26T02:39:37.238Z"
+    "decided_at": "2026-07-26T02:39:37.238Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Original retirement shipped80b59b7b per recorded answer; proxy guide and execution substrate are retired. Do not restore obsolete examples to satisfy historical paths. This timestamp records reconciliation, not the original implementation date."
   },
   "c27fc2430cedcede": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The philosophy map states a design its own canonical home records as REFUTED, and cites a memory file that does not exist",
     "path": "docs/project-philosophy.md",
-    "decided_at": "2026-07-26T02:39:37.299Z"
+    "decided_at": "2026-07-26T02:39:37.299Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. current philosophy brief and canonical-homes table replace contradictory duplicate map; no missing memory citations. Philosophy full-registry72 tests passed; final documentation gates remain required. This timestamp records reconciliation, not the original implementation date."
   },
   "722b143c8f45cc06": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The manifest's \"excluded\" row is one 21,565-character table cell covering 51 dated records — and it grew again",
     "path": "docs/doc-review-guidelines.md",
-    "decided_at": "2026-07-26T02:39:37.351Z"
+    "decided_at": "2026-07-26T02:39:37.351Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/doc-manifest-data.mjs owns routing; docs/documentation-philosophy.md names all tracked Markdown; whole-tree citation gate passed. Historical resolved-at-source answer retained; generated and hand-authored documents remain separately routed. This timestamp records reconciliation, not the original implementation date."
   },
   "4caf44c5efa14013": {
     "disposition": "settled",
     "answer": "Rewritten to settled invariants at backend-identity-axes.md. Shipped 80b59b7b.",
     "subject": "Six spec passages still describe shipped work in plan tense (\"becomes\", \"must satisfy\", \"Ship a …\")",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-07-26T02:39:37.406Z"
+    "decided_at": "2026-07-26T02:39:37.406Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "7e13a673dfb730fe": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The README's public philosophy reads deterministic-by-default and hedges an invariant the project states absolutely",
     "path": "README.md",
-    "decided_at": "2026-07-26T02:39:37.463Z"
+    "decided_at": "2026-07-26T02:39:37.463Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. generated README preserves non-deterministic judgment and absolute enforce-in-tooling rule; check-philosophy-brief passed. Current generation supersedes historic wording. This timestamp records reconciliation, not the original implementation date."
   },
   "d7d782cbefca16d6": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "Four small corrections that each need a wording choice rather than a token swap",
     "path": "spec/contract-authoring-determinism-design.md",
-    "decided_at": "2026-07-26T02:39:37.518Z"
+    "decided_at": "2026-07-26T02:39:37.518Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as historically satisfied. Owner decision explicitly records resolution July25. Verified relevant spec corrections944a4310,f886066e,0e2eb67b; current spec is host-neutral. Four original subquestions are not retained, so this is historical completion evidence, not a new independent reconstruction of all four. This timestamp records reconciliation, not the original implementation date."
   },
   "928c6e644fef1f56": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "A shipped fix is documented as making a defect \"impossible\"; tracing it shows the defect is still live",
     "path": "src/shared/providers/sharedProviderConfirmation.ts",
-    "decided_at": "2026-07-26T02:39:37.570Z"
+    "decided_at": "2026-07-26T02:39:37.570Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "4027a6670bd4477c": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "How should a staged migration record its shipped stages — delete them, or keep ✅ markers?",
     "path": "docs/backlog/forward-tracks.md",
-    "decided_at": "2026-07-26T02:39:37.619Z"
+    "decided_at": "2026-07-26T02:39:37.619Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Verified historical migration labels corrected by0e2eb67b; provider migration later retired by467b1e8f. Do not restore a provider migration queue. This timestamp records reconciliation, not the original implementation date."
   },
   "67580078935b53d4": {
     "disposition": "settled",
     "answer": "Stage 3 is now a one-line KNOWN-WRONG pointer. Convention: delete shipped stages, keep known-wrong visible. Shipped 80b59b7b.",
     "subject": "A migration stage sits in the queue looking pending, while the next line says it was refuted",
     "path": "docs/backlog/forward-tracks.md",
-    "decided_at": "2026-07-26T02:39:37.671Z"
+    "decided_at": "2026-07-26T02:39:37.671Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. Verified git show80b59b7b changed forward-tracks migration stage; recorded owner answer identifies the known-wrong pointer. Current forward-tracks directs readers to settled decisions/rejected alternatives rather than reviving that stage. This timestamp records reconciliation, not the original implementation date."
   },
   "aa691b57778496f8": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "A decided item is parked in the working queue, and deleting it would erase the only record that it was declined",
     "path": "docs/backlog/forward-tracks.md",
-    "decided_at": "2026-07-26T02:39:37.733Z"
+    "decided_at": "2026-07-26T02:39:37.733Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Verified 560dd111 moved declined capability-floor-versus-tradeable-quality decision from queue into spec/dispatch-cost-speed-dial; subsequent zero-adapter retirement supersedes live spec while Git preserves rejection rationale. This timestamp records reconciliation, not the original implementation date."
   },
   "e75a2245f7fb15dd": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The entry about the file being too big hand-carries a measurement that goes stale every time the file is edited",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T02:39:37.785Z"
+    "decided_at": "2026-07-26T02:39:37.785Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/check-backlog-budget.mjs and scripts/shared/generate-backlog-index.mjs preserve file-level budget and generated seek index; backlog-budget-unit and backlog-index tests passed in packet 23 focused suite. Original historical outcome is recorded in answer; no size split or entry ratchet restored. This timestamp records reconciliation, not the original implementation date."
   },
   "45162da1a55c3672": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "Offload lane: the schema flag SHIPPED; line numbers and the truncation signal are still live (and one is a 5-day-old entry)",
     "path": "C:/Users/ethan/.claude/llm-call.mjs",
-    "decided_at": "2026-07-26T02:39:37.839Z"
+    "decided_at": "2026-07-26T02:39:37.839Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Historical llm-call helper/router and proposed quote checker are retired per packet 38 explicit exclusion; current host-owned dispatch and lane normalization own usable-output handling. No machine helper recreated or unperformed20-reply experiment claimed. This timestamp records reconciliation, not the original implementation date."
   },
   "977a34da5036752c": {
     "disposition": "settled",
     "answer": "Already resolved at HEAD before this item was presented - verified 2026-07-25. No work needed.",
     "subject": "The fix that stopped false REDs can turn a real failure GREEN in the release gate",
     "path": "scripts/shared/vitestGateVerdict.mjs",
-    "decided_at": "2026-07-26T02:39:37.892Z"
+    "decided_at": "2026-07-26T02:39:37.892Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/shared/vitestGateVerdict.mjs and tests/shared/vitest-gate-false-red.test.ts; all9 actual verdict tests passed in packet 38 focused suite on2026-09-30. This timestamp records reconciliation, not the original implementation date."
   },
   "a1a8dbf9de278566": {
     "disposition": "settled",
     "answer": "Owner: all three docs get an entry. audit-workflow-design gains a flow line, artifact-contract gains intent-equivalence-verdict.json, audit-goals names the gate in the judgment list (attested, additive). Shipped f6cd5b86.",
     "subject": "The DD-9 intent-equivalence gate shipped but is documented in no spec/audit doc — where does it get written down?",
     "path": "spec/audit/executor-catalog.md",
-    "decided_at": "2026-07-26T02:46:04.523Z"
+    "decided_at": "2026-07-26T02:46:04.523Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. Recorded f6cd5b86 implementation; current spec/audit-workflow-design.md names intent_equivalence and spec/audit/audit-goals.md names its judgment gate. Current artifact-contract records transient host submission lifecycle. This timestamp records reconciliation, not the original implementation date."
   },
   "5a097c71dc0127a1": {
     "disposition": "settled",
     "answer": "Owner approved 22b/22d/22e as recommended in docs/reviews/docs-22-duplicate-homes-2026-07-25.md; 22a dissolved (different questions, compatible answers), 22c closed in 80b59b7b. Shipped f6cd5b86.",
     "subject": "Doc-set condensation: five concepts each have two or three homes, and four have already drifted",
     "path": "docs/audit-pkg/product.md",
-    "decided_at": "2026-07-26T02:46:04.573Z"
+    "decided_at": "2026-07-26T02:46:04.573Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. Recorded f6cd5b86 implementation; current spec/audit-workflow-design.md names intent_equivalence and spec/audit/audit-goals.md names its judgment gate. Current artifact-contract records transient host submission lifecycle. This timestamp records reconciliation, not the original implementation date."
   },
   "8744b76810576e4b": {
     "disposition": "settled",
     "answer": "ALREADY SHIPPED - verified at source 2026-07-25. src/shared/io/schemaVersion.ts owns the policy pair (discardOnSchemaVersionMismatch for regenerable state, throwOnSchemaVersionMismatch for costly/authored), 8 consumers, and check:version-gates is wired into verify:checks reporting 12 persisted payloads read back under a version check, 0 unchecked. proxyCatalog.ts is compliant via an inline check with documented discard semantics. Owner had approved the tool-written-regenerable scope; no work needed. Caught by /design-check before implementation.",
     "subject": "State written by an older version is still read under new semantics, and a green test suite cannot see it",
     "path": "src/shared/io/",
-    "decided_at": "2026-07-26T02:47:02.900Z"
+    "decided_at": "2026-07-26T02:47:02.900Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. src/shared/io/schemaVersion.ts shared mismatch policy and check:version-gates executable catalog membership; tests/shared/schema-version-read-policy.test.ts and version-gate-scan.test.ts retain regressions. This timestamp records reconciliation, not the original implementation date."
   },
   "9b044e8702bc5058": {
     "disposition": "settled",
     "answer": "Approved. Correct docs/documentation-philosophy.md — \"any tracked `docs/**/*.md`\" becomes \"any tracked `*.md` anywhere in the repo\" — and file the constitutional-doc attestation with the same staged tree.",
     "subject": "Constitutional doc: the manifest gate reaches the WHOLE repo, but the philosophy still says docs/** — a one-phrase fix that needs an attested override",
     "path": "docs/documentation-philosophy.md",
-    "decided_at": "2026-07-26T15:00:57.915Z"
+    "decided_at": "2026-07-26T15:00:57.915Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/doc-manifest-data.mjs owns routing; docs/documentation-philosophy.md names all tracked Markdown; whole-tree citation gate passed. Historical resolved-at-source answer retained; generated and hand-authored documents remain separately routed. This timestamp records reconciliation, not the original implementation date."
   },
   "4b0ca1335b8261f0": {
     "disposition": "settled",
     "answer": "Approved. One attested edit to spec/remediate/remediation-goals.md correcting both sentences to the shipped behaviour: e2e failure transitions to triage rather than hard-erroring, and the artifacts directory is preserved unless the run is fully green.",
     "subject": "Constitutional goals doc: two adjacent sentences are contradicted by the code AND by the sister spec — one attested edit fixes both",
     "path": "spec/remediate/remediation-goals.md",
-    "decided_at": "2026-07-26T15:01:33.311Z"
+    "decided_at": "2026-07-26T15:01:33.311Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. spec/remediate/remediation-goals.md explicitly records clarification return without stopping siblings, e2e failure returning to triage, and artifact preservation; matching next-step lifecycle regressions remain required in final suite. This timestamp records reconciliation, not the original implementation date."
   },
   "9faa390f0d3aa846": {
     "disposition": "settled",
     "answer": "Add intent-equivalence-verdict.json to ARTIFACT_DEFINITIONS, making the \"structurally parallel to critical-flow-fallback\" rationale actually true.",
     "subject": "The DD-9 row you approved three commits ago rests on a parallel that does not hold — its sibling IS a registry entry and it is not",
     "path": "spec/audit/artifact-contract.md",
-    "decided_at": "2026-07-26T15:02:39.500Z"
+    "decided_at": "2026-07-26T15:02:39.500Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. spec/audit/artifact-contract.md explicitly identifies intent-equivalence-verdict.json as transient, unregistered, consumed/deleted host submission; materialized intent baseline is authority. Do not add ARTIFACT_DEFINITIONS entry. This timestamp records reconciliation, not the original implementation date."
   },
   "059a6b158ff82464": {
     "disposition": "settled",
     "answer": "Split the manifest row: .agent/** and .github/** stay renderer-owned, and the four skills/** loader bodies get their own reviewable row, since they are the canonical source rather than generated output.",
     "subject": "Four hand-authored loader bodies are filed as \"generated, do not review\" — but they ARE the source, so nothing reviews them",
     "path": "skills/audit-code/audit-code.prompt.md",
-    "decided_at": "2026-07-26T15:03:13.982Z"
+    "decided_at": "2026-07-26T15:03:13.982Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/doc-manifest-data.mjs owns routing; docs/documentation-philosophy.md names all tracked Markdown; whole-tree citation gate passed. Historical resolved-at-source answer retained; generated and hand-authored documents remain separately routed. This timestamp records reconciliation, not the original implementation date."
   },
   "e6af2ebe051dc436": {
     "disposition": "settled",
     "answer": "Replace the prohibition in docs/nightly-routine-prompt.md with the helper invocation. The helper already supplies the task-shaped schema, non-strict decoding, an explicit max_tokens and a truncation exit code.",
     "subject": "This routine's own prompt bans the offload helper and asks for a hand-rolled POST that reimplements it — two other homes say the opposite",
     "path": "docs/nightly-routine-prompt.md",
-    "decided_at": "2026-07-26T15:03:37.213Z"
+    "decided_at": "2026-07-26T15:03:37.213Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Historical llm-call helper/router and proposed quote checker are retired per packet 38 explicit exclusion; current host-owned dispatch and lane normalization own usable-output handling. No machine helper recreated or unperformed20-reply experiment claimed. This timestamp records reconciliation, not the original implementation date."
   },
   "60798a0bf788f168": {
     "disposition": "settled",
     "answer": "Add friction-stop-gate.mjs and nightly-surface.mjs to the CLAUDE.md guard enumeration, and name the worktree-reaping leg in the session-start-guards description. Leave \"the two session-lifecycle gates\" unchanged — it correctly describes the test file scope.",
     "subject": "Instruction-file edit: the guard inventory names five hooks and misses two registered ones, including a blocking Stop gate and the only leg that deletes files",
     "path": "CLAUDE.md",
-    "decided_at": "2026-07-26T15:04:02.213Z"
+    "decided_at": "2026-07-26T15:04:02.213Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. CLAUDE.md now points to authoritative guard registry rather than copying hook enumeration; scripts/guard-reach-data.mjs owns hook tests/wiring. Registry reconciliation passes. This timestamp records reconciliation, not the original implementation date."
   },
   "e9a80773304e82ef": {
     "disposition": "settled",
     "answer": "We need to fix this in tooling, not decide whether or not to leave it as a note. Plan a fix.",
     "subject": "Philosophy conformance: HANDOFF still carries a be-careful warning that its own backlog entry records as having failed",
     "path": "docs/HANDOFF.md",
-    "decided_at": "2026-07-26T15:05:23.493Z"
+    "decided_at": "2026-07-26T15:05:23.493Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. Verified 203017aa replaced warning with closeout CI gate. Current closeout-challenge-gate imports/calls latestFailedWorkflows and ciRedWorkflows.mjs exists; declared fail-open limits remain intentional. This timestamp records reconciliation, not the original implementation date."
   },
   "3683c7ee81710c94": {
     "disposition": "settled",
     "answer": "Move both docs to spec/ and fix the guard / gate.",
     "subject": "Doc-set condensation: two design specs live in docs/ while the philosophy routes design specs to spec/ — and the path-based routing is why nothing noticed",
     "path": "docs/quota-dispatch-design.md",
-    "decided_at": "2026-07-26T15:06:29.043Z"
+    "decided_at": "2026-07-26T15:06:29.043Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "b65ff0bcca7bb685": {
     "disposition": "settled",
     "answer": "Generate docs/nightly-routine-prompt.md from nightly-routine.md + doc-review-guidelines.md, following the philosophy-brief and HANDOFF-roadmap pattern, so the facts have one home.",
     "subject": "Doc-set condensation: the nightly prompt is a second home for facts that already have one, kept honest by a precedence rule instead of by single-sourcing",
     "path": "docs/nightly-routine-prompt.md",
-    "decided_at": "2026-07-26T15:06:38.345Z"
+    "decided_at": "2026-07-26T15:06:38.345Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. 7afb99a3 explicitly retires pre-joined nightly prompt, parity gate and generated byte-copy; machine loader reads two canonical sources. Regenerating that prompt would reverse the decision. This timestamp records reconciliation, not the original implementation date."
   },
   "8657aaec746c142f": {
     "disposition": "settled",
     "answer": "Retire docs/model-capability-ranking-sources.md outright — the consumption-pattern decision it produced is already recorded elsewhere — and delete its bespoke manifest row.",
     "subject": "Existence review: a dated survey that names its own retirement condition is the last file holding a bespoke manifest exemption",
     "path": "docs/model-capability-ranking-sources.md",
-    "decided_at": "2026-07-26T15:07:21.484Z"
+    "decided_at": "2026-07-26T15:07:21.484Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. docs/model-capability-ranking-sources.md is absent and no bespoke routing row remains; retain retirement rather than recreate dated survey. This timestamp records reconciliation, not the original implementation date."
   },
   "47086e76d3fac438": {
     "disposition": "settled",
@@ -300,77 +380,99 @@
     "answer": "Delete the entry. The populate trigger already keys on the per-run Gate-0 artifact, which is exactly the Property the entry demanded. Do not re-anchor its citation.",
     "subject": "This entry's premise is CLOSED at HEAD — the populate trigger already keys on the Gate-0 artifact it demands",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:10:19.611Z"
+    "decided_at": "2026-07-26T15:10:19.611Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Provider/quota/Gate-0 substrate retired by 467b1e8f zero-adapter host-owned execution and 6df1f477 dispatch inversion; original fixed-at-source/80b59b7b evidence remains in answer. Do not recreate removed provider documentation or trigger. This timestamp records reconciliation, not the original implementation date."
   },
   "a85c5e0afe680471": {
     "disposition": "settled",
     "answer": "Let's create that third value and include it in classification so the spec is correct.",
     "subject": "Malformed-result entry: property (a) is fully shipped and (b) is two-thirds shipped — trim to the real remainder, or close it",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:12:23.085Z"
+    "decided_at": "2026-07-26T15:12:23.085Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. src/shared/submission/submissionClassifier.ts has distinct submission_missing, submission_malformed, submission_contract_invalid outcomes, consumed by both orchestrators. tests/shared/ingest-report.test.ts and tests/remediate/host-handoff.test.ts pin the actual reader. This timestamp records reconciliation, not the original implementation date."
   },
   "fcdbfdde282cf2a4": {
     "disposition": "settled",
     "answer": "Confirmed — delete the \"Ad-hoc Agent fan-out has no per-agent ledger\" entry, executing the recorded 2026-07-25 decision that the host-fan-out entry subsumes it.",
     "subject": "An owner decision recorded in the backlog instructs closing a second entry; that entry is still open",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:12:50.014Z"
+    "decided_at": "2026-07-26T15:12:50.014Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Host-owned workload/ingestion now defines fan-out and run-bound submission ledger in src/shared/submission/hostResultOutcomes.ts; old ad-hoc per-agent-ledger proposal must not recreate product-owned execution. tests/shared/host-result-outcomes.test.ts covers refusal history/run isolation/recovery. This timestamp records reconciliation, not the original implementation date."
   },
   "3d5ac0871e30ffd3": {
     "disposition": "settled",
     "answer": "Merge all three into a single entry, folding the two unique properties into its body rather than keeping separate entries.",
     "subject": "One shared sub-claim is stated in three backlog entries — but two of the three also carry unique properties a merge would destroy",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:13:14.109Z"
+    "decided_at": "2026-07-26T15:13:14.109Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Verified aa270971 merged shape-degraded-cache and machine-global-cache properties c/d into one proxy-freshness entry;467b1e8f later retired provider substrate. No property silently dropped and no obsolete cache restored. This timestamp records reconciliation, not the original implementation date."
   },
   "a4e27bb59aa97976": {
     "disposition": "settled",
     "answer": "Keep the two backlog entries separate — they are distinct defects (baseline-binds-to-worktree false RED; --update-baseline raising a grown ceiling) — and delete the durable-traps and HANDOFF restatements.",
     "subject": "The budget-ratchet trap has four homes — but the two backlog entries are TWO DISTINCT DEFECTS, not two halves of one",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:13:40.436Z"
+    "decided_at": "2026-07-26T15:13:40.436Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/check-backlog-budget.mjs and scripts/shared/generate-backlog-index.mjs preserve file-level budget and generated seek index; backlog-budget-unit and backlog-index tests passed in packet 23 focused suite. Original historical outcome is recorded in answer; no size split or entry ratchet restored. This timestamp records reconciliation, not the original implementation date."
   },
   "5f8878d1e3126a4a": {
     "disposition": "settled",
     "answer": "Consolidate the three offload-lane entries into one durable-traps entry with two explicitly named axes — payload SIZE and CONCURRENCY — rather than arbitrating a concurrency number.",
     "subject": "Three offload-lane entries look like one contradictory trap — they are two different axes, and the \"1 vs 2\" conflict mostly dissolves",
     "path": "docs/backlog/durable-traps.md",
-    "decided_at": "2026-07-26T15:14:18.054Z"
+    "decided_at": "2026-07-26T15:14:18.054Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. docs/backlog/durable-traps.md contains one TWO independent axes payload SIZE and CONCURRENCY entry, preserving distinction; machine scheduling remains outside product ownership. This timestamp records reconciliation, not the original implementation date."
   },
   "8e0e2a693acf04ed": {
     "disposition": "settled",
     "answer": "Rewrite the eleven titles to state only the remaining OPEN work, moving shipped context into the entry bodies. Do not widen the status-token gate.",
     "subject": "Eleven backlog TITLES carry a SHIPPED marker, and each renders three times because both generators copy titles verbatim",
     "path": "docs/backlog/open-bugs.md",
-    "decided_at": "2026-07-26T15:14:44.382Z"
+    "decided_at": "2026-07-26T15:14:44.382Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. check-backlog aggregate status validator and generated backlog-index pass; historical answer called for title cleanup rather than wider status policy. This timestamp records reconciliation, not the original implementation date."
   },
   "a4147efe3fc66cd1": {
     "disposition": "settled",
     "answer": "Do not build the anchor half. Measure the quote-verification half alone over 20 live offload replies — both its true-positive rate and its closed-set false-positive surface — and bring the numbers back before anything ships.",
     "subject": "Offload-lane fabrication is real and recurring — but the proposed citation checker catches 0 of the 3 incidents, so the question is whether a mechanical check is the right shape at all",
     "path": "~/.claude/llm-call.mjs",
-    "decided_at": "2026-07-26T15:17:06.804Z"
+    "decided_at": "2026-07-26T15:17:06.804Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Historical llm-call helper/router and proposed quote checker are retired per packet 38 explicit exclusion; current host-owned dispatch and lane normalization own usable-output handling. No machine helper recreated or unperformed20-reply experiment claimed. This timestamp records reconciliation, not the original implementation date."
   },
   "5004af843c274506": {
     "disposition": "settled",
     "answer": "Approved. Add a sentence to the ~/.claude/llm-call.mjs system prompt stating that inlined content is line-numbered, conditional on the lineNumbers flag so it is not asserted under --no-line-numbers.",
     "subject": "Uncontested one-liner: the offload helper numbers every inlined line but never tells the model they are line numbers",
     "path": "~/.claude/llm-call.mjs",
-    "decided_at": "2026-07-26T15:17:44.571Z"
+    "decided_at": "2026-07-26T15:17:44.571Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as superseded. Historical llm-call helper/router and proposed quote checker are retired per packet 38 explicit exclusion; current host-owned dispatch and lane normalization own usable-output handling. No machine helper recreated or unperformed20-reply experiment claimed. This timestamp records reconciliation, not the original implementation date."
   },
   "b73a32e2dceb884a": {
     "disposition": "settled",
     "answer": "Wire smoke:linked-audit-code and smoke:linked-remediate-code into verify:release (they are slow). Do not build the general script-reachability gate — one incident is not a pattern; revisit if it recurs.",
     "subject": "Two smoke scripts are still run by nothing, six days after the property was written down — wire them, and decide separately about a gate",
     "path": "package.json",
-    "decided_at": "2026-07-26T15:18:32.946Z"
+    "decided_at": "2026-07-26T15:18:32.946Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. scripts/guard-reach-data.mjs release-stage rows and scripts/shared/verify-steps.mjs catalog projection run both linked smokes. Packet 22 catalog insertion regression passed; final smoke execution still required. This timestamp records reconciliation, not the original implementation date."
   },
   "3ba976efda50a723": {
     "disposition": "settled",
     "answer": "Give friction-stop-gate.mjs a real contract test alongside the other two Stop gates — spawn the process, assert its exit codes and its fail-open behaviours, and assert its wiring in settings.json.",
     "subject": "The only blocking Stop hook with no behavioural test — its coverage never runs it",
     "path": ".claude/hooks/friction-stop-gate.mjs",
-    "decided_at": "2026-07-26T15:19:07.719Z"
+    "decided_at": "2026-07-26T15:19:07.719Z",
+    "completed_at": "2026-09-30T13:16:47.797Z",
+    "completed_ref": "Reconciled on 2026-09-30 as satisfied by existing. tests/shared/hook-friction-stop-gate.test.ts spawns actual hook and asserts process behavior and wiring; final full suite required. This timestamp records reconciliation, not the original implementation date."
   },
   "efc78a9f1afad71a": {
     "disposition": "settled",

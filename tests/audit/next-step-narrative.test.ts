@@ -1,3 +1,6 @@
+import { persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
+import { persistAnalyzerConsent } from "../../src/shared/analyzerPolicy.js";
+import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
 import { test, expect } from "vitest";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -55,6 +58,7 @@ async function persistSynthesisReadyState(
   });
   await mkdir(artifactsDir, { recursive: true });
   await writeCoreArtifacts(artifactsDir, synthesis.updated_bundle);
+  await persistDesignReviewSnapshots(artifactsDir, synthesis.updated_bundle);
   return synthesis;
 }
 
@@ -98,6 +102,8 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
   try {
     await writeFixtureRepo(root);
     await persistSynthesisReadyState(root, artifactsDir);
+    await declineDefaultAcquiredAnalyzers(root);
+    await persistAnalyzerConsent(root, { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" });
     // This fixture has no local `typescript`; skip the optional analyzer so the
     // resume does not pause on the graph-enrichment install prompt.
     await writeFile(
@@ -105,7 +111,6 @@ test.concurrent("next-step pauses for the synthesis narrative, then completes af
       JSON.stringify(
         {
           analyzers: { typescript: "skip" },
-          analyzer_consent: { semgrep: "declined", eslint: "declined", knip: "declined", jscpd: "declined", "osv-scanner": "declined" },
         },
         null,
         2,
