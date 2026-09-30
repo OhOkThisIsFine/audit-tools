@@ -172,7 +172,7 @@ async function driveExport(form: FormFixture): Promise<boolean> {
   return detected(result);
 }
 
-function driveHook(form: FormFixture): { status: number | null; output: string } {
+function driveHook(form: FormFixture, launchCwd?: string): { status: number | null; output: string } {
   const root = tempDir("guard-form-hook-");
   for (const rel of form.rootFixture ?? []) {
     const target = join(root, rel);
@@ -182,7 +182,7 @@ function driveHook(form: FormFixture): { status: number | null; output: string }
   if (form.rootGit) {
     // A rule that consults git state (unstaged edits at risk) needs a real repo
     // at the project root, with the fixture files committed and then edited.
-    git(root, "init", "--quiet");
+    git(root, "init", "--quiet", "--initial-branch=main");
     git(root, "config", "user.email", "fixture@example.invalid");
     git(root, "config", "user.name", "fixture");
     for (const [rel, content] of Object.entries(form.rootGit.files)) {
@@ -196,7 +196,11 @@ function driveHook(form: FormFixture): { status: number | null; output: string }
       writeFileSync(join(root, rel), content);
     }
   }
-  let payloadJson = JSON.stringify(form.payload ?? {});
+  const payload = form.payload ?? {};
+  if (typeof payload !== "object" || Array.isArray(payload)) throw new Error("Hook fixture payload must be an object");
+  // The checkout the command targets is part of the real tool payload. A hook
+  // must not accidentally consult this test runner's checkout or its branch refs.
+  let payloadJson = JSON.stringify({ ...payload, cwd: root });
   if (form.sampleFile === "transcript-jsonl") {
     const transcript = join(root, "transcript.jsonl");
     writeFileSync(
@@ -213,6 +217,7 @@ function driveHook(form: FormFixture): { status: number | null; output: string }
   payloadJson = payloadJson.replaceAll("$SESSION", `guard-form-${Math.random().toString(36).slice(2, 10)}`);
   const r = spawnSyncHidden(process.execPath, [join(ROOT, form.hook ?? "")], {
     input: payloadJson,
+    cwd: launchCwd ?? root,
     encoding: "utf8",
     windowsHide: true,
     timeout: 60_000,
@@ -222,6 +227,20 @@ function driveHook(form: FormFixture): { status: number | null; output: string }
 }
 
 describe("guard form reach", () => {
+  it("binds the push form to its fixture when launched from a detached checkout without main", () => {
+    const host = tempDir("guard-form-detached-host-");
+    git(host, "init", "--quiet", "--initial-branch=fixture-host");
+    git(host, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "--no-gpg-sign", "--quiet", "-m", "host");
+    git(host, "checkout", "--quiet", "--detach");
+    const main = spawnSyncHidden("git", ["rev-parse", "--verify", "refs/heads/main"], { cwd: host, encoding: "utf8" });
+    expect(main.status).not.toBe(0);
+    const form = formGuards.find((guard) => guard.id === "push-gate")?.forms.find((candidate) => candidate.name === "agent push to main with no suite-green stamp");
+    if (!form) throw new Error("Missing declared protected push form");
+    const result = driveHook(form, host);
+    expect(result.status, result.output).toBe(2);
+    expect(result.output).toContain("push to a PROTECTED branch");
+    expect(result.output).not.toContain("FAIL-OPEN");
+  });
   it("at least one guard declares the forms it must recognize", () => {
     expect(formGuards.length).toBeGreaterThan(0);
   });
