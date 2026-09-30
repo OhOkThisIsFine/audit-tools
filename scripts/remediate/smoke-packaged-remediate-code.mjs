@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/remediate/packaged-smoke-bin.test.ts
 import "../shared/hermetic-state-dir.mjs";
 import { spawnSync } from "child_process";
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync } from "fs";
@@ -130,28 +131,30 @@ try {
       }
     });
 
-    // Use the .mjs wrapper directly for cross-platform reliability
-    const wrapperPath = join(
-      nodeModulesDir,
-      "audit-tools",
-      "remediate-code.mjs",
-    );
-
-    check("remediate-code --version exits 0", () => {
-      const r = spawnSync(process.execPath, [wrapperPath, "--version"], {
+    // Exercise npm's actual shim/symlink, including the Windows .cmd adapter.
+    const installedBin = process.platform === "win32" ? `${binPath}.cmd` : binPath;
+    const runInstalled = (flag) => {
+      const resolved = resolveSpawn(installedBin, [flag]);
+      const result = spawnSync(resolved.command, resolved.args, {
         encoding: "utf8",
         windowsHide: true,
       });
-      if (r.status !== 0) throw new Error(`exit ${r.status}`);
+      if (result.error || result.status !== 0) {
+        throw new Error(`${flag}: ${result.error?.message ?? `exit ${result.status}`}`);
+      }
+      return result.stdout.trim();
+    };
+
+    check(`installed remediate-code --version prints exactly ${packageVersion}`, () => {
+      const output = runInstalled("--version");
+      if (output !== packageVersion) throw new Error(`got: ${JSON.stringify(output)}`);
     });
 
-    check(`remediate-code --version prints ${packageVersion}`, () => {
-      const r = spawnSync(process.execPath, [wrapperPath, "--version"], {
-        encoding: "utf8",
-        windowsHide: true,
-      });
-      if (!r.stdout.includes(packageVersion))
-        throw new Error(`got: ${r.stdout.trim()}`);
+    check("installed remediate-code --help renders its CLI usage", () => {
+      const output = runInstalled("--help");
+      if (!/^Usage: remediate-code\b/mu.test(output)) {
+        throw new Error(`unexpected help: ${JSON.stringify(output)}`);
+      }
     });
 
     check("postinstall installed ~/.claude/commands/remediate-code.md", () => {

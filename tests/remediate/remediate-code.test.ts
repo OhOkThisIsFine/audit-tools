@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, utimesSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, utimesSync, symlinkSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,9 +9,8 @@ import { tmpdir } from "node:os";
 // The wrapper's OWN build-attempt signal, imported rather than re-typed. A
 // second copy of the literal here would desync silently the day production
 // renames it — the exact class this file's regression tests exist to catch.
-// (Importing is side-effect-free: the wrapper guards `main()` on
-// `import.meta.url === pathToFileURL(process.argv[1] ?? "").href` —
-// remediate-code.mjs, the `if` immediately above its `main().catch(...)`.)
+// Importing stays side-effect-free: the wrapper checks real filesystem identity
+// before entering main, including when npm invokes its symlink.
 import { BUILD_ATTEMPT_MARKER } from "../../remediate-code.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +27,36 @@ async function importWrapperModule() {
     rmSync(tmpDir, { recursive: true, force: true });
   }
 }
+
+// A global npm bin is a symlink on POSIX, not the wrapper's real path.
+describe.skipIf(process.platform === "win32")("remediate-code global symlink entrypoint", () => {
+  it.each(["--version", "--help"])("executes %s through the installed bin", (flag) => {
+    const root = mkdtempSync(join(tmpdir(), "remediate global bin "));
+    try {
+      const packageRoot = join(root, "lib", "node_modules", "audit-tools");
+      mkdirSync(join(packageRoot, "dist", "remediate"), { recursive: true });
+      mkdirSync(join(root, "bin"));
+      const wrapper = join(packageRoot, "remediate-code.mjs");
+      writeFileSync(wrapper, readFileSync(WRAPPER, "utf8"));
+      chmodSync(wrapper, 0o755);
+      writeFileSync(join(packageRoot, "dist", "remediate", "index.js"),
+        'console.log(process.argv[2] === "--version" ? "0.52.4" : "Usage: remediate-code [options] [command]");');
+      const bin = join(root, "bin", "remediate-code");
+      symlinkSync("../lib/node_modules/audit-tools/remediate-code.mjs", bin);
+      const result = spawnSync(bin, [flag], { cwd: root, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe(flag === "--version" ? "0.52.4" : "Usage: remediate-code [options] [command]");
+      expect(result.stderr).toBe("");
+      const imported = spawnSync(process.execPath, ["--input-type=module", "-e",
+        `await import(${JSON.stringify(pathToFileURL(wrapper).href)}); console.log("import stayed inert");`],
+      { cwd: root, encoding: "utf8" });
+      expect(imported.status).toBe(0);
+      expect(imported.stdout.trim()).toBe("import stayed inert");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("remediate-code.mjs dist-not-found guard", () => {
   it("exits 1 with error message when dist/index.js is absent", () => {
