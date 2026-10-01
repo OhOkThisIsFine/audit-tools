@@ -11,6 +11,10 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).** #12 deleted trap T44, but `scanBarrelSpies` matches only the `audit-tools/shared` specifier; a relative namespace import of `src/shared/index.ts` is the same barrel and returns `[]`. **Property:** every spelling of the barrel is recognized, or the uncovered half is stated in [`durable-traps.md`](durable-traps.md).
+- **Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).** Since #14 a charter step also carries a scoped-inspection workload; only a prompt sentence keeps blind readers apart from it. `ensureSemanticReviewRunUnlocked` always writes the semantic-review pause handoff, also when a charter step is current. **Property:** a blind-lane result carries a validated inputs declaration, and the handoff names the emitted step.
+- **`CLAUDE.md` drifted from #14 (2026-10-01, low).** It does not say host results are now ingested before the engine runs (`ingestAvailableInspectionResults`), and its remediate state diagram puts `waiting_for_clarification` beside planning, though only implementing and triage reach it. **Property:** `CLAUDE.md` describes where ingestion runs and the reachable state edges.
+- **`answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).** Marking a settled answer done changes `.claude/nightly-decisions.json`, but `docs/nightly-inbox.md` is not re-rendered, so the commit gate refuses until `node scripts/nightly/render-inbox.mjs` runs by hand. **Property:** every ledger write re-renders the inbox, as `writeOpenItems` already does.
 - **Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer
   unlocated (2026-08-29, low, friction: tool_should_decide).** Both zero bytes, timestamped during
   targeted vitest invocations in a live session, deleted by hand; the suite's added-root-entry

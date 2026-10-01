@@ -5,26 +5,23 @@
 
 ## Current state
 
-Published baseline: `v0.52.5`, with registry publication and installed command entry
-points verified in the cloud workspace. This does not claim installation on the
-owner's desktop. Outcomes-first workflow cleanup is implemented under the
-[implementation plan](reviews/outcomes-first-workflow-plan-2026-09-30.md).
+Published and installed: `v0.53.0`, the outcomes-first simplification
+([plan and record](reviews/outcomes-first-workflow-plan-2026-09-30.md)). The 2026-09-30
+cloud-agent work (#12, #13, #14) was reviewed and adversarially checked on 2026-10-01:
+[evaluation](reviews/chatgpt-work-evaluation-2026-10-01.md). Its main lines hold; its
+defects are filed in [`open-bugs.md`](backlog/open-bugs.md) and
+[`minor-bugs.md`](backlog/minor-bugs.md) under 2026-10-01. The suite is green on Windows.
 
-The earlier backlog has an owner-approved implementation sequence and frozen entry inventory in
-[`docs/reviews/backlog-implementation-2026-09-19.md`](reviews/backlog-implementation-2026-09-19.md).
-The historical preparation record reports separately preserved unfinished edits and points to
-`C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`. That Windows recovery location
-is unavailable, unverified and untouched from this cloud workspace. Its owner must verify
-preservation and review unregistered worktree ownership, unique changes and reachability before
-any cleanup; retain unknown work.
+The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
+is present on the owner's machine and was not reviewed in that lap; retain unknown work.
 
 ## Immediate next
 
-Cleanup is implemented; exact-head GitHub CI must pass before the authorized merge.
-Local validation: 570 files, 6,846 tests passed, 3 skipped; all catalog smoke legs passed.
-See the [decision and verification record](reviews/outcomes-first-workflow-plan-2026-09-30.md).
-Runtime/workload/outcome v2 refuses old in-progress state non-destructively.
-**Live owner decision:** none. No new npm publication is requested.
+Work the 2026-10-01 medium entries in [`open-bugs.md`](backlog/open-bugs.md). The push-gate
+`HEAD` refspec bypass is reproduced and the smallest; the loop-core attestation gap at the
+GitHub merge boundary is the one that let the others land unreviewed.
+**Live owner decision:** the `codex/recovery-reconciliation` worktree and `stash@{0}` hold
+unique pre-#14 work; see the evaluation record.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
