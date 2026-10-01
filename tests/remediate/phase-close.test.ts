@@ -16,7 +16,10 @@ import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import { RunLogger } from "audit-tools/shared";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
-import { validateVerificationReport } from "../../src/remediate/validation/contractPipeline.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import type { RemediationItemState, RemediationPlan, SourceVerification } from "../../src/remediate/state/types.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
+import { validateVerificationReport } from "../../src/remediate/validation/verificationReport.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,20 +27,64 @@ const REPO_DIR = scratchDir(".test-close-repo");
 const TEST_DIR = join(REPO_DIR, ".audit-tools", "remediation");
 const OUTPUT_DIR = join(REPO_DIR, ".audit-tools");
 
-const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: TEST_DIR };
+// These phase/report tests isolate their named legs. The mandatory floor is
+// exercised with real commands by final-acceptance-window.test.ts.
+const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: TEST_DIR, skipFinalGate: true };
 
 function makeState(overrides: Record<string, unknown> = {}): RemediationState {
+  type HistoricalBlock = { block_id: string; items?: string[]; touched_files?: string[]; dependencies?: string[] };
+  type HistoricalPlan = Partial<RemediationPlan> & { blocks?: HistoricalBlock[] };
+  type HistoricalItem = Omit<RemediationItemState, "unit_id"> & SourceVerification & { finding_id?: string; block_id?: string; unit_id?: string };
+  const historicalPlan = (overrides.plan ?? {}) as HistoricalPlan;
+  const historicalItems = (overrides.items ?? {}) as Record<string, HistoricalItem>;
+  const { blocks = [], ...plan } = historicalPlan;
+  const sourceIds = new Set((plan.findings ?? []).map(finding => finding.id));
+  // Each fixture item owns an explicit unit. This is test data conversion,
+  // not a production legacy adapter or a synthesis of new source findings.
+  const ids = [...new Set([...sourceIds, ...Object.keys(historicalItems)])];
+  const units = ids.map(id => {
+    const source = plan.findings?.find(finding => finding.id === id);
+    const block = blocks.find(candidate => candidate.block_id === historicalItems[id]?.block_id || candidate.items?.includes(id));
+    const paths = block?.touched_files ?? source?.affected_files.map(file => file.path) ?? [];
+    return canonicalUnitFixture(id, {
+      title: source?.title || id, description: source?.summary || `Implement ${id}`,
+      source_finding_ids: sourceIds.has(id) ? [id] : [],
+      allowed_files: paths, read_paths: paths.length ? paths : ["README.md"],
+    });
+  });
+  const items = Object.fromEntries(Object.entries(historicalItems).map(([id, item]) => {
+    const { finding_id: _finding, block_id: _block, evidence: _evidence, disposition_override: _disposition,
+      recorded_by_module: _module, mechanical_verification: _mechanical, ...runtime } = item;
+    return [id, { ...runtime, unit_id: id }];
+  }));
+  const canonical = canonicalPlanFixture({
+    plan_id: "P1", candidate_closing_actions: ["none"], ...plan, units,
+    requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: unit.source_finding_ids, change_kind: "structural", assertions: [] })),
+  });
+  const sourceVerifications = Object.fromEntries((canonical.findings ?? []).map(finding => {
+    const item = historicalItems[finding.id];
+    return [finding.id, {
+      evidence: item?.evidence, disposition_override: item?.disposition_override,
+      recorded_by_module: item?.recorded_by_module, mechanical_verification: item?.mechanical_verification,
+      review_revision_sha256: canonical.review_revision_sha256, source_sha256: contentSha256(finding),
+    }];
+  }));
+  const findingDispositions = Object.fromEntries((canonical.findings ?? []).flatMap(finding => {
+    const item = historicalItems[finding.id];
+    if (item?.status !== "ignored" && item?.status !== "deemed_inappropriate") return [];
+    return [[finding.id, {
+      status: item.status === "ignored" ? "ignored" as const : "declined" as const,
+      reason: item.failure_reason ?? (item.status === "ignored" ? "Ignored by user." : "Deemed inappropriate during remediation."),
+    }]];
+  }));
   return makeBaseState({
     status: "closing",
-    plan: {
-      plan_id: "P1",
-      findings: [],
-      blocks: [],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"],
-    },
     closing_plan: { action: "none" },
     ...overrides,
+    plan: canonical,
+    items,
+    source_verifications: sourceVerifications,
+    finding_dispositions: findingDispositions,
   });
 }
 
@@ -79,6 +126,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
 
@@ -131,6 +179,8 @@ describe("runClosePhase", () => {
         },
       },
     });
+    state.plan!.units[0]!.required_tests = ["npm test -- auth"];
+    state.items!.F1.host_result_evidence = ["tool-observed requirement verification"];
     await writeFileAsync(
       join(TEST_DIR, "result_F1_verify_code_against_documentation.json"),
       JSON.stringify({
@@ -140,6 +190,7 @@ describe("runClosePhase", () => {
       }),
     );
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, BASE_OPTIONS);
 
     const outcomesJson = JSON.parse(
@@ -166,34 +217,12 @@ describe("runClosePhase", () => {
     );
     expect(verificationReport.goal_id).toBe("G1");
     const traces = verificationReport.findings[0].traces;
-    expect(traces).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          trace_id: "F1:contract-goal",
-          kind: "requirement",
-          evidence: ["goal_id=G1"],
-          status: "passed",
-        }),
-        expect.objectContaining({
-          trace_id: "F1:contract-obligations",
-          kind: "requirement",
-          evidence: ["O-1"],
-          status: "passed",
-        }),
-        expect.objectContaining({
-          trace_id: "F1:verification-obligations",
-          kind: "invariant",
-          evidence: ["VO-1"],
-          status: "passed",
-        }),
-        expect.objectContaining({
-          trace_id: "F1:targeted-command-1",
-          kind: "command",
-          evidence: ["planned command: npm test -- auth"],
-          status: "passed",
-        }),
-      ]),
-    );
+    expect(traces).toEqual(expect.arrayContaining([
+      expect.objectContaining({ trace_id: "F1:requirement:REQ-F1", kind: "requirement", label: "REQ-F1", evidence: ["tool-observed requirement verification"], status: "passed" }),
+      expect.objectContaining({ trace_id: "F1:command:0", kind: "command", label: "npm test -- auth", evidence: ["tool-observed requirement verification"], status: "passed" }),
+      expect.objectContaining({ trace_id: "F1:verify-doc", kind: "file", evidence: ["check A", "check B"], status: "passed" }),
+    ]));
+    expect(traces.some((trace: { trace_id: string }) => trace.trace_id === "F1:contract-goal")).toBe(false);
   });
 
   it("transitions to triage when test_command fails", async () => {
@@ -211,6 +240,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("triage");
     expect(state.items!.F1.status).toBe("blocked");
@@ -234,6 +264,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     // Must complete, not triage — ignored items stay ignored.
     expect(next.status).toBe("complete");
@@ -276,6 +307,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
 
@@ -321,6 +353,7 @@ describe("runClosePhase", () => {
     const logPath = join(REPO_DIR, "run.log.jsonl");
     const runLogger = new RunLogger(logPath, { enabled: true });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, BASE_OPTIONS, runLogger);
 
     const lines = (await readFile(logPath, "utf8"))
@@ -345,6 +378,7 @@ describe("runClosePhase", () => {
     const state = makeState({
       items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
     });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
   });
@@ -357,6 +391,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     const jsonReport = JSON.parse(
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -418,6 +453,7 @@ describe("runClosePhase", () => {
 
     let next: ReturnType<typeof makeState>;
     try {
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       next = await runClosePhase(state, BASE_OPTIONS);
     } finally {
       console.warn = originalWarn;
@@ -470,6 +506,7 @@ describe("runClosePhase", () => {
     // REPO_DIR is a clean git repo with no uncommitted changes, so collectStagingFiles returns [].
     it("status is 'success' and commands is empty when action is 'commit' and no files to stage", async () => {
       const state = makeState({ closing_plan: { action: "commit", pre_authorized: true } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -480,6 +517,7 @@ describe("runClosePhase", () => {
 
     it("status is 'success' when action is 'push' and no files to stage", async () => {
       const state = makeState({ closing_plan: { action: "push", pre_authorized: true } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -490,6 +528,7 @@ describe("runClosePhase", () => {
 
     it("status is 'success' when action is 'open-pr' and no files to stage", async () => {
       const state = makeState({ closing_plan: { action: "open-pr", pre_authorized: true } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -506,6 +545,7 @@ describe("runClosePhase", () => {
     // the backstop for a hand-edited closing_plan).
     it("status is 'failed' when action is 'custom' and custom_command is undefined — nothing ran", async () => {
       const state = makeState({ closing_plan: { action: "custom" } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -517,6 +557,7 @@ describe("runClosePhase", () => {
 
     it("status is 'failed' when action is 'custom' and custom_command is empty array — nothing ran", async () => {
       const state = makeState({ closing_plan: { action: "custom", custom_command: [] } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -539,6 +580,7 @@ describe("runClosePhase", () => {
       let jsonReport: Record<string, unknown>;
       try {
         const state = makeState({ closing_plan: { action: "commit", pre_authorized: true } });
+        await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
         await runClosePhase(state, BASE_OPTIONS);
         jsonReport = JSON.parse(
           await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -554,6 +596,7 @@ describe("runClosePhase", () => {
 
     it("returns status 'success' when action is 'push' and collectStagingFiles returns []", async () => {
       const state = makeState({ closing_plan: { action: "push", pre_authorized: true } });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -574,6 +617,7 @@ describe("runClosePhase", () => {
           custom_command: [process.execPath, "-e", "process.exit(1)"],
         },
       });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
       const jsonReport = JSON.parse(
         await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -598,6 +642,7 @@ describe("runClosePhase", () => {
       items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
 
@@ -611,6 +656,7 @@ describe("runClosePhase", () => {
     const state = makeState({
       items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
     });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     await runClosePhase(state, BASE_OPTIONS);
     const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
     expect(report).not.toContain("## Process Feedback");
@@ -649,6 +695,7 @@ describe("runClosePhase", () => {
         } as any,
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
 
       // Should return preview, not complete.
@@ -670,6 +717,7 @@ describe("runClosePhase", () => {
         closing_plan: { action: "commit", pre_authorized: true },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
       expect(next.closing_plan!.closing_action_preview).toBeUndefined();
@@ -679,6 +727,7 @@ describe("runClosePhase", () => {
       const state = makeState({
         closing_plan: { action: "none" },
       });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
       expect(next.closing_plan!.closing_action_preview).toBeUndefined();
@@ -715,6 +764,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
 
@@ -745,6 +795,7 @@ describe("runClosePhase", () => {
         items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
       // pre_authorized skips the preview entirely — confirms it does not widen scope.
@@ -807,6 +858,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
 
@@ -832,6 +884,7 @@ describe("runClosePhase", () => {
         items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
 
@@ -847,6 +900,7 @@ describe("runClosePhase", () => {
         items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const previewState = await runClosePhase(state, BASE_OPTIONS);
       expect(previewState.status).toBe("closing");
       expect(previewState.closing_plan!.closing_action_preview!.files).toEqual(["fixed.ts"]);
@@ -878,6 +932,7 @@ describe("runClosePhase", () => {
         items: { F1: { finding_id: "F1", status: "resolved_no_change", block_id: "B1" } },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
 
@@ -914,6 +969,7 @@ describe("runClosePhase", () => {
       let result: Awaited<ReturnType<typeof runClosePhase>> | undefined;
       let threw = false;
       try {
+        await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
         result = await runClosePhase(state, BASE_OPTIONS);
       } catch {
         threw = true;
@@ -947,6 +1003,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("complete");
     });
@@ -979,6 +1036,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("triage");
       // Only F1 (auth.ts overlap) should be blocked.
@@ -1004,6 +1062,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       const next = await runClosePhase(state, BASE_OPTIONS);
       expect(next.status).toBe("triage");
       expect(state.items!.F1.status).toBe("blocked");
@@ -1028,6 +1087,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
       const { readFileSync } = await import("node:fs");
@@ -1035,8 +1095,8 @@ describe("runClosePhase", () => {
         readFileSync(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
       );
       expect(report.overall_status).toBe("passed");
-      const f2trace = report.findings.find(
-        (f: { finding_id: string }) => f.finding_id === "F2",
+      const f2trace = report.units.find(
+        (unit: { unit_id: string }) => unit.unit_id === "F2",
       );
       expect(f2trace.overall_status).toBe("skipped");
       expect(
@@ -1058,6 +1118,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
       const { readFileSync } = await import("node:fs");
@@ -1065,8 +1126,8 @@ describe("runClosePhase", () => {
         readFileSync(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
       );
       expect(report.overall_status).toBe("passed");
-      const f3trace = report.findings.find(
-        (f: { finding_id: string }) => f.finding_id === "F3",
+      const f3trace = report.units.find(
+        (unit: { unit_id: string }) => unit.unit_id === "F3",
       );
       expect(f3trace.overall_status).toBe("skipped");
       expect(
@@ -1093,6 +1154,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
       const { readFileSync } = await import("node:fs");
@@ -1104,7 +1166,7 @@ describe("runClosePhase", () => {
       // stays the strict "passed"|"failed" (never "skipped" itself).
       expect(report.overall_status).toBe("passed");
       expect(
-        report.findings.every((f: { overall_status: string }) => f.overall_status === "skipped"),
+        report.units.every((unit: { overall_status: string }) => unit.overall_status === "skipped"),
       ).toBe(true);
       expect(
         validateVerificationReport(report).filter((i) => i.severity === "error"),
@@ -1122,6 +1184,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
       const { existsSync } = await import("node:fs");
@@ -1155,6 +1218,7 @@ describe("runClosePhase", () => {
       const originalWarn = console.warn;
       console.warn = () => {};
       try {
+        await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
         await runClosePhase(state, BASE_OPTIONS);
       } finally {
         console.warn = originalWarn;
@@ -1173,6 +1237,7 @@ describe("runClosePhase", () => {
         },
       });
 
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
       await runClosePhase(state, BASE_OPTIONS);
 
       const { existsSync } = await import("node:fs");
@@ -1201,6 +1266,7 @@ describe("runClosePhase", () => {
       },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
 
@@ -1273,6 +1339,7 @@ describe("the force-close backstop: a needs_clarification item never lands green
       } as any,
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
 
@@ -1359,6 +1426,7 @@ describe("the force-close backstop: a needs_clarification item never lands green
     // delete it, but the ordinary close does — and the assertion below must not
     // depend on which happened.
     const logPath = join(REPO_DIR, "run.log.jsonl");
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(
       state,
       BASE_OPTIONS,
@@ -1652,6 +1720,7 @@ describe("closing spawns refuse a command that leaves the declared single-invoca
       closing_plan: { action: "none", pre_authorized: true },
     });
 
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
 
     // A refused e2e declaration is a FAILED close, never a silent pass: the

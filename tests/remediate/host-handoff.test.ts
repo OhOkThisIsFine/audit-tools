@@ -1,3 +1,7 @@
+import type { CurrentRemediationHostState } from "../../src/remediate/steps/dispatch/hostContracts.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { REMEDIATION_STATE_CONTRACT_VERSION } from "../../src/remediate/state/store.js";
+import type { ExecutionUnit, Finding, RemediationHostHandoffRecord } from "../../src/remediate/state/types.js";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
@@ -34,35 +38,18 @@ import {
 
 const FAILURE_SIGNATURE =
   "contract:remediation-zero-adapter-boundary:not-yet-satisfied";
-const CURRENT_STATE_VERSION = "remediate-code-state/v1alpha1";
+const CURRENT_STATE_VERSION = REMEDIATION_STATE_CONTRACT_VERSION;
 const BASELINE_COMMIT = "1".repeat(40);
 const AFTER_COMMIT = "2".repeat(40);
 /** The one id the fixture is both planned and run under — see `currentState`. */
 const FIXTURE_RUN_ID = "remediation-run-fixture";
 
-interface HostBlock {
-  readonly block_id: string;
-  readonly items: readonly string[];
-  readonly parallel_safe: boolean;
-  readonly dependencies: readonly string[];
-  readonly touched_files: readonly string[];
-  readonly targeted_commands?: readonly string[];
-  /**
-   * Optional on the real contract, so optional here — the id-glossary scope
-   * widening reads the block's own contract to decide whether the item coins an
-   * invariant id.
-   */
-  readonly module_contracts?: readonly {
-    readonly module: string;
-    readonly contract: Record<string, unknown>;
-  }[];
-  readonly phase_ordinal: number;
-  readonly token_estimate: number;
-}
+type HostBlock = ExecutionUnit;
 
 interface HostWorkItem {
   readonly id: string;
-  readonly finding_ids: readonly string[];
+  readonly source_finding_ids: readonly string[];
+  readonly obligation_ids: readonly string[];
   readonly allowed_files: readonly string[];
   readonly baseline_commit: string;
   readonly prompt: { readonly sha256: string; readonly text: string };
@@ -72,51 +59,14 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "remediation-host-workload/v1alpha3";
+  readonly contract_version: "remediation-host-workload/v2";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
 
-interface CurrentState {
-  readonly contract_version: typeof CURRENT_STATE_VERSION;
-  readonly status: "implementing";
-  readonly plan: Readonly<Record<string, unknown>> & {
-    readonly plan_id: string;
-    readonly blocks: readonly HostBlock[];
-  };
-  readonly items: Record<
-    string,
-    {
-      readonly finding_id: string;
-      readonly block_id: string;
-      status: string;
-      /**
-       * The corroborated landing, written at acceptance — the field that makes
-       * "the edits landed but the result is missing" distinguishable from
-       * "nothing was done". Mutable like `status`: the partial-progress case
-       * re-opens a settled item to put it back on the frontier.
-       */
-      host_landed_commit?: string;
-    }
-  >;
-  host_handoff?: HandoffRecord;
-}
+type CurrentState = CurrentRemediationHostState;
 
-type HandoffRecord = {
-  readonly run_id: string;
-  readonly baseline_commit: string;
-  readonly workload_sha256: string;
-  readonly work_item_ids: readonly string[];
-} &
-  (
-    | {
-        readonly contract_version: "remediation-host-handoff-record/v1alpha1";
-      }
-    | {
-        readonly contract_version: "remediation-host-handoff-record/v1alpha2";
-        readonly scope_semantics: "explicit-directory-markers/v1";
-      }
-  );
+type HandoffRecord = RemediationHostHandoffRecord;
 
 interface PreparedHandoff {
   readonly workload: HostWorkload;
@@ -247,7 +197,7 @@ async function snapshotTree(root: string): Promise<Readonly<Record<string, strin
   return Object.fromEntries(entries);
 }
 
-function finding(id: string, path: string): Record<string, unknown> {
+function finding(id: string, path: string): Finding {
   return {
     id,
     title: `Fix ${id}`,
@@ -340,20 +290,11 @@ function block(
   path: string,
   options: { dependencies?: string[]; phase?: number } = {},
 ): HostBlock {
-  return {
-    block_id: id,
-    items: [findingId],
-    parallel_safe: true,
-    dependencies: options.dependencies ?? [],
-    // A real, fast, always-green invocation: corroboration RE-RUNS a work
-    // item's required tests against the tree, so a command naming a vitest file
-    // that does not exist in the temp root would fail the ingest for a reason
-    // this fixture is not about.
-    targeted_commands: [`node -e "process.exit(0)"`],
-    touched_files: [path],
-    phase_ordinal: options.phase ?? 0,
-    token_estimate: 1_800,
-  };
+  return canonicalUnitFixture(id, {
+    source_finding_ids: [findingId], dependencies: options.dependencies ?? [],
+    required_tests: [`node -e "process.exit(0)"`],
+    read_paths: [path], allowed_files: [path],
+  });
 }
 
 function currentState(): CurrentState {
@@ -363,12 +304,12 @@ function currentState(): CurrentState {
     block("block-dependent", "finding-c", "src/c.ts", {
       dependencies: ["block-a", "block-b"],
     }),
-    block("block-phase-1", "finding-d", "src/d.ts", { phase: 1 }),
+    block("block-phase-1", "finding-d", "src/d.ts", { dependencies: ["block-a", "block-b", "block-dependent"] }),
   ];
   return {
     contract_version: CURRENT_STATE_VERSION,
     status: "implementing",
-    plan: {
+    plan: canonicalPlanFixture({
       // EQUAL to the run id the fixture prepares under, because production
       // derives one from the other: the host run id IS `state.plan.plan_id`
       // (`stateRunId` in nextStep.ts). A fixture where the two differ cannot
@@ -380,19 +321,12 @@ function currentState(): CurrentState {
         finding("finding-c", "src/c.ts"),
         finding("finding-d", "src/d.ts"),
       ],
-      blocks,
+      units: blocks,
+      requirements: blocks.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: unit.source_finding_ids, change_kind: "structural", assertions: [] })),
       project_type: "typescript",
       candidate_closing_actions: ["none"],
-    },
-    items: Object.fromEntries(
-      blocks.map((entry) => {
-        const findingId = entry.items[0]!;
-        return [
-          findingId,
-          { finding_id: findingId, block_id: entry.block_id, status: "pending" },
-        ];
-      }),
-    ),
+    }),
+    items: Object.fromEntries(blocks.map(unit => [unit.id, { unit_id: unit.id, status: "pending" }])),
   };
 }
 
@@ -436,7 +370,7 @@ function resultShape(
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
     landed_commit: landedCommit,
-    obligation_evidence: [],
+    obligation_evidence: item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: ["src/a.ts:1 implements the reviewed requirement"] })),
     ...overrides,
   };
 }
@@ -499,6 +433,7 @@ async function prepareFixture(): Promise<{
   const runId = FIXTURE_RUN_ID;
   const baselineCommit = await initGitRoot(root);
   const state = currentState();
+  await writeApprovedPlanFixture(artifactsDir, state, root);
   const handoff = requirePrepared(
     await boundary.prepareRemediationHostHandoff({
       root,
@@ -599,11 +534,11 @@ describe(FAILURE_SIGNATURE, () => {
     const { root, artifactsDir, runId, state, handoff, baselineCommit } =
       await prepareFixture();
     const expected = (scheduler.hostDependencyLevels(state)[0] ?? [])
-      .map((entry) => entry.block_id)
+      .map((entry) => entry.id)
       .sort();
     expect(expected).toEqual(["block-a", "block-b"]);
     expect(handoff.workload.contract_version).toBe(
-      "remediation-host-workload/v1alpha3",
+      "remediation-host-workload/v2",
     );
     expect(handoff.workload.run_id).toBe(runId);
     expect(handoff.workload.work_items.map((entry) => entry.id)).toEqual(expected);
@@ -615,11 +550,11 @@ describe(FAILURE_SIGNATURE, () => {
     );
 
     for (const item of handoff.workload.work_items) {
-      const source = state.plan.blocks.find((entry) => entry.block_id === item.id)!;
-      expect(item.finding_ids).toEqual(source.items);
-      expect(item.allowed_files).toEqual([...source.touched_files].sort());
-      expect(item.required_tests).toEqual(source.targeted_commands);
-      expect(item.token_estimate).toBe(source.token_estimate);
+      const source = state.plan.units.find((entry) => entry.id === item.id)!;
+      expect(item.source_finding_ids).toEqual(source.source_finding_ids);
+      expect(item.allowed_files).toEqual([...source.allowed_files].sort());
+      expect(item.required_tests).toEqual(source.required_tests);
+      expect(item.token_estimate).toBeGreaterThan(0);
       expect(item.baseline_commit).toBe(baselineCommit);
       // The digest binds the prompt BODY — the text above the tool-filled
       // result template, which cannot carry its own digest.
@@ -670,7 +605,7 @@ describe(FAILURE_SIGNATURE, () => {
       }),
     );
     expect(missing.accepted_count).toBe(0);
-    expect(missing.state.items[first!.finding_ids[0]!]!.status).toBe("pending");
+    expect(missing.state.items[first.id]!.status).toBe("pending");
 
     await writeFile(firstPath, "{ malformed", "utf8");
     const malformed = requireIngested(
@@ -739,7 +674,7 @@ describe(FAILURE_SIGNATURE, () => {
       );
       expect(rejected.accepted_count).toBe(0);
       expect(rejected.completed_work_item_ids).toEqual([]);
-      expect(rejected.state.items[first!.finding_ids[0]!]!.status).toBe("pending");
+      expect(rejected.state.items[first.id]!.status).toBe("pending");
       // Refused for ITS OWN defect, and refused exactly once. Asserting only
       // "not accepted" would stay green if a variant started being rejected by
       // some SHARED downstream reason — a git-ancestry or changed-files
@@ -764,8 +699,8 @@ describe(FAILURE_SIGNATURE, () => {
       first!.id,
       second!.id,
     ]);
-    expect(accepted.state.items[first!.finding_ids[0]!]!.status).toBe("resolved");
-    expect(accepted.state.items[second!.finding_ids[0]!]!.status).toBe("resolved");
+    expect(accepted.state.items[first.id]!.status).toBe("resolved");
+    expect(accepted.state.items[second.id]!.status).toBe("resolved");
 
     const next = requirePrepared(
       await boundary.prepareRemediationHostHandoff({
@@ -799,9 +734,9 @@ describe(FAILURE_SIGNATURE, () => {
         ...base,
         plan: {
           ...base.plan,
-          blocks: [
-            { ...base.plan.blocks[0], model_hint: { tier: "strong" } },
-            ...base.plan.blocks.slice(1),
+          units: [
+            { ...base.plan.units[0], model_hint: { tier: "strong" } },
+            ...base.plan.units.slice(1),
           ],
         },
       },
@@ -809,7 +744,7 @@ describe(FAILURE_SIGNATURE, () => {
         ...base,
         items: {
           ...base.items,
-          "finding-a": { ...base.items["finding-a"], provider_attempt: 1 },
+          "block-a": { ...base.items["block-a"], provider_attempt: 1 },
         },
       },
     ];
@@ -884,15 +819,15 @@ describe(FAILURE_SIGNATURE, () => {
 // bug never surfaced anywhere.
 // ───────────────────────────────────────────────────────────────────────────
 
-/** A state whose only pending block declares a dependency present in no block. */
+/** A state whose first unit declares a dependency present in no unit. */
 function stateWithMissingDependency(): CurrentState {
   const base = currentState();
-  const blocks = base.plan.blocks.map((entry) =>
-    entry.block_id === "block-a"
+  const blocks = base.plan.units.map((entry) =>
+    entry.id === "block-a"
       ? { ...entry, dependencies: ["MISSING_BLOCK_ID"] }
       : entry,
   );
-  return { ...base, plan: { ...base.plan, blocks } };
+  return { ...base, plan: { ...base.plan, units: blocks } };
 }
 
 describe("dependency readiness requires existence", () => {
@@ -900,39 +835,46 @@ describe("dependency readiness requires existence", () => {
     const scheduler = await loadScheduler();
     const state = currentState();
     const levels = scheduler.hostDependencyLevels(state);
-    expect(levels[0]?.map((entry) => entry.block_id).sort()).toEqual([
+    expect(levels[0]?.map((entry) => entry.id).sort()).toEqual([
       "block-a",
       "block-b",
     ]);
-    expect(levels[1]?.map((entry) => entry.block_id)).toEqual(["block-dependent"]);
+    expect(levels[1]?.map((entry) => entry.id)).toEqual(["block-dependent"]);
   });
 
   it("never places a block whose declared dependency exists in no block at level 0", async () => {
     const scheduler = await loadScheduler();
     const levels = scheduler.hostDependencyLevels(stateWithMissingDependency());
-    const scheduled = levels.flat().map((entry) => entry.block_id);
+    const scheduled = levels.flat().map((entry) => entry.id);
     // BOTH legs are asserted: the readiness predicate must not read an
     // unresolvable id as satisfied, AND permanentlyIneligible must not skip it.
     // Closing only one leaves the block reaching the host anyway.
     expect(scheduled).not.toContain("block-a");
-    expect(levels[0]?.map((entry) => entry.block_id)).toEqual(["block-b"]);
+    expect(levels[0]?.map((entry) => entry.id)).toEqual(["block-b"]);
   });
 
   it("raises a classified issue for the unschedulable block instead of dispatching it", async () => {
-    const { boundary, root, artifactsDir, runId } = await prepareFixture();
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const corrupted = { ...stateWithMissingDependency(), host_handoff: handoff.handoff_record };
+    // Deliberately bypass authoring validation to exercise the consumer's graph
+    // diagnostics. These synthetic receipts are not a claim that the authoring
+    // pipeline would approve a missing dependency.
+    await writeApprovedPlanFixture(artifactsDir, corrupted, root);
     const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({
-        root,
-        artifactsDir,
-        runId,
-        state: stateWithMissingDependency(),
-      }),
+      await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state: corrupted }),
     );
     expect(summary.accepted_count).toBe(0);
     const issue = summary.issues.find((entry) => entry.code === "dependency_missing");
     expect(issue, "the producer defect must be named, not absorbed").toBeDefined();
     expect(issue!.work_item_id).toBe("block-a");
     expect(issue!.message).toContain("MISSING_BLOCK_ID");
+    await writeApprovedPlanFixture(artifactsDir, state, root);
+    const item = handoff.workload.work_items.find(entry => entry.id === "block-a")!;
+    await writeFile(expectContained(root, item.result_path, "restored result"), JSON.stringify(await validResult(root, runId, item)));
+    const restored = requireIngested(await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }));
+    expect(restored.accepted_count).toBe(1);
+    expect(restored.completed_work_item_ids).toEqual([item.id]);
+    expect(restored.issues.filter(issue => issue.work_item_id === item.id)).toEqual([]);
   });
 
   it("names the unresolvable dependency when it is why there is nothing to prepare", async () => {
@@ -946,15 +888,17 @@ describe("dependency readiness requires existence", () => {
       items: Object.fromEntries(
         Object.entries(base.items).map(([findingId, item]) => [
           findingId,
-          findingId === "finding-a" ? item : { ...item, status: "resolved" },
+          findingId === "block-a" ? item : { ...item, status: "resolved" },
         ]),
       ),
     };
+    // Synthetic malformed consumer state: authoring rejects this graph earlier.
+    await writeApprovedPlanFixture(join(root, ".audit-tools", "remediation"), state, root);
     await expect(
       boundary.prepareRemediationHostHandoff({
         root,
         artifactsDir: join(root, ".audit-tools", "remediation"),
-        runId: "missing-dependency-run",
+        runId: FIXTURE_RUN_ID,
         baselineCommit: BASELINE_COMMIT,
         state,
       }),
@@ -966,61 +910,53 @@ describe("a block outside the consumed write-scope contract is refused, not norm
   async function prepareWith(
     blockOverrides: Partial<HostBlock>,
   ): Promise<{ root: string; run: () => Promise<unknown> }> {
-    const boundary = await loadBoundary();
-    const root = await mkdtemp(join(tmpdir(), "remediation-block-contract-"));
-    cleanupRoots.push(root);
-    const base = currentState();
-    const blocks = base.plan.blocks.map((entry) =>
-      entry.block_id === "block-a" ? { ...entry, ...blockOverrides } : entry,
+    const { boundary, root, artifactsDir, runId, baselineCommit, state: base } = await prepareFixture();
+    const units = base.plan.units.map((entry) =>
+      entry.id === "block-a" ? { ...entry, ...blockOverrides } : entry,
     );
-    const state: CurrentState = { ...base, plan: { ...base.plan, blocks } };
+    const state: CurrentState = { ...base, plan: { ...base.plan, units } };
+    // These are defensive consumer-contract tests, deliberately injecting a
+    // malformed persisted plan plus synthetic review receipts. Authoring would
+    // reject such paths/commands. Keep the real prior handoff so the consumer's
+    // exact diagnostic, rather than absent authority or context, is exercised.
+    await writeApprovedPlanFixture(artifactsDir, state, []);
     return {
       root,
-      run: () =>
-        boundary.prepareRemediationHostHandoff({
-          root,
-          artifactsDir: join(root, ".audit-tools", "remediation"),
-          runId: "block-contract-run",
-          baselineCommit: BASELINE_COMMIT,
-          state,
-        }),
+      run: () => boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, baselineCommit, state }),
     };
   }
 
   it("accepts a normalized block, binding its scope and commands verbatim", async () => {
     const { handoff, state } = await prepareFixture();
     const item = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
-    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
-    expect(item.allowed_files).toEqual([...source.touched_files]);
-    expect(item.required_tests).toEqual(source.targeted_commands);
+    const source = state.plan.units.find((entry) => entry.id === "block-a")!;
+    expect(item.allowed_files).toEqual([...source.allowed_files]);
+    expect(item.required_tests).toEqual(source.required_tests);
   });
 
-  it("raises the classified aggregate, not a raw block-contract throw, on a malformed frontier block", async () => {
-    const { run } = await prepareWith({ touched_files: [resolve("/etc/passwd")] });
-    // The empty-workload branch already names producer defects this way. A
-    // malformed block ON the frontier reached the caller as an uncaught
-    // BlockContractError instead — a stack, not a classified refusal, and one
-    // every retry reproduces identically.
-    await expect(run()).rejects.toThrow(
-      /^Cannot prepare a remediation host workload: block 'block-a' is outside the normalized write-scope contract/u,
-    );
+  it("raises a classified repair refusal rather than a raw contract exception", async () => {
+    const { run } = await prepareWith({ allowed_files: [resolve("/etc/passwd")] });
+    await expect(run()).rejects.toMatchObject({
+      name: "RemediationHostPreparationError",
+      code: "plan_repair_required",
+      message: expect.stringMatching(/^block 'block-a' is outside the normalized write-scope contract/u),
+    });
   });
 
-  it("attributes the THROWER even when the scan names a different block", async () => {
+  it("names both a malformed bound unit and an independent missing dependency", async () => {
     const boundary = await loadBoundary();
     const root = await mkdtemp(join(tmpdir(), "remediation-thrower-attribution-"));
     cleanupRoots.push(root);
     const runId = "thrower-attribution-run";
     const base = currentState();
-    // block-a: BOUND, all items terminal, and malformed — the block that throws.
-    // block-z: pending, with a dependency present in no block — a defect the scan
-    // DOES find. Falling back only on an empty scan meant block-z's presence was
-    // enough to suppress the thrower entirely: the operator got a message about a
-    // block that did not throw, and none about the one that did.
+    // Bound terminal units remain part of the trusted workload. Its malformed
+    // scope must be named alongside the independent missing dependency, even
+    // though the unit no longer has a pending lifecycle status.
     const state: CurrentState = {
       ...base,
       host_handoff: {
-        contract_version: "remediation-host-handoff-record/v1alpha1",
+        contract_version: "remediation-host-handoff-record/v1alpha2",
+        scope_semantics: "explicit-directory-markers/v1",
         run_id: runId,
         baseline_commit: BASELINE_COMMIT,
         workload_sha256: "0".repeat(64),
@@ -1029,11 +965,11 @@ describe("a block outside the consumed write-scope contract is refused, not norm
       plan: {
         ...base.plan,
         plan_id: runId,
-        findings: [...(base.plan.findings as unknown[]), finding("finding-z", "src/z.ts")],
-        blocks: [
-          ...base.plan.blocks.map((entry) =>
-            entry.block_id === "block-a"
-              ? { ...entry, touched_files: [resolve("/etc/passwd")] }
+        findings: [...base.plan.findings, finding("finding-z", "src/z.ts")],
+        units: [
+          ...base.plan.units.map((entry) =>
+            entry.id === "block-a"
+              ? { ...entry, allowed_files: [resolve("/etc/passwd")] }
               : entry,
           ),
           {
@@ -1044,15 +980,16 @@ describe("a block outside the consumed write-scope contract is refused, not norm
       },
       items: {
         ...base.items,
-        "finding-a": { ...base.items["finding-a"]!, status: "resolved" },
-        "finding-z": {
-          finding_id: "finding-z",
-          block_id: "block-z",
+        "block-a": { ...base.items["block-a"]!, status: "resolved" },
+        "block-z": {
+          unit_id: "block-z",
           status: "pending",
         },
       },
     };
 
+    // Synthetic malformed consumer state preserves both independent diagnostics.
+    await writeApprovedPlanFixture(join(root, ".audit-tools", "remediation"), state, []);
     const message = await boundary
       .prepareRemediationHostHandoff({
         root,
@@ -1065,28 +1002,28 @@ describe("a block outside the consumed write-scope contract is refused, not norm
         () => "resolved without throwing",
         (error: unknown) => (error instanceof Error ? error.message : String(error)),
       );
-    expect(message).toMatch(/^Cannot prepare a remediation host workload: /u);
-    expect(message, "the thrower must be named").toContain("block-a");
+    expect(message).toMatch(/^block 'block-a' is outside the normalized write-scope contract/u);
+    expect(message, "the bound unit must be named").toContain("block-a");
     expect(message, "the scanned defect is still reported too").toContain(
       "GHOST_BLOCK_ID",
     );
   });
 
   it("refuses an absolute touched_files entry with a named, block-attributed error", async () => {
-    const { run } = await prepareWith({ touched_files: [resolve("/etc/passwd")] });
+    const { run } = await prepareWith({ allowed_files: [resolve("/etc/passwd")] });
     await expect(run()).rejects.toThrow(
       /block 'block-a' is outside the normalized write-scope contract: touched_files entry .* is absolute/u,
     );
   });
 
   it("refuses a touched_files entry that is not in normalized repo-relative form", async () => {
-    const { run } = await prepareWith({ touched_files: ["./src/a.ts"] });
+    const { run } = await prepareWith({ allowed_files: ["./src/a.ts"] });
     await expect(run()).rejects.toThrow(/is not in normalized repo-relative form/u);
   });
 
   it("refuses a shell-chained targeted_command, and never runs it", async () => {
     const { root, run } = await prepareWith({
-      targeted_commands: [
+      required_tests: [
         `node -e "require('fs').writeFileSync('pwned','x')" && echo chained`,
       ],
     });
@@ -1101,14 +1038,14 @@ describe("a block outside the consumed write-scope contract is refused, not norm
 
   it("refuses a redirecting targeted_command", async () => {
     const { run } = await prepareWith({
-      targeted_commands: ["npm run build > build.log"],
+      required_tests: ["npm run build > build.log"],
     });
     await expect(run()).rejects.toThrow(/leaves the declared shape/u);
   });
 
   it("still admits an ordinary quoted test invocation", async () => {
     const { run } = await prepareWith({
-      targeted_commands: [`node -e "process.exit(0)"`],
+      required_tests: [`node -e "process.exit(0)"`],
     });
     await expect(run()).resolves.toBeDefined();
   });
@@ -1121,7 +1058,7 @@ describe("a block outside the consumed write-scope contract is refused, not norm
 
   it("refuses a metacharacter behind single quotes, which cmd.exe does not quote with", async () => {
     const { root, run } = await prepareWith({
-      targeted_commands: ["echo '& evil.exe'"],
+      required_tests: ["echo '& evil.exe'"],
     });
     await expect(run()).rejects.toThrow(/leaves the declared shape/u);
     expect(
@@ -1134,14 +1071,14 @@ describe("a block outside the consumed write-scope contract is refused, not norm
     // sh reads `\"` as a literal quote, so the `&` this scan would otherwise
     // believe is quoted is a live command separator.
     const { run } = await prepareWith({
-      targeted_commands: ['echo \\" & evil \\"'],
+      required_tests: ['echo \\" & evil \\"'],
     });
     await expect(run()).rejects.toThrow(/leaves the declared shape/u);
   });
 
   it("refuses cmd.exe percent expansion, which expands inside double quotes too", async () => {
     const { run } = await prepareWith({
-      targeted_commands: ["%COMSPEC% /c evil"],
+      required_tests: ["%COMSPEC% /c evil"],
     });
     await expect(run()).rejects.toThrow(/leaves the declared shape/u);
   });
@@ -1155,7 +1092,7 @@ describe("a block outside the consumed write-scope contract is refused, not norm
       `echo "unterminated`,
       "npm run build\nevil",
     ]) {
-      const { run } = await prepareWith({ targeted_commands: [command] });
+      const { run } = await prepareWith({ required_tests: [command] });
       await expect(run(), command).rejects.toThrow(/leaves the declared shape/u);
     }
   });
@@ -1168,205 +1105,41 @@ describe("a block outside the consumed write-scope contract is refused, not norm
       "npx vitest run tests/remediate/a.test.ts tests/remediate/b.test.ts",
       `echo "plain arg"`,
     ]) {
-      const { run } = await prepareWith({ targeted_commands: [command] });
+      const { run } = await prepareWith({ required_tests: [command] });
       await expect(run(), command).resolves.toBeDefined();
     }
   });
 });
 
-// ───────────────────────────────────────────────────────────────────────────
-// A producer-side block defect is REPORTED, not a wedge.
-//
-// Refusing the whole ingest over any malformed block made the run
-// unadvanceable: a dependent block nothing was waiting on could hold every
-// frontier acceptance at zero, `next-step` read `state_changed: false` and
-// re-emitted the same items against the same plan, and the only escape was
-// hand-editing the plan.
-// ───────────────────────────────────────────────────────────────────────────
-
-describe("a malformed block reports without blocking the frontier", () => {
-  /** `block-dependent` is level 1, so its defect gates nothing at level 0. */
-  function stateWithMalformedDependent(): CurrentState {
-    const base = currentState();
-    const blocks = base.plan.blocks.map((entry) =>
-      entry.block_id === "block-dependent"
-        ? { ...entry, touched_files: [resolve("/etc/passwd")] }
-        : entry,
-    );
-    return { ...base, plan: { ...base.plan, blocks } };
-  }
-
-  it("accepts a valid landed result for a good block while naming the malformed one", async () => {
-    const boundary = await loadBoundary();
-    const root = await mkdtemp(join(tmpdir(), "remediation-nonfrontier-block-"));
-    cleanupRoots.push(root);
-    const artifactsDir = join(root, ".audit-tools", "remediation");
-    const runId = "nonfrontier-block-run";
-    const baselineCommit = await initGitRoot(root);
-    const state = stateWithMalformedDependent();
-    const handoff = requirePrepared(
-      await boundary.prepareRemediationHostHandoff({
-        root,
-        artifactsDir,
-        runId,
-        baselineCommit,
-        state,
-      }),
-    );
-    const good = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
-    const goodPath = expectContained(root, good.result_path, "good result");
-    await mkdir(resolve(goodPath, ".."), { recursive: true });
-    await writeFile(goodPath, JSON.stringify(await validResult(root, runId, good)), "utf8");
-    const bound: CurrentState = { ...state, host_handoff: handoff.handoff_record };
-
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({
-        root,
-        artifactsDir,
-        runId,
-        state: bound,
-      }),
-    );
-    expect(summary.accepted_count).toBe(1);
-    expect(summary.completed_work_item_ids).toEqual(["block-a"]);
-    expect(summary.state.items["finding-a"]!.status).toBe("resolved");
-    expect(summary.state_changed).toBe(true);
-    const issue = summary.issues.find(
-      (entry) => entry.code === "block_contract_invalid",
-    );
-    expect(issue, "the producer defect must still be named, not absorbed").toBeDefined();
-    expect(issue!.work_item_id).toBe("block-dependent");
-  });
-
-  it("names a malformed block whose items triage moved to blocked, not just pending ones", async () => {
-    const boundary = await loadBoundary();
-    const root = await mkdtemp(join(tmpdir(), "remediation-blocked-block-"));
-    cleanupRoots.push(root);
-    const artifactsDir = join(root, ".audit-tools", "remediation");
-    const runId = "blocked-block-run";
-    const baselineCommit = await initGitRoot(root);
-    // `blocked` is UNSETTLED, not settled: triage retries it, so the item is
-    // still bound and `parseWorkItem` still re-derives its block. A scan that
-    // only looked at `pending` left that re-derivation failing as a bare
-    // workload_invalid naming no block.
-    const base = stateWithMalformedDependent();
-    const state: CurrentState = {
-      ...base,
-      items: {
-        ...base.items,
-        "finding-c": { ...base.items["finding-c"]!, status: "blocked" },
-      },
-    };
-    const handoff = requirePrepared(
-      await boundary.prepareRemediationHostHandoff({
-        root,
-        artifactsDir,
-        runId,
-        baselineCommit,
-        state,
-      }),
-    );
-    const good = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
-    const goodPath = expectContained(root, good.result_path, "good result");
-    await mkdir(resolve(goodPath, ".."), { recursive: true });
-    await writeFile(goodPath, JSON.stringify(await validResult(root, runId, good)), "utf8");
-    const bound: CurrentState = { ...state, host_handoff: handoff.handoff_record };
-
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({
-        root,
-        artifactsDir,
-        runId,
-        state: bound,
-      }),
-    );
-    const issue = summary.issues.find(
-      (entry) => entry.code === "block_contract_invalid",
-    );
-    expect(issue, "a blocked item's block is still bound, so its defect is named").toBeDefined();
-    expect(issue!.work_item_id).toBe("block-dependent");
-    // And the frontier still advances — the whole point of the reporting change.
-    expect(summary.accepted_count).toBe(1);
-  });
-
-  it("names a BOUND malformed block whose items have all reached terminal", async () => {
-    // The status filter and the re-derivation scanned DIFFERENT SETS.
-    // `parseWorkItem` rebuilds every BOUND item whatever its findings' statuses,
-    // so a bound block whose items all settled still broke the workload parse —
-    // and a scan that asked only about unsettled items had nothing to say about
-    // it, leaving a bare workload_invalid naming no block at all.
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
-    const settledAndMalformed: CurrentState = {
-      ...state,
-      host_handoff: handoff.handoff_record,
-      plan: {
-        ...state.plan,
-        blocks: state.plan.blocks.map((entry) =>
-          entry.block_id === "block-a"
-            ? { ...entry, touched_files: [resolve("/etc/passwd")] }
-            : entry,
-        ),
-      },
-      items: {
-        ...state.items,
-        "finding-a": { ...state.items["finding-a"]!, status: "resolved" },
-        "finding-b": { ...state.items["finding-b"]!, status: "resolved" },
-      },
-    };
-
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({
-        root,
-        artifactsDir,
-        runId,
-        state: settledAndMalformed,
-      }),
-    );
-    const codes = summary.issues.map((entry) => entry.code);
-    expect(codes).toContain("workload_invalid");
-    const issue = summary.issues.find(
-      (entry) => entry.code === "block_contract_invalid",
-    );
-    expect(issue, "the block that broke the parse must be named").toBeDefined();
-    expect(issue!.work_item_id).toBe("block-a");
-  });
-
-  it("still refuses a BOUND work item whose own block is malformed, and names the block", async () => {
-    const { boundary, root, artifactsDir, runId, state, handoff } =
-      await prepareFixture();
-    const first = handoff.workload.work_items.find((entry) => entry.id === "block-a")!;
-    const firstPath = expectContained(root, first.result_path, "first result");
-    await mkdir(resolve(firstPath, ".."), { recursive: true });
-    await writeFile(firstPath, JSON.stringify(await validResult(root, runId, first)), "utf8");
+// The reviewed executable plan is the sole authority. A runtime-only mutation
+// cannot salvage other work against a different plan; restoring the reviewed
+// revision makes the unchanged landed evidence consumable again.
+describe("malformed runtime plans cannot replace reviewed authority", () => {
+  it.each([
+    { unitId: "block-dependent", status: "pending" as const },
+    { unitId: "block-dependent", status: "blocked" as const },
+    { unitId: "block-a", status: "resolved" as const },
+    { unitId: "block-a", status: "pending" as const },
+  ])("refuses an unapproved $status mutation of $unitId and accepts after restoration", async ({ unitId, status }) => {
+    const { boundary, root, artifactsDir, runId, state, handoff } = await prepareFixture();
+    const good = handoff.workload.work_items.find(item => item.id === "block-b")!;
+    await writeFile(expectContained(root, good.result_path, "result"), JSON.stringify(await validResult(root, runId, good)), "utf8");
     const malformed: CurrentState = {
       ...state,
       plan: {
         ...state.plan,
-        blocks: state.plan.blocks.map((entry) =>
-          entry.block_id === "block-a"
-            ? { ...entry, touched_files: [resolve("/etc/passwd")] }
-            : entry,
-        ),
+        units: state.plan.units.map(unit => unit.id === unitId ? { ...unit, allowed_files: [resolve("/etc/passwd")] } : unit),
       },
+      items: { ...state.items, [unitId]: { ...state.items[unitId]!, status } },
     };
-
-    const summary = requireIngested(
-      await boundary.ingestRemediationHostResults({
-        root,
-        artifactsDir,
-        runId,
-        state: malformed,
-      }),
-    );
-    // The guarantee is `parseWorkItem`'s canonical re-derivation: it rebuilds
-    // every bound item through `buildWorkItem`, whose `assertBlockContract`
-    // throws, so the workload fails to parse and no command is ever spawned.
-    expect(summary.accepted_count).toBe(0);
-    expect(summary.state.items["finding-a"]!.status).toBe("pending");
-    const codes = summary.issues.map((entry) => entry.code);
-    expect(codes).toContain("workload_invalid");
-    expect(codes).toContain("block_contract_invalid");
+    const before = await snapshotTree(artifactsDir);
+    await expect(boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state: malformed }))
+      .rejects.toMatchObject({ code: "plan_repair_required", message: expect.stringContaining("approved revision") });
+    expect(await snapshotTree(artifactsDir), "refusal must preserve submissions and accepted history").toEqual(before);
+    const restored = requireIngested(await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }));
+    expect(restored.accepted_count).toBe(1);
+    expect(restored.completed_work_item_ids).toEqual([good.id]);
+    expect(restored.state.items[good.id]!.status).toBe("resolved");
   });
 });
 
@@ -1383,7 +1156,7 @@ describe("the remediate ingest is pure with respect to persisted state", () => {
     const summary = requireIngested(
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
     );
-    expect(summary.state.items[first.finding_ids[0]!]!.status).toBe("resolved");
+    expect(summary.state.items[first.id]!.status).toBe("resolved");
     expect(summary.state).not.toBe(state);
     // Deep-equal against the pre-call snapshot: this fails the moment the live
     // object is edited in place instead of a structuredClone.
@@ -1468,7 +1241,7 @@ describe("missing and rejected results are distinct, machine-readable statuses",
       await boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
     );
     expect(accepting.accepted_count).toBe(1);
-    const findingId = first.finding_ids[0]!;
+    const findingId = first.id;
     expect(accepting.state.items[findingId]!.host_landed_commit).toBe(landed);
     expect(accepting.state.items[findingId]!.status).not.toBe("pending");
 
@@ -1515,8 +1288,9 @@ describe("missing and rejected results are distinct, machine-readable statuses",
 });
 
 describe("the boundary refuses an escaping artifacts dir and a climbing run id", () => {
-  it("refuses on prepare and on ingest, before any filesystem effect", async () => {
+  it("refuses on prepare, ingest and recovery precompute before any filesystem effect", async () => {
     const boundary = await loadBoundary();
+    const { precomputeRecoveryTestVerdicts } = await import("../../src/remediate/steps/dispatch/hostHandoff.js");
     // The escape target sits under a CLEANED parent, not in the shared tmpdir:
     // a guessable name there survives any run that actually performs the escape
     // (a red-green mutation, say), and every later run reads that debris as its
@@ -1527,6 +1301,9 @@ describe("the boundary refuses an escaping artifacts dir and a climbing run id",
     await mkdir(root, { recursive: true });
     const escaping = join(parent, "remediation-escaped-artifacts");
     const state = currentState();
+    const artifactsDir = join(root, ".audit-tools", "remediation");
+    await writeApprovedPlanFixture(artifactsDir, state, root);
+    const before = await snapshotTree(artifactsDir);
     await expect(
       boundary.prepareRemediationHostHandoff({
         root,
@@ -1544,9 +1321,10 @@ describe("the boundary refuses an escaping artifacts dir and a climbing run id",
         state,
       }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
+    await expect(precomputeRecoveryTestVerdicts({ root, artifactsDir: escaping, runId: "containment-run", state }))
+      .rejects.toThrow(/artifactsDir must remain beneath/u);
     expect(existsSync(escaping)).toBe(false);
 
-    const artifactsDir = join(root, ".audit-tools", "remediation");
     for (const runId of ["..", "a/b", "a\\b", ""]) {
       await expect(
         boundary.prepareRemediationHostHandoff({
@@ -1560,8 +1338,10 @@ describe("the boundary refuses an escaping artifacts dir and a climbing run id",
       await expect(
         boundary.ingestRemediationHostResults({ root, artifactsDir, runId, state }),
       ).rejects.toThrow(/Invalid remediation host run id/u);
+      await expect(precomputeRecoveryTestVerdicts({ root, artifactsDir, runId, state }))
+        .rejects.toThrow(/Invalid remediation host run id/u);
     }
-    expect(existsSync(artifactsDir)).toBe(false);
+    expect(await snapshotTree(artifactsDir)).toEqual(before);
   });
 });
 
@@ -1618,13 +1398,9 @@ describe("an empty scan is not a pass", () => {
       empty.issues.filter((issue) => /no host submissions were discovered/iu.test(issue)),
       "nothing on disk is not a broken join",
     ).toEqual([]);
-    // The gate side reports the same way: how many cross-gates actually ran.
-    // EXACT values, because this fixture writes no contract-pipeline artifacts
-    // at all — so the honest answer is that no gate ran and none was skipped
-    // either, and the counters must say so. A sum-is-non-negative assertion
-    // cannot fail for any implementation and left the gate half of `scan`
-    // effectively uncovered.
-    expect(empty.scan.gates_evaluated).toBe(0);
+    // Preparation has a real canonical plan/source pair, so its single
+    // executable-plan gate ran even though no host submission exists yet.
+    expect(empty.scan.gates_evaluated).toBe(1);
     expect(empty.scan.gates_skipped).toBe(0);
   });
 
@@ -1709,6 +1485,7 @@ describe("an empty scan is not a pass", () => {
       plan: { ...base.plan, plan_id: secondRunId },
     };
     const boundary = await loadBoundary();
+    await writeApprovedPlanFixture(artifactsDir, secondRun, root);
     requirePrepared(
       await boundary.prepareRemediationHostHandoff({
         root,
@@ -1736,22 +1513,11 @@ describe("an empty scan is not a pass", () => {
 
   it("counts a gate that could not run as skipped, not as a silent pass", async () => {
     const { root, artifactsDir } = await prepareFixture();
-    // One contract-pipeline artifact present but carrying an empty payload: the
-    // cross-gate sweep runs, and every gate whose primary input is absent reports
-    // itself SKIPPED rather than contributing an empty issues array that would
-    // read as clean. Only the nothing-present 0/0 case was pinned before, which
-    // left the direction the counters exist for untested.
-    const cpDir = join(artifactsDir, "intake", "contract");
-    await mkdir(cpDir, { recursive: true });
-    await writeFile(
-      join(cpDir, "goal_spec.json"),
-      JSON.stringify({ payload: {} }),
-      "utf8",
-    );
-
+    const { executionPlanPaths } = await import("../../src/remediate/contractPipeline/executionPlan.js");
+    await rm(executionPlanPaths(artifactsDir).source);
     const result = await validate(artifactsDir, root);
-    expect(result.scan.gates_skipped).toBeGreaterThan(0);
-    expect(result.scan.gates_evaluated + result.scan.gates_skipped).toBe(8);
+    expect(result.scan.gates_evaluated).toBe(0);
+    expect(result.scan.gates_skipped).toBe(1);
   });
 
   it("flags a submission that no host workload references", async () => {
@@ -1762,18 +1528,19 @@ describe("an empty scan is not a pass", () => {
     // empty set and could not have been exercised at all.
     const { root, artifactsDir, runId, submissionDir, accepted } =
       await acceptThenReprepare();
-    const item = accepted.state.plan.blocks[0]!;
+    const item = accepted.state.plan.units[0]!;
     // A well-formed result for a prompt no workload ever issued: the unknown
     // digest is what makes it reference nothing.
     const unissued: HostWorkItem = {
-      id: item.block_id,
-      finding_ids: [...item.items],
-      allowed_files: [...item.touched_files],
+      id: item.id,
+      source_finding_ids: [...item.source_finding_ids],
+      obligation_ids: [...item.requirement_ids],
+      allowed_files: [...item.allowed_files],
       baseline_commit: BASELINE_COMMIT,
       prompt: { sha256: "0".repeat(64), text: "" },
-      required_tests: [...(item.targeted_commands ?? [])],
+      required_tests: [...(item.required_tests ?? [])],
       result_path: "",
-      token_estimate: item.token_estimate,
+      token_estimate: 1800,
     };
     await writeFile(
       join(submissionDir, `${"a".repeat(64)}.json`),
@@ -1834,13 +1601,12 @@ describe("work items carry the approved module contracts (open-bugs.md:474)", ()
       failure_modes: ["InvalidCredentials"],
       seam_adjustments: [],
     };
-    const state = JSON.parse(JSON.stringify(currentState())) as {
-      plan: { blocks: Array<{ block_id: string; module_contracts?: unknown }> };
-    } & Record<string, unknown>;
-    const withContract = state.plan.blocks.find(
-      (entry) => entry.block_id === "block-a",
+    const state = structuredClone(currentState());
+    const withContract = state.plan.units.find(
+      (entry) => entry.id === "block-a",
     )!;
-    withContract.module_contracts = [{ module: "auth-module", contract }];
+    withContract.affected_interfaces = [{ name: "auth-module", description: JSON.stringify(contract) }];
+    await writeApprovedPlanFixture(artifactsDir, state, root);
 
     const handoff = requirePrepared(
       await boundary.prepareRemediationHostHandoff({
@@ -1855,15 +1621,17 @@ describe("work items carry the approved module contracts (open-bugs.md:474)", ()
     const bound = handoff.workload.work_items.find((item) => item.id === "block-a")!;
     // The approved contract rides the sha-bound prompt: the worker sees the
     // interface it must conform to, and the binding covers what it saw.
-    expect(bound.prompt.text).toContain("module_contracts");
+    expect(bound.prompt.text).toContain("affected_interfaces");
     expect(bound.prompt.text).toContain("INV-1: sessions survive refresh");
-    const CONFORM_RULE = "Conform to each contract in `module_contracts`";
+    const CONFORM_RULE = "Preserve every declared affected interface";
     expect(bound.prompt.text).toContain(CONFORM_RULE);
     // The rule sits in the digest-bound BODY, not only in the appended template.
     expect(splitPrompt(bound).body).toContain(CONFORM_RULE);
-    // A block with no owning module carries no contract section.
+    // Generic conformance guidance applies to every unit, but the contract is
+    // carried only by its reviewed owner.
     const unbound = handoff.workload.work_items.find((item) => item.id === "block-b")!;
-    expect(unbound.prompt.text).not.toContain(CONFORM_RULE);
+    expect(unbound.prompt.text).not.toContain("INV-1: sessions survive refresh");
+    expect(unbound.prompt.text).not.toContain("auth-module");
   });
 });
 
@@ -1931,6 +1699,7 @@ describe("F3: the severity risk weight is total over the shared severity set", (
       const state = currentState();
       const findings = state.plan.findings as Array<{ id: string; severity: string }>;
       findings.find((entry) => entry.id === "finding-a")!.severity = severity;
+      await writeApprovedPlanFixture(artifactsDir, state, root);
 
       const handoff = requirePrepared(
         await boundary.prepareRemediationHostHandoff({
@@ -1996,6 +1765,7 @@ describe("landing gates", () => {
     baselineCommit: string,
     state: ReturnType<typeof currentState>,
   ): Promise<HostWorkItem> {
+    await writeApprovedPlanFixture(join(root, ".audit-tools", "remediation"), state, root);
     const handoff = requirePrepared(
       await boundary.prepareRemediationHostHandoff({
         root,
@@ -2027,10 +1797,8 @@ describe("landing gates", () => {
     state: ReturnType<typeof currentState>,
     contract: Record<string, unknown>,
   ): void {
-    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
-    (source as { module_contracts: HostBlock["module_contracts"] }).module_contracts = [
-      { module: "src/a.ts", contract },
-    ];
+    const source = state.plan.units.find((entry) => entry.id === "block-a")!;
+    source.affected_interfaces = [{ name: "src/a.ts", description: JSON.stringify(contract) }];
   }
 
   const GATE_SCRIPTS = {
@@ -2050,11 +1818,11 @@ describe("landing gates", () => {
     const { root, boundary, baselineCommit } = await rootWithScripts(GATE_SCRIPTS);
     const state = currentState();
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
-    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    const source = state.plan.units.find((entry) => entry.id === "block-a")!;
     // The item's required tests are ITS OWN commands, exactly — the tool
     // reruns this list at ingestion, and a tree-wide gate here is one no
     // in-scope edit can satisfy.
-    expect(item.required_tests).toEqual([...(source.targeted_commands ?? [])]);
+    expect(item.required_tests).toEqual([...(source.required_tests ?? [])]);
     for (const gate of [
       "npm run check:deadcode",
       "npm run check:depgraph",
@@ -2108,14 +1876,14 @@ describe("landing gates", () => {
     expect(item.prompt.text).not.toMatch(/LANDING GATES/i);
   });
 
-  it("widens the scope to the glossary document when the contract COINS an id", async () => {
+  it("does not silently widen reviewed scope when an interface mentions a new glossary id", async () => {
     const { root, boundary, baselineCommit } = await rootWithGlossary(GATE_SCRIPTS);
     const state = currentState();
     declareContract(state, {
       invariants: ["INV-BRAND-NEW holds across the module"],
     });
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
-    expect(item.allowed_files).toContain("docs/glossary-ids.md");
+    expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
   });
 
   it("does NOT widen for a contract that only MENTIONS an id the glossary already documents", async () => {
@@ -2128,9 +1896,9 @@ describe("landing gates", () => {
       seam_adjustments: ["the consumer of INV-EXISTING must not change"],
     });
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
-    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    const source = state.plan.units.find((entry) => entry.id === "block-a")!;
     expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
-    expect(item.allowed_files).toEqual([...source.touched_files]);
+    expect(item.allowed_files).toEqual([...source.allowed_files]);
   });
 
   it("does NOT widen when the target root keeps no glossary document at all", async () => {
@@ -2149,11 +1917,11 @@ describe("landing gates", () => {
     const state = currentState();
     declareContract(state, { inputs: ["a path"], outputs: ["a string"] });
     const item = await preparedBlockA(root, boundary, baselineCommit, state);
-    const source = state.plan.blocks.find((entry) => entry.block_id === "block-a")!;
+    const source = state.plan.units.find((entry) => entry.id === "block-a")!;
     // The write scope is NOT blanket-widened: a block that coins no id has no
     // business editing the glossary.
     expect(item.allowed_files).not.toContain("docs/glossary-ids.md");
-    expect(item.allowed_files).toEqual([...source.touched_files]);
+    expect(item.allowed_files).toEqual([...source.allowed_files]);
   });
 });
 
@@ -2182,13 +1950,13 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
   it("ends each worker prompt with a template whose identity values the tool filled in", async () => {
     const { runId, handoff } = await prepareFixture();
     expect(handoff.workload.contract_version).toBe(
-      "remediation-host-workload/v1alpha3",
+      "remediation-host-workload/v2",
     );
     for (const item of handoff.workload.work_items) {
       const { body, template } = splitPrompt(item);
       // The digest covers the text above the template, exactly.
       expect(sha256(body)).toBe(item.prompt.sha256);
-      expect(item.prompt.text.startsWith(`# Implement remediation work item \`${item.id}\``)).toBe(true);
+      expect(item.prompt.text.startsWith(`# Implement execution unit \`${item.id}\``)).toBe(true);
       expect(Object.keys(template).sort()).toEqual(SLIM_KEYS);
       expect(template).toMatchObject({
         contract_version: "remediation-host-result/v1alpha3",
@@ -2196,7 +1964,7 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
         run_id: runId,
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,
-        obligation_evidence: [],
+        obligation_evidence: item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: [expect.any(String)] })),
       });
       expect(item.prompt.text).toContain(item.result_path);
       expect(item.prompt.text).not.toMatch(/frontier|later dependency level|digest/iu);
@@ -2282,54 +2050,44 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
         state: staleState,
       }),
     );
-    expect(reminted.workload.contract_version).toBe("remediation-host-workload/v1alpha3");
+    expect(reminted.workload.contract_version).toBe("remediation-host-workload/v2");
     expect(reminted.handoff_record).toEqual(handoff.handoff_record);
   });
 });
 
-describe("implementation context survives the real promotion and handoff", () => {
-  it.each([false, true])("preserves node semantics without adding finding fields (audit seed=%s)", async (seeded) => {
-    const root = await mkdtemp(join(tmpdir(), "implementation-context-"));
-    cleanupRoots.push(root);
-    const baselineCommit = await initGitRoot(root);
-    const artifactsDir = join(root, ".audit-tools", "remediation");
-    const { writeContractArtifact } = await import("../../src/remediate/contractPipeline/artifactStore.js");
-    const { promoteImplementationDagToExtractedPlan, writePathASeedFromFindings } = await import("../../src/remediate/steps/contractPipeline.js");
-    const { buildAuditFindingsDeliverable } = await import("../../src/shared/reporting/auditDeliverable.js");
-    const { RemediationPlanSchema } = await import("../../src/remediate/state/types.js");
-    const { CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION, CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION } = await import("../../src/shared/types/contractPipeline.js");
-    const counterexample = { id: "CE-unique", claim: "refresh race", reproduction_steps: ["refresh twice"], expected: "one session", actual: "duplicate sessions", violated_obligation_ids: [] };
-    if (seeded) {
-      const { FindingSchema } = await import("../../src/shared/types/finding.js");
-      const report = buildAuditFindingsDeliverable([FindingSchema.parse(finding("finding-a", "src/a.ts"))], null);
-      const reportPath = join(root, "audit-findings.json");
-      await writeFile(reportPath, JSON.stringify(report));
-      await writePathASeedFromFindings(artifactsDir, reportPath, report);
-    }
-    await writeContractArtifact(artifactsDir, "counterexample", { contract_version: CONTRACT_PIPELINE_COUNTEREXAMPLE_VERSION, goal_id: FIXTURE_RUN_ID, counterexamples: [counterexample], created_at: "2026-09-30T00:00:00Z" });
-    await writeContractArtifact(artifactsDir, "implementation_dag", { contract_version: CONTRACT_PIPELINE_IMPLEMENTATION_DAG_VERSION, goal_id: FIXTURE_RUN_ID, nodes: [{ id: "N1", title: "Repair refresh", description: "Serialize refresh attempts", satisfies_obligations: [], addresses_counterexamples: [counterexample.id], depends_on: [], verification_obligation_ids: [], targeted_commands: [], status: "pending", output_files: ["src/a.ts"], ...(seeded ? { source_finding_ids: ["finding-a"] } : {}), preconditions: ["session exists"], expected_changes: "atomic refresh" }], edges: [], created_at: "2026-09-30T00:00:00Z" });
-    await promoteImplementationDagToExtractedPlan(artifactsDir, root);
-    const raw = JSON.parse(await readFile(join(artifactsDir, "extracted-plan.json"), "utf8"));
-    delete raw.traceability;
-    const plan = RemediationPlanSchema.parse(raw);
-    const state = { contract_version: CURRENT_STATE_VERSION, status: "implementing", plan, items: Object.fromEntries(plan.blocks.flatMap(block => block.items.map(id => [id, { finding_id: id, block_id: block.block_id, status: "pending" }]))) };
-    const boundary = await loadBoundary();
-    const handoff = requirePrepared(await boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId: FIXTURE_RUN_ID, baselineCommit, state }));
+describe("reviewed implementation context survives the real handoff", () => {
+  it.each([false, true])("preserves reviewed semantics without synthetic findings (audit seed=%s)", async seeded => {
+    const root = await mkdtemp(join(tmpdir(), "implementation-context-")); cleanupRoots.push(root);
+    const baselineCommit = await initGitRoot(root), artifactsDir = join(root, ".audit-tools", "remediation");
+    const sources = seeded ? [finding("finding-a", "src/a.ts")] : [];
+    const unit = canonicalUnitFixture("N1", { title: "Repair refresh", description: "Serialize refresh attempts; session exists; atomic refresh",
+      source_finding_ids: sources.map(source => source.id), addresses_counterexample_ids: ["CE-unique"], required_tests: ['node -e "process.exit(0)"'] });
+    const counterexample = { id: "CE-unique", claim: "refresh race", reproduction_steps: ["refresh twice"], expected: "one session", actual: "duplicate sessions", requirement_ids: unit.requirement_ids, unit_ids: [unit.id] };
+    const plan = canonicalPlanFixture({ plan_id: FIXTURE_RUN_ID, findings: sources, units: [unit],
+      requirements: [{ id: unit.requirement_ids[0]!, description: "Exactly one session survives concurrent refresh", source_finding_ids: unit.source_finding_ids, change_kind: "structural", assertions: [] }],
+      review_counterexamples: [counterexample],
+      ...(!seeded ? { request: { id: "request-1", text: "Repair concurrent refresh", source_paths: [] } } : {}),
+    });
+    const state: CurrentState = { contract_version: CURRENT_STATE_VERSION, status: "implementing", plan, items: { N1: { unit_id: "N1", status: "pending" } } };
+    await writeApprovedPlanFixture(artifactsDir, state, root);
+    const handoff = requirePrepared(await (await loadBoundary()).prepareRemediationHostHandoff({ root, artifactsDir, runId: FIXTURE_RUN_ID, baselineCommit, state }));
     const text = handoff.workload.work_items[0]!.prompt.text;
     for (const fact of ["session exists", "atomic refresh", "refresh twice", "Serialize refresh attempts"]) expect(text).toContain(fact);
-    expect(plan.findings[0]).not.toHaveProperty("concrete_change");
-    expect(plan.findings[0]).not.toHaveProperty("preconditions");
-    expect(RemediationPlanSchema.safeParse({ ...plan, blocks: [{ ...plan.blocks[0], implementation_context: { preconditions: 42 } }] }).success).toBe(false);
+    expect(state.plan.findings).toEqual(sources);
+    if (seeded) { expect(state.plan.findings[0]).not.toHaveProperty("concrete_change"); expect(state.plan.findings[0]).not.toHaveProperty("preconditions"); }
+    else expect(state.plan.findings).toEqual([]);
   });
 });
 
 describe("host handoff repair and root observations", () => {
-  it('rebinds ordinary trusted state movement and refuses the old prompt result', async () => {
+  it('rebinds an explicitly reapproved unit revision and refuses the old prompt result', async () => {
     const { boundary, root, artifactsDir, runId, state, handoff, baselineCommit } = await prepareFixture();
     const changed = {
       ...state,
-      plan: { ...state.plan, findings: (state.plan.findings as Array<Record<string, unknown>>).map((finding) => ({ ...finding, summary: `${finding.summary} Updated required behavior.` })) },
+      plan: { ...state.plan, units: state.plan.units.map(unit => ({ ...unit, description: `${unit.description} Updated required behavior.` })) },
     };
+    await expect(boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit })).rejects.toThrow(/approved revision/);
+    await writeApprovedPlanFixture(artifactsDir, changed, root);
     const rebound = requirePrepared(await boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit }));
     expect(rebound.handoff_record.workload_sha256).not.toBe(handoff.handoff_record.workload_sha256);
     expect(rebound.handoff_record.work_item_ids).toEqual(handoff.handoff_record.work_item_ids);
@@ -2349,11 +2107,23 @@ describe("host handoff repair and root observations", () => {
     if (part === 'baseline') old.work_items[0].baseline_commit = 'f'.repeat(40);
     if (part === 'items') old.work_items[0].id = 'unexpected-block';
     await writeFile(handoff.workload_path, JSON.stringify(old));
-    const changed = { ...state, plan: { ...state.plan,
-      findings: (state.plan.findings as Array<Record<string, unknown>>).map((finding) => ({ ...finding, summary: 'Changed requirement' })),
+    // A deliberate approved revision changes the derived workload digest and
+    // exercises rebind. An unapproved source mutation would stop at authority
+    // validation and never test the predecessor's run/baseline/item identity.
+    const changed: CurrentState = { ...state, plan: { ...state.plan,
+      units: state.plan.units.map(unit => ({ ...unit, description: `${unit.description} Revised approved behavior.` })),
     } };
+    await writeApprovedPlanFixture(artifactsDir, changed, root);
     await expect(boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit })).rejects.toThrow(/trusted identity|binding/i);
     expect(JSON.parse(await readFile(handoff.workload_path, 'utf8'))).toEqual(old);
+    await writeFile(handoff.workload_path, JSON.stringify({ ...handoff.workload, contract_version: 'remediation-host-workload/v1alpha1' }));
+    const restored = requirePrepared(await boundary.prepareRemediationHostHandoff({ root, artifactsDir, runId, state: changed, baselineCommit }));
+    expect(restored.handoff_record.workload_sha256).not.toBe(handoff.handoff_record.workload_sha256);
+    expect(restored.handoff_record).toMatchObject({
+      run_id: handoff.handoff_record.run_id,
+      baseline_commit: handoff.handoff_record.baseline_commit,
+      work_item_ids: handoff.handoff_record.work_item_ids,
+    });
   });
 
   it('reports newly observed ignored root logs on remediation ingestion without claiming their creator', async () => {

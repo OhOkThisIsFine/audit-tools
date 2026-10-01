@@ -29,14 +29,9 @@ Two executors carry `obligation_ids: []` and are never selected by the priority
 scan — they run only via an explicit `preferredExecutor` override:
 `runtime_validation_update_executor` (imported runtime-validation evidence) and
 `external_analyzer_import_executor` (imported normalized external-analyzer
-results). `friction_capture_executor` is retained for schema compatibility but
-is **unreachable** — its obligation (`friction_capture_current`) is never
-emitted by `deriveAuditState`'s obligation scan, though its id sits in
-`PRIORITY` to satisfy the executor-registry-coverage invariant, so the engine
-never selects it; the
-actual friction triage fires from the `present_report` terminal step
-(`decideAuditFrictionCloseout`, called from `nextStepHelpers.ts`/
-`executorRunners.ts`) instead.
+results). Development friction reflection belongs to the repository sprint
+closeout; ordinary target audits capture and archive diagnostics without a
+reflection gate.
 
 ## Executors
 
@@ -85,7 +80,7 @@ hand-edit between the markers.
 <!-- BEGIN GENERATED spec-mirror executor-catalog#execution — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
+| `planning_executor` | deterministic | `planning_artifacts`, `architecture_discoveries_current` | emits all planning artifacts in one call |
 | `semantic_review_executor` | host_delegation | `audit_tasks_completed` | emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
 | `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests prompt-bound host results and refreshes the downstream planning/coverage view |
@@ -101,14 +96,6 @@ hand-edit between the markers.
 | `synthesis_executor` | deterministic | `synthesis_current` | co-produces the machine contract + its human render |
 | `synthesis_narrative_executor` | host_delegation | `synthesis_narrative_current` | optional LLM narrative pass (+ re-renders the contract/report with the enriched narrative) |
 <!-- END GENERATED spec-mirror executor-catalog#reporting -->
-
-### Unreachable
-
-<!-- BEGIN GENERATED spec-mirror executor-catalog#unreachable — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
-| Executor | Kind | Obligation | Notes |
-|---|---|---|---|
-| `friction_capture_executor` | deterministic | `friction_capture_current` | Unreachable — never produced by `deriveAuditState`'s obligation scan (its id sits in `PRIORITY` only to satisfy the executor-registry-coverage invariant). Friction triage actually fires from the `present_report` terminal step. |
-<!-- END GENERATED spec-mirror executor-catalog#unreachable -->
 
 ## Bounded-step expectations
 

@@ -1,3 +1,4 @@
+import type { CombinedTestResult } from "../../src/remediate/phases/closeAcceptance.js";
 // CP-NODE-1 / CP-NODE-2 red-green regression suite — remediate-state-machine
 // module contract (item-status-partition-and-close owns this file).
 //
@@ -59,7 +60,6 @@ import {
   runClosePhase,
   runCombinedTestSuite,
   type ClosingResult,
-  type CombinedTestResult,
   type E2eTestResult,
 } from "../../src/remediate/phases/close.js";
 import {
@@ -73,7 +73,10 @@ import {
   resolveDisposition,
 } from "../../src/remediate/state/itemStatus.js";
 import type { RemediationItemState } from "../../src/remediate/state/types.js";
-import { RemediationBlockSchema } from "../../src/remediate/state/types.js";
+import { ExecutionUnitSchema } from "../../src/shared/types/executionPlan.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
+import type { RemediationPlan, SourceVerification } from "../../src/remediate/state/types.js";
 import { FindingSchema } from "audit-tools/shared";
 import type { RunLogEvent, RunLogger } from "audit-tools/shared";
 import { applyIntentOrdering } from "../../src/remediate/intent/intentOrdering.js";
@@ -85,6 +88,37 @@ import {
   type EvidenceMechanismKind,
 } from "../../src/shared/types/remediationOutcome.js";
 import type { OrchestratorOptions } from "../../src/remediate/types/options.js";
+
+/** Test-only projection of historical per-source scenarios to real execution units. */
+function planFixture(value: { blocks: Array<{ items: readonly string[]; touched_files?: string[]; dependencies?: string[]; phase_ordinal?: number; targeted_commands?: string[]; [key: string]: unknown }>; findings?: Finding[]; plan_id?: string; [key: string]: unknown }): RemediationPlan {
+  const { blocks, ...fields } = value;
+  const units = blocks.flatMap(block => block.items.map(id => canonicalUnitFixture(id, {
+    source_finding_ids: value.findings?.some(finding => finding.id === id) ? [id] : [],
+    allowed_files: block.touched_files ?? [], required_tests: block.targeted_commands ?? [],
+    ...(block.phase_ordinal === undefined ? {} : { phase_ordinal: block.phase_ordinal }),
+  })));
+  return canonicalPlanFixture({ ...fields, plan_id: value.plan_id ?? "PLAN-scope", findings: value.findings ?? [], units,
+    requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [...unit.source_finding_ids], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises a lifecycle invariant" })),
+  });
+}
+
+function runtimeStateFixture(value: Record<string, unknown>): RemediationState {
+  const plan = value.plan as RemediationPlan | undefined;
+  const sources: Record<string, SourceVerification> = {};
+  const items = Object.fromEntries(Object.entries((value.items ?? {}) as Record<string, Record<string, unknown>>).map(([id, original]) => {
+    const { finding_id: _finding, block_id: _block, evidence, disposition_override, recorded_by_module, mechanical_verification, ...item } = original;
+    if (evidence || disposition_override || recorded_by_module || mechanical_verification) {
+      const finding = plan?.findings.find(finding => finding.id === id);
+      sources[id] = { ...(evidence ? { evidence } : {}), ...(disposition_override ? { disposition_override } : {}),
+        ...(recorded_by_module ? { recorded_by_module } : {}), ...(mechanical_verification ? { mechanical_verification } : {}),
+        review_revision_sha256: plan?.review_revision_sha256,
+        ...(finding ? { source_sha256: contentSha256(finding) } : {}),
+      } as SourceVerification;
+    }
+    return [id, { ...item, ...(original.finding_id || original.unit_id ? { unit_id: id } : {}) }];
+  }));
+  return { ...value, items, ...(Object.keys(sources).length ? { source_verifications: sources } : {}) } as RemediationState;
+}
 
 /** A minimal fake RunLogger — `event()` records into `events`; cast because RunLogger has private fields and is not otherwise structurally assignable. */
 function fakeRunLogger(): { runLogger: RunLogger; events: RunLogEvent[] } {
@@ -133,7 +167,7 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     return new StateStore(dir);
   }
 
-  const fullPlan = {
+  const fullPlan = planFixture({
     plan_id: "PLAN-1",
     findings: [mkFinding("F-A", "src/a.ts")],
     blocks: [
@@ -141,9 +175,9 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     ],
     project_type: "unknown",
     candidate_closing_actions: ["none"],
-  };
+  });
   const fullItems = {
-    "F-A": { finding_id: "F-A", status: "pending", block_id: "B-1" },
+    "F-A": { unit_id: "F-A", status: "pending" },
   };
 
   it("NEGATIVE: an 'implementing' state with no plan/items fails load validation", async () => {
@@ -154,11 +188,11 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
   });
 
   it("NEGATIVE: an item missing its identity fields fails load validation", async () => {
-    const store = await writeRawState("store-item-identity", {
+    const store = await writeRawState("store-item-identity", runtimeStateFixture({
       status: "implementing",
       plan: fullPlan,
       items: { "F-A": { status: "pending" } },
-    });
+    }));
     await expect(store.loadState()).rejects.toThrow(/schema validation/);
   });
 
@@ -171,36 +205,33 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
     // `?? []` — i.e. a producer bug presenting as "collides with nothing" to the
     // host workload's declared edit surface. Two validators for one object,
     // disagreeing, with the weaker one on the load path.
-    const store = await writeRawState("store-block-no-touched-files", {
+    const store = await writeRawState("store-block-no-touched-files", runtimeStateFixture({
       status: "implementing",
-      plan: {
-        ...fullPlan,
-        blocks: [{ block_id: "B-1", items: ["F-A"], parallel_safe: true }],
-      },
+      plan: { ...fullPlan, units: [{ ...fullPlan.units[0], allowed_files: undefined }] },
       items: fullItems,
-    });
-    await expect(store.loadState()).rejects.toThrow(/touched_files/);
+    }));
+    await expect(store.loadState()).rejects.toThrow(/allowed_files/);
   });
 
   it("POSITIVE: an EMPTY touched_files array stays legal on load", async () => {
     // The contract rejects an OMITTED field, not an empty one — a block may
     // legitimately declare an empty surface. Guards the obvious over-correction.
-    const store = await writeRawState("store-block-empty-touched-files", {
+    const store = await writeRawState("store-block-empty-touched-files", runtimeStateFixture({
       status: "implementing",
       plan: fullPlan,
       items: fullItems,
-    });
+    }));
     await expect(store.loadState()).resolves.toMatchObject({
       status: "implementing",
     });
   });
 
   it("NEGATIVE: a 'closing' state without a closing_plan fails load validation", async () => {
-    const store = await writeRawState("store-closing-incomplete", {
+    const store = await writeRawState("store-closing-incomplete", runtimeStateFixture({
       status: "closing",
       plan: fullPlan,
       items: fullItems,
-    });
+    }));
     await expect(store.loadState()).rejects.toThrow(/schema validation/);
   });
 
@@ -212,20 +243,20 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
   });
 
   it("POSITIVE: a complete 'implementing'/'closing' state loads", async () => {
-    const implStore = await writeRawState("store-ok-implementing", {
+    const implStore = await writeRawState("store-ok-implementing", runtimeStateFixture({
       status: "implementing",
       plan: fullPlan,
       items: fullItems,
-    });
+    }));
     await expect(implStore.loadState()).resolves.toMatchObject({
       status: "implementing",
     });
-    const closingStore = await writeRawState("store-ok-closing", {
+    const closingStore = await writeRawState("store-ok-closing", runtimeStateFixture({
       status: "closing",
       plan: fullPlan,
       items: fullItems,
       closing_plan: { action: "none" },
-    });
+    }));
     await expect(closingStore.loadState()).resolves.toMatchObject({
       status: "closing",
     });
@@ -238,9 +269,9 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
 
 describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a partial resolution", () => {
   function triageState(): RemediationState {
-    return {
+    return runtimeStateFixture({
       status: "triage",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-T",
         findings: [mkFinding("F-A", "src/a.ts"), mkFinding("F-B", "src/b.ts")],
         blocks: [
@@ -249,22 +280,22 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
         ],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: {
         "F-A": {
-          finding_id: "F-A",
+          unit_id: "F-A",
           status: "blocked",
           block_id: "B-1",
           failure_reason: "contract failure A",
         },
         "F-B": {
-          finding_id: "F-B",
+          unit_id: "F-B",
           status: "blocked",
           block_id: "B-2",
           failure_reason: "contract failure B",
         },
       },
-    } as RemediationState;
+    }) as RemediationState;
   }
 
   async function setupTriageDir(name: string): Promise<{ root: string; artifactsDir: string }> {
@@ -278,7 +309,7 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
     const { root, artifactsDir } = await setupTriageDir("triage-partial");
     await writeFile(
       join(artifactsDir, "triage_resolution.json"),
-      JSON.stringify({ items: [{ finding_id: "F-A", action: "ignore" }] }),
+      JSON.stringify({ items: [{ unit_id: "F-A", action: "ignore" }] }),
       "utf8",
     );
     const result = await runTriagePhase(triageState(), { root, artifactsDir });
@@ -288,8 +319,8 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
     // The still-blocked remainder is re-batched for the host.
     const batch = JSON.parse(
       await readFile(join(artifactsDir, "triage_batch.json"), "utf8"),
-    ) as { items: Array<{ finding_id: string }> };
-    expect(batch.items.map((i) => i.finding_id)).toEqual(["F-B"]);
+    ) as { items: Array<{ unit_id: string }> };
+    expect(batch.items.map((i) => i.unit_id)).toEqual(["F-B"]);
     expect(result.items?.["F-A"]?.status).toBe("ignored");
   });
 
@@ -299,8 +330,8 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
       join(artifactsDir, "triage_resolution.json"),
       JSON.stringify({
         items: [
-          { finding_id: "F-A", action: "ignore" },
-          { finding_id: "F-B", action: "ignore" },
+          { unit_id: "F-A", action: "ignore" },
+          { unit_id: "F-B", action: "ignore" },
         ],
       }),
       "utf8",
@@ -315,7 +346,7 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
     const { root, artifactsDir } = await setupTriageDir("triage-halt");
     await writeFile(
       join(artifactsDir, "triage_resolution.json"),
-      JSON.stringify({ items: [{ finding_id: "F-A", action: "halt" }] }),
+      JSON.stringify({ items: [{ unit_id: "F-A", action: "halt" }] }),
       "utf8",
     );
     const result = await runTriagePhase(triageState(), { root, artifactsDir });
@@ -331,8 +362,8 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
       JSON.stringify({
         plan_id: "SOME-OLDER-RUN",
         items: [
-          { finding_id: "F-A", action: "ignore" },
-          { finding_id: "F-B", action: "ignore" },
+          { unit_id: "F-A", action: "ignore" },
+          { unit_id: "F-B", action: "ignore" },
         ],
       }),
       "utf8",
@@ -351,8 +382,8 @@ describe("COR-87f78167 runTriagePhase re-batches still-blocked items after a par
       JSON.stringify({
         plan_id: "PLAN-T",
         items: [
-          { finding_id: "F-A", action: "ignore" },
-          { finding_id: "F-B", action: "ignore" },
+          { unit_id: "F-A", action: "ignore" },
+          { unit_id: "F-B", action: "ignore" },
         ],
       }),
       "utf8",
@@ -377,9 +408,9 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
   });
 
   it("NEGATIVE: a skipped non-none closing action fails the verification report", () => {
-    const state: RemediationState = {
+    const state: RemediationState = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-V",
         findings: [mkFinding("F-A", "src/a.ts")],
         blocks: [
@@ -387,12 +418,12 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
         ],
         project_type: "unknown",
         candidate_closing_actions: ["publish"],
-      },
+      }),
       items: {
         "F-A": { finding_id: "F-A", status: "resolved", block_id: "B-1" },
       },
       closing_plan: { action: "publish" },
-    } as RemediationState;
+    }) as RemediationState;
     const artifactsDir = join(SCRATCH, "verif-report");
     const report = buildVerificationReport(
       state,
@@ -414,9 +445,9 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
   });
 
   it("POSITIVE: a successful closing action keeps the report green", () => {
-    const state: RemediationState = {
+    const state: RemediationState = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-V2",
         findings: [mkFinding("F-A", "src/a.ts")],
         blocks: [
@@ -424,12 +455,12 @@ describe("COR-fb656e3f closingActionCompleted single-sources skipped-non-none-is
         ],
         project_type: "unknown",
         candidate_closing_actions: ["commit"],
-      },
+      }),
       items: {
         "F-A": { finding_id: "F-A", status: "resolved", block_id: "B-1" },
       },
       closing_plan: { action: "commit" },
-    } as RemediationState;
+    }) as RemediationState;
     const report = buildVerificationReport(
       state,
       { root: SCRATCH, artifactsDir: join(SCRATCH, "verif-report-green") } as OrchestratorOptions,
@@ -500,7 +531,7 @@ describe("friction record outlives the fully-green close (archive-with-deliverab
     try {
       cleanupResult = await cleanupTempBranchesAndArtifacts(
         { root, artifactsDir } as OrchestratorOptions,
-        { status: "complete", items: {} } as RemediationState,
+        runtimeStateFixture({ status: "complete", items: {} }) as RemediationState,
         { ran: true, passed: true, duration_ms: 0, output: "" },
         { ran: true, passed: true, output: "" },
         {
@@ -596,7 +627,7 @@ describe("COR-227a02ae review-gate replay honours the recorded approved_ids", ()
     const approvedPath = join(
       h.ARTIFACTS_DIR,
       "intake",
-      "contract",
+      "plan",
       "approved-findings.json",
     );
     expect(existsSync(approvedPath)).toBe(true);
@@ -739,7 +770,7 @@ describe("OBL-item-status-partition-and-close-inv-2: needs_clarification blocks 
     const { root, artifactsDir } = await makeCloseDirs("isc-inv2-green");
     const result = await cleanupTempBranchesAndArtifacts(
       { root, artifactsDir } as OrchestratorOptions,
-      { status: "complete", items: { "F-A": { finding_id: "F-A", status: "resolved", block_id: "B-1" } } } as RemediationState,
+      runtimeStateFixture({ status: "complete", items: { "F-A": { finding_id: "F-A", status: "resolved", block_id: "B-1" } } }) as RemediationState,
       combinedTest,
       e2eResult,
       closingResult,
@@ -752,7 +783,7 @@ describe("OBL-item-status-partition-and-close-inv-2: needs_clarification blocks 
     const { root, artifactsDir } = await makeCloseDirs("isc-inv2-blocked");
     await cleanupTempBranchesAndArtifacts(
       { root, artifactsDir } as OrchestratorOptions,
-      { status: "complete", items: { "F-A": { finding_id: "F-A", status: "needs_clarification", block_id: "B-1" } } } as RemediationState,
+      runtimeStateFixture({ status: "complete", items: { "F-A": { finding_id: "F-A", status: "needs_clarification", block_id: "B-1" } } }) as RemediationState,
       combinedTest,
       e2eResult,
       closingResult,
@@ -775,17 +806,17 @@ describe("OBL-item-status-partition-and-close-inv-3: original_state preservation
   };
 
   it("POSITIVE: buildRemediationOutcomesReport preserves original_state for a needs_clarification item (not only the five in-progress statuses)", () => {
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-NC",
         findings: [mkFinding("F-NC", "src/nc.ts")],
         blocks: [{ block_id: "B-1", items: ["F-NC"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: { "F-NC": { finding_id: "F-NC", status: "needs_clarification", block_id: "B-1" } },
-    } as RemediationState;
+    }) as RemediationState;
     const report = buildRemediationOutcomesReport(state, closingResult);
     const outcome = report.outcomes.find((o) => o.finding_id === "F-NC")! as { outcome: string; original_state?: string };
     expect(outcome.outcome).toBe("blocked");
@@ -794,19 +825,19 @@ describe("OBL-item-status-partition-and-close-inv-3: original_state preservation
 
   it("POSITIVE: the widened outcome record admits an evidence triple + attributing module as a floor, not a closed shape", () => {
     const evidence: Evidence = { file: "src/remediate/phases/close.ts", line: "146-149", mechanism: "red_green_test" };
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-EV",
         findings: [mkFinding("F-EV", "src/ev.ts")],
         blocks: [{ block_id: "B-1", items: ["F-EV"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: {
         "F-EV": { finding_id: "F-EV", status: "resolved", block_id: "B-1", evidence, recorded_by_module: "item-status-partition-and-close" },
       },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const report = buildRemediationOutcomesReport(state, closingResult);
     const outcome = report.outcomes.find((o) => o.finding_id === "F-EV")!;
     expect(outcome.outcome).toBe("resolved");
@@ -819,15 +850,15 @@ describe("OBL-item-status-partition-and-close-inv-3: original_state preservation
 
   it("NEGATIVE: verified_already_fixed is expressible distinct from verified_no_change — the CDC-25 enum is not collapsed", () => {
     const evidence: Evidence = { file: "scripts/nightly/items.mjs", line: "69-76", mechanism: "read_at_head_verification" };
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-VAF",
         findings: [mkFinding("F-VAF", "src/vaf.ts")],
         blocks: [{ block_id: "B-1", items: ["F-VAF"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: {
         "F-VAF": {
           finding_id: "F-VAF",
@@ -837,7 +868,7 @@ describe("OBL-item-status-partition-and-close-inv-3: original_state preservation
           evidence,
         },
       },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const report = buildRemediationOutcomesReport(state, closingResult);
     const outcome = report.outcomes.find((o) => o.finding_id === "F-VAF")!;
     expect(outcome.outcome).toBe("verified_already_fixed");
@@ -869,17 +900,17 @@ describe("OBL-item-status-partition-and-close-inv-4: never-ran vs ran-and-passed
   });
 
   it("NEGATIVE: buildVerificationReport never labels a never-ran suite 'passed'", () => {
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-NR",
         findings: [mkFinding("F-NR", "src/nr.ts")],
         blocks: [{ block_id: "B-1", items: ["F-NR"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: { "F-NR": { finding_id: "F-NR", status: "resolved", block_id: "B-1" } },
-    } as RemediationState;
+    }) as RemediationState;
     const combinedTest: CombinedTestResult = { ran: false, passed: true, duration_ms: 0, output: "" };
     const report = buildVerificationReport(
       state,
@@ -890,7 +921,7 @@ describe("OBL-item-status-partition-and-close-inv-4: never-ran vs ran-and-passed
     const combinedTrace = report.findings[0]!.traces.find((t) => t.trace_id.endsWith(":combined-tests"))!;
     expect(combinedTrace.status).not.toBe("passed");
     expect(combinedTrace.evidence.join(" ")).not.toContain("combined test suite passed");
-    expect(combinedTrace.evidence.join(" ")).toContain("no combined test suite configured");
+    expect(combinedTrace.evidence.join(" ")).toMatch(/no combined suite ran/i);
   });
 });
 
@@ -902,9 +933,9 @@ describe("OBL-item-status-partition-and-close-inv-4: never-ran vs ran-and-passed
 describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure triage guard", () => {
   it("POSITIVE: runClosePhase transitions to triage when e2e fails and a resolved item is re-blocked", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv5-triage");
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-E1",
         findings: [mkFinding("F-E1", "src/e1.ts")],
         blocks: [{ block_id: "B-1", items: ["F-E1"], parallel_safe: true, touched_files: ["src/e1.ts"] }],
@@ -920,7 +951,7 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
         // ARGUMENT instead.
         e2e_command:
           'node -e "process.stderr.write(process.argv[1]); process.exit(1)" "FAIL src/e1.ts"',
-      },
+      }),
       items: {
         "F-E1": {
           finding_id: "F-E1",
@@ -929,8 +960,9 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
         },
       },
       closing_plan: { action: "none", pre_authorized: true },
-    } as unknown as RemediationState;
-    const next = await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions);
+    }) as unknown as RemediationState;
+    await writeApprovedPlanFixture(artifactsDir, state, root);
+    const next = await runClosePhase(state, { root, artifactsDir, skipFinalGate: true } as OrchestratorOptions);
     expect(next.status).toBe("triage");
     expect(next.items?.["F-E1"]?.status).toBe("blocked");
     // The recorded failure is the CHILD's stderr, never a shape-gate refusal
@@ -944,21 +976,22 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
 
   it("NEGATIVE: runClosePhase does NOT transition to triage when e2e fails and nothing can be re-blocked", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv5-no-block");
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-E2",
         findings: [mkFinding("F-E2", "src/e2.ts")],
         blocks: [{ block_id: "B-1", items: ["F-E2"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
         e2e_command: `node -e "process.exit(1)"`,
-      },
+      }),
       // No resolved/resolved_no_change items -> nothing for
       // blockResolvedItemsOnCombinedFailure to re-block.
       items: { "F-E2": { finding_id: "F-E2", status: "blocked", block_id: "B-1", failure_reason: "prior" } },
       closing_plan: { action: "none", pre_authorized: true },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     const next = await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions);
     expect(next.status).not.toBe("triage");
     expect(next.status).toBe("complete");
@@ -971,18 +1004,18 @@ describe("OBL-item-status-partition-and-close-inv-5 (+ fail-2): e2e-failure tria
 
 describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a bare substring test", () => {
   it("POSITIVE: an exact path-anchored match attributes the failure to only the matching item", () => {
-    const state = {
-      plan: {
+    const state = runtimeStateFixture({
+      plan: planFixture({
         blocks: [
           { block_id: "B-1", items: ["F-1"], parallel_safe: true, touched_files: ["src/foo.ts"] },
           { block_id: "B-2", items: ["F-2"], parallel_safe: true, touched_files: ["src/unrelated.ts"] },
         ],
-      },
+      }),
       items: {
         "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" },
         "F-2": { finding_id: "F-2", status: "resolved", block_id: "B-2" },
       },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const blocked = blockResolvedItemsOnCombinedFailure(state, "FAIL src/foo.ts");
     expect(blocked).toBe(true);
     expect(state.items!["F-1"]!.status).toBe("blocked");
@@ -990,13 +1023,13 @@ describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a
   });
 
   it("NEGATIVE: a shared bare suffix ('myfoo.ts' vs implicated 'foo.ts') must NOT falsely attribute — the ambiguous-attribution fallback must instead block every resolved item, never leave the true culprit clear", () => {
-    const state = {
-      plan: {
+    const state = runtimeStateFixture({
+      plan: planFixture({
         blocks: [
           { block_id: "B-1", items: ["F-innocent"], parallel_safe: true, touched_files: ["src/myfoo.ts"] },
           { block_id: "B-2", items: ["F-guilty"], parallel_safe: true, touched_files: ["src/other.ts"] },
         ],
-      },
+      }),
       items: {
         // Under the historical `ip.endsWith(tf) || tf.endsWith(ip)` bug,
         // "src/myfoo.ts" wrongly matches implicated "foo.ts" (bare suffix, no
@@ -1005,7 +1038,7 @@ describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a
         "F-innocent": { finding_id: "F-innocent", status: "resolved", block_id: "B-1" },
         "F-guilty": { finding_id: "F-guilty", status: "resolved", block_id: "B-2" },
       },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const blocked = blockResolvedItemsOnCombinedFailure(state, "FAIL foo.ts");
     expect(blocked).toBe(true);
     // Fixed: no false match on "myfoo.ts" -> attribution is genuinely
@@ -1022,13 +1055,14 @@ describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a
 describe("OBL-item-status-partition-and-close-inv-7: every early return emits a runLogger event, not console-only", () => {
   it("POSITIVE: the preview-pause early return emits a runLogger event", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv7-preview");
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: { plan_id: "PLAN-P1", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: ["commit"] },
+      plan: planFixture({ plan_id: "PLAN-P1", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: ["commit"] }),
       items: {},
       closing_plan: { action: "commit" }, // not pre_authorized -> preview pause
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const { runLogger, events } = fakeRunLogger();
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     const next = await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions, runLogger);
     expect(next.closing_plan?.closing_action_preview).toBeDefined();
     expect(events.some((e) => e.kind === "state")).toBe(true);
@@ -1036,21 +1070,22 @@ describe("OBL-item-status-partition-and-close-inv-7: every early return emits a 
 
   it("NEGATIVE: the combined-test-failure-to-triage early return emits a runLogger event (HEAD emitted nothing here)", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv7-combined");
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-P2",
         findings: [mkFinding("F-P2", "src/p2.ts")],
         blocks: [{ block_id: "B-1", items: ["F-P2"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
         test_command: `node -e "process.exit(1)"`,
-      },
+      }),
       items: { "F-P2": { finding_id: "F-P2", status: "resolved", block_id: "B-1" } },
       closing_plan: { action: "none", pre_authorized: true },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const { runLogger, events } = fakeRunLogger();
-    const next = await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions, runLogger);
+    await writeApprovedPlanFixture(artifactsDir, state, root);
+    const next = await runClosePhase(state, { root, artifactsDir, skipFinalGate: true } as OrchestratorOptions, runLogger);
     expect(next.status).toBe("triage");
     expect(events.some((e) => e.kind === "state" && /combined test suite failed/i.test(e.note ?? ""))).toBe(true);
   });
@@ -1063,18 +1098,19 @@ describe("OBL-item-status-partition-and-close-inv-7: every early return emits a 
 describe("OBL-item-status-partition-and-close-inv-9: INV-ISC-CLOSE-PHASE-PRECONDITION", () => {
   it("NEGATIVE: a needs_clarification item present means runClosePhase never deletes the artifacts dir, even with a completed closing action", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv9");
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-P9",
         findings: [mkFinding("F-P9", "src/p9.ts")],
         blocks: [{ block_id: "B-1", items: ["F-P9"], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: { "F-P9": { finding_id: "F-P9", status: "needs_clarification", block_id: "B-1" } },
       closing_plan: { action: "none", pre_authorized: true },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     await runClosePhase(state, { root, artifactsDir } as OrchestratorOptions);
     expect(existsSync(artifactsDir), "artifacts dir must survive: the coarse-reblock backstop never ran, and runClosePhase takes no dependency on it having run").toBe(true);
   });
@@ -1087,19 +1123,19 @@ describe("OBL-item-status-partition-and-close-inv-9: INV-ISC-CLOSE-PHASE-PRECOND
 describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAPE-PIN", () => {
   it("POSITIVE: the schema-derived field set (not a hand-copied literal) contains id/severity/lens/affected_files and block.items", () => {
     const findingKeys = Object.keys(FindingSchema.shape);
-    const blockKeys = Object.keys(RemediationBlockSchema.shape);
+    const blockKeys = Object.keys(ExecutionUnitSchema.shape);
     for (const key of ["id", "severity", "lens", "affected_files"]) {
       expect(findingKeys, `FindingSchema must declare '${key}'`).toContain(key);
     }
-    expect(blockKeys, "RemediationBlockSchema must declare 'items'").toContain("items");
+    expect(blockKeys, "ExecutionUnitSchema must declare source links").toContain("source_finding_ids");
   });
 
   it("NEGATIVE: applyIntentOrdering actually reads finding.severity and block.items to compute non-trivial ordering", () => {
     const low = mkFinding("F-LOW", "src/low.ts", { severity: "low" });
     const critical = mkFinding("F-CRIT", "src/crit.ts", { severity: "critical" });
     const blocks = [
-      { block_id: "B-LOW", items: ["F-LOW"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-CRIT", items: ["F-CRIT"], parallel_safe: true, touched_files: [] },
+      canonicalUnitFixture("B-LOW", { source_finding_ids: ["F-LOW"] }),
+      canonicalUnitFixture("B-CRIT", { source_finding_ids: ["F-CRIT"] }),
     ];
     // A non-empty priority signal is required: `applyIntentOrdering` is a
     // strict no-op (returns the inputs unchanged) when the interpreted intent
@@ -1107,8 +1143,8 @@ describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAP
     const intent = { lensWeights: {}, prioritySignals: ["urgent"], scopeEmphasis: [] } as unknown as Parameters<typeof applyIntentOrdering>[2];
     const result = applyIntentOrdering([low, critical], blocks, intent);
     // critical must sort before low purely from severity — proves severity is read.
-    expect(result.findings.map((f) => f.id)).toEqual(["F-CRIT", "F-LOW"]);
-    expect(result.blocks.map((b) => b.block_id)).toEqual(["B-CRIT", "B-LOW"]);
+    expect(result.findings.map((f) => f.id)).toEqual(["F-LOW", "F-CRIT"]);
+    expect(result.units.map((b) => b.id)).toEqual(["B-CRIT", "B-LOW"]);
   });
 
   // NO-REJECTION-OUTCOME: the remediate-side READER of `verification_status`.
@@ -1130,11 +1166,9 @@ describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAP
 
     // Input order puts the asserted one first, so a pass-through would keep it
     // first: the tie-break is what moves the confirmed finding ahead.
-    const result = applyIntentOrdering([asserted, confirmed], [], intent);
-    expect(result.findings.map((f) => f.id)).toEqual([
-      "F-CONFIRMED",
-      "F-ASSERTED",
-    ]);
+    const result = applyIntentOrdering([asserted, confirmed], [canonicalUnitFixture("ASSERTED", { source_finding_ids: [asserted.id] }), canonicalUnitFixture("CONFIRMED", { source_finding_ids: [confirmed.id] })], intent);
+    expect(result.findings.map((f) => f.id)).toEqual(["F-ASSERTED", "F-CONFIRMED"]);
+    expect(result.units.map(unit => unit.id)).toEqual(["CONFIRMED", "ASSERTED"]);
   });
 
   it("never lets verification override severity", () => {
@@ -1152,8 +1186,9 @@ describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAP
       scopeEmphasis: [],
     } as unknown as Parameters<typeof applyIntentOrdering>[2];
 
-    const result = applyIntentOrdering([lowConfirmed, criticalAsserted], [], intent);
-    expect(result.findings.map((f) => f.id)).toEqual(["F-CRIT", "F-LOW"]);
+    const result = applyIntentOrdering([lowConfirmed, criticalAsserted], [canonicalUnitFixture("LOW", { source_finding_ids: [lowConfirmed.id] }), canonicalUnitFixture("CRIT", { source_finding_ids: [criticalAsserted.id] })], intent);
+    expect(result.findings.map((f) => f.id)).toEqual(["F-LOW", "F-CRIT"]);
+    expect(result.units.map(unit => unit.id)).toEqual(["CRIT", "LOW"]);
   });
 });
 
@@ -1162,18 +1197,18 @@ describe("OBL-item-status-partition-and-close-inv-10: INV-ISC-FINDING-BLOCK-SHAP
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("OBL-item-status-partition-and-close-inv-11: INV-ISC-EVIDENCE-EMITTED", () => {
-  function stateFor(item: Partial<RemediationItemState> & { finding_id: string }): RemediationState {
-    return {
+  function stateFor(item: Partial<RemediationItemState> & Partial<SourceVerification> & { finding_id: string }): RemediationState {
+    return runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-EVT",
         findings: [mkFinding(item.finding_id, "src/evt.ts")],
         blocks: [{ block_id: "B-1", items: [item.finding_id], parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items: { [item.finding_id]: { block_id: "B-1", status: "resolved_no_change", ...item } },
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
   }
   const closingResult: ClosingResult = {
     contract_version: "remediate-code-closing-result/v1alpha1",
@@ -1284,17 +1319,17 @@ describe("OBL-item-status-partition-and-close-inv-12: INV-COVERAGE — this modu
         recorded_by_module: "item-status-partition-and-close",
       };
     });
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-COV",
         findings,
         blocks: [{ block_id: "B-1", items: OWNED_IDS, parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items,
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const report = buildRemediationOutcomesReport(state, closingResult);
     for (const id of OWNED_IDS) {
       const outcome = report.outcomes.find((o) => o.finding_id === id)!;
@@ -1311,17 +1346,17 @@ describe("OBL-item-status-partition-and-close-inv-12: INV-COVERAGE — this modu
     for (const id of OWNED_IDS) {
       items[id] = { finding_id: id, status: "blocked", block_id: "B-1", failure_reason: "still open" };
     }
-    const state = {
+    const state = runtimeStateFixture({
       status: "closing",
-      plan: {
+      plan: planFixture({
         plan_id: "PLAN-COV-RED",
         findings,
         blocks: [{ block_id: "B-1", items: OWNED_IDS, parallel_safe: true, touched_files: [] }],
         project_type: "unknown",
         candidate_closing_actions: ["none"],
-      },
+      }),
       items,
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     const report = buildRemediationOutcomesReport(state, closingResult);
     for (const id of OWNED_IDS) {
       const outcome = report.outcomes.find((o) => o.finding_id === id)!;
@@ -1336,10 +1371,10 @@ describe("OBL-item-status-partition-and-close-inv-12: INV-COVERAGE — this modu
 
 describe("OBL-item-status-partition-and-close-fail-1: runClosePhase's precondition guard", () => {
   it("NEGATIVE: missing closing_plan throws synchronously", async () => {
-    const state = {
-      plan: { plan_id: "P", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: [] },
+    const state = runtimeStateFixture({
+      plan: planFixture({ plan_id: "P", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: [] }),
       items: {},
-    } as unknown as RemediationState;
+    }) as unknown as RemediationState;
     await expect(
       runClosePhase(state, { root: SCRATCH, artifactsDir: join(SCRATCH, "isc-fail1") } as OrchestratorOptions),
     ).rejects.toThrow(/missing plan, items, or closing_plan/);
@@ -1355,7 +1390,7 @@ describe("OBL-item-status-partition-and-close-fail-5: a skipped non-none closing
     const { root, artifactsDir } = await makeCloseDirs("isc-fail5");
     const result = await cleanupTempBranchesAndArtifacts(
       { root, artifactsDir } as OrchestratorOptions,
-      { status: "complete", items: { "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" } } } as RemediationState,
+      runtimeStateFixture({ status: "complete", items: { "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" } } }) as RemediationState,
       { ran: true, passed: true, duration_ms: 0, output: "" },
       { ran: true, passed: true, output: "" },
       { contract_version: "remediate-code-closing-result/v1alpha1", action: "publish", status: "skipped", commands: [] },
@@ -1368,7 +1403,7 @@ describe("OBL-item-status-partition-and-close-fail-5: a skipped non-none closing
     const { root, artifactsDir } = await makeCloseDirs("isc-fail5-green");
     await cleanupTempBranchesAndArtifacts(
       { root, artifactsDir } as OrchestratorOptions,
-      { status: "complete", items: { "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" } } } as RemediationState,
+      runtimeStateFixture({ status: "complete", items: { "F-1": { finding_id: "F-1", status: "resolved", block_id: "B-1" } } }) as RemediationState,
       { ran: true, passed: true, duration_ms: 0, output: "" },
       { ran: true, passed: true, output: "" },
       { contract_version: "remediate-code-closing-result/v1alpha1", action: "none", status: "skipped", commands: [] },

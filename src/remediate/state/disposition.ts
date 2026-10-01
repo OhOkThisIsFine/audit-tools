@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/remediation-outcomes.test.ts, tests/remediate/remediate-state-invariants.test.ts, tests/remediate/unit-source-outcomes.test.ts
 // Declared in its own module BELOW both `types.ts` and `itemStatus.ts`: types.ts
 // needs `RemediationItemStatus` from itemStatus, and itemStatus needs this type —
 // which closed a type-only import cycle between them. `types.ts` re-exports it,
@@ -35,11 +36,8 @@
  * and therefore exhaustive over this union — a partial landing across the three
  * files is a `npm run check` compile error, not a silent gap.
  */
-export type PerFindingDisposition =
-  | "resolved"
-  | "resolved_no_change"
-  | "ignored"
-  | "deemed_inappropriate"
-  | "abandoned"
-  | "verified_already_fixed"
-  | "refuted";
+export const PER_FINDING_DISPOSITIONS = [
+  "resolved", "resolved_no_change", "ignored", "deemed_inappropriate", "abandoned",
+  "verified_already_fixed", "refuted",
+] as const;
+export type PerFindingDisposition = (typeof PER_FINDING_DISPOSITIONS)[number];

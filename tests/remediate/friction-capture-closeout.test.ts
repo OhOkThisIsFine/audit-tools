@@ -1,4 +1,5 @@
-import { decideRemediateFrictionCloseout } from "../../src/remediate/steps/frictionCloseout.js";
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -8,6 +9,7 @@ import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 import {
   FRICTION_CAPTURE_SCHEMA_VERSION,
   FRICTION_CATEGORIES,
+  decideFrictionTriage,
   frictionCapturePath,
   captureFrictionEvent,
   recordFrictionDisposition,
@@ -28,7 +30,6 @@ function coverAllCategories(record: TriagedFrictionArtifact): void {
     note: "none this run",
   }));
 }
-import { decideAuditFrictionCloseout } from "../../src/audit/orchestrator/nextStep.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 
 // OFF-TREE, per invocation. This suite used to root its scratch tree at
@@ -46,23 +47,6 @@ async function readArtifact(path: string): Promise<TriagedFrictionArtifact> {
   return JSON.parse(await readFile(path, "utf8")) as TriagedFrictionArtifact;
 }
 
-/**
- * The remediate decider answers `null` when the run's artifacts dir is GONE —
- * the lifecycle fact that survives the state's deletion (see the long note on
- * `decideRemediateFrictionCloseout`). Every test below except the one that
- * asserts THAT property is looking at a run whose dir is present, so this
- * narrows and states the premise rather than sprinkling `!` at each call site:
- * a decider that started answering null here would fail loudly at the helper.
- */
-function mustDecide(
-  decision: import("audit-tools/shared").FrictionTriageDecision | null,
-): import("audit-tools/shared").FrictionTriageDecision {
-  if (decision === null) {
-    throw new Error("expected a friction triage decision — the artifacts dir is present");
-  }
-  return decision;
-}
-
 beforeEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(TEST_DIR, { recursive: true });
@@ -72,14 +56,14 @@ afterEach(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
 });
 
-describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
-  it("empty set (zero events AND zero reflections) blocks at AUDIT terminal until host covers all friction categories", async () => {
+describe("explicit development friction triage utility", () => {
+  it("audit diagnostics require every category when explicitly triaged", async () => {
     const artifactsDir = join(TEST_DIR, "audit");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "AUDIT-RUN-1";
 
     // First call: materializes the record, no subjects, but all categories missing.
-    const pending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const pending = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(pending.action).toBe("dispose");
     expect(pending.pending).toEqual([]);
     expect(pending.needs_open_observations).toBe(true);
@@ -100,18 +84,18 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     coverAllCategories(record);
     await writeFile(path, JSON.stringify(record) + "\n", "utf8");
 
-    const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const disposed = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(disposed.action).toBe("disposed");
     expect(disposed.needs_open_observations).toBe(false);
     expect(disposed.missing_categories).toEqual([]);
   });
 
-  it("empty set blocks at REMEDIATE terminal until host covers all friction categories", async () => {
+  it("remediation diagnostics require every category when explicitly triaged", async () => {
     const artifactsDir = join(TEST_DIR, "remediation");
     await mkdir(artifactsDir, { recursive: true });
-    const state = { status: "complete" as const, plan: { plan_id: "REM-RUN-1", findings: [], blocks: [] } } as never;
+    const runId = "REM-RUN-1";
 
-    const pending = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
+    const pending = await decideFrictionTriage(artifactsDir, runId, "remediate-code");
     expect(pending.action).toBe("dispose");
     expect(pending.needs_open_observations).toBe(true);
     expect(pending.recordPath).toMatch(/REM-RUN-1\.json$/);
@@ -121,7 +105,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     coverAllCategories(record);
     await writeFile(pending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
-    const disposed = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
+    const disposed = await decideFrictionTriage(artifactsDir, runId, "remediate-code");
     expect(disposed.action).toBe("disposed");
   });
 
@@ -130,7 +114,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     await mkdir(artifactsDir, { recursive: true });
     const runId = "A-CAT";
 
-    const first = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const first = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(first.missing_categories).toEqual([...FRICTION_CATEGORIES]);
 
     // Cover ONLY one category via a real observation; add a free-form note.
@@ -141,7 +125,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     record.free_form_notes = "cwd drift produced a nested artifact tree";
     await writeFile(first.recordPath, JSON.stringify(record) + "\n", "utf8");
 
-    const stillPending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const stillPending = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(stillPending.action).toBe("dispose");
     expect(stillPending.missing_categories).toEqual([
       "ambiguous_direction",
@@ -157,7 +141,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     ];
     await writeFile(first.recordPath, JSON.stringify(record2) + "\n", "utf8");
 
-    const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const disposed = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(disposed.action).toBe("disposed");
     expect(disposed.free_form_notes).toBe("cwd drift produced a nested artifact tree");
   });
@@ -174,7 +158,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
       "audit-code",
     );
 
-    const blocked = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const blocked = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(blocked.action).toBe("dispose");
     expect(blocked.pending.map((s) => s.id)).toContain("evt-1");
 
@@ -187,7 +171,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     );
 
     // Subjects disposed but still needs the per-category walk.
-    const stillPending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const stillPending = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(stillPending.action).toBe("dispose");
     expect(stillPending.pending).toEqual([]);
     expect(stillPending.needs_open_observations).toBe(true);
@@ -197,7 +181,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     coverAllCategories(record);
     await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
-    const disposed = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const disposed = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     expect(disposed.action).toBe("disposed");
     expect(disposed.pending).toEqual([]);
   });
@@ -206,7 +190,6 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     const artifactsDir = join(TEST_DIR, "remediation");
     await mkdir(artifactsDir, { recursive: true });
     const runId = "R-REF";
-    const state = { status: "complete" as const, plan: { plan_id: runId, findings: [], blocks: [] } } as never;
 
     await writeFile(
       join(artifactsDir, AGENT_FEEDBACK_FILENAME),
@@ -217,7 +200,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     const subjects = await collectTriageSubjects(artifactsDir, runId);
     expect(subjects.some((s) => s.source === "reflection")).toBe(true);
 
-    const blocked = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
+    const blocked = await decideFrictionTriage(artifactsDir, runId, "remediate-code");
     expect(blocked.action).toBe("dispose");
     const reflId = blocked.pending.find((s) => s.source === "reflection")!.id;
 
@@ -230,7 +213,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     );
 
     // Subjects disposed but still needs the per-category walk.
-    const stillPending = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
+    const stillPending = await decideFrictionTriage(artifactsDir, runId, "remediate-code");
     expect(stillPending.action).toBe("dispose");
     expect(stillPending.needs_open_observations).toBe(true);
 
@@ -239,7 +222,7 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     coverAllCategories(record);
     await writeFile(stillPending.recordPath, JSON.stringify(record) + "\n", "utf8");
 
-    const disposed = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
+    const disposed = await decideFrictionTriage(artifactsDir, runId, "remediate-code");
     expect(disposed.action).toBe("disposed");
   });
 
@@ -382,100 +365,21 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
     const runId = "AUDIT/RUN:2026 07_22";
     await captureFrictionEvent(artifactsDir, runId, { id: "evt-x", note: "n" }, "audit-code");
 
-    const pending = await decideAuditFrictionCloseout(artifactsDir, runId);
+    const pending = await decideFrictionTriage(artifactsDir, runId, "audit-code");
     // Same file as the canonical capture path...
     expect(pending.recordPath).toBe(frictionCapturePath(artifactsDir, runId));
     // ...and the captured event is therefore VISIBLE to the close-out walk.
     expect(pending.pending.map((s) => s.id)).toContain("evt-x");
   });
 
-  // The record a run WRITES friction to is the record its close-out READS,
-  // whatever the state's lifecycle did in between. A fully-green close calls
-  // `runClosePhase`, which archives every friction record and then `rm -r`s the
-  // whole artifacts dir — and the terminal `present_report` step reloads the
-  // state, which is now GONE. If the run id is re-derived from that null state
-  // it falls back to a different key, so the close-out does not merely read a
-  // different existing file: it materializes a fresh empty record inside the
-  // just-deleted dir, in place of the plan-keyed record the run actually wrote.
-  //
-  // The by-reference join cannot bridge it either — the fallback record is
-  // materialized with BOTH reference arrays empty, and an empty query matches
-  // nothing.
-  it("the fully-green close-out reads the SAME record the run wrote (state deleted → plan absent)", async () => {
-    const artifactsDir = join(TEST_DIR, "remediation");
-    await mkdir(artifactsDir, { recursive: true });
-    const runId = "PLAN-7";
-
-    // The host completes the walk on the run's own keyed record, BEFORE close.
-    await captureFrictionEvent(artifactsDir, runId, { id: "e1", note: "n" }, "remediate-code");
-    await recordFrictionDisposition(
-      artifactsDir,
-      runId,
-      { target_id: "e1", disposition: "keep" },
-      "remediate-code",
-    );
-    const record = await readArtifact(frictionCapturePath(artifactsDir, runId));
-    coverAllCategories(record);
-    await writeFile(frictionCapturePath(artifactsDir, runId), JSON.stringify(record) + "\n", "utf8");
-
-    // Premise: against the LIVE state (plan present) the run is fully disposed.
-    const live = await decideRemediateFrictionCloseout(artifactsDir, {
-      status: "complete",
-      plan: { plan_id: runId, findings: [], blocks: [] },
-    } as never);
-    expect(live?.action).toBe("disposed");
-    expect(live?.recordPath).toBe(frictionCapturePath(artifactsDir, runId));
-
-    // The fully-green close deletes the artifacts dir; the terminal step
-    // reloads the state and gets null (state.json went with it).
-    const { rm } = await import("node:fs/promises");
-    await rm(artifactsDir, { recursive: true, force: true });
-
-    // No dir, no record, no obligation: the decider answers the lifecycle
-    // fact rather than re-deriving a key from a state that no longer exists.
-    expect(await decideRemediateFrictionCloseout(artifactsDir, null)).toBeNull();
-
-    // …and NOTHING was minted. This is the assertion that fails when the
-    // decider is reached with the fallback key: `decideFrictionTriage`
-    // materializes the record it is handed, so the just-deleted dir comes
-    // back holding a fresh empty `friction/run.json` in place of the
-    // plan-keyed record the run actually wrote.
-    expect(existsSync(artifactsDir)).toBe(false);
-    expect(existsSync(frictionCapturePath(artifactsDir, "run"))).toBe(false);
-  });
-
-  // The half of the property the fix above must NOT buy by refusing to look: a
-  // run whose artifacts dir is STILL THERE (a non-green complete preserves it)
-  // keeps reading — and writing — the plan-keyed record it wrote all along.
-  it("a non-green complete still walks the plan-keyed record the run wrote", async () => {
-    const artifactsDir = join(TEST_DIR, "remediation");
-    await mkdir(artifactsDir, { recursive: true });
-    const state = { status: "complete" as const, plan: { plan_id: "PLAN-KEEP", findings: [], blocks: [] } } as never;
-
-    const first = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
-    expect(first?.recordPath).toBe(frictionCapturePath(artifactsDir, "PLAN-KEEP"));
-
-    // The host walks it THERE, and the next call reads that same file.
-    const record = await readArtifact(first!.recordPath);
-    coverAllCategories(record);
-    await writeFile(first!.recordPath, JSON.stringify(record) + "\n", "utf8");
-
-    const disposed = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
-    expect(disposed?.action).toBe("disposed");
-    expect(disposed?.recordPath).toBe(first?.recordPath);
-    // No second record was minted beside it.
-    expect(existsSync(frictionCapturePath(artifactsDir, "run"))).toBe(false);
-  });
-
-  it("PARITY: both halves use the SAME single-sourced triage decider (only `tool` differs)", async () => {
+  it("explicit triage uses the same schema for both diagnostic sources", async () => {
     const auditDir = join(TEST_DIR, "audit");
     const remDir = join(TEST_DIR, "remediation");
     await mkdir(auditDir, { recursive: true });
     await mkdir(remDir, { recursive: true });
-    const state = { status: "complete" as const, plan: { plan_id: "P", findings: [], blocks: [] } } as never;
 
-    await decideAuditFrictionCloseout(auditDir, "P");
-    mustDecide(await decideRemediateFrictionCloseout(remDir, state));
+    await decideFrictionTriage(auditDir, "P", "audit-code");
+    await decideFrictionTriage(remDir, "P", "remediate-code");
 
     const auditArtifact = await readArtifact(frictionCapturePath(auditDir, "P"));
     const remArtifact = await readArtifact(frictionCapturePath(remDir, "P"));
@@ -486,85 +390,8 @@ describe("end-of-run friction TRIAGE close-out (both orchestrators)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The walk is decided BEFORE the close touches disk (F2, entries 2 and 3).
-//
-// The close archives the run's friction record into the promoted deliverables
-// and then `rm -r`s the artifacts dir. The record and the state's plan id — the
-// key that names it — both go with it. So the decision has to be taken while
-// they still exist, or it cannot name the run it is closing out (and, if it
-// falls back to a shared key, mints a fresh record instead).
-//
-// The teeth of this property are in the LAST test of this block, which drives
-// the real entry points end to end: `decideNextStep` on a state that goes green
-// through the real close, the walk in between, and the next call after. The two
-// tests before it are UNIT tests of the decider — they call it directly and
-// simulate the close with an `rm` of the artifacts dir, so they pin the
-// decider's answer on a planless state. Those two do NOT drive the sequence, and
-// a caller that stopped consulting the decider entirely would leave them green.
-// ---------------------------------------------------------------------------
-describe("the friction walk is decided before the close archives the run (F2)", () => {
-  it("never consults a planless state, and mints no `friction/run.json` when the run's dir is gone", async () => {
-    const artifactsDir = join(TEST_DIR, "remediation");
-    await mkdir(artifactsDir, { recursive: true });
-
-    // A run that walked its walk on the plan-keyed record.
-    const runId = "PLAN-SEQ";
-    await captureFrictionEvent(artifactsDir, runId, { id: "e1", note: "n" }, "remediate-code");
-    await recordFrictionDisposition(
-      artifactsDir,
-      runId,
-      { target_id: "e1", disposition: "keep" },
-      "remediate-code",
-    );
-    const record = await readArtifact(frictionCapturePath(artifactsDir, runId));
-    coverAllCategories(record);
-    await writeFile(frictionCapturePath(artifactsDir, runId), JSON.stringify(record) + "\n", "utf8");
-
-    // The live state (plan present) reads exactly that record.
-    const state = {
-      status: "closing" as const,
-      plan: { plan_id: runId, findings: [], blocks: [] },
-    } as never;
-    const live = mustDecide(await decideRemediateFrictionCloseout(artifactsDir, state));
-    expect(live.action).toBe("disposed");
-    expect(live.recordPath).toBe(frictionCapturePath(artifactsDir, runId));
-
-    // The fully-green close removes the whole artifacts dir, state and record
-    // alike. Nothing survives to key a walk on.
-    const { rm } = await import("node:fs/promises");
-    await rm(artifactsDir, { recursive: true, force: true });
-
-    // RED PROOF for the deleted fallback. With `stateRunId` falling back to
-    // "run", this call reaches `decideFrictionTriage`, which MATERIALIZES the
-    // record it is handed — recreating the directory the close just deleted and
-    // filing a fresh empty `friction/run.json` inside it. The run would then
-    // block forever on a record it created for itself (the 2026-08-24 record
-    // still sitting in the main checkout).
-    expect(await decideRemediateFrictionCloseout(artifactsDir, null)).toBeNull();
-    expect(existsSync(artifactsDir)).toBe(false);
-    expect(existsSync(frictionCapturePath(artifactsDir, "run"))).toBe(false);
-  });
-
-  it("a state with no plan id names no run, so it mints no record either", async () => {
-    const artifactsDir = join(TEST_DIR, "remediation");
-    await mkdir(artifactsDir, { recursive: true });
-    // A state that exists but carries no plan is the same answer as no state:
-    // there is no run to key a walk on. `decideFrictionTriage` would MATERIALIZE
-    // whatever key it was handed, so naming one here would mint a record for a
-    // run that never ran.
-    const planless = { status: "complete" as const } as never;
-    expect(await decideRemediateFrictionCloseout(artifactsDir, planless)).toBeNull();
-    expect(existsSync(join(artifactsDir, "friction"))).toBe(false);
-  });
-
-  // THE real-sequence test (F4). The two tests above drive the decider directly
-  // and simulate the close with an `rm`; this one drives the TOOL: `closing`
-  // state in, real `next-step` calls out, close and archive included. It is the
-  // only test here that can fail because a CALLER stopped consulting the
-  // decider — which is precisely how the 2026-08-24 defect survived the guard
-  // it was supposedly covered by.
-  it("drives the real close: the plan-keyed walk gates it, then the close archives the dir", async () => {
+describe("product completion preserves development diagnostics without requiring reflection", () => {
+  it("external remediation closes and archives pending diagnostics without a development friction walk", async () => {
     const harness = createNextStepHarness(".test-friction-closeout-real");
     const planId = "PLAN-REAL";
     try {
@@ -572,39 +399,36 @@ describe("the friction walk is decided before the close archives the run (F2)", 
       // A `closing` state with a `closing_plan` and NO `test_command`: the close
       // needs no host-run test to go green. (Same fixture, and same greenness,
       // as `completeRunAndDeleteState` in outcomes-roundtrip.test.ts.)
-      await harness.saveState({
+      const state = {
         status: "closing",
         plan: {
           plan_id: planId,
-          findings: [],
-          blocks: [],
+          objective: "Report unchanged result",
+          non_goals: [], requirements: [], units: [], source_dispositions: [], review_counterexamples: [],
+          findings: [], review_revision_sha256: "a".repeat(64),
           project_type: "unknown",
           candidate_closing_actions: ["none"],
         },
         items: {},
         closing_plan: { action: "none" },
-      } as never);
+      } as never;
       await harness.acknowledgeResume();
       await harness.writeIntentCheckpoint();
+      await writeApprovedPlanFixture(harness.ARTIFACTS_DIR, state, harness.REPO_DIR);
+      await harness.saveState(state);
 
-      // (ii) The run's walk is still owed, so the FIRST call does not close: it
-      // emits the blocking close step, and the record it names is the one keyed
-      // by the plan the run is closing out — not a fallback name.
-      const blocked = await decideNextStep({ root: harness.REPO_DIR });
-      expect(blocked.step_kind).toBe("close_run");
-      expect(blocked.status).toBe("ready");
-      const named = blocked.artifact_paths.friction_record as string;
-      expect(named.endsWith(`${planId}.json`), `expected a ${planId}-keyed record, got '${named}'`).toBe(true);
-      // The close has NOT run: its deliverables do not exist yet.
-      expect(existsSync(join(harness.REPO_DIR, ".audit-tools", "remediation-outcomes.json"))).toBe(false);
-
-      // (iii) The host walks THAT record, completely.
-      await harness.walkFriction(planId);
-
-      // (iv) The next call re-decides the walk as disposed and closes for real.
+      await captureFrictionEvent(harness.ARTIFACTS_DIR, planId,
+        { id: "pending-event", note: "Diagnostic to review during development closeout" }, "remediate-code");
+      // Product completion never requires the target's operator to perform
+      // audit-tools development reflection. Preserve the pending evidence.
       const closed = await decideNextStep({ root: harness.REPO_DIR });
       expect(closed.step_kind).toBe("present_report");
       expect(existsSync(join(harness.REPO_DIR, ".audit-tools", "remediation-outcomes.json"))).toBe(true);
+
+      const archived = await readArtifact(join(harness.REPO_DIR, ".audit-tools", `remediation-friction-${planId}.json`));
+      expect(archived.frictions.some((f) => f.id === "pending-event")).toBe(true);
+      expect(archived.category_attestations ?? []).toEqual([]);
+      expect(closed.artifact_paths.friction_record).toBeUndefined();
 
       // (v) NOTHING re-materialized a friction record under the legacy fallback
       // key. `decideFrictionTriage` MATERIALIZES the record it is handed, so a
@@ -755,7 +579,7 @@ describe("CP-NODE-24 inv-4: the harness threads the injectable final-gate runner
     ): Promise<Record<string, unknown> | undefined> {
       await harness.resetTestRepo();
       await makeMonorepoShaped(harness.REPO_DIR);
-      await harness.saveState({
+      const state = canonicalStateFromLegacyFixture({
         status: "implementing",
         plan: {
           plan_id: "PLAN-THH",
@@ -788,6 +612,8 @@ describe("CP-NODE-24 inv-4: the harness threads the injectable final-gate runner
         closing_plan: { action: "none" },
       } as never);
       await harness.writeIntentCheckpoint();
+      await writeApprovedPlanFixture(harness.ARTIFACTS_DIR, state, harness.REPO_DIR);
+      await harness.saveState(state);
       await harness.acknowledgeResume();
       await decideNextStep({ root: harness.REPO_DIR, ...options } as never);
       const recordPath = finalGateOutcomePath(harness.ARTIFACTS_DIR);
@@ -840,8 +666,7 @@ describe("CP-NODE-24 inv-5: INV-COVERAGE — this module's 2 owned ids", () => {
     const { buildRemediationOutcomesReport } = await import(
       "../../src/remediate/phases/close.js"
     );
-    return buildRemediationOutcomesReport(
-      {
+    const state = canonicalStateFromLegacyFixture({
         status: "closing",
         plan: {
           plan_id: "PLAN-THH-COV",
@@ -856,19 +681,17 @@ describe("CP-NODE-24 inv-5: INV-COVERAGE — this module's 2 owned ids", () => {
             affected_files: [{ path: OWNED_FILE }],
             evidence: [`${OWNED_FILE}:1 evidence`],
           })),
-          blocks: [
-            {
-              block_id: "B-1",
-              items: OWNED_IDS,
-              parallel_safe: true,
-              touched_files: [],
-            },
-          ],
+          blocks: OWNED_IDS.map(id => ({ block_id: id, items: [id], touched_files: [OWNED_FILE] })),
           project_type: "unknown",
           candidate_closing_actions: ["none"],
         },
         items,
-      } as never,
+      } as never);
+    state.source_verifications = Object.fromEntries(state.plan!.findings.map(finding => {
+      const item = items[finding.id] as Record<string, unknown>;
+      return [finding.id, { evidence: item.evidence, disposition_override: item.disposition_override, recorded_by_module: item.recorded_by_module, review_revision_sha256: state.plan!.review_revision_sha256, source_sha256: contentSha256(finding) }];
+    })) as typeof state.source_verifications;
+    return buildRemediationOutcomesReport(state,
       {
         contract_version: "remediate-code-closing-result/v1alpha1",
         action: "none",

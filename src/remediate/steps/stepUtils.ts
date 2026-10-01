@@ -1,4 +1,4 @@
-import type { Finding } from "../state/types.js";
+import type { Finding } from "audit-tools/shared";
 
 export type FindingRiskTier = "safe" | "substantive" | "context_dependent";
 

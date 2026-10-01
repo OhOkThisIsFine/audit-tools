@@ -20,24 +20,41 @@ intake
   → intent_checkpoint       [user gate]
   → intent_equivalence      [host_delegation for a prose-only delta; every other
                              arm resolves deterministically — DD-9]
-  → charter_extraction      [host_delegation, gated by the intent-checkpoint ceiling;
-                             three blind estimator lanes each submit one goal DAG]
-  → charter_comparison      [host_delegation, the comparison reader confirms tool-proposed
-                             correspondences and records the typed n-ary differences]
-  → charter_fidelity        [host_delegation, a separate lane verifies each finding
-                             candidate against its own source slices]
-  → design_review × 2       [parallel host_delegation: contract + conceptual]
-  → charter_clarification   [host_delegation loop, gated by ceiling+attention — Phase D]
-  → systemic_challenge      [host_delegation loop, gated by ceiling — Phase E]
-  → planning
-  → host_review_handoff     [complete provider-neutral workload + bound result ingestion]
+  → planning                [confirmed purpose/scope and usable source context]
+  → concurrent investigation
+      scoped review workload [bound tasks, partial result ingestion]
+      architectural inquiry  [isolated charter extraction → comparison → fidelity;
+                               contract/conceptual review → clarification/challenge]
+      targeted feedback      [concrete discoveries add/redirect affected work]
+  → investigation join      [required architectural and scoped work reconciled]
   → runtime_validation      [deterministic — runs planned runtime-validation commands]
   → synthesis
   → synthesis_narrative     [host_delegation]
-  → friction_capture        [terminal close-out — resolved at the completion
-                             boundary in decideAuditFrictionCloseout, not by the
-                             bundle-derived obligation scan]
+  → present_report          [capture/archive diagnostics without a development gate]
 ```
+
+---
+
+## Investigation dependencies
+
+Architectural discovery informs scoped planning, and scoped evidence can reveal an
+architectural assumption worth revisiting. Neither investigation must universally
+finish before the other starts. Begin useful scoped work once confirmed intent
+and source context support it; expose that ready workload alongside independent
+architectural tasks in the same host boundary.
+
+Use concrete, grounded discoveries to add or redirect only affected work. Track
+which evidence delta has been consumed so replay does not create duplicate tasks
+or restart every broad review. An unresolved architectural question holds only
+work whose interpretation actually depends on its answer, not every inspection of
+those files. A temporarily held frontier is not a completed investigation.
+
+Preserve unchanged issued bindings and accepted results when adding work. Source
+or premise changes still invalidate affected results. Only the full fold consumes
+host submissions; the deterministic plan draw does not. Charter source readers
+remain blind to peer and scoped-review results, even when those tasks are issued
+alongside them. Reconcile required architecture work and targeted follow-ups before
+synthesis can present complete conclusions.
 
 ---
 

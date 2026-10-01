@@ -2,8 +2,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
-import { RunLogger, auditArtifactsDir, readAuditReadState } from "audit-tools/shared";
-import { AUDIT_FRICTION_RUN_ID, decideAuditFrictionCloseout } from "./nextStep.js";
+import { RunLogger, readAuditReadState } from "audit-tools/shared";
 import { runIntakeExecutor } from "./intakeExecutors.js";
 import { runIntentEquivalenceResolve } from "./intentEquivalenceExecutor.js";
 import {
@@ -237,26 +236,4 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       requireRoot(options.root, "syntax_resolution_executor"),
       { analyzerConsent: options.externalAcquisition?.analyzerConsent },
     ),
-  // friction_capture_executor is retained for schema compatibility but is unreachable:
-  // the friction_capture_current obligation is not in deriveAuditState, so the engine
-  // never selects it. The triage now fires in the present_report terminal step
-  // (nextStepHelpers.ts / nextStepCommand.ts) via decideAuditFrictionCloseout.
-  friction_capture_executor: async (bundle, { options }) => {
-    const artifactsDir =
-      options.artifactsDir ??
-      auditArtifactsDir(requireRoot(options.root, "friction_capture_executor"));
-    const decision = await decideAuditFrictionCloseout(artifactsDir, AUDIT_FRICTION_RUN_ID);
-    return {
-      updated: bundle,
-      // A literal, not `frictionCapturePath(artifactsDir, AUDIT_FRICTION_RUN_ID)`: the
-      // write-site extractor (scripts/shared/executor-write-sites.mjs, runnerWriteSet)
-      // reads artifact names out of this array as string literals. DECL-10 pins this
-      // literal against the derived path.
-      artifacts_written: ["friction/run.json"],
-      progress_summary:
-        decision.action === "disposed"
-          ? "Friction triage disposed."
-          : `Friction triage pending: ${decision.pending.length} item(s), needs_open_observations=${decision.needs_open_observations}.`,
-    };
-  },
 };

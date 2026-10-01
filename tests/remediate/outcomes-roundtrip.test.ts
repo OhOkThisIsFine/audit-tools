@@ -1,10 +1,11 @@
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 // OBL-018 — full-run round-trip: `remediation-outcomes.json` must be retryable
 // on its own. The `retryable remediation-outcomes contract` describe in
 // next-step.test.ts asserts individual contract fields directly; this file
 // complements it by completing a run whose findings end in every terminal
 // disposition class (fixed / failed / ignored / checkpoint-dropped / deduped),
 // deleting state.json (and every other state artifact), and reconstructing the
-// full Finding[] — with RemediationBlock context — from the
+// full Finding[] — with execution-unit context — from the
 // outcomes file alone, asserting deep equivalence with the original run.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -23,9 +24,6 @@ import type {
   RemediationOutcomeItem,
 } from "../../src/remediate/state/types.js";
 import { scratchDir } from "../helpers/scratch.js";
-// The friction vocabulary is single-sourced in shared, so the walk helper below
-// attests every category by iterating it rather than restating the list.
-import { FRICTION_CATEGORIES } from "audit-tools/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-outcomes-roundtrip");
@@ -79,7 +77,7 @@ const CHECKPOINT_RATIONALE =
  * documented and implemented its items looks when it reaches `closing`.
  */
 function makeCompletedRunClosingState(): RemediationState {
-  return {
+  return canonicalStateFromLegacyFixture({
     status: "closing",
     plan: {
       plan_id: "PLAN-ROUNDTRIP",
@@ -121,6 +119,7 @@ function makeCompletedRunClosingState(): RemediationState {
         failure_reason: "Ignored by user decision.",
       },
     },
+    finding_dispositions: { "F-IGN": { status: "ignored", reason: "Ignored by user decision." } },
     closing_plan: { action: "none" },
     plan_coverage: {
       contract_version: "remediate-code-coverage/v1alpha1",
@@ -132,9 +131,9 @@ function makeCompletedRunClosingState(): RemediationState {
       checkpoint_dropped_count: 1,
       phantom_dropped_count: 0,
       entries: [
-        { finding_id: "F-FIX", title: F_FIX.title, disposition: "planned", block_id: "B-001" },
-        { finding_id: "F-FAIL", title: F_FAIL.title, disposition: "planned", block_id: "B-002" },
-        { finding_id: "F-IGN", title: F_IGN.title, disposition: "planned", block_id: "B-003" },
+        { finding_id: "F-FIX", title: F_FIX.title, disposition: "planned", unit_ids: ["B-001"] },
+        { finding_id: "F-FAIL", title: F_FAIL.title, disposition: "planned", unit_ids: ["B-002"] },
+        { finding_id: "F-IGN", title: F_IGN.title, disposition: "planned", unit_ids: ["B-003"] },
         {
           finding_id: "F-DUP",
           title: F_DUP.title,
@@ -149,7 +148,7 @@ function makeCompletedRunClosingState(): RemediationState {
         },
       ],
     },
-  };
+  });
 }
 
 /**
@@ -192,29 +191,6 @@ async function acknowledgeResume(): Promise<void> {
   );
 }
 
-/**
- * Complete the run's friction close-out walk on the plan-keyed record.
- *
- * The close is GATED on this walk: `handleClosing` decides it before the close
- * touches disk, so an unwalked run stops at the blocking `close_run` step rather
- * than folding to `present_report`. This suite wants the FOLD, so it walks the
- * record first — exactly what a host does, on the key the close keys on.
- */
-async function writeFrictionWalk(planId: string): Promise<void> {
-  const dir = join(ARTIFACTS_DIR, "friction");
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    join(dir, `${planId}.json`),
-    JSON.stringify({
-      category_attestations: FRICTION_CATEGORIES.map((category) => ({
-        category,
-        note: "none this run",
-      })),
-    }) + "\n",
-    "utf8",
-  );
-}
-
 async function writeIntentCheckpoint(): Promise<void> {
   await writeFile(
     join(ARTIFACTS_DIR, "intent_checkpoint.json"),
@@ -236,14 +212,14 @@ async function writeIntentCheckpoint(): Promise<void> {
  */
 async function completeRunAndDeleteState(): Promise<any> {
   await writeStructuredAuditSource();
-  await new StateStore(ARTIFACTS_DIR).saveState(makeCompletedRunClosingState());
-  // The close is gated on the run's friction walk — satisfy it first.
-  await writeFrictionWalk("PLAN-ROUNDTRIP");
-  await acknowledgeResume();
+  const state = makeCompletedRunClosingState();
   await writeIntentCheckpoint();
+  await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+  await new StateStore(ARTIFACTS_DIR).saveState(state);
+  await acknowledgeResume();
 
   // Folded: closing state runs close and returns present_report in one call.
-  const step = await decideNextStep({ root: REPO_DIR });
+  const step = await decideNextStep({ root: REPO_DIR, skipFinalGate: true });
   expect(step.step_kind).toBe("present_report");
   expect(existsSync(OUTCOMES_PATH)).toBe(true);
 
@@ -263,15 +239,17 @@ async function completeRunAndDeleteState(): Promise<any> {
 }
 
 // ---------------------------------------------------------------------------
-// Reconstruction — rebuilds the run's Finding[] (with spec and block context)
+// Reconstruction — rebuilds the run's Finding[] (with execution-unit context)
 // from the outcomes file alone. Every required field is asserted with a message
 // naming it: a missing field here is exactly the regression OBL-018 exists to
 // catch, so the failure must say which field the contract stopped persisting.
 // ---------------------------------------------------------------------------
 
-type TerminalDisposition =
+type ReconstructedDisposition =
   | "fixed"
   | "failed"
+  | "pending"
+  | "deferred"
   | "ignored"
   | "skipped"
   | "checkpoint_dropped"
@@ -279,15 +257,15 @@ type TerminalDisposition =
 
 interface ReconstructedFinding {
   finding: Finding;
-  disposition: TerminalDisposition;
-  block?: { block_id: string; block_dependencies: string[] };
+  disposition: ReconstructedDisposition;
+  execution?: { unit_ids: string[]; unit_dependencies: string[] };
   /** Surviving canonical finding a deduped entry was merged into. */
   folded_into?: string;
   /** Drop rationale for checkpoint-dropped entries. */
   drop_rationale?: string;
 }
 
-const DISPOSITION_BY_DROP_REASON: Record<string, TerminalDisposition> = {
+const DISPOSITION_BY_DROP_REASON: Record<string, ReconstructedDisposition> = {
   cross_lens_dedup: "deduped",
   intent_checkpoint: "checkpoint_dropped",
 };
@@ -295,22 +273,26 @@ const DISPOSITION_BY_DROP_REASON: Record<string, TerminalDisposition> = {
 function reconstructFindings(report: any): ReconstructedFinding[] {
   const byId = new Map<string, ReconstructedFinding>();
 
+  const droppedIds = new Set<string>((report.plan_coverage?.entries ?? []).filter((entry: OutcomeCoverageEntry) => entry.drop_reason).map((entry: OutcomeCoverageEntry) => entry.finding_id));
+  const sourceOutcomes = new Map<string, RemediationOutcomeItem>((report.outcomes ?? []).map((entry: RemediationOutcomeItem) => [entry.finding_id, entry]));
+  expect(sourceOutcomes.size).toBe(report.outcomes.length);
   for (const entry of (report.outcomes ?? []) as RemediationOutcomeItem[]) {
     const id = entry.finding_id;
     expect(byId.has(id), `finding ${id} appears more than once in outcomes`).toBe(false);
     expect(entry.finding, `outcomes entry ${id} is missing field 'finding' (full Finding payload)`).toBeDefined();
     expect(entry.final_status, `outcomes entry ${id} is missing field 'final_status'`).toBeDefined();
-    expect(entry.block_id, `outcomes entry ${id} is missing field 'block_id'`).toBeDefined();
+    if (droppedIds.has(id)) continue; // precise drop disposition comes from retained coverage below
+    expect(entry.unit_ids, `outcomes entry ${id} is missing field 'unit_ids'`).toBeDefined();
     expect(
-      entry.block_dependencies,
-      `outcomes entry ${id} is missing field 'block_dependencies'`,
+      entry.unit_dependencies,
+      `outcomes entry ${id} is missing field 'unit_dependencies'`,
     ).toBeDefined();
     byId.set(id, {
       finding: entry.finding,
       disposition: entry.final_status,
-      block: {
-        block_id: entry.block_id,
-        block_dependencies: entry.block_dependencies,
+      execution: {
+        unit_ids: entry.unit_ids,
+        unit_dependencies: entry.unit_dependencies,
       },
     });
   }
@@ -323,7 +305,9 @@ function reconstructFindings(report: any): ReconstructedFinding[] {
   for (const entry of coverageEntries) {
     if (!entry.drop_reason) continue; // planned entries are reconstructed from outcomes
     const id = entry.finding_id;
-    expect(byId.has(id), `never-planned finding ${id} also appears in outcomes`).toBe(false);
+    expect(byId.has(id), `never-planned finding ${id} was reconstructed twice`).toBe(false);
+    expect(sourceOutcomes.get(id)?.finding, `source outcome ${id} lost its immutable original`).toEqual(entry.finding);
+    expect(sourceOutcomes.get(id)?.outcome).toBe("ignored");
     expect(
       entry.finding,
       `coverage entry ${id} (drop_reason '${entry.drop_reason}') is missing field 'finding' (full Finding payload)`,
@@ -393,7 +377,7 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
     const report = await completeRunAndDeleteState();
 
     const outcomeIds = report.outcomes.map((entry: any) => entry.finding_id).sort();
-    expect(outcomeIds).toEqual(["F-FAIL", "F-FIX", "F-IGN"]);
+    expect(outcomeIds).toEqual(["F-CHK", "F-DUP", "F-FAIL", "F-FIX", "F-IGN"]);
 
     const coverageIds = report.plan_coverage.entries
       .map((entry: any) => entry.finding_id)
@@ -401,7 +385,7 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
     expect(coverageIds).toEqual(["F-CHK", "F-DUP", "F-FAIL", "F-FIX", "F-IGN"]);
 
     // Every source finding id is recorded exactly once across the union of the
-    // item outcomes and the never-planned coverage entries.
+    // source outcomes, with coverage retaining each never-planned disposition.
     const reconstructed = reconstructFindings(report);
     expect(reconstructed.map((entry) => entry.finding.id)).toEqual([
       "F-CHK",
@@ -412,7 +396,7 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
     ]);
   });
 
-  it("Finding[] with spec and block context round-trips from remediation-outcomes.json alone", async () => {
+  it("Finding[] with execution-unit context round-trips from remediation-outcomes.json alone", async () => {
     const report = await completeRunAndDeleteState();
 
     const reconstructed = reconstructFindings(report);
@@ -428,23 +412,23 @@ describe("remediation-outcomes round-trip (OBL-018)", () => {
       },
       // Deduped: full payload, traceable to the surviving canonical finding.
       { finding: F_DUP, disposition: "deduped", folded_into: "F-FIX" },
-      // Failed (exhausted retries / blocked): block context preserved.
+      // Failed (exhausted retries / blocked): execution-unit context preserved.
       {
         finding: F_FAIL,
         disposition: "failed",
-        block: { block_id: "B-002", block_dependencies: ["B-001"] },
+        execution: { unit_ids: ["B-002"], unit_dependencies: ["B-001"] },
       },
-      // Fixed: block context preserved.
+      // Fixed: execution-unit context preserved.
       {
         finding: F_FIX,
         disposition: "fixed",
-        block: { block_id: "B-001", block_dependencies: [] },
+        execution: { unit_ids: ["B-001"], unit_dependencies: [] },
       },
-      // Ignored: block membership survives.
+      // Ignored: execution-unit membership survives.
       {
         finding: F_IGN,
         disposition: "ignored",
-        block: { block_id: "B-003", block_dependencies: [] },
+        execution: { unit_ids: ["B-003"], unit_dependencies: [] },
       },
     ];
 

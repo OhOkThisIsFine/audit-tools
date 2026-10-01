@@ -15,8 +15,8 @@ import { fileURLToPath } from "node:url";
 
 import { FindingSchema, findingIdentity } from "../../src/shared/types/finding.js";
 import { SEVERITIES } from "../../src/shared/types/lens.js";
-import { buildObligationLedger } from "../../src/shared/types/obligationLedger.js";
-import { CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION } from "../../src/shared/types/contractPipeline.js";
+import { executionPlanReferenceIssues } from "../../src/shared/types/executionPlan.js";
+import { executionPlanForGraph } from "./executionPlanGraphFixture.js";
 import {
   FINDINGS_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
@@ -121,21 +121,11 @@ test("INV-shared-core-01: audit_result.schema.json required keys are present in 
 // ── INV-shared-core-02: No provider-name→tier table ─────────────────────────
 
 
-test("INV-shared-core-04: ObligationEntry is exported from shared types", () => {
-  // The ObligationEntry type is the shared obligation abstraction.
-  // We verify it is accessible via shared and has the required shape fields.
-  const ledger = buildObligationLedger({
-    goal_id: "test-goal",
-    obligations: [
-      { id: "OBL-1", description: "test obligation", kind: "behavioral", depends_on: [], status: "pending" },
-    ],
-  });
-
-  expect(ledger.contract_version).toBe(CONTRACT_PIPELINE_OBLIGATION_LEDGER_VERSION);
-  expect(ledger.goal_id).toBe("test-goal");
-  expect(ledger.obligations.length).toBe(1);
-  expect(ledger.obligations[0].id).toBe("OBL-1");
-  expect(typeof ledger.obligations[0].depends_on !== "undefined", "ObligationEntry must have depends_on").toBeTruthy();
+test("INV-shared-core-04: reviewed execution requirements have stable identities", () => {
+  const plan = executionPlanForGraph([["A", []]]);
+  expect(plan.requirements[0]!.id).toBe("REQ-A");
+  expect(plan.units[0]!.requirement_ids).toEqual(["REQ-A"]);
+  expect(executionPlanReferenceIssues(plan, [])).toEqual([]);
 });
 
 // ── INV-shared-core-05: Finding identity subset ───────────────────────────────
@@ -358,53 +348,15 @@ test("INV-shared-core-06: approved projection enforces closed membership and rec
   }
 });
 
-// ── INV-shared-core-07: ObligationEntry.depends_on cycle-checked at construction ─
-
-test("INV-shared-core-07: buildObligationLedger throws when depends_on forms a direct cycle (A → B → A)", () => {
-  assert.throws(
-    () => buildObligationLedger({
-      goal_id: "g",
-      obligations: [
-        { id: "A", description: "a", kind: "behavioral", depends_on: ["B"], status: "pending" },
-        { id: "B", description: "b", kind: "behavioral", depends_on: ["A"], status: "pending" },
-      ],
-    }),
-    /cycle/i,
-    "A direct depends_on cycle must be caught at construction time",
-  );
+// INV-shared-core-07: the actual executable dependency graph is cycle-checked.
+test("INV-shared-core-07: direct and transitive execution cycles are refused", () => {
+  for (const graph of [[["A", ["B"]], ["B", ["A"]]], [["A", ["B"]], ["B", ["C"]], ["C", ["A"]]]] as Array<Array<[string, string[]]>>) {
+    expect(executionPlanReferenceIssues(executionPlanForGraph(graph), []).join("\n")).toMatch(/cycle/);
+  }
 });
-
-test("INV-shared-core-07: buildObligationLedger throws when depends_on forms a transitive cycle (A → B → C → A)", () => {
-  assert.throws(
-    () => buildObligationLedger({
-      goal_id: "g",
-      obligations: [
-        { id: "A", description: "a", kind: "behavioral", depends_on: ["B"], status: "pending" },
-        { id: "B", description: "b", kind: "behavioral", depends_on: ["C"], status: "pending" },
-        { id: "C", description: "c", kind: "behavioral", depends_on: ["A"], status: "pending" },
-      ],
-    }),
-    /cycle/i,
-    "A transitive depends_on cycle must be caught at construction time",
-  );
-});
-
-test("INV-shared-core-07: buildObligationLedger accepts a valid DAG with no cycles", () => {
-  const ledger = buildObligationLedger({
-    goal_id: "g",
-    obligations: [
-      { id: "A", description: "a", kind: "behavioral", depends_on: [], status: "pending" },
-      { id: "B", description: "b", kind: "behavioral", depends_on: ["A"], status: "pending" },
-      { id: "C", description: "c", kind: "behavioral", depends_on: ["A", "B"], status: "pending" },
-    ],
-  });
-  expect(ledger.obligations.length).toBe(3);
-  expect(ledger.goal_id).toBe("g");
-});
-
-test("INV-shared-core-07: buildObligationLedger accepts empty obligations list", () => {
-  const ledger = buildObligationLedger({ goal_id: "g", obligations: [] });
-  expect(ledger.obligations.length).toBe(0);
+test("INV-shared-core-07: valid execution DAG and empty work have no graph issues", () => {
+  expect(executionPlanReferenceIssues(executionPlanForGraph([["A", []], ["B", ["A"]], ["C", ["A", "B"]]]), [])).toEqual([]);
+  expect(executionPlanReferenceIssues(executionPlanForGraph([]), [])).toEqual([]);
 });
 
 // ── INV-shared-core-08: ClaudeCodeConfig.dangerously_skip_permissions flagged ─

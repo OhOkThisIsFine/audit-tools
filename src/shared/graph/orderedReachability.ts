@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/ordered-reachability.test.ts, tests/audit/dependency-slices.test.ts, tests/remediate/contract-pipeline-artifact-store.test.ts
+// sites-pinned: tests/shared/ordered-reachability.test.ts, tests/audit/dependency-slices.test.ts
 /**
  * Expand a reached set by repeated scans of caller-ordered directed edges.
  * Edge order is observable through Set insertion order; this deliberately does

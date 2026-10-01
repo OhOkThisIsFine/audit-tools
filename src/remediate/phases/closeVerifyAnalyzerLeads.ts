@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/close-verify-analyzer-leads.test.ts, tests/remediate/unit-source-outcomes.test.ts
 import {
   EXTERNAL_ANALYZER_CANDIDATES,
   loadAnalyzerPolicy,
@@ -11,6 +12,7 @@ import {
   type AnalyzerPolicy,
   type MechanicalVerification,
 } from "audit-tools/shared";
+import { isVerifiedCompleteStatus } from "../state/itemStatus.js";
 import type { RemediationState } from "../state/store.js";
 
 /**
@@ -63,18 +65,14 @@ export async function verifyAnalyzerLeads(params: {
   overrides?: AnalyzerLeadVerifyOverrides;
 }): Promise<AnalyzerLeadVerifyOutcome> {
   const { state, root, overrides } = params;
-  const findingsById = new Map(
-    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
-  );
-
-  // Only `resolved` items claim an applied fix worth mechanically verifying.
-  // `verified_no_change` deliberately left the lead in place — re-running the
-  // analyzer would trivially re-find it, which is not evidence of anything.
   const targets: Array<{ finding_id: string; provenance: AnalyzerLeadProvenance }> = [];
-  for (const item of Object.values(state.items ?? {})) {
-    if (item.status !== "resolved") continue;
-    const provenance = findingsById.get(item.finding_id)?.analyzer_provenance;
-    if (provenance) targets.push({ finding_id: item.finding_id, provenance });
+  for (const finding of state.plan?.findings ?? []) {
+    if (state.finding_dispositions?.[finding.id]) continue;
+    const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
+    const items = units.map(unit => state.items?.[unit.id]);
+    if (items.length === 0 || !items.every(item => item && isVerifiedCompleteStatus(item.status)) ||
+        !items.some(item => item?.status === "resolved")) continue;
+    if (finding.analyzer_provenance) targets.push({finding_id: finding.id, provenance: finding.analyzer_provenance});
   }
   if (targets.length === 0) return NO_OP;
 

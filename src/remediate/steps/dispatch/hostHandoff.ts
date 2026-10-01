@@ -6,7 +6,10 @@ import { corroborateHostResult, corroborateNoChangeClaim } from "./hostCorrobora
 import { runRequiredTest, rerunRequiredTests, requiredTestIssue, requiredTestVerdictKey, type RequiredTestFailure } from "./requiredTests.js";
 import { readIntentCheckpoint } from "../../../shared/types/intentCheckpoint.js";
 import { checkContractConformance, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
-import type { ImplementationContext } from "../../../shared/types/contractPipeline/implementation.js";
+import type { ExecutionUnit, ExecutionRequirement } from "../../../shared/types/executionPlan.js";
+import { executionPlanReferenceIssues } from "../../../shared/types/executionPlan.js";
+import { executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
+import { assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPlanAuthorityError } from "../../contractPipeline/runtimePlanAuthority.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff.test.ts
 //   host-handoff-corroboration: the bounded required-test failure message.
 //   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line
@@ -17,7 +20,6 @@ import { isAbsolute, join } from "node:path";
 import {
   headCommit,
   commandLeavesDeclaredShape,
-  FindingSchema,
   SUBMISSION_ISSUE_REMEDY,
   WORKLOAD_ISSUE_REMEDY,
   bindWorkerPrompt,
@@ -30,8 +32,8 @@ import {
   isMissingObservation,
   compareCodeUnits,
   contentSha256,
-  declaredInvariantIds,
   deriveLaneDemand,
+  estimateTokensFromBytes,
   discoverLandingGates,
   hasExactKeys,
   identityFailureDiagnostic,
@@ -60,7 +62,6 @@ import {
   severityRank,
   stringArray,
   stableStringify,
-  withGlossaryScope,
   writeJsonFile,
   type FindingSeverity,
   type HostHandoffPaths,
@@ -74,14 +75,12 @@ import {
   type RemediationState,
 } from "../../state/store.js";
 import {
-  REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1,
   REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2,
   REMEDIATION_HOST_SCOPE_SEMANTICS,
   RemediationHostHandoffRecordSchema,
   ConformanceReviewBindingSchema,
   RemediationPlanSchema,
   isClarificationCategory,
-  type RemediationBlock,
   type RemediationHostHandoffRecord,
 } from "../../state/types.js";
 import {
@@ -179,6 +178,8 @@ const CURRENT_STATE_KEYS = new Set([
   "closing_plan",
   "contract_version",
   "items",
+  "finding_dispositions",
+  "source_verifications",
   "host_handoff",
   "conformance_review",
   "plan",
@@ -190,7 +191,7 @@ const CURRENT_STATE_KEYS = new Set([
 ]);
 
 const CURRENT_ITEM_KEYS = new Set([
-  "block_id",
+  "unit_id",
   "clarification_context",
   "clarification_question",
   "completed_at",
@@ -204,10 +205,8 @@ const CURRENT_ITEM_KEYS = new Set([
   "host_landed_files",
   "host_result_evidence",
   "conformance_review",
-  "finding_id",
   "incomplete_coverage_attempts",
   "last_successful_step",
-  "mechanical_verification",
   "rework_count",
   "started_at",
   "status",
@@ -253,40 +252,27 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
     }
   }
 
-  const blockById = new Map<string, RemediationBlock>();
-  for (const block of parsedPlan.data.blocks) {
-    if (blockById.has(block.block_id)) return null;
-    blockById.set(block.block_id, block);
-  }
-
+  const unitIds = new Set(parsedPlan.data.units.map(unit => unit.id));
+  if (unitIds.size !== parsedPlan.data.units.length) return null;
   const knownStatuses = new Set<string>(ITEM_STATUSES);
-  for (const [findingId, item] of Object.entries(stateItems)) {
-    if (
-      !isRecord(item) ||
-      !hasOnlyKnownKeys(item, CURRENT_ITEM_KEYS) ||
-      item.finding_id !== findingId ||
-      typeof item.block_id !== "string" ||
-      !knownStatuses.has(String(item.status))
-    ) {
-      return null;
-    }
+  for (const [unitId, item] of Object.entries(stateItems)) {
+    if (!isRecord(item) || !hasOnlyKnownKeys(item, CURRENT_ITEM_KEYS) ||
+        item.unit_id !== unitId || !unitIds.has(unitId) || !knownStatuses.has(String(item.status))) return null;
     if (item.conformance_review !== undefined && !AcceptedConformanceReviewSchema.safeParse(item.conformance_review).success) return null;
-    const block = blockById.get(item.block_id);
-    if (!block || !block.items.includes(findingId)) return null;
   }
-
-  for (const block of parsedPlan.data.blocks) {
-    if (
-      block.items.some((findingId) => {
-        const item = stateItems[findingId];
-        return !isRecord(item) || item.block_id !== block.block_id;
-      })
-    ) {
-      return null;
-    }
-  }
+  if ([...unitIds].some(id => !stateItems[id])) return null;
 
   return value as unknown as CurrentRemediationHostState;
+}
+
+/** Preserve the host boundary's public repair error while sharing its authority policy. */
+async function assertApprovedRuntimePlan(artifactsDir: string, state: CurrentRemediationHostState) {
+  try {
+    return await assertCurrentPlanAuthority(artifactsDir, state);
+  } catch (error) {
+    if (!(error instanceof RemediationPlanAuthorityError)) throw error;
+    throw new RemediationHostPreparationError(error.code, error.message);
+  }
 }
 
 function normalizeDeclaredPath(root: string, candidate: string, label: string): string {
@@ -295,125 +281,6 @@ function normalizeDeclaredPath(root: string, candidate: string, label: string): 
   }
   const normalized = repoRelativePath(root, candidate, label);
   return candidate.endsWith("/") ? `${normalized}/` : normalized;
-}
-
-/**
- * Recover only the directory marker the pre-0.50.2 producer erased.
- *
- * The persisted workload remains byte-for-byte bound. This creates an
- * in-memory consumer view only after canonical workload validation, and only
- * when a finding assigned to this same work item carries the exact slash form
- * plus a syntactically valid plan-time content hash. Live filesystem shape,
- * git tree shape, and a coincidentally named directory are deliberately not
- * evidence: any of those would turn an exact legacy file scope into a blanket
- * widening rule.
- */
-interface LegacyDirectoryScopeRecovery {
-  readonly workItem: RemediationHostWorkItem;
-  readonly directoryPaths: readonly string[];
-}
-
-function deriveLegacyDirectoryPathsForBlock(
-  state: CurrentRemediationHostState,
-  blockId: string,
-  declaredPaths: readonly string[],
-): string[] {
-  const binding = state.host_handoff;
-  if (binding?.contract_version !== REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1) {
-    return [];
-  }
-  const block = state.plan.blocks.find((entry) => entry.block_id === blockId);
-  if (!block) return [];
-
-  const hashedDirectoryPaths = new Set<string>();
-  for (const findingId of block.items) {
-    const finding = state.plan.findings.find((entry) => entry.id === findingId);
-    if (!finding) continue;
-    for (const affectedFile of finding.affected_files) {
-      if (
-        affectedFile.path.endsWith("/") &&
-        isSha256(affectedFile.hash_at_plan_time)
-      ) {
-        hashedDirectoryPaths.add(affectedFile.path);
-      }
-    }
-  }
-
-  return declaredPaths.flatMap((path) => {
-    const directoryPath = `${path}/`;
-    return !path.endsWith("/") && hashedDirectoryPaths.has(directoryPath)
-      ? [directoryPath]
-      : [];
-  });
-}
-
-function deriveLegacyDirectoryScopeRecovery(
-  state: CurrentRemediationHostState,
-  workItem: RemediationHostWorkItem,
-): LegacyDirectoryScopeRecovery {
-  if (!state.host_handoff?.work_item_ids.includes(workItem.id)) {
-    return { workItem, directoryPaths: [] };
-  }
-  const directoryPaths = deriveLegacyDirectoryPathsForBlock(
-    state,
-    workItem.id,
-    workItem.allowed_files,
-  );
-  const recovered = new Set(directoryPaths);
-  const allowedFiles = workItem.allowed_files.map((allowed) => {
-    const directoryPath = `${allowed}/`;
-    return recovered.has(directoryPath) ? directoryPath : allowed;
-  });
-  return {
-    workItem: sameStrings(allowedFiles, workItem.allowed_files)
-      ? workItem
-      : { ...workItem, allowed_files: allowedFiles },
-    directoryPaths,
-  };
-}
-
-function effectiveBoundWorkload(
-  state: CurrentRemediationHostState,
-  workload: RemediationHostWorkload,
-): RemediationHostWorkload {
-  if (!state.host_handoff) return workload;
-  return {
-    ...workload,
-    work_items: workload.work_items.map((workItem) =>
-      deriveLegacyDirectoryScopeRecovery(state, workItem).workItem,
-    ),
-  };
-}
-
-/**
- * Persist the same directory intent for every block in a legacy plan before
- * its final active workload is cleared. Dependency-blocked blocks are included
- * because their next workload will be minted under v1alpha2 and cannot use
- * legacy inference. This must run only on the final drain: changing a currently
- * bound block sooner would break byte-for-byte canonical re-derivation.
- */
-function migrateLegacyDirectoryScopesAfterFinalDrain(
-  state: CurrentRemediationHostState,
-): void {
-  state.plan.blocks = state.plan.blocks.map((block) => {
-    const recovered = new Set(
-      deriveLegacyDirectoryPathsForBlock(
-        state,
-        block.block_id,
-        block.touched_files,
-      ),
-    );
-    if (recovered.size === 0) return block;
-    const touchedFiles = block.touched_files.map((path) =>
-      !path.endsWith("/") && recovered.has(`${path}/`) ? `${path}/` : path,
-    );
-    return sameStrings(touchedFiles, block.touched_files)
-      ? block
-      : {
-          ...block,
-          touched_files: [...new Set(touchedFiles)].sort(compareCodeUnits),
-        };
-  });
 }
 
 /**
@@ -447,23 +314,23 @@ class BlockContractError extends Error {
  * becomes a work item and its commands never run.
  *
  * COVERS THE HANDOFF BOUNDARY ONLY. The other consumer of the same
- * `block.targeted_commands` — `reverifyBlockedItemAgainstTree` in
+ * `block.required_tests` — `reverifyBlockedItemAgainstTree` in
  * `src/remediate/phases/triage.ts` — asks the same declared command-shape rule
  * before spawning and then runs each command through {@link runRequiredTest}
  * (argv-split, no shell, deadline-bounded), so a command this boundary would
  * refuse is refused there too rather than reaching a shell.
  */
-function assertBlockContract(root: string, block: RemediationBlock): void {
-  for (const raw of block.touched_files) {
+function assertBlockContract(root: string, block: ExecutionUnit): void {
+  for (const raw of block.allowed_files) {
     if (typeof raw !== "string" || raw.trim().length === 0) {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         "touched_files carries an empty entry",
       );
     }
     if (isAbsolute(raw)) {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         `touched_files entry ${JSON.stringify(raw)} is absolute, not repository-relative`,
       );
     }
@@ -472,26 +339,26 @@ function assertBlockContract(root: string, block: RemediationBlock): void {
       normalized = normalizeDeclaredPath(
         root,
         raw,
-        `${block.block_id}.touched_files[]`,
+        `${block.id}.touched_files[]`,
       );
     } catch {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         `touched_files entry ${JSON.stringify(raw)} does not resolve beneath the repository root`,
       );
     }
     if (normalized !== raw) {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         `touched_files entry ${JSON.stringify(raw)} is not in normalized repo-relative form ` +
           `(${JSON.stringify(normalized)})`,
       );
     }
   }
-  for (const command of block.targeted_commands ?? []) {
+  for (const command of block.required_tests ?? []) {
     if (typeof command !== "string" || command.trim().length === 0) {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         "targeted_commands carries an empty command",
       );
     }
@@ -501,7 +368,7 @@ function assertBlockContract(root: string, block: RemediationBlock): void {
     // and dead-end at another.
     if (commandLeavesDeclaredShape(command)) {
       throw new BlockContractError(
-        block.block_id,
+        block.id,
         `targeted_command ${JSON.stringify(command)} leaves the declared shape — it chains, ` +
           "redirects or substitutes, and this boundary executes commands verbatim through a shell",
       );
@@ -533,24 +400,22 @@ function planBlockIssues(
   root: string,
   state: CurrentRemediationHostState,
 ): RemediationHostIngestIssue[] {
-  const blockIds = new Set(state.plan.blocks.map((block) => block.block_id));
+  const blockIds = new Set(state.plan.units.map((block) => block.id));
   const boundIds = new Set(state.host_handoff?.work_item_ids ?? []);
   const issues: RemediationHostIngestIssue[] = [];
-  for (const block of state.plan.blocks) {
-    const unsettled = block.items.some((findingId) => {
-      const status = state.items[findingId]?.status;
-      return status !== undefined && !isTerminalStatus(status);
-    });
-    if (!unsettled && !boundIds.has(block.block_id)) continue;
+  for (const block of state.plan.units) {
+    const status = state.items[block.id]?.status;
+    const unsettled = status !== undefined && !isTerminalStatus(status);
+    if (!unsettled && !boundIds.has(block.id)) continue;
     const missing = (block.dependencies ?? []).filter(
       (dependencyId) => !blockIds.has(dependencyId),
     );
     if (missing.length > 0) {
       issues.push({
         code: "dependency_missing",
-        work_item_id: block.block_id,
+        work_item_id: block.id,
         message:
-          `block '${block.block_id}' declares ${missing.length === 1 ? "a dependency" : "dependencies"} ` +
+          `block '${block.id}' declares ${missing.length === 1 ? "a dependency" : "dependencies"} ` +
           `${missing.map((id) => `'${id}'`).join(", ")} present in no block of the plan, so it can ` +
           "never be dependency-verified and is never scheduled",
       });
@@ -562,10 +427,13 @@ function planBlockIssues(
       if (!(error instanceof BlockContractError)) throw error;
       issues.push({
         code: "block_contract_invalid",
-        work_item_id: block.block_id,
+        work_item_id: block.id,
         message: error.message,
       });
     }
+  }
+  for (const message of executionPlanReferenceIssues(state.plan, state.plan.findings.map(finding => finding.id))) {
+    if (!issues.some(issue => issue.message === message)) issues.push({ code: "block_contract_invalid", message });
   }
   return issues;
 }
@@ -692,219 +560,74 @@ export function remediationHostResultFilePath(params: {
  */
 export function hostDependencyLevels(
   state: Pick<RemediationState, "plan" | "items">,
-): RemediationBlock[][] {
-  const plan = state.plan;
-  const items = state.items;
+): ExecutionUnit[][] {
+  const { plan, items } = state;
   if (!plan || !items) return [];
-
-  const blockById = new Map(plan.blocks.map((block) => [block.block_id, block]));
-  const pendingBlocks = plan.blocks.filter((block) =>
-    block.items.some((findingId) => items[findingId]?.status === "pending"),
-  );
-  const isVerifiedNow = (block: RemediationBlock): boolean =>
-    block.items.every((findingId) =>
-      isVerifiedCompleteStatus(items[findingId]?.status),
-    );
-  const isPending = (block: RemediationBlock): boolean =>
-    block.items.some((findingId) => items[findingId]?.status === "pending");
-  const phaseOf = (block: RemediationBlock): number => block.phase_ordinal ?? 0;
-  const lowerPhaseBlocks = (phase: number): RemediationBlock[] =>
-    plan.blocks.filter((block) => phaseOf(block) < phase);
-  const phaseBarrierClear = (phase: number): boolean =>
-    lowerPhaseBlocks(phase).every(isVerifiedNow);
-  const phaseBarrierUnsatisfiable = (phase: number): boolean =>
-    lowerPhaseBlocks(phase).some(
-      (block) => !isVerifiedNow(block) && !isPending(block),
-    );
-  const permanentlyIneligible = (block: RemediationBlock): boolean => {
-    for (const dependencyId of block.dependencies ?? []) {
-      const dependency = blockById.get(dependencyId);
-      // An id that resolves to NO block is not a harmless declaration — it is a
-      // prerequisite that can never be verified, so the block can never become
-      // eligible. Guarding on `dependency &&` skipped exactly this case, which
-      // is the second half of the same hole as the readiness predicate below:
-      // closing only one leaves the block reaching the host anyway.
-      if (dependency === undefined) return true;
-      if (!isVerifiedNow(dependency) && !isPending(dependency)) {
-        return true;
-      }
-    }
-    return phaseBarrierUnsatisfiable(phaseOf(block));
-  };
-
-  const levels: RemediationBlock[][] = [];
+  const byId = new Map(plan.units.map(unit => [unit.id, unit]));
+  const lowerPhases = (unit: ExecutionUnit): ExecutionUnit[] => plan.units.filter(lower =>
+    (lower.phase_ordinal ?? 0) < (unit.phase_ordinal ?? 0));
   const placed = new Set<string>();
-  let remaining = pendingBlocks.filter((block) => !permanentlyIneligible(block));
-  while (remaining.length > 0) {
-    const ready = remaining.filter(
-      (block) =>
-        phaseBarrierClear(phaseOf(block)) &&
-        (block.dependencies ?? []).every((dependencyId) => {
-          const dependency = blockById.get(dependencyId);
-          // DEPENDENCY READINESS REQUIRES EXISTENCE. `!dependency` used to read
-          // as "satisfied", so a plan naming a block that does not exist had its
-          // dependent placed at level 0 and dispatched with the prerequisite
-          // never verified — silently, because no other check looks at it.
-          if (dependency === undefined) return false;
-          if (isVerifiedNow(dependency)) return true;
-          return dependency.items.every(
-            (findingId) =>
-              isVerifiedCompleteStatus(items[findingId]?.status) ||
-              (items[findingId]?.status === "pending" &&
-                placed.has(dependency.block_id)),
-          );
-        }),
-    );
-    if (ready.length === 0) break;
+  let remaining = plan.units.filter(unit => items[unit.id]?.status === "pending");
+  const levels: ExecutionUnit[][] = [];
+  while (remaining.length) {
+    // A phase is an integration boundary: even projected later dependency levels
+    // wait until every earlier phase actually verified on the current tree.
+    const ready = remaining.filter(unit => lowerPhases(unit).every(lower => isVerifiedCompleteStatus(items[lower.id]?.status)) &&
+      unit.dependencies.every(id => byId.has(id) && (isVerifiedCompleteStatus(items[id]?.status) || placed.has(id))));
+    if (!ready.length) break;
     levels.push(ready);
-    for (const block of ready) placed.add(block.block_id);
-    remaining = remaining.filter((block) => !placed.has(block.block_id));
+    for (const unit of ready) placed.add(unit.id);
+    remaining = remaining.filter(unit => !placed.has(unit.id));
   }
   return levels;
 }
 
-/**
- * Pending blocks that can NEVER dispatch — the dead-end sweep's one source,
- * kept beside {@link hostDependencyLevels} so the sweep and the workload
- * boundary share one eligibility semantics and cannot disagree (the 2026-08-23
- * empty-frontier incident: the old edge-only sweep predicate missed the phase
- * barrier and dependency existence, so a frontier the builder refused looked
- * dispatchable to the guard and next-step threw instead of pausing).
- *
- * Optimistic liveness fixpoint: an item counts as still SATISFIABLE while it is
- * verified-complete, `pending`, or `needs_clarification` — an unanswered
- * question is "awaiting an answer", never "upstream failed" (the 175cfb89
- * pin). A block is LIVE once every one of its items is satisfiable, every
- * declared dependency resolves to a live block, and every lower-phase block is
- * live. What never enters the live set is exactly what can never reach the
- * host: an obstacle chain that bottoms out in a terminal non-verified item
- * (`blocked` or a SKIP — INV-RS-01), a dependency id that resolves to no
- * block, or a dependency cycle.
- */
-export function permanentlyDeadPendingBlocks(
+/** Questions remain live; skipped/failed prerequisites never authorize a dependent. */
+export function permanentlyDeadPendingUnits(
   state: Pick<RemediationState, "plan" | "items">,
-): RemediationBlock[] {
-  const plan = state.plan;
-  const items = state.items;
+): ExecutionUnit[] {
+  const { plan, items } = state;
   if (!plan || !items) return [];
-
-  const satisfiable = (status: string | undefined): boolean =>
-    isVerifiedCompleteStatus(status) ||
-    status === "pending" ||
-    status === "needs_clarification";
-  const phaseOf = (block: RemediationBlock): number => block.phase_ordinal ?? 0;
-  const blockById = new Map(plan.blocks.map((block) => [block.block_id, block]));
-
-  // Fully-verified blocks seed the live set unconditionally: their work already
-  // landed, so their own declared dependencies are history, not obstacles.
-  const live = new Set<string>(
-    plan.blocks
-      .filter((block) =>
-        block.items.every((findingId) =>
-          isVerifiedCompleteStatus(items[findingId]?.status),
-        ),
-      )
-      .map((block) => block.block_id),
-  );
-
-  // Least fixpoint: grow the live set until stable. A cycle never enters it.
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const block of plan.blocks) {
-      if (live.has(block.block_id)) continue;
-      if (!block.items.every((findingId) => satisfiable(items[findingId]?.status))) {
-        continue;
-      }
-      const dependenciesLive = (block.dependencies ?? []).every((dependencyId) => {
-        const dependency = blockById.get(dependencyId);
-        return dependency !== undefined && live.has(dependency.block_id);
-      });
-      const lowerPhasesLive = plan.blocks
-        .filter((lower) => phaseOf(lower) < phaseOf(block))
-        .every((lower) => live.has(lower.block_id));
-      if (dependenciesLive && lowerPhasesLive) {
-        live.add(block.block_id);
-        grew = true;
+  const live = new Set(plan.units.filter(unit => isVerifiedCompleteStatus(items[unit.id]?.status)).map(unit => unit.id));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const unit of plan.units) {
+      if (live.has(unit.id)) continue;
+      const status = items[unit.id]?.status;
+      const lowerPhasesLive = plan.units.filter(lower => (lower.phase_ordinal ?? 0) < (unit.phase_ordinal ?? 0)).every(lower => live.has(lower.id));
+      if ((status === "pending" || status === "needs_clarification") && lowerPhasesLive && unit.dependencies.every(id => live.has(id))) {
+        live.add(unit.id); changed = true;
       }
     }
   }
-
-  return plan.blocks.filter(
-    (block) =>
-      !live.has(block.block_id) &&
-      block.items.some((findingId) => items[findingId]?.status === "pending"),
-  );
+  return plan.units.filter(unit => !live.has(unit.id) && items[unit.id]?.status === "pending");
 }
 
 function buildPrompt(item: {
-  readonly blockId: string;
-  readonly findingIds: readonly string[];
-  readonly assignments: readonly Record<string, unknown>[];
-  readonly allowedFiles: readonly string[];
+  readonly unit: ExecutionUnit;
+  readonly requirements: readonly ExecutionRequirement[];
+  readonly sourceFindings: readonly unknown[];
+  readonly counterexamples: readonly unknown[];
+  readonly revision: string;
+  readonly context: { clarification_context?: string; failure_context?: string };
   readonly baselineCommit: string;
-  readonly requiredTests: readonly string[];
   readonly resultPath: string;
-  readonly obligationIds: readonly string[];
-  /**
-   * Whether the repository declares any landing gate at all — a fact about the
-   * target root, not about this item. It only decides whether the emitted
-   * prompt's ONE sentence points the host at a close that will run gates; the
-   * gates themselves are the CLOSE's, never this item's (see `buildWorkItem`).
-   */
   readonly hasLandingGates: boolean;
-  readonly moduleContracts: readonly { module: string; contract: Record<string, unknown> }[];
-  readonly implementationContext?: ImplementationContext;
 }): string {
-  const assignment = stableStringify({
-    ...(item.implementationContext ? { implementation_context: item.implementationContext } : {}),
-    allowed_files: item.allowedFiles,
-    assignments: item.assignments,
-    baseline_commit: item.baselineCommit,
-    finding_ids: item.findingIds,
-    id: item.blockId,
-    // The approved contract rides the sha-bound prompt (the evidence-coverage
-    // entry in docs/backlog/open-bugs.md): the binding then covers exactly the
-    // interface the worker saw.
-    ...(item.moduleContracts.length > 0
-      ? { module_contracts: item.moduleContracts }
-      : {}),
-    ...(item.obligationIds.length > 0
-      ? { obligation_ids: item.obligationIds }
-      : {}),
-    required_tests: item.requiredTests,
-    result_path: item.resultPath,
-  });
-  // The BODY only. The result template is appended by `bindWorkerPrompt`, and
-  // the prompt digest covers exactly this text (owner review of prompt 20,
-  // 2026-09-18: plain language, rules as bullets, no word a worker cannot act
-  // on).
   return [
-    `# Implement remediation work item \`${item.blockId}\``,
-    "",
-    "Assignment:",
-    "",
-    "```json",
-    assignment,
-    "```",
-    "",
-    "Rules:",
-    "",
-    '- Edit only the files in `allowed_files`. An entry that ends in "/" allows every file below that directory. Every other entry allows only that one file.',
-    "- Apply each finding in `assignments` exactly, with the clarified scope or the retry context it carries.",
-    ...(item.moduleContracts.length > 0
-      ? [
-          "- Conform to each contract in `module_contracts`: every declared input, output, invariant, side effect, validation boundary, failure mode and seam adjustment. Code that breaks a contract is a defect, even when the build and the tests pass.",
-        ]
-      : []),
-    ...(item.requiredTests.length > 0
-      ? [
-          "- Run each command in `required_tests` until it passes. The tool runs each command again before it accepts your result.",
-        ]
-      : []),
-    "- Make one commit on top of `baseline_commit`, with all your edits in it. Merge it so that HEAD contains it.",
-    ...(item.hasLandingGates
-      ? ["- Do not run the landing gates. The close phase runs them once, on the merged tree."]
-      : []),
+    `# Implement execution unit \`${item.unit.id}\``, "", "Assignment:", "", "```json",
+    stableStringify({
+      unit: item.unit, requirements: item.requirements, source_findings: item.sourceFindings,
+      accepted_counterexamples: item.counterexamples,
+      review_revision_sha256: item.revision, baseline_commit: item.baselineCommit,
+      ...item.context, result_path: item.resultPath,
+    }), "```", "", "Rules:", "",
+    '- Edit only `unit.allowed_files`. A trailing "/" permits files below that directory; every other entry permits exactly that file.',
+    '- Read `unit.read_paths`, implement the reviewed unit description, and satisfy every linked requirement and scoped positive/negative assertion. Original source findings are provenance, not substitute execution instructions.',
+    '- Preserve every declared affected interface and address the named counterexamples. Code violating a requirement is a defect even if tests pass.',
+    ...(item.unit.required_tests.length ? ['- Run every `unit.required_tests` command until it passes. The tool reruns each before accepting your result.'] : []),
+    '- Make one commit on top of `baseline_commit`, with all your edits in it. Merge it so HEAD contains it.',
+    ...(item.hasLandingGates ? ['- Do not run the landing gates. The close phase runs them once, on the merged tree.'] : []),
   ].join("\n");
 }
 
@@ -1007,9 +730,9 @@ export function severityRiskWeight(severity: FindingSeverity): number {
 
 function blockRiskScore(
   state: CurrentRemediationHostState,
-  block: RemediationBlock,
+  block: ExecutionUnit,
 ): number {
-  const scores = block.items
+  const scores = block.source_finding_ids
     .map(
       (findingId) =>
         state.plan.findings.find((entry) => entry.id === findingId)?.severity,
@@ -1026,132 +749,41 @@ function blockRiskScore(
   return Math.min(1, worst + Math.max(0, corroborating) * 0.1);
 }
 
-function buildFindingAssignments(
-  state: CurrentRemediationHostState,
-  block: RemediationBlock,
-): Record<string, unknown>[] {
-  return block.items.map((findingId) => {
-    const finding = state.plan.findings.find((entry) => entry.id === findingId);
-    const item = state.items[findingId];
-    if (!finding || !item) {
-      throw new Error(
-        `Host work item ${block.block_id} references unknown finding ${findingId}`,
-      );
-    }
-    return {
-      finding: FindingSchema.parse(finding),
-      ...(item.clarification_context
-        ? { clarification_context: item.clarification_context }
-        : {}),
-      ...(item.failure_context
-        ? { failure_context: item.failure_context }
-        : {}),
-    };
-  });
-}
-
 function buildWorkItem(
-  paths: BoundaryPaths,
-  runId: string,
-  block: RemediationBlock,
-  baselineCommit: string,
-  state: CurrentRemediationHostState,
+  paths: BoundaryPaths, runId: string, unit: ExecutionUnit,
+  baselineCommit: string, state: CurrentRemediationHostState,
 ): RemediationHostWorkItem {
-  // The consumed-shape gate runs FIRST: a block outside the write-scope /
-  // command contract must never become a work item, so nothing downstream can
-  // dispatch it or execute its commands.
-  assertBlockContract(paths.root, block);
-  // THE ID-GLOSSARY SCOPE. A block whose contract COINS an invariant id writes
-  // it in `src/`, and the glossary document that has to document it sits
-  // outside every module's file scope — so without this the item is
-  // structurally unable to satisfy the id-glossary gate. Read off the block's
-  // own contract and obligations, never guessed; the ids the document already
-  // carries are subtracted inside `withGlossaryScope`, so a contract that only
-  // MENTIONS an existing id (a seam adjustment citing `INV-COVERAGE`, say) gets
-  // no widening — it coins nothing and needs no row.
-  const declaredIds = declaredInvariantIds({
-    obligations: block.items.flatMap(
-      (findingId) =>
-        state.plan.findings.find((entry) => entry.id === findingId)
-          ?.contract_obligation_ids ?? [],
-    ),
-    module_contracts: block.module_contracts ?? [],
+  assertBlockContract(paths.root, unit);
+  const item = state.items[unit.id];
+  if (!item) throw new Error(`Execution unit ${unit.id} has no runtime item`);
+  const requirements = unit.requirement_ids.map(id => {
+    const requirement = state.plan.requirements.find(entry => entry.id === id);
+    if (!requirement) throw new Error(`Execution unit ${unit.id} references unknown requirement ${id}`);
+    return requirement;
   });
-  const allowedFiles = withGlossaryScope(
-    paths.root,
-    [...new Set(block.touched_files)].map((path) =>
-      normalizeDeclaredPath(paths.root, path, `${block.block_id}.touched_files[]`),
-    ).sort(compareCodeUnits),
-    declaredIds,
-  );
-  const resultPath = resultPathFor(paths, block.block_id);
-  // THE LANDING GATES ARE NOT THIS ITEM'S. `check:deadcode`, `check:depgraph`,
-  // lint and the id-glossary gate state facts about the WHOLE tree, so the
-  // boundary that owns them is the CLOSE, on the merged tree — never a
-  // per-item dispatch. Folding them in here was tried and refused a wave item
-  // that added an export whose only consumer lands in a LATER item: no edit
-  // inside the item's scope could pass, and another item's fault could refuse
-  // this one. See CLAUDE.md, *A gate states the boundary it OWNS*; the close
-  // leg is `verifyLandingGates` in `src/remediate/phases/close.ts`.
-  //
-  // The per-item required tests are the block's OWN commands, unchanged, which
-  // is what this field meant before the gates were folded in and what the
-  // tool reruns at ingestion.
-  //
-  // ONE FACT still rides the emitted prompt: whether the target root declares
-  // any landing gate at all, so the host knows a close will run them.
-  const hasLandingGates = discoverLandingGates(paths.root).length > 0;
-  const requiredTests = [...(block.targeted_commands ?? [])];
-  const assignments = buildFindingAssignments(state, block);
-  // The obligation demand is bound here, once, from the same plan findings the
-  // assignments render — ingestion then re-derives this exact set through the
-  // byte-for-byte work-item comparison, so the result's evidence coverage is
-  // checked against a tool-owned binding, never the result's own claim.
-  const obligationIds = [
-    ...new Set(
-      block.items.flatMap(
-        (findingId) =>
-          state.plan.findings.find((entry) => entry.id === findingId)
-            ?.contract_obligation_ids ?? [],
-      ),
-    ),
-  ].sort(compareCodeUnits);
+  const sourceFindings = unit.source_finding_ids.map(id => {
+    const finding = state.plan.findings.find(entry => entry.id === id);
+    if (!finding) throw new Error(`Execution unit ${unit.id} references unknown source finding ${id}`);
+    return finding;
+  });
+  const resultPath = resultPathFor(paths, unit.id);
+  const obligationIds = [...unit.requirement_ids].sort(compareCodeUnits);
   const prompt = bindWorkerPrompt(buildPrompt({
-    blockId: block.block_id,
-    findingIds: block.items,
-    assignments,
-    allowedFiles,
-    baselineCommit,
-    obligationIds,
-    requiredTests,
-    hasLandingGates,
-    resultPath,
-    moduleContracts: block.module_contracts ?? [],
-    implementationContext: block.implementation_context,
-  }), (promptDigest) =>
-    renderResultTemplate({
-      runId,
-      blockId: block.block_id,
-      resultPath,
-      obligationIds,
-      promptDigest,
-    }),
-  );
+    unit, requirements, sourceFindings, revision: state.plan.review_revision_sha256,
+    counterexamples: (state.plan.review_counterexamples ?? []).filter(example => unit.addresses_counterexample_ids.includes(example.id)),
+    context: {
+      ...(item.clarification_context ? { clarification_context: item.clarification_context } : {}),
+      ...(item.failure_context ? { failure_context: item.failure_context } : {}),
+    }, baselineCommit, resultPath, hasLandingGates: discoverLandingGates(paths.root).length > 0,
+  }), promptDigest => renderResultTemplate({ runId, blockId: unit.id, resultPath, obligationIds, promptDigest }));
+  const tokenEstimate = estimateTokensFromBytes(Buffer.byteLength(prompt.text, "utf8"));
   return {
-    id: block.block_id,
-    finding_ids: [...block.items],
-    allowed_files: allowedFiles,
-    baseline_commit: baselineCommit,
-    obligation_ids: obligationIds,
-    prompt: { text: prompt.text, sha256: prompt.sha256 },
-    required_tests: requiredTests,
-    result_path: resultPath,
-    demand: deriveLaneDemand({
-      tokenEstimate: block.token_estimate ?? 0,
-      fileCount: allowedFiles.length,
-      riskScore: blockRiskScore(state, block),
-    }),
-    token_estimate: block.token_estimate ?? 0,
+    id: unit.id, source_finding_ids: [...unit.source_finding_ids],
+    allowed_files: [...unit.allowed_files], baseline_commit: baselineCommit,
+    obligation_ids: obligationIds, prompt: { text: prompt.text, sha256: prompt.sha256 },
+    required_tests: [...unit.required_tests], result_path: resultPath,
+    demand: deriveLaneDemand({ tokenEstimate, fileCount: unit.allowed_files.length, riskScore: blockRiskScore(state, unit) }),
+    token_estimate: tokenEstimate,
   };
 }
 
@@ -1166,15 +798,15 @@ function buildCanonicalWorkload(params: {
     ? new Set(params.workItemIds)
     : null;
   const sourceBlocks = requestedIds
-    ? params.state.plan.blocks.filter((block) => requestedIds.has(block.block_id))
+    ? params.state.plan.units.filter((block) => requestedIds.has(block.id))
     : hostDependencyLevels(params.state)[0] ?? [];
   const blocks = [...sourceBlocks].sort((left, right) =>
-    compareCodeUnits(left.block_id, right.block_id),
+    compareCodeUnits(left.id, right.id),
   );
   if (
     requestedIds &&
     (blocks.length !== requestedIds.size ||
-      blocks.some((block) => !requestedIds.has(block.block_id)))
+      blocks.some((block) => !requestedIds.has(block.id)))
   ) {
     throw new Error("Trusted remediation host workload references an unknown block");
   }
@@ -1200,7 +832,7 @@ function parseWorkItem(
       "allowed_files",
       "baseline_commit",
       "demand",
-      "finding_ids",
+      "source_finding_ids",
       "id",
       "obligation_ids",
       "prompt",
@@ -1211,8 +843,8 @@ function parseWorkItem(
     typeof value.id !== "string" ||
     !LaneDemandSchema.safeParse(value.demand).success ||
     !isCommit(value.baseline_commit) ||
-    !Array.isArray(value.finding_ids) ||
-    !value.finding_ids.every((entry) => typeof entry === "string") ||
+    !Array.isArray(value.source_finding_ids) ||
+    !value.source_finding_ids.every((entry) => typeof entry === "string") ||
     !Array.isArray(value.obligation_ids) ||
     !value.obligation_ids.every((entry) => typeof entry === "string") ||
     !Array.isArray(value.allowed_files) ||
@@ -1230,7 +862,7 @@ function parseWorkItem(
     return null;
   }
 
-  const block = state.plan.blocks.find((candidate) => candidate.block_id === value.id);
+  const block = state.plan.units.find((candidate) => candidate.id === value.id);
   if (!block) return null;
   let expected: RemediationHostWorkItem;
   try {
@@ -1627,12 +1259,12 @@ function unresolvedFrontierWorkItemIds(
 ): readonly string[] {
   const items = state.items as Record<
     string,
-    { readonly block_id?: string; readonly status?: string } | undefined
+    { readonly unit_id?: string; readonly status?: string } | undefined
   >;
   const pendingBlockIds = new Set(
     Object.values(items)
       .filter((item) => item?.status === "pending")
-      .map((item) => item!.block_id),
+      .map((item) => item!.unit_id),
   );
   return [...record.work_item_ids]
     .filter((id) => pendingBlockIds.has(id))
@@ -1666,6 +1298,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
   const paths = resolveBoundaryPaths(params);
+  await assertApprovedRuntimePlan(paths.artifactsDir, state);
   const verdicts = new MintedRequiredTestVerdicts();
 
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
@@ -1675,9 +1308,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
 
   const commands: string[] = [];
   for (const workItem of workload.work_items) {
-    const hasPending = workItem.finding_ids.some(
-      (findingId) => state.items[findingId]?.status === "pending",
-    );
+    const hasPending = state.items[workItem.id]?.status === "pending";
     if (!hasPending) continue;
     const absoluteResultPath = resolveContainedPath(
       paths.root,
@@ -1738,12 +1369,21 @@ export async function prepareRemediationHostHandoff(params: {
 }): Promise<PreparedRemediationHostHandoff | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
+  const paths = resolveBoundaryPaths(params);
+  const approved = await assertApprovedRuntimePlan(paths.artifactsDir, state);
   if (!isCommit(params.baselineCommit)) {
     throw new Error("Remediation host baselineCommit must be a full commit id");
   }
 
-  const paths = resolveBoundaryPaths(params);
   const existingRecord = state.host_handoff;
+  if (!existingRecord) {
+    const accepted = state.plan.units.flatMap(unit => {
+      const item = state.items[unit.id];
+      return item?.host_landed_commit ? [{ allowed_files: [...unit.allowed_files], landed_commit: item.host_landed_commit }] : [];
+    });
+    const contextIssues = await executionPlanContextIssues(paths.root, approved.canonical, accepted);
+    if (contextIssues.length) throw new RemediationHostPreparationError("plan_repair_required", contextIssues.join("; "));
+  }
   if (existingRecord && existingRecord.run_id !== params.runId) {
     throw new Error("Trusted remediation host handoff belongs to another run");
   }
@@ -1757,6 +1397,8 @@ export async function prepareRemediationHostHandoff(params: {
   }
 
   const baselineCommit = existingRecord?.baseline_commit ?? params.baselineCommit;
+  const planIssues = planBlockIssues(paths.root, state);
+  if (planIssues.length) throw new RemediationHostPreparationError("plan_repair_required", planIssues.map(issue => issue.message).join("; "));
   let workload: RemediationHostWorkload;
   try {
     workload = buildCanonicalWorkload({
@@ -1844,6 +1486,7 @@ export async function prepareRemediationHostHandoff(params: {
     };
 
   await mkdir(paths.resultDir, { recursive: true });
+  await assertApprovedRuntimePlan(paths.artifactsDir, state);
   await recordHostRootLogBoundary({ ...paths, runId: params.runId, phase: "prepare" });
   await writeJsonFile(paths.workloadPath, workload);
   return {
@@ -1916,6 +1559,8 @@ export async function ingestRemediationHostResults(params: {
 }): Promise<RemediationHostIngestSummary | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
+  const paths = resolveBoundaryPaths(params);
+  await assertApprovedRuntimePlan(paths.artifactsDir, state);
 
   // The verdict table is the ONE input whose validity the type system cannot
   // check: a hand-built map of all-green verdicts asserts tests ran that never
@@ -1932,7 +1577,6 @@ export async function ingestRemediationHostResults(params: {
     );
   }
 
-  const paths = resolveBoundaryPaths(params);
   if (state.conformance_review && state.conformance_review.run_id !== params.runId) {
     throw new Error("Conformance review policy belongs to another run; refusing result acceptance.");
   }
@@ -1971,6 +1615,9 @@ export async function ingestRemediationHostResults(params: {
     recordedRecoveryMarks: null,
   };
   const verdicts = await executeHostVerificationReruns(validated.ctx, acc);
+  // Tests and independent review involve awaits. A superseding plan/source
+  // invalidates the entire acceptance before any accepted ledger event is minted.
+  await assertApprovedRuntimePlan(paths.artifactsDir, state);
   const issues = await recordAndEnrichHostIssues(
     params.artifactsDir,
     params.runId,
@@ -2273,9 +1920,9 @@ async function validateHostResultBundle(input: {
       recovery: input.recovery !== undefined,
       state,
       nextState,
-      effectiveWorkload: effectiveBoundWorkload(state, workload),
+      effectiveWorkload: workload,
       eligibleIds: new Set(
-        (hostDependencyLevels(state)[0] ?? []).map((block) => block.block_id),
+        (hostDependencyLevels(state)[0] ?? []).map((block) => block.id),
       ),
       // Can this ingest be corroborated against ground truth AT ALL? A git root
       // supplies the tree; a persisted `host_handoff` supplies the trusted
@@ -2318,9 +1965,7 @@ function hasLandedCommitFor(
   state: CurrentRemediationHostState,
   workItem: RemediationHostWorkItem,
 ): boolean {
-  return workItem.finding_ids.some(
-    (findingId) => typeof state.items[findingId]?.host_landed_commit === "string",
-  );
+  return typeof state.items[workItem.id]?.host_landed_commit === "string";
 }
 
 async function requiredConformanceReview(
@@ -2331,7 +1976,11 @@ async function requiredConformanceReview(
   return checkContractConformance({
     root: ctx.paths.root, artifactsDir: ctx.paths.artifactsDir, runId: ctx.runId,
     item: workItem, result,
-    contracts: ctx.state.plan.blocks.find(block => block.block_id === workItem.id)?.module_contracts ?? [],
+    requirements: ctx.state.plan.requirements.filter(requirement => workItem.obligation_ids.includes(requirement.id)),
+    unit: ctx.state.plan.units.find(unit => unit.id === workItem.id)!,
+    revision: ctx.state.plan.review_revision_sha256,
+    counterexamples: (ctx.state.plan.review_counterexamples ?? []).filter(example =>
+      ctx.state.plan.units.find(unit => unit.id === workItem.id)!.addresses_counterexample_ids.includes(example.id)),
   });
 }
 
@@ -2342,7 +1991,7 @@ async function executeHostVerificationReruns(
   const { paths, nextState, state } = ctx;
   const verdicts: HostItemVerdict[] = [];
   for (const workItem of ctx.effectiveWorkload.work_items) {
-    const pendingItems = workItem.finding_ids.filter(
+    const pendingItems = [workItem.id].filter(
       (findingId) =>
         nextState.items[findingId]?.status === "pending" &&
         !acc.settledFindingIds.has(findingId),
@@ -2644,14 +2293,13 @@ function commitRemediationStateUpdates(
 
   const pendingWorkItemIds = ctx.effectiveWorkload.work_items
     .filter((workItem) =>
-      workItem.finding_ids.some(
+      [workItem.id].some(
         (findingId) => nextState.items[findingId]?.status === "pending",
       ),
     )
     .map((workItem) => workItem.id);
   let stateChanged = acc.completed.length > 0;
   if (nextState.host_handoff && pendingWorkItemIds.length === 0) {
-    migrateLegacyDirectoryScopesAfterFinalDrain(nextState);
     delete nextState.host_handoff;
     stateChanged = true;
   }

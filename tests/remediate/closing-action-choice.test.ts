@@ -11,7 +11,6 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
-import { promoteImplementationDagToExtractedPlan } from "../../src/remediate/steps/contractPipeline.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import { intakePaths, writeProjectFacts } from "../../src/remediate/intake.js";
 import { detectProjectFacts } from "audit-tools/shared";
@@ -19,7 +18,7 @@ import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 
 const harness = createNextStepHarness(".test-closing-action-choice");
-const { REPO_DIR, ARTIFACTS_DIR, resetTestRepo, cleanupTestRepo, writeCompleteContractPipelineDag } = harness;
+const { REPO_DIR, ARTIFACTS_DIR, resetTestRepo, cleanupTestRepo, writeApprovedExecutionPlan } = harness;
 
 function git(...args: string[]): void {
   const result = spawnSync("git", args, { cwd: REPO_DIR, encoding: "utf8" });
@@ -48,42 +47,6 @@ async function writeReadyDocumentIntake(): Promise<void> {
         affected_files: [{ path: "src/auth.ts" }],
       }),
     ),
-    "utf8",
-  );
-}
-
-/**
- * An extracted plan that carries NO project facts, so detection must fill them.
- * The finding cites a real file so grounding keeps it (a finding whose every
- * cited path is phantom is dropped, and a plan with no findings is destroyed).
- */
-async function writeExtractedPlanWithoutFacts(): Promise<void> {
-  await mkdir(join(REPO_DIR, "src"), { recursive: true });
-  await writeFile(join(REPO_DIR, "src", "auth.ts"), "export const auth = 1;\n", "utf8");
-  // Grounding enumerates TRACKED files (git ls-files): an untracked citation is
-  // a phantom path, and a plan whose only finding grounds to nothing is destroyed.
-  git("add", "src/auth.ts");
-  git("commit", "--no-gpg-sign", "-q", "-m", "fixture: cited file");
-  await writeFile(
-    intakePaths(ARTIFACTS_DIR).extractedPlan,
-    JSON.stringify({
-      plan_id: "P1",
-      findings: [
-        {
-          id: "F-001",
-          title: "Fix auth",
-          category: "correctness",
-          severity: "high",
-          confidence: "high",
-          lens: "correctness",
-          summary: "s",
-          affected_files: [{ path: "src/auth.ts" }],
-          // The finding filter drops a finding with no evidence (findingFilter.ts).
-          evidence: ["src/auth.ts:1 export const auth = 1;"],
-        },
-      ],
-      blocks: [{ block_id: "B-001", items: ["F-001"], parallel_safe: true, touched_files: ["src/auth.ts"] }],
-    }),
     "utf8",
   );
 }
@@ -154,10 +117,10 @@ describe("closing action: detected candidates, user choice", () => {
 
   it("the host's choice reaches closing_plan, and detection fills the plan's candidates", async () => {
     await writeReadyDocumentIntake();
-    await writeExtractedPlanWithoutFacts();
     // The confirm step runs first, as in the real flow: it detects and persists the facts.
     await decideNextStep({ root: REPO_DIR });
     await writeHostCheckpoint({ closing_action: "commit" });
+    await writeApprovedExecutionPlan();
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step.step_kind).not.toBe("confirm_intent");
@@ -170,9 +133,9 @@ describe("closing action: detected candidates, user choice", () => {
 
   it("an omitted closing_action is none — nothing is inferred from the candidates", async () => {
     await writeReadyDocumentIntake();
-    await writeExtractedPlanWithoutFacts();
     await decideNextStep({ root: REPO_DIR });
     await writeHostCheckpoint();
+    await writeApprovedExecutionPlan();
 
     const step = await decideNextStep({ root: REPO_DIR });
     expect(step.step_kind).not.toBe("confirm_intent");
@@ -181,19 +144,14 @@ describe("closing action: detected candidates, user choice", () => {
     expect(state?.closing_plan?.action, `after step ${step.step_kind}`).toBe("none");
   });
 
-  it("the contract pipeline's extracted plan carries the persisted detected candidates, not a hard-coded none", async () => {
-    await writeCompleteContractPipelineDag();
+  it("approved-plan activation carries detected candidates without selecting an action", async () => {
+    await writeReadyDocumentIntake();
     git("remote", "add", "origin", "https://example.invalid/fixture.git");
-    // The confirm step's persisted facts are what planning consumes; promotion
-    // itself spawns nothing (the backend-independent planning contract).
     await writeProjectFacts(ARTIFACTS_DIR, await detectProjectFacts(REPO_DIR));
-
-    await promoteImplementationDagToExtractedPlan(ARTIFACTS_DIR, REPO_DIR);
-
-    const extracted = JSON.parse(await readFile(intakePaths(ARTIFACTS_DIR).extractedPlan, "utf8"));
-    expect(extracted.candidate_closing_actions).toEqual([
-      "commit", "push", "open-pr", "tag", "none", "custom",
-    ]);
+    await writeHostCheckpoint(); await writeApprovedExecutionPlan();
+    await decideNextStep({ root: REPO_DIR });
+    const extracted = (await new StateStore(ARTIFACTS_DIR).loadState())!.plan!;
+    expect(extracted.candidate_closing_actions).toEqual(["commit", "push", "open-pr", "tag", "none", "custom"]);
     expect(extracted.project_type).toBe("unknown");
   });
 });

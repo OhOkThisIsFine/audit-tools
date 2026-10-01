@@ -1,7 +1,4 @@
 import { recoverIngestHostResults } from "./steps/recoverIngest.js";
-import { resolveAdversarialDepth } from "./steps/contractPipeline.js";
-import { PHASE_TO_ARTIFACT, reviewRequirementForRole } from "./steps/contractPipelinePrompts.js";
-import { validateContractReviewInput } from "./contractPipeline/contractReviewBinding.js";
 // sites-pinned: tests/remediate/recover-verb-branches.test.ts
 // (the
 // ACCEPTED-WITH-ISSUES arm — its status token and exit code)
@@ -11,22 +8,8 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { changeOperatorLifecycle, decideNextStep } from "./steps/nextStep.js";
 import { validateArtifacts } from "./validation/artifacts.js";
-import { CONTRACT_PIPELINE_VALIDATORS } from "./validation/contractPipeline.js";
-import { evaluateContractPipelineCrossGateOutcomes } from "./validation/contractPipelineGates.js";
-import {
-  readRepairState,
-  waivedJudgeAcceptedIds,
-} from "./contractPipeline/repairState.js";
-import {
-  CP_ARTIFACT_NAMES,
-  isEnvelope,
-  stampToolCreatedAt,
-  readContractArtifact,
-  envelopePayload,
-  type ContractPipelineArtifactName,
-} from "./contractPipeline/artifactStore.js";
+import { PlanSubmissionSchema, CritiqueSchema, CriticSchema, PlanJudgeSchema, executionPlanIssues, readPlanSource } from "./contractPipeline/executionPlan.js";
 import { StateStore } from "./state/store.js";
-import { intakePaths } from "./intake.js";
 import type { ValidationIssue } from "audit-tools/shared";
 import {
   assertCliCommandAllowedFromCwd,
@@ -35,7 +18,6 @@ import {
   remediationArtifactsDir,
   resolveRepoRoot,
   invalidateStepContracts,
-  readOptionalJsonFile,
   recoverSubmission,
   runTracked,
   runWithBlockedStepBackstop,
@@ -320,158 +302,32 @@ program
 
 export interface ValidateArtifactActionResult {
   status: "ok" | "error";
-  name?: ContractPipelineArtifactName;
+  name?: string;
   issue_count?: number;
   issues?: ValidationIssue[];
   message?: string;
 }
 
-/**
- * The `validate-artifact --name X` self-check's full logic, exported so tests
- * can call it directly (no dist build / subprocess race). Returns the JSON body
- * + exit code the CLI action prints/exits with, without doing either itself.
- *
- * Beyond the per-artifact structural validator, this ALSO loads the on-disk
- * sibling contract-pipeline artifacts (under `<artifactsDir>/intake/contract/`)
- * and runs the SAME cross-artifact gates the plural `validate-artifacts` sweep
- * and `next-step` enforce (evaluateContractPipelineCrossGateOutcomes —
- * single-sourced in validation/contractPipelineGates.ts), substituting the in-flight `name`
- * payload for its on-disk version so the in-flight edit always wins over a
- * stale/absent sibling. Without this, a shape-valid artifact missing its
- * cross-artifact obligations (e.g. a test_validator_plan missing its CE-006
- * scoped negative) could self-validate "ok" here and only fail later at
- * next-step — the exact authoring round-trip this closes.
- */
+/** Author-side shape/reference feedback. Acceptance still requires the live bound workflow. */
 export async function runValidateArtifactAction(options: {
-  name: string;
-  file?: string;
-  /** Raw `--root` as supplied; absent means "discover it" (`resolveRootOption`). */
-  root?: string;
-  artifactsDir: string;
+  name: string; file?: string; root?: string; artifactsDir: string;
 }): Promise<{ result: ValidateArtifactActionResult; exitCode: number }> {
-  const name = options.name as ContractPipelineArtifactName;
-  const validator = CONTRACT_PIPELINE_VALIDATORS[name];
-  if (!validator) {
-    return {
-      result: {
-        status: "error",
-        message: `Unknown contract-pipeline artifact "${options.name}". Valid names: ${CP_ARTIFACT_NAMES.join(", ")}.`,
-      },
-      exitCode: 2,
-    };
-  }
-  let raw: string;
+  const schema = options.name === "execution_plan" ? PlanSubmissionSchema : options.name === "critique" ? CritiqueSchema : options.name === "critic" ? CriticSchema : options.name === "judge" ? PlanJudgeSchema : undefined;
+  if (!schema) return { result: { status: "error", message: "Valid names: execution_plan, critique, critic, judge." }, exitCode: 2 };
   try {
-    raw = options.file
-      ? readFileSync(resolve(options.file), "utf8")
-      : readFileSync(0, "utf8");
-  } catch (err) {
-    return {
-      result: { status: "error", message: `Could not read artifact input: ${(err as Error).message}` },
-      exitCode: 2,
-    };
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    return {
-      result: { status: "error", message: `Artifact is not valid JSON: ${(err as Error).message}` },
-      exitCode: 2,
-    };
-  }
-  const root = resolveRootOption(options.root);
-  const artifactsDir = resolveArtifactsDirOption(root, options.artifactsDir);
-  const role = Object.entries(PHASE_TO_ARTIFACT).find(([, artifact]) => artifact === name)?.[0] ?? "";
-  const depth = (await resolveAdversarialDepth(artifactsDir)).adversarialDepth;
-  const requirement = reviewRequirementForRole(role, depth);
-  const reviewed = await validateContractReviewInput({
-    artifactsDir, artifact: name, role, requirement,
-    raw: requirement === "ordinary" && isEnvelope(parsed) ? parsed.payload : parsed,
-  });
-  if (!reviewed.ok) {
-    return { result: { status: "error", name, issue_count: 1, issues: [{ path: `${name}.review`, severity: "error", message: reviewed.issue }] }, exitCode: 1 };
-  }
-  const payload = stampToolCreatedAt(reviewed.payload, new Date().toISOString());
-  const structuralIssues = validator(payload, name);
-
-  let crossGateIssues: ValidationIssue[];
-  try {
-    const payloads = new Map<ContractPipelineArtifactName, unknown>();
-    for (const siblingName of CP_ARTIFACT_NAMES) {
-      const siblingPayload = envelopePayload(await readContractArtifact(artifactsDir, siblingName));
-      if (siblingPayload !== undefined) payloads.set(siblingName, siblingPayload);
+    const raw = JSON.parse(options.file ? readFileSync(resolve(options.file), "utf8") : readFileSync(0, "utf8")) as unknown;
+    const payload = options.name !== "execution_plan" && raw && typeof raw === "object" && "result" in raw ? raw.result : raw;
+    const parsed = schema.safeParse(payload);
+    const messages = parsed.success ? [] : parsed.error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`);
+    if (parsed.success && options.name === "execution_plan") {
+      const root = resolveRootOption(options.root);
+      const source = await readPlanSource(resolveArtifactsDirOption(root, options.artifactsDir));
+      if (!source) messages.push("Tool-owned source record missing.");
+      else messages.push(...executionPlanIssues(root, source, PlanSubmissionSchema.parse(payload).plan));
     }
-    // The in-flight payload ALWAYS wins over any stale/absent on-disk copy of
-    // the SAME artifact — this is the write-time self-check for `name`, so its
-    // in-flight content is what must be gated, not a possibly-stale sibling file.
-    payloads.set(name, payload);
-    const findingEnumeration = await readOptionalJsonFile(
-      intakePaths(artifactsDir).findingEnumeration,
-    );
-    crossGateIssues = (
-      await evaluateContractPipelineCrossGateOutcomes({
-        payloads,
-        findingEnumeration,
-        root,
-        // Owner-waived counterexamples are excluded from the coverage gates
-        // (open-bugs.md:108) — the self-check must agree with next-step.
-        waivedCounterexampleIds: waivedJudgeAcceptedIds(
-          await readRepairState(artifactsDir),
-          payloads.get("judge_report"),
-          payloads.get("counterexample"),
-        ),
-      })
-    ).flatMap((outcome) => outcome.issues);
-  } catch (err) {
-    // readContractArtifact / readOptionalJsonFile throw on a corrupt (malformed-
-    // JSON) sibling envelope — mirror the same JSON-parse-error shape/exit code
-    // the primary --file parse error above uses.
-    return {
-      result: {
-        status: "error",
-        message: `Could not load a sibling contract-pipeline artifact: ${(err as Error).message}`,
-      },
-      exitCode: 2,
-    };
-  }
-
-  // A write-time self-check for `name` gates only what is KNOWABLE when `name`
-  // is authored — it must not report a defect scoped to an artifact authored
-  // LATER in the pipeline (which does not exist yet at this write). The
-  // canonical example: the OBL-CO-03 evidence-threading cross-gate fail-closes
-  // when a judge ACCEPTS a counterexample but no implementation_dag threads it —
-  // correct at the DAG/promotion boundary, but the DAG is authored AFTER the
-  // judge, so `validate-artifact --name judge_report` could never return "ok"
-  // for an honest judge with accepted counterexamples (its "fix issues until ok"
-  // prompt was unsatisfiable). Suppress cross-gate issues whose scoped artifact
-  // is DOWNSTREAM of `name`; the promotion sweep (where that downstream artifact
-  // IS the in-flight one, so its order is not > name's) still enforces them in
-  // full. This phase-scopes ONLY the singular self-check to match what next-step
-  // applies at `name`'s phase — the shared cross-gate SET the plural sweep and
-  // next-step run is untouched, so the two can never diverge on what IS checked.
-  const nameOrder = CP_ARTIFACT_NAMES.indexOf(name);
-  const isDownstreamScopedIssue = (issue: ValidationIssue): boolean => {
-    // Issue paths are `<artifact>.<field>…` / `<artifact>[i]…`; the leading
-    // segment names the artifact the defect belongs to. A non-artifact prefix
-    // (e.g. `decomposition_file_scope.repo_tree`) resolves to -1 → never
-    // suppressed (only a POSITIVE downstream match is dropped).
-    const lead = issue.path.split(/[.[]/, 1)[0];
-    return CP_ARTIFACT_NAMES.indexOf(lead as ContractPipelineArtifactName) > nameOrder;
-  };
-  crossGateIssues = crossGateIssues.filter((issue) => !isDownstreamScopedIssue(issue));
-
-  const issues = [...structuralIssues, ...crossGateIssues];
-  const errors = issues.filter((issue) => issue.severity === "error");
-  return {
-    result: {
-      status: errors.length === 0 ? "ok" : "error",
-      name,
-      issue_count: issues.length,
-      issues,
-    },
-    exitCode: errors.length === 0 ? 0 : 1,
-  };
+    const issues: ValidationIssue[] = messages.map(message => ({ path: options.name, severity: "error", message }));
+    return { result: { status: issues.length ? "error" : "ok", name: options.name, issue_count: issues.length, issues, message: "Shape/reference check only; next-step validates the live revision and review binding before acceptance." }, exitCode: issues.length ? 1 : 0 };
+  } catch (error) { return { result: { status: "error", message: String(error) }, exitCode: 2 }; }
 }
 
 program
@@ -481,7 +337,7 @@ program
   )
   .requiredOption(
     "--name <name>",
-    "Contract-pipeline artifact name (e.g. obligation_ledger, test_validator_plan)",
+    "Executable planning artifact name (execution_plan, critique, critic, judge)",
   )
   .option("--file <path>", "Path to the artifact JSON file (defaults to stdin)")
   .option("--root <path>", ROOT_OPTION_DESCRIPTION)

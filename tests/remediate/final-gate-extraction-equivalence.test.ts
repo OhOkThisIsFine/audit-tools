@@ -32,15 +32,17 @@ import {
 } from "../../src/remediate/steps/finalGate.js";
 import {
   buildRemediationOutcomesReport,
-  runClosePhase,
+  buildRemediationReportMarkdown,
+  readFinalGateReport,
 } from "../../src/remediate/phases/close.js";
 import type { ClosingResult } from "../../src/remediate/phases/close.js";
-import type { OrchestratorOptions } from "../../src/remediate/types/options.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 import type { EvidenceMechanismKind } from "../../src/shared/types/remediationOutcome.js";
 import { scratchDir } from "../helpers/scratch.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 
 const TESTS_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 /** The audit-tools repo itself — the one tree the gate's command list applies to. */
@@ -447,35 +449,23 @@ function makeBoundaryState(): RemediationState {
       affected_files: [{ path }],
       evidence: [`${path}:1 evidence`],
     }) as Finding;
+  const units = [0, 1].map(index => canonicalUnitFixture(`F-00${index}`, {
+    source_finding_ids: [`F-00${index}`],
+    allowed_files: [index ? "src/b.ts" : "src/a.ts"],
+    read_paths: [index ? "src/b.ts" : "src/a.ts"],
+    dependencies: index ? ["F-000"] : [], phase_ordinal: index,
+  }));
   return {
     status: "implementing",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "PLAN-GATE-OUTCOME",
-      findings: [finding("F-000", "src/a.ts"), finding("F-001", "src/b.ts")],
-      blocks: [
-        {
-          block_id: "B-000",
-          items: ["F-000"],
-          parallel_safe: true,
-          touched_files: ["src/a.ts"],
-          dependencies: [],
-          phase_ordinal: 0,
-        },
-        {
-          block_id: "B-001",
-          items: ["F-001"],
-          parallel_safe: true,
-          touched_files: ["src/b.ts"],
-          dependencies: ["B-000"],
-          phase_ordinal: 1,
-        },
-      ],
-      project_type: "unknown",
+      findings: [finding("F-000", "src/a.ts"), finding("F-001", "src/b.ts")], units,
+      requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: unit.source_finding_ids, change_kind: "structural", assertions: [] })),
       candidate_closing_actions: ["none"],
-    },
+    }),
     items: {
-      "F-000": { finding_id: "F-000", status: "resolved", block_id: "B-000" },
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
+      "F-000": { unit_id: "F-000", status: "resolved" },
+      "F-001": { unit_id: "F-001", status: "pending" },
     },
     closing_plan: { action: "none" },
   };
@@ -483,8 +473,10 @@ function makeBoundaryState(): RemediationState {
 
 async function establishBoundaryRun(inScope: boolean): Promise<void> {
   if (inScope) await makeRepoLookLikeAuditTools();
-  await saveState(makeBoundaryState());
+  const state = makeBoundaryState();
   await writeIntentCheckpoint();
+  await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
+  await saveState(state);
   await acknowledgeResume();
 }
 
@@ -562,42 +554,8 @@ describe("OBL-…-inv-1/fail-7 end to end: the consumers record which gate happe
 // ---------------------------------------------------------------------------
 
 describe("OBL-…-inv-1: the completion report names which gate happened", () => {
-  const OUTPUT_DIR = () => join(REPO_DIR, ".audit-tools");
-
   function closingState(): RemediationState {
-    return {
-      status: "closing",
-      plan: {
-        plan_id: "PLAN-GATE-REPORT",
-        findings: [
-          {
-            id: "F-001",
-            title: "Finding F-001",
-            category: "correctness",
-            severity: "high",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix F-001.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["src/a.ts:1 evidence"],
-          } as Finding,
-        ],
-        blocks: [
-          {
-            block_id: "B-001",
-            items: ["F-001"],
-            parallel_safe: true,
-            touched_files: ["src/a.ts"],
-          },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items: {
-        "F-001": { finding_id: "F-001", status: "resolved", block_id: "B-001" },
-      },
-      closing_plan: { action: "none" },
-    } as unknown as RemediationState;
+    return { status: "closing", plan: canonicalPlanFixture({ plan_id: "PLAN-GATE-REPORT" }), items: {}, closing_plan: { action: "none" } };
   }
 
   async function closeWithGateRecord(
@@ -611,16 +569,16 @@ describe("OBL-…-inv-1: the completion report names which gate happened", () =>
         "utf8",
       );
     }
-    await runClosePhase(closingState(), {
-      root: REPO_DIR,
-      artifactsDir: ARTIFACTS_DIR,
-    } as OrchestratorOptions);
-    return {
-      report: await readFile(join(OUTPUT_DIR(), "remediation-report.md"), "utf8"),
-      outcomes: JSON.parse(
-        await readFile(join(OUTPUT_DIR(), "remediation-outcomes.json"), "utf8"),
-      ) as Record<string, unknown>,
-    };
+    // Historical outcome rendering is a pure reporting question. A real close
+    // now executes its own mandatory floor and must replace stale history.
+    const state = closingState();
+    const closingResult: ClosingResult = { contract_version: "remediate-code-closing-result/v1alpha1", action: "none", status: "skipped", commands: [] };
+    const gate = await readFinalGateReport(ARTIFACTS_DIR);
+    const outcomes = buildRemediationOutcomesReport(state, closingResult, gate);
+    const report = buildRemediationReportMarkdown(state,
+      { resolved: [], verifiedNoChange: [], inappropriate: [], ignored: [], blocked: [] },
+      closingResult, undefined, outcomes, { ran: false, passed: true, duration_ms: 0, output: "" });
+    return { report, outcomes: { ...outcomes } };
   }
 
   it("POSITIVE: an executed GREEN floor is named green in the contract and the render", async () => {
@@ -806,24 +764,22 @@ describe("OBL-…-inv-16: INV-COVERAGE — this module's 9 owned ids", () => {
   }
 
   function stateFor(items: Record<string, unknown>): RemediationState {
-    return {
-      status: "closing",
-      plan: {
-        plan_id: "PLAN-RNF-COV",
-        findings: OWNED_IDS.map(mkFinding),
-        blocks: [
-          {
-            block_id: "B-1",
-            items: OWNED_IDS,
-            parallel_safe: true,
-            touched_files: [],
-          },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
-      items,
-    } as unknown as RemediationState;
+    const findings = OWNED_IDS.map(mkFinding);
+    const units = findings.map(finding => canonicalUnitFixture(finding.id, { source_finding_ids: [finding.id] }));
+    const plan = canonicalPlanFixture({ plan_id: "PLAN-RNF-COV", findings, units,
+      requirements: units.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: unit.source_finding_ids, change_kind: "structural", assertions: [] })),
+    });
+    const runtimeItems = Object.fromEntries(Object.entries(items).map(([id, raw]) => {
+      const item = raw as Record<string, unknown>;
+      return [id, { unit_id: id, status: item.status, ...(item.failure_reason ? { failure_reason: item.failure_reason } : {}) }];
+    }));
+    const sourceVerifications = Object.fromEntries(Object.entries(items).map(([id, raw]) => {
+      const item = raw as Record<string, unknown>;
+      return [id, { evidence: item.evidence, disposition_override: item.disposition_override, recorded_by_module: item.recorded_by_module,
+        review_revision_sha256: plan.review_revision_sha256, source_sha256: contentSha256(findings.find(finding => finding.id === id)) }];
+    }));
+    // Negative cases deliberately supply incomplete evidence to the writer.
+    return { status: "closing", plan, items: runtimeItems, source_verifications: sourceVerifications } as unknown as RemediationState;
   }
 
   /** One owned id, dispositioned under T with a complete, non-contradicting triple. */

@@ -414,17 +414,6 @@ export const SPEC_MIRROR_REGIONS = [
     ],
   },
   {
-    id: "executor-catalog#unreachable",
-    doc: EXECUTOR_CATALOG_DOC,
-    kind: "executors",
-    rows: [
-      {
-        executor: "friction_capture_executor",
-        note: "Unreachable — never produced by `deriveAuditState`'s obligation scan (its id sits in `PRIORITY` only to satisfy the executor-registry-coverage invariant). Friction triage actually fires from the `present_report` terminal step.",
-      },
-    ],
-  },
-  {
     id: "dependency-map#phase-1",
     doc: DEPENDENCY_MAP_DOC,
     kind: "dependencies",

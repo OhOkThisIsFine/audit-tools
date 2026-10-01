@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/remediate-state-invariants.test.ts, tests/remediate/cp-node-1-regressions.test.ts
 /**
  * Fold a confirmed checkpoint's structured `InterpretedIntent` into remediation
  * block / finding ORDERING (DC-1, remediate half).
@@ -5,8 +6,7 @@
  * The user's `free_form_intent` is interpreted ONCE, deterministically, by the
  * single shared interpreter (`interpretFreeFormIntent`) into lens weights,
  * priority signals, and scope emphases. This module consumes that structured
- * signal to reorder the plan's findings (and the blocks that carry them) so the
- * work the user emphasised is dispatched first.
+ * signal to reorder execution units. Original source findings remain byte-exact.
  *
  * Hard boundaries (mirroring audit's planning boost):
  * - ORDERING ONLY. Intent never drops, filters, or mutates a finding — dropping
@@ -21,9 +21,8 @@
  * Pure and synchronous — no IO, no LLM.
  */
 
-import type { InterpretedIntent } from "audit-tools/shared";
+import type { InterpretedIntent, Finding, ExecutionUnit } from "audit-tools/shared";
 import { severityRank } from "audit-tools/shared";
-import type { Finding, RemediationBlock } from "../state/types.js";
 
 /** Boost added to a finding whose lens the intent emphasised (lensWeights). */
 const LENS_EMPHASIS_BOOST = 10;
@@ -31,23 +30,6 @@ const LENS_EMPHASIS_BOOST = 10;
 const SCOPE_EMPHASIS_BOOST = 5;
 /** Flat boost when the intent carried any priority/urgency signal at all. */
 const PRIORITY_SIGNAL_BOOST = 3;
-
-/**
- * Tie-break rank for the audit judge's defect-presence claim. Deliberately NOT
- * a weight boost: verification must never outrank severity, so it is applied
- * only between findings the intent weighting AND severity already call equal.
- * A finding the judge checked against HEAD is worth doing before one it merely
- * asserted, at the same severity.
- *
- * ⚠ REACH: above risk tier `low` the remediate contract pipeline RE-MINTS
- * `state.plan.findings` from DAG nodes rather than carrying the audit `Finding`
- * objects through, so this tie-break reaches only the path where the audit
- * findings survive. That is a pre-existing class, not one this ordering
- * introduces, and closing it means changing what the contract pipeline carries.
- */
-function verificationRank(finding: Finding): number {
-  return finding.verification_status === "judge_confirmed" ? 1 : 0;
-}
 
 // Leading scope-verb phrases (focus on / prioritise / ignore / …) that prefix a
 // scope-emphasis clause; stripped so the needles are the path/identifier targets,
@@ -164,14 +146,14 @@ function intentIsEmpty(intent: InterpretedIntent): boolean {
 
 export interface IntentOrderingResult {
   findings: Finding[];
-  blocks: RemediationBlock[];
+  units: ExecutionUnit[];
 }
 
 /**
- * Reorder `findings` and `blocks` by intent-derived weight (descending), stably.
+ * Reorder `findings` and `units` by intent-derived weight (descending), stably.
  *
  * - Findings sort by `findingIntentWeight` desc, ties broken by original index.
- * - Blocks sort by the MAX intent weight of their member findings (so a block
+ * - Units sort by the MAX intent weight of their member findings (so a block
  *   carrying an emphasised finding is dispatched first), ties broken by original
  *   index. A block's internal item order is left untouched.
  * - When the intent carries no signal, both arrays are returned UNCHANGED (no
@@ -182,11 +164,11 @@ export interface IntentOrderingResult {
  */
 export function applyIntentOrdering(
   findings: Finding[],
-  blocks: RemediationBlock[],
+  units: ExecutionUnit[],
   intent: InterpretedIntent,
 ): IntentOrderingResult {
   if (intentIsEmpty(intent)) {
-    return { findings, blocks };
+    return { findings, units };
   }
 
   const includeNeedles = scopeIncludeNeedles(intent);
@@ -199,38 +181,30 @@ export function applyIntentOrdering(
     );
   }
 
-  // Stable sort: decorate with original index, compare on (weight desc, index asc).
-  const orderedFindings = findings
-    .map((finding, index) => ({ finding, index }))
-    .sort((a, b) => {
-      const wa = weightByFinding.get(a.finding.id) ?? 0;
-      const wb = weightByFinding.get(b.finding.id) ?? 0;
-      if (wb !== wa) return wb - wa;
-      // Gated on EQUAL SEVERITY as well as equal weight. Weight folds severity
-      // in with the boosts, so two different severities can still tie on weight
-      // (e.g. critical+nothing against low+priority); requiring equal severity
-      // is what makes "never overrides severity" true rather than nearly true.
-      if (a.finding.severity === b.finding.severity) {
-        const va = verificationRank(a.finding);
-        const vb = verificationRank(b.finding);
-        if (vb !== va) return vb - va;
-      }
-      return a.index - b.index;
-    })
-    .map((entry) => entry.finding);
-
-  const blockWeight = (block: RemediationBlock): number => {
+  const blockWeight = (block: ExecutionUnit): number => {
     let max = -Infinity;
-    for (const id of block.items) {
+    for (const id of block.source_finding_ids) {
       const w = weightByFinding.get(id);
       if (w !== undefined && w > max) max = w;
     }
     return max === -Infinity ? 0 : max;
   };
-  const orderedBlocks = blocks
+  const orderedUnits = units
     .map((block, index) => ({ block, index }))
-    .sort((a, b) => blockWeight(b.block) - blockWeight(a.block) || a.index - b.index)
+    .sort((a, b) => {
+      const weight = blockWeight(b.block) - blockWeight(a.block);
+      if (weight) return weight;
+      const sources = (unit: ExecutionUnit) => findings.filter(finding => unit.source_finding_ids.includes(finding.id));
+      const aSources = sources(a.block), bSources = sources(b.block);
+      const severity = (values: Finding[]) => Math.max(0, ...values.map(finding => severityRank(finding.severity)));
+      if (severity(aSources) === severity(bSources)) {
+        const confirmed = (values: Finding[]) => values.some(finding => finding.verification_status === "judge_confirmed") ? 1 : 0;
+        const verification = confirmed(bSources) - confirmed(aSources);
+        if (verification) return verification;
+      }
+      return a.index - b.index;
+    })
     .map((entry) => entry.block);
 
-  return { findings: orderedFindings, blocks: orderedBlocks };
+  return { findings, units: orderedUnits };
 }

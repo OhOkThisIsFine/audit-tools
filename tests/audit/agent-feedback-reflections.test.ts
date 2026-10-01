@@ -167,11 +167,11 @@ test("a reflection appended after synthesis re-synthesizes once and the run stil
     const artDir = join(root, ".audit-tools/audit");
     await mkdir(artDir, { recursive: true });
 
-    // Seed the real pre-planning frontier through the shared scripted-host
+    // Seed the ready-inspection frontier through the shared scripted-host
     // fixture. Direct advanceAudit calls intentionally stop at semantic host
     // boundaries, so repeatedly calling them cannot manufacture checkpoint,
     // charter, or design-review results.
-    const preplanningBundle = await buildAdvancedBundle(root, "planning_artifacts");
+    const preplanningBundle = await buildAdvancedBundle(root, "audit_tasks_completed");
     await writeCoreArtifacts(artDir, preplanningBundle, { prune: true });
     await persistDesignReviewSnapshots(artDir, preplanningBundle);
 

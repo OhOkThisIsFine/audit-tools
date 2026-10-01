@@ -38,7 +38,7 @@ import { writeCurrentStep } from "./steps.js";
  * `priority` enum as if it were a risk score, which is what put a coarsely
  * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
  */
-function toHostTask(task: AuditTask): AuditHostTask {
+function toHostTask(task: AuditTask, manifest: ArtifactBundle["repo_manifest"]): AuditHostTask {
   const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
   const demand = deriveLaneDemand({
     tokenEstimate,
@@ -53,7 +53,9 @@ function toHostTask(task: AuditTask): AuditHostTask {
     lens: task.lens,
     file_paths: task.file_paths,
     file_line_counts: task.file_line_counts ?? {},
-    rationale: task.rationale,
+    rationale: task.rationale + "\nSource revision: " + JSON.stringify(task.file_paths.map((path) => ({
+      path, hash: manifest?.files.find((file) => file.path === path)?.hash ?? "unversioned",
+    }))),
     priority: task.priority ?? "low",
     demand,
     token_estimate: tokenEstimate,
@@ -79,7 +81,7 @@ function toHostTask(task: AuditTask): AuditHostTask {
  * choice; audit-tools only binds prompts/results and ingests validated
  * AuditResult objects on the next invocation.
  */
-export async function renderSemanticReviewStep(params: {
+interface SemanticReviewStepParams {
   root: string;
   artifactsDir: string;
   activeReviewRun: ActiveReviewRun;
@@ -97,7 +99,10 @@ export async function renderSemanticReviewStep(params: {
   ingestIssues?: readonly AuditHostIngestIssue[];
   /** Advisory validation findings on results the SAME ingest accepted. */
   validationWarnings?: readonly AuditHostValidationWarning[];
-}): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
+}
+
+/** Prepare bound work without taking over the host's current architecture step. */
+export async function prepareSemanticReviewWorkload(params: SemanticReviewStepParams) {
   const { root, artifactsDir, activeReviewRun } = params;
   if (!activeReviewRun.pending_audit_tasks_path) {
     throw new Error(
@@ -115,12 +120,13 @@ export async function renderSemanticReviewStep(params: {
   // it read zero for every run whose publish was exhaustive (which is every
   // run: the boundary suppresses nothing), and it would misreport the moment a
   // task left the pending set for any reason other than acceptance.
-  const { completedTaskIds } = derivePendingTaskPartition(params.bundle);
+  const { completedTaskIds, pendingTasks } = derivePendingTaskPartition(params.bundle);
   const handoff = await prepareAuditHostHandoff({
     root,
     artifactsDir,
     runId: activeReviewRun.run_id,
-    tasks: tasks.map(toHostTask),
+    tasks: tasks.map((task) => toHostTask(task, params.bundle.repo_manifest)),
+    pendingTaskCount: pendingTasks.length,
   });
   // Name this round's runs on the audit friction record, which is keyed by a fixed
   // literal and so on its own names no run at all (semantics: `FrictionRunLinks`). Each
@@ -138,6 +144,12 @@ export async function renderSemanticReviewStep(params: {
   const resultPaths = handoff.workload.work_items.map((item) =>
     resolve(root, item.result_path),
   );
+  return { handoff, completedTaskIds, resultPaths, continueCommand };
+}
+
+export async function renderSemanticReviewStep(params: SemanticReviewStepParams): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
+  const { root, artifactsDir, activeReviewRun } = params;
+  const { handoff, completedTaskIds, resultPaths, continueCommand } = await prepareSemanticReviewWorkload(params);
   const issues = params.ingestIssues ?? [];
   const validationWarnings = params.validationWarnings ?? [];
 

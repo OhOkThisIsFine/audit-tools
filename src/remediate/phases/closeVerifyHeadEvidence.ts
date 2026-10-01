@@ -1,3 +1,4 @@
+import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 // sites-pinned: tests/remediate/close-verify-head-evidence.test.ts
 import {
   auditReadOf,
@@ -14,92 +15,26 @@ import {
   toPosixPath,
 } from "audit-tools/shared";
 import type { Evidence } from "../../shared/types/remediationOutcome.js";
-import type { Finding, PerFindingDisposition, RemediationItemState } from "../state/types.js";
+import type { Finding, PerFindingDisposition, RemediationItemState, RemediationPlan, SourceVerification, FindingDisposition } from "../state/types.js";
 
 /**
- * CDC-25/CDC-26 (INV-ISC-EVIDENCE-EMITTED) — the PRODUCER for the two
- * evidence-bearing terminal dispositions. `verified_already_fixed` and
- * `refuted` are reachable from a real run ONLY through
- * `RemediationItemState.disposition_override`, and the writer
- * (`buildRemediationOutcomesReport` in `close.ts`) refuses that override unless
- * the item also carries a complete `evidence` triple and the module stamp that
- * recorded it. Nothing wrote those three fields, so both dispositions were
- * dead letters: the only route from a determination to run state was a human
- * transcribing a markdown document no code reads.
+ * Source-specific read-at-HEAD verification. A source is eligible when every
+ * linked execution unit claims verified no-change, or the accepted plan
+ * explicitly proposes already-fixed/refuted. One shared unit never shares a
+ * verdict across its original findings.
  *
- * This leg is that producer, and it is a REAL determination rather than a
- * record of one: it re-reads the finding's own CITED location at TWO refs and
- * decides from what it read. The triple it records names the file and the line
- * it actually read (that is the whole content of INV-ISC-EVIDENCE-EMITTED — the
- * recorded triple must name what was read), so a triple naming a location this
- * leg never opened cannot be produced here.
+ * Two reads are required: B is the audit's recorded commit, never remediation's
+ * start or an internal graph baseline. Present at B and absent at HEAD supports
+ * verified_already_fixed; absent at B supports refuted; present at both withholds
+ * judgment. Missing B, dirty-at-audit files, missing/ambiguous quotes and unreadable
+ * sources withhold rather than guessing. The existing exact matching/provenance
+ * mechanisms below enforce those distinctions.
  *
- * ── WHY TWO READS, NEVER ONE ────────────────────────────────────────────────
- * Let B be the commit the AUDIT read when it produced the finding, and HEAD the
- * commit the fix has landed on by the time this leg runs (close.ts executes the
- * closing action BEFORE its verify legs, so HEAD contains the remediation
- * result — the same point `verifyAnalyzerLeads` and the combined-test leg
- * read). A read at HEAD ALONE cannot support either verdict:
- *
- *   span at B | span at HEAD | result
- *   ----------|--------------|------------------------------------------
- *   present   | absent       | `verified_already_fixed` — the code the audit
- *             |              | read is gone; the fix landed.
- *   absent    | (any)        | `refuted` — the audit read a location that
- *             |              | never showed the span it quoted.
- *   present   | present      | WITHHELD — the cited code still stands, so
- *             |              | this leg makes no determination at all.
- *   B unknown/unreadable     | WITHHELD, with the reason.
- *
- * The single-read form this leg used to carry was WRONG in both directions, and
- * the two errors were mirror images. It called "span still present at HEAD"
- * `refuted` on the stated ground that "the cited location never showed the
- * defect" — an inference no read at HEAD can make. A span still standing proves
- * only that the code the finding quoted is still there; if the defect was real
- * when the audit read it, it is still real. Symmetrically it called "span absent
- * at HEAD" `verified_already_fixed`, when an absent span has TWO causes: the
- * code changed after the audit read it (the fix landed), or the span was never
- * in the file (a misquote — the `refuted` case). B is what tells them apart, so
- * without B neither verdict is reachable and every candidate is withheld.
- *
- * ── WHERE B COMES FROM ──────────────────────────────────────────────────────
- * B must be a commit the AUDIT itself recorded. A remediation-side commit is
- * NOT B: code can change between the audit and the remediation run, so a span
- * absent at the remediation's own start could be a fix made in between rather
- * than a misquote — the very confusion this leg exists to avoid. The obvious
- * candidate, the host-handoff `baseline_commit`, is exactly that remediation-
- * side value and is therefore refused here BY NAME. So is
- * `artifact_metadata.git_history_baseline.head`: it is HEAD at the audit's last
- * git-history re-mine, an internal staleness cache, not what synthesis read.
- *
- * B is `state.plan.audit_read` — the findings contract's `audit_read`
- * (`AuditReadSchema`), which audit synthesis records and the TOOL stamps onto
- * the plan at plan application from the validated source report (never from the
- * host-writable extracted plan). It is state, not an override: there is no seam
- * through which a caller can hand this leg a different commit.
- *
- * `audit_read` is more than a commit because the audit reads the WORKING TREE.
- * For a path in `audit_read.dirty_paths` the blob at B is NOT what the audit
- * read, so a span "absent at B" there could simply have been uncommitted —
- * reading it would manufacture a `refuted`. Such a candidate is WITHHELD.
- *
- * `null`/absent means no commit is known (a report from a non-git tree, a plan
- * with no audit-side source, a state persisted before the field existed): every
- * candidate is withheld. A B that does not resolve to a real commit in this repo
- * is refused as unknown rather than read.
- *
- * PROVENANCE IS STRUCTURAL. Only `resolved_no_change` items are considered: the
- * host has already asserted "I changed nothing because nothing needed
- * changing", so this leg CONFIRMS or leaves that assertion standing — it can
- * never manufacture a disposition for an item nobody resolved. The outcome is
- * then still subject to the writer's own backstop, which refuses a triple whose
- * mechanism contradicts the disposition (`mechanismContradictsOutcome`) or that
- * arrives incomplete; a mechanism/disposition pair is reachable here only
- * because the branch above chose both together.
- *
- * It is a close-gate VERIFY leg, never a `CLOSING_ACTIONS` entry: it runs
- * beside `verifyAnalyzerLeads`, dispatches no host work, and a run with no
- * qualifying item is a no-op.
+ * Every eligible source is rechecked; old determinations are cleared before the
+ * read. New evidence records bind the source content and reviewed plan revision
+ * and name the actual HEAD. Reporting independently refuses incomplete,
+ * contradictory, or stale source evidence. Captured analyzer verdicts remain
+ * independent of the source's read-at-HEAD determination.
  */
 
 export interface HeadEvidenceOverrides {
@@ -138,7 +73,7 @@ export interface HeadEvidenceOutcome {
   head: string | null;
   /** The audit-read commit `B`, when one was supplied AND resolved; null otherwise. */
   base: string | null;
-  /** Per finding_id, the triple + disposition this leg RECORDED onto the item. */
+  /** Per finding_id, the triple + disposition this leg recorded in source_verifications. */
   recorded: Record<string, HeadEvidenceRecord>;
   /** Candidate items the leg declined to determine, with the reason. */
   withheld: HeadEvidenceRecord[];
@@ -354,28 +289,33 @@ async function determine(
 
 export async function verifyHeadEvidenceAgainstFindings(params: {
   state: {
-    plan?: { findings?: Finding[]; audit_read?: unknown } | undefined;
+    plan?: Pick<RemediationPlan, "findings" | "units" | "source_dispositions" | "review_revision_sha256"> & { audit_read?: unknown };
+    source_verifications?: Record<string, SourceVerification>;
+    finding_dispositions?: Record<string, FindingDisposition>;
     items?: Record<string, RemediationItemState> | undefined;
   };
   root: string;
   overrides?: HeadEvidenceOverrides;
 }): Promise<HeadEvidenceOutcome> {
   const { state, root, overrides } = params;
-  const findingsById = new Map(
-    (state.plan?.findings ?? []).map((finding) => [finding.id, finding]),
-  );
-
-  // Provenance first: only a `resolved_no_change` item is a candidate, because
-  // only there has the host asserted a no-change resolution for this leg to
-  // confirm. An item that already carries an override is left alone — a
-  // determination someone else recorded is not this leg's to overwrite.
-  const candidates: Array<{ item: RemediationItemState; finding: Finding }> = [];
-  for (const item of Object.values(state.items ?? {})) {
-    if (item.status !== "resolved_no_change") continue;
-    if (item.disposition_override !== undefined) continue;
-    const finding = findingsById.get(item.finding_id);
-    if (!finding) continue;
-    candidates.push({ item, finding });
+  // Verification is source-scoped: one unit can serve several sources and
+  // one source can require several units. Never copy one source's verdict to
+  // its siblings merely because they share an implementation assignment.
+  const candidates = (state.plan?.findings ?? []).filter(finding => {
+    if (state.finding_dispositions?.[finding.id]) return false;
+    const disposition = state.plan?.source_dispositions.find(entry => entry.finding_id === finding.id);
+    if (disposition?.status === "already_fixed" || disposition?.status === "refuted") return true;
+    const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
+    return units.length > 0 && units.every(unit => state.items?.[unit.id]?.status === "resolved_no_change");
+  }).map(finding => ({ finding }));
+  for (const { finding } of candidates) {
+    const old = state.source_verifications?.[finding.id];
+    if (old) {
+      // A previous read is not authority for this HEAD. Retain the independent
+      // analyzer leg, but remove any stale source determination before rereading.
+      state.source_verifications![finding.id] = old.mechanical_verification
+        ? { mechanical_verification: old.mechanical_verification } : {};
+    }
   }
   if (candidates.length === 0) return NO_OP;
 
@@ -430,7 +370,7 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
 
   const recorded: Record<string, HeadEvidenceRecord> = {};
   const withheld: HeadEvidenceRecord[] = [];
-  for (const { item, finding } of candidates) {
+  for (const { finding } of candidates) {
     const verdict = await determine({
       root,
       head,
@@ -448,9 +388,14 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
       });
       continue;
     }
-    item.disposition_override = verdict.disposition;
-    item.evidence = verdict.evidence;
-    item.recorded_by_module = HEAD_EVIDENCE_MODULE;
+    state.source_verifications ??= {};
+    state.source_verifications[finding.id] = {
+      ...state.source_verifications[finding.id],
+      disposition_override: verdict.disposition, evidence: verdict.evidence,
+      recorded_by_module: HEAD_EVIDENCE_MODULE,
+      review_revision_sha256: state.plan!.review_revision_sha256,
+      source_sha256: contentSha256(finding), head_commit: head,
+    };
     recorded[finding.id] = {
       finding_id: finding.id,
       determined: true,

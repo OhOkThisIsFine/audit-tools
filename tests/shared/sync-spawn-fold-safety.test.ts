@@ -33,7 +33,7 @@ const FOLD_REACHABLE_MODULES = [
   // Remediate fold:
   "src/remediate/steps/dispatch/hostHandoff.ts", // state lock (ingestion corroboration)
   "src/remediate/phases/triage.ts", //             phase lock (blocked-item reverify)
-  "src/remediate/validation/contractPipelineGates.ts", // phase lock (promotion gates)
+  "src/remediate/contractPipeline/executionPlan.ts", // accepted semantic plan under the phase lock
   "src/shared/validation/findingGrounding.ts", //  phase lock (grounding corpus)
   // The tool-owned final gate is spawned INLINE by the phase-boundary gate, which
   // `advanceUnderPhaseLock` runs with the phase lock HELD — and its unit leg is a

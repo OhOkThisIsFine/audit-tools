@@ -58,6 +58,7 @@ export const RUNTIME_NAME_SOURCES = [
   { file: "src/audit/supervisor/operatorHandoff.ts", rules: ["filenameConstants"] },
   { file: "src/audit/types/conceptualAdjudication.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/droppedFindingsRecord.ts", rules: ["filenameConstants"] },
+  { file: "src/remediate/contractPipeline/executionPlan.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/steps/dispatch/hostHandoff.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/intake.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/intent/intentPersistence.ts", rules: ["filenameConstants"] },

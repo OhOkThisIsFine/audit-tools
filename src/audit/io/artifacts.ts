@@ -633,9 +633,8 @@ export async function promoteFinalAuditReport(params: {
       );
     }
   }
-  // Archive the friction close-out record with the promoted deliverables BEFORE
-  // the rm below destroys it — the walk completed (the close gate enforced it),
-  // but no consumer has read the record yet. Best-effort, like the findings copy.
+  // Archive captured diagnostics with the promoted deliverables BEFORE cleanup.
+  // Records may be untriaged: development reflection is not a product gate.
   // The RETURN is consumed, not discarded. `archiveFrictionRecords` warns per
   // failed file and simply omits it from the archived list, so dropping the
   // return meant a friction record that failed to copy was destroyed by the rm

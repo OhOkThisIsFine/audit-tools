@@ -18,7 +18,7 @@ test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
   // operator-authored provider order.
   expect(PRIORITY).not.toContain("provider_confirmation");
   expectObligationEndpoint(expect, "repo_manifest", "first");
-  expectObligationEndpoint(expect, "friction_capture_current", "last");
+  expectObligationEndpoint(expect, "synthesis_narrative_current", "last");
 
   expect(!PRIORITY.includes("design_review_completed"), "design_review_completed should no longer be in PRIORITY").toBeTruthy();
 
@@ -39,13 +39,13 @@ test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
     "structure_decomposition_current",
     "docs_digest_current",
     "intent_checkpoint_current",
+    "planning_artifacts",
+    "architecture_discoveries_current",
     "charter_extraction_current",
     "design_review_contract_completed",
     "design_review_conceptual_completed",
     "charter_clarification_current",
     "systemic_challenge_current",
-    "planning_artifacts",
     "synthesis_narrative_current",
-    "friction_capture_current",
   ]);
 });

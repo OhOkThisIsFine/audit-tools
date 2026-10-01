@@ -5,38 +5,12 @@ import { fileURLToPath } from "node:url";
 import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import { validateArtifacts } from "../../src/remediate/validation/artifacts.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { makePlanningState } from "./helpers/nextStepHarness.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-artifact-validation");
 const REPO_DIR = join(TEST_DIR, "repo");
 const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools/remediation");
-
-const plan = {
-  plan_id: "PLAN-1",
-  findings: [
-    {
-      id: "F-001",
-      title: "First",
-      category: "correctness",
-      severity: "high",
-      confidence: "high",
-      lens: "correctness",
-      summary: "Fix first.",
-      affected_files: [{ path: "src/a.ts" }],
-      evidence: ["src/a.ts:1 evidence"],
-    },
-  ],
-  blocks: [
-    {
-      block_id: "B-001",
-      items: ["F-001"],
-      parallel_safe: true,
-      touched_files: ["src/a.ts"],
-    },
-  ],
-  project_type: "unknown",
-  candidate_closing_actions: ["none"],
-};
 
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -44,15 +18,7 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 }
 
 async function saveState(overrides: Partial<RemediationState> = {}): Promise<void> {
-  await new StateStore(ARTIFACTS_DIR).saveState({
-    status: "planning",
-    plan,
-    items: {
-      "F-001": { finding_id: "F-001", status: "pending", block_id: "B-001" },
-    },
-    closing_plan: { action: "none" },
-    ...overrides,
-  } as RemediationState);
+  await new StateStore(ARTIFACTS_DIR).saveState(makePlanningState(overrides));
 }
 
 beforeEach(async () => {

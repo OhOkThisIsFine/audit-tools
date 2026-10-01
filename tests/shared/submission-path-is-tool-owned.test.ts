@@ -14,8 +14,8 @@ import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
  *
  *   1. no host-facing prompt or worker packet contains a literal submission
  *      filename or an `incoming/` path;
- *   2. the emitted step's declared write paths are the tool-computed
- *      `submissions/<sha256>.json` names;
+ *   2. architectural submissions and concurrently ready inspection results use
+ *      their respective tool-computed, content-bound hashed filenames;
  *   3. mechanically, across the whole of `src/`: no `join(..., "incoming", ...)`
  *      construction and no rendered `incoming/` literal survives.
  *
@@ -49,6 +49,8 @@ import {
   releaseLock,
   repoRelativePath,
   resolveContainedPath,
+  resolveHostHandoffPaths,
+  hostHandoffResultPath,
   RunLogger,
   submissionPathFor,
   deriveLaneDemand,
@@ -177,12 +179,27 @@ describe("the submission path is tool-owned", () => {
         expect(writePaths.length, "the step must still declare its writable paths").toBeGreaterThan(
           0,
         );
-        for (const writePath of writePaths) {
-          expect(
-            writePath,
-            "every declared submission path is the tool-computed submissions/<sha256>.json name",
-          ).toMatch(/\/submissions\/[0-9a-f]{64}\.json$/);
+        const contractResult = slashed(step.artifact_paths.contract_results!);
+        expect(contractResult).toMatch(/\/submissions\/[0-9a-f]{64}\.json$/);
+        expect(writePaths).toContain(contractResult);
+        const workloadPath = step.artifact_paths.host_workload;
+        expect(workloadPath, "ready scoped inspection should accompany the architecture lane").toBeTruthy();
+        const workload = JSON.parse(await readFile(workloadPath!, "utf8")) as {
+          run_id: string; work_items: Array<{ id: string; result_path: string }>;
+        };
+        const boundPaths = resolveHostHandoffPaths({ root, artifactsDir, runId: workload.run_id, runDirSegments: [] });
+        expect(slashed(workloadPath!)).toBe(slashed(boundPaths.workloadPath));
+        const inspectionResults = workload.work_items.map(item => {
+          const expected = hostHandoffResultPath(boundPaths, item.id);
+          expect(item.result_path).toBe(expected);
+          return slashed(resolveContainedPath(root, expected, "inspection result"));
+        });
+        expect(inspectionResults.length).toBeGreaterThan(0);
+        expect(new Set(writePaths)).toEqual(new Set([contractResult, ...inspectionResults]));
+        for (const writePath of inspectionResults) {
+          expect(writePath).toMatch(/\/host-results\/[0-9a-f]{64}\.json$/);
         }
+        expect(packetText, "the blind architectural packet must not include the scoped workload").not.toContain(workloadPath);
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }

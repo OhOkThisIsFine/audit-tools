@@ -5,15 +5,7 @@ import { EXECUTOR_REGISTRY, isHostDelegationExecutor } from "../../src/audit/orc
 import { EXECUTOR_RUNNERS } from "../../src/audit/orchestrator/executorRunners.js";
 import { PRIORITY } from "../../src/audit/orchestrator/nextStep.js";
 
-// Two tests DISSOLVED here (CX-02, record constraint 6): the fold-array⇄PRIORITY
-// forward guard (with its friction_capture_current carve-out) and its CP-NODE-14
-// reverse. Their subject was the divergence between a HAND-ENUMERATED fold array
-// and PRIORITY; `buildAuditObligations()` now DERIVES the registry from PRIORITY
-// (`PRIORITY.map`, with a load-time assertion that every bespoke policy body
-// names a PRIORITY id), so an id can no longer be in one and absent from the
-// other. The carve-out needed no new home either: `friction_capture_current`
-// stays inert by absence — `deriveAuditState` never emits it, so its derived
-// state is always satisfied.
+// buildAuditObligations derives the fold registry from PRIORITY.
 
 test("every PRIORITY obligation is covered by exactly one EXECUTOR_REGISTRY entry", () => {
   for (const obligationId of PRIORITY) {

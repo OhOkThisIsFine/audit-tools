@@ -147,26 +147,15 @@ const FIXTURE_SKIP_ANALYZERS = {
 };
 
 /**
- * Drive the deterministic audit pipeline in-process up to (and including) the
- * planning step. Returns `{ planning, lineIndex }` where `lineIndex` is
- * `FIXTURE_LINE_INDEX`.
- *
- * `advanceAudit` drains the consecutive deterministic regen frontier within one
- * call, stopping only at host-delegation boundaries (intent_checkpoint, charter,
- * both design-review passes). So the whole
- * deterministic chain collapses into a handful of host-boundary round-trips — this
- * helper is chain-length-agnostic: it loops `advanceAudit` until the planning
- * artifacts are built (planning_executor is the deterministic tail that the
- * conceptual design-review round-trip drains into), never hard-coding the exact
- * intermediate step count. Every call passes the same options (root + lineIndex +
- * a skip-all analyzer policy for hermeticity), mirroring the real CLI path.
+ * Prepare scoped work and explicitly settle the fixture's architectural host
+ * evidence, then return a forced planning pass with the canonical line index.
+ * This helper supports tests whose next boundary is inspection/synthesis; the
+ * concurrent frontier tests separately retain pending architecture lanes.
  */
 export async function advanceFixtureToPlanning(root) {
-  // Drive the deterministic pipeline up to (but not through) planning via the
-  // single target-keyed stage list in advancedBundle.mjs — adding a PRIORITY
-  // phase is a one-line stage insert there, never a re-edit of this sequence.
-  const preplanningBundle = await buildAdvancedBundle(root, "planning_artifacts");
+  const preplanningBundle = await buildAdvancedBundle(root, "audit_tasks_completed");
   const planning = await advanceAudit(preplanningBundle, {
+    preferredExecutor: "planning_executor",
     root,
     lineIndex: FIXTURE_LINE_INDEX,
     analyzers: FIXTURE_SKIP_ANALYZERS,

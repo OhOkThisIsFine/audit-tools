@@ -41,35 +41,14 @@ export {
 } from './frictionRecord.js';
 
 /**
- * O1 end-of-run friction TRIAGE — single-sourced for BOTH orchestrators so the
- * triage step shape, the disposition vocabulary, the blocking semantics, and the
- * close-out deciders cannot drift between the two halves of the pipeline. This is
- * the analog (and now the single source) of the former per-orchestrator
- * `decideAuditFrictionCloseout` / `decideRemediateFrictionCloseout` deciders,
- * collapsed here as one parameterized decider.
+ * Explicit development reflection over captured run diagnostics. Both tools use
+ * the same event/reflection vocabulary, but neither calls this utility as a
+ * condition of target completion. Repository-owned sprint closeout owns the
+ * reflection policy.
  *
- * What the triage gates:
- *  - The MECHANICAL friction events the O3/O2 seams accreted through the sink
- *    (`captureFrictionEvent` → the per-run `friction/<run_id>.json` record).
- *  - The OPT-IN agent-feedback reflections workers appended to
- *    `agent-feedback.jsonl` during the run.
- *
- * The satisfaction predicate set is the UNION of those two sources. The triage is
- * a MANDATORY, BLOCKING end-of-run step: it stays unsatisfied until every captured
- * event AND every surfaced reflection carries a recorded disposition. This is
- * DISTINCT from the optional, untouched mid-run worker reflection channel — a
- * worker MAY append a reflection line, but the blocking triage is the host's
- * end-of-run obligation to dispose of what was captured.
- *
- * False-green is dropped: an empty up-front zero-friction record NO LONGER
- * satisfies the close-out. Satisfaction requires either:
- *  - EMPTY SET: zero events AND zero reflections → trivially disposed (the
- *    close-out fires once, persists a disposed record, and never re-loops); or
- *  - DISPOSED: every event id and every reflection key has a `keep|discard|
- *    annotate` disposition recorded against it.
- *
- * Friction appends ride O2's `withFileLock` (keyed off the friction record path)
- * so a friction append never races the locked critical section.
+ * When explicitly requested, triage requires dispositions for captured subjects
+ * and an observation or clean attestation for every category. Capture remains
+ * best-effort and records are archived even when they have not been triaged.
  */
 
 /** The set of valid dispositions, for validation at the contract boundary. */

@@ -1,6 +1,7 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts
 import { z } from "zod";
-import { isTerminalStatus } from "./itemStatus.js";
+import { executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
+import { ITEM_STATUSES, isTerminalStatus } from "./itemStatus.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -17,6 +18,10 @@ import {
 import {
   type ConformanceReviewBinding,
   RemediationPlan,
+  type FindingDisposition,
+  type SourceVerification,
+  SourceVerificationSchema,
+  RemediationPlanSchema,
   RemediationItemState,
   ClosingPlan,
   isClarificationCategory,
@@ -24,7 +29,6 @@ import {
   RemediationHostHandoffRecord,
   RemediationHostHandoffRecordSchema,
 } from "./types.js";
-import { validateRemediationBlock } from "../validation/remediationState.js";
 import {
   REMEDIATION_RUN_STATUSES,
   isRemediationRunStatus,
@@ -32,39 +36,13 @@ import {
 } from "./runStatus.js";
 
 /**
- * The schema version stamped on every persisted `state.json`.
- *
- * The VALUE is unchanged from the literal three modules already spelled out
- * (the host-handoff parser, the state-shaping helper in `nextStep.ts`, and the
- * test fixtures). What changes is that it is now ONE declaration that the store
- * actually writes and reads back, rather than a constant a reader FABRICATED
- * onto the loaded value to satisfy its own parser — see `parseCurrentState`'s
- * call site in `steps/dispatch/hostHandoff.ts`. An identity that the reader
- * supplies itself is not a check; it is the check's answer written in advance.
- *
- * A run's state is COSTLY / AUTHORED state in the sense
- * `audit-tools/shared/io/schemaVersion.ts` names: it records work an operator
- * or a host has already done, and it cannot be rebuilt from anything else on
- * disk. That module's policy is therefore THROW on a mismatch — silently
- * discarding a state would read as "this run never started" and destroy the
- * plan, the item ledger and every recorded acceptance with it.
- *
- * ABSENT IS NOT A MISMATCH, and the distinction is deliberate here rather than
- * inherited. Every run already in flight when this field was introduced has a
- * `state.json` with no `contract_version`; treating its absence as a mismatch
- * would refuse to load exactly the runs this field exists to protect. An
- * unstamped state is read under the CURRENT version's semantics (it was written
- * by a release whose shape this one still admits — that is what makes the field
- * safe to add), and the next write stamps it. A stamped-but-DIFFERENT version
- * is the case that throws, because at that point the file positively claims
- * another release's semantics rather than merely predating the field.
- *
- * Same asymmetry as `intent_checkpoint` (absent ⇒ nothing to check; present
- * and different ⇒ refuse loudly), inverted for a version that is newly added
- * rather than newly REQUIRED.
+ * Unit-native authored runtime. Older stamped states are refused without mutation:
+ * their source/item identities cannot be losslessly interpreted as execution units.
+ * Versionless new-shape states may be constructed in memory and are stamped only
+ * on write; loading never fabricates a version or discards accepted evidence.
  */
 export const REMEDIATION_STATE_CONTRACT_VERSION =
-  "remediate-code-state/v1alpha1" as const;
+  "remediate-code-state/v2" as const;
 
 /** The file this store owns, named once so the version error can name it too. */
 const STATE_FILENAME = "state.json";
@@ -105,6 +83,8 @@ export interface RemediationState {
   conformance_review?: ConformanceReviewBinding;
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
+  finding_dispositions?: Record<string, FindingDisposition>;
+  source_verifications?: Record<string, SourceVerification>;
   closing_plan?: ClosingPlan;
   started_at?: string;
   step_count?: number;
@@ -222,35 +202,9 @@ function validateState(value: unknown): string[] {
     if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
       errors.push(`status "${status}" requires a persisted plan`);
     } else {
-      const p = plan as Record<string, unknown>;
-      if (typeof p["plan_id"] !== "string" || p["plan_id"].length === 0) {
-        errors.push(`status "${status}" requires plan.plan_id`);
-      }
-      if (!Array.isArray(p["findings"])) {
-        errors.push(`status "${status}" requires plan.findings`);
-      }
-      if (!Array.isArray(p["blocks"])) {
-        errors.push(`status "${status}" requires plan.blocks`);
-      } else {
-        // Per-block shape is delegated to the ONE block validator rather than
-        // re-checked here. Two validators for one object is how the load path
-        // came to be the weaker of the pair: `validateRemediationBlock` requires
-        // `touched_files` (the surface the file-ownership-disjoint scheduler and
-        // post-merge attribution read), but it was reachable only through
-        // `validateRemediationPlan`, so a block with no declared surface loaded
-        // clean and every reader normalized the omission to an implicit empty —
-        // i.e. "collides with nothing". [[validator-guards-every-field-caller-reads]]
-        for (const [i, block] of (p["blocks"] as unknown[]).entries()) {
-          for (const issue of validateRemediationBlock(
-            block,
-            `plan.blocks[${i}]`,
-          )) {
-            if (issue.severity === "error") {
-              errors.push(`${issue.path}: ${issue.message}`);
-            }
-          }
-        }
-      }
+      const parsed = RemediationPlanSchema.safeParse(plan);
+      if (!parsed.success) errors.push(...parsed.error.issues.map(issue => `plan.${issue.path.join(".")}: ${issue.message}`));
+
     }
     const items = obj["items"];
     if (!items || typeof items !== "object" || Array.isArray(items)) {
@@ -262,13 +216,34 @@ function validateState(value: unknown): string[] {
           continue;
         }
         const it = item as Record<string, unknown>;
-        // Item identity fields: triage / close / dispatch all key on these.
-        if (typeof it["finding_id"] !== "string" || it["finding_id"].length === 0) {
-          errors.push(`items["${key}"] is missing its finding_id identity field`);
-        }
-        if (typeof it["block_id"] !== "string" || it["block_id"].length === 0) {
-          errors.push(`items["${key}"] is missing its block_id identity field`);
-        }
+        if (it["unit_id"] !== key || key.length === 0) errors.push(`items["${key}"] has an invalid unit_id identity`);
+        if (it["finding_id"] !== undefined || it["block_id"] !== undefined) errors.push(`items["${key}"] uses retired finding/block identity`);
+        if (!(ITEM_STATUSES as readonly unknown[]).includes(it["status"])) errors.push(`items["${key}"] has an invalid status`);
+
+      }
+    }
+  }
+  if (obj["plan"] !== undefined) {
+    const parsed = RemediationPlanSchema.safeParse(obj["plan"]);
+    if (!parsed.success) errors.push(...parsed.error.issues.map(issue => `plan.${issue.path.join(".")}: ${issue.message}`));
+    else {
+      errors.push(...executionPlanReferenceIssues(parsed.data, parsed.data.findings.map(finding => finding.id)));
+      const unitIds = new Set(parsed.data.units.map(unit => unit.id));
+      const items = obj["items"] as Record<string, unknown> | undefined;
+      if (items && typeof items === "object" && !Array.isArray(items)) {
+        for (const id of Object.keys(items)) if (!unitIds.has(id)) errors.push(`items["${id}"] is not a plan unit`);
+        for (const id of unitIds) if (!items[id]) errors.push(`plan unit "${id}" has no runtime item`);
+      }
+      if (obj["source_verifications"] !== undefined) {
+        const sourceRecords = z.record(z.string(), SourceVerificationSchema).safeParse(obj["source_verifications"]);
+        if (!sourceRecords.success) errors.push("source_verifications has invalid source evidence");
+        else for (const id of Object.keys(sourceRecords.data)) if (!parsed.data.findings.some(f => f.id === id)) errors.push(`source_verifications references unknown source "${id}"`);
+      }
+      const dispositions = obj["finding_dispositions"];
+      if (dispositions !== undefined) {
+        const shape = z.record(z.string(), z.object({ status: z.enum(["ignored", "declined"]), reason: z.string().trim().min(1) }).strict()).safeParse(dispositions);
+        if (!shape.success) errors.push("finding_dispositions must carry explicit source decisions with reasons");
+        else for (const id of Object.keys(shape.data)) if (!parsed.data.findings.some(f => f.id === id)) errors.push(`finding_dispositions references unknown source "${id}"`);
       }
     }
   }
@@ -306,9 +281,8 @@ function validateState(value: unknown): string[] {
  * - an item paused as `needs_clarification` must carry its question, because
  *   the clarification round is built from those items alone.
  *
- * A state written before the move is translated on READ by
- * {@link adoptLegacyClarifications}, so these refuse only a WRITE of the old
- * shape.
+ * The retired representation is refused on both read and write; no question
+ * authority is inferred from failure prose.
  */
 function clarificationQuestionErrors(obj: Record<string, unknown>): string[] {
   const errors: string[] = [];
@@ -339,85 +313,6 @@ function clarificationQuestionErrors(obj: Record<string, unknown>): string[] {
     }
   }
   return errors;
-}
-
-/**
- * The READ rule for a state written before the worker question moved onto its
- * item. Such a state holds the questions in a run-level `clarifications` list,
- * and the old ingest ALSO wrote each question into the paused item's
- * `failure_reason`.
- *
- * Every `needs_clarification` item without a `clarification_question` takes
- * one: from its entry in the legacy list when there is one, else from its
- * `failure_reason` (this recovers a run that the old partial-answer defect
- * already wedged, where the list was cleared but the item still waits). The
- * legacy list is then dropped, and the next write persists the new shape.
- *
- * This is the one place a read is not byte-faithful, and it touches only the
- * retired shape: a current state passes through unchanged.
- */
-function adoptLegacyClarifications(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const obj = raw as Record<string, unknown>;
-  const items = obj["items"];
-  const hasItems = Boolean(items) && typeof items === "object" && !Array.isArray(items);
-  const needsQuestion = hasItems
-    ? Object.values(items as Record<string, unknown>).some(
-        (item) =>
-          Boolean(item) &&
-          typeof item === "object" &&
-          (item as Record<string, unknown>)["status"] === "needs_clarification" &&
-          (item as Record<string, unknown>)["clarification_question"] === undefined,
-      )
-    : false;
-  if (obj["clarifications"] === undefined && !needsQuestion) return raw;
-
-  const legacy = new Map<string, Record<string, unknown>>();
-  if (Array.isArray(obj["clarifications"])) {
-    for (const entry of obj["clarifications"] as unknown[]) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-      const e = entry as Record<string, unknown>;
-      if (typeof e["finding_id"] === "string" && !legacy.has(e["finding_id"])) {
-        legacy.set(e["finding_id"], e);
-      }
-    }
-  }
-  const { clarifications: _retired, ...rest } = obj;
-  if (!hasItems) return rest;
-  const nextItems: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(items as Record<string, unknown>)) {
-    const it = item as Record<string, unknown> | null;
-    if (
-      !it ||
-      typeof it !== "object" ||
-      it["status"] !== "needs_clarification" ||
-      it["clarification_question"] !== undefined
-    ) {
-      nextItems[key] = item;
-      continue;
-    }
-    const entry = legacy.get(key);
-    const description =
-      typeof entry?.["description"] === "string" && entry["description"].trim()
-        ? entry["description"]
-        : typeof it["failure_reason"] === "string" && it["failure_reason"].trim()
-          ? it["failure_reason"]
-          : "The worker paused this finding for a clarification but recorded no question text.";
-    const options = Array.isArray(entry?.["options"])
-      ? (entry["options"] as unknown[]).filter((o): o is string => typeof o === "string")
-      : [];
-    nextItems[key] = {
-      ...it,
-      clarification_question: {
-        category: isClarificationCategory(entry?.["category"])
-          ? entry["category"]
-          : "scope_of_fix",
-        description,
-        ...(options.length > 0 ? { options } : {}),
-      },
-    };
-  }
-  return { ...rest, items: nextItems };
 }
 
 const LOCK_FILENAME = "state.lock";
@@ -460,7 +355,7 @@ export class StateStore {
         // `validateState` throws SchemaVersionMismatchError for a state stamped
         // with another release's contract version; that propagates out of the
         // read exactly as the policy requires (see the constant's doc).
-        const adopted = adoptLegacyClarifications(raw);
+        const adopted = raw;
         const errors = validateState(adopted);
         if (errors.length > 0) {
           throw new Error(
@@ -474,8 +369,6 @@ export class StateStore {
         // written before the field existed has none until its next write, and
         // `validateState` admits that (see the constant's doc) — which is the
         // whole reason the field is optional on the type rather than required.
-        // The one exception is the retired clarification shape, translated by
-        // `adoptLegacyClarifications`; a current state is returned unchanged.
         return adopted as RemediationState;
       },
       // The WRITE hook. Without it the store's own `persist` wrote whatever a
@@ -547,7 +440,7 @@ export class StateStore {
         phase: state?.status ?? null,
         plan_id: state?.plan?.plan_id ?? null,
         active_item_ids: Object.values(state?.items ?? {})
-          .filter((item) => !isTerminalStatus(item.status)).map((item) => item.finding_id).sort(),
+          .filter((item) => !isTerminalStatus(item.status)).map((item) => item.unit_id).sort(),
         ...(state?.host_handoff ? { workload_sha256: state.host_handoff.workload_sha256 } : {}),
       };
     }

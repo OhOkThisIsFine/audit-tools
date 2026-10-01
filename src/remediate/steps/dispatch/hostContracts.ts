@@ -20,7 +20,7 @@ export type CurrentRemediationHostState = RemediationState & {
 
 export interface RemediationHostWorkItem {
   readonly id: string;
-  readonly finding_ids: readonly string[];
+  readonly source_finding_ids: readonly string[];
   readonly allowed_files: readonly string[];
   readonly baseline_commit: string;
   /**

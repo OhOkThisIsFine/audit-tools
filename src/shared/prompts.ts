@@ -1,8 +1,7 @@
 import type { ReviewRequirement } from "./types/reviewIndependence.js";
-// sites-pinned: tests/remediate/contract-pipeline-prompts.test.ts
-//   The independence mandate's wording (an independent CONTEXT, never a
-//   mechanism) is pinned by the contract-pipeline prompts suite, which renders
-//   it through every adversarial role and asserts the mechanism words absent.
+// sites-pinned: tests/shared/review-independence.test.ts
+//   Required review pauses when independence is unavailable and does not offer
+//   inline self-review as a fallback.
 /**
  * Parts of a cacheable prompt: a static shared prefix (identical across all
  * agents in a wave) and a per-agent payload (varies per invocation).
@@ -64,8 +63,7 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  * to a fresh, independent sub-agent", which names one way to get independence
  * and presumes the host has it — in-process subagents are not universal, and a
  * host without them read an instruction it could not follow (the same defect the
- * contract-pipeline fan-out carried; see `module_contract_drafting`'s "what this
- * work needs" line in contractPipeline.ts). Independence is a property of the
+ * former contract-pipeline fan-out carried). Independence is a property of the
  * CONTEXT, so that is what the text requires and the host owns the mechanism.
  * Required independent review has no self-review escape. Degraded review is
  * available only through an explicit role policy, and its provenance is recorded.

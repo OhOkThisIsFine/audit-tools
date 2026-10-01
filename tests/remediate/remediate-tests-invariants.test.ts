@@ -1,12 +1,11 @@
 /**
  * INV-remediate-tests-01: no it() at module scope in test files; describe blocks balanced
- * INV-remediate-tests-02: no inline contract-pipeline version literals in test fixtures;
- *                         tests must import CONTRACT_PIPELINE_*_VERSION constants
+ * INV-remediate-tests-02: retired with the multi-artifact contract pipeline
  * INV-remediate-tests-03: duplicated scaffold helpers extracted to a shared module (structural check)
  * INV-remediate-tests-04: no either-or set-membership assertions where a single deterministic outcome is expected
  * INV-remediate-tests-05: retired with the tool-owned quota scheduler (host execution policy is outside the remediation contract)
  * INV-remediate-tests-06: retired (A6 — contracts single-sourced as zod; no JSON schema files)
- * INV-remediate-tests-07: validation.test.ts covers all contract-pipeline validators
+ * INV-remediate-tests-07: retired artifact roster; executable-plan behavior is tested directly
  * INV-remediate-tests-08: ESM-correct __dirname derivation (fileURLToPath(import.meta.url))
  * INV-remediate-tests-09: no vacuous/placeholder tests (expect(true).toBe(true))
  * INV-remediate-tests-10: no cross-file duplicate test bodies for the same behaviour
@@ -79,75 +78,6 @@ describe("INV-remediate-tests-01: no it() at module scope in test files", () => 
       if (matches.length > 0) violations.push(`${file}: ${matches.length} module-scope it()`);
     }
     expect(violations).toEqual([]);
-  });
-});
-
-// ── INV-remediate-tests-02 ─────────────────────────────────────────────────
-
-describe("INV-remediate-tests-02: no inline contract-pipeline version literals in test files", () => {
-  // The canonical form for these test files is to use the exported version constants
-  // from audit-tools/shared (CONTRACT_PIPELINE_*_VERSION) or from local validation
-  // modules (CP_* private consts) rather than bare string literals.
-  //
-  // CONTRACT_PIPELINE_ exports available from shared cover: goal_spec, context_bundle,
-  // design_spec, conceptual_design_critique, obligation_ledger, contract_assessment_report,
-  // counterexample, judge_report, implementation_dag, verification_report, test_validator_plan.
-  //
-  // Artifacts whose constants are NOT yet in shared (module_decomposition, module_contracts,
-  // seam_reconciliation_report, finalized_module_contracts, cyclic_seam_resolution) must
-  // be imported from src/validation/contractPipeline.js (local module-level consts).
-  // Until that migration completes, validation.test.ts is the exception — it defines
-  // local test-scope consts inline (acceptable; see the describe blocks it adds below).
-  //
-  // This test checks the KEY invariant: contract-pipeline-adversarial.test.ts (the main
-  // adversarial fixture) at a minimum imports at least one shared CONTRACT_PIPELINE_* constant
-  // or a local const CP_* for the artifact types that now have exported constants.
-
-  it("contract-pipeline-adversarial.test.ts uses CONTRACT_PIPELINE_*_VERSION for supported artifact types OR defines local version consts", () => {
-    const src = readTestFile("contract-pipeline-adversarial.test.ts");
-    // The file uses version literals for fixtures. It MUST import at least the shared
-    // constants that exist (goal_spec, obligation_ledger, judge_report, implementation_dag, etc.)
-    // OR define equivalent local const CP_* or import from validation/.
-    const usesSharedConstants = src.includes("CONTRACT_PIPELINE_");
-    const usesLocalConsts = src.includes("const CP_");
-    const importsFromValidation = src.includes("../src/validation/contractPipeline");
-
-    // Track which of the 4+ shared-exported types are used raw:
-    const rawGoalSpec = /"remediate-code-contract-pipeline\/goal-spec\/v1alpha1"/.test(src);
-    const rawJudge = /"remediate-code-contract-pipeline\/judge-report\/v1alpha1"/.test(src);
-    const rawImplDag = /"remediate-code-contract-pipeline\/implementation-dag\/v1alpha1"/.test(src);
-
-    // If raw literals are used for types that HAVE shared constants, it's a violation.
-    // These types have CONTRACT_PIPELINE_GOAL_SPEC_VERSION, _JUDGE_REPORT_VERSION, etc.
-    if (rawGoalSpec) {
-      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
-    }
-    if (rawJudge) {
-      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
-    }
-    if (rawImplDag) {
-      expect(usesSharedConstants || usesLocalConsts || importsFromValidation).toBe(true);
-    }
-
-    // Overall: the file MUST use constants for at least the available shared types.
-    // NOTE: this assertion will fail when the file is updated to use constants (which is good),
-    // or it records the current state (file uses only raw literals = known debt).
-    // This test documents the current state and will fail when migration is needed.
-    // For now, record the count of raw literals as an invariant (must not grow).
-    const rawLiteralCount = (src.match(/"remediate-code-contract-pipeline\/[^"]+\/v1alpha1"/g) ?? []).length;
-    // The count is currently ~20+. We fix it to not increase (regression guard).
-    expect(rawLiteralCount).toBeLessThanOrEqual(25);
-  });
-
-  it("validation.test.ts defines local version consts (not bare literals) for the 5 validators under test", () => {
-    const src = readTestFile("validation.test.ts");
-    // After the INV-07 fix, validation.test.ts defines local const variables for each
-    // tested artifact version (e.g. const CP_MODULE_DECOMPOSITION_VERSION = "...").
-    // These local consts are acceptable because the shared module doesn't yet export them.
-    const definesLocalConsts = src.includes("const CP_") ||
-      src.includes("CP_MODULE_DECOMPOSITION_VERSION") ||
-      src.includes("CP_MODULE_CONTRACTS_VERSION");
-    expect(definesLocalConsts).toBe(true);
   });
 });
 
@@ -276,12 +206,10 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
   // We detect the `.toContain(someVar)` pattern applied to array literals holding
   // step_kind or status string members.
   //
-  // Known legitimate non-determinism: integration-pipeline.test.ts and
-  // next-step.test.ts closing-phase assertions where multiple closing step_kinds
-  // are valid depending on plan state. These are tracked as known debt (not
-  // new violations) and must not grow.
+  // The old integration/closing exceptions now have exact outcome assertions.
+  // New either-or assertions must not bring that ambiguity back.
 
-  it("either-or set-membership assertion count does not grow beyond known debt (integration + next-step closing steps)", () => {
+  it("no deterministic outcome assertion accepts an either-or result", () => {
     const THIS_FILE = "remediate-tests-invariants.test.ts";
     // Matches: expect(['...', '...']).toContain( — two or more string items then .toContain(
     const EITHER_OR_PATTERN = /expect\(\s*\[(?:\s*['"][a-z_]+['"]\s*,\s*){1,}['"][a-z_]+['"]\s*\]\s*\)\.toContain\(/;
@@ -295,13 +223,7 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
         violations.push(file);
       }
     }
-    // Only the known debt files are allowed; any new file is a violation. The
-    // next-step-implement-dispatch either-or assertion was retired when the
-    // classic impl-risk preview was removed (review-gate convergence, chunk C).
-    const KNOWN_DEBT = [
-      "integration-pipeline.test.ts",
-    ].sort();
-    expect(violations.sort()).toEqual(KNOWN_DEBT);
+    expect(violations.sort()).toEqual([]);
   });
 });
 
@@ -313,37 +235,8 @@ describe("INV-remediate-tests-04: no either-or set-membership assertions for det
 // schema now, so there are no hand-authored JSON schema files to bidirectionally
 // cover.
 
-// ── INV-remediate-tests-07 ─────────────────────────────────────────────────
-
-describe("INV-remediate-tests-07: validation.test.ts covers all contract-pipeline validators", () => {
-  // The full set of validators in src/validation/contractPipeline.ts must each
-  // have a describe block in validation.test.ts covering them.
-  const REQUIRED_VALIDATORS = [
-    "validateModuleDecomposition",
-    "validateModuleContracts",
-    "validateSeamReconciliationReport",
-    "validateFinalizedModuleContracts",
-    "validateCyclicSeamResolution",
-    "validateGoalSpec",
-    "validateImplementationDAG",
-    "validateCounterexample",
-    "validateJudgeReport",
-  ];
-
-  it("validation.test.ts imports all required validators", () => {
-    const src = readTestFile("validation.test.ts");
-    const missing = REQUIRED_VALIDATORS.filter((v) => !src.includes(v));
-    expect(missing).toEqual([]);
-  });
-
-  it("each required validator has its own describe block in validation.test.ts", () => {
-    const src = readTestFile("validation.test.ts");
-    const missingDescribe = REQUIRED_VALIDATORS.filter(
-      (v) => !src.includes(`describe("${v}`) && !src.includes(`describe('${v}`),
-    );
-    expect(missingDescribe).toEqual([]);
-  });
-});
+// The retired multi-artifact validator roster is replaced by executable-plan
+// schema and live-boundary tests in executable-plan-identity/contract-review-independence.
 
 // ── INV-remediate-tests-10 ─────────────────────────────────────────────────
 

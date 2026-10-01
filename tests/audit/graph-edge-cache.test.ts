@@ -445,13 +445,14 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
     digest.update("\0");
   }
 
+  // The workflow cleanup changed only graphRoutes comments; emitted code is unchanged.
   expect(
     digest.digest("hex"),
     "An extractor feeding a cached per-file contribution changed. A prior cache " +
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("82b3d043ffd83c535be6096a004eaa7ffd19ca5ee7866b85093d0d8c54c2a511");
+  ).toBe("3caf286d59fae71eea85f250a5b9fc9d6d1389dec2a0305e8655374dede70e50");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 

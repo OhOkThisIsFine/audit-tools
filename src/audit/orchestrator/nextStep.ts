@@ -1,9 +1,5 @@
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { findFirstActionableObligation } from "audit-tools/shared";
-import {
-  decideFrictionTriage,
-  type FrictionTriageDecision,
-} from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditObligation, AuditState } from "../types/auditState.js";
 import { EXECUTOR_BY_OBLIGATION, EXECUTOR_REGISTRY } from "./executors.js";
@@ -16,12 +12,8 @@ export interface NextStepDecision {
   reason: string;
 }
 
-/**
- * Obligation id for the terminal friction-capture close-out (audit side). Last in
- * PRIORITY — it fires only after every audit obligation is satisfied and the run
- * would otherwise present as complete.
- */
-export const FRICTION_CAPTURE_OBLIGATION_ID = "friction_capture_current";
+/** Stable key for automatic audit diagnostics; never a completion obligation. */
+export const AUDIT_FRICTION_RUN_ID = "run";
 
 export const PRIORITY: string[] = [
   "repo_manifest",
@@ -44,6 +36,9 @@ export const PRIORITY: string[] = [
   // of it (charters, coverage, tasks all derive at/below the charter slot), so
   // a pending prose judgment pauses the cascade instead of racing it.
   "intent_equivalence_current",
+  // Inspection needs confirmed scope and structure, not completed architecture inquiry.
+  "planning_artifacts",
+  "architecture_discoveries_current",
   "charter_extraction_current",
   "charter_comparison_current",
   "charter_fidelity_current",
@@ -51,18 +46,11 @@ export const PRIORITY: string[] = [
   "design_review_conceptual_completed",
   "charter_clarification_current",
   "systemic_challenge_current",
-  "planning_artifacts",
   "audit_tasks_completed",
   "audit_results_ingested",
   "runtime_validation_current",
   "synthesis_current",
   "synthesis_narrative_current",
-  // Terminal close-out: AFTER synthesis, before the run is presented as complete,
-  // the tool emits a friction-capture step. Parity with remediate-code (same shared
-  // shape + persist helper). Resolved deterministically off the on-disk friction
-  // artifact (not bundle state), so it lives at the completion boundary in
-  // `decideAuditFrictionCloseout` rather than in the bundle-derived obligation scan.
-  FRICTION_CAPTURE_OBLIGATION_ID,
 ];
 
 /**
@@ -154,32 +142,4 @@ export function decideNextStep(
       ? `Selected highest-priority actionable obligation ${next.id}.`
       : `No executor found for obligation ${next.id}; EXECUTOR_REGISTRY has no entry for this obligation ID. This is a configuration gap — the obligation was selected but cannot be dispatched.`,
   };
-}
-
-/**
- * The audit friction record's own key. Audit keeps ONE friction record per artifacts
- * dir — its step envelopes carry no per-run id — so the key is a fixed literal rather
- * than a minted run id. Single-sourced here beside the close-out that reads it, so the
- * capture seams, the close-out, the run-linkage writers, and the operator handoff's
- * `friction_record` path cannot spell it differently. Two source sites still write the
- * derived record path out as a literal, each because a mechanical reader requires one
- * there: `friction_capture_executor`'s `artifacts_written` (executorRunners.ts), read
- * structurally by the write-site extractor, and the same executor's
- * `produces[].artifact` in EXECUTOR_REGISTRY (executors.ts), whose producer generator
- * refuses any non-string-literal initializer. DECL-10 pins BOTH against this constant.
- */
-export const AUDIT_FRICTION_RUN_ID = "run";
-
-/**
- * Terminal friction-TRIAGE close-out for audit. Folded into the `present_report`
- * terminal step (not a separate executor) so it fires at exactly the right moment.
- * Blocks ("dispose") until every mechanical event + reflection is disposed AND ≥1
- * open observation written — empty set no longer trivially satisfies.
- * Single-sourced in `audit-tools/shared`; parity with remediate.
- */
-export async function decideAuditFrictionCloseout(
-  artifactsDir: string,
-  runId: string,
-): Promise<FrictionTriageDecision> {
-  return decideFrictionTriage(artifactsDir, runId, "audit-code");
 }

@@ -43,7 +43,7 @@ function resolutionEntryRules(
   return `\`\`\`json
 [
   {
-    "finding_id": "${firstId}",
+    "unit_id": "${firstId}",
     "action": "clarified",
     "rationale": "${rationaleExample}"
   }
@@ -51,7 +51,7 @@ function resolutionEntryRules(
 \`\`\`
 
 The file is a JSON array with one entry per finding. Each entry has
-\`finding_id\`, \`action\` and, for \`clarified\`, \`rationale\`. Use one of these
+\`unit_id\`, \`action\` and, for \`clarified\`, \`rationale\`. Use one of these
 three actions:
 
 | \`action\` | Use it when | Effect |
@@ -69,7 +69,7 @@ plan's \`touched_files\` by hand.
 
 The tool refuses the WHOLE file when any entry is wrong: an unknown action, a
 missing or empty \`rationale\` on \`clarified\`, a \`scope_additions\` path that
-breaks the rule above, a duplicate \`finding_id\`, or an id outside the set below.
+breaks the rule above, a duplicate \`unit_id\`, or an id outside the set below.
 The refusal names the entry and the field. Nothing is applied, and this step
 comes back.`;
 }
@@ -97,7 +97,7 @@ export function clarificationPrompt(
   resolutionPath: string,
   refusal?: string,
 ): string {
-  const ids = clarifications.map((c) => c.finding_id);
+  const ids = clarifications.map((c) => c.unit_id);
   const count = clarifications.length;
   return `
 # Resolve Remediation Clarifications
@@ -108,7 +108,7 @@ answer from the user. Ask the user all of the questions in one message.
 ${clarifications
   .map(
     (item) => `
-## ${item.finding_id}
+## ${item.unit_id}
 
 - Category: ${item.category}
 - Question: ${item.description}
@@ -123,7 +123,7 @@ After the user answers, write JSON to exactly:
 
 ${resolutionEntryRules(ids[0] ?? "F-001", "the user's answer, in words the worker can act on")}
 
-\`finding_id\` MUST be drawn from this closed set (copy, never retype):
+\`unit_id\` MUST be drawn from this closed set (copy, never retype):
 ${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
 
 You can answer only some of the findings. A finding with no entry stays paused,
@@ -160,14 +160,14 @@ the findings in the set below yourself.`;
   const candidateBlock = candidates
     .map(
       (item) => `
-## ${item.finding_id}
+## ${item.unit_id}
 
 - Category: ${item.category}
 - Candidate: ${item.description}
 `,
     )
     .join("");
-  const firstId = candidates[0]?.finding_id ?? validFindingIds[0] ?? "F-001";
+  const firstId = candidates[0]?.unit_id ?? validFindingIds[0] ?? "F-001";
 
   return `
 # Resolve ambiguity in the plan before implementation
@@ -193,7 +193,7 @@ If no real ambiguity remains, write \`[]\`. The plan then continues unchanged.
 
 ${resolutionEntryRules(firstId, "the user's answer: the scope the fix must have")}
 
-\`finding_id\` MUST be drawn from this closed set (copy, never retype):
+\`unit_id\` MUST be drawn from this closed set (copy, never retype):
 ${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
 
 A finding with no entry continues as planned.
@@ -309,9 +309,9 @@ and are not reported as fixed. No further implementation is dispatched.
 
 ${blocked
   .map((item) => {
-    const finding = state.plan?.findings.find((entry) => entry.id === item.finding_id);
+    const finding = state.plan?.units.find((entry) => entry.id === item.unit_id);
     return `
-## ${item.finding_id} - ${finding?.title ?? "Untitled finding"}
+## ${item.unit_id} - ${finding?.title ?? "Untitled finding"}
 
 - Failure reason: ${item.failure_reason ?? "Unknown"}
 - Last successful step: ${item.last_successful_step ?? "none"}
@@ -327,7 +327,7 @@ After the user answers, write JSON to exactly:
 {
   "items": [
     {
-      "finding_id": "...",
+      "unit_id": "...",
       "action": "retry",
       "rationale": "..."
     }

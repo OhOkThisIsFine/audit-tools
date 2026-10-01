@@ -31,7 +31,6 @@ dist/
 # the pushed tree (scripts/shared/suiteGreenStamp.mjs). Tracked with its siblings
 # above — an untracked hook a settings.json references is a hook main cannot run.
 !.claude/hooks/push-gate.mjs
-!.claude/hooks/friction-stop-gate.mjs
 !.claude/hooks/nightly-surface.mjs
 !.claude/hooks/shell-split.mjs
 !.claude/hooks/shell-trap-guard.mjs

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/host-handoff.test.ts
 import type { ArtifactBundle } from "../../io/artifacts.js";
 import { derivePendingTaskPartition } from "../../orchestrator/pendingTasks.js";
 
@@ -8,5 +9,5 @@ import { derivePendingTaskPartition } from "../../orchestrator/pendingTasks.js";
  * model selection, and launch policy belong to the host.
  */
 export function buildPendingAuditTasks(bundle: ArtifactBundle) {
-  return derivePendingTaskPartition(bundle).pendingTasks;
+  return derivePendingTaskPartition(bundle).readyTasks;
 }

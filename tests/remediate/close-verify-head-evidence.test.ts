@@ -1,3 +1,4 @@
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runClosePhase } from "../../src/remediate/phases/close.js";
 import {
@@ -79,23 +80,14 @@ function makeState(
 ): RemediationState {
   // `makeBaseState` types the plan through the real contract, so the cast is
   // confined to THIS one fixture builder rather than sprinkled at each call.
+  const units = findings.map(finding => canonicalUnitFixture(finding.id, {source_finding_ids:[finding.id]}));
   return makeBaseState({
     status: "closing",
-    plan: {
-      plan_id: "P1",
-      findings: findings as never,
-      blocks: [],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"],
-      ...(auditRead !== undefined ? { audit_read: auditRead } : {}),
-    },
-    closing_plan: { action: "none" },
-    items: Object.fromEntries(
-      findings.map((finding) => [
-        finding.id,
-        { finding_id: finding.id, status: statuses[finding.id] ?? "resolved_no_change" },
-      ]),
-    ) as never,
+    plan: canonicalPlanFixture({plan_id:"P1",findings:findings as never,units,
+      requirements:units.map(unit=>({id:unit.requirement_ids[0]!,description:unit.description,source_finding_ids:unit.source_finding_ids,change_kind:"structural",assertions:[]})),
+      candidate_closing_actions:["none"], ...(auditRead !== undefined ? {audit_read:auditRead} : {})}),
+    closing_plan:{action:"none"},
+    items:Object.fromEntries(findings.map(finding=>[finding.id,{unit_id:finding.id,status:statuses[finding.id]??"resolved_no_change"}])) as never,
   }) as RemediationState;
 }
 
@@ -184,7 +176,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
       root: REPO_DIR,
     });
     expect(outcome.ran).toBe(false);
-    expect(state.items!.F1.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
   });
 
   it("withholds — never guesses — when the finding carries no quoted span", async () => {
@@ -204,9 +196,9 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
       outcome.withheld[0].determined ? "" : outcome.withheld[0].reason,
     ).toMatch(/no verbatim quoted_text span/);
     // The item keeps its current disposition: no override was recorded.
-    expect(state.items!.F1.disposition_override).toBeUndefined();
-    expect(state.items!.F1.evidence).toBeUndefined();
-    expect(state.items!.F1.recorded_by_module).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.evidence).toBeUndefined();
+    expect(state.source_verifications?.F1?.recorded_by_module).toBeUndefined();
   });
 
   it("records NOTHING for any item when no audit-read commit B is known", async () => {
@@ -233,9 +225,9 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     ).toMatch(/no audit-read commit is recorded/);
     // The blanket invariant this leg must never break: a disposition WITHOUT a
     // B read is unfalsifiable evidence, so it must be unreachable.
-    expect(state.items!.F1.disposition_override).toBeUndefined();
-    expect(state.items!.F1.evidence).toBeUndefined();
-    expect(state.items!.F1.recorded_by_module).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.evidence).toBeUndefined();
+    expect(state.source_verifications?.F1?.recorded_by_module).toBeUndefined();
   });
 
   it("withholds when the supplied audit-read commit does not resolve in this repo", async () => {
@@ -254,7 +246,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     expect(
       outcome.withheld[0].determined ? "" : outcome.withheld[0].reason,
     ).toMatch(/does not resolve to a commit/);
-    expect(state.items!.F1.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
   });
 
   it("reaches verified_already_fixed for a span present at B and absent at HEAD", async () => {
@@ -292,7 +284,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     expect(reads[1]).not.toBe(reads[0]);
     expect(reads[1]).toMatch(/:src\/parse\.ts$/);
     const detail = (
-      state.items!.F1.evidence as { mechanism_detail?: string }
+      state.source_verifications?.F1?.evidence as { mechanism_detail?: string }
     ).mechanism_detail;
     expect(detail).toContain(base.slice(0, 12));
     expect(detail).toContain("HEAD");
@@ -331,7 +323,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     // ONE read — at B. HEAD cannot change an "absent at B" verdict.
     expect(reads).toEqual([`${base.slice(0, 12)}:src/parse.ts`]);
     const detail = (
-      state.items!.F1.evidence as { mechanism_detail?: string }
+      state.source_verifications?.F1?.evidence as { mechanism_detail?: string }
     ).mechanism_detail;
     expect(detail).toContain(base.slice(0, 12));
   });
@@ -363,9 +355,9 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     const reason = outcome.withheld[0].determined ? "" : outcome.withheld[0].reason;
     expect(reason).toMatch(/present both at the audit-read commit .* and at HEAD/);
     // Untouched: no override, no triple, no module stamp.
-    expect(state.items!.F1.disposition_override).toBeUndefined();
-    expect(state.items!.F1.evidence).toBeUndefined();
-    expect(state.items!.F1.recorded_by_module).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.evidence).toBeUndefined();
+    expect(state.source_verifications?.F1?.recorded_by_module).toBeUndefined();
   });
 
   it("withholds when the cited file is not readable at the audit-read commit", async () => {
@@ -433,28 +425,27 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     });
 
     expect(Object.keys(outcome.recorded)).toEqual([]);
-    expect(state.items!.F1.disposition_override).toBeUndefined();
+    expect(state.source_verifications?.F1?.disposition_override).toBeUndefined();
     expect(outcome.withheld).toHaveLength(1);
   });
 
-  it("leaves an item that already carries an override alone", async () => {
+  it("rechecks a prior source override against the current HEAD", async () => {
     const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState(
       [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
       { F1: "resolved_no_change" },
       { commit: base, dirty_paths: [] },
     );
-    state.items!.F1.disposition_override = "refuted";
-    state.items!.F1.recorded_by_module = "someoneElse";
+    state.source_verifications = {F1:{disposition_override:"refuted",recorded_by_module:"someoneElse"}};
 
     const outcome = await verifyHeadEvidenceAgainstFindings({
       state,
       root: REPO_DIR,
     });
 
-    expect(Object.keys(outcome.recorded)).toEqual([]);
-    expect(state.items!.F1.disposition_override).toBe("refuted");
-    expect(state.items!.F1.recorded_by_module).toBe("someoneElse");
+    expect(Object.keys(outcome.recorded)).toEqual(["F1"]);
+    expect(state.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
+    expect(state.source_verifications?.F1?.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
   });
 
   it("resolves a bare-basename citation through the tracked corpus rather than reading nothing", async () => {
@@ -522,7 +513,8 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       { commit: base, dirty_paths: [] },
     );
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       headEvidenceOverrides: {
@@ -532,9 +524,9 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBe("verified_already_fixed");
-    expect(next.items!.F1.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
-    expect(next.items!.F1.evidence).toMatchObject({
+    expect(next.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
+    expect(next.source_verifications?.F1?.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
+    expect(next.source_verifications?.F1?.evidence).toMatchObject({
       file: "src/parse.ts",
       line: "2",
       mechanism: "read_at_head_verification",
@@ -562,7 +554,8 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       { commit: base, dirty_paths: [] },
     );
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
       headEvidenceOverrides: {
@@ -571,8 +564,8 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBeUndefined();
-    expect(next.items!.F1.evidence).toBeUndefined();
+    expect(next.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(next.source_verifications?.F1?.evidence).toBeUndefined();
 
     const outcomes = JSON.parse(
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -591,14 +584,15 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       F1: "resolved_no_change",
     }, { commit: base, dirty_paths: [] });
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBeUndefined();
-    expect(next.items!.F1.evidence).toBeUndefined();
+    expect(next.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(next.source_verifications?.F1?.evidence).toBeUndefined();
 
     const outcomes = JSON.parse(
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -621,15 +615,16 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       { commit: base, dirty_paths: [] },
     );
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBe("verified_already_fixed");
-    expect(next.items!.F1.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
-    expect(next.items!.F1.evidence).toMatchObject({
+    expect(next.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
+    expect(next.source_verifications?.F1?.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
+    expect(next.source_verifications?.F1?.evidence).toMatchObject({
       file: "src/parse.ts",
       mechanism: "read_at_head_verification",
     });
@@ -643,14 +638,15 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       { commit: base, dirty_paths: ["src/parse.ts"] },
     );
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBeUndefined();
-    expect(next.items!.F1.evidence).toBeUndefined();
+    expect(next.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(next.source_verifications?.F1?.evidence).toBeUndefined();
   });
 
   it.each([
@@ -671,10 +667,11 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
         { commit: base, dirty_paths: [dirty] },
       );
 
-      const next = await runClosePhase(state, { root: REPO_DIR, artifactsDir: TEST_DIR });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+      const next = await runClosePhase(state, { skipFinalGate: true, root: REPO_DIR, artifactsDir: TEST_DIR });
 
-      expect(next.items!.F1.disposition_override).toBeUndefined();
-      expect(next.items!.F1.evidence).toBeUndefined();
+      expect(next.source_verifications?.F1?.disposition_override).toBeUndefined();
+      expect(next.source_verifications?.F1?.evidence).toBeUndefined();
     },
   );
 
@@ -689,14 +686,15 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
       { F1: "resolved_no_change" },
     );
 
-    const next = await runClosePhase(state, {
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
       root: REPO_DIR,
       artifactsDir: TEST_DIR,
     });
 
     expect(next.status).toBe("complete");
-    expect(next.items!.F1.disposition_override).toBeUndefined();
-    expect(next.items!.F1.recorded_by_module).toBeUndefined();
+    expect(next.source_verifications?.F1?.disposition_override).toBeUndefined();
+    expect(next.source_verifications?.F1?.recorded_by_module).toBeUndefined();
 
     const outcomes = JSON.parse(
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
@@ -707,5 +705,23 @@ describe("runClosePhase — the read-at-HEAD evidence leg", () => {
     expect(outcome.outcome).toBe("verified_no_change");
     expect(outcome.evidence).toBeUndefined();
     expect(outcome.recorded_by_module).toBeUndefined();
+  });
+});
+
+describe("shared-unit source evidence", () => {
+  it("keeps distinct source determinations when two findings share one execution unit", async () => {
+    const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+    const state = makeState([
+      findingWithAnchor("F1", {quoted: QUOTED_SPAN}),
+      findingWithAnchor("F2", {quoted: "this quoted defect never existed"}),
+    ], {F1:"resolved_no_change",F2:"resolved_no_change"}, {commit:base,dirty_paths:[]});
+    state.plan!.units[0]!.source_finding_ids = ["F1", "F2"];
+    state.plan!.units.splice(1);
+    delete state.items!.F2;
+    const outcome = await verifyHeadEvidenceAgainstFindings({state,root:REPO_DIR});
+    expect(Object.keys(outcome.recorded).sort()).toEqual(["F1","F2"]);
+    expect(state.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
+    expect(state.source_verifications?.F2?.disposition_override).toBe("refuted");
+    expect(state.source_verifications?.F1?.source_sha256).not.toBe(state.source_verifications?.F2?.source_sha256);
   });
 });

@@ -66,8 +66,8 @@ Deterministic responsibilities:
 - work-block generation
 - final Markdown rendering
 - cleanup and resume behavior
-- the terminal friction close-out (resolved deterministically off the on-disk friction artifact at
-  the completion boundary, after synthesis)
+- diagnostic capture and archival; development friction reflection is not a product
+  completion requirement
 
 LLM responsibilities:
 
@@ -165,7 +165,7 @@ into partial success.
   `complete` with nothing left for the completion transition to do — every artifact promotion
   archives is already one level up, byte-identical, as decided by promotion's own archive walk run
   in verify-only mode, never by a second enumeration of the archive set. A `complete` dir with work
-  left (an unpromoted render, an unarchived contract, friction triage pending) is a live
+  left (an unpromoted render or unarchived diagnostic evidence) is a live
   continuation for BOTH callers: `next-step` finishes it through the terminal step, and the
   `cleanup` command refuses it without `--force`. `active`/`blocked` runs are never swept
   mid-flight.

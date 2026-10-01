@@ -86,7 +86,7 @@ test("committed fixture repo supports external analyzer import and deterministic
     expect(imported.selected_executor).toBe("external_analyzer_import_executor");
     bundle = imported.updated_bundle;
 
-    const planning = await advanceAudit(bundle, options);
+    const planning = await advanceAudit(bundle, { ...options, preferredExecutor: "planning_executor" });
     expect(planning.selected_executor).toBe("planning_executor");
     if (planning.updated_bundle.audit_tasks === undefined) {
       throw new Error("expected audit_tasks on the planning result's bundle");

@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/host-handoff.test.ts
+import { inspectionTaskHeld } from "./architectureDiscovery.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditTask } from "../types.js";
 import { selectCurrentResults } from "./ledger.js";
@@ -23,6 +25,8 @@ export interface PendingTaskPartition {
   completedTaskIds: Set<string>;
   /** Tasks that still need work, in `bundle.audit_tasks` order. */
   pendingTasks: AuditTask[];
+  readyTasks: AuditTask[];
+  heldTasks: AuditTask[];
 }
 
 export function derivePendingTaskPartition(
@@ -45,5 +49,7 @@ export function derivePendingTaskPartition(
       staleResultTaskIds.has(task.task_id) ||
       (task.status !== "complete" && !completedTaskIds.has(task.task_id)),
   );
-  return { staleResultTaskIds, completedTaskIds, pendingTasks };
+  const heldTasks = pendingTasks.filter((task) => inspectionTaskHeld(task, bundle));
+  const readyTasks = pendingTasks.filter((task) => !inspectionTaskHeld(task, bundle));
+  return { staleResultTaskIds, completedTaskIds, pendingTasks, readyTasks, heldTasks };
 }

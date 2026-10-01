@@ -1,8 +1,5 @@
 /**
- * INV-remediate-phases-01: applyPlanPipeline runs mergeBlocksSharingFiles over the
- *   post-dedup plan (membership is a content-coherence contract; planning reports
- *   size but never reshapes work around a backend window)
- * INV-remediate-phases-02: mergeBlocksSharingFiles never merges serialized (dep-ordered) blocks
+ * Reviewed unit contracts survive scheduling unchanged; dependency ordering is preserved
  * INV-remediate-phases-04: buildCoverageLedger — every source finding has exactly one disposition
  * INV-remediate-phases-05: runTriagePhase uses a unified auto-retry cap
  * INV-remediate-phases-06: runClosePhase preview gate blocks unconfirmed closing actions
@@ -21,166 +18,54 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import {
-  applyPlanPipeline,
-  mergeBlocksSharingFiles,
   buildCoverageLedger,
 } from "../../src/remediate/phases/plan.js";
 import { collectStagingFiles, executeClosingAction, runClosePhase, buildRemediationOutcomesReport } from "../../src/remediate/phases/close.js";
 import { groundExtractedFindings, groundAffectedFiles, evidenceCitesRealPath } from "../../src/remediate/phases/grounding.js";
 import { enumerateTrackedFilePaths } from "audit-tools/shared";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
-import type { RemediationBlock } from "../../src/remediate/state/types.js";
+import type { ExecutionUnit } from "../../src/remediate/state/types.js";
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { hostDependencyLevels } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { REMEDIATION_STATE_CONTRACT_VERSION, type RemediationState } from "../../src/remediate/state/store.js";
+import { REMEDIATION_OUTCOMES_CONTRACT_VERSION } from "../../src/shared/types/remediationOutcome.js";
 import type { ClosingPlan } from "../../src/remediate/state/types.js";
 import { makeState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// ---------------------------------------------------------------------------
-// INV-remediate-phases-01: applyPlanPipeline — post-dedup pipeline
-// mergeBlocksSharingFiles runs over the deduped blocks (preventing parallel
-// clobber). A plan with two parallel-safe blocks sharing a file must come out
-// annotated, never reshaped to fit a context window.
-// ---------------------------------------------------------------------------
-
-describe("applyPlanPipeline — INV-remediate-phases-01: post-dedup pipeline merges co-file blocks", () => {
-  const TEST_DIR = scratchDir(".test-phases-inv-01");
-
-  function mkFinding(id: string, filePath: string) {
-    return {
-      id,
-      title: id,
-      category: "General",
-      severity: "low" as const,
-      confidence: "low" as const,
-      lens: "correctness",
-      summary: id,
-      affected_files: [{ path: filePath }],
-      evidence: ["evidence"],
-    };
-  }
-
-  beforeEach(async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
-    await mkdir(join(TEST_DIR, "src"), { recursive: true });
-    // Create real files so fileSizeBytes can stat them
-    writeFileSync(join(TEST_DIR, "src", "shared.ts"), "export const x = 1;\n");
-    await writeFile(
-      join(TEST_DIR, "session-config.json"),
-      JSON.stringify({
-        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
-      }),
-      "utf8",
-    );
+// The reviewed executable plan replaces post-review block regrouping. These
+// tests pin its live replacement: scheduling never rewrites unit contracts.
+function planForUnits(units: ExecutionUnit[]) {
+  return canonicalPlanFixture({ units, requirements: units.map(unit => ({
+    id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: unit.source_finding_ids,
+    change_kind: "structural", assertions: [], inapplicable_reason: "Scheduling fixture; no implementation runs",
+  })) });
+}
+function runtimeForUnits(units: ExecutionUnit[]): RemediationState {
+  return { contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing", plan: planForUnits(units),
+    items: Object.fromEntries(units.map(unit => [unit.id, { unit_id: unit.id, status: "pending" }])),
+  };
+}
+describe("reviewed execution-unit scheduling preserves authored boundaries", () => {
+  it("does not regroup independent reviewed units sharing a file", () => {
+    const units = [canonicalUnitFixture("U1"), canonicalUnitFixture("U2")];
+    const state = runtimeForUnits(units);
+    const before = JSON.stringify(state.plan);
+    expect(hostDependencyLevels(state).flat().map(unit => unit.id)).toEqual(["U1", "U2"]);
+    expect(JSON.stringify(state.plan)).toBe(before);
   });
-
-  afterEach(async () => {
-    await rm(TEST_DIR, { recursive: true, force: true });
+  it("serialized units may share a file without merging their identity", () => {
+    const state = runtimeForUnits([canonicalUnitFixture("U1"), canonicalUnitFixture("U2", { dependencies: ["U1"] })]);
+    expect(hostDependencyLevels(state).map(level => level.map(unit => unit.id))).toEqual([["U1"], ["U2"]]);
+    state.items!.U1.status = "resolved";
+    expect(hostDependencyLevels(state).flat().map(unit => unit.id)).toEqual(["U2"]);
+    expect(state.plan!.units.map(unit => unit.id)).toEqual(["U1", "U2"]);
   });
-
-  it("A3: keeps two independent parallel-safe blocks sharing a file separate + flagged after applyPlanPipeline", async () => {
-    const findings = [
-      mkFinding("F1", "src/shared.ts"),
-      mkFinding("F2", "src/shared.ts"),
-    ];
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: [] },
-    ];
-    const plan = {
-      plan_id: "P-INV01",
-      findings: findings as any,
-      blocks,
-      project_type: "unknown",
-      candidate_closing_actions: ["none" as const],
-    };
-    const result = await applyPlanPipeline(plan, { root: TEST_DIR });
-    // A3: independent same-file blocks stay separate + flagged.
-    expect(result.blocks.length).toBe(2);
-    for (const b of result.blocks) expect(b.cofile_parallel_safe).toBe(true);
-  });
-
-  it("preserves dep-ordered blocks that share a file (INV-02 via applyPlanPipeline)", async () => {
-    const findings = [
-      mkFinding("F1", "src/shared.ts"),
-      mkFinding("F2", "src/shared.ts"),
-    ];
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
-    ];
-    const plan = {
-      plan_id: "P-INV01b",
-      findings: findings as any,
-      blocks,
-      project_type: "unknown",
-      candidate_closing_actions: ["none" as const],
-    };
-    const result = await applyPlanPipeline(plan, { root: TEST_DIR });
-    // Serialized blocks are NOT merged — they remain separate
-    expect(result.blocks.length).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// INV-remediate-phases-02: mergeBlocksSharingFiles — serialized blocks not merged
-// ---------------------------------------------------------------------------
-
-describe("mergeBlocksSharingFiles — INV-remediate-phases-02: dep-serialized blocks sharing a file must NOT be merged", () => {
-  function mkFinding(id: string, files: string[]) {
-    return {
-      id,
-      title: id,
-      category: "General",
-      severity: "low" as const,
-      confidence: "low" as const,
-      lens: "correctness",
-      summary: id,
-      affected_files: files.map((path) => ({ path })),
-      evidence: ["evidence"],
-    };
-  }
-
-  it("does not merge two blocks ordered by dependency even when they share a file", async () => {
-    const findings = [
-      mkFinding("F1", ["src/shared.ts"]),
-      mkFinding("F2", ["src/shared.ts"]),
-    ];
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B2", items: ["F2"], dependencies: ["B1"], parallel_safe: false, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
-    // Must remain 2 blocks — serialization makes the shared file safe.
-    expect(merged).toHaveLength(2);
-    const ids = merged.map((b) => b.block_id).sort();
-    expect(ids).toEqual(["B1", "B2"]);
-  });
-
-  it("A3: two independent parallel-safe blocks sharing a file stay SEPARATE, each flagged", async () => {
-    const findings = [
-      mkFinding("F1", ["src/shared.ts"]),
-      mkFinding("F2", ["src/shared.ts"]),
-    ];
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B2", items: ["F2"], parallel_safe: true, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
-    // A3: independent same-file blocks are NOT unioned — kept separate + flagged.
-    expect(merged).toHaveLength(2);
-    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
-  });
-
-  it("singleton block is returned unchanged", async () => {
-    const findings = [mkFinding("F1", ["src/a.ts"])];
-    const blocks: RemediationBlock[] = [
-      { block_id: "B1", items: ["F1"], parallel_safe: true, touched_files: [] },
-    ];
-    const result = mergeBlocksSharingFiles(blocks, findings as any, "/tmp");
-    expect(result).toHaveLength(1);
-    expect(result[0].block_id).toBe("B1");
-    expect(result[0].parallel_safe).toBe(true);
+  it("a singleton remains exactly the reviewed unit", () => {
+    const unit = canonicalUnitFixture("U1");
+    expect(hostDependencyLevels(runtimeForUnits([unit]))).toEqual([[unit]]);
   });
 });
 
@@ -212,9 +97,6 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
       mkFinding("DROPPED-PH"),
     ] as any[];
 
-    const items: Record<string, any> = {
-      PLANNED: { finding_id: "PLANNED", status: "pending", block_id: "B1" },
-    };
 
     const ledger = buildCoverageLedger({
       planId: "P-INV04",
@@ -224,7 +106,7 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
       droppedPhantomPaths: new Map([["DROPPED-PH", ["src/phantom.ts"]]]),
       phantomPathsRemoved: undefined,
       mergeMap: new Map([["FOLDED", "PLANNED"]]),
-      items,
+      units: [canonicalUnitFixture("U-planned", { source_finding_ids: ["PLANNED"] })],
     });
 
     expect(ledger.source_finding_count).toBe(5);
@@ -265,7 +147,7 @@ describe("buildCoverageLedger — INV-remediate-phases-04: every source finding 
       droppedNoEvidence: [],
       droppedByCheckpoint: [],
       mergeMap: new Map(),
-      items: {},
+      units: [],
     });
     expect(ledger.source_finding_count).toBe(0);
     expect(ledger.planned_count).toBe(0);
@@ -293,12 +175,12 @@ describe("runTriagePhase — INV-remediate-phases-05: unified auto-retry cap", (
   it("a failure at the unified cap routes to human triage", async () => {
     const state = makeState({
       status: "triage",
+      plan: planForUnits([canonicalUnitFixture("F1")]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "test assertion failed — wrong output",
-          block_id: "B1",
           rework_count: 2,
         },
       },
@@ -322,13 +204,7 @@ describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfi
   function makeClosingState(overrides: Record<string, unknown> = {}) {
     return makeState({
       status: "closing",
-      plan: {
-        plan_id: "P1",
-        findings: [],
-        blocks: [],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
+      plan: canonicalPlanFixture({ plan_id: "P1", candidate_closing_actions: ["none"] }),
       closing_plan: { action: "none" },
       ...overrides,
     });
@@ -352,6 +228,7 @@ describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfi
     const state = makeClosingState({
       closing_plan: { action: "commit" }, // no pre_authorized
     });
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     // Must stop at preview
     expect(next.status).toBe("closing");
@@ -362,6 +239,7 @@ describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfi
     const state = makeClosingState({
       closing_plan: { action: "commit", pre_authorized: true },
     });
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
     expect(next.closing_plan!.closing_action_preview).toBeUndefined();
@@ -369,6 +247,7 @@ describe("runClosePhase — INV-remediate-phases-06: preview gate blocks unconfi
 
   it("action=none never triggers a preview regardless of pre_authorized", async () => {
     const state = makeClosingState({ closing_plan: { action: "none" } });
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
     const next = await runClosePhase(state, BASE_OPTIONS);
     expect(next.status).toBe("complete");
     expect(next.closing_plan!.closing_action_preview).toBeUndefined();
@@ -524,19 +403,19 @@ describe("runTriagePhase — INV-remediate-phases-09: explicit action:retry is a
   it("action:retry retries the item even when rationale looks like a skip", async () => {
     const state = makeState({
       status: "triage",
+      plan: planForUnits([canonicalUnitFixture("F1")]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "failed",
-          block_id: "B1",
         },
       },
     });
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "retry", rationale: "not worth fixing" }],
+        items: [{ unit_id: "F1", action: "retry", rationale: "not worth fixing" }],
       }),
       "utf8",
     );
@@ -549,19 +428,19 @@ describe("runTriagePhase — INV-remediate-phases-09: explicit action:retry is a
   it("action:ignore ignores the item even when rationale says retry", async () => {
     const state = makeState({
       status: "triage",
+      plan: planForUnits([canonicalUnitFixture("F1")]),
       items: {
         F1: {
-          finding_id: "F1",
+          unit_id: "F1",
           status: "blocked",
           failure_reason: "failed",
-          block_id: "B1",
         },
       },
     });
     await writeFile(
       join(TEST_DIR, "triage_resolution.json"),
       JSON.stringify({
-        items: [{ finding_id: "F1", action: "ignore", rationale: "please retry this" }],
+        items: [{ unit_id: "F1", action: "ignore", rationale: "please retry this" }],
       }),
       "utf8",
     );
@@ -584,13 +463,7 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
   function makeClosingState(actionOverride: ClosingPlan["action"]) {
     return makeState({
       status: "closing",
-      plan: {
-        plan_id: "P-INV10",
-        findings: [],
-        blocks: [],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
+      plan: canonicalPlanFixture({ plan_id: "P-INV10", candidate_closing_actions: ["none"] }),
       closing_plan: { action: actionOverride, pre_authorized: true },
     });
   }
@@ -632,11 +505,12 @@ describe("runClosePhase — INV-remediate-phases-10: ClosingResult always has co
   it("remediation-outcomes.json always carries contract_version", async () => {
     const { readFile } = await import("node:fs/promises");
     const state = makeClosingState("none");
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
     await runClosePhase(state, BASE_OPTIONS);
     const outcomes = JSON.parse(
       await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
     );
-    expect(outcomes.contract_version).toBe("remediate-code-outcomes/v1alpha1");
+    expect(outcomes.contract_version).toBe(REMEDIATION_OUTCOMES_CONTRACT_VERSION);
   });
 });
 
@@ -800,7 +674,7 @@ describe("buildCoverageLedger — TST-761e8471: disposition precedence for overl
       droppedByCheckpoint: [],
       droppedPhantomPaths: new Map([["OVERLAP-PH-EV", ["phantom.ts"]]]),
       mergeMap: new Map(),
-      items: {},
+      units: [],
     });
     const entry = ledger.entries.find((e) => e.finding_id === "OVERLAP-PH-EV")!;
     expect(entry.disposition).toBe("dropped_phantom_paths");
@@ -814,7 +688,7 @@ describe("buildCoverageLedger — TST-761e8471: disposition precedence for overl
       droppedNoEvidence: ["OVERLAP-EV-MG"],
       droppedByCheckpoint: [],
       mergeMap: new Map([["OVERLAP-EV-MG", "SOME-TARGET"]]),
-      items: {},
+      units: [],
     });
     const entry = ledger.entries.find((e) => e.finding_id === "OVERLAP-EV-MG")!;
     expect(entry.disposition).toBe("dropped_no_evidence");
@@ -828,7 +702,7 @@ describe("buildCoverageLedger — TST-761e8471: disposition precedence for overl
       droppedNoEvidence: [],
       droppedByCheckpoint: ["OVERLAP-MG-CP"],
       mergeMap: new Map([["OVERLAP-MG-CP", "SOME-TARGET"]]),
-      items: {},
+      units: [],
     });
     const entry = ledger.entries.find((e) => e.finding_id === "OVERLAP-MG-CP")!;
     expect(entry.disposition).toBe("folded_into");
@@ -846,7 +720,7 @@ describe("buildCoverageLedger — TST-761e8471: disposition precedence for overl
       droppedNoEvidence: ["OVL-A"],
       droppedByCheckpoint: ["OVL-A", "OVL-B"],
       mergeMap: new Map(),
-      items: {},
+      units: [],
     });
     const ids = ledger.entries.map((e) => e.finding_id);
     const unique = new Set(ids);
@@ -885,25 +759,16 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: final_status mappings
     const findings = ["F-resolved", "F-blocked", "F-ignored", "F-inappropriate"].map(mkPlanFinding);
     const state = makeState({
       status: "closing",
-      plan: {
-        plan_id: "P-FSO",
-        findings,
-        blocks: [
-          {
-            block_id: "B1",
-            items: findings.map((f) => f.id),
-            parallel_safe: true,
-            touched_files: ["src/a.ts"],
-          },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
+      plan: canonicalPlanFixture({ ...planForUnits(findings.map(finding => canonicalUnitFixture(finding.id, { source_finding_ids: [finding.id] }))), plan_id: "P-FSO", findings }),
+      finding_dispositions: {
+        "F-ignored": { status: "ignored", reason: "user chose to ignore" },
+        "F-inappropriate": { status: "declined", reason: "not applicable" },
       },
       items: {
-        "F-resolved":      { finding_id: "F-resolved",      status: "resolved",             block_id: "B1" },
-        "F-blocked":       { finding_id: "F-blocked",        status: "blocked",              block_id: "B1", failure_reason: "failed" },
-        "F-ignored":       { finding_id: "F-ignored",        status: "ignored",              block_id: "B1", failure_reason: "user chose to ignore" },
-        "F-inappropriate": { finding_id: "F-inappropriate",  status: "deemed_inappropriate", block_id: "B1", failure_reason: "not applicable" },
+        "F-resolved":      { unit_id: "F-resolved",      status: "resolved" },
+        "F-blocked":       { unit_id: "F-blocked",        status: "blocked", failure_reason: "failed" },
+        "F-ignored":       { unit_id: "F-ignored",        status: "ignored", failure_reason: "user chose to ignore" },
+        "F-inappropriate": { unit_id: "F-inappropriate",  status: "deemed_inappropriate", failure_reason: "not applicable" },
       },
     });
 
@@ -919,15 +784,9 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: final_status mappings
   it("verified_no_change outcome maps to final_status=fixed", () => {
     const state = makeState({
       status: "closing",
-      plan: {
-        plan_id: "P-VNC",
-        findings: [mkPlanFinding("F-vnc")],
-        blocks: [{ block_id: "B1", items: ["F-vnc"], parallel_safe: true, touched_files: ["src/a.ts"] }],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      },
+      plan: canonicalPlanFixture({ ...planForUnits([canonicalUnitFixture("F-vnc", { source_finding_ids: ["F-vnc"] })]), plan_id: "P-VNC", findings: [mkPlanFinding("F-vnc")] }),
       items: {
-        "F-vnc": { finding_id: "F-vnc", status: "resolved_no_change", block_id: "B1" },
+        "F-vnc": { unit_id: "F-vnc", status: "resolved_no_change" },
       },
     });
 

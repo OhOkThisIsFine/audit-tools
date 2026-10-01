@@ -50,18 +50,24 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/laneValidators.ts",
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/orchestrator/",
+  // Dispatch, result acceptance and closing share this reviewed-authority boundary.
+  "src/remediate/contractPipeline/runtimePlanAuthority.ts",
   // Imported ONLY by nextStep.ts, so the closure rule claims it: a module every
   // one of whose importers is core is core. It renders the record of what the
   // intake filter removed, which is a statement about the loop's own decisions.
   "src/remediate/droppedFindingsRecord.ts",
   "src/remediate/intent/intentPersistence.ts",
   "src/remediate/review/filterDispositions.ts",
+  "src/remediate/review/reviewGate.ts",
+  "src/remediate/review/reviewNecessity.ts",
   "src/remediate/riskSignal.ts",
   "src/remediate/state/runIdentity.ts",
   "src/remediate/steps/contractPipeline.ts",
+  "src/remediate/steps/contractPipelinePrompts.ts",
   "src/remediate/steps/dispatch/",
   "src/remediate/steps/frictionCloseout.ts",
   "src/remediate/steps/nextStep.ts",
+  "src/remediate/steps/prompts.ts",
   "src/remediate/steps/recoverIngest.ts",
   "src/shared/engine/",
   // Both host boundaries own this persisted, create-once observation history.

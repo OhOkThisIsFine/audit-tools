@@ -1,7 +1,7 @@
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 // Review-approval gate (go-forward program item 1) — state-machine wiring.
 //
-// The gate fires on the Path-A (structured_audit) intake BEFORE the contract
-// pipeline collapses the original findings into DAG nodes, so every finding —
+// The gate fires on Path-A intake before planning, so every finding —
 // especially the strategic (architecture / design-review) ones that previously
 // vanished into quality-tail blocks — is surfaced for an explicit approve /
 // decline, and declined findings are recorded (never silently closed).
@@ -12,6 +12,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { buildNextContractPipelineStep } from "../../src/remediate/steps/contractPipeline.js";
+import { executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readPlanSource, readApprovedExecutionPlan } from "../../src/remediate/contractPipeline/executionPlan.js";
+import type { ExecutableChangePlan } from "../../src/shared/types/executionPlan.js";
+import { StateStore } from "../../src/remediate/state/store.js";
+import { readOptionalJsonFile, writeJsonFile } from "../../src/shared/index.js";
 import {
   buildAuditFindingsDeliverable,
   type Finding,
@@ -74,8 +79,8 @@ async function writeAuditIntake(): Promise<string> {
 const requestPath = join(ARTIFACTS_DIR, "review_request.json");
 const resolutionPath = join(ARTIFACTS_DIR, "review_resolution.json");
 const decisionPath = join(ARTIFACTS_DIR, "review_decision.json");
-const seedPath = join(ARTIFACTS_DIR, "intake", "contract", "path_a_seed.json");
-const approvedFindingsPath = join(ARTIFACTS_DIR, "intake", "contract", "approved-findings.json");
+const seedPath = executionPlanPaths(ARTIFACTS_DIR).source;
+const approvedFindingsPath = join(executionPlanPaths(ARTIFACTS_DIR).directory, "approved-findings.json");
 
 let prevRollingEngine: string | undefined;
 beforeEach(async () => {
@@ -158,7 +163,7 @@ describe("review-approval gate: approve-all resolution", () => {
     // Approve-all writes no filtered findings file (seed carries every finding).
     expect(existsSync(approvedFindingsPath)).toBe(false);
     const seed = JSON.parse(await readFile(seedPath, "utf8"));
-    expect(seed.finding_count).toBe(2);
+    expect(seed.findings).toHaveLength(2);
   });
 
   it("the decision gates the gate: a later run does not re-halt", async () => {
@@ -197,8 +202,8 @@ describe("review-approval gate: a decline is recorded and excluded", () => {
     expect(decision.approved_ids).toEqual([CONCRETE_ID]);
     // The declined finding is excluded from the seed AND from the filtered source.
     const seed = JSON.parse(await readFile(seedPath, "utf8"));
-    expect(seed.finding_count).toBe(1);
-    expect(seed.findings_summary.map((f: { id: string }) => f.id)).toEqual([CONCRETE_ID]);
+    expect(seed.findings).toHaveLength(1);
+    expect(seed.findings.map((f: { id: string }) => f.id)).toEqual([CONCRETE_ID]);
     const approved = JSON.parse(await readFile(approvedFindingsPath, "utf8"));
     expect(approved.findings.map((f: { id: string }) => f.id)).toEqual([CONCRETE_ID]);
     // The filtered source remains a canonical report. The original shared-file
@@ -275,33 +280,6 @@ describe("Path-A coverage is built over the original findings", () => {
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
     await writeFile(join(REPO_DIR, "src", "node.ts"), "// node\n", "utf8");
 
-    // The contract pipeline's promoted plan (node findings) — consumed via the
-    // early extracted-plan fast path in handlePendingExtractedPlan.
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify({
-        plan_id: "PLAN-CP",
-        source: "contract_pipeline",
-        findings: [
-          {
-            id: "CP-001",
-            title: "Implement node",
-            category: "General",
-            severity: "high",
-            confidence: "high",
-            lens: "security",
-            summary: "do the work",
-            affected_files: [{ path: "src/node.ts" }],
-            evidence: ["obligation O-1"],
-          },
-        ],
-        blocks: [{ block_id: "B-001", items: ["CP-001"], parallel_safe: true }],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      }),
-      "utf8",
-    );
-
     // Persisted intake filter dispositions over the ORIGINAL findings.
     const orig = (id: string) => ({
       id,
@@ -337,14 +315,15 @@ describe("Path-A coverage is built over the original findings", () => {
       }),
       "utf8",
     );
-    // Note 3, part A: the up-front ambiguity gate also fires once at planning.
-    // Pre-mark it decided so this fold-to-implement test isn't intercepted by it.
-    await writeFile(
-      join(ARTIFACTS_DIR, "ambiguity_decision.json"),
-      JSON.stringify({ resolved_at: new Date().toISOString(), resolution_count: 0 }),
-      "utf8",
-    );
     await harness.writeIntentCheckpoint();
+    const stateFixture = canonicalStateFromLegacyFixture({
+      status: "planning",
+      plan: {
+        plan_id: "PLAN-CP", findings: [orig("ORIG-PLAN") as Finding],
+        blocks: [{ block_id: "CP-001", items: ["ORIG-PLAN"], touched_files: ["src/node.ts"] }],
+      },
+    });
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, stateFixture, REPO_DIR);
 
     // This fresh run (no state.json at entry) folds intake → plan → implementing
     // → implement dispatch in ONE call: with the checkpoint confirmed and the
@@ -378,245 +357,125 @@ describe("Path-A coverage is built over the original findings", () => {
   });
 });
 
-describe("Path-B planning review gate", () => {
-  // Path B (document / conversation) has no pre-pipeline finding set — its
-  // findings are derived inside the pipeline — so the gate fires at the PLANNING
-  // point over the deduped/grounded node findings, gated on review_decision.json
-  // being absent (Path A's decision already exists → no double review).
-  const ARCH_NODE = "CP-ARCH-001";
-  const SEC_NODE = "CP-SEC-001";
+describe("Path-B canonical owner choices", () => {
+  const ARCH_UNIT = "UNIT-architecture";
+  const SEC_UNIT = "UNIT-login";
+  const paths = executionPlanPaths(ARTIFACTS_DIR);
+  const ownerPath = join(paths.directory, "owner-decision.json");
+  const nextOptions = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR, finalGateRunner: harness.finalGateRunner };
 
-  async function writePathBPlan(): Promise<void> {
-    await mkdir(join(REPO_DIR, "src"), { recursive: true });
-    await writeFile(join(REPO_DIR, "src", "arch.ts"), "// arch\n", "utf8");
-    await writeFile(join(REPO_DIR, "src", "login.ts"), "// login\n", "utf8");
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify({
-        plan_id: "PLAN-PATH-B",
-        source: "contract_pipeline",
-        findings: [
-          {
-            id: ARCH_NODE,
-            title: "Rework module boundaries",
-            category: "architecture",
-            severity: "medium",
-            confidence: "medium",
-            lens: "architecture",
-            summary: "Restructure the store/db seam.",
-            affected_files: [{ path: "src/arch.ts" }],
-            evidence: ["obligation O-ARCH"],
-          },
-          {
-            id: SEC_NODE,
-            title: "Escape login input",
-            category: "security",
-            severity: "high",
-            confidence: "high",
-            lens: "security",
-            summary: "Escape the email before the query.",
-            affected_files: [{ path: "src/login.ts" }],
-            evidence: ["obligation O-SEC"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-ARCH", items: [ARCH_NODE], parallel_safe: true },
-          { block_id: "B-SEC", items: [SEC_NODE], parallel_safe: true },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      }),
-      "utf8",
-    );
-    await harness.writeIntentCheckpoint();
-    // The plan is built and persisted on the first next-step, so subsequent calls
-    // see existing state — ack the resume gate so it doesn't intercept the run.
-    await acknowledgeResume();
-  }
-
-  it("halts at collect_review_approval over the node findings when no decision exists", async () => {
-    await writePathBPlan();
-
-    const step = await decideNextStep({ root: REPO_DIR });
-
-    expect(step.step_kind).toBe("collect_review_approval");
-    expect(step.step_kind).not.toBe("dispatch_implement");
-    const request = JSON.parse(await readFile(requestPath, "utf8"));
-    expect(request.total).toBe(2);
-    const ids = request.tiers.flatMap((t: { items: { finding_id: string }[] }) =>
-      t.items.map((i) => i.finding_id),
-    );
-    expect(ids).toEqual(expect.arrayContaining([ARCH_NODE, SEC_NODE]));
-  });
-
-  it("declining a node records it terminal (never silently closed) and the run proceeds", async () => {
-    await writePathBPlan();
-    await decideNextStep({ root: REPO_DIR }); // halt + write request
-
-    await writeFile(
-      resolutionPath,
-      JSON.stringify({ declined_findings: [{ finding_id: ARCH_NODE }] }),
-      "utf8",
-    );
-    const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
-
-    expect(step.step_kind).not.toBe("collect_review_approval");
-    // A Path-B decision record is written, correlated on the LIVE plan's own
-    // id (INV-RSM-RESOLUTION-CORRELATE) — the stable "path-b-review" constant
-    // was retired: with a constant id a stale cross-run resolution always
-    // correlated.
-    const decision = JSON.parse(await readFile(decisionPath, "utf8"));
-    expect(decision.plan_id).toBe("PLAN-PATH-B");
-    expect(decision.declined.map((d: { finding_id: string }) => d.finding_id)).toEqual([ARCH_NODE]);
-    // The declined node is a recorded terminal disposition, not a silent close.
-    const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
-    expect(state.items[ARCH_NODE].status).toBe("ignored");
-    expect(state.items[ARCH_NODE].failure_reason).toMatch(/declined by the user/i);
-    expect(state.items[ARCH_NODE].completed_at).toBeTruthy();
-    // The approved node stays live for implementation.
-    expect(state.items[SEC_NODE].status).toBe("pending");
-  });
-
-  it("re-running after the decision does not re-halt (fires at most once)", async () => {
-    await writePathBPlan();
-    await decideNextStep({ root: REPO_DIR });
-    await writeFile(resolutionPath, JSON.stringify({}), "utf8");
-    await decideNextStep({ root: REPO_DIR });
-
-    const step = await decideNextStep({ root: REPO_DIR });
-
-    expect(step.step_kind).not.toBe("collect_review_approval");
-    expect(existsSync(decisionPath)).toBe(true);
-  });
-});
-
-describe("up-front ambiguity gate (note 3, part A)", () => {
-  // Findings whose scope/judgment is ambiguous must be resolved in ONE batched
-  // round at planning, before any implement dispatch — never fall to mid-run
-  // triage. The deterministic heuristics seed candidates; the gate halts only
-  // when at least one is detected.
-  const AMBIG_ID = "CP-ARCH-broad";
-  const CLEAR_ID = "CP-SEC-clear";
-  const ambiguityRequestPath = join(ARTIFACTS_DIR, "ambiguity_request.json");
-  const ambiguityResolutionPath = join(ARTIFACTS_DIR, "ambiguity_resolution.json");
-  const ambiguityDecisionPath = join(ARTIFACTS_DIR, "ambiguity_decision.json");
-
-  async function writeAmbiguousPlan(): Promise<void> {
-    await mkdir(join(REPO_DIR, "src"), { recursive: true });
-    await writeFile(join(REPO_DIR, "src", "login.ts"), "// login\n", "utf8");
-    // Pre-decide the review gate so it doesn't intercept before the ambiguity gate.
-    await writeFile(
-      decisionPath,
-      JSON.stringify({
-        schema_version: "remediate-code-review-decision/v1",
-        plan_id: "pre-decided",
-        approved_ids: [AMBIG_ID, CLEAR_ID],
-        declined: [],
-        created_at: new Date().toISOString(),
-      }),
-      "utf8",
-    );
-    await writeFile(
-      join(ARTIFACTS_DIR, "extracted-plan.json"),
-      JSON.stringify({
-        plan_id: "PLAN-AMBIG",
-        source: "contract_pipeline",
-        findings: [
-          {
-            // architecture lens + NO cited files → scope_of_fix candidate.
-            id: AMBIG_ID,
-            title: "Rework module boundaries",
-            category: "architecture",
-            severity: "medium",
-            confidence: "medium",
-            lens: "architecture",
-            summary: "Restructure the store/db seam.",
-            affected_files: [],
-            evidence: ["obligation O-ARCH"],
-          },
-          {
-            // security + 1 cited file + high confidence → not ambiguous.
-            id: CLEAR_ID,
-            title: "Escape login input",
-            category: "security",
-            severity: "high",
-            confidence: "high",
-            lens: "security",
-            summary: "Escape the email before the query.",
-            affected_files: [{ path: "src/login.ts" }],
-            evidence: ["obligation O-SEC"],
-          },
-        ],
-        blocks: [
-          { block_id: "B-ARCH", items: [AMBIG_ID], parallel_safe: true },
-          { block_id: "B-SEC", items: [CLEAR_ID], parallel_safe: true },
-        ],
-        project_type: "unknown",
-        candidate_closing_actions: ["none"],
-      }),
-      "utf8",
-    );
+  async function writeRequestPlan() {
     await harness.writeIntentCheckpoint();
     await acknowledgeResume();
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    for (const file of ["arch.ts", "login.ts"]) await writeFile(join(REPO_DIR, "src", file), "// original implementation\n");
+    const input = join(ARTIFACTS_DIR, "request.md");
+    await writeFile(input, "Restructure the store boundary and reject invalid login input. Choose the scope of both changes before implementation.\n");
+    const options = { ...nextOptions, runId: "REQUEST-owner-choices", sourcePaths: [input] };
+    await buildNextContractPipelineStep(options);
+    const source = (await readPlanSource(ARTIFACTS_DIR))!;
+    const plan: ExecutableChangePlan = {
+      plan_id: source.plan_id, objective: "Improve the store boundary and login input handling", non_goals: ["No database migration"],
+      requirements: [
+        { id: "REQ-architecture", description: "Keep storage calls behind the module interface", source_finding_ids: [], change_kind: "addition",
+          assertions: [{ kind: "positive", description: "Public callers use the storage interface", scope_paths: ["src/arch.ts"] }] },
+        { id: "REQ-login", description: "Reject invalid login input", source_finding_ids: [], change_kind: "addition",
+          assertions: [{ kind: "positive", description: "Invalid input is rejected before querying", scope_paths: ["src/login.ts"] }] },
+      ],
+      units: [
+        { id: ARCH_UNIT, title: "Rework storage boundary", description: "Choose the minimal store/interface boundary change",
+          source_finding_ids: [], requirement_ids: ["REQ-architecture"], dependencies: [], read_paths: ["src/arch.ts"], allowed_files: ["src/arch.ts"], required_tests: [],
+          affected_interfaces: [{ name: "storage", description: "Keep persistence private to the storage interface" }], addresses_counterexample_ids: [] },
+        { id: SEC_UNIT, title: "Reject invalid login input", description: "Validate login input before the query without changing the public response contract",
+          source_finding_ids: [], requirement_ids: ["REQ-login"], dependencies: [], read_paths: ["src/login.ts"], allowed_files: ["src/login.ts"], required_tests: [],
+          affected_interfaces: [{ name: "login", description: "Preserve the public response contract" }], addresses_counterexample_ids: [] },
+      ], source_dispositions: [],
+    };
+    await writeJsonFile(paths.submission, { base_revision_sha256: null, plan, retired_requirements: [] });
+    expect((await ingestExecutionPlan(options)).issues).toEqual([]);
+    return { options, plan, canonical: (await readCanonicalPlan(ARTIFACTS_DIR))! };
   }
 
-  it("halts at collect_clarifications with the detected candidate when ambiguity exists", async () => {
-    await writeAmbiguousPlan();
+  async function approveIndependentReviews(f: Awaited<ReturnType<typeof writeRequestPlan>>) {
+    for (const role of ["critique", "critic", "judge"] as const) {
+      const step = await decideNextStep(nextOptions);
+      expect(step.step_kind).toBe("contract_pipeline");
+      const request = (await readOptionalJsonFile<{ prompt_sha256: string }>(paths.review(role).request))!;
+      expect(request).toBeDefined();
+      const result = role === "critique" ? { verdict: "approved", issues: [] } : role === "critic" ? { counterexamples: [] } : {
+        verdict: "approved", classifications: [], disposition_assessments: [],
+        requirement_assessments: f.plan.requirements.map(requirement => ({ requirement_id: requirement.id, verdict: "satisfied", evidence: ["Reviewed the source, unit boundaries and scoped assertions"] })),
+      };
+      await writeJsonFile(paths.review(role).submission, { contract_version: "review-submission/v1", prompt_sha256: request.prompt_sha256,
+        review: { mode: "independent", reason: "A separate reviewer inspected this executable plan" }, result });
+    }
+  }
 
-    const step = await decideNextStep({ root: REPO_DIR });
-
-    expect(step.step_kind).toBe("collect_clarifications");
-    const request = JSON.parse(await readFile(ambiguityRequestPath, "utf8"));
-    const ids = request.candidates.map((c: { finding_id: string }) => c.finding_id);
-    expect(request.findings.map((finding: { id: string }) => finding.id)).toEqual([AMBIG_ID, CLEAR_ID]);
-    expect(request.findings[0].summary).toBe("Restructure the store/db seam.");
-    expect(request.findings[0].evidence).toEqual(["obligation O-ARCH"]);
-    expect(step.access?.read_paths).toContain(ambiguityRequestPath.replaceAll("\\", "/"));
-    expect(await readFile(step.prompt_path, "utf8")).toContain(ambiguityRequestPath.replaceAll("\\", "/"));
-    expect(ids).toContain(AMBIG_ID); // ambiguous arch finding flagged
-    expect(ids).not.toContain(CLEAR_ID); // clear security finding not flagged
-    expect(request.candidates.find((c: { finding_id: string }) => c.finding_id === AMBIG_ID).category).toBe(
-      "scope_of_fix",
-    );
+  it("batches scope questions over the concrete units before any review or dispatch", async () => {
+    const f = await writeRequestPlan();
+    const step = await decideNextStep(nextOptions);
+    expect(step.step_kind).toBe("contract_pipeline");
+    expect(step.status).toBe("blocked");
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toContain("Batch scope/behavior questions now");
+    expect(prompt).toContain(ARCH_UNIT);
+    expect(prompt).toContain(SEC_UNIT);
+    expect(step.artifact_paths.execution_plan).toBe(paths.canonical.replaceAll("\\", "/"));
+    expect(f.canonical.plan.units.map(unit => unit.title)).toEqual(["Rework storage boundary", "Reject invalid login input"]);
+    expect((await readPlanSource(ARTIFACTS_DIR))!.findings).toEqual([]);
+    expect(await new StateStore(ARTIFACTS_DIR).loadState()).toBeNull();
+    expect(existsSync(paths.review("critique").request)).toBe(false);
+    for (const file of ["ambiguity_request.json", "ambiguity_resolution.json", "ambiguity_decision.json"]) {
+      expect(existsSync(join(ARTIFACTS_DIR, file))).toBe(false);
+    }
   });
 
-  it("explicit user deferral closes the item as ignored and the run proceeds", async () => {
-    await writeAmbiguousPlan();
-    await decideNextStep({ root: REPO_DIR }); // halt + write request
-
-    await writeFile(
-      ambiguityResolutionPath,
-      JSON.stringify([
-        { finding_id: AMBIG_ID, action: "defer", rationale: "out of scope this run" },
-      ]),
-      "utf8",
-    );
-    const step = await decideNextStep({ root: REPO_DIR }); // consume + proceed
-
-    expect(step.step_kind).not.toBe("collect_clarifications");
-    expect(existsSync(ambiguityDecisionPath)).toBe(true);
-    const state = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"));
-    // Deferred item is a recorded terminal disposition (ignored), never silently dropped.
-    expect(state.items[AMBIG_ID].status).toBe("ignored");
-    expect(state.items[AMBIG_ID].failure_reason).toMatch(/deferred/i);
-    // The clear item stays live for implementation.
-    expect(state.items[CLEAR_ID].status).toBe("pending");
+  it.each(["missing", "stale", "incomplete", "reasonless"] as const)("a %s owner choice cannot authorize implementation", async kind => {
+    const f = await writeRequestPlan();
+    if (kind !== "missing") await writeJsonFile(ownerPath, {
+      revision_sha256: kind === "stale" ? "0".repeat(64) : f.canonical.revision_sha256,
+      confirmed_by: "host", approved_unit_ids: kind === "incomplete" || kind === "reasonless" ? [SEC_UNIT] : [ARCH_UNIT, SEC_UNIT],
+      declined_units: kind === "reasonless" ? [{ id: ARCH_UNIT, reason: "" }] : [],
+    });
+    const step = await decideNextStep(nextOptions);
+    expect(step.step_kind).toBe("contract_pipeline");
+    expect(step.status).toBe("blocked");
+    expect(await readApprovedExecutionPlan(ARTIFACTS_DIR)).toBeUndefined();
+    expect(await new StateStore(ARTIFACTS_DIR).loadState()).toBeNull();
   });
 
-  it("re-running after the resolution does not re-halt (fires at most once)", async () => {
-    await writeAmbiguousPlan();
-    await decideNextStep({ root: REPO_DIR });
-    await writeFile(
-      ambiguityResolutionPath,
-      JSON.stringify([{ finding_id: AMBIG_ID, action: "clarified", rationale: "minimal local fix" }]),
-      "utf8",
-    );
-    await decideNextStep({ root: REPO_DIR });
+  it("the current choice opens independent review rather than directly approving the plan", async () => {
+    const f = await writeRequestPlan();
+    await writeJsonFile(ownerPath, { revision_sha256: f.canonical.revision_sha256, confirmed_by: "host", approved_unit_ids: [ARCH_UNIT, SEC_UNIT], declined_units: [] });
+    const step = await decideNextStep(nextOptions);
+    expect(step.step_kind).toBe("contract_pipeline");
+    expect(step.status).toBe("ready");
+    expect(existsSync(paths.review("critique").request)).toBe(true);
+    expect(await readApprovedExecutionPlan(ARTIFACTS_DIR)).toBeUndefined();
+  });
 
-    const step = await decideNextStep({ root: REPO_DIR });
-
-    expect(step.step_kind).not.toBe("collect_clarifications");
-    expect(existsSync(ambiguityDecisionPath)).toBe(true);
+  it("an initial decline keeps its reason and repeated continuation only dispatches the approved unit", async () => {
+    const f = await writeRequestPlan();
+    await writeJsonFile(ownerPath, { revision_sha256: f.canonical.revision_sha256, confirmed_by: "host", approved_unit_ids: [SEC_UNIT],
+      declined_units: [{ id: ARCH_UNIT, reason: "Defer the architecture change until the next release" }] });
+    const ownerBytes = await readFile(ownerPath, "utf8");
+    await approveIndependentReviews(f);
+    const first = await decideNextStep(nextOptions);
+    expect(first.step_kind).toBe("dispatch_implement");
+    const initial = (await new StateStore(ARTIFACTS_DIR).loadState())!;
+    expect(initial.plan!.findings).toEqual([]);
+    expect(initial.items![ARCH_UNIT]!.status).toBe("ignored");
+    expect(initial.items![ARCH_UNIT]!.failure_reason).toBe("Defer the architecture change until the next release");
+    expect(initial.items![SEC_UNIT]!.status).toBe("pending");
+    const again = await decideNextStep(nextOptions);
+    expect(again.step_kind).toBe("dispatch_implement");
+    const repeated = (await new StateStore(ARTIFACTS_DIR).loadState())!;
+    expect(repeated.items![ARCH_UNIT]).toEqual(initial.items![ARCH_UNIT]);
+    expect(await readFile(ownerPath, "utf8")).toBe(ownerBytes);
+    for (const step of [first, again]) {
+      const workload = (await readOptionalJsonFile<{ work_items: Array<{ id: string }> }>(step.artifact_paths.host_workload!))!;
+      expect(workload.work_items.map(item => item.id)).toEqual([SEC_UNIT]);
+    }
   });
 });
 

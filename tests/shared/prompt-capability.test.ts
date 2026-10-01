@@ -1,53 +1,11 @@
-/**
- * C2 (sol-10 / P35) — PROMPT CAPABILITY: every imperative a rendered prompt
- * gives a worker must be satisfiable by the worker it is handed to.
- *
- * Two failure classes, one property. Both were live at HEAD, both were logged as
- * backlog friction rather than enforced, and both are the kind of thing "the
- * host will notice" — which is exactly what this repo bans.
- *
- *   1. **ENOENT inputs.** A prompt lists a "## Required Inputs" path that no
- *      producer ever writes. The fix is DERIVATION: the required-input list is
- *      read off the artifact store's `DEPENDENCY_MAP` (one truth for staleness
- *      AND for prompts), and every tool-derived artifact is materialized at the
- *      host-facing input path as well as the canonical envelope. A hand-kept
- *      per-role list could drift from the write map; a derived one cannot.
- *
- *   2. **Unsatisfiable write imperatives.** A lane prompt orders "write the JSON
- *      object to <path>" with no alternative, so a read-only executor has no
- *      sanctioned way to deliver its answer at all. The write instruction must
- *      STAY (the bound path is what `tryConsumeSubmission` reads); what was
- *      missing is the stated fallback — return the object as the final message
- *      and let the dispatching agent write it verbatim.
- *
- * Scope: MAP-LEVEL and RENDER-LEVEL only. Whether a given path exists on disk at
- * a given moment is a run property, pinned by the targeted single-phase scenario
- * in `tests/remediate/contract-pipeline-required-inputs.test.ts` — a blanket
- * disk rule would be a false positive on a collapsed framing step, which
- * legitimately names paths written later in the same round-trip.
- */
 import { describe, it, expect } from "vitest";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  DEPENDENCY_MAP,
-  CP_ARTIFACT_NAMES,
-  contractArtifactFilePath,
-  contractInputFilePath,
-  isEnvelope,
-  readContractArtifact,
-  writeDerivedContractArtifact,
-} from "../../src/remediate/contractPipeline/artifactStore.js";
-import type { ContractPipelineArtifactName } from "../../src/remediate/contractPipeline/artifactStore.js";
-import {
-  CONTRACT_PIPELINE_PHASE_ORDER,
-  PHASE_TO_ARTIFACT,
-  ROLES,
-  renderContractPipelinePrompt,
-} from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { renderPlanAuthorPrompt, renderPlanReviewPrompt } from "../../src/remediate/steps/contractPipelinePrompts.js";
+import { planPromptSource, planPromptCanonical, planPromptHistory } from "./planPromptFixture.js";
 import {
   LANE_RESULT_FALLBACK_SENTENCE,
   LANE_RESULTS_HEADING,
@@ -62,18 +20,9 @@ import { toPromptPathToken } from "../../src/shared/tooling/exec.js";
 
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-const FAKE_ARTIFACTS_DIR = "/project/.audit-tools/remediation";
-
-const ALL_PATHS = Object.fromEntries(
-  CP_ARTIFACT_NAMES.map((name) => [
-    name,
-    contractInputFilePath(FAKE_ARTIFACTS_DIR, name),
-  ]),
-) as Record<ContractPipelineArtifactName, string>;
-
 // The recognizers live in the shared helper so the guard-form-reach test can
 // drive the REAL matchers over each declared sample (P51).
-import { requiredInputEntries, resultsPathDriftLines } from "../helpers/recognizers.js";
+import { resultsPathDriftLines } from "../helpers/recognizers.js";
 
 /** OS-agnostic reporting for src-scan violations. */
 function slashed(candidate: string): string {
@@ -89,126 +38,22 @@ async function collectTypeScriptSources(dir: string): Promise<string[]> {
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-// ── 1. Producer soundness ─────────────────────────────────────────────────────
-
-describe("every declared input has a producer that runs BEFORE it", () => {
-  const artifactToPhase = new Map<ContractPipelineArtifactName, string>(
-    Object.entries(PHASE_TO_ARTIFACT).map(([phase, artifact]) => [artifact, phase]),
-  );
-
-  // Artifacts the TOOL writes after the last worker phase, each with the writer
-  // that produces it. Prompt 18 retired the `closing` worker text: no worker phase
-  // writes `verification_report`, the close phase builds it.
-  const toolWritten = new Map<ContractPipelineArtifactName, string>([
-    ["verification_report", "buildVerificationReport (src/remediate/phases/close.ts), after every phase"],
-  ]);
-
-  it("every contract-pipeline artifact has exactly one producing phase, or a named tool writer", () => {
-    const producerless = CP_ARTIFACT_NAMES.filter(
-      (name) => !artifactToPhase.has(name) && !toolWritten.has(name),
-    );
-    expect(
-      producerless,
-      "an artifact no phase produces can be NAMED as an input but never written",
-    ).toEqual([]);
-    for (const name of toolWritten.keys()) {
-      expect(
-        artifactToPhase.has(name),
-        `${name} is declared tool-written but a phase also produces it`,
-      ).toBe(false);
-    }
+describe("canonical planning prompt capabilities", () => {
+  it("author writes only a submission and reads the canonical source", () => {
+    const prompt = renderPlanAuthorPrompt({ root: "/repo", source: planPromptSource, history: planPromptHistory,
+      sourcePath: "/run/source.json", planPath: "/run/plan.json", outputPath: "/run/plan.input.json" });
+    expect(prompt).toContain("Read /run/source.json");
+    expect(prompt).toContain("Write ONLY /run/plan.input.json");
+    expect(prompt).toContain("Inspect actual source");
+    expect(prompt).not.toContain("obligation_ledger.json");
   });
-
-  it("every DEPENDENCY_MAP dependency is produced strictly earlier in the phase order", () => {
-    const violations: string[] = [];
-    for (const name of CP_ARTIFACT_NAMES) {
-      // A tool-written artifact is produced after the last phase.
-      const ownIndex = toolWritten.has(name)
-        ? CONTRACT_PIPELINE_PHASE_ORDER.length
-        : CONTRACT_PIPELINE_PHASE_ORDER.indexOf(artifactToPhase.get(name)!);
-      for (const dep of DEPENDENCY_MAP[name]) {
-        const depPhase = artifactToPhase.get(dep);
-        if (depPhase === undefined) {
-          violations.push(`${name} depends on ${dep}, which no phase produces`);
-          continue;
-        }
-        const depIndex = CONTRACT_PIPELINE_PHASE_ORDER.indexOf(depPhase);
-        if (depIndex >= ownIndex) {
-          violations.push(
-            `${name} (phase ${ownIndex}) depends on ${dep} (phase ${depIndex}) — not strictly earlier`,
-          );
-        }
-      }
-    }
-    expect(violations).toEqual([]);
-  });
-});
-
-// ── 2. Derivation: prompts read the write/dependency map ──────────────────────
-
-describe("a role's Required Inputs are DERIVED from DEPENDENCY_MAP", () => {
-  for (const roleName of Object.keys(ROLES)) {
-    it(`${roleName} lists exactly DEPENDENCY_MAP[${ROLES[roleName]!.outputKey}]`, () => {
-      const role = ROLES[roleName]!;
-      const result = renderContractPipelinePrompt({
-        role: roleName,
-        artifactPaths: ALL_PATHS,
-      });
-      const entries = requiredInputEntries(result.prompt);
-      expect(entries.map((entry) => entry.key)).toEqual([
-        ...DEPENDENCY_MAP[role.outputKey],
-      ]);
-      for (const entry of entries) {
-        expect(
-          entry.path,
-          `${roleName} must name the resolved artifact path for ${entry.key}`,
-        ).toBe(ALL_PATHS[entry.key as ContractPipelineArtifactName]);
-      }
-    });
-  }
-
-  it("the role table carries no second, hand-kept copy of the input list", () => {
-    for (const [roleName, role] of Object.entries(ROLES)) {
-      expect(
-        Object.keys(role),
-        `${roleName} must not re-declare its inputs — DEPENDENCY_MAP is the single truth`,
-      ).not.toContain("requiredInputKeys");
-    }
-  });
-});
-
-// ── 3. Materialization: a derived artifact reaches the HOST-facing path ────────
-
-describe("a tool-derived artifact is written where the prompt says to read it", () => {
-  it("writeDerivedContractArtifact leaves a plain payload at the input path and an envelope at the canonical path", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "c2-derived-artifact-"));
-    try {
-      const payload = {
-        contract_version: "remediate-code-contract-pipeline/obligation-ledger/v1alpha1",
-        goal_id: "G1",
-        obligations: [],
-        created_at: "2026-01-01T00:00:00.000Z",
-      };
-      await writeDerivedContractArtifact(dir, "obligation_ledger", payload);
-
-      const hostFacing = JSON.parse(
-        await readFile(contractInputFilePath(dir, "obligation_ledger"), "utf8"),
-      );
-      expect(
-        isEnvelope(hostFacing),
-        "the host's world is the PLAIN payload — never the tool's envelope",
-      ).toBe(false);
-      expect(hostFacing).toEqual(payload);
-
-      const canonical = JSON.parse(
-        await readFile(contractArtifactFilePath(dir, "obligation_ledger"), "utf8"),
-      );
-      expect(isEnvelope(canonical)).toBe(true);
-      const envelope = await readContractArtifact(dir, "obligation_ledger");
-      expect(envelope?.payload).toEqual(payload);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+  for (const role of ["critique", "critic", "judge"] as const) it(`${role} reads accepted records and may check actual source`, () => {
+    const prompt = renderPlanReviewPrompt({ role, root: "/repo", sourcePath: "/run/source.json", planPath: "/run/plan.json",
+      canonical: planPromptCanonical, history: planPromptHistory, priorReviewPaths: ["/run/prior.json"], requirement: "independent" });
+    for (const path of ["/run/source.json", "/run/plan.json", "/run/prior.json"]) expect(prompt).toContain(path);
+    expect(prompt).toContain("may inspect");
+    expect(prompt).toContain("Do not edit repository source or the canonical plan");
+    expect(prompt).toContain("independent context");
   });
 });
 

@@ -1,3 +1,5 @@
+import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
+import { executionPlanPaths } from "../../src/remediate/contractPipeline/executionPlan.js";
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -72,9 +74,10 @@ describe('persisted operator lifecycle through fresh CLI processes', () => {
     await writeFile(join(REPO_DIR, 'src/a.ts'), 'export const a = 1;\n');
     await writeFile(join(REPO_DIR, 'src/b.ts'), 'export const b = 2;\n');
     const state = makePlanningState({ status: 'implementing' });
-    state.items!['F-001']!.status = 'resolved';
-    await harness.saveState(state);
+    state.items!['B-001']!.status = 'resolved';
     await harness.acknowledgeResume(); await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
+    await harness.saveState(state);
     expect(ok('next-step').step_kind).toBe('dispatch_implement');
     const before = await readFile(statePath(), 'utf8');
     const bound = JSON.parse(before).host_handoff;
@@ -87,7 +90,7 @@ describe('persisted operator lifecycle through fresh CLI processes', () => {
     expect(ok('resume').step_kind).toBe('operator_resumed'); ok('resume');
     expect(ok('next-step').step_kind).toBe('dispatch_implement');
     const resumed = JSON.parse(await readFile(statePath(), 'utf8'));
-    expect(resumed.items['F-001'].status).toBe('resolved');
+    expect(resumed.items['B-001'].status).toBe('resolved');
     expect(resumed.host_handoff).toEqual(bound);
   });
 
@@ -104,15 +107,10 @@ describe('persisted operator lifecycle through fresh CLI processes', () => {
   });
 
   it('finishes approved planning before its automatic pause, but never calls a failed plan finished', async () => {
-    await harness.saveState(makePlanningState());
     await harness.acknowledgeResume(); await harness.writeIntentCheckpoint();
-    await writeFile(join(ARTIFACTS_DIR, 'review_decision.json'), JSON.stringify({
-      schema_version: 'remediate-code-review-decision/v1', plan_id: 'PLAN-1',
-      approved_ids: ['F-001', 'F-002'], declined: [], created_at: new Date().toISOString(),
-    }));
-    await writeFile(join(ARTIFACTS_DIR, 'ambiguity_decision.json'), JSON.stringify({
-      resolved_at: new Date().toISOString(), resolution_count: 0,
-    }));
+    const initial = makePlanningState();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, initial, REPO_DIR);
+    await harness.saveState(initial);
     expect(ok('next-step', '--plan-only').step_kind).toBe('operator_paused');
     const planned = JSON.parse(await readFile(statePath(), 'utf8'));
     expect(planned.status).toBe('implementing');
@@ -121,9 +119,9 @@ describe('persisted operator lifecycle through fresh CLI processes', () => {
     // A genuine planning-integrity refusal must still surface as a refusal,
     // rather than being relabelled a successful plan-only stop.
     const broken = makePlanningState();
-    broken.plan!.findings[0]!.affected_files[0]!.hash_at_plan_time = '0'.repeat(64);
     await harness.saveState(broken);
-    expect(ok('next-step', '--plan-only').step_kind).toBe('collect_starting_point');
+    await writeFile(executionPlanPaths(ARTIFACTS_DIR).approval, '{}');
+    expect(ok('next-step', '--plan-only').step_kind).toBe('contract_pipeline');
     expect(JSON.parse(await readFile(controlPath(), 'utf8')).mode).toBe('active');
   });
 

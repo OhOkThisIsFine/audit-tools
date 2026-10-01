@@ -1025,6 +1025,8 @@ export async function prepareAuditHostHandoff(params: {
   readonly artifactsDir: string;
   readonly runId: string;
   readonly tasks: readonly AuditHostTask[];
+  /** Includes question-held work, so an empty ready frontier cannot close a live wave. */
+  readonly pendingTaskCount?: number;
   /**
    * Threaded into the shared lock substrate so its heartbeat, timeout and
    * stale-lock-reclaim events are recorded rather than lost. Optional: a caller
@@ -1108,7 +1110,7 @@ export async function prepareAuditHostHandoff(params: {
     await writeJsonFile(reviewWaveClosedPath(params.artifactsDir, params.runId), {
       contract_version: REVIEW_WAVE_CLOSED_CONTRACT_VERSION,
       run_id: params.runId,
-      closed: allWorkItems.length === 0,
+      closed: allWorkItems.length === 0 && (params.pendingTaskCount ?? 0) === 0,
     });
 
     const workload: AuditHostWorkload = {

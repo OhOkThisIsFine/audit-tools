@@ -1,137 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import {
-  applyPlanPipeline,
-  mergeBlocksSharingFiles,
-  buildCoverageLedger,
-  estimateGroupTokens,
-  ESTIMATED_BLOCK_BASE_TOKENS,
-  ESTIMATED_FINDING_OVERHEAD_TOKENS,
-} from "../../src/remediate/phases/plan.js";
-import { checkAffectedFileIntegrity } from "../../src/remediate/utils/fileIntegrity.js";
-import { scratchDir } from "../helpers/scratch.js";
+import { describe, it, expect } from "vitest";
+import { buildCoverageLedger } from "../../src/remediate/phases/plan.js";
+import type { Finding } from "../../src/remediate/state/types.js";
+import { canonicalUnitFixture } from "./helpers/canonicalPlanFixture.js";
 
-interface FindingOpts {
-  severity?: string;
-  confidence?: string;
-  lens?: string;
-  summary?: string;
-  files?: string[];
-  evidence?: string[];
+function mkFinding(id: string, title: string, opts: { files?: string[] } = {}): Finding {
+ return { id, title, category: "correctness", severity: "low", confidence: "high", lens: "correctness", summary: title,
+ affected_files: (opts.files ?? []).map(path => ({path})), evidence: ["Source evidence"] };
 }
-
-function mkFinding(id: string, title: string, opts: FindingOpts = {}) {
-  return {
-    id,
-    title,
-    category: "General",
-    severity: opts.severity ?? "low",
-    confidence: opts.confidence ?? "low",
-    lens: opts.lens ?? "correctness",
-    summary: opts.summary ?? `${title}.`,
-    affected_files: (opts.files ?? []).map((path) => ({ path })),
-    evidence: opts.evidence ?? ["Evidence."],
-  };
-}
-
-describe("mergeBlocksSharingFiles", () => {
-  const f = (id: string, file: string) => mkFinding(id, id, { files: [file] });
-
-  it("A3: independent parallel blocks sharing a file stay SEPARATE, each cofile_parallel_safe", () => {
-    const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(2);
-    expect(merged.map((b) => b.block_id).sort()).toEqual(["B-001", "B-002"]);
-    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
-  });
-
-  it("does not merge blocks already serialized by a dependency", () => {
-    const findings = [f("F-1", "shared.ts"), f("F-2", "shared.ts")];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      {
-        block_id: "B-002",
-        items: ["F-2"],
-        parallel_safe: false,
-        dependencies: ["B-001"],
-        touched_files: [],
-      },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(2);
-  });
-
-  it("leaves blocks that share no file untouched", () => {
-    const findings = [f("F-1", "a.ts"), f("F-2", "b.ts")];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(2);
-  });
-
-  it("CE-008/A3: blocks citing one physical file under different spellings share via canonical identity", () => {
-    // `src/x.ts` vs `./src/x.ts` are the SAME physical file. Under A3 they are no
-    // longer unioned, but the canonical-identity share detection still applies —
-    // both independent blocks are flagged cofile_parallel_safe.
-    const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/x.ts")];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
-    expect(merged).toHaveLength(2);
-    for (const b of merged) expect(b.cofile_parallel_safe).toBe(true);
-  });
-
-  it("CE-008: distinct files under different spellings still do NOT merge", () => {
-    const findings = [f("F-1", "src/x.ts"), f("F-2", "./src/y.ts")];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any, "/repo");
-    expect(merged).toHaveLength(2);
-  });
-
-  it("A3: independent co-file blocks are NOT unioned, so no dependency remap occurs", () => {
-    // B-001 and B-002 are independent findings on shared.ts — under A3 they stay
-    // separate (flagged parallel-safe), NOT unioned. B-003 depends on B-002 and
-    // keeps that edge unchanged (nothing was remapped).
-    const findings = [
-      f("F-1", "shared.ts"),
-      f("F-2", "shared.ts"),
-      f("F-3", "other.ts"),
-    ];
-    const blocks = [
-      { block_id: "B-001", items: ["F-1"], parallel_safe: true, touched_files: [] },
-      { block_id: "B-002", items: ["F-2"], parallel_safe: true, touched_files: [] },
-      {
-        block_id: "B-003",
-        items: ["F-3"],
-        parallel_safe: false,
-        dependencies: ["B-002"],
-        touched_files: [],
-      },
-    ];
-    const merged = mergeBlocksSharingFiles(blocks, findings as any);
-    expect(merged).toHaveLength(3);
-    expect(
-      merged.find((b) => b.block_id === "B-001")!.cofile_parallel_safe,
-    ).toBe(true);
-    expect(
-      merged.find((b) => b.block_id === "B-002")!.cofile_parallel_safe,
-    ).toBe(true);
-    const b3 = merged.find((b) => b.block_id === "B-003")!;
-    expect(b3.dependencies).toEqual(["B-002"]);
-  });
-});
 
 describe("buildCoverageLedger", () => {
   it("classifies planned, folded, and dropped findings", () => {
@@ -146,7 +21,7 @@ describe("buildCoverageLedger", () => {
       droppedNoEvidence: ["C"],
       droppedByCheckpoint: [],
       mergeMap: new Map([["B", "A"]]),
-      items: { A: { finding_id: "A", status: "pending", block_id: "B-001" } },
+      units: [canonicalUnitFixture("B-001", { source_finding_ids: ["A"] })],
     });
     expect(ledger.source_finding_count).toBe(3);
     expect(ledger.planned_count).toBe(1);
@@ -156,7 +31,7 @@ describe("buildCoverageLedger", () => {
       ledger.entries.map((e) => [e.finding_id, e]),
     );
     expect(byId.A.disposition).toBe("planned");
-    expect(byId.A.block_id).toBe("B-001");
+    expect(byId.A.unit_ids).toEqual(["B-001"]);
     expect(byId.B.disposition).toBe("folded_into");
     expect(byId.B.folded_into).toBe("A");
     expect(byId.C.disposition).toBe("dropped_no_evidence");
@@ -182,7 +57,7 @@ describe("buildCoverageLedger", () => {
         { finding_id: "ARC-002", reason: "Disapproved by the user at the review gate." },
       ],
       mergeMap: new Map(),
-      items: { "NODE-1": { finding_id: "NODE-1", status: "pending", block_id: "B-001" } },
+      units: [canonicalUnitFixture("B-001", { source_finding_ids: ["NODE-1"] })],
     });
 
     expect(ledger.source_finding_count).toBe(3);
@@ -205,192 +80,22 @@ describe("buildCoverageLedger", () => {
   });
 });
 
-// ── MNT-1905694f: applyPlanPipeline ──────────────────────────────────────────
 
-describe("applyPlanPipeline (MNT-1905694f)", () => {
-  const PIPELINE_TEST_DIR = scratchDir(".test-plan-pipeline");
-
-  beforeEach(async () => {
-    await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
-    await mkdir(PIPELINE_TEST_DIR, { recursive: true });
-    // Several cases write source files under src/ (e.g. src/big.ts); writeFile
-    // does not create parent dirs, so ensure src/ exists up front.
-    await mkdir(join(PIPELINE_TEST_DIR, "src"), { recursive: true });
-    await writeFile(
-      join(PIPELINE_TEST_DIR, "session-config.json"),
-      JSON.stringify({
-        block_quota: { context_tokens: 200_000, reserved_output_tokens: 8_000 },
-      }),
-      "utf8",
-    );
+describe("coverage source identities", () => {
+  it("coverage preserves immutable originals and many-to-many execution links", () => {
+    const findings = [mkFinding("A", "First source"), mkFinding("B", "Second source")];
+    const before = JSON.stringify(findings);
+    const units = [canonicalUnitFixture("U-one", { source_finding_ids: ["A", "B"] }), canonicalUnitFixture("U-two", { source_finding_ids: ["A"] })];
+    const ledger = buildCoverageLedger({ planId: "PLAN-links", sourceFindings: findings, units, droppedNoEvidence: [], droppedByCheckpoint: [], mergeMap: new Map() });
+    expect(ledger.entries.find(entry => entry.finding_id === "A")!.unit_ids).toEqual(["U-one", "U-two"]);
+    expect(ledger.entries.find(entry => entry.finding_id === "B")!.unit_ids).toEqual(["U-one"]);
+    expect(ledger.entries.map(entry => entry.finding)).toEqual(findings);
+    expect(JSON.stringify(findings)).toBe(before);
   });
 
-  afterEach(async () => {
-    await rm(PIPELINE_TEST_DIR, { recursive: true, force: true });
-  });
-
-  it("normalizeExtractedPlan path: A3 keeps independent file-sharing blocks separate + parallel-safe (MNT-1905694f)", async () => {
-    // Two independent findings that both touch shared.ts in separate blocks.
-    const sharedFile = "src/shared.ts";
-    const fA = mkFinding("F-A", "Finding A", { files: [sharedFile], evidence: ["evidence A"] });
-    const fB = mkFinding("F-B", "Finding B", { files: [sharedFile], evidence: ["evidence B"] });
-
-    const inputPlan = {
-      plan_id: "PLAN-test",
-      findings: [fA, fB] as any[],
-      blocks: [
-        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [], touched_files: [] },
-        { block_id: "B-002", items: ["F-B"], parallel_safe: true, dependencies: [], touched_files: [] },
-      ],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"] as any,
-    };
-
-    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
-
-    // A3: independent same-file blocks are NOT unioned — kept separate, each flagged.
-    expect(result.blocks).toHaveLength(2);
-    for (const b of result.blocks) expect(b.cofile_parallel_safe).toBe(true);
-  });
-
-  it("normalizeExtractedPlan path: dependency-ordered file-sharing blocks stay separate and non-parallel-safe", async () => {
-    const sharedFile = "src/shared.ts";
-    const fA = mkFinding("F-A", "Finding A", { files: [sharedFile], evidence: ["e"] });
-    const fB = mkFinding("F-B", "Finding B", { files: [sharedFile], evidence: ["e"] });
-
-    // B-002 depends on B-001. Even though both touch shared.ts, the existing
-    // dependency already serializes them, so mergeBlocksSharingFiles must NOT
-    // fuse them (the `!ordered` guard): the dependency edge prevents the parallel
-    // file-clobber the merge exists to avoid. The dependent block stays
-    // non-parallel-safe.
-    const inputPlan = {
-      plan_id: "PLAN-test",
-      findings: [fA, fB] as any[],
-      blocks: [
-        { block_id: "B-001", items: ["F-A"], parallel_safe: true, dependencies: [], touched_files: [] },
-        { block_id: "B-002", items: ["F-B"], parallel_safe: false, dependencies: ["B-001"], touched_files: [] },
-      ],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"] as any,
-    };
-
-    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
-
-    // Already dependency-ordered → not merged; both blocks survive.
-    expect(result.blocks).toHaveLength(2);
-    const dependent = result.blocks.find((b) => b.block_id === "B-002");
-    expect(dependent?.parallel_safe).toBe(false);
-    expect(dependent?.dependencies).toContain("B-001");
-  });
-
-  it("normalizeExtractedPlan path: preserves coherence and reports size without backend fitting", async () => {
-    // Two large files, one per finding. The findings must touch DIFFERENT files
-    // so groupFindingsByFileOverlap puts them in separate file-overlap groups —
-    // the splitter only divides a block at group boundaries, never within a group
-    // of findings that share a file (those must stay together to avoid clobbering).
-    const bigFileA = "src/big-a.ts";
-    const bigFileB = "src/big-b.ts";
-    const bigContent = "x".repeat(200_000); // ~200 KB each → well over any tiny budget
-    await writeFile(join(PIPELINE_TEST_DIR, bigFileA), bigContent, "utf8");
-    await writeFile(join(PIPELINE_TEST_DIR, bigFileB), bigContent, "utf8");
-
-    // A retired backend-sizing config must not reshape canonical membership.
-    const sessionConfig = {
-      block_quota: { context_tokens: 100, reserved_output_tokens: 10 },
-    };
-    await writeFile(
-      join(PIPELINE_TEST_DIR, "session-config.json"),
-      JSON.stringify(sessionConfig),
-      "utf8",
-    );
-
-    // Build a block with two independent findings pointing at the two big files.
-    const fA = mkFinding("F-A", "Finding A", { files: [bigFileA], evidence: ["e"] });
-    const fB = mkFinding("F-B", "Finding B", { files: [bigFileB], evidence: ["e"] });
-
-    const inputPlan = {
-      plan_id: "PLAN-test",
-      findings: [fA, fB] as any[],
-      blocks: [
-        { block_id: "B-001", items: ["F-A", "F-B"], parallel_safe: true, dependencies: [], touched_files: [] },
-      ],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"] as any,
-    };
-
-    const result = await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
-
-    expect(result.blocks).toHaveLength(1);
-    expect(result.blocks[0]?.block_id).toBe("B-001");
-    expect(result.blocks[0]?.items).toEqual(["F-A", "F-B"]);
-    expect(result.blocks[0]?.token_estimate).toBeGreaterThan(100);
-  });
-
-  it("normalizeExtractedPlan path: snapshotAffectedFileHashes records baseline so integrity is clean (MNT-1905694f)", async () => {
-    const trackedFile = "src/tracked.ts";
-    await writeFile(join(PIPELINE_TEST_DIR, trackedFile), "original content", "utf8");
-
-    const f = mkFinding("F-1", "Finding 1", { files: [trackedFile], evidence: ["e"] });
-    const inputPlan = {
-      plan_id: "PLAN-test",
-      findings: [f] as any[],
-      blocks: [
-        { block_id: "B-001", items: ["F-1"], parallel_safe: true, dependencies: [], touched_files: [] },
-      ],
-      project_type: "unknown",
-      candidate_closing_actions: ["none"] as any,
-    };
-
-    await applyPlanPipeline(inputPlan, { root: PIPELINE_TEST_DIR });
-
-    // After applyPlanPipeline, the file snapshot should exist and the integrity
-    // check should report clean (the file has not been modified since the snapshot).
-    const integrity = await checkAffectedFileIntegrity(PIPELINE_TEST_DIR, [f] as any);
-    expect(integrity.is_clean).toBe(true);
-  });
-});
-
-// ── FINDING-014: directory path exclusion from overlap grouping ───────────────
-
-describe("estimateGroupTokens uses shared constants (N-S04)", () => {
-  function finding(id: string, files: string[]) {
-    return {
-      id,
-      title: id,
-      category: "correctness",
-      severity: "low" as const,
-      confidence: "high" as const,
-      lens: "correctness" as const,
-      summary: `summary ${id}`,
-      affected_files: files.map((path) => ({ path })),
-      evidence: ["Evidence."],
-    };
-  }
-
-  it("empty findings returns ESTIMATED_PROMPT_OVERHEAD_TOKENS (900)", () => {
-    const result = estimateGroupTokens([], [], new Map());
-    // 900 base + estimateTokensFromBytes(0) + 0 items * 600 = 900
-    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS);
-    expect(result).toBe(900);
-  });
-
-  it("one finding with 400 bytes returns 900 + 100 + 600 = 1600", () => {
-    const f = finding("F1", ["src/a.ts"]);
-    const fileByteCounts = new Map([["src/a.ts", 400]]);
-    const result = estimateGroupTokens(["F1"], [f as any], fileByteCounts);
-    // 900 base + ceil(400/4)=100 file tokens + 1*600 item overhead = 1600
-    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS + 100 + ESTIMATED_FINDING_OVERHEAD_TOKENS);
-    expect(result).toBe(1600);
-  });
-
-  it("two findings returns base + file_bytes_tokens + 2 * ESTIMATED_FINDING_OVERHEAD_TOKENS", () => {
-    const f1 = finding("F1", ["src/a.ts"]);
-    const f2 = finding("F2", ["src/b.ts"]);
-    // 200 bytes each → 50 tokens each → 100 total file tokens
-    const fileByteCounts = new Map([["src/a.ts", 200], ["src/b.ts", 200]]);
-    const result = estimateGroupTokens(["F1", "F2"], [f1 as any, f2 as any], fileByteCounts);
-    // 900 + ceil(200/4)+ceil(200/4) + 2*600 = 900 + 50 + 50 + 1200 = 2200
-    expect(result).toBe(ESTIMATED_BLOCK_BASE_TOKENS + 100 + 2 * ESTIMATED_FINDING_OVERHEAD_TOKENS);
-    expect(result).toBe(2200);
+  it("conversation-only execution invents no finding or coverage entry", () => {
+    const ledger = buildCoverageLedger({ planId: "PLAN-request", sourceFindings: [], units: [canonicalUnitFixture("U-request")], droppedNoEvidence: [], droppedByCheckpoint: [], mergeMap: new Map() });
+    expect(ledger.source_finding_count).toBe(0);
+    expect(ledger.entries).toEqual([]);
   });
 });

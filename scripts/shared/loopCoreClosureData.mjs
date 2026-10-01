@@ -62,14 +62,12 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/audit/extractors/risk.ts", claim: "pure", reason: "risk-signal extraction over already-loaded inputs; the executor owns the write" },
   { module: "src/audit/systemic/systemicChallengeLoop.ts", claim: "pure", reason: "the systemic challenge round FOLD — it grounds, namespaces, dedupes and blast-ranks one round's submitted improvements and returns the register; `systemicChallengeExecutor.ts` owns the write, the round counter and the convergence decision. It became closure-visible only when the adversary prompt stopped naming SYSTEMIC_FINDING_ID_PREFIX (owner review 2026-09-17, prompt 12: id-namespacing is tooling internals the reader cannot act on), which removed its one non-core importer" },
 
+  { module: "src/shared/graph/orderedReachability.ts", claim: "pure", reason: "generic ordered graph reachability over caller-owned sets and a supplied edge predicate; no I/O or persisted workflow state" },
+
   // ── Remediate: contract-pipeline stages and phase bodies ──────────────────
   // Same argument on the remediate draw: `steps/contractPipeline.ts` and
   // `steps/nextStep.ts` are the loop-core boundary, and these are the bodies
   // they call.
-  { module: "src/remediate/contractPipeline/cyclicSeamResolution.ts", claim: "pure", reason: "seam-cycle resolution; pure over the pipeline's own input" },
-  { module: "src/remediate/contractPipeline/phaseCutArtifact.ts", claim: "reads-only", reason: "phase-cut rendering; it reads pipeline envelopes and returns text — the pipeline owns the write" },
-  { module: "src/remediate/contractPipeline/reviewSnapshot.ts", claim: "mutates", reason: "review-snapshot shaping; it WRITES review-snapshots/<name>.json and mkdirs the snapshots dir, but every location derives from an artifactsDir its CALLER supplies (reviewSnapshotDir(artifactsDir)) — it never chooses where, so it holds no write-boundary decision the boundary itself should own" },
-  { module: "src/remediate/contractPipeline/testPlanCarry.ts", claim: "mutates", reason: "test-plan carry-forward; it WRITES test-plan-carry.json under the contract-pipeline dir, again derived entirely from a caller-supplied artifactsDir (testPlanCarryPath(artifactsDir)), and it carries state between pipeline stages rather than deciding what the pipeline does next" },
   { module: "src/remediate/findingFilter.ts", claim: "reads-only", reason: "finding filtering; it reads findings input and returns a filter result" },
   { module: "src/remediate/intent/intentOrdering.ts", claim: "pure", reason: "intent ordering; pure" },
   { module: "src/remediate/phases/close.ts", claim: "mutates", reason: "closing-action bodies; it WRITES closing artifacts and removes the artifacts dir on promotion, but the STEP MACHINE owns the transition and the directory — close.ts executes a close it was handed, it does not decide that the run is closing or where its artifacts live (options.artifactsDir is caller-supplied throughout)" },

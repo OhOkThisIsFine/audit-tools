@@ -86,7 +86,7 @@ import { ensureSupervisorDirs } from "../io/runArtifacts.js";
 import {
   persistConfigErrorHandoff,
 } from "./reviewRun.js";
-import { renderSemanticReviewStep } from "./semanticReviewStep.js";
+import { renderSemanticReviewStep, prepareSemanticReviewWorkload } from "./semanticReviewStep.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
@@ -559,6 +559,44 @@ function operatorHandoffBlock(
   };
 }
 
+/** The host can progress inspection without handing its evidence to blind readers. */
+async function withReadyInspection(
+  plan: AuditStepPlan,
+  ctx: NextStepEmitContext | undefined,
+): Promise<AuditStepPlan> {
+  const inspectionRun = ctx?.result.inspectionRun;
+  if (plan.via !== "current" || !ctx || !inspectionRun) return plan;
+  const { handoff, resultPaths } = await prepareSemanticReviewWorkload({
+    root: ctx.root, artifactsDir: ctx.artifactsDir,
+    bundle: ctx.result.bundle, activeReviewRun: inspectionRun,
+  });
+  return {
+    ...plan,
+    params: {
+      ...plan.params,
+      artifactPaths: {
+        ...plan.params.artifactPaths,
+        host_workload: handoff.workload_path,
+        host_result_map: handoff.result_map_path,
+        active_review_run: inspectionRun.review_run_path,
+        pending_audit_tasks: inspectionRun.pending_audit_tasks_path,
+      },
+      prompt: plan.params.prompt + [
+        "", "## Ready scoped inspection", "",
+        "Execute this scoped-inspection workload alongside the architectural inquiry above:",
+        handoff.workload_path,
+        "Use separate worker contexts. Give every blind architectural reader ONLY its own prompt and packet; never pass this host envelope or inspection results to a blind reader.",
+        "Each inspection worker follows its bound prompt and writes its bound result. The continuation above describes the architectural workload alone; you may also call next-step as scoped results arrive, without waiting for pending architecture work. Keep independent work running.",
+      ].join("\n"),
+      stopCondition: "Progress the independent ready workloads and call next-step as results arrive.",
+      access: {
+        read_paths: [...(plan.params.access?.read_paths ?? []), handoff.workload_path, handoff.result_map_path, inspectionRun.pending_audit_tasks_path],
+        write_paths: [...(plan.params.access?.write_paths ?? []), ...resultPaths],
+      },
+    },
+  };
+}
+
 /** The ONE writer dispatch. Each underlying writer is called exactly once here. */
 async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
   switch (plan.via) {
@@ -697,29 +735,16 @@ export function buildExternalAcquisitionOptions(
 
 const emitComplete = emissionRow<"complete">(
   async ({ root, artifactsDir }, result) => {
-    const triage = result.triage;
-    const frictionPending = triage?.action === "dispose";
     return currentStepPlan({
       artifactsDir,
       stepKind: "present_report",
-      status: frictionPending ? "ready" : "complete",
+      status: "complete",
       runId: null,
-      // INV-READY-STEP-CONTINUATION (COR-f6a36670): a ready step whose
-      // stop_condition instructs calling next-step again must carry the
-      // executable continuation command — never leave the host to reconstruct
-      // the invocation from prose.
-      allowedCommands: frictionPending
-        ? [nextStepCommand(root, artifactsDir)]
-        : [],
-      stopCondition: frictionPending
-        ? "Complete friction triage (write open_observations and any dispositions), then call next-step again."
-        : "Present the final audit report and stop.",
+      allowedCommands: [],
+      stopCondition: "Present the final audit report and stop.",
       repoRoot: root,
-      artifactPaths: {
-        final_report: result.finalReportPath,
-        ...(triage ? { friction_record: triage.recordPath } : {}),
-      },
-      prompt: renderPresentReportPrompt(result.finalReportPath, triage),
+      artifactPaths: { final_report: result.finalReportPath },
+      prompt: renderPresentReportPrompt(result.finalReportPath),
     });
   },
 );
@@ -1839,8 +1864,8 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
   },
   // The drained advisory lines decorate the PLAN inside the one writer, so
   // they reach every row (and the fallback) without a second splice per row.
-  write: (plan, ctx) =>
-    writeAuditStep(withAdvisoryNotice(plan, ctx?.advisoryNotice)),
+  write: async (plan, ctx) =>
+    writeAuditStep(await withReadyInspection(withAdvisoryNotice(plan, ctx?.advisoryNotice), ctx)),
   // The tool's only externally-observable per-invocation contract.
   log: (step) => {
     console.log(JSON.stringify(step, null, 2));

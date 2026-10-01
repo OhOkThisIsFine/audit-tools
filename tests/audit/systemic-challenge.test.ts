@@ -1210,12 +1210,12 @@ describe("buildReviewFileMap", () => {
 // ── The PRIORITY insertion position ──────────────────────────────────────────
 
 describe("PRIORITY insertion", () => {
-  test("systemic_challenge_current sits immediately after charter_clarification and before planning", () => {
+  test("systemic_challenge_current sits after charter_clarification and before reporting", () => {
     const clar = PRIORITY.indexOf("charter_clarification_current");
     const systemic = PRIORITY.indexOf("systemic_challenge_current");
-    const planning = PRIORITY.indexOf("planning_artifacts");
+    const synthesis = PRIORITY.indexOf("synthesis_current");
     expect(systemic).toBe(clar + 1);
-    expect(planning).toBe(systemic + 1);
+    expect(synthesis).toBeGreaterThan(systemic);
   });
 });
 

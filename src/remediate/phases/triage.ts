@@ -20,7 +20,7 @@ interface TriageResolution {
    */
   plan_id?: string;
   items: {
-    finding_id: string;
+    unit_id: string;
     action: "retry" | "ignore" | "halt";
     rationale?: string;
   }[];
@@ -36,7 +36,7 @@ interface TriageBatch {
    * so INV-RSM-RESOLUTION-CORRELATE can reject a stale cross-run answer. */
   plan_id?: string;
   items: {
-    finding_id: string;
+    unit_id: string;
     failure_reason: string;
     last_successful_step: string;
   }[];
@@ -108,15 +108,11 @@ function retryBlockedItem(
  *                         (caller falls back to the normal retry path)
  */
 async function reverifyBlockedItemAgainstTree(
-  item: { finding_id: string; block_id?: string },
+  item: { unit_id: string },
   state: RemediationState,
   options: OrchestratorOptions,
 ): Promise<"satisfied" | "unsatisfied" | "indeterminate"> {
-  const block =
-    (item.block_id
-      ? state.plan?.blocks.find((b) => b.block_id === item.block_id)
-      : undefined) ??
-    state.plan?.blocks.find((b) => b.items.includes(item.finding_id));
+  const unit = state.plan?.units.find(unit => unit.id === item.unit_id);
   // Deliverable-existence guard (2026-07-03): a node cannot be "already satisfied" if
   // its declared deliverables aren't in the tree. A passing `targeted_command` may be
   // satisfied by a SIBLING's work while THIS node's file was never created — proven
@@ -124,10 +120,10 @@ async function reverifyBlockedItemAgainstTree(
   // never on the branch. Require every declared touched path to exist before trusting
   // the command result. (An edit-node's paths pre-exist, so this only fires on a
   // never-created new-file deliverable — exactly the false-resolve case.)
-  for (const rel of block?.touched_files ?? []) {
+  for (const rel of unit?.allowed_files ?? []) {
     if (!existsSync(join(options.root, rel))) return "unsatisfied";
   }
-  const commands = block?.targeted_commands;
+  const commands = unit?.required_tests;
   if (!commands || commands.length === 0) return "indeterminate";
   // These strings become real child processes below, so this path asks the same
   // declared command-shape rule the producer and the host-handoff consumer ask —
@@ -159,27 +155,18 @@ async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Pro
 async function archiveImplementResultsForRetries(
   state: RemediationState,
   options: OrchestratorOptions,
-  findingIds: Set<string>,
+  unitIds: Set<string>,
 ): Promise<void> {
   const runId = state.plan?.plan_id;
-  if (!runId || findingIds.size === 0) return;
+  if (!runId || unitIds.size === 0) return;
 
-  const blockIds = new Set<string>();
-  for (const findingId of findingIds) {
-    const item = state.items?.[findingId];
-    const blockId =
-      item?.block_id ??
-      state.plan?.blocks.find((block) => block.items.includes(findingId))?.block_id;
-    if (blockId) blockIds.add(blockId);
-  }
-
-  for (const blockId of blockIds) {
+  for (const unitId of unitIds) {
     await archiveIfPresent(
       remediationHostResultFilePath({
         root: options.root,
         artifactsDir: options.artifactsDir,
         runId,
-        workItemId: blockId,
+        workItemId: unitId,
       }),
       "stale",
     );
@@ -293,16 +280,16 @@ export async function runTriagePhase(
       }
       console.log("Found triage_resolution.json. Processing resolutions...");
       let requiresRetry = false;
-      const retryFindingIds = new Set<string>();
+      const retryUnitIds = new Set<string>();
 
       // Triage outcome artifact — records per-finding resolution actions.
-      const triageOutcome: { finding_id: string; action: string }[] = [];
+      const triageOutcome: { unit_id: string; action: string }[] = [];
 
       for (const res of resolution.items) {
         if (res.action === "halt") {
           await archiveIfPresent(resolutionPath, "consumed");
           console.log("Halt requested during triage. Routing through close (partial report).");
-          triageOutcome.push({ finding_id: res.finding_id, action: "halted" });
+          triageOutcome.push({ unit_id: res.unit_id, action: "halted" });
           await writeJsonFile(
             join(options.artifactsDir, "triage-outcome.json"),
             { resolved_at: new Date().toISOString(), items: triageOutcome },
@@ -310,7 +297,7 @@ export async function runTriagePhase(
           return haltToClosing(state);
         }
 
-        const item = state.items[res.finding_id];
+        const item = state.items[res.unit_id];
         if (item && item.status === "blocked") {
           // Fix: explicit `action` is authoritative; rationaleAsksForRetry is a
           // tie-breaker used only when action is absent (e.g. action === undefined).
@@ -319,14 +306,14 @@ export async function runTriagePhase(
             (res.action === undefined && rationaleAsksForRetry(res.rationale));
           if (shouldRetry) {
             retryBlockedItem(item);
-            retryFindingIds.add(res.finding_id);
+            retryUnitIds.add(res.unit_id);
             requiresRetry = true;
-            triageOutcome.push({ finding_id: res.finding_id, action: "retried" });
+            triageOutcome.push({ unit_id: res.unit_id, action: "retried" });
           } else if (res.action === "ignore") {
             item.status = "ignored";
             markTerminal(item);
             item.failure_reason = res.rationale ?? "User ignored during triage";
-            triageOutcome.push({ finding_id: res.finding_id, action: "ignored" });
+            triageOutcome.push({ unit_id: res.unit_id, action: "ignored" });
           }
         }
       }
@@ -337,7 +324,7 @@ export async function runTriagePhase(
         { resolved_at: new Date().toISOString(), items: triageOutcome },
       );
       if (requiresRetry) {
-        await archiveImplementResultsForRetries(state, options, retryFindingIds);
+        await archiveImplementResultsForRetries(state, options, retryUnitIds);
         return { ...state, status: "implementing" };
       }
 
@@ -352,7 +339,7 @@ export async function runTriagePhase(
         const rebatch: TriageBatch = {
           ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
           items: stillBlockedAfterResolution.map((item) => ({
-            finding_id: item.finding_id,
+            unit_id: item.unit_id,
             failure_reason: item.failure_reason ?? "Unknown error",
             last_successful_step: item.last_successful_step ?? "Unknown step",
           })),
@@ -385,7 +372,7 @@ export async function runTriagePhase(
           // conveyed by the terminal `resolved_no_change` status + this log.
           item.failure_reason = undefined;
           console.log(
-            `[triage] ${item.finding_id}: already satisfied in the working tree — reconciled to resolved_no_change (no retry).`,
+            `[triage] ${item.unit_id}: already satisfied in the working tree — reconciled to resolved_no_change (no retry).`,
           );
           continue;
         }
@@ -398,12 +385,12 @@ export async function runTriagePhase(
           // cannot distinguish an item that auto-retried from one that fell
           // through to human triage because its retry budget is spent.
           console.error(
-            `[triage] ${item.finding_id}: retry budget exhausted (${usedCount}/${MAX_AUTO_RETRIES}) — routing to human triage.`,
+            `[triage] ${item.unit_id}: retry budget exhausted (${usedCount}/${MAX_AUTO_RETRIES}) — routing to human triage.`,
           );
           continue;
         }
         console.log(
-          `[triage] ${item.finding_id}: auto-retrying (attempt ${usedCount + 1}/${MAX_AUTO_RETRIES}).`,
+          `[triage] ${item.unit_id}: auto-retrying (attempt ${usedCount + 1}/${MAX_AUTO_RETRIES}).`,
         );
         retryBlockedItem(item);
         autoRetried = true;
@@ -429,7 +416,7 @@ export async function runTriagePhase(
       const triageBatch: TriageBatch = {
         ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
         items: stillBlocked.map((item) => ({
-          finding_id: item.finding_id,
+          unit_id: item.unit_id,
           failure_reason: item.failure_reason ?? "Unknown error",
           last_successful_step: item.last_successful_step ?? "Unknown step",
         })),

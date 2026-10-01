@@ -22,6 +22,13 @@ test("absence of executable project gates never authorizes completion", async ()
   const gate = await runToolOwnedFinalGate(repo(), { runner: () => { throw Error("must not spawn"); } });
   expect(gate.passed).toBe(false);
 });
+test("a planned terminal operation that refused admission cannot report a passing floor", async () => {
+  const gate = await runToolOwnedFinalGate(repo({ test: "test" }), {
+    terminalUnit: { argv: ["npm", "test"], execute: () => ({ status: 0, ran: false, stderr: "refused" }) },
+  });
+  expect(gate.passed).toBe(false);
+  expect(gate.results[0]).toMatchObject({ ran: false, passed: false, stderr_tail: "refused" });
+});
 test("check:types is explicit typechecking but arbitrary check is not", () => {
   expect(discoverProjectCommands(repo({ "check:types": "tsc" }))).toMatchObject({ typecheck: ["npm", "run", "check:types"] });
   expect(discoverProjectCommands(repo({ check: "something" }))).not.toHaveProperty("typecheck");

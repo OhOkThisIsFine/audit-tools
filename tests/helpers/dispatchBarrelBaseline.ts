@@ -11,7 +11,7 @@ export const DISPATCH_BARREL_EXPORTS = [
   "RemediationHostPreparationError",
   "hostDependencyLevels",
   "ingestRemediationHostResults",
-  "permanentlyDeadPendingBlocks",
+  "permanentlyDeadPendingUnits",
   "precomputeRecoveryTestVerdicts",
   "prepareRemediationHostHandoff",
   "remediationHostResultFilePath",

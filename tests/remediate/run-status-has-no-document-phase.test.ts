@@ -1,3 +1,4 @@
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 /**
  * Run status has no document phase — invariant tests.
  *
@@ -100,7 +101,7 @@ describe("planning transitions directly to implementing", () => {
 
     const planId = "PLAN-DOC-DISSOLVED";
     const findingId = "F-DOC-DISSOLVED-001";
-    const state = {
+    const state = canonicalStateFromLegacyFixture({
       status: "planning" as const,
       plan: {
         plan_id: planId,
@@ -131,7 +132,7 @@ describe("planning transitions directly to implementing", () => {
         },
       },
       closing_plan: { action: "none" as const },
-    };
+    });
     await new StateStore(ARTIFACTS_DIR).saveState(state);
 
     // Write resume ack, intent checkpoint, and an approve-all review decision so
@@ -163,6 +164,7 @@ describe("planning transitions directly to implementing", () => {
       }),
       "utf8",
     );
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, state, REPO_DIR);
     const step = await decideNextStep({ root: REPO_DIR });
 
     // Must NOT be dispatch_document or document_single_item

@@ -117,15 +117,17 @@ await test("decideNextStep selects intent_checkpoint after design assessment, be
   expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
-await test("decideNextStep advances to charter_extraction once the checkpoint exists", async () => {
-  // Phase C: the charter-extraction pass sits between the checkpoint and the
-  // design-review passes (it needs the confirmed ceiling). Once charter extraction
-  // is satisfied (omitted at a shallow ceiling), design_review_contract is next.
+await test("confirmed intent opens scoped planning before charter and design inquiry", async () => {
   // DD-9: the intent-equivalence baseline is settled first — otherwise
   // intent_equivalence_current (directly after the checkpoint) is selected.
   const bundle = settleIntentBaseline({ ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() });
-  expect(decideNextStep(bundle).selected_obligation).toBe("charter_extraction_current");
-  const withCharters = { ...bundle, charter_register: omittedCharterRegister() };
+  expect(decideNextStep(bundle).selected_obligation).toBe("planning_artifacts");
+  const planned = settleIntentBaseline({ ...bundle,
+    coverage_matrix: { files: [] }, flow_coverage: { flows: [] }, runtime_validation_tasks: { tasks: [] },
+    audit_tasks: [], requeue_tasks: [],
+  });
+  expect(decideNextStep(planned).selected_obligation).toBe("charter_extraction_current");
+  const withCharters = { ...planned, charter_register: omittedCharterRegister() };
   expect(decideNextStep(withCharters).selected_obligation).toBe("design_review_contract_completed");
 });
 

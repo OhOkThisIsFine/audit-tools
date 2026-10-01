@@ -12,6 +12,8 @@ import {
 } from "../../src/remediate/index.js";
 
 import { prepareRemediationHostHandoff } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { REMEDIATION_STATE_CONTRACT_VERSION } from "../../src/remediate/state/store.js";
+import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../../src/remediate/steps/types.js";
 import {
   createNextStepHarness,
@@ -61,15 +63,21 @@ interface RunnableWork {
 
 async function persistRunnableState(): Promise<RunnableWork> {
   const state = makePlanningState({
+    contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
     status: "implementing",
     plan: { ...makePlanningState().plan!, plan_id: "RUN-1" },
   });
+  await mkdir(join(REPO_DIR, "src"), { recursive: true });
+  for (const file of ["src/a.ts", "src/b.ts"]) await writeFile(join(REPO_DIR, file), "// reviewed fixture source\n");
+  git(["add", "src"]);
+  git(["commit", "-m", "reviewed fixture baseline"]);
+  await writeApprovedPlanFixture(ARTIFACTS_DIR, state);
   const prepared = await prepareRemediationHostHandoff({
     root: REPO_DIR,
     artifactsDir: ARTIFACTS_DIR,
     runId: "RUN-1",
     baselineCommit: git(["rev-parse", "HEAD"]),
-    state: { contract_version: "remediate-code-state/v1alpha1", ...state } as never,
+    state,
   });
   if (prepared === "unsupported_retired_state") {
     throw new Error("fixture state unexpectedly rejected");
@@ -106,6 +114,7 @@ async function landAcceptedWork(work: RunnableWork): Promise<void> {
       id: string;
       allowed_files: string[];
       required_tests: string[];
+      obligation_ids: string[];
       prompt: { sha256: string };
       baseline_commit: string;
     }>;
@@ -136,7 +145,7 @@ async function landAcceptedWork(work: RunnableWork): Promise<void> {
  */
 function landedResult(
   runId: string,
-  item: { readonly id: string; readonly prompt: { readonly sha256: string } },
+  item: { readonly id: string; readonly obligation_ids: readonly string[]; readonly prompt: { readonly sha256: string } },
   landedCommit: string,
 ): Record<string, unknown> {
   return {
@@ -146,7 +155,7 @@ function landedResult(
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
     landed_commit: landedCommit,
-    obligation_evidence: [],
+    obligation_evidence: item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: [`The landed fixture commit ${landedCommit} implements this requirement in the unit's allowed file`] })),
   };
 }
 
@@ -408,6 +417,7 @@ describe("recovery verbs invalidate the persisted step contract", () => {
         id: string;
         allowed_files: string[];
         required_tests: string[];
+        obligation_ids: string[];
         prompt: { sha256: string };
         baseline_commit: string;
       }>;

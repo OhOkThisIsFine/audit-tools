@@ -49,7 +49,10 @@ export async function checkContractConformance(params: {
   runId: string;
   item: RemediationHostWorkItem;
   result: RemediationHostResult | RemediationHostDecision;
-  contracts: readonly unknown[];
+  requirements: readonly unknown[];
+  unit: unknown;
+  revision: string;
+  counterexamples: readonly unknown[];
 }): Promise<ConformanceReviewCheck> {
   const paths = conformanceReviewPaths(params.artifactsDir, params.runId, params.item.id);
   const verifiedHead = "outcome" in params.result ? await headCommit(params.root) : undefined;
@@ -61,7 +64,10 @@ export async function checkContractConformance(params: {
     ...(verifiedHead ? { verified_head: verifiedHead } : {}),
     prompt_sha256: params.item.prompt.sha256,
     obligation_ids: params.item.obligation_ids,
-    module_contracts: params.contracts,
+    requirements: params.requirements,
+    unit: params.unit,
+    review_revision_sha256: params.revision,
+    accepted_counterexamples: params.counterexamples,
     result: params.result,
   };
   const binding = digest(content);
@@ -72,8 +78,8 @@ export async function checkContractConformance(params: {
     content,
     response_path: paths.response,
     instructions: [
-      "Review the result's obligation evidence against every carried module contract in an independent context that did not author the implementation and cannot see its author's reasoning.",
-      `Inspect the cited source and tests at ${verifiedHead ? "the verified_head commit" : "the landed commit"}. Do not accept a citation merely because it exists; explain how it satisfies the obligation and the relevant contract.`,
+      "Review the result's obligation evidence against every reviewed requirement, its scoped assertions, the execution unit and the carried counterexample reproductions in an independent context that did not author the implementation and cannot see its author's reasoning.",
+      `Inspect the cited source and tests at ${verifiedHead ? "the verified_head commit" : "the landed commit"}. Do not accept a citation merely because it exists; explain how it satisfies the obligation and the relevant requirement.`,
       "Do not edit source, contracts, or the implementation result. Return one evidence-backed verdict per exact obligation id.",
       "Independence is a host declaration, not mechanically proven identity. If an independent context is unavailable, declare unavailable; self-review/degraded mode cannot satisfy this required lane.",
       "Use verdict insufficient with actionable missing evidence when the result or implementation needs repair. Write only the response file; the conversation host owns continuation.",

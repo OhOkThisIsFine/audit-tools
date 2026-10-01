@@ -1,3 +1,4 @@
+import { canonicalStateFromLegacyFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { REQUIRED_TEST_MESSAGE_LIMIT, runRequiredTest, type RequiredTestFailure } from "../../src/remediate/steps/dispatch/requiredTests.js";
@@ -7,7 +8,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { ingestRemediationHostResults, precomputeRecoveryTestVerdicts, prepareRemediationHostHandoff, remediationSubmissionBinding } from "../../src/remediate/steps/dispatch/hostHandoff.js";
+import { ingestRemediationHostResults, precomputeRecoveryTestVerdicts, prepareRemediationHostHandoff } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { type CurrentRemediationHostState, type PreparedRemediationHostHandoff, type RemediationHostWorkItem } from "../../src/remediate/steps/dispatch/hostContracts.js";
 import { type RemediationRequiredTestVerdicts } from "../../src/remediate/steps/dispatch/requiredTests.js";
 
@@ -32,13 +33,13 @@ describe("remediation host handoff record scope semantics versions", () => {
     work_item_ids: ["B1"],
   };
 
-  it("keeps v1alpha1 strict and requires explicit semantics on v1alpha2", () => {
+  it("rejects retired implicit scope and requires explicit semantics", () => {
     expect(
       RemediationHostHandoffRecordSchema.safeParse({
         contract_version: "remediation-host-handoff-record/v1alpha1",
         ...binding,
       }).success,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       RemediationHostHandoffRecordSchema.safeParse({
         contract_version: "remediation-host-handoff-record/v1alpha1",
@@ -108,7 +109,7 @@ async function fixture(options: {
   otherAffectedFiles?: Array<{ path: string; hash_at_plan_time?: string }>;
   requiredTest?: string;
   /**
-   * A block's WHOLE `targeted_commands` list. `requiredTest` is the single
+   * A unit's WHOLE required-test list. `requiredTest` is the single
    * command most tests need; this is for the tests that must bind several, where
    * the NUMBER of commands is the variable under test (a per-command excerpt is
    * fine; the message JOINS them, so its size scales with the count).
@@ -116,7 +117,7 @@ async function fixture(options: {
   requiredTests?: string[];
   runStartDirty?: string[];
   /**
-   * Add a VERIFIED dependency block `B0` ahead of `B1`. At mint time B0 is
+   * Add a VERIFIED dependency unit `B0` ahead of `B1`. At mint time B0 is
    * `resolved`, so B1 is the whole level-zero frontier and the workload binds
    * to it alone; `reopenGate` then flips B0 back to pending, which is how a
    * bound work item becomes dependency-ineligible without touching the plan
@@ -124,16 +125,16 @@ async function fixture(options: {
    */
   gateBlock?: boolean;
   /**
-   * Add a SECOND independent level-zero block `B2` over `src/b.ts`, binding the
-   * same `targeted_commands` as `B1`. Both land in one workload, which is what
+   * Add a SECOND independent level-zero unit `B2` over `src/b.ts`, binding the
+   * same required tests as `B1`. Both land in one workload, which is what
    * makes a shared required test's spawn count observable.
    */
   twoBlocks?: boolean;
   secondDependsOnFirst?: boolean;
   /**
-   * Give F1 contract-pipeline overlay obligation ids (deliberately unsorted)
-   * and B1 the carried approved module contract — the shape promotion writes,
-   * which the obligation evidence-coverage floor binds and enforces.
+   * Give B1 stable contract requirements (deliberately unsorted) and reviewed
+   * affected-interface semantics, which the obligation evidence-coverage
+   * floor binds and enforces independently of the original source finding.
    */
   contractOverlays?: boolean;
   /**
@@ -160,8 +161,8 @@ async function fixture(options: {
   const allowedFiles = options.allowedFiles ?? ["src/a.ts"];
   const runId = "git-corroboration";
   const artifactsDir = join(root, ".audit-tools", "remediation");
-  const state = {
-    contract_version: "remediate-code-state/v1alpha1",
+  const state = canonicalStateFromLegacyFixture({
+    contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
     status: "implementing",
     plan: {
       plan_id: runId,
@@ -172,8 +173,8 @@ async function fixture(options: {
                 id: "F2",
                 title: "Correct the other exported value",
                 category: "correctness",
-                severity: "high",
-                confidence: "high",
+                severity: "high" as const,
+                confidence: "high" as const,
                 lens: "correctness",
                 summary: "Change the other exported value.",
                 affected_files:
@@ -188,8 +189,8 @@ async function fixture(options: {
                 id: "F0",
                 title: "Land the prerequisite",
                 category: "correctness",
-                severity: "medium",
-                confidence: "high",
+                severity: "medium" as const,
+                confidence: "high" as const,
                 lens: "correctness",
                 summary: "Land the prerequisite B1 depends on.",
                 affected_files: [{ path: "src/b.ts" }],
@@ -201,8 +202,8 @@ async function fixture(options: {
           id: "F1",
           title: "Correct the returned value",
           category: "correctness",
-          severity: "high",
-          confidence: "high",
+          severity: "high" as const,
+          confidence: "high" as const,
           lens: "correctness",
           summary: "Change the exported value from one to two.",
           affected_files: options.affectedFiles ?? [{ path: "src/a.ts" }],
@@ -321,7 +322,18 @@ async function fixture(options: {
       ".counter",
       ...(options.runStartDirty ?? []),
     ],
-  } as unknown as CurrentRemediationHostState;
+  }) as CurrentRemediationHostState;
+  if (options.contractOverlays) {
+    const unit = state.plan.units.find(unit => unit.id === "B1")!;
+    state.plan.requirements = state.plan.requirements.filter(requirement => !unit.requirement_ids.includes(requirement.id));
+    unit.requirement_ids = ["mod-a:output:2", "mod-a:invariant:1"];
+    state.plan.requirements.push(...unit.requirement_ids.map(id => ({
+      id, description: id, source_finding_ids: ["F1"], change_kind: "structural" as const,
+      assertions: [{ kind: "positive" as const, description: "src/a.ts preserves the export contract", scope_paths: ["src/a.ts"] }],
+    })));
+    unit.affected_interfaces = [{ name: "mod-a", description: "src/a.ts exports value and preserves its name" }];
+  }
+  await writeApprovedPlanFixture(artifactsDir, state, root);
   const prepared = await prepareRemediationHostHandoff({
     root,
     artifactsDir,
@@ -351,17 +363,6 @@ function boundState(
   return { ...value.state, host_handoff: record, conformance_review: value.handoff.conformance_review };
 }
 
-function legacyBoundState(
-  value: Fixture,
-  record: RemediationHostHandoffRecord = value.handoff.handoff_record,
-): CurrentRemediationHostState {
-  const legacyRecord = {
-    ...record,
-    contract_version: "remediation-host-handoff-record/v1alpha1",
-  } as Record<string, unknown>;
-  delete legacyRecord.scope_semantics;
-  return boundState(value, legacyRecord as RemediationHostHandoffRecord);
-}
 
 async function persistBoundState(
   value: Fixture,
@@ -398,7 +399,7 @@ function resultFor(
     work_item_id: item.id,
     prompt_sha256: item.prompt.sha256,
     landed_commit: landedCommit,
-    obligation_evidence: [],
+    obligation_evidence: item.obligation_ids.map(obligation_id => ({ obligation_id, evidence: ["src/a.ts:1 implements the reviewed requirement"] })),
   };
 }
 
@@ -585,19 +586,27 @@ async function orphanBaselineAndLand(value: Fixture): Promise<string> {
   return landA(value);
 }
 
-/** Flip the gate block back to pending, making the bound work item ineligible. */
+/** Flip the gate unit back to pending, making the bound work item ineligible. */
 function reopenGate(value: Fixture): CurrentRemediationHostState {
   const bound = boundState(value);
   return {
     ...bound,
     items: {
       ...bound.items,
-      F0: { ...bound.items.F0!, status: "pending" },
+      B0: { ...bound.items.B0!, status: "pending" },
     },
   };
 }
 
 describe("remediation host handoff repository corroboration", () => {
+  it("refuses a retired implicit-scope handoff without accepting a result", async () => {
+    const value = await fixture();
+    const before = JSON.stringify(value.state);
+    const retired = { ...boundState(value), host_handoff: { ...value.handoff.handoff_record, contract_version: "remediation-host-handoff-record/v1alpha1" } };
+    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state: retired });
+    expect(result).toBe("unsupported_retired_state");
+    expect(JSON.stringify(value.state)).toBe(before);
+  });
   it("accepts one leading byte-order mark only after reading the bound result, while keeping invalid results refused", async () => {
     const accepted = await fixture();
     const acceptedAfter = await landA(accepted);
@@ -687,7 +696,7 @@ describe("remediation host handoff repository corroboration", () => {
     if (ingested === "unsupported_retired_state") return;
     expect(ingested.accepted_count).toBe(1);
     expect(ingested.issues).toEqual([]);
-    expect(ingested.state.items.F1!.status).toBe("resolved");
+    expect(ingested.state.items.B1!.status).toBe("resolved");
     expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
     expect(ingested.state.host_handoff).toBeUndefined();
     // The CORROBORATED landing, persisted per item. `applied_edit_surface` is
@@ -695,8 +704,8 @@ describe("remediation host handoff repository corroboration", () => {
     // `host_result_evidence` is deleted on the resolved path. Without this the
     // only way to recover "what landed for this item" was to re-run the git
     // probes — which a rewrite-orphaned baseline makes unanswerable.
-    expect(ingested.state.items.F1!.host_landed_commit).toBe(after);
-    expect(ingested.state.items.F1!.host_landed_files).toEqual(["src/a.ts"]);
+    expect(ingested.state.items.B1!.host_landed_commit).toBe(after);
+    expect(ingested.state.items.B1!.host_landed_files).toEqual(["src/a.ts"]);
   });
 
   it("records no landed commit for a decision outcome — only a real landing claims one", async () => {
@@ -721,9 +730,9 @@ describe("remediation host handoff repository corroboration", () => {
       state: boundState(value),
     });
     if (ingested === "unsupported_retired_state") throw new Error("state rejected");
-    expect(ingested.state.items.F1!.status).toBe("resolved_no_change");
-    expect(ingested.state.items.F1!.host_landed_commit).toBeUndefined();
-    expect(ingested.state.items.F1!.host_landed_files).toBeUndefined();
+    expect(ingested.state.items.B1!.status).toBe("resolved_no_change");
+    expect(ingested.state.items.B1!.host_landed_commit).toBeUndefined();
+    expect(ingested.state.items.B1!.host_landed_files).toBeUndefined();
   });
 
   it("accepts a real commit beneath a prompt-bound directory write scope", async () => {
@@ -745,283 +754,6 @@ describe("remediation host handoff repository corroboration", () => {
     expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
   });
 
-  it("recovers a legacy exact scope only from the same finding's hashed directory provenance", async () => {
-    const value = await fixture({
-      allowedFiles: ["src"],
-      affectedFiles: [
-        { path: "src/", hash_at_plan_time: "a".repeat(64) },
-      ],
-    });
-    expect(value.item.allowed_files).toEqual(["src"]);
-    const state = legacyBoundState(value);
-    await persistBoundState(value, state);
-    const after = await landA(value);
-    const result = resultFor(value, after);
-
-    const binding = await remediationSubmissionBinding({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      workItemId: value.item.id,
-    });
-    expect(binding).not.toBeNull();
-    expect(binding!.validate(result)).toBeNull();
-
-    await writeResult(value, result);
-    const ingested = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state,
-    });
-    expect(ingested).not.toBe("unsupported_retired_state");
-    if (ingested === "unsupported_retired_state") return;
-    expect(ingested.accepted_count).toBe(1);
-    expect(ingested.issues).toEqual([]);
-    expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
-    expect(
-      ingested.state.plan.blocks.find((block) => block.block_id === "B1")
-        ?.touched_files,
-    ).toEqual(["src/"]);
-    expect(ingested.state.host_handoff).toBeUndefined();
-  });
-
-  it("defers legacy plan migration until the bound workload's final drain", async () => {
-    const value = await fixture({
-      allowedFiles: ["src"],
-      affectedFiles: [
-        { path: "src/", hash_at_plan_time: "9".repeat(64) },
-      ],
-      twoBlocks: true,
-    });
-    const state = legacyBoundState(value);
-    await persistBoundState(value, state);
-    const landedA = await landA(value);
-    await writeResult(value, resultFor(value, landedA));
-
-    const first = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state,
-    });
-    expect(first).not.toBe("unsupported_retired_state");
-    if (first === "unsupported_retired_state") return;
-    expect(first.accepted_count).toBe(1);
-    expect(first.pending_work_item_ids).toEqual(["B2"]);
-    expect(
-      first.state.plan.blocks.find((block) => block.block_id === "B1")
-        ?.touched_files,
-    ).toEqual(["src"]);
-    expect(first.state.host_handoff?.contract_version).toBe(
-      "remediation-host-handoff-record/v1alpha1",
-    );
-
-    const landedB = await landB(value);
-    await writeResult(
-      value,
-      resultFor(value, landedB, value.workItems[1]!),
-      value.workItems[1]!,
-    );
-    const second = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state: first.state,
-    });
-    expect(second).not.toBe("unsupported_retired_state");
-    if (second === "unsupported_retired_state") return;
-    expect(second.accepted_count).toBe(1);
-    expect(second.issues).toEqual([]);
-    expect(
-      second.state.plan.blocks.find((block) => block.block_id === "B1")
-        ?.touched_files,
-    ).toEqual(["src/"]);
-    expect(second.state.host_handoff).toBeUndefined();
-  });
-
-  it("migrates dependency-blocked legacy blocks before minting the next v1alpha2 wave", async () => {
-    const value = await fixture({
-      allowedFiles: ["src/a.ts"],
-      affectedFiles: [{ path: "src/a.ts" }],
-      twoBlocks: true,
-      secondDependsOnFirst: true,
-      otherAllowedFiles: ["src"],
-      otherAffectedFiles: [
-        { path: "src/", hash_at_plan_time: "8".repeat(64) },
-      ],
-    });
-    expect(value.workItems.map((item) => item.id)).toEqual(["B1"]);
-    const state = legacyBoundState(value);
-    const landedA = await landA(value);
-    await writeResult(value, resultFor(value, landedA));
-
-    const firstWave = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state,
-    });
-    expect(firstWave).not.toBe("unsupported_retired_state");
-    if (firstWave === "unsupported_retired_state") return;
-    expect(firstWave.accepted_count).toBe(1);
-    expect(firstWave.state.host_handoff).toBeUndefined();
-    expect(
-      firstWave.state.plan.blocks.find((block) => block.block_id === "B2")
-        ?.touched_files,
-    ).toEqual(["src/"]);
-
-    const nextWave = await prepareRemediationHostHandoff({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      baselineCommit: git(value.root, ["rev-parse", "HEAD"]),
-      state: firstWave.state,
-    });
-    expect(nextWave).not.toBe("unsupported_retired_state");
-    if (nextWave === "unsupported_retired_state") return;
-    expect(nextWave.handoff_record).toMatchObject({
-      contract_version: "remediation-host-handoff-record/v1alpha2",
-      scope_semantics: "explicit-directory-markers/v1",
-    });
-    expect(nextWave.workload.work_items).toHaveLength(1);
-    expect(nextWave.workload.work_items[0]).toMatchObject({
-      id: "B2",
-      allowed_files: ["src/"],
-    });
-  });
-
-  it("uses recovered legacy directory scope during full no-change corroboration", async () => {
-    const value = await fixture({
-      allowedFiles: ["src"],
-      affectedFiles: [
-        { path: "src/", hash_at_plan_time: "c".repeat(64) },
-      ],
-    });
-    const state = legacyBoundState(value);
-    await persistBoundState(value, state);
-    await landA(value);
-    await writeFile(join(value.root, "outside.ts"), "export const outside = 1;\n");
-    git(value.root, ["add", "outside.ts"]);
-    git(value.root, ["commit", "-m", "add out-of-scope witness"]);
-    await writeResult(
-      value,
-      decisionFor(value, {
-        status: "resolved_no_change",
-        evidence: ["Claimed existing code already satisfied the contract."],
-      }),
-    );
-
-    const ingested = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state,
-    });
-    expect(ingested).not.toBe("unsupported_retired_state");
-    if (ingested === "unsupported_retired_state") return;
-    expect(ingested.accepted_count).toBe(0);
-    expect(ingested.issues.map((issue) => issue.code)).toContain(
-      "changed_files_mismatch",
-    );
-    const messages = ingested.issues.map((issue) => issue.message).join("\n");
-    expect(messages).toContain("outside.ts");
-    expect(messages).toContain("inside: src/a.ts");
-  });
-
-  it("does not recover a legacy directory scope from missing or invalid plan-time hashes", async () => {
-    for (const affectedFiles of [
-      [{ path: "src/" }],
-      [{ path: "src/", hash_at_plan_time: "not-a-sha256" }],
-    ]) {
-      const value = await fixture({ allowedFiles: ["src"], affectedFiles });
-      const state = legacyBoundState(value);
-      await persistBoundState(value, state);
-      const after = await landA(value);
-      // v1alpha3: the host states no file list, so the write scope is judged on
-      // the files git says the landed commit changed — at corroboration, not
-      // at the shape gate. The unrecovered exact scope `src` refuses there.
-      await writeResult(value, resultFor(value, after));
-      const ingested = await ingestRemediationHostResults({
-        root: value.root,
-        artifactsDir: value.artifactsDir,
-        runId: value.runId,
-        state,
-      });
-      expect(ingested).not.toBe("unsupported_retired_state");
-      if (ingested === "unsupported_retired_state") continue;
-      expect(ingested.accepted_count).toBe(0);
-      expectWriteScopeRefusal(ingested.issues, "src/a.ts");
-    }
-  });
-
-  it("does not borrow legacy directory provenance from another work item's finding", async () => {
-    const value = await fixture({
-      allowedFiles: ["src"],
-      twoBlocks: true,
-      affectedFiles: [{ path: "src/a.ts" }],
-      otherAffectedFiles: [
-        { path: "src/", hash_at_plan_time: "b".repeat(64) },
-      ],
-    });
-    const state = legacyBoundState(value);
-    await persistBoundState(value, state);
-    const after = await landA(value);
-    // Judged at corroboration on the git-derived file set (see above).
-    await writeResult(value, resultFor(value, after));
-    const ingested = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state,
-    });
-    expect(ingested).not.toBe("unsupported_retired_state");
-    if (ingested === "unsupported_retired_state") return;
-    expect(ingested.accepted_count).toBe(0);
-    expectWriteScopeRefusal(
-      ingested.issues.filter((issue) => issue.work_item_id === value.item.id),
-      "src/a.ts",
-    );
-  });
-
-  it("does not recover legacy directory scope from an unbound persisted state", async () => {
-    const value = await fixture({
-      allowedFiles: ["src"],
-      affectedFiles: [
-        { path: "src/", hash_at_plan_time: "d".repeat(64) },
-      ],
-    });
-    const unbound = legacyBoundState(value, {
-      ...value.handoff.handoff_record,
-      workload_sha256: "e".repeat(64),
-    });
-    await persistBoundState(value, unbound);
-    const after = await landA(value);
-    const result = resultFor(value, after);
-    // v1alpha3: the shape gate the recovery verb draws from is scope-blind (the
-    // host states no file list), so it passes a well-shaped result...
-    const binding = await remediationSubmissionBinding({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      workItemId: value.item.id,
-    });
-    expect(binding).not.toBeNull();
-    expect(binding!.validate(result)).toBeNull();
-    // ...and the unbound state still cannot widen the exact scope into an
-    // acceptance: the ingest under it accepts nothing.
-    await writeResult(value, result);
-    const ingested = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state: unbound,
-    });
-    expect(ingested).not.toBe("unsupported_retired_state");
-    if (ingested === "unsupported_retired_state") return;
-    expect(ingested.accepted_count).toBe(0);
-    expect(ingested.state.items.F1!.status).toBe("pending");
-  });
 
   it("marks new scope semantics and never reinterprets a future exact scope", async () => {
     const value = await fixture({
@@ -1176,7 +908,7 @@ describe("remediation host handoff repository corroboration", () => {
     );
     expect(ingested.accepted_count).toBe(0);
     expect(ingested.state_changed).toBe(false);
-    expect(ingested.state.items.F1!.status).toBe("pending");
+    expect(ingested.state.items.B1!.status).toBe("pending");
   });
 
   it("names an UNPARSEABLE workload file distinctly from a digest mismatch", async () => {
@@ -1262,7 +994,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(
       failed.issues.find((issue) => issue.code === "required_test_failed")!.check,
     ).toBe("required_tests");
-    expect(failed.state.items.F1!.status).toBe("pending");
+    expect(failed.state.items.B1!.status).toBe("pending");
 
     const malformed = await fixture();
     const path = resolve(malformed.root, malformed.item.result_path);
@@ -1314,7 +1046,7 @@ describe("remediation host handoff repository corroboration", () => {
       "outside prompt-bound allowed_files",
     );
     // The item stays PENDING: an unaccepted claim must not settle the finding.
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
   });
 
   it("refuses a resolved_no_change contradicted by an UNCOMMITTED edit", async () => {
@@ -1346,7 +1078,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.issues.map((issue) => issue.code)).toContain(
       "changed_files_mismatch",
     );
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
   });
 
   it("refuses a resolved_no_change contradicted by a NEW UNTRACKED file", async () => {
@@ -1393,7 +1125,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.issues.map((issue) => issue.message).join("\n")).toContain(
       "src/new.ts",
     );
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
   });
 
   it("accepts a resolved_no_change whose only untracked files are the tool's own artifacts", async () => {
@@ -1464,7 +1196,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(
       refused.issues.map((issue) => issue.message).join("\n"),
     ).toContain("src/b.ts");
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
   });
 
   it("excuses a SIBLING's landing accepted earlier in the SAME ingest from a no-change claim", async () => {
@@ -1521,8 +1253,8 @@ describe("remediation host handoff repository corroboration", () => {
     // run already corroborated, so it does not falsify the other item's claim.
     expect(ingested.issues).toEqual([]);
     expect(ingested.accepted_count).toBe(2);
-    expect(ingested.state.items.F1!.status).toBe("resolved");
-    expect(ingested.state.items.F2!.status).toBe("resolved_no_change");
+    expect(ingested.state.items.B1!.status).toBe("resolved");
+    expect(ingested.state.items.B2!.status).toBe("resolved_no_change");
     // The accepted surface carries the landed file, which is what the excuse
     // was drawn from.
     expect(ingested.state.applied_edit_surface).toEqual(["src/a.ts"]);
@@ -1545,8 +1277,8 @@ describe("remediation host handoff repository corroboration", () => {
     });
     expect(noChangeResult).not.toBe("unsupported_retired_state");
     if (noChangeResult === "unsupported_retired_state") return;
-    expect(noChangeResult.state.items.F1!.status).toBe("resolved_no_change");
-    expect(noChangeResult.state.items.F1!.host_result_evidence).toHaveLength(1);
+    expect(noChangeResult.state.items.B1!.status).toBe("resolved_no_change");
+    expect(noChangeResult.state.items.B1!.host_result_evidence).toHaveLength(1);
 
     const blocked = await fixture();
     await writeResult(
@@ -1564,7 +1296,7 @@ describe("remediation host handoff repository corroboration", () => {
     });
     expect(blockedResult).not.toBe("unsupported_retired_state");
     if (blockedResult === "unsupported_retired_state") return;
-    expect(blockedResult.state.items.F1).toMatchObject({
+    expect(blockedResult.state.items.B1).toMatchObject({
       status: "blocked",
       failure_reason: "The required upstream API is absent.",
     });
@@ -1586,11 +1318,11 @@ describe("remediation host handoff repository corroboration", () => {
     });
     expect(clarificationResult).not.toBe("unsupported_retired_state");
     if (clarificationResult === "unsupported_retired_state") return;
-    expect(clarificationResult.state.items.F1!.status).toBe(
+    expect(clarificationResult.state.items.B1!.status).toBe(
       "needs_clarification",
     );
     // The question lives on the item it pauses — its one home.
-    expect(clarificationResult.state.items.F1!.clarification_question).toEqual({
+    expect(clarificationResult.state.items.B1!.clarification_question).toEqual({
       category: "compatibility_policy",
       description: "Should the legacy export remain as an alias?",
     });
@@ -1618,7 +1350,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(normal.issues[0]!.check).toBe("landed_commit");
     expect(normal.issues[0]!.message).toContain("recover-ingest");
     expect(normal.accepted_count).toBe(0);
-    expect(normal.state.items.F1!.status).toBe("pending");
+    expect(normal.state.items.B1!.status).toBe("pending");
 
     const recovered = await ingestRemediationHostResults({
       root: value.root,
@@ -1631,7 +1363,7 @@ describe("remediation host handoff repository corroboration", () => {
     if (recovered === "unsupported_retired_state") return;
     expect(recovered.issues).toEqual([]);
     expect(recovered.accepted_count).toBe(1);
-    expect(recovered.state.items.F1!.status).toBe("resolved");
+    expect(recovered.state.items.B1!.status).toBe("resolved");
     expect(recovered.state.applied_edit_surface).toEqual(["src/a.ts"]);
 
     // No acceptance without a record: the relaxation is marked on the ledger,
@@ -1680,7 +1412,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused).not.toBe("unsupported_retired_state");
     if (refused === "unsupported_retired_state") return;
     expect(refused.accepted_count).toBe(0);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
     expect(refused.issues.map((issue) => issue.code)).toEqual([
       "baseline_not_ancestor",
     ]);
@@ -1730,7 +1462,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused).not.toBe("unsupported_retired_state");
     if (refused === "unsupported_retired_state") return;
     expect(refused.accepted_count).toBe(0);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
     expect(refused.issues.map((issue) => issue.code)).toEqual([
       "baseline_not_ancestor",
     ]);
@@ -1792,7 +1524,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(unrecorded).not.toBe("unsupported_retired_state");
     if (unrecorded === "unsupported_retired_state") return;
     expect(unrecorded.accepted_count).toBe(0);
-    expect(unrecorded.state.items.F1!.status).toBe("pending");
+    expect(unrecorded.state.items.B1!.status).toBe("pending");
     expect(unrecorded.issues.map((issue) => issue.code)).toEqual([
       "recovery_unrecorded",
     ]);
@@ -1832,7 +1564,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused).not.toBe("unsupported_retired_state");
     if (refused === "unsupported_retired_state") return;
     expect(refused.accepted_count).toBe(0);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
     expect(refused.issues.map((issue) => issue.code)).toEqual([
       "baseline_not_ancestor",
     ]);
@@ -1936,11 +1668,8 @@ describe("remediation host handoff repository corroboration", () => {
     const value = await fixture();
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
-    const { contract_version: _contractVersion, ...persistable } =
-      boundState(value);
     const statePath = join(value.artifactsDir, "state.json");
-    await mkdir(value.artifactsDir, { recursive: true });
-    await writeFile(statePath, JSON.stringify(persistable, null, 2), "utf8");
+    await persistBoundState(value);
 
     const summary = await recoverIngestHostResults({
       root: value.root,
@@ -1960,7 +1689,7 @@ describe("remediation host handoff repository corroboration", () => {
     // store now owns the field, so peeling would persist a state whose identity
     // the next read has to re-invent.)
     expect(persisted.contract_version).toBe(REMEDIATION_STATE_CONTRACT_VERSION);
-    expect(persisted.items.F1!.status).toBe("resolved");
+    expect(persisted.items.B1!.status).toBe("resolved");
 
     const afterFirst = await readFile(statePath, "utf8");
     const again = await recoverIngestHostResults({
@@ -2047,7 +1776,7 @@ describe("remediation host handoff repository corroboration", () => {
       ...boundState(value),
       items: {
         ...boundState(value).items,
-        F1: { ...boundState(value).items.F1!, status: "resolved" },
+        B1: { ...boundState(value).items.B1!, status: "resolved" },
       },
     } as CurrentRemediationHostState;
     const refused = await ingestRemediationHostResults({
@@ -2086,18 +1815,11 @@ describe("remediation host handoff repository corroboration", () => {
     const value = await fixture({ requiredTest: COUNTER_TEST });
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
-    const { contract_version: _contractVersion, ...persistable } =
-      boundState(value);
-    await mkdir(value.artifactsDir, { recursive: true });
-    await writeFile(
-      join(value.artifactsDir, "state.json"),
-      JSON.stringify(persistable, null, 2),
-      "utf8",
-    );
+    await persistBoundState(value);
 
     // The required test a host authored SETTLES THE ITEM — the real residual,
     // and the one no digest in the state tracks. The phase-1 verdict table was
-    // keyed on F1 being pending; by the time the lock is taken it is not, so the
+    // keyed on B1 being pending; by the time the lock is taken it is not, so the
     // table describes a frontier that no longer exists. (`tree_moved_between_phases`
     // is asserted separately above; this run's HEAD is untouched, so only the
     // frontier half of the guard can catch it.)
@@ -2111,7 +1833,7 @@ describe("remediation host handoff repository corroboration", () => {
         "  import.meta.url,",
         ");",
         'const s = JSON.parse(readFileSync(p, "utf8"));',
-        's.items.F1.status = "resolved";',
+        's.items.B1.status = "resolved";',
         'writeFileSync(p, JSON.stringify(s, null, 2));',
       ].join("\n"),
     );
@@ -2145,14 +1867,7 @@ describe("remediation host handoff repository corroboration", () => {
       resultFor(value, landedB, value.workItems[1]!),
       value.workItems[1]!,
     );
-    const { contract_version: _contractVersion, ...persistable } =
-      boundState(value);
-    await mkdir(value.artifactsDir, { recursive: true });
-    await writeFile(
-      join(value.artifactsDir, "state.json"),
-      JSON.stringify(persistable, null, 2),
-      "utf8",
-    );
+    await persistBoundState(value);
 
     const summary = await recoverIngestHostResults({
       root: value.root,
@@ -2173,14 +1888,7 @@ describe("remediation host handoff repository corroboration", () => {
     });
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
-    const { contract_version: _contractVersion, ...persistable } =
-      boundState(value);
-    await mkdir(value.artifactsDir, { recursive: true });
-    await writeFile(
-      join(value.artifactsDir, "state.json"),
-      JSON.stringify(persistable, null, 2),
-      "utf8",
-    );
+    await persistBoundState(value);
 
     const summary = await recoverIngestHostResults({
       root: value.root,
@@ -2192,7 +1900,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(summary.issues.map((issue) => issue.code)).toEqual([
       "tree_moved_between_phases",
     ]);
-    expect(summary.state.items.F1!.status).toBe("pending");
+    expect(summary.state.items.B1!.status).toBe("pending");
     expect(await readSubmissionLedger(value.artifactsDir)).toEqual([]);
   });
 
@@ -2250,7 +1958,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused).not.toBe("unsupported_retired_state");
     if (refused === "unsupported_retired_state") return;
     expect(refused.accepted_count).toBe(0);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
     expect(refused.issues.map((issue) => issue.code)).toEqual([
       "work_item_not_eligible",
     ]);
@@ -2280,8 +1988,8 @@ describe("remediation host handoff repository corroboration", () => {
     await writeFile(join(root, "src", "a.ts"), "export const value = 1;\n");
     const artifactsDir = join(root, ".audit-tools", "remediation");
     const runId = "no-git-corroboration";
-    const state = {
-      contract_version: "remediate-code-state/v1alpha1",
+    const state = canonicalStateFromLegacyFixture({
+      contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
       status: "implementing",
       plan: {
         plan_id: runId,
@@ -2290,8 +1998,8 @@ describe("remediation host handoff repository corroboration", () => {
             id: "F1",
             title: "Correct the exported value",
             category: "correctness",
-            severity: "high",
-            confidence: "high",
+            severity: "high" as const,
+            confidence: "high" as const,
             lens: "correctness",
             summary: "Change the exported value.",
             affected_files: [{ path: "src/a.ts" }],
@@ -2314,7 +2022,8 @@ describe("remediation host handoff repository corroboration", () => {
         candidate_closing_actions: ["none"],
       },
       items: { F1: { finding_id: "F1", block_id: "B1", status: "pending" } },
-    } as unknown as CurrentRemediationHostState;
+    }) as CurrentRemediationHostState;
+    await writeApprovedPlanFixture(artifactsDir, state, root);
     const prepared = await prepareRemediationHostHandoff({
       root,
       artifactsDir,
@@ -2342,7 +2051,7 @@ describe("remediation host handoff repository corroboration", () => {
     // Must be refused: no git repo and no host_handoff binding means no corroboration possible
     expect(ingested.accepted_count).toBe(0);
     expect(ingested.issues.map((i) => i.code)).toContain("trusted_binding_missing");
-    expect(ingested.state.items.F1!.status).toBe("pending");
+    expect(ingested.state.items.B1!.status).toBe("pending");
   });
 
   it("refuses a git-backed workload with no trusted binding rather than accepting the claim", async () => {
@@ -2364,7 +2073,7 @@ describe("remediation host handoff repository corroboration", () => {
     expect(refused.issues.map((issue) => issue.code)).toEqual([
       "trusted_binding_missing",
     ]);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
   });
 
   it("keeps corroborating when a binding is present — 'unavailable' never means 'corroborated'", async () => {
@@ -2386,7 +2095,7 @@ describe("remediation host handoff repository corroboration", () => {
     // absent git binary produces, which is exactly why the failure mode warns a
     // caller to read a run-wide commit_missing as an environment signal.
     expect(refused.issues.map((issue) => issue.code)).toEqual(["commit_missing"]);
-    expect(refused.state.items.F1!.status).toBe("pending");
+    expect(refused.state.items.B1!.status).toBe("pending");
     // The genuinely landed commit is still there; nothing about it was accepted.
     expect(isAncestor(value.root, after, "HEAD")).toBe(true);
   });
@@ -2664,9 +2373,9 @@ describe("obligation evidence-coverage floor", () => {
     ]);
   });
 
-  it("binds an empty obligation set for a plan without contract overlays", async () => {
+  it("binds stable requirements even without a full module contract", async () => {
     const value = await fixture();
-    expect(value.item.obligation_ids).toEqual([]);
+    expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
   });
 
   it("accepts a result whose obligation_evidence covers every bound obligation", async () => {
@@ -2688,7 +2397,7 @@ describe("obligation evidence-coverage floor", () => {
     const ingested = await ingest(value);
     expect(ingested.issues).toEqual([]);
     expect(ingested.accepted_count).toBe(1);
-    expect(ingested.state.items.F1!.status).toBe("resolved");
+    expect(ingested.state.items.B1!.status).toBe("resolved");
   });
 
   it("refuses a result that omits evidence for a bound obligation, naming the uncovered id", async () => {
@@ -2754,13 +2463,21 @@ describe("obligation evidence-coverage floor", () => {
     expect(refused.issues[0]!.message).toContain("mod-a:invariant:1");
   });
 
-  it("accepts an unburdened result (empty coverage) only when no obligations are bound", async () => {
+  it("refuses empty coverage for a unit even without a module contract", async () => {
     const value = await fixture();
+    expect(value.item.obligation_ids).toEqual(["REQ-B1"]);
     const after = await landA(value);
     await writeResult(value, evidenceFor(value, after, []));
     const ingested = await ingest(value);
-    expect(ingested.issues).toEqual([]);
-    expect(ingested.accepted_count).toBe(1);
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.state.items.B1?.status).toBe("pending");
+    expect(ingested.issues).toHaveLength(1);
+    expect(ingested.issues[0]).toMatchObject({
+      code: "submission_contract_invalid",
+      check: "obligation_evidence",
+      work_item_id: "B1",
+    });
+    expect(ingested.issues[0]!.message).toContain("REQ-B1");
   });
 
   it("the dispatch prompt enumerates the bound obligation ids it demands evidence for", async () => {
@@ -2840,9 +2557,9 @@ describe("independent conformance admission and captured verification evidence",
       await answerConformance(value);
       const accepted = await ingestConformance(value);
       expect(accepted.accepted_count).toBe(1);
-      expect(accepted.state.items.F1?.status).toBe("resolved");
+      expect(accepted.state.items.B1?.status).toBe("resolved");
       expect(accepted.state.conformance_review?.enabled).toBe(true);
-      expect(accepted.state.items.F1).toHaveProperty("conformance_review");
+      expect(accepted.state.items.B1).toHaveProperty("conformance_review");
     });
     it("unavailable and degraded review pause instead of silently self-reviewing", async () => {
       const value = await conformanceFixture(); await writeConformanceResult(value); await ingestConformance(value);
@@ -2907,18 +2624,20 @@ describe("independent conformance admission and captured verification evidence",
     await writeResult(value, decisionFor(value, { status: "blocked", failure_reason: "Missing owner decision" }));
     const outcome = await ingestConformance(value);
     expect(outcome.accepted_count).toBe(1);
-    expect(outcome.state.items.F1?.status).toBe("blocked");
+    expect(outcome.state.items.B1?.status).toBe("blocked");
     await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
   });
   it("a changed carried contract invalidates the old mechanical workload and review", async () => {
     const value = await conformanceFixture(); await writeConformanceResult(value); await ingestConformance(value); await answerConformance(value);
     const state = structuredClone(boundState(value));
-    const contract = state.plan.blocks[0]!.module_contracts![0]!;
-    contract.contract = { ...contract.contract, unexpected_new_requirement: "must be independently reviewed" };
-    const result = await ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state });
-    if (result === "unsupported_retired_state") throw Error(result);
-    expect(result.accepted_count).toBe(0);
-    expect(result.issues.some(issue => issue.code === "workload_invalid")).toBe(true);
+    state.plan.units[0]!.affected_interfaces.push({ name: "new-boundary", description: "must be independently reviewed" });
+    const before = JSON.stringify(state);
+    const ledgerBefore = await readSubmissionLedger(value.artifactsDir);
+    await expect(ingestRemediationHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, state }))
+      .rejects.toMatchObject({ code: "plan_repair_required" });
+    expect(JSON.stringify(state)).toBe(before);
+    expect(state.items.B1?.status).toBe("pending");
+    expect(await readSubmissionLedger(value.artifactsDir)).toEqual(ledgerBefore);
   });
 
 

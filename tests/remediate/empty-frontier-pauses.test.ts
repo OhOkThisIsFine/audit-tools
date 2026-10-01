@@ -1,3 +1,4 @@
+import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 // An empty dispatch frontier PAUSES; it never throws (the 2026-08-23
 // empty-frontier incident, closed by this test's commit).
 //
@@ -18,7 +19,7 @@ import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type {
-  RemediationBlock,
+  ExecutionUnit,
   RemediationItemState,
 } from "../../src/remediate/state/types.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
@@ -28,43 +29,33 @@ function block(
   id: string,
   items: string[],
   opts: { dependencies?: string[]; phase_ordinal?: number } = {},
-): RemediationBlock {
-  return {
-    block_id: id,
-    items,
-    parallel_safe: true,
-    dependencies: opts.dependencies ?? [],
-    touched_files: [],
-    ...(opts.phase_ordinal === undefined
-      ? {}
-      : { phase_ordinal: opts.phase_ordinal }),
-  };
+): ExecutionUnit {
+  return canonicalUnitFixture(id, { source_finding_ids: items, dependencies: opts.dependencies ?? [], allowed_files: [], ...(opts.phase_ordinal === undefined ? {} : { phase_ordinal: opts.phase_ordinal }) });
 }
 
 function item(
-  findingId: string,
+  _findingId: string,
   blockId: string,
   status: RemediationItemState["status"],
   extra: Partial<RemediationItemState> = {},
 ): RemediationItemState {
   return {
-    finding_id: findingId,
+    unit_id: blockId,
     status,
-    block_id: blockId,
     ...extra,
   };
 }
 
 function stateWith(
-  blocks: RemediationBlock[],
+  blocks: ExecutionUnit[],
   items: Record<string, RemediationItemState>,
 ): RemediationState {
   return {
     status: "implementing",
-    plan: {
+    plan: canonicalPlanFixture({
       plan_id: "PLAN-EF",
       findings: blocks.flatMap((b) =>
-        b.items.map((id) => ({
+        b.source_finding_ids.map((id) => ({
           id,
           title: id,
           category: "correctness",
@@ -76,11 +67,12 @@ function stateWith(
           evidence: [`src/${id}.ts:1`],
         })),
       ),
-      blocks,
+      units: blocks,
+      requirements: blocks.map(unit => ({ id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [...unit.source_finding_ids], change_kind: "structural", assertions: [], inapplicable_reason: "Fixture exercises runtime lifecycle only" })),
       project_type: "unknown",
       candidate_closing_actions: ["none"],
-    },
-    items,
+    }),
+    items: Object.fromEntries(Object.values(items).map(item => [item.unit_id, item])),
     closing_plan: { action: "none" },
   } as RemediationState;
 }
@@ -124,9 +116,10 @@ describe("empty frontier: a blocked item holding a phase barrier", () => {
       }),
       F2: item("F2", "B2", "pending"),
     });
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
 
     let step = await decideNextStep({ root: REPO_DIR });
     let guard = 20;
@@ -139,7 +132,7 @@ describe("empty frontier: a blocked item holding a phase barrier", () => {
     // The barrier holder is still on the triage batch, undecided — the tool
     // paused for the operator instead of dying.
     const finalState = await readState(ARTIFACTS_DIR);
-    expect(finalState.items.F1.status).toBe("blocked");
+    expect(finalState.items.B1.status).toBe("blocked");
     expect(finalState.status).toBe("waiting_for_triage");
   });
 });
@@ -179,16 +172,17 @@ describe("empty frontier: a clarification holding a phase barrier", () => {
       },
       F2: item("F2", "B2", "pending"),
     });
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
 
     const step = await decideNextStep({ root: REPO_DIR });
 
     expect(step.step_kind).toBe("collect_clarifications");
     const finalState = await readState(ARTIFACTS_DIR);
-    expect(finalState.items.F2.status).toBe("pending");
-    expect(finalState.items.F2.failure_reason).toBeUndefined();
+    expect(finalState.items.B2.status).toBe("pending");
+    expect(finalState.items.B2.failure_reason).toBeUndefined();
   });
 });
 
@@ -198,7 +192,7 @@ describe("empty frontier: a clarification holding a phase barrier", () => {
 
 describe("empty frontier: a dependency id that resolves to no block", () => {
   const harness = createNextStepHarness(".test-empty-frontier-dangling");
-  const { REPO_DIR, ARTIFACTS_DIR } = harness;
+  const { ARTIFACTS_DIR } = harness;
 
   beforeEach(async () => {
     await harness.resetTestRepo();
@@ -217,20 +211,7 @@ describe("empty frontier: a dependency id that resolves to no block", () => {
     const st = stateWith(blocks, {
       F2: item("F2", "B2", "pending", { rework_count: 2 }),
     });
-    await new StateStore(ARTIFACTS_DIR).saveState(st);
-    await harness.acknowledgeResume();
-    await harness.writeIntentCheckpoint();
+    await expect(new StateStore(ARTIFACTS_DIR).saveState(st)).rejects.toThrow(/invalid dependency B9/);
 
-    let step = await decideNextStep({ root: REPO_DIR });
-    let guard = 20;
-    while (step.step_kind !== "collect_triage" && guard-- > 0) {
-      step = await decideNextStep({ root: REPO_DIR });
-    }
-    expect(guard).toBeGreaterThan(0);
-    expect(step.step_kind).toBe("collect_triage");
-
-    const finalState = await readState(ARTIFACTS_DIR);
-    expect(finalState.items.F2.status).toBe("blocked");
-    expect(finalState.items.F2.failure_reason ?? "").toMatch(/INV-RS-01/);
   });
 });
