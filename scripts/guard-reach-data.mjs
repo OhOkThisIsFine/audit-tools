@@ -26,6 +26,7 @@
 //   phantom claim.
 
 import { RUNTIME_NAME_SOURCES } from "./shared/generate-runtime-artifact-names.mjs";
+import { LOOP_CORE_PATTERNS } from "../.claude/hooks/loop-core-patterns.mjs";
 import { SPEC_MIRROR_DOCS, SPEC_MIRROR_SOURCE_FILES } from "./shared/spec-mirror-data.mjs";
 // The gate's own scan set and the schemas its producer pairing names — imported
 // from the modules that OWN them, never re-listed here. This registry is loaded
@@ -443,6 +444,19 @@ export const GUARDS = [
       'a module is reachable ONLY through loop-core but is neither in LOOP_CORE_PATTERNS nor ' +
       'declared — add it to src/shared/loopCorePaths.ts (then regenerate) if it is core, or add a ' +
       'row with its reason to scripts/shared/loopCoreClosureData.mjs if it is not',
+  },
+  {
+    id: 'check:loop-core-attestations',
+    releaseOrder: 40,
+    releaseStage: 'checks',
+    kind: 'gate',
+    impl: 'check:loop-core-attestations',
+    preCommit: 'reach',
+    fix:
+      'a loop-core path carries content its .claude/loop-core-attestations.json entry does not vouch ' +
+      'for — review the change, then run `node .claude/hooks/attest-loop-core-review.mjs ' +
+      '--reviewed-by <id> --attester-class <agent|human> --checked "<...>"` (plus `--include-unvouched <path>` ' +
+      'for each listed path outside the staged change), which updates and stages the ledger',
   },
   {
     id: 'check:constitutional-doc-paths',
@@ -1826,6 +1840,29 @@ export const REACH = [
       'the F2 hole (ceremony review 2026-08-29): the generated hook copy is what the pre-build ' +
       'commit gate matches loop-core paths against, so an unregenerated loopCorePaths.ts edit must ' +
       'red AT COMMIT, not first in release CI',
+  },
+  {
+    area: 'loop-core content and its tracked attestation ledger',
+    files: [
+      '.claude/loop-core-attestations.json',
+      'scripts/check-loop-core-attestations.mjs',
+      'scripts/shared/loopCoreAttestationLedger.mjs',
+      '.claude/hooks/loop-core-patterns.mjs',
+      // Every loop-core path, derived from the generated pattern list — never
+      // re-listed here. A "/"-terminated pattern is a directory prefix.
+      ...LOOP_CORE_PATTERNS.map((p) => (p.endsWith('/') ? `${p}**` : p)),
+    ],
+    guardedBy: ['check:loop-core-attestations'],
+    note:
+      'the local review record and the commit gate live only in each clone, so a hook-less cloud ' +
+      'commit and a GitHub squash merge landed loop-core content on main unchecked (#14, backlog ' +
+      '2026-10-01). This gate reads the TRACKED ledger and judges the whole tree, so CI on every pull ' +
+      'request and push to main, the pre-tag gate and the publish gate all run the same rule',
+    uncovered:
+      'it enforces existence, content binding and verdict, not review quality: a ledger entry is ' +
+      'hand-writable by anyone who can commit. And a red check stops a landing only where something ' +
+      'requires it — the publish gate always, and branch protection on main requires the `checks` job, ' +
+      'but does not bind admins: an admin direct push to main is judged after it lands',
   },
   {
     area: 'loop-core closure sources',

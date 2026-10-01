@@ -1,0 +1,586 @@
+{
+  "schema_version": "loop-core-attestations/v1",
+  "baselines": {
+    "7b79934e86baf378": {
+      "commit": "b5876f52a09f61cfe05eb38ce500ed45a17bda8c",
+      "notes": "Context only, not a review: the cloud-agent work that last changed this content (#12, #13, #14) was evaluated in docs/reviews/chatgpt-work-evaluation-2026-10-01.md, and the defects it found are filed in docs/backlog/open-bugs.md.",
+      "vouches": {
+        "src/audit/cli/charterClarificationPrompt.ts": "160eda8163442e72495fd9b0255e8488d2a1393f",
+        "src/audit/cli/charterExtractionPrompt.ts": "0bb07c1ebc5fa3d02692455daa8ba84e0d7cbed3",
+        "src/audit/cli/charterFidelityPrompt.ts": "70d59431c6c5e19bb99032a2bf71708be1d71720",
+        "src/audit/cli/conceptualDispatch.ts": "1975d61a417b625c4966b64fff22c8978025937d",
+        "src/audit/cli/confirmIntentStep.ts": "6022d6b2b213421031fff72915feb2c34a652005",
+        "src/audit/cli/dispatch/hostHandoff.ts": "565bef369483eb9e5b2580c187c4dd8b943aaeb0",
+        "src/audit/cli/dispatch/packetFilter.ts": "88c49c7a964508db8b11ae507ad57394e060ccef",
+        "src/audit/cli/fanoutLanes.ts": "e54964c0381bf12d6e03faaa03f0568ea2b47d3d",
+        "src/audit/cli/foldTransaction.ts": "2928fc1bed8b35cfba2b6999fdda1324e459f049",
+        "src/audit/cli/laneSubmissions.ts": "58ec96a4b6099945d532358006c1f3225ac0d76d",
+        "src/audit/cli/laneValidators.ts": "380a9c647a26709be1ef60cb28322d8ac1dfbbf4",
+        "src/audit/cli/nextStepCommand.ts": "cf20fc8efba3bcf3a0ef8df47962609594c21bc3",
+        "src/audit/cli/nextStepHelpers.ts": "178feaf7f9fec8294ce2a5a50c6d0c9639ceab65",
+        "src/audit/cli/prompts.ts": "4edc238a2a132cb9d31855dd8cee16f8209b7c00",
+        "src/audit/cli/semanticReviewStep.ts": "53d56f9665beaa7131a80f64dd1be6d353965708",
+        "src/audit/orchestrator/accessMemory.ts": "88fa3b2e6b84f8518f9ad936349fd93ddeb32139",
+        "src/audit/orchestrator/acquisitionExecutor.ts": "79db7e4068ae475a99865213e3d4faac28971db2",
+        "src/audit/orchestrator/advance.ts": "3a7496016f0215277dcc81a32cc13a87ea9f861c",
+        "src/audit/orchestrator/advanceTypes.ts": "da412ba28f88ebafba0f698056c9ce47b787280d",
+        "src/audit/orchestrator/architectureDiscovery.ts": "db86c283b86416ea08a5f18ee986a934129a5996",
+        "src/audit/orchestrator/artifactMetadata.ts": "d8d82c1f4ba13e3c7c214ebf4d69147a3c8d5358",
+        "src/audit/orchestrator/auditTaskUtils.ts": "d868a8f4549a64e5fa12642c2ade913a4bf68323",
+        "src/audit/orchestrator/autoFixExecutor.ts": "fd84dd19d3075dde78d018a00177f58e21b0cbbb",
+        "src/audit/orchestrator/charterClarificationExecutor.ts": "0c3b0dfd151f785b0fd36254157934100d5cd868",
+        "src/audit/orchestrator/charterComparisonExecutor.ts": "cfe2ea2417908e060c7894621fa169c7b742dc77",
+        "src/audit/orchestrator/charterExtractionExecutor.ts": "016b4afa43194ff88f625b25163e10c2ce3b9ea3",
+        "src/audit/orchestrator/charterFidelityExecutor.ts": "c6fc3c90e8cb6d299f47f599c081b60f952b3120",
+        "src/audit/orchestrator/charterFidelityPacket.ts": "622885c6c82db97c7d13f83c5444fe98d6b7b2f4",
+        "src/audit/orchestrator/charterPacketArchive.ts": "8b8e25f523827aa4fe1e16cf40e190420e57ebcb",
+        "src/audit/orchestrator/charterPackets.ts": "30ed595ffe6e9f6c2089345c3dbc525d46a4384d",
+        "src/audit/orchestrator/coverageElementBaseline.ts": "f7f81aef5c912de3af6438cc8f532e1fb7e6d3a5",
+        "src/audit/orchestrator/criticalFlowFallbackExecutor.ts": "04e7374d29a349915b1f2cc1e9a5402cefbdd522",
+        "src/audit/orchestrator/dependencyMap.ts": "2456212f8a4eba112b014cdd1eda584c11da02ef",
+        "src/audit/orchestrator/dependencySlices.ts": "deb43add66f64f3e8cb67a2a638fa6cb3b8e9236",
+        "src/audit/orchestrator/designReviewProjection.ts": "af1997c6d515cbed00c8f301a621e1a4dfcd7499",
+        "src/audit/orchestrator/designReviewPrompt.ts": "35424eb834ff48ca9b259c9fc29db1f9ed467954",
+        "src/audit/orchestrator/designReviewSnapshot.ts": "891c2708e7518576faa5193cd8f4afd699afcef7",
+        "src/audit/orchestrator/designReviewTask.ts": "9123d4e9036625545605ae22f1c27b00b10e9f96",
+        "src/audit/orchestrator/edgeReasoning.ts": "fdd4f394d792d4ba4a34ebee66d8af939a9255b9",
+        "src/audit/orchestrator/executorResult.ts": "dd3a4b865536b62ba4376992f36c0e79f299dfb7",
+        "src/audit/orchestrator/executorRunners.ts": "c0838c5804efe0d26f5f3e1b30d2cec6e7ee03ea",
+        "src/audit/orchestrator/executors.ts": "d0c556173c4deee3067871e18107a2fd3cce78f3",
+        "src/audit/orchestrator/fileIntegrity.ts": "adee81702b919a4f9362f4c51ae11582d7d44965",
+        "src/audit/orchestrator/flowCoverage.ts": "17bc45a467d6148a8f63f74c48fedac7fb32816c",
+        "src/audit/orchestrator/flowPlanning.ts": "b7d1ef6bc4e41b60e49e03de7b5d7c07681adb7b",
+        "src/audit/orchestrator/flowRequeue.ts": "dd801b06a664fef6632078bfbf0e842002186599",
+        "src/audit/orchestrator/gitHistoryBaseline.ts": "d8e8fa6f607494040b753abc09dc67bbf55727dd",
+        "src/audit/orchestrator/graphEdgeCache.ts": "1b759a84a4c8ef965327267aa6860804877af582",
+        "src/audit/orchestrator/graphEnrichmentExecutor.ts": "24e2c4ec91b68398d2447a475540218960123727",
+        "src/audit/orchestrator/hostInputPause.ts": "6b869d2b049661bb98aa3a5a0881d21bf17ba07f",
+        "src/audit/orchestrator/ingestionExecutors.ts": "f550da91e45fc6a1e4365493b95862d2d5c1d226",
+        "src/audit/orchestrator/intakeExecutors.ts": "cb54914bb79e438703a0cdfd8993fcb984532b4e",
+        "src/audit/orchestrator/intentCheckpointExecutor.ts": "a91122c1c8e65caa515e04bfaa8a86f1c52c900a",
+        "src/audit/orchestrator/intentCheckpointGate.ts": "dd7c0ea39a1b62eaf18ff7bbc87dec9af2e7f2c1",
+        "src/audit/orchestrator/intentEquivalenceExecutor.ts": "01083817e6360d094a5900d62a75f29794cc01e0",
+        "src/audit/orchestrator/intentInterpreter.ts": "f8d90ca9921a4aa125bb34c4dac73992a1508692",
+        "src/audit/orchestrator/intentScopeDisposition.ts": "19781ac33fd65a573602a955197f754d1a39d59d",
+        "src/audit/orchestrator/ledger.ts": "4cb66e880d93ce03bad57555086c12161c90ea2c",
+        "src/audit/orchestrator/lensSelection.ts": "f219cc0958e0ab6b8dc073909651b50cc30418d7",
+        "src/audit/orchestrator/lineCounts.ts": "2836b3ddb9424d4ee534c53438d53ed1a1582554",
+        "src/audit/orchestrator/localCommands.ts": "6e067a85054754f04457b81d681a4f00a66ca79b",
+        "src/audit/orchestrator/nextStep.ts": "ff4afa35ff856956e11f417c68a42d4fc7bf9878",
+        "src/audit/orchestrator/obligationDerive.ts": "35bcd9e280988cb08f03e3027e9b52224bdb7a72",
+        "src/audit/orchestrator/obligationPolicy.ts": "104b7261975d1e4f11142eaeb5d6c6111ad70444",
+        "src/audit/orchestrator/partitionTaskGraph.ts": "7b8bfdbe63f8209f86ad61e22fa6a6f0c094ea4b",
+        "src/audit/orchestrator/pendingTasks.ts": "1899ab2db1685dadabb9f88cb3a7c6217ac2541e",
+        "src/audit/orchestrator/planning.ts": "de5b8371f037598ecc4f3e0e3e29c372f930f6a4",
+        "src/audit/orchestrator/planningExecutors.ts": "add11555bc13fbf1eef1d772404a3d90cb6e6cc4",
+        "src/audit/orchestrator/requeue.ts": "fa4f6eb44086f0d37fc2990c1ebf190f6aa623de",
+        "src/audit/orchestrator/requeueCommand.ts": "baf73548d33ce82b05995fee9c1aa5befe450226",
+        "src/audit/orchestrator/requeueFold.ts": "28fdbaef9b56a27c332c90498e2d67213195fed6",
+        "src/audit/orchestrator/requeueUtils.ts": "54820067845c8a71e04e73d8635f893a862a0312",
+        "src/audit/orchestrator/resultBaseline.ts": "b4922b3aa83a3825a5654a4678b5f627bb15a677",
+        "src/audit/orchestrator/resultIngestion.ts": "f6a999e0002081bcf87a973082a7ca6b19acea0e",
+        "src/audit/orchestrator/reviewPacketGraph.ts": "33ce5834cabc35e1d09b806228b0e21bd4da51c1",
+        "src/audit/orchestrator/reviewPacketGraphContext.ts": "67d54c9fe9b1640271b343d967764b91ff03143a",
+        "src/audit/orchestrator/reviewPacketGraphEdges.ts": "92194752e99664c9625706add352e5fcf8a64f21",
+        "src/audit/orchestrator/reviewPacketMetrics.ts": "50b625caf0fc9525d78e6e2c7c6d0173eb058be1",
+        "src/audit/orchestrator/reviewPacketShared.ts": "b7a95672cf24b40d4fb8d8faf53f60a46dae6d53",
+        "src/audit/orchestrator/reviewPacketSizing.ts": "b992fb11f85a07d4bb695ae6c074669eb191aa95",
+        "src/audit/orchestrator/reviewPackets.ts": "b05966bd78753464a9488304f54b6099ce9e79cd",
+        "src/audit/orchestrator/runtimeCommand.ts": "3ec8d5a0c935a888cf9ac1756551e1f6ad74c6a6",
+        "src/audit/orchestrator/runtimeValidation.ts": "966e05e35492cf67d60db75a525aefd6164e1565",
+        "src/audit/orchestrator/runtimeValidationUpdate.ts": "1ffffd6c2530c944947919908c17613dfd93aedb",
+        "src/audit/orchestrator/scope.ts": "09c5da9156e819cff27128f46cf63e2afac85a62",
+        "src/audit/orchestrator/scopeIndexBaseline.ts": "5feaad4664391b67a08d3b8ec29c7b2c5b2a0e28",
+        "src/audit/orchestrator/selectiveDeepening/conflict.ts": "01361b6ed975038a8ea341ae09b13b810fcfcbbc",
+        "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": "a7ed703f9de92236ae3bd5888603fda32c4409b6",
+        "src/audit/orchestrator/selectiveDeepening/highRiskClean.ts": "901dc66187696720c89c7207ee13ca7d8ea5b7ee",
+        "src/audit/orchestrator/selectiveDeepening/index.ts": "a552981e3a462aaadb1714f7a3d792b7697e51e8",
+        "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": "6e401e7ffa33c55d31e4718bff2e6072df2b4fe1",
+        "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": "52e22c54af0079a2591429a1473d73749baaf618",
+        "src/audit/orchestrator/selectiveDeepening/shared.ts": "a179ba1dd2246192c0427ed87f507965e981cdb5",
+        "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": "4cdda5e900c88d367b402de0ad1acf3215fe4759",
+        "src/audit/orchestrator/staleness.ts": "97e7c662e121d559fcb9f019043b7a3633ee7ef1",
+        "src/audit/orchestrator/state.ts": "390e26c35ca634c69a854259130093e3cfa233ae",
+        "src/audit/orchestrator/structureExecutors.ts": "2b39ab4be815ef79a31d08c95cdc0bca35f42cea",
+        "src/audit/orchestrator/syntaxResolutionExecutor.ts": "6c9f5b1b26562fe7e1ea6dc9481e6f9525d58d61",
+        "src/audit/orchestrator/synthesisExecutors.ts": "bea986d2d4d740f0f47441c7c3fd48510c1caff5",
+        "src/audit/orchestrator/systemicChallengeExecutor.ts": "513ca0fc1561a7d7df62db3d59c9cff4436c9ef2",
+        "src/audit/orchestrator/taskAffinityGraph.ts": "6963409d9cb1c664893191a54ea514f90b0bf6bf",
+        "src/audit/orchestrator/taskBuilder.ts": "58b26e903ffbb47e898617792189dd86deabcf2c",
+        "src/audit/orchestrator/trivialAudit.ts": "743f5f875fdc40686913807923396ed410758c6e",
+        "src/audit/orchestrator/unitBuilder.ts": "43eb13c36b8e26fbfbb5336d54181b8e2a0b14b9",
+        "src/audit/reporting/criticalFlowFallbackPrompt.ts": "1504f2e5624a795017e7f385e4c327dc6337f9e7",
+        "src/audit/reporting/synthesisNarrativePrompt.ts": "d8f32b956f9f37d3105ee305e3e78c474b158d37",
+        "src/audit/systemic/aggregateMetricsDigest.ts": "a44ac78ae9f62433a42a8ad075a9d1a0ae6704e0",
+        "src/audit/systemic/reviewFileMap.ts": "4ed3fefcd43e59762e3ddd4e05ad50ff5a811f35",
+        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "39141f0b82ad7c7cf1f5a34843fa71b7d66d552f",
+        "src/audit/validation/ingestIssueCodes.ts": "40d7916f61590216e310e3200d59590325e072f9",
+        "src/remediate/contractPipeline/runtimePlanAuthority.ts": "27b29fb3c896afe295fc13df7d9feee4069b471a",
+        "src/remediate/droppedFindingsRecord.ts": "242168b15c6ddbbfa4652879fbc71fbb91a4f3c2",
+        "src/remediate/intent/intentPersistence.ts": "8831f912eb4f25443b41da3e4079827f21f381b3",
+        "src/remediate/review/filterDispositions.ts": "caa1acea634237bdbbe2f97ab48291ebd0671187",
+        "src/remediate/review/reviewGate.ts": "d53345981f29b1998e74ff13c8306285df9f3c3b",
+        "src/remediate/review/reviewNecessity.ts": "806de07bd5a839b99dfcadf9da04021aaaf44190",
+        "src/remediate/riskSignal.ts": "9b0232e3abe32e4498509947bc87f1be1fc7b1ef",
+        "src/remediate/state/runIdentity.ts": "04c8a9f84814d73b73a41709fdd88cbb1f5a38cc",
+        "src/remediate/steps/contractPipeline.ts": "3e85007915ce7e83a65020f39ad5fd9013d2afd0",
+        "src/remediate/steps/contractPipelinePrompts.ts": "50be0df1e72c066c2c221d5a63ac007eb4f3a143",
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "6fa0433c6540f1c78efdd3d93bfbd36e264cb156",
+        "src/remediate/steps/dispatch/hostContracts.ts": "3e07a31411a624e40fca2a7f582e5f2d8ee28e90",
+        "src/remediate/steps/dispatch/hostCorroboration.ts": "1c1a02996574722d2aed3b114e36fd4eff9e3190",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "c52d43311947c7ee16eb7e327ac6919217cb6354",
+        "src/remediate/steps/dispatch/requiredTests.ts": "c396ab9650f225ebea1e3b1bbeba097f9332d224",
+        "src/remediate/steps/frictionCloseout.ts": "2c4b9165daac8212daf1572a3c63f818854cb710",
+        "src/remediate/steps/nextStep.ts": "b557267db1b01a71afff02b6bce5cd796b6fb299",
+        "src/remediate/steps/prompts.ts": "6a463fb31a76d2f5cad9735037865babe20caf4a",
+        "src/remediate/steps/recoverIngest.ts": "cfc1794807c957e7711b7d51168af9fcd1aff5ba",
+        "src/shared/engine/obligationEngine.ts": "a8d2c7dded35f727031658a8996f7f10adcf3dc4",
+        "src/shared/observability/rootLogObservations.ts": "6c3dc28e4699b460cb6014fb26b4e4fd6e474855",
+        "src/shared/steps/stepEmissionScaffold.ts": "f5e432dbe3da7d7ea2b2da16d2573a4b43403fb6",
+        "src/shared/submission/expectedSubmissions.ts": "4174adbd3b624636878f729a595ac388226b6303",
+        "src/shared/submission/handRecovery.ts": "50a8f3d9c0e57a16105828a9a403721e1e80e23a",
+        "src/shared/submission/hostHandoffCore.ts": "1b922026a9422af0966549f9f9d9e79b51451fde",
+        "src/shared/submission/hostResultOutcomes.ts": "872b07077b08444fd17275746c5dc0d539462235",
+        "src/shared/submission/ingestReport.ts": "af55df3ec44946475473004be05484a6622453cc",
+        "src/shared/submission/ingestionChecks.ts": "27598deecff36ac6e0f593642f5660ce3e524fdc",
+        "src/shared/submission/submissionClassifier.ts": "880e8a4c3edfcc3e6124f61df40269a11070a3c2",
+        "src/shared/submission/submissionIdentity.ts": "4a4c76463ae01dd82593e246c28bb4d321a3b616",
+        "src/shared/submission/submissionLedger.ts": "51d5684fbb1f473ee77c4d2df42104205dcc5a7b",
+        "src/shared/submission/submissionScan.ts": "ed5bd151fd27c70a0c04891c344cc5190b174106",
+        "src/shared/submission/workerPromptBinding.ts": "21946c7d2f8aacb6bed38c464bc75a89f2747410"
+      }
+    }
+  },
+  "reviews": {},
+  "entries": {
+    "src/audit/cli/charterClarificationPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/charterExtractionPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/charterFidelityPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/conceptualDispatch.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/confirmIntentStep.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/dispatch/hostHandoff.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/dispatch/packetFilter.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/fanoutLanes.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/foldTransaction.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/laneSubmissions.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/laneValidators.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/nextStepCommand.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/nextStepHelpers.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/prompts.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/cli/semanticReviewStep.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/accessMemory.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/acquisitionExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/advance.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/advanceTypes.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/architectureDiscovery.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/artifactMetadata.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/auditTaskUtils.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/autoFixExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterClarificationExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterComparisonExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterExtractionExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterFidelityExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterFidelityPacket.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterPacketArchive.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/charterPackets.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/coverageElementBaseline.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/criticalFlowFallbackExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/dependencyMap.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/dependencySlices.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/designReviewProjection.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/designReviewPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/designReviewSnapshot.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/designReviewTask.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/edgeReasoning.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/executorResult.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/executorRunners.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/executors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/fileIntegrity.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/flowCoverage.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/flowPlanning.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/flowRequeue.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/gitHistoryBaseline.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/graphEdgeCache.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/graphEnrichmentExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/hostInputPause.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/ingestionExecutors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intakeExecutors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intentCheckpointExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intentCheckpointGate.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intentEquivalenceExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intentInterpreter.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/intentScopeDisposition.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/ledger.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/lensSelection.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/lineCounts.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/localCommands.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/nextStep.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/obligationDerive.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/obligationPolicy.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/partitionTaskGraph.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/pendingTasks.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/planning.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/planningExecutors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/requeue.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/requeueCommand.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/requeueFold.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/requeueUtils.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/resultBaseline.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/resultIngestion.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketGraph.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketGraphContext.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketGraphEdges.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketMetrics.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketShared.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPacketSizing.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/reviewPackets.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/runtimeCommand.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/runtimeValidation.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/runtimeValidationUpdate.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/scope.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/scopeIndexBaseline.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/highRiskClean.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/index.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/shared.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/staleness.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/state.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/structureExecutors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/syntaxResolutionExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/synthesisExecutors.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/systemicChallengeExecutor.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/taskAffinityGraph.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/taskBuilder.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/trivialAudit.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/orchestrator/unitBuilder.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/reporting/criticalFlowFallbackPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/reporting/synthesisNarrativePrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/systemic/aggregateMetricsDigest.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/systemic/reviewFileMap.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/audit/validation/ingestIssueCodes.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/contractPipeline/runtimePlanAuthority.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/droppedFindingsRecord.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/intent/intentPersistence.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/review/filterDispositions.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/review/reviewGate.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/review/reviewNecessity.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/riskSignal.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/state/runIdentity.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/contractPipeline.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/contractPipelinePrompts.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/dispatch/contractConformanceReview.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/dispatch/hostContracts.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/dispatch/hostCorroboration.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/dispatch/hostHandoff.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/dispatch/requiredTests.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/frictionCloseout.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/nextStep.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/prompts.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/remediate/steps/recoverIngest.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/engine/obligationEngine.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/observability/rootLogObservations.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/steps/stepEmissionScaffold.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/expectedSubmissions.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/handRecovery.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/hostHandoffCore.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/hostResultOutcomes.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/ingestReport.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/ingestionChecks.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/submissionClassifier.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/submissionIdentity.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/submissionLedger.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/submissionScan.ts": {
+      "baseline": "7b79934e86baf378"
+    },
+    "src/shared/submission/workerPromptBinding.ts": {
+      "baseline": "7b79934e86baf378"
+    }
+  }
+}

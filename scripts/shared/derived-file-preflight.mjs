@@ -495,9 +495,13 @@ function readPackageScripts(root) {
  * so no caller has to reconstruct which side moved.
  */
 /**
- * @param {{root: string, staged: string[], stagedTree: string, git?: Function}} options
+ * `exclude` maps a leg id to the reason the CALLER owns that leg's verdict: a
+ * leg judging a file the caller writes only after the preflight passes would
+ * judge the tree before that write and refuse every run. An excluded leg is
+ * announced in `skipped`, never silent.
+ * @param {{root: string, staged: string[], stagedTree: string, git?: Function, exclude?: Record<string, string>}} options
  */
-export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
+export function runDerivedFilePreflight({ root, staged, stagedTree, git, exclude = {} }) {
   if (typeof stagedTree !== 'string' || stagedTree.trim() === '') {
     // The object judged must be the object bound. A caller that cannot name it
     // has no business receiving a verdict about it.
@@ -511,6 +515,10 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git }) {
   const skipped = [];
   for (const leg of buildPreCommitLegs({ packageScripts: readPackageScripts(root) })) {
     if (!leg.triggered(git ? { root, staged, git } : { root, staged })) continue;
+    if (Object.hasOwn(exclude, leg.id)) {
+      skipped.push(`${leg.script} is not run by this preflight — ${exclude[leg.id]}`);
+      continue;
+    }
     // Gate legs are npm scripts, pin legs are test files — the KIND is a
     // property of the leg, so both the runnability probe and the command come
     // from the one shared decision (legRunnable / legCommand) rather than from

@@ -8,7 +8,11 @@
 // staged-tree-hash-bound review attestation exists. This tool WRITES that
 // attestation after the adversarial review is performed — it binds the review
 // to the exact staged tree (`git write-tree`), so any later restage invalidates
-// it and forces a re-review.
+// it and forces a re-review. It also records the reviewed CONTENT (each
+// loop-core path's blob id) in the tracked ledger `.claude/loop-core-attestations.json`
+// and stages it: that is the evidence `check:loop-core-attestations` reads in CI
+// and at release, where the local record does not exist
+// (scripts/shared/loopCoreAttestationLedger.mjs).
 //
 // It enforces attestation existence + freshness + binding MECHANICALLY. It does
 // NOT — and running on the same machine as the agent, CANNOT — establish that a
@@ -24,7 +28,8 @@
 //     --reviewed-by <id> \
 //     --attester-class agent|human \
 //     --checked "<>=20 chars describing the adversarial review performed>" \
-//     [--verdict clear|concerns] [--override "<reason>"]
+//     [--verdict clear|concerns] [--override "<reason>"] \
+//     [--include-unvouched <path>]...
 //
 //   --reviewed-by     reviewer id (default: git user.name)
 //   --attester-class  REQUIRED; who is RUNNING this attestation — `agent` when any
@@ -33,9 +38,19 @@
 //   --checked         REQUIRED; what was adversarially checked (>= 20 non-space chars)
 //   --verdict         clear (default) | concerns
 //   --override        reason a `concerns` verdict may still pass the gate (recorded)
+//   --include-unvouched  repeatable; a loop-core path OUTSIDE the staged set whose
+//                     current content the ledger does not vouch for, which this
+//                     review also covers. Each such path must be named: the
+//                     attestation refuses rather than vouch for content silently.
+//
+// sites-pinned: tests/shared/loop-core-attestation-ledger.test.ts, tests/shared/attest-derived-file-preflight.test.ts, tests/shared/pre-commit-gate-attestation.test.ts
+//   Each suite spawns this hook against a throwaway repo: the ledger suite
+//   drives the ledger write/stage and --include-unvouched refusals, the
+//   preflight suite the preflight-before-ledger ordering, and the gate suite
+//   the tree-bound attestation record the pre-commit gate reads.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -45,6 +60,7 @@ function git(args) {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: Infinity, // `ls-files -s` grows with the repository
     windowsHide: true,
   });
   return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
@@ -65,6 +81,14 @@ function fail(msg) {
 import { isLoopCorePath } from './loop-core-patterns.mjs';
 import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
 import { resolveNightlyDecisionKeys } from '../../scripts/shared/nightlyDecisionKey.mjs';
+import {
+  LEDGER_PATH,
+  applyAttestation,
+  loopCoreBlobs,
+  readLedger,
+  serializeLedger,
+  unvouchedPaths,
+} from '../../scripts/shared/loopCoreAttestationLedger.mjs';
 
 // ── parse argv ────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -76,10 +100,11 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--checked') flags.checked = argv[++i];
   else if (a === '--verdict') flags.verdict = argv[++i];
   else if (a === '--override') flags.override = argv[++i];
+  else if (a === '--include-unvouched') (flags.includeUnvouched ??= []).push(argv[++i]);
   else if (a === '--help' || a === '-h') {
     console.log(
       'usage: attest-loop-core-review.mjs --reviewed-by <id> --attester-class agent|human ' +
-        '--checked "<...>" [--verdict clear|concerns] [--override "<reason>"]',
+        '--checked "<...>" [--verdict clear|concerns] [--override "<reason>"] [--include-unvouched <path>]...',
     );
     process.exit(0);
   } else fail(`unknown argument: ${a}`);
@@ -185,22 +210,77 @@ if (!reviewedBy) {
 }
 if (!reviewedBy) fail('could not determine --reviewed-by (no value given and git user.name unset)');
 
-// ── compute the staged tree SHA + loop-core staged file list ───────────────────
-const wt = git(['write-tree']);
-if (!wt.ok || !wt.stdout.trim()) {
-  fail(`\`git write-tree\` failed — nothing staged, or not a git repo. ${wt.stderr}`);
+/// ── the staged set + what this attestation vouches for ─────────────────────────
+function listStaged() {
+  const cached = git(['diff', '--cached', '--name-only']);
+  if (!cached.ok) fail(`could not list the staged set (\`git diff --cached\` failed). ${cached.stderr}`);
+  return cached.stdout
+    .split(/\r?\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
 }
-const sha = wt.stdout.trim();
+const stagedBeforeLedger = listStaged();
+const stagedLoopCore = stagedBeforeLedger.filter(isLoopCorePath);
 
-const cached = git(['diff', '--cached', '--name-only']);
-if (!cached.ok) fail(`could not list the staged set (\`git diff --cached\` failed). ${cached.stderr}`);
-const staged = cached.stdout
-  .split(/\r?\n/)
-  .map((p) => p.trim())
-  .filter(Boolean);
-const loopCoreFiles = staged.filter(isLoopCorePath);
-if (loopCoreFiles.length === 0) {
-  fail('nothing loop-core staged to attest — the staged set touches no loop-core path.');
+// The TRACKED ledger (scripts/shared/loopCoreAttestationLedger.mjs) is the
+// evidence that travels with the tree, so CI and the release gate can judge a
+// commit no local hook saw. This attestation vouches for every staged loop-core
+// change. Loop-core content OUTSIDE the staged set that the ledger does not
+// vouch for (a newly classified path, or content that landed without a review)
+// is vouched for only when the attester NAMES each path with
+// --include-unvouched: a review of a one-file change must not silently cover
+// every unattested file in the tree. Entries for paths that are no longer
+// tracked loop-core are dropped.
+const blobs = loopCoreBlobs(git);
+if (blobs === null) fail('could not list the index (`git ls-files -s` failed).');
+const loadedLedger = readLedger(git);
+if (loadedLedger.kind === 'corrupt') {
+  fail(`the staged ${LEDGER_PATH} is unreadable (${loadedLedger.reason}); fix or remove it, then re-run.`);
+}
+const priorLedger = loadedLedger.kind === 'ok' ? loadedLedger.ledger : null;
+const unvouched = unvouchedPaths(priorLedger, blobs);
+const stagedLoopCoreSet = new Set(stagedLoopCore);
+const unvouchedOutsideStaged = unvouched.filter((p) => !stagedLoopCoreSet.has(p));
+const named = [...new Set((flags.includeUnvouched ?? []).map((p) => String(p ?? '').trim().replace(/\\/g, '/')))];
+const notUnvouched = named.filter((p) => !unvouched.includes(p));
+if (notUnvouched.length > 0) {
+  fail(
+    `--include-unvouched names ${notUnvouched.map((p) => `"${p}"`).join(', ')}, which ` +
+      `${notUnvouched.length === 1 ? 'is' : 'are'} not loop-core content the ledger fails to vouch for. ` +
+      (unvouchedOutsideStaged.length > 0
+        ? `The unvouched loop-core paths outside the staged set are:\n${unvouchedOutsideStaged.map((p) => `  ${p}`).join('\n')}`
+        : 'There is no unvouched loop-core content outside the staged set.'),
+  );
+}
+const unnamed = unvouchedOutsideStaged.filter((p) => !named.includes(p));
+if (unnamed.length > 0) {
+  fail(
+    `refusing to attest: ${unnamed.length} loop-core path(s) outside the staged set carry content ` +
+      `${LEDGER_PATH} does not vouch for, and this review would bind a tree that contains them:\n` +
+      unnamed.map((p) => `  ${p}`).join('\n') +
+      `\nReview that content too, then name each path on the command line ` +
+      `(${unnamed.map((p) => `--include-unvouched ${p}`).join(' ')}), ` +
+      `or restore it to the content the ledger vouches for. Nothing was written.`,
+  );
+}
+const loopCoreFiles = [...new Set([...stagedLoopCore, ...named])].sort();
+const nextLedger = applyAttestation(priorLedger, blobs, loopCoreFiles, {
+  reviewed_by: reviewedBy,
+  attester_class: /** @type {'agent'|'human'} */ (attesterClass),
+  checked,
+  verdict: /** @type {'clear'|'concerns'} */ (verdict),
+  override: override ?? null,
+  attested_at: new Date().toISOString(),
+});
+// Changed = the serialized ledger differs from the staged one. With nothing to
+// vouch for, the only possible change is dropping orphan entries; a repo with no
+// ledger and no loop-core content gets no ledger at all.
+const ledgerChanged =
+  priorLedger === null
+    ? loopCoreFiles.length > 0
+    : serializeLedger(nextLedger) !== serializeLedger(priorLedger);
+if (loopCoreFiles.length === 0 && !ledgerChanged) {
+  fail('nothing loop-core to attest — the staged set touches no loop-core path and the ledger already vouches for every one.');
 }
 
 // ── P19: refuse to bind to a tree the gate would reject ────────────────────────
@@ -216,7 +296,26 @@ if (loopCoreFiles.length === 0) {
 // The legs read the WORKING tree; this attestation binds the STAGED tree. The
 // preflight therefore refuses only when the two are the same object before AND
 // after the legs run, and otherwise ABSTAINS — see the module's header.
-const preflight = runDerivedFilePreflight({ root, staged, stagedTree: sha });
+//
+// The preflight runs BEFORE the ledger is written, so a refusal leaves nothing
+// behind: no record, no rewritten or staged ledger. It therefore judges the
+// staged tree WITHOUT this run's ledger update — the only file this script then
+// writes — and the ledger's own leg is excluded: it would judge the ledger
+// before the write that makes it vouch for the staged change. The commit gate
+// runs that leg on the final staged tree.
+const preflightTree = git(['write-tree']);
+if (!preflightTree.ok || !preflightTree.stdout.trim()) {
+  fail(`\`git write-tree\` failed — not a git repo, or the index is unmerged. ${preflightTree.stderr}`);
+}
+const preflight = runDerivedFilePreflight({
+  root,
+  staged: stagedBeforeLedger,
+  stagedTree: preflightTree.stdout.trim(),
+  exclude: {
+    'check:loop-core-attestations':
+      `this attestation writes ${LEDGER_PATH} only after the preflight passes; the commit gate judges it`,
+  },
+});
 for (const s of preflight.skipped) console.error(`attest-loop-core-review: note — ${s}`);
 if (preflight.failures.length > 0) {
   for (const f of preflight.failures) {
@@ -225,7 +324,7 @@ if (preflight.failures.length > 0) {
   fail(
     'refusing to bind: the staged tree would be rejected by the pre-commit gate\'s derived-file ' +
       'checks above — verified against the staged tree (working tree is identical). ' +
-      'Fix + re-stage, THEN attest — nothing was written, so nothing is wasted.',
+      `Fix + re-stage, THEN attest — no review record was written and ${LEDGER_PATH} was not touched.`,
   );
 }
 if (preflight.abstention) {
@@ -248,6 +347,23 @@ if (preflight.abstention) {
       `Stage or set aside the divergence and re-run for a judged verdict.`,
   );
 }
+
+// ── write + stage the ledger, THEN compute the bound tree ─────────────────────
+// Written and staged together, so the worktree and the staged tree move as one
+// object and the preflight's tree identity carries over to the bound tree.
+if (ledgerChanged) {
+  const ledgerFile = join(root, ...LEDGER_PATH.split('/'));
+  mkdirSync(dirname(ledgerFile), { recursive: true });
+  writeFileSync(ledgerFile, serializeLedger(nextLedger), 'utf8');
+  // -f: the ledger lives under `.claude/`, which is ignored except by name.
+  const add = git(['add', '-f', '--', LEDGER_PATH]);
+  if (!add.ok) fail(`could not stage ${LEDGER_PATH}. ${add.stderr}`);
+}
+const wt = git(['write-tree']);
+if (!wt.ok || !wt.stdout.trim()) {
+  fail(`\`git write-tree\` failed — nothing staged, or not a git repo. ${wt.stderr}`);
+}
+const sha = wt.stdout.trim();
 
 const headRev = git(['rev-parse', 'HEAD']);
 const gitHead = headRev.ok ? headRev.stdout.trim() : null;
@@ -274,7 +390,8 @@ const record = {
   // abstention is recorded as data rather than passing silently, so "the legs
   // were run" and "the legs judged the bound tree" stay distinguishable after
   // the fact. No schema_version bump: the field has no reader — the gate reads
-  // staged_tree, verdict, override and freshness only.
+  // staged_tree, verdict, override and freshness only. Its `staged_tree` is the
+  // tree the preflight judged: the bound tree minus this run's ledger write.
   preflight: {
     attributable: preflight.attributable,
     staged_tree: preflight.stagedTree,
@@ -296,5 +413,10 @@ console.log(
     `  verdict     : ${verdict}${override ? ` (override: ${override})` : ''}\n` +
     `  loop_core   : ${loopCoreFiles.length} file(s)\n` +
     loopCoreFiles.map((p) => `                - ${p}`).join('\n') +
+    (named.length > 0
+      ? `\n  of which ${named.length} outside the staged set, named with --include-unvouched, carried content ` +
+        `the ledger did not vouch for before this review.`
+      : '') +
+    (ledgerChanged ? `\n  ledger      : ${LEDGER_PATH} updated and staged — commit it with the change.` : '') +
     `\nThe pre-commit gate will now allow a commit of this exact staged tree.`,
 );

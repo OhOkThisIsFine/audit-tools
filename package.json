@@ -116,6 +116,7 @@
     "generate:shard-baseline": "node scripts/shared/generate-vitest-shard-baseline.mjs",
     "check:orphan-modules": "node scripts/check-orphan-modules.mjs",
     "check:loop-core-closure": "node scripts/check-loop-core-closure.mjs",
+    "check:loop-core-attestations": "node scripts/check-loop-core-attestations.mjs",
     "check:pin-obligations": "node scripts/check-pin-obligations.mjs",
     "check:contract-sites": "node --import tsx/esm scripts/check-contract-sites.mjs",
     "check:sites-pinned": "node scripts/check-sites-pinned.mjs",

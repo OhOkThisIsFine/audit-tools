@@ -22,6 +22,7 @@ import {
   scriptWired,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 import { worktreeTree } from "../../scripts/shared/worktree-tree.mjs";
+import { LEDGER_PATH } from "../../scripts/shared/loopCoreAttestationLedger.mjs";
 import { EXPECTED_SRC_REACH_LEG_IDS } from "../helpers/precommitLegExpectations.js";
 
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -58,8 +59,10 @@ function makeFixture(
   // Mirrors the real .gitignore's `.claude/` line. Without it the attestation
   // this script writes under .claude/loop-core-review/ is picked up by the
   // worktree-tree hash, so a SUCCESSFUL attest would move the tree it just
-  // described — and the no-mutation contract pin below could never hold.
-  writeFileSync(join(root, ".gitignore"), ".claude/\n");
+  // described — and the contract pin below could never hold. The tracked
+  // attestation LEDGER is re-included by name, exactly as in the real repo, so
+  // the ledger the attest script stages is part of the worktree tree too.
+  writeFileSync(join(root, ".gitignore"), ".claude/*\n!.claude/loop-core-attestations.json\n");
   mkdirSync(join(root, "src", "audit", "orchestrator"), { recursive: true });
   writeFileSync(join(root, "src", "audit", "orchestrator", "advance.ts"), "export const base = 1;\n");
   git("add", "-A");
@@ -84,6 +87,16 @@ function runAttest(root: string) {
     [ATTEST_LOOP_CORE, "--attester-class", "agent", "--checked", "preflight contract test adversarial pass"],
     { cwd: root, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: root } },
   );
+}
+
+const LEDGER = LEDGER_PATH;
+
+/** The index (`ls-files -s`) with the attestation ledger's own row removed. */
+function stagedEntriesBesideLedger(root: string): string {
+  return spawnSyncHidden("git", ["ls-files", "-s"], { cwd: root, encoding: "utf8" })
+    .stdout.split("\n")
+    .filter((line) => !line.endsWith(`\t${LEDGER}`))
+    .join("\n");
 }
 
 function attestationCount(root: string): number {
@@ -222,18 +235,32 @@ describe("the preflight issues a verdict only about the tree it actually judged"
     );
   });
 
-  it("CONTRACT PIN (not part of the red-green proof): a successful attest mutates nothing", () => {
+  it("CONTRACT PIN (not part of the red-green proof): a successful attest mutates only the ledger", () => {
     const root = makeFixture({ backlogIndexScript: 'node -e "process.exit(0)"' });
-    const treeBefore = worktreeTree(root);
-    const stagedBefore = spawnSyncHidden("git", ["write-tree"], { cwd: root, encoding: "utf8" }).stdout.trim();
+    const stagedBefore = stagedEntriesBesideLedger(root);
     const statusBefore = spawnSyncHidden("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout;
     const r = runAttest(root);
     expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
     // Reintroducing checkout-index or any other materialization at this boundary
     // reds this test. The checkout is shared with concurrent sessions and with a
-    // background typecheck hook, so in-place surgery here is not available.
-    expect(worktreeTree(root)).toBe(treeBefore);
-    expect(spawnSyncHidden("git", ["write-tree"], { cwd: root, encoding: "utf8" }).stdout.trim()).toBe(stagedBefore);
+    // background typecheck hook, so in-place surgery here is not available. The
+    // ONE deliberate write is the tracked attestation ledger, written and staged
+    // together: every other staged entry is byte-for-byte what it was, and the
+    // worktree and the bound staged tree stay the same object.
+    expect(stagedEntriesBesideLedger(root)).toBe(stagedBefore);
+    const stagedAfter = spawnSyncHidden("git", ["write-tree"], { cwd: root, encoding: "utf8" }).stdout.trim();
+    expect(worktreeTree(root)).toBe(stagedAfter);
+    expect(spawnSyncHidden("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout).toBe(
+      `A  ${LEDGER}\n${statusBefore}`,
+    );
+  });
+
+  it("a REFUSED attest leaves no ledger behind, written or staged", () => {
+    const root = makeFixture({ backlogIndexScript: 'node -e "process.exit(1)"' });
+    const statusBefore = spawnSyncHidden("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout;
+    const r = runAttest(root);
+    expect(r.status, `${r.stdout}\n${r.stderr}`).not.toBe(0);
+    expect(existsSync(join(root, ...LEDGER.split("/")))).toBe(false);
     expect(spawnSyncHidden("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).stdout).toBe(statusBefore);
   });
 

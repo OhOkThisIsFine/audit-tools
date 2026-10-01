@@ -53,6 +53,11 @@ dist/
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/
+# The TRACKED counterpart: path → reviewed blob id, written and staged by the same
+# attest script and verified by check:loop-core-attestations in CI and at release
+# (scripts/shared/loopCoreAttestationLedger.mjs). Tracked because a server-side
+# check can only read evidence that travels with the tree.
+!.claude/loop-core-attestations.json
 # Test-generated scratch trees (fake HOMEs, temp repos, artifact dirs) that the
 .opencode/
 .vscode/

@@ -1,14 +1,19 @@
 // sites-pinned: tests/shared/loop-core-gate-parity.test.ts, tests/shared/loop-core-closure.test.ts
 // Single source of truth for the "loop-core" path set — the persisted workflow,
 // host-handoff, verification, and orchestrator-step substrate whose changes carry
-// the highest blast radius. The surviving consumers are the two pre-build
-// enforcement hooks:
+// the highest blast radius. The surviving consumers are pre-build enforcement
+// scripts:
 //
-//   • the pre-commit ADVERSARIAL GATE (`.claude/hooks/pre-commit-gate.mjs`)
+//   • the pre-commit ADVERSARIAL GATE (`.claude/hooks/commit-gate.mjs`)
 //     blocks a hand-authored loop-core commit that lacks a fresh review
-//     attestation, and
+//     attestation,
 //   • the attestation WRITER (`.claude/hooks/attest-loop-core-review.mjs`)
-//     scopes what it binds to the same set.
+//     scopes what it binds to the same set, and
+//   • the tracked attestation LEDGER check
+//     (`scripts/check-loop-core-attestations.mjs`, in verify:checks, so CI and
+//     the release gate run it) refuses a tree whose loop-core content the
+//     ledger does not vouch for — the boundary a squash merge or a hook-less
+//     cloud commit cannot skip.
 //
 // Both run under plain node BEFORE any build, so they cannot import this
 // TypeScript module. They import a GENERATED sibling instead
@@ -40,7 +45,19 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   //     the audit draw of the submission core, not a helper beside it)
   //   • remediate step machine + host-handoff/landing + risk/pipeline core
   //   • shared obligation engine + submission core
+  // Workload composition (backlog 2026-10-01): `nextStepCommand.ts` and
+  // `semanticReviewStep.ts` COMPOSE the step a host is handed, and the prompt
+  // and issue-code modules below are reachable only through them (the closure
+  // rule claims them). A change to any of these alters what every audit host
+  // does next — the same blast radius as the dispatch and orchestrator modules,
+  // and the audit counterpart of `src/remediate/steps/prompts.ts`.
+  "src/audit/cli/charterClarificationPrompt.ts",
+  "src/audit/cli/charterExtractionPrompt.ts",
+  "src/audit/cli/charterFidelityPrompt.ts",
+  "src/audit/cli/conceptualDispatch.ts",
+  "src/audit/cli/confirmIntentStep.ts",
   "src/audit/cli/dispatch/",
+  "src/audit/cli/fanoutLanes.ts",
   // The fold's staging and commit core. It is here because `quarantineSubmissionFile`
   // MOVED into it out of `nextStepHelpers.ts` (b4a3eb4a, CX-02) — a loop-core path then
   // and now — which took the fold's one core write boundary out of attestation coverage
@@ -48,8 +65,17 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/foldTransaction.ts",
   "src/audit/cli/laneSubmissions.ts",
   "src/audit/cli/laneValidators.ts",
+  "src/audit/cli/nextStepCommand.ts",
   "src/audit/cli/nextStepHelpers.ts",
+  "src/audit/cli/prompts.ts",
+  "src/audit/cli/semanticReviewStep.ts",
   "src/audit/orchestrator/",
+  "src/audit/reporting/criticalFlowFallbackPrompt.ts",
+  "src/audit/reporting/synthesisNarrativePrompt.ts",
+  "src/audit/systemic/aggregateMetricsDigest.ts",
+  "src/audit/systemic/reviewFileMap.ts",
+  "src/audit/systemic/secondOrderAdversaryPrompt.ts",
+  "src/audit/validation/ingestIssueCodes.ts",
   // Dispatch, result acceptance and closing share this reviewed-authority boundary.
   "src/remediate/contractPipeline/runtimePlanAuthority.ts",
   // Imported ONLY by nextStep.ts, so the closure rule claims it: a module every

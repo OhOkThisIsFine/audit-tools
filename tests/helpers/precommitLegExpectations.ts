@@ -16,6 +16,10 @@ export const EXPECTED_SRC_REACH_LEG_IDS = [
   "check:control-bytes",
   "check:shared-primitives",
   "check:orphan-modules",
+  // Backlog 2026-10-01: a staged loop-core path must carry content the tracked
+  // attestation ledger vouches for — the same rule CI and the release gates run.
+  // Its reach is every loop-core path; a src-only set outside loop-core skips it.
+  "check:loop-core-attestations",
   // P27: the per-site pinning gate's scan set includes `src/**/*.ts`, so a
   // src-only staged set is exactly what it exists to judge. It rides the
   // `reach` phase like the others: it refuses on the staged diff, which is
