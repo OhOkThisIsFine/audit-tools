@@ -57,7 +57,7 @@
 - `minor-bugs.md:14` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
 - `minor-bugs.md:15` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
 - `minor-bugs.md:16` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
-- `minor-bugs.md:17` — The question-philosophy gate challenged the first lap-approval question (2026-10-01, low).
+- `minor-bugs.md:17` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
 - `minor-bugs.md:18` — A memory note can red an unrelated commit (2026-10-01, low).
 - `minor-bugs.md:19` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
 - `minor-bugs.md:20` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
