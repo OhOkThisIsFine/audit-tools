@@ -1,4 +1,4 @@
-import { EXTERNAL_ANALYZER_CANDIDATES, persistAnalyzerConsent, persistAnalyzerSettings } from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES, persistAnalyzerConsent, persistAnalyzerSettings, toPromptPathToken } from "audit-tools/shared";
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -27,7 +27,8 @@ it("the public next-step emits capability work before semantic or deterministic 
   await cmdNextStep(["--root", root]);
   const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
   expect(step.step_kind).toBe("functional_preflight");
-  expect(step.artifact_paths.functional_preflight).toBe(functionalPreflightPath(artifactsDir));
+  // Host-facing paths are forward-slash tokens on every OS (toPromptPathToken).
+  expect(step.artifact_paths.functional_preflight).toBe(toPromptPathToken(functionalPreflightPath(artifactsDir)));
   expect(await readdir(artifactsDir)).not.toContain("repo_manifest.json");
   const prompt = await readFile(step.prompt_path, "utf8");
   expect(prompt).toContain("Actor: the host");

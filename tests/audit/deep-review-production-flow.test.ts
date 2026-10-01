@@ -19,6 +19,7 @@ import {
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { readConceptualReviewRoundManifest } from "../../src/audit/types/conceptualAdjudication.js";
 import { persistAnalyzerConsent } from "../../src/shared/analyzerPolicy.js";
+import { toPromptPathToken } from "../../src/shared/tooling/exec.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 
 function readyForIntentBundle(): ArtifactBundle {
@@ -200,8 +201,9 @@ test("production systemic dispatch never advertises the deleted deep-review judg
       await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
     );
     expect(step.step_kind).toBe("systemic_challenge");
-    expect(step.access.read_paths).toContain(perspectiveResultPath);
-    expect(step.access.read_paths).not.toContain(deletedJudgeResultPath);
+    // Host-facing paths are forward-slash tokens on every OS (toPromptPathToken).
+    expect(step.access.read_paths).toContain(toPromptPathToken(perspectiveResultPath));
+    expect(step.access.read_paths).not.toContain(toPromptPathToken(deletedJudgeResultPath));
 
     const prompt = await readFile(
       step.artifact_paths.systemic_challenge_prompt,
