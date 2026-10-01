@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 124 entr(y/ies) indexed.
+> and at commit). 127 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -57,15 +57,17 @@
 - `minor-bugs.md:14` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
 - `minor-bugs.md:15` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
 - `minor-bugs.md:16` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
-- `minor-bugs.md:17` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:18` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:36` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:50` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:71` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:82` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:100` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:105` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:107` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:17` — The question-philosophy gate challenged the first lap-approval question (2026-10-01, low).
+- `minor-bugs.md:18` — A memory note can red an unrelated commit (2026-10-01, low).
+- `minor-bugs.md:19` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:20` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
+- `minor-bugs.md:38` — CP-NODE-10 residuals (2026-08-19, low, one entry):
+- `minor-bugs.md:52` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:73` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:84` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `minor-bugs.md:102` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:107` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `minor-bugs.md:109` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -87,86 +89,87 @@
 ### [`durable-traps.md`](backlog/durable-traps.md)
 
 - `durable-traps.md:16` — Never run `npm test` concurrently with any other `npm run check:*` in the same worktree (2026-09-15).
-- `durable-traps.md:26` — A background PowerShell task can fail with NO output (2026-09-18).
-- `durable-traps.md:31` — An entry that reinterprets an incident must quote or link the primary record's own words for the mechanism, not restate them.
-- `durable-traps.md:35` — A guard that fires AS DESIGNED is not friction and is never re-filed as a defect (owner decision 2026-09-05, nightly item bl-1).
-- `durable-traps.md:45` — A delegated `codex exec` lane runs the sprint ceremony and CONSUMES the session's lap record (2026-08-29, ENFORCED IN PART).
-- `durable-traps.md:60` — `gh run list --commit <short-sha>` silently returns an EMPTY set — the flag matches the FULL 40-character sha only (2026-08-29).
-- `durable-traps.md:66` — Parallel deep `codex exec` lanes exhaust the ChatGPT quota in well under an hour, and a lane dies mid-answer with NO verdict (2026-08-28).
-- `durable-traps.md:78` — Mechanical-analyzer acquisitions decided against — do not re-propose without new evidence (folded here 2026-08-27 from the retired mechanical-analyzer layer spec, now deleted).
-- `durable-traps.md:93` — `git add -A` in a SHARED checkout commits a CONCURRENT session's files under your message (2026-08-26).
-- `durable-traps.md:102` — Generating code through a Bash heredoc loses ONE level of backslash escaping (2026-08-26).
-- `durable-traps.md:111` — Two pushes landing close together can leave the NEWER commit with no CI signal (2026-08-26).
-- `durable-traps.md:118` — A session rooted ABOVE the repo loads NONE of its Claude Code hooks (measured 2026-08-26) — the COMMIT gate no longer depends on that, the shell traps still do.
-- `durable-traps.md:130` — A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit (2026-08-20).
-- `durable-traps.md:140` — `git commit` after `git add <paths>` commits the whole INDEX, not your paths (2026-08-20).
-- `durable-traps.md:146` — A vitest CLI file filter resurrects same-suffixed test COPIES under stale worktree dirs (2026-08-06).
-- `durable-traps.md:157` — The Workflow tool's per-agent `model` override may not take (observed 2026-08-06).
-- `durable-traps.md:164` — A spend-limit death returns a workflow as `completed` with a success-shaped empty result (2026-08-25).
-- `durable-traps.md:174` — A broad multi-file review scope kills both peer-CLI lanes, and they fail in OPPOSITE shapes (2026-08-09 and 2026-08-10, four deaths in two nights).
-- `durable-traps.md:201` — A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).
-- `durable-traps.md:209` — An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).
-- `durable-traps.md:214` — Never delete from a backlog file by LINE NUMBER.
-- `durable-traps.md:220` — A long multi-line prompt passed INLINE to a peer-CLI lane arrives truncated, and the lane then offers to work from whatever file it can find (2026-08-23).
-- `durable-traps.md:233` — A lane that lost its tools FABRICATES a confident answer instead of failing — but workspace trust is NOT what takes them away (2026-08-15, premise corrected by measurement 2026-08-29).
-- `durable-traps.md:256` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
-- `durable-traps.md:284` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
-- `durable-traps.md:297` — Empty repo-root files named from code or prose are cmd.exe REDIRECT artifacts, and since 2026-08-30 NOTHING in this repo watches for them (relanded here as its guard was deleted).
-- `durable-traps.md:314` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
-- `durable-traps.md:328` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
-- `durable-traps.md:346` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
-- `durable-traps.md:360` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
-- `durable-traps.md:368` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
-- `durable-traps.md:378` — After an unattended run, `git diff` the tracked docs before committing.
-- `durable-traps.md:390` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
-- `durable-traps.md:412` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
-- `durable-traps.md:418` — The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file wall is expected, not a hang.
-- `durable-traps.md:438` — One test runner: vitest
-- `durable-traps.md:452` — Don't mask the test exit code with a REDIRECT.
-- `durable-traps.md:470` — Global `-g` install BLOCKS `postinstall`
-- `durable-traps.md:480` — A global junction to a LIVE working tree silently shadows a registry install.
-- `durable-traps.md:486` — PowerShell
-- `durable-traps.md:495` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
-- `durable-traps.md:512` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
-- `durable-traps.md:519` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
-- `durable-traps.md:524` — Do not hand-edit a wedged audit run — use `audit-code force-synthesis`.
-- `durable-traps.md:529` — A scratch file written into the repository root is tree dirt for the nightly clean-tree rule (2026-08-22, low).
-- `durable-traps.md:536` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
-- `durable-traps.md:538` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
-- `durable-traps.md:546` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
-- `durable-traps.md:551` — After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of re-reading the whole file (2026-07-16).
-- `durable-traps.md:555` — A `check:*` typecheck leg can exit non-zero with NO error text when it races the async PostToolUse typecheck hook (2026-08-27).
-- `durable-traps.md:563` — A typecheck sweep's error count is not final until you re-run it.
-- `durable-traps.md:571` — An untypechecked fixture can sit inert for months while its suite reads green.
-- `durable-traps.md:592` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
-- `durable-traps.md:603` — A backlog entry's bold title must not contain `
-- `durable-traps.md:608` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
-- `durable-traps.md:639` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.
-- `durable-traps.md:648` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:655` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:669` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
-- `durable-traps.md:680` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:689` — An external-delegation directive and the Workflow tool are in tension — Workflow has no external lane (2026-08-27; reworded 2026-09-22 for the switch/agent-dispatch lap <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->).
-- `durable-traps.md:700` — agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run (2026-08-27).
-- `durable-traps.md:708` — An execution override can be accepted without affecting the launched command.
-- `durable-traps.md:713` — A reply that returns nothing usable can have exhausted its output budget.
-- `durable-traps.md:719` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
-- `durable-traps.md:730` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
-- `durable-traps.md:737` — The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:743` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
-- `durable-traps.md:759` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
-- `durable-traps.md:764` — A commit-carries-its-record-update gate has a covered mechanical half and an uncovered semantic half (measured 2026-08-18, closed covered-by-neighbors).
-- `durable-traps.md:778` — Never amend or rebase a landed wave commit after the remediation workload prepare (2026-08-19).
-- `durable-traps.md:786` — A subagent's Read tool can serve STALE pre-edit content for a file another agent is concurrently editing (2026-08-20).
-- `durable-traps.md:794` — A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the failure text tells you to bump the cache version (2026-08-24).
-- `durable-traps.md:802` — CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).
-- `durable-traps.md:804` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
-- `durable-traps.md:806` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
-- `durable-traps.md:818` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
-- `durable-traps.md:834` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
-- `durable-traps.md:851` — A successful process exit does not establish a usable review result.
-- `durable-traps.md:858` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
-- `durable-traps.md:869` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
+- `durable-traps.md:26` — A checkout under a deep directory fails on Windows: "Filename too long" (2026-10-01).
+- `durable-traps.md:31` — A background PowerShell task can fail with NO output (2026-09-18).
+- `durable-traps.md:36` — An entry that reinterprets an incident must quote or link the primary record's own words for the mechanism, not restate them.
+- `durable-traps.md:40` — A guard that fires AS DESIGNED is not friction and is never re-filed as a defect (owner decision 2026-09-05, nightly item bl-1).
+- `durable-traps.md:50` — A delegated `codex exec` lane runs the sprint ceremony and CONSUMES the session's lap record (2026-08-29, ENFORCED IN PART).
+- `durable-traps.md:65` — `gh run list --commit <short-sha>` silently returns an EMPTY set — the flag matches the FULL 40-character sha only (2026-08-29).
+- `durable-traps.md:71` — Parallel deep `codex exec` lanes exhaust the ChatGPT quota in well under an hour, and a lane dies mid-answer with NO verdict (2026-08-28).
+- `durable-traps.md:83` — Mechanical-analyzer acquisitions decided against — do not re-propose without new evidence (folded here 2026-08-27 from the retired mechanical-analyzer layer spec, now deleted).
+- `durable-traps.md:98` — `git add -A` in a SHARED checkout commits a CONCURRENT session's files under your message (2026-08-26).
+- `durable-traps.md:107` — Generating code through a Bash heredoc loses ONE level of backslash escaping (2026-08-26).
+- `durable-traps.md:116` — Two pushes landing close together can leave the NEWER commit with no CI signal (2026-08-26).
+- `durable-traps.md:123` — A session rooted ABOVE the repo loads NONE of its Claude Code hooks (measured 2026-08-26) — the COMMIT gate no longer depends on that, the shell traps still do.
+- `durable-traps.md:135` — A tracked generated doc that links to an UNTRACKED file blocks every docs-touching commit (2026-08-20).
+- `durable-traps.md:145` — `git commit` after `git add <paths>` commits the whole INDEX, not your paths (2026-08-20).
+- `durable-traps.md:151` — A vitest CLI file filter resurrects same-suffixed test COPIES under stale worktree dirs (2026-08-06).
+- `durable-traps.md:162` — The Workflow tool's per-agent `model` override may not take (observed 2026-08-06).
+- `durable-traps.md:169` — A spend-limit death returns a workflow as `completed` with a success-shaped empty result (2026-08-25).
+- `durable-traps.md:179` — A broad multi-file review scope kills both peer-CLI lanes, and they fail in OPPOSITE shapes (2026-08-09 and 2026-08-10, four deaths in two nights).
+- `durable-traps.md:206` — A PreToolUse block kills the WHOLE chained command — the earlier statements never ran (2026-07-25).
+- `durable-traps.md:214` — An "open item" claim in a MEMORY or spec is a lead, not a work order (2026-07-19).
+- `durable-traps.md:219` — Never delete from a backlog file by LINE NUMBER.
+- `durable-traps.md:225` — A long multi-line prompt passed INLINE to a peer-CLI lane arrives truncated, and the lane then offers to work from whatever file it can find (2026-08-23).
+- `durable-traps.md:238` — A lane that lost its tools FABRICATES a confident answer instead of failing — but workspace trust is NOT what takes them away (2026-08-15, premise corrected by measurement 2026-08-29).
+- `durable-traps.md:261` — The offload lane degrades on TWO independent axes — payload SIZE and CONCURRENCY — and both look identical to a weak or dead model
+- `durable-traps.md:289` — The Bash tool silently CLAMPS `timeout` to 600000ms (2026-07-24).
+- `durable-traps.md:302` — Empty repo-root files named from code or prose are cmd.exe REDIRECT artifacts, and since 2026-08-30 NOTHING in this repo watches for them (relanded here as its guard was deleted).
+- `durable-traps.md:319` — Git Bash MANGLES a leading-slash argument into a Windows path (2026-07-25).
+- `durable-traps.md:333` — Concurrent agent sessions can share the ONE primary checkout (2026-07-23).
+- `durable-traps.md:351` — The pre-commit gate scans the WHOLE command string — including commit-message text — for the hooksPath/no-verify bypass tokens (2026-07-21).
+- `durable-traps.md:365` — The offload lane must inline source WITH LINE NUMBERS, or any file:line ask is unanswerable (2026-07-20, medium).
+- `durable-traps.md:373` — An offload-lane model will fabricate SUPPORTING QUOTES while getting the STRUCTURE right (2026-07-20, medium).
+- `durable-traps.md:383` — After an unattended run, `git diff` the tracked docs before committing.
+- `durable-traps.md:395` — npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).
+- `durable-traps.md:417` — `git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is NOT a rejection.
+- `durable-traps.md:423` — The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file wall is expected, not a hang.
+- `durable-traps.md:443` — One test runner: vitest
+- `durable-traps.md:457` — Don't mask the test exit code with a REDIRECT.
+- `durable-traps.md:475` — Global `-g` install BLOCKS `postinstall`
+- `durable-traps.md:485` — A global junction to a LIVE working tree silently shadows a registry install.
+- `durable-traps.md:491` — PowerShell
+- `durable-traps.md:500` — Packaged/global-install drift is caught ONLY by `smoke:packaged-*`, never by dev, `npm run check`, knip or vitest — so it fails the gate loudly, not silently.
+- `durable-traps.md:517` — Front-load a broad "does this already exist" sweep BEFORE authoring goal_spec/context_bundle/ module_decomposition, not just a targeted one.
+- `durable-traps.md:524` — Don't fan out a large mechanical edit across parallel subagents that spawn their OWN grandchildren.
+- `durable-traps.md:529` — Do not hand-edit a wedged audit run — use `audit-code force-synthesis`.
+- `durable-traps.md:534` — A scratch file written into the repository root is tree dirt for the nightly clean-tree rule (2026-08-22, low).
+- `durable-traps.md:541` — A residual-reference check run with an ignore-bypassing search manufactures false positives (2026-07-24, low).
+- `durable-traps.md:543` — A root-containment check must survive BOTH a win32 cross-drive path and a real `..`-prefixed name.
+- `durable-traps.md:551` — The Grep tool's content output can mangle comment markers with a BACKSLASH.
+- `durable-traps.md:556` — After a "string to replace not found" on text you JUST wrote, grep for the anchor instead of re-reading the whole file (2026-07-16).
+- `durable-traps.md:560` — A `check:*` typecheck leg can exit non-zero with NO error text when it races the async PostToolUse typecheck hook (2026-08-27).
+- `durable-traps.md:568` — A typecheck sweep's error count is not final until you re-run it.
+- `durable-traps.md:576` — An untypechecked fixture can sit inert for months while its suite reads green.
+- `durable-traps.md:597` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
+- `durable-traps.md:608` — A backlog entry's bold title must not contain `
+- `durable-traps.md:613` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
+- `durable-traps.md:644` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.
+- `durable-traps.md:653` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
+- `durable-traps.md:660` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:674` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
+- `durable-traps.md:685` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
+- `durable-traps.md:694` — An external-delegation directive and the Workflow tool are in tension — Workflow has no external lane (2026-08-27; reworded 2026-09-22 for the switch/agent-dispatch lap <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->).
+- `durable-traps.md:705` — agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run (2026-08-27).
+- `durable-traps.md:713` — An execution override can be accepted without affecting the launched command.
+- `durable-traps.md:718` — A reply that returns nothing usable can have exhausted its output budget.
+- `durable-traps.md:724` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:735` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
+- `durable-traps.md:742` — The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).
+- `durable-traps.md:748` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
+- `durable-traps.md:764` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
+- `durable-traps.md:769` — A commit-carries-its-record-update gate has a covered mechanical half and an uncovered semantic half (measured 2026-08-18, closed covered-by-neighbors).
+- `durable-traps.md:783` — Never amend or rebase a landed wave commit after the remediation workload prepare (2026-08-19).
+- `durable-traps.md:791` — A subagent's Read tool can serve STALE pre-edit content for a file another agent is concurrently editing (2026-08-20).
+- `durable-traps.md:799` — A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the failure text tells you to bump the cache version (2026-08-24).
+- `durable-traps.md:807` — CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).
+- `durable-traps.md:809` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
+- `durable-traps.md:811` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
+- `durable-traps.md:823` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
+- `durable-traps.md:839` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
+- `durable-traps.md:856` — A successful process exit does not establish a usable review result.
+- `durable-traps.md:863` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
+- `durable-traps.md:874` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
 
 <!-- END GENERATED SEEK INDEX -->
 

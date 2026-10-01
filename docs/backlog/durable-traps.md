@@ -23,6 +23,11 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `tests/shared/sync-spawn-budget.test.ts` reds because three sync spawns each blocked >60s
   (2026-09-16 — all three passed alone on the quiet re-run).
 
+- **A checkout under a deep directory fails on Windows: "Filename too long" (2026-10-01).** Some
+  tracked paths (nightly proposals, remediation-contract fixtures) exceed the Windows path limit
+  when the worktree root is long, e.g. inside a session scratchpad; `git worktree add` then aborts
+  with "Could not reset index file". Put a temporary checkout at a short path, or verify a tree
+  through a temporary index (`GIT_INDEX_FILE`, `read-tree`, `apply --cached`, `write-tree`).
 - **A background PowerShell task can fail with NO output (2026-09-18).** `npm run build` started
   as a background PowerShell task exited non-zero with an empty log; the same chain started as a
   background Bash task (`cmd1 && cmd2 > log 2>&1`) worked. Start a long gate as a Bash background
