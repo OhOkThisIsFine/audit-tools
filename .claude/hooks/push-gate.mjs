@@ -74,6 +74,16 @@ const git = (args) => {
   return { ok: r.status === 0, stdout: r.stdout ?? '' };
 };
 
+// Git sends a source-only refspec to the full ref name its source resolves to,
+// so a symbolic source (`HEAD`, `@`) lands on the checked-out branch. An
+// unresolvable or detached source keeps its literal name: git refuses that push.
+const sourceOnlyDestination = (source) => {
+  const full = git(['rev-parse', '--symbolic-full-name', '--end-of-options', source]);
+  // rev-parse echoes `--end-of-options` itself as a line; the name is the last.
+  const name = full.ok ? (full.stdout.trim().split(/\r?\n/).pop() ?? '') : '';
+  return name.startsWith('refs/') ? name : source;
+};
+
 // Resolve each explicit local source, not the current checkout content. A
 // protected destination may receive a different branch or an older commit.
 const sources = [];
@@ -145,7 +155,10 @@ for (const statement of pushes) {
     const ref = raw.replace(/^\+/, '');
     const colon = ref.indexOf(':');
     const source = colon < 0 ? ref : ref.slice(0, colon);
-    const target = (colon < 0 ? ref : ref.slice(colon + 1)).replace(/^refs\/heads\//, '');
+    // A source-only refspec pushes to the source's own full ref name, as git
+    // resolves it: `HEAD` and `@` on main name refs/heads/main, not "HEAD".
+    const named = colon < 0 ? sourceOnlyDestination(ref) : ref.slice(colon + 1);
+    const target = named.replace(/^refs\/heads\//, '');
     if (source && PROTECTED.includes(target)) sources.push(source);
   }
 }

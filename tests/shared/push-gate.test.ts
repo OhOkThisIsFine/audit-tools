@@ -148,6 +148,33 @@ describe("push-gate: an agent push to a protected branch needs a full-suite stam
     expect(runHook(root, "git push origin HEAD:refs/heads/main").status).toBe(2);
   });
 
+  it("resolves a source-only symbolic refspec (`HEAD`, `@`) to the checked-out branch", () => {
+    // Git pushes a source-only refspec to the source's own full ref name, so on
+    // main `git push origin HEAD` updates main exactly as `origin main` does.
+    const forms = [
+      "git push origin HEAD",
+      "git push origin @",
+      "git push --set-upstream origin HEAD",
+      "git push -u origin @",
+      "git push origin +HEAD",
+    ];
+    const onMain = makeRepo();
+    for (const cmd of forms) {
+      const r = runHook(onMain, cmd);
+      expect(r.status, `"${cmd}" on main must be refused; stderr:\n${r.stderr}`).toBe(2);
+    }
+    writeSuiteGreenStamp(onMain, worktreeTree(onMain));
+    for (const cmd of forms) expect(runHook(onMain, cmd).status, cmd).toBe(0);
+    const onBranch = makeRepo({ branch: "feature/x" });
+    for (const cmd of forms) expect(runHook(onBranch, cmd).status, cmd).toBe(0);
+  });
+
+  it("resolves a configured source-only `HEAD` push refspec to the checked-out branch", () => {
+    const root = makeRepo();
+    expect(spawnSyncHidden("git", ["config", "remote.origin.push", "HEAD"], { cwd: root, encoding: "utf8" }).status).toBe(0);
+    expect(runHook(root, "git push origin").status).toBe(2);
+  });
+
   it("does not gate an explicit feature destination merely because HEAD is main", () => {
     const root = makeRepo();
     expect(runHook(root, "git push origin HEAD:feature/x").status).toBe(0);
