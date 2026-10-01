@@ -29,7 +29,7 @@
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — A loop-core change can reach `main` without an attestation (2026-10-01, medium).
-- `open-bugs.md:10` — Remediate plan review: the round cap counts the plan's whole life (2026-10-01, medium).
+- `open-bugs.md:10` — Remediate plan review: an operator cannot record a disposition of a judge-accepted counterexample (2026-10-01, medium).
 - `open-bugs.md:11` — A clarification that re-adds an in-scope file wedges the plan (2026-10-01, medium).
 - `open-bugs.md:12` — Audit prompts still say "subagent" and the loader still talks to audit-tools developers (2026-10-01, medium; re-opens O49 and O03, closed by #12 with the defect present).
 - `open-bugs.md:13` — `dispatch/lens-definitions.json` ships with no reader (2026-10-01, medium).

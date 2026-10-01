@@ -152,6 +152,17 @@
     }
   },
   "reviews": {
+    "19ae69424562b47f": {
+      "reviewed_by": "claude-opus-5-5-reviewer",
+      "attester_class": "agent",
+      "checked": "npm run build green; vitest tests/remediate plus every tests/shared suite referencing contractPipeline/repair_rounds: 1288 passed 0 failed 4 skipped. Red proof: reverted the approval write to repair_rounds:history.repair_rounds in the working tree, new test failed (expected 8 to be 0), restored to staged blob. Unbounded-loop check: only judge approval resets the count, each cycle stays capped at 8, and a new cycle needs an operator forceRevision or source change; spec/remediation-workflow-design.md and the backlog property ask for a per-cycle bound, no global bound documented. Other keys: repair_rounds read only at the two >=8 gates; history_sha256 is hashed after the reset write and readApprovedExecutionPlan rehashes the on-disk file, so runs approved before this change keep verifying (their stored file is unchanged).",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-01T23:43:49.410Z",
+      "vouches": {
+        "src/remediate/steps/contractPipeline.ts": "a8b0a9f266275df7d6ae93d215339970b8d7e832"
+      }
+    },
     "9bc59db653647a3a": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -528,7 +539,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "19ae69424562b47f"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
       "baseline": "7b79934e86baf378"

@@ -242,7 +242,8 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       const finalCritic = CriticSchema.parse((await readPlanReview(options.artifactsDir, "critic", canonical.revision_sha256))?.result);
       const finalExamples = new Map(history.counterexamples.map(entry => [entry.id,entry]));
       for (const entry of finalCritic.counterexamples) finalExamples.set(entry.id,entry);
-      await writeJsonFile(executionPlanPaths(options.artifactsDir).history,{counterexamples:[...finalExamples.values()],accepted_ids:[],repair_rounds:history.repair_rounds});
+      // Approval closes this review cycle: the repair bound is per cycle, so a later revision of the approved plan starts at zero.
+      await writeJsonFile(executionPlanPaths(options.artifactsDir).history,{counterexamples:[...finalExamples.values()],accepted_ids:[],repair_rounds:0});
       const paths=executionPlanPaths(options.artifactsDir);
       const reviews=Object.fromEntries(await Promise.all(PLAN_REVIEW_ROLES.map(async role=>[role,hashContent(stableStringify(await readPlanReview(options.artifactsDir,role,canonical.revision_sha256)))])));
       await writeJsonFile(paths.approval, { revision_sha256: canonical.revision_sha256, judge_input_sha256: result.input_sha256,

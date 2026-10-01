@@ -165,3 +165,38 @@ test("conceptual repairs have an eight-decision bound and repeated author pauses
   }
   expect(await readApprovedExecutionPlan(f.artifactsDir)).toBeUndefined();
 });
+
+test("approval closes the review cycle, so a later conceptual repair of the approved plan starts with a fresh repair bound", async () => {
+  const f = await fixture();
+  const needsRepair = async () => {
+    const canonical = (await readCanonicalPlan(f.artifactsDir))!;
+    await writeJsonFile(join(f.paths.directory, "owner-decision.json"), {
+      revision_sha256: canonical.revision_sha256, confirmed_by: "host", approved_unit_ids: [f.plan.units[0]!.id], declined_units: [],
+    });
+    await buildNextContractPipelineStep(f.options);
+    const request = (await readOptionalJsonFile<{ prompt_sha256: string }>(f.paths.review("critique").request))!;
+    await writeJsonFile(f.paths.review("critique").submission, { contract_version: "review-submission/v1", prompt_sha256: request.prompt_sha256,
+      review: { mode: "independent", reason: "Independent conceptual reviewer" },
+      result: { verdict: "needs_repair", issues: [{ id: "ISSUE-scope", description: "The changed interface remains unspecified",
+        requirement_ids: ["REQ-greeting"], unit_ids: ["UNIT-greeting"], blocking: true }] },
+    });
+    return buildNextContractPipelineStep(f.options);
+  };
+  // The first cycle spends the whole bound and still converges to an approval.
+  for (let round = 0; round < 8; round++) {
+    expect((await needsRepair())?.status).toBe("ready");
+    f.plan.objective = `Clarify the affected greeting interface, revision ${round + 1}`;
+    expect((await submit(f)).issues).toEqual([]);
+  }
+  expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(8);
+  await approveExecutablePlanFixture(f);
+  expect(await readApprovedExecutionPlan(f.artifactsDir)).toBeDefined();
+  expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(0);
+  // The operator asks for a revision of the approved plan; its first repair decision must not hit the old cycle's cap.
+  expect((await buildNextContractPipelineStep({ ...f.options, forceRevision: true }))?.status).toBe("ready");
+  f.plan.objective = "Add a greeting with an operator-requested follow-up";
+  expect((await submit(f)).issues).toEqual([]);
+  const step = await needsRepair();
+  expect(step?.status).toBe("ready");
+  expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(1);
+});
