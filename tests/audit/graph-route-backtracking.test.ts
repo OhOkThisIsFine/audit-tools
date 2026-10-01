@@ -43,17 +43,9 @@ import {
  * quadratic, measured at 3.6/10.7/45.2/181.1ms across 2k/4k/8k/16k markers with
  * the unbounded gap, and 4.4ms at 16k bounded.
  *
- * Timing assertions are deliberate here — see the sibling test in
- * `tests/remediate/change-classification-backtracking.test.ts` for why this
- * input class warrants one: the separation is two orders of magnitude, so the
- * assertion detects an asymptotic regression rather than a constant factor.
+ * Hard subprocess deadlines below bound pathological regressions while allowing
+ * ordinary CI scheduling noise; semantic assertions prove the public extractor ran.
  */
-
-function elapsedMsOf(run: () => void): number {
-  const started = process.hrtime.bigint();
-  run();
-  return Number(process.hrtime.bigint() - started) / 1e6;
-}
 
 describe("framework route extraction is linear on adversarial input", () => {
   it("scans growing route objects in a bounded subprocess and preserves their paths", () => {
@@ -130,50 +122,32 @@ describe("framework route extraction is linear on adversarial input", () => {
  * COMPLETES (a well-formed import) is linear under the old regex too, so a test
  * written on that shape passes with the bug present and proves nothing.
  *
- * The assertion is a RATIO ACROSS A DOUBLING, with the same floor the sibling
- * suite uses: linear doubles, quadratic quadruples, and the floor keeps a loaded
- * runner's noise on a sub-millisecond small case from making the ratio noise.
+ * A bounded subprocess checks growing inputs and exact empty evidence. The old
+ * quadratic scanners exceed the ceiling; the linear scans have ample headroom.
+ * Unlike a millisecond doubling ratio, the ceiling tolerates CI scheduling noise.
  */
-function importClauseSource(markerCount: number): string {
-  return `export const routes = 0;\n${"import ".repeat(markerCount)}`;
-}
-
-function destructuringSource(markerCount: number): string {
-  return `export const routes = 0;\n${"const { ".repeat(markerCount)}`;
-}
-
-/**
- * Time the same measurement at 40k and 80k markers.
- *
- * Both sizes are measured TWICE and the smaller of the two is used, because a
- * loaded runner produces a slow outlier and a growth test must not read one as
- * asymptotics. The warm-up call is discarded entirely: first-call JIT tier-up
- * would otherwise be billed to whichever size ran first.
- */
-function doubling(
-  measure: (markerCount: number) => void,
-): { smallMs: number; largeMs: number } {
-  measure(40_000);
-  const times = (markerCount: number) => [elapsedMsOf(() => measure(markerCount)), elapsedMsOf(() => measure(markerCount))];
-  const small = times(40_000);
-  const large = times(80_000);
-  return { smallMs: Math.min(...small), largeMs: Math.min(...large) };
+function expectBoundedBindingScan(marker: string): void {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { extractRegisteredRouteEvidence } from './src/audit/extractors/graphRoutes.ts';
+    for (const size of [100000, 200000, 400000]) {
+      const source = 'export const routes = 0;\\n' + ${JSON.stringify(marker)}.repeat(size);
+      const result = extractRegisteredRouteEvidence('src/app/routes.ts', source, new Map());
+      assert.deepEqual(result.routes, []);
+      assert.deepEqual(result.calls, []);
+    }
+  `;
+  const result = spawnSync(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", script], {
+    cwd: process.cwd(), encoding: "utf8", timeout: 8000,
+  });
+  expect(result.error, result.stderr).toBeUndefined();
+  expect(result.status, result.stderr).toBe(0);
 }
 
 describe("the import-binding clause scan is linear on adversarial input", () => {
   it("scans a marker run with no completing `from` without quadratic backtracking", () => {
-    const { smallMs, largeMs } = doubling((markers) =>
-      extractRegisteredRouteEvidence(
-        "src/app/routes.ts",
-        importClauseSource(markers),
-        new Map(),
-      ),
-    );
-    expect(
-      largeMs,
-      `40k=${smallMs.toFixed(2)}ms 80k=${largeMs.toFixed(2)}ms`,
-    ).toBeLessThan(Math.max(smallMs * 3, 30));
-  }, 120_000);
+    expectBoundedBindingScan("import ");
+  }, 12000);
 
   it("still reads every binding a well-formed clause declares", () => {
     // The scan must not cost the shapes it exists to read.
@@ -202,18 +176,8 @@ describe("the import-binding clause scan is linear on adversarial input", () => 
 
 describe("the destructuring-require scan is linear on adversarial input", () => {
   it("scans a marker run with no closing brace without quadratic backtracking", () => {
-    const { smallMs, largeMs } = doubling((markers) =>
-      extractRegisteredRouteEvidence(
-        "src/app/routes.ts",
-        destructuringSource(markers),
-        new Map(),
-      ),
-    );
-    expect(
-      largeMs,
-      `40k=${smallMs.toFixed(2)}ms 80k=${largeMs.toFixed(2)}ms`,
-    ).toBeLessThan(Math.max(smallMs * 3, 30));
-  }, 120_000);
+    expectBoundedBindingScan("const { ");
+  }, 12000);
 
   it("still reads every destructured require binding", () => {
     const source = [
