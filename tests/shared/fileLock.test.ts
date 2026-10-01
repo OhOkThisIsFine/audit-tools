@@ -532,21 +532,40 @@ test("acquireLock honours the timeout deadline without large overshoot", async (
     const lockPath = tmpLockPath(dir);
     const token = await acquireLock(lockPath); // hold a fresh (non-stale) lock
     const timeoutMs = 250;
-    const start = Date.now();
+    // Virtual time: the injected clock moves ONLY when acquireLock sleeps, and
+    // each sleep resolves on the next macrotask. A wall-clock elapsed bound
+    // measured scheduler load, not acquireLock (968ms seen under a loaded full
+    // run); this asserts the deadline structure itself, independent of load.
+    const clock = makeClock(Date.now()); // start at real time so the held lock reads fresh
+    const start = clock();
+    const deadline = start + timeoutMs;
+    const sleeps: { at: number; ms: number }[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms = 0, ...rest: unknown[]) => {
+      const at = clock();
+      // A sleep requested once the deadline has passed means acquireLock is not
+      // honouring it; fail fast instead of looping forever in virtual time.
+      if (at >= deadline) throw new Error(`sleep requested at/after the deadline (t=+${at - start}ms)`);
+      sleeps.push({ at, ms });
+      clock.advance(ms);
+      return realSetTimeout(fn, 0, ...rest);
+    }) as unknown as typeof setTimeout;
     try {
       await assert.rejects(
-        () => acquireLock(lockPath, timeoutMs),
+        () => acquireLock(lockPath, timeoutMs, undefined, { now: clock }),
         (e) => e instanceof FileLockTimeoutError,
       );
     } finally {
+      globalThis.setTimeout = realSetTimeout;
       await releaseLock(lockPath, token);
     }
-    const elapsed = Date.now() - start;
-    // Deadline is checked before stale-check IO and the backoff sleep is clamped
-    // to the time left, so we neither give up early nor overshoot by a full
-    // backoff interval.
-    expect(elapsed >= timeoutMs - 60, `should not give up early; elapsed=${elapsed}ms`).toBeTruthy();
-    expect(elapsed <= timeoutMs + 600, `should not overshoot the deadline; elapsed=${elapsed}ms`).toBeTruthy();
+    // Every backoff sleep is clamped to the time left, so none crosses the
+    // deadline, and the timeout fires exactly when the deadline is reached:
+    // neither early nor after an extra backoff interval.
+    for (const { at, ms } of sleeps) {
+      expect(ms, `sleep at t=+${at - start}ms overshoots the deadline`).toBeLessThanOrEqual(deadline - at);
+    }
+    expect(clock() - start, "timed out at a virtual time other than the deadline").toBe(timeoutMs);
   });
 });
 
