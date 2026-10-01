@@ -86,6 +86,14 @@ async function emit(options: ContractPipelineStepOptions, prompt: string, status
   });
 }
 
+/**
+ * The repair bound is spent for this review cycle. Nothing records an operator override of a reviewer's refusal (by design;
+ * #14 removed waivers), so the step names the only working exits: a revised plan that is reviewed again, or cancelling the run.
+ */
+function repairBoundSpent(options: ContractPipelineStepOptions, review: string, kind: string, remaining: unknown): Promise<RemediationStep> {
+  return emit(options, `${review} has not converged after eight repair decisions in this review cycle. There is no operator override of the reviewers' refusal. To continue, revise the plan so it addresses every one of these ${kind}, and write the complete revision to ${executionPlanPaths(options.artifactsDir).submission}; the revision is reviewed again. Otherwise the operator may cancel the run. Do not implement an unapproved plan.\n\nRemaining ${kind}:\n${JSON.stringify(remaining, null, 2)}`, "blocked");
+}
+
 async function authorStep(options: ContractPipelineStepOptions, source: PlanSource, canonical?: CanonicalPlan, reason?: string) {
   const paths = executionPlanPaths(options.artifactsDir);
   return emit(options, renderPlanAuthorPrompt({ root: options.root, source, canonical,
@@ -216,7 +224,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       const critique = CritiqueSchema.parse(result.result);
       if (critique.verdict !== "approved" || critique.issues.some(issue => issue.blocking)) {
         const history=await readPlanReviewHistory(options.artifactsDir);
-        if(history.repair_rounds>=8) return emit(options,`Conceptual review has not converged after eight repair decisions. Ask the operator to resolve these remaining design issues: ${JSON.stringify(critique.issues)}`,"blocked");
+        if(history.repair_rounds>=8) return repairBoundSpent(options,"Conceptual review","design issues",critique.issues);
         await writeJsonFile(executionPlanPaths(options.artifactsDir).history,{...history,repair_rounds:history.repair_rounds+1,repair_revision:canonical.revision_sha256,repair_reason:JSON.stringify(critique)});
         return authorStep(options,source,canonical,JSON.stringify(critique,null,2));
       }
@@ -229,7 +237,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
         const counterexamples = new Map(history.counterexamples.map(entry => [entry.id, entry]));
         for (const example of critic.counterexamples) counterexamples.set(example.id, example);
         const acceptedIds = judge.classifications.filter(entry => entry.classification === "accepted").map(entry => entry.counterexample_id);
-        if (history.repair_rounds >= 8) return emit(options, "The reviewed plan has not converged after eight repair decisions. Ask the operator to resolve the named remaining counterexamples; do not implement an unapproved plan.", "blocked");
+        if (history.repair_rounds >= 8) return repairBoundSpent(options, "Plan review", "judge-accepted counterexamples", acceptedIds.map(id => counterexamples.get(id) ?? { id }));
         await writeJsonFile(executionPlanPaths(options.artifactsDir).history, { counterexamples: [...counterexamples.values()], accepted_ids: acceptedIds, repair_rounds: history.repair_rounds + 1, repair_revision: canonical.revision_sha256, repair_reason: JSON.stringify(judge) });
         return authorStep(options, source, canonical, JSON.stringify(judge, null, 2));
       }

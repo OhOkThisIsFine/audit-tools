@@ -152,8 +152,11 @@ challenges correctness and boundary assumptions; a separate judge disposes of
 those counterexamples. These responsibilities remain distinct even though they
 refer to the same plan rather than successive restatements of it.
 
-A valid counterexample changes the plan or remains an explicitly unresolved
-requirement. Approval binds the exact reviewed revision. Changed meaning requires
+A valid counterexample changes the plan, or the judge classifies it as a residual
+risk that the operator explicitly accepts. Nothing records an operator override of
+a counterexample the judge accepted: when the repair bound for a review cycle is
+spent, the exits are a revised plan that is reviewed again, or cancelling the run.
+Approval binds the exact reviewed revision. Changed meaning requires
 fresh affected review; a post-approval semantic planner cannot silently change
 scope, dependencies or what a unit is supposed to accomplish.
 

@@ -24,6 +24,15 @@ async function submit(f: Awaited<ReturnType<typeof fixture>>) {
   await writeJsonFile(f.paths.submission, { base_revision_sha256: prior.revision_sha256, plan: f.plan, retired_requirements: [] });
   return ingestExecutionPlan(f.options);
 }
+/** A spent repair bound names the only working exits: no override is promised, the remaining items are listed, and a revision goes to the plan submission. */
+async function expectSpentBoundPrompt(f: Awaited<ReturnType<typeof fixture>>, step: { prompt_path: string }, remainingId: string) {
+  const prompt = await readFile(step.prompt_path, "utf8");
+  expect(prompt).not.toMatch(/resolve/i);
+  expect(prompt).toMatch(/no operator override/i);
+  expect(prompt).toContain(f.paths.submission.replaceAll("\\", "/"));
+  expect(prompt).toContain(remainingId);
+  expect(prompt).toMatch(/cancel/i);
+}
 async function bindIntent(f: Awaited<ReturnType<typeof fixture>>, scope: Partial<IntentCheckpoint>) {
   await writeJsonFile(join(f.artifactsDir, "intent_checkpoint.json"), {
     schema_version: "intent-checkpoint/v1", confirmed_at: "2026-09-30", confirmed_by: "host",
@@ -153,6 +162,7 @@ test("conceptual repairs have an eight-decision bound and repeated author pauses
     const step = await buildNextContractPipelineStep(f.options);
     if (round === 8) {
       expect(step?.status).toBe("blocked");
+      await expectSpentBoundPrompt(f, step!, "ISSUE-scope");
       expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(8);
       break;
     }
@@ -199,4 +209,31 @@ test("approval closes the review cycle, so a later conceptual repair of the appr
   const step = await needsRepair();
   expect(step?.status).toBe("ready");
   expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(1);
+});
+
+test("a spent judge repair bound names the accepted counterexamples and offers only a revision or cancel, never an operator override", async () => {
+  const f = await fixture();
+  const canonical = (await readCanonicalPlan(f.artifactsDir))!;
+  await writeJsonFile(f.paths.history, { counterexamples: [], accepted_ids: [], repair_rounds: 8 });
+  await writeJsonFile(join(f.paths.directory, "owner-decision.json"), {
+    revision_sha256: canonical.revision_sha256, confirmed_by: "host", approved_unit_ids: [f.plan.units[0]!.id], declined_units: [],
+  });
+  for (const role of ["critique", "critic", "judge"] as const) {
+    await buildNextContractPipelineStep(f.options);
+    const request = (await readOptionalJsonFile<{ prompt_sha256: string }>(f.paths.review(role).request))!;
+    const result = role === "critique" ? { verdict: "approved", issues: [] } : role === "critic" ? {
+      counterexamples: [{ id: "CE-empty-name", claim: "An empty name yields a malformed greeting", reproduction_steps: ["Pass an empty name"],
+        expected: "A defined greeting", actual: "Hello, !", requirement_ids: ["REQ-greeting"], unit_ids: ["UNIT-greeting"] }],
+    } : {
+      verdict: "needs_repair", classifications: [{ counterexample_id: "CE-empty-name", classification: "accepted", rationale: "Reproduces against the plan" }],
+      requirement_assessments: [{ requirement_id: "REQ-greeting", verdict: "insufficient", evidence: ["Empty name is unspecified"] }], disposition_assessments: [],
+    };
+    await writeJsonFile(f.paths.review(role).submission, { contract_version: "review-submission/v1", prompt_sha256: request.prompt_sha256,
+      review: { mode: "independent", reason: "Independent fixture reviewer" }, result });
+  }
+  const step = await buildNextContractPipelineStep(f.options);
+  expect(step?.status).toBe("blocked");
+  await expectSpentBoundPrompt(f, step!, "CE-empty-name");
+  expect((await readPlanReviewHistory(f.artifactsDir)).repair_rounds).toBe(8);
+  expect(await readApprovedExecutionPlan(f.artifactsDir)).toBeUndefined();
 });
