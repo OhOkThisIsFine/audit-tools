@@ -20,8 +20,7 @@ is present on the owner's machine and was not reviewed in that lap; retain unkno
 Work the 2026-10-01 medium entries in [`open-bugs.md`](backlog/open-bugs.md). The push-gate
 `HEAD` refspec bypass is reproduced and the smallest; the loop-core attestation gap at the
 GitHub merge boundary is the one that let the others land unreviewed.
-**Live owner decision:** the `codex/recovery-reconciliation` worktree and `stash@{0}` hold
-unique pre-#14 work; see the evaluation record.
+**Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->

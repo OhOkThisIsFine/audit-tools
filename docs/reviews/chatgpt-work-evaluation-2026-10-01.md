@@ -66,6 +66,7 @@ failures. The cloud agent validated on Linux only, so the Windows failures were 
 - The project memory store described the deleted contract pipeline. It was swept against HEAD
   (7 notes deleted, 33 edited); `check:memory-citations` had gone red on one dangling path.
 - Two Codex worktrees from 2026-09-26 held uncommitted work. `codex/packet-3-contract-fields`
-  is fully on `main` and was removed. `codex/recovery-reconciliation` (and `stash@{0}`, marked
-  "PRESERVE") holds unique work written against the pre-#14 architecture and was kept for an
-  owner decision.
+  is fully on `main` and was removed. `codex/recovery-reconciliation` held unique work written against the pre-#14
+  architecture; by owner decision it was archived (verified tree-identical), the worktree was
+  removed, `stash@{0}` was kept, and the salvage is a forward track in
+  [`forward-tracks.md`](../backlog/forward-tracks.md).
