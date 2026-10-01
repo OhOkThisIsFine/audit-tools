@@ -38,7 +38,6 @@ export const PRIORITY: string[] = [
   "intent_equivalence_current",
   // Inspection needs confirmed scope and structure, not completed architecture inquiry.
   "planning_artifacts",
-  "architecture_discoveries_current",
   "charter_extraction_current",
   "charter_comparison_current",
   "charter_fidelity_current",

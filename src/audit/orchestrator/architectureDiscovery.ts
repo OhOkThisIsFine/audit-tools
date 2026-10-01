@@ -61,6 +61,21 @@ function existingFindingFollowups(bundle: ArtifactBundle): Map<string, AuditTask
   return byDiscovery;
 }
 
+/**
+ * The sorted files a clarification question's charter difference spans: the
+ * register lane nodes its correspondence's members name. The only part of the
+ * register's differences, correspondences and lanes discovery reads — shared
+ * with the audit_tasks.json slice projection (dependencySlices.ts).
+ */
+export function charterQuestionFiles(bundle: Pick<ArtifactBundle, "charter_register">, differenceId: string): string[] {
+  const register = bundle.charter_register;
+  const difference = register?.differences.find((item) => item.difference_id === differenceId);
+  const correspondence = register?.correspondences.find((item) => item.correspondence_id === difference?.correspondence_id);
+  return [...new Set((correspondence?.members ?? []).flatMap((member) =>
+    register?.lanes.find((lane) => lane.kind === member.kind)?.nodes
+      .filter((node) => member.node_ids.includes(node.node_id)).flatMap((node) => node.files ?? []) ?? []))].sort();
+}
+
 /** Concrete unverified discoveries earn bounded follow-up, never another full audit. */
 export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Record<string, number> = {}): AuditTask[] {
   const selected = resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection);
@@ -106,11 +121,7 @@ export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Re
   for (const question of bundle.charter_clarification?.asked ?? []) {
     if (!allowsLens("architecture")) continue;
     if (question.answer === "leave_open") continue;
-    const difference = bundle.charter_register?.differences.find((item) => item.difference_id === question.difference_id);
-    const correspondence = bundle.charter_register?.correspondences.find((item) => item.correspondence_id === difference?.correspondence_id);
-    const paths = [...new Set((correspondence?.members ?? []).flatMap((member) =>
-      bundle.charter_register?.lanes.find((lane) => lane.kind === member.kind)?.nodes
-        .filter((node) => member.node_ids.includes(node.node_id)).flatMap((node) => node.files ?? []) ?? []).filter(inScope))].sort();
+    const paths = charterQuestionFiles(bundle, question.difference_id).filter(inScope);
     if (paths.length === 0) continue;
     const id = taskIdFor("charter-question", [question.request_id, ...paths]);
     const resolution = question.answer === undefined
@@ -129,12 +140,22 @@ export function isArchitectureDiscoveryTask(task: AuditTask): boolean {
   return task.tags?.includes(ARCHITECTURE_DISCOVERY_TAG) ?? false;
 }
 
-export function architectureDiscoveryWorkChanged(bundle: ArtifactBundle): boolean {
-  if (!bundle.audit_tasks) return false;
-  const current = bundle.audit_tasks.filter(isArchitectureDiscoveryTask);
-  const desired = architectureDiscoveryTasks(bundle);
-  const project = (tasks: AuditTask[]) => tasks.map((task) => ({ id: task.task_id, paths: task.file_paths, inputs: task.inputs, rationale: task.rationale })).sort((a, b) => compareCodeUnits(a.id, b.id));
-  return stableStringify(project(current)) !== stableStringify(project(desired));
+/**
+ * Re-derive the discovery family inside `bundle.audit_tasks` for a producer that
+ * rewrites audit_tasks.json without replanning (result ingestion). The DAG stamps
+ * that write against the current discovery inputs, so the family must be current
+ * when it lands: an issued task whose derivation is unchanged is kept as issued
+ * (status, estimates), a new one is added, a retired one is dropped.
+ */
+export function reconcileArchitectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Record<string, number> = {}): AuditTask[] {
+  const tasks = bundle.audit_tasks ?? [];
+  const derivation = (task: AuditTask) => stableStringify({ paths: task.file_paths, inputs: task.inputs, rationale: task.rationale });
+  const issued = new Map(tasks.filter(isArchitectureDiscoveryTask).map((task) => [task.task_id, task]));
+  const discovery = architectureDiscoveryTasks(bundle, lineIndex).map((task) => {
+    const existing = issued.get(task.task_id);
+    return existing && derivation(existing) === derivation(task) ? existing : task;
+  });
+  return [...tasks.filter((task) => !isArchitectureDiscoveryTask(task)), ...discovery];
 }
 
 /** Join current independent evidence without pretending an empty result refutes a claim. */

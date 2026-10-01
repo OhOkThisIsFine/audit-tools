@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/dependency-slices.test.ts, tests/audit/audit-frontier.test.ts
 /**
  * Per-EDGE semantic-slice projections for the staleness DAG (the charter
  * phantom-staleness fix, re-dogfood 2026-07-22 #6).
@@ -34,6 +35,7 @@ import {
   memberDependencyEdgeLines,
 } from "./charterPackets.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { charterQuestionFiles } from "./architectureDiscovery.js";
 
 type SliceProjection = (bundle: ArtifactBundle) => unknown;
 
@@ -94,9 +96,10 @@ function charterReadFileSlice(bundle: ArtifactBundle): unknown {
 }
 
 /**
- * The edge registry: `downstream → upstream → projection`. ONLY
- * `charter_register.json` (the expensive extraction step, the live incident
- * driver) is registered:
+ * The edge registry: `downstream → upstream → projection`. Two downstreams are
+ * registered: `charter_register.json` (the expensive extraction step, the live
+ * incident driver), and `audit_tasks.json` on its three late inputs (see the
+ * discovery slices above). Beyond those:
  *
  *  - `charter_clarification` / `systemic_challenge` keep their whole-artifact
  *    `repo_manifest` edges — HEAD trace shows `systemic_challenge` consumes the
@@ -121,6 +124,35 @@ function charterGraphEdgeSlice(bundle: ArtifactBundle): unknown {
   return memberDependencyEdgeLines(bundle);
 }
 
+// The surfaces `architectureDiscoveryTasks` (architectureDiscovery.ts) reads
+// from the three LATE inputs of audit_tasks.json (dependencyMap.ts
+// `LATE_INPUT_EDGES`). The slice compare is what keeps those edges convergent:
+// the upstreams re-derive AFTER planning, and a re-derivation that only moves
+// their revision (new dependency revisions, identical content) must not
+// re-select planning over an unchanged discovery input — a whole-revision
+// compare did exactly that and tripped the no-progress guard. Each projects
+// ONLY what discovery reads, and a file holding none of it projects exactly as
+// an absent file does (`null`): planning runs before these files exist, so a
+// first appearance with nothing to discover must not re-run it.
+function charterDiscoverySlice(bundle: ArtifactBundle): unknown {
+  const findings = bundle.charter_register?.findings ?? [];
+  const questionFiles = (bundle.charter_clarification?.asked ?? [])
+    .map((question) => ({ difference_id: question.difference_id,
+      files: charterQuestionFiles(bundle, question.difference_id) }))
+    .filter((entry) => entry.files.length > 0);
+  return findings.length > 0 || questionFiles.length > 0 ? { findings, questionFiles } : null;
+}
+
+function clarificationDiscoverySlice(bundle: ArtifactBundle): unknown {
+  const asked = bundle.charter_clarification?.asked ?? [];
+  return asked.length > 0 ? asked : null;
+}
+
+function systemicDiscoverySlice(bundle: ArtifactBundle): unknown {
+  const findings = bundle.systemic_challenge?.findings ?? [];
+  return findings.length > 0 ? findings : null;
+}
+
 export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
   Record<string, Partial<Record<string, SliceProjection>>>
 > = {
@@ -128,6 +160,11 @@ export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
     "structure_decomposition.json": consensusMembershipSlice,
     "repo_manifest.json": charterReadFileSlice,
     "graph_bundle.json": charterGraphEdgeSlice,
+  },
+  "audit_tasks.json": {
+    "charter_register.json": charterDiscoverySlice,
+    "charter_clarification.json": clarificationDiscoverySlice,
+    "systemic_challenge.json": systemicDiscoverySlice,
   },
 };
 

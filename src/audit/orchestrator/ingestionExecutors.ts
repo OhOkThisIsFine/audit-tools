@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/audit-frontier.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
@@ -30,6 +31,7 @@ import { updateRuntimeValidationReport } from "./runtimeValidationUpdate.js";
 import { resolveIntentLensSelection } from "./lensSelection.js";
 import { foldPendingRequeueTasks } from "./requeueFold.js";
 import { buildSelectiveDeepeningTasks } from "./selectiveDeepening/index.js";
+import { reconcileArchitectureDiscoveryTasks } from "./architectureDiscovery.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { buildTaskAffinityGraph } from "./taskAffinityGraph.js";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
@@ -39,6 +41,34 @@ function lineIndexFromTasks(tasks: AuditTask[] | undefined): Record<string, numb
   return Object.fromEntries(
     (tasks ?? []).flatMap((task) => Object.entries(task.file_line_counts ?? {})),
   );
+}
+
+/**
+ * The one assembly every incremental audit_tasks.json write goes through — the
+ * result-ingestion and both runtime-validation executors (planning re-derives
+ * the whole set, discovery family included, on its own). audit_tasks.json
+ * declares the discovery inputs (dependencyMap.ts), so a listed write is
+ * stamped against their current revisions: the architecture-discovery family is
+ * re-derived here, before that stamp, and the affinity graph and plan metrics
+ * are rebuilt from the same final set so the three never disagree.
+ */
+function reviewTaskArtifacts(
+  bundle: ArtifactBundle,
+  tasks: AuditTask[],
+): Pick<ArtifactBundle, "audit_tasks" | "task_affinity_graph" | "audit_plan_metrics"> {
+  const lineIndex = lineIndexFromTasks(tasks);
+  const auditTasks = canonicalizeAuditTasks(
+    reconcileArchitectureDiscoveryTasks({ ...bundle, audit_tasks: tasks }, lineIndex),
+  );
+  return {
+    audit_tasks: auditTasks,
+    task_affinity_graph: buildTaskAffinityGraph(auditTasks, { graphBundle: bundle.graph_bundle }),
+    audit_plan_metrics: buildAuditPlanMetrics(auditTasks, {
+      graphBundle: bundle.graph_bundle,
+      lineIndex,
+      sizeIndex: sizeIndexFromManifest(bundle.repo_manifest),
+    }),
+  };
 }
 
 function appendSelectiveDeepeningTasks(params: {
@@ -51,7 +81,6 @@ function appendSelectiveDeepeningTasks(params: {
   }
 
   const lineIndex = lineIndexFromTasks(params.bundle.audit_tasks);
-  const sizeIndex = sizeIndexFromManifest(params.bundle.repo_manifest);
   const selectiveDeepeningTasks = buildSelectiveDeepeningTasks({
     existingTasks: params.bundle.audit_tasks,
     results: params.results,
@@ -66,22 +95,13 @@ function appendSelectiveDeepeningTasks(params: {
     return { bundle: params.bundle, taskCount: 0, artifacts: [] };
   }
 
-  const auditTasks = canonicalizeAuditTasks([
-    ...params.bundle.audit_tasks,
-    ...selectiveDeepeningTasks,
-  ]);
   return {
     bundle: {
       ...params.bundle,
-      audit_tasks: auditTasks,
-      task_affinity_graph: buildTaskAffinityGraph(auditTasks, {
-        graphBundle: params.bundle.graph_bundle,
-      }),
-      audit_plan_metrics: buildAuditPlanMetrics(auditTasks, {
-        graphBundle: params.bundle.graph_bundle,
-        lineIndex,
-        sizeIndex,
-      }),
+      ...reviewTaskArtifacts(params.bundle, [
+        ...params.bundle.audit_tasks,
+        ...selectiveDeepeningTasks,
+      ]),
     },
     taskCount: selectiveDeepeningTasks.length,
     artifacts: [
@@ -217,7 +237,6 @@ export function runResultIngestionExecutor(
   // grammars, and applied no operator lens gate at all; see `requeueFold.ts`.
   const deepenedTasks = selectiveDeepening.bundle.audit_tasks ?? [];
   const lineIndex = lineIndexFromTasks(deepenedTasks);
-  const sizeIndex = sizeIndexFromManifest(selectiveDeepening.bundle.repo_manifest);
   const pendingRequeueTasks = foldPendingRequeueTasks({
     requeueTasks: requeuePayload.tasks,
     auditTasks: deepenedTasks,
@@ -226,10 +245,6 @@ export function runResultIngestionExecutor(
       selectiveDeepening.bundle.intent_checkpoint?.lens_selection,
     ),
   });
-  const allReviewTasks = canonicalizeAuditTasks([
-    ...deepenedTasks,
-    ...pendingRequeueTasks,
-  ]);
   // Record half of the staleness gate: refresh the per-result content-key
   // baselines for the just-ingested results (under their CURRENT, possibly
   // re-keyed, lineage) against live task content. A re-dispatched result thus
@@ -242,6 +257,12 @@ export function runResultIngestionExecutor(
     ingestedResults,
     liveTasksByTaskId,
   );
+  const ledgerBundle: ArtifactBundle = {
+    ...selectiveDeepening.bundle,
+    ...(priorMetadata
+      ? { artifact_metadata: { ...priorMetadata, result_baselines: refreshedBaselines } }
+      : {}),
+  };
   // Deterministic per-run access-memory: a pure summary of what the ingested
   // result ledger covered, harvested in the same step that appends the ledger so
   // it records the post-append audit_results revision (dependency-first). Raw
@@ -251,26 +272,13 @@ export function runResultIngestionExecutor(
   // attention signal for a continuity bias (see deriveAccessMemory docs).
   const accessMemory = deriveAccessMemory(mergedResults);
   const finalBundle: ArtifactBundle = {
-    ...selectiveDeepening.bundle,
-    audit_tasks: allReviewTasks,
-    task_affinity_graph: buildTaskAffinityGraph(allReviewTasks, {
-      graphBundle: selectiveDeepening.bundle.graph_bundle,
-    }),
+    ...ledgerBundle,
+    // Assembled against the post-append ledger and refreshed baselines: this
+    // call writes audit_results.jsonl too, so the discovery family that ledger
+    // derives must land with the write that is stamped against it.
+    ...reviewTaskArtifacts(ledgerBundle, [...deepenedTasks, ...pendingRequeueTasks]),
     requeue_tasks: requeuePayload.tasks,
     access_memory: accessMemory,
-    ...(priorMetadata
-      ? {
-          artifact_metadata: {
-            ...priorMetadata,
-            result_baselines: refreshedBaselines,
-          },
-        }
-      : {}),
-    audit_plan_metrics: buildAuditPlanMetrics(allReviewTasks, {
-      graphBundle: selectiveDeepening.bundle.graph_bundle,
-      lineIndex,
-      sizeIndex,
-    }),
   };
 
   return {

@@ -105,9 +105,15 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   };
 }
 
-test("the registry is contract-pinned: exactly charter_register's three edges", () => {
+test("the registry is contract-pinned: charter_register's three edges and audit_tasks' three late inputs", () => {
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS).sort()).toEqual([
+    "audit_tasks.json",
     "charter_register.json",
+  ]);
+  expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS["audit_tasks.json"]!).sort()).toEqual([
+    "charter_clarification.json",
+    "charter_register.json",
+    "systemic_challenge.json",
   ]);
   // graph_bundle joined at design resolution 4: the STRUCTURAL channel's packet
   // embeds member-member dependency edges, so enrichment-merged edges must
@@ -722,4 +728,33 @@ test("recovery: the emitted record carries the explanation, not just the stale l
   // happens, that this is a correct re-derivation rather than a wedge.
   expect(record.recovery?.message).toContain("correct recovery");
   expect(record.recovery?.caused_by).toEqual(["tooling_manifest.json"]);
+});
+
+test("a late discovery input with nothing discovery reads projects exactly as an absent file; a real entry moves the slice", () => {
+  const finding = { id: "F-1", title: "Ownership gap", category: "architecture", severity: "high" as const,
+    confidence: "medium" as const, lens: "correctness", summary: "s", affected_files: [{ path: "src/a.ts" }] };
+  const register = (over: Partial<CharterRegister> = {}) => ({
+    schema_version: 5, generated_at: "2026-10-01T00:00:00Z", target: "charter", ceiling: { rung: "deep" },
+    ...EMPTY_REGISTER_BODY, ...over,
+  }) as unknown as CharterRegister;
+  const slice = (upstream: string, over: Partial<ArtifactBundle>) =>
+    computeDependencySliceHash("audit_tasks.json", upstream, makeBundle(over));
+  const cases: Array<[string, Partial<ArtifactBundle>, Partial<ArtifactBundle>]> = [
+    ["charter_register.json", { charter_register: register() }, { charter_register: register({ findings: [finding] } as Partial<CharterRegister>) }],
+    ["charter_clarification.json",
+      { charter_clarification: { asked: [] } as unknown as ArtifactBundle["charter_clarification"] },
+      { charter_clarification: { asked: [{ request_id: "q1", difference_id: "d1" }] } as unknown as ArtifactBundle["charter_clarification"] }],
+    ["systemic_challenge.json",
+      { systemic_challenge: { findings: [] } as unknown as ArtifactBundle["systemic_challenge"] },
+      { systemic_challenge: { findings: [finding] } as unknown as ArtifactBundle["systemic_challenge"] }],
+  ];
+  for (const [upstream, empty, populated] of cases) {
+    expect(slice(upstream, empty), `${upstream}: empty == absent`).toBe(slice(upstream, {}));
+    expect(slice(upstream, populated), `${upstream}: a real entry moves the slice`).not.toBe(slice(upstream, {}));
+  }
+  // A lane-only register (no finding, no clarification question naming it) is
+  // nothing discovery reads either.
+  const lanes = [{ kind: "structural", nodes: [{ node_id: "n1", files: ["src/a.ts"] }] }];
+  expect(slice("charter_register.json", { charter_register: register({ lanes } as unknown as Partial<CharterRegister>) }))
+    .toBe(slice("charter_register.json", {}));
 });

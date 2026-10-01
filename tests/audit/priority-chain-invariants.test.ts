@@ -40,7 +40,6 @@ test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
     "docs_digest_current",
     "intent_checkpoint_current",
     "planning_artifacts",
-    "architecture_discoveries_current",
     "charter_extraction_current",
     "design_review_contract_completed",
     "design_review_conceptual_completed",

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/advance-drain-loop.test.ts, tests/audit/audit-frontier.test.ts
 import { randomUUID } from "node:crypto";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditState } from "../types/auditState.js";
@@ -19,6 +19,7 @@ import {
   resetStalenessDedup,
 } from "./staleness.js";
 import { DEPENDENCY_SLICE_PROJECTIONS } from "./dependencySlices.js";
+import { isLateInputEdge } from "./dependencyMap.js";
 import { probeScopeIndexKeyCached, withScopeIndexKey } from "./scopeIndexBaseline.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
@@ -108,6 +109,10 @@ const SLICE_PARTICIPANT_PRODUCERS: Readonly<Record<string, readonly string[]>> =
   "repo_manifest.json": ["repo_manifest"],
   // Written by the structure pass and again by graph enrichment.
   "graph_bundle.json": ["structure_artifacts", "graph_enrichment_current"],
+  // Planned wholesale, then rewritten by ingestion and runtime validation.
+  "audit_tasks.json": ["planning_artifacts", "audit_results_ingested", "runtime_validation_current"],
+  "charter_clarification.json": ["charter_clarification_current"],
+  "systemic_challenge.json": ["systemic_challenge_current"],
 };
 
 export interface PriorityOrderingViolation {
@@ -161,6 +166,21 @@ export function findPriorityOrderingViolations(
       }
       const lastUpstream = Math.max(...upstreamPositions);
       const firstDownstream = Math.min(...downstreamPositions);
+      // A declared LATE-INPUT edge (dependencyMap.ts) holds the inverse
+      // guarantee: its upstream first re-derives strictly AFTER the
+      // downstream's first producer, so the deferred decision fires once the
+      // upstream has re-derived, and a moved slice re-selects that
+      // earlier-scheduled producer on the next derivation.
+      if (isLateInputEdge(downstream, upstream)) {
+        if (Math.min(...upstreamPositions) <= firstDownstream) {
+          violations.push({
+            downstream,
+            upstream,
+            reason: `the late-input edge's upstream ${upstream} is first regenerated at or before the downstream ${downstream} — declare it an ordinary slice edge instead`,
+          });
+        }
+        continue;
+      }
       if (lastUpstream >= firstDownstream) {
         violations.push({
           downstream,

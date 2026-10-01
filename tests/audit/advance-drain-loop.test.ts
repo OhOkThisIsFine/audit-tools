@@ -9,6 +9,13 @@ import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
+import { LATE_INPUT_EDGES } from "../../src/audit/orchestrator/dependencyMap.js";
+
+// A late-input deferral (dependencyMap.ts) is held until its upstream, which
+// the drain schedules after the downstream, re-derives — by design, so the
+// within-one-drain guarantee below is about the EARLY slice deferrals.
+const earlyDeferred = (deferred: ReadonlySet<string>): string[] =>
+  [...deferred].filter((name) => !(name in LATE_INPUT_EDGES));
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -315,6 +322,16 @@ test("a PRIORITY order that puts a slice-projected downstream first is REPORTED"
   expect(violations[0]!.reason).toMatch(/at or after the downstream/);
 });
 
+test("a declared late-input edge whose upstream is scheduled before its downstream is REPORTED", () => {
+  // systemic_challenge.json is a LATE input of audit_tasks.json; moving its pass
+  // ahead of planning makes it an ordinary early edge, which must be declared so.
+  const reordered = PRIORITY.filter((id) => id !== "systemic_challenge_current");
+  reordered.splice(reordered.indexOf("planning_artifacts"), 0, "systemic_challenge_current");
+  const violations = findPriorityOrderingViolations(reordered);
+  expect(violations.some((v) => v.downstream === "audit_tasks.json" &&
+    v.upstream === "systemic_challenge.json" && /late-input/.test(v.reason))).toBe(true);
+});
+
 test("a slice participant whose producing obligation is absent from the order is REPORTED, never assumed safe", () => {
   const withoutStructure = PRIORITY.filter(
     (id) => id !== "structure_decomposition_current",
@@ -446,7 +463,7 @@ test.each([true, false])("a populated deferred slice is resolved within one drai
       };
     }, () => withStubbedRunner("charter_extraction_executor", async (...args) => {
       executions.push("charter");
-      expect(computeStaleArtifacts(args[0], { emit: false }).deferred.size).toBe(0);
+      expect(earlyDeferred(computeStaleArtifacts(args[0], { emit: false }).deferred)).toEqual([]);
       return realCharter(...args);
     }, () => advanceAudit(pending, { root, analyzers: SKIP_ANALYZERS })));
 

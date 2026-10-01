@@ -380,7 +380,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "planning_executor",
     kind: "deterministic",
-    obligation_ids: ["planning_artifacts", "architecture_discoveries_current"],
+    obligation_ids: ["planning_artifacts"],
     produces: [
       {
         artifact: "audit_plan_metrics.json",

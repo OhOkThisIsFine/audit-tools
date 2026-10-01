@@ -102,10 +102,12 @@ test("deep architectural inquiry publishes ready scoped inspection without leaki
 
 test("architectural discovery adds only targeted follow-up and reconciliation is replay-stable", async () => {
   const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
-  const { architectureDiscoveryWorkChanged } = await import("../../src/audit/orchestrator/architectureDiscovery.js");
+  const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
+  const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
   await withTempRepo(async (root) => {
     const source = deepCeilingBundle();
-    const initial = (await runPlanningExecutor(source, root, { "src/a.ts": 4, "README.md": 2 })).updated;
+    const initialRun = await runPlanningExecutor(source, root, { "src/a.ts": 4, "README.md": 2 });
+    const initial = { ...initialRun.updated, artifact_metadata: computeArtifactMetadata(initialRun.updated) };
     const beforeIds = initial.audit_tasks!.map((task) => task.task_id);
     const discovered: ArtifactBundle = { ...initial, design_assessment: {
       ...initial.design_assessment!, contract_findings: [{
@@ -114,15 +116,168 @@ test("architectural discovery adds only targeted follow-up and reconciliation is
         summary: "A caller can mutate an input after validation.", affected_files: [{ path: "src/a.ts" }],
       }],
     } };
-    expect(architectureDiscoveryWorkChanged(discovered)).toBe(true);
-    const reconciled = (await runPlanningExecutor(discovered, root, { "src/a.ts": 4, "README.md": 2 })).updated;
+    discovered.artifact_metadata = computeArtifactMetadata(discovered, initial.artifact_metadata, ["design_assessment.json"]);
+    expect(computeStaleArtifacts(discovered, { emit: false }).has("audit_tasks.json")).toBe(true);
+    const reconciledRun = await runPlanningExecutor(discovered, root, { "src/a.ts": 4, "README.md": 2 });
+    const reconciled = { ...reconciledRun.updated, artifact_metadata: computeArtifactMetadata(
+      reconciledRun.updated, discovered.artifact_metadata, reconciledRun.artifacts_written) };
     const additions = reconciled.audit_tasks!.filter((task) => !beforeIds.includes(task.task_id));
     expect(additions).toHaveLength(1);
     expect(additions[0]!.file_paths).toEqual(["src/a.ts"]);
     expect(additions[0]!.rationale).toContain("ARCH-1");
-    expect(architectureDiscoveryWorkChanged(reconciled)).toBe(false);
+    expect(computeStaleArtifacts(reconciled, { emit: false }).has("audit_tasks.json")).toBe(false);
     const replay = (await runPlanningExecutor(reconciled, root, { "src/a.ts": 4, "README.md": 2 })).updated;
     expect(replay.audit_tasks!.map((task) => task.task_id)).toEqual(reconciled.audit_tasks!.map((task) => task.task_id));
+  });
+});
+
+test("every input of the stored architecture-discovery tasks stales audit_tasks.json through the staleness DAG", async () => {
+  const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
+  const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
+  const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
+  await withTempRepo(async (root) => {
+    const run = await runPlanningExecutor(deepCeilingBundle(), root, { "src/a.ts": 4, "README.md": 2 });
+    const planned: ArtifactBundle = { ...run.updated, artifact_metadata: computeArtifactMetadata(run.updated) };
+    expect(computeStaleArtifacts(planned, { emit: false }).has("audit_tasks.json")).toBe(false);
+    const finding = { id: "ARCH-1", title: "Input ownership can be bypassed", category: "trust_boundary_gap",
+      severity: "high" as const, confidence: "medium" as const, lens: "correctness", systemic: true,
+      summary: "A caller can mutate an input after validation.", affected_files: [{ path: "src/a.ts" }] };
+    const inputChanges: Record<string, Partial<ArtifactBundle>> = {
+      "design_assessment.json": { design_assessment: { ...planned.design_assessment!, contract_findings: [finding] } },
+      "charter_register.json": { charter_register: { findings: [finding] } as unknown as ArtifactBundle["charter_register"] },
+      "charter_clarification.json": { charter_clarification: { asked: [{ request_id: "q1" }] } as unknown as ArtifactBundle["charter_clarification"] },
+      "systemic_challenge.json": { systemic_challenge: { findings: [finding] } as unknown as ArtifactBundle["systemic_challenge"] },
+      "audit_results.jsonl": { audit_results: [{ task_id: "source:correctness", unit_id: "source", pass_id: "base", lens: "correctness",
+        file_coverage: [{ path: "src/a.ts", total_lines: 4 }], findings: [finding] }] },
+    };
+    for (const [artifact, change] of Object.entries(inputChanges)) {
+      const changed: ArtifactBundle = { ...planned, ...change };
+      changed.artifact_metadata = computeArtifactMetadata(changed, planned.artifact_metadata, [artifact]);
+      expect(computeStaleArtifacts(changed, { emit: false }).has("audit_tasks.json"), artifact).toBe(true);
+    }
+  });
+});
+
+test("result ingestion stamps audit_tasks.json only with the discovery family its ingested ledger derives", async () => {
+  const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
+  const { runResultIngestionExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
+  const { architectureDiscoveryTasks, isArchitectureDiscoveryTask } = await import("../../src/audit/orchestrator/architectureDiscovery.js");
+  await withTempRepo(async (root) => {
+    // A discovery task's own result never earns a selective-deepening follow-up,
+    // so a novel discovery it reports is planned only by the discovery family.
+    const source = deepCeilingBundle();
+    source.design_assessment!.contract_findings = [{ id: "ARCH-1", title: "Input ownership can be bypassed",
+      category: "trust_boundary_gap", severity: "high", confidence: "medium", lens: "correctness",
+      summary: "A caller can mutate an input after validation.", affected_files: [{ path: "src/a.ts" }] }];
+    const planned = (await runPlanningExecutor(source, root, { "src/a.ts": 4, "README.md": 2 })).updated;
+    const issued = planned.audit_tasks!.filter(isArchitectureDiscoveryTask);
+    expect(issued).toHaveLength(1);
+    const ingested = runResultIngestionExecutor(planned, [{
+      task_id: issued[0]!.task_id, unit_id: issued[0]!.unit_id, pass_id: issued[0]!.pass_id, lens: issued[0]!.lens,
+      file_coverage: [{ path: "src/a.ts", total_lines: 4 }], findings: [{ id: "SYS-1", title: "Unbounded cross-system retry",
+        category: "correctness", severity: "high", confidence: "medium", lens: "correctness", systemic: true,
+        summary: "Retries across the boundary never terminate.", affected_files: [{ path: "src/a.ts" }] }],
+    }]).updated;
+    const stored = ingested.audit_tasks!.filter(isArchitectureDiscoveryTask);
+    expect(stored.map((task) => task.task_id)).toEqual(architectureDiscoveryTasks(ingested).map((task) => task.task_id));
+    expect(stored).toHaveLength(2);
+    // The issued task keeps its binding and its ingested completion.
+    expect(stored.find((task) => task.task_id === issued[0]!.task_id)!.status).toBe("complete");
+  });
+});
+
+async function plannedWithDiscovery(root: string, withDesignFinding: boolean): Promise<ArtifactBundle> {
+  const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
+  const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
+  const source = deepCeilingBundle();
+  if (withDesignFinding) source.design_assessment!.contract_findings = [ARCH_FINDING];
+  const run = await runPlanningExecutor(source, root, { "src/a.ts": 4, "README.md": 2 });
+  return { ...run.updated, artifact_metadata: computeArtifactMetadata(run.updated) };
+}
+
+const ARCH_FINDING = { id: "ARCH-1", title: "Input ownership can be bypassed", category: "trust_boundary_gap",
+  severity: "high" as const, confidence: "medium" as const, lens: "correctness",
+  summary: "A caller can mutate an input after validation.", affected_files: [{ path: "src/a.ts" }] };
+
+test("an advanceAudit ingestion leaves audit_tasks.json fresh with the discovery family its ledger derives", async () => {
+  const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
+  const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
+  const { architectureDiscoveryTasks, isArchitectureDiscoveryTask } = await import("../../src/audit/orchestrator/architectureDiscovery.js");
+  await withTempRepo(async (root) => {
+    const planned = await plannedWithDiscovery(root, true);
+    const issued = planned.audit_tasks!.filter(isArchitectureDiscoveryTask)[0]!;
+    const advanced = (await advanceAudit(planned, { root, preferredExecutor: "result_ingestion_executor", auditResults: [{
+      task_id: issued.task_id, unit_id: issued.unit_id, pass_id: issued.pass_id, lens: issued.lens,
+      file_coverage: [{ path: "src/a.ts", total_lines: 4 }], findings: [{ id: "SYS-1", title: "Unbounded cross-system retry",
+        category: "correctness", severity: "high", confidence: "medium", lens: "correctness", systemic: true,
+        summary: "Retries across the boundary never terminate.", affected_files: [{ path: "src/a.ts" }] }],
+    }] })).updated_bundle;
+    expect(computeStaleArtifacts(advanced, { emit: false }).has("audit_tasks.json")).toBe(false);
+    const stored = advanced.audit_tasks!.filter(isArchitectureDiscoveryTask).map((task) => task.task_id);
+    expect(stored).toHaveLength(2);
+    expect(stored).toEqual(architectureDiscoveryTasks(advanced).map((task) => task.task_id));
+  });
+});
+
+test("a runtime-validation rewrite of audit_tasks.json carries the discovery family a pending input derives", async () => {
+  const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
+  const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
+  const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
+  const { architectureDiscoveryTasks, isArchitectureDiscoveryTask } = await import("../../src/audit/orchestrator/architectureDiscovery.js");
+  await withTempRepo(async (root) => {
+    const planned = await plannedWithDiscovery(root, false);
+    const base = planned.audit_tasks!.find((task) => task.lens === "correctness" && task.file_paths.includes("src/a.ts"))!;
+    // A discovery input moved (awaiting replan) and a high-severity result is on
+    // the ledger, so the runtime-validation pass deepens and rewrites the tasks.
+    const pending: ArtifactBundle = { ...planned,
+      design_assessment: { ...planned.design_assessment!, contract_findings: [ARCH_FINDING] },
+      audit_results: [{ task_id: base.task_id, unit_id: base.unit_id, pass_id: base.pass_id, lens: base.lens,
+        file_coverage: [{ path: "src/a.ts", total_lines: 4 }], findings: [{ id: "BASE-1", title: "Invalid local input",
+          category: "correctness", severity: "high", confidence: "medium", lens: "correctness",
+          summary: "A local branch accepts invalid input.", affected_files: [{ path: "src/a.ts" }] }] }] };
+    pending.artifact_metadata = computeArtifactMetadata(pending, planned.artifact_metadata, ["design_assessment.json", "audit_results.jsonl"]);
+    expect(computeStaleArtifacts(pending, { emit: false }).has("audit_tasks.json")).toBe(true);
+    const result = await advanceAudit(pending, { root, preferredExecutor: "runtime_validation_update_executor",
+      runtimeValidationUpdates: { results: [] } });
+    expect(result.artifacts_written).toContain("audit_tasks.json");
+    const advanced = result.updated_bundle;
+    const stored = advanced.audit_tasks!.filter(isArchitectureDiscoveryTask).map((task) => task.task_id);
+    expect(stored).toHaveLength(1);
+    expect(stored).toEqual(architectureDiscoveryTasks(advanced).map((task) => task.task_id));
+    expect(computeStaleArtifacts(advanced, { emit: false }).has("audit_tasks.json")).toBe(false);
+  });
+});
+
+test("a late discovery input defers audit_tasks.json while pending and stales it only when its content moves", async () => {
+  const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
+  const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
+  await withTempRepo(async (root) => {
+    const planned = await plannedWithDiscovery(root, false);
+    const withSystemic: ArtifactBundle = { ...planned,
+      conceptual_review_adjudication: { verdicts: [] } as unknown as ArtifactBundle["conceptual_review_adjudication"],
+      systemic_challenge: { findings: [] } as unknown as ArtifactBundle["systemic_challenge"] };
+    withSystemic.artifact_metadata = computeArtifactMetadata(withSystemic);
+    expect(computeStaleArtifacts(withSystemic, { emit: false }).has("audit_tasks.json")).toBe(false);
+    // An upstream of systemic_challenge moves: it is pending, and planning —
+    // scheduled before it — cannot clear that, so audit_tasks is deferred.
+    const pending: ArtifactBundle = { ...withSystemic,
+      conceptual_review_adjudication: { verdicts: ["moved"] } as unknown as ArtifactBundle["conceptual_review_adjudication"] };
+    pending.artifact_metadata = computeArtifactMetadata(pending, withSystemic.artifact_metadata, ["conceptual_review_adjudication.json"]);
+    const deferred = computeStaleArtifacts(pending, { emit: false });
+    expect(deferred.has("systemic_challenge.json")).toBe(true);
+    expect(deferred.has("audit_tasks.json")).toBe(false);
+    expect([...deferred.deferred]).toContain("audit_tasks.json");
+    // The systemic pass re-derives the same findings: a revision-only move.
+    const unchanged: ArtifactBundle = { ...pending };
+    unchanged.artifact_metadata = computeArtifactMetadata(unchanged, pending.artifact_metadata, ["systemic_challenge.json"]);
+    expect(unchanged.artifact_metadata.artifacts["systemic_challenge.json"]!.revision)
+      .toBeGreaterThan(pending.artifact_metadata.artifacts["systemic_challenge.json"]!.revision);
+    expect(computeStaleArtifacts(unchanged, { emit: false }).has("audit_tasks.json")).toBe(false);
+    // It re-derives a new finding: discovery's input moved, so planning re-runs.
+    const moved: ArtifactBundle = { ...pending,
+      systemic_challenge: { findings: [ARCH_FINDING] } as unknown as ArtifactBundle["systemic_challenge"] };
+    moved.artifact_metadata = computeArtifactMetadata(moved, pending.artifact_metadata, ["systemic_challenge.json"]);
+    expect(computeStaleArtifacts(moved, { emit: false }).has("audit_tasks.json")).toBe(true);
   });
 });
 

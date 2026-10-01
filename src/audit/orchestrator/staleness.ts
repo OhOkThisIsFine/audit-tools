@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/staleness.test.ts, tests/audit/dependency-slices.test.ts
+// sites-pinned: tests/audit/staleness.test.ts, tests/audit/dependency-slices.test.ts, tests/audit/intent-checkpoint.test.ts
 import { propagateReachability } from "../../shared/graph/orderedReachability.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
@@ -433,15 +433,6 @@ export function computeStaleArtifacts(
           }
           continue;
         }
-        const dependencyEntry = metadata.artifacts[dependencyName];
-        if (!dependencyEntry) {
-          if (present(bundle, dependencyName) || recordedRevision > 0) {
-            isStale = true;
-            break;
-          }
-          continue;
-        }
-
         // Per-edge semantic slice (dependencySlices.ts): when a projection is
         // registered AND this entry recorded a slice for the edge, the slice
         // compare REPLACES the whole-hash + revision disjunction — an upstream
@@ -451,7 +442,11 @@ export function computeStaleArtifacts(
         // the conservative whole-hash compare. A projection that throws at
         // compare time returns the error sentinel, which never equals a
         // recorded sha256 → stale (fail-safe). The dependency-KEY-SET gate
-        // above is untouched: re-listing dependencies still stales.
+        // above is untouched: re-listing dependencies still stales. The slice
+        // compare also runs for an upstream that carries no metadata entry of
+        // its own: the projection reads the bundle, not the manifest, so the
+        // no-entry fail-safe below is needed only where the whole-hash compare
+        // has nothing to compare against.
         const recordedSlice = entry.dependency_slices?.[dependencyName];
         if (
           recordedSlice !== undefined &&
@@ -463,6 +458,15 @@ export function computeStaleArtifacts(
             bundle,
           );
           if (recordedSlice !== currentSlice) {
+            isStale = true;
+            break;
+          }
+          continue;
+        }
+
+        const dependencyEntry = metadata.artifacts[dependencyName];
+        if (!dependencyEntry) {
+          if (present(bundle, dependencyName) || recordedRevision > 0) {
             isStale = true;
             break;
           }

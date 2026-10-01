@@ -80,7 +80,7 @@ hand-edit between the markers.
 <!-- BEGIN GENERATED spec-mirror executor-catalog#execution — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `planning_executor` | deterministic | `planning_artifacts`, `architecture_discoveries_current` | emits all planning artifacts in one call |
+| `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
 | `semantic_review_executor` | host_delegation | `audit_tasks_completed` | emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
 | `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests prompt-bound host results and refreshes the downstream planning/coverage view |

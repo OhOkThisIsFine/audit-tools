@@ -128,7 +128,7 @@ three writers).
 | Artifact | Depends on |
 |---|---|
 | `coverage_matrix.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json`, `audit_results.jsonl` |
-| `audit_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json` |
+| `audit_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json`, `design_assessment.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `audit_results.jsonl` |
 | `audit_plan_metrics.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `audit_tasks.json`, `audit_results.jsonl` |
 | `task_affinity_graph.json` | `audit_tasks.json` |
 | `flow_coverage.json` | `repo_manifest.json`, `file_disposition.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `audit_results.jsonl` |
@@ -157,6 +157,18 @@ sets. It is a *direct* input to `audit_tasks.json` (not just transitively via
 matrix (same files/buckets) still re-stales tasks. No cycle: planning writes
 `scope.json`, `coverage_matrix.json`, and `audit_tasks.json` in one
 `advanceAudit` call, dependency-first.
+
+`audit_tasks.json` also stores the architecture-discovery tasks, derived from
+`design_assessment.json`, `charter_register.json`, `charter_clarification.json`,
+`systemic_challenge.json` and `audit_results.jsonl`; each is a declared input, so
+a change to any of them re-stales the task set through this DAG. Result ingestion
+writes `audit_results.jsonl` and `audit_tasks.json` in one call, so it re-derives
+that task family before the write is stamped. The charter, clarification and
+systemic inputs are re-derived *after* planning in the drain, so those three
+edges are late-input edges (`LATE_INPUT_EDGES` in `dependencyMap.ts`) carrying
+slice projections: a pending upstream defers `audit_tasks.json` instead of
+staling it, and once the upstream re-derives only a change in what discovery
+reads re-stales it.
 
 `task_affinity_graph.json` is the provider-neutral task-affinity graph derived
 from `audit_tasks.json`; planning's packet composition consumes it

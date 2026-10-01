@@ -151,7 +151,27 @@
       }
     }
   },
-  "reviews": {},
+  "reviews": {
+    "9bc59db653647a3a": {
+      "reviewed_by": "claude-opus-5-5-reviewer",
+      "attester_class": "agent",
+      "checked": "Third pass. My first attestation (verdict concerns) MISSED the endless-replan loop: I checked the dependency map for cycles but not for an upstream that is stale-and-pending and produced after planning (charter_register, charter_clarification, systemic_challenge). Second pass found the intent-checkpoint test red (first appearance of an empty late input forced a replan). This pass: built (npm run build) and ran ALL of tests/audit via run-vitest-gate: 2596 passed, 0 failed, 2 skipped; npm run check exit 0. Focus on staleness.ts reordering (slice compare before the no-entry rule): probed computeStaleArtifacts against dist with forged manifests - (1) audit_tasks entry under the OLD dependency list plus a matching recorded slice and an upstream without an entry -> stale (dependency key-set gate runs first; slices are only recorded on listed re-derivation under the current list, and unlisted restamps preserve old deps/slices); (2) null slice then charter appears with findings and no entry -> stale; (4) recorded slice, charter content changed, no entry -> stale; (3)/(5) empty or unchanged discovery content with no entry -> fresh+deferred, correct since the projection reads bundle content. Absent upstream with recorded revision>0 still stales (checked before the slice). Verified slices cover everything architectureDiscoveryTasks reads (register findings, question files via shared charterQuestionFiles, clarification asked incl. answers, systemic findings); late producers do not depend on planning outputs, so each late change costs at most one replan; all four audit_tasks writers go through reviewTaskArtifacts/planning re-derivation.",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-01T22:09:45.245Z",
+      "vouches": {
+        "src/audit/orchestrator/advance.ts": "581ee810032c23aad873c461c3d10f6cd1683685",
+        "src/audit/orchestrator/architectureDiscovery.ts": "d3153b4e1b7ac5da72b0c1a73edda3b9783d7328",
+        "src/audit/orchestrator/dependencyMap.ts": "4b5f7559db81b77b540590497e0002094ecf3502",
+        "src/audit/orchestrator/dependencySlices.ts": "f7c8873132bc3a86ff5a932cf70d2106654f0000",
+        "src/audit/orchestrator/executors.ts": "64bbd60afbde9ae6d6a71a896435873e229651da",
+        "src/audit/orchestrator/ingestionExecutors.ts": "585babd84cf5140c76b29b2c00101af4862aed7c",
+        "src/audit/orchestrator/nextStep.ts": "52c68f098ce18e3b515385638c51e8fe4cfed5be",
+        "src/audit/orchestrator/staleness.ts": "9fc14544c1c18f7254d6366b51b62b0e819cb437",
+        "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
+      }
+    }
+  },
   "entries": {
     "src/audit/cli/charterClarificationPrompt.ts": {
       "baseline": "7b79934e86baf378"
@@ -205,13 +225,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/advance.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
       "baseline": "7b79934e86baf378"
@@ -250,10 +270,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
       "baseline": "7b79934e86baf378"
@@ -277,7 +297,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executors.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/fileIntegrity.ts": {
       "baseline": "7b79934e86baf378"
@@ -304,7 +324,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "baseline": "7b79934e86baf378"
@@ -337,7 +357,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/nextStep.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/obligationDerive.ts": {
       "baseline": "7b79934e86baf378"
@@ -436,10 +456,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/staleness.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/state.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "baseline": "7b79934e86baf378"

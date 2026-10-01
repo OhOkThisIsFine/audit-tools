@@ -167,6 +167,20 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "scope.json",
     "audit_results.jsonl",
   ],
+  // sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/staleness.test.ts
+  // Architecture-discovery tasks (architectureDiscovery.ts) are stored here too,
+  // derived from the design-review, charter, clarification and systemic findings
+  // plus the current result ledger — so each is a declared input, and a change
+  // to any of them re-stales the task set through this DAG like every other
+  // input. A listed write of audit_tasks.json is stamped against these inputs'
+  // current revisions, so every producer re-derives that family before it
+  // writes: planning wholesale, and the result-ingestion and both
+  // runtime-validation executors through the one assembly they share
+  // (`reviewTaskArtifacts` in ingestionExecutors.ts, which calls
+  // `reconcileArchitectureDiscoveryTasks`; ingestion appends
+  // audit_results.jsonl in the same call, so it assembles against the
+  // post-append ledger). coverage_matrix.json (read for its exclusions) needs
+  // no edge: every one of its inputs is declared here.
   "audit_tasks.json": [
     "repo_manifest.json",
     "file_disposition.json",
@@ -175,6 +189,11 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "intent_checkpoint.json",
     "external_analyzer_results.json",
     "scope.json",
+    "design_assessment.json",
+    "charter_register.json",
+    "charter_clarification.json",
+    "systemic_challenge.json",
+    "audit_results.jsonl",
   ],
   // Access-memory is harvested from the ingested result ledger in the same
   // advanceAudit call that appends it (dependency-first metadata), so it records
@@ -296,6 +315,36 @@ export function invertDependencyMap(dependsOn: DependencyMap): DependencyMap {
  */
 export const ARTIFACT_DEPENDENTS_MAP: DependencyMap =
   invertDependencyMap(ARTIFACT_DEPENDS_ON_MAP);
+
+/**
+ * LATE-INPUT edges: declared dependencies whose upstream is (re)written by an
+ * obligation the drain schedules AFTER the downstream's producer (planning runs
+ * before the charter, clarification and systemic passes on purpose — inspection
+ * needs scope and structure, not completed architecture inquiry).
+ *
+ * Each such edge carries a slice projection (dependencySlices.ts), the existing
+ * machinery that already does what a late edge needs: `computeStaleArtifacts`
+ * DEFERS the downstream rather than propagating a stale-and-pending upstream's
+ * staleness (the downstream's producer could never clear it — the upstream
+ * re-derives only later — so it would be re-selected forever), and once the
+ * upstream has re-derived the per-edge slice compare decides on CONTENT, so a
+ * revision-only re-derivation does not re-select planning either. A moved slice
+ * stales the downstream, whose earlier-scheduled producer then re-derives.
+ * `findPriorityOrderingViolations` (advance.ts) checks every declared pair is
+ * genuinely late; an ordinary slice edge must be early instead.
+ */
+export const LATE_INPUT_EDGES: Partial<Record<ArtifactFileName, readonly ArtifactFileName[]>> = {
+  "audit_tasks.json": [
+    "charter_register.json",
+    "charter_clarification.json",
+    "systemic_challenge.json",
+  ],
+};
+
+/** True when `downstream ← upstream` is a declared late-input edge. */
+export function isLateInputEdge(downstream: string, upstream: string): boolean {
+  return (LATE_INPUT_EDGES as Partial<Record<string, readonly string[]>>)[downstream]?.includes(upstream) ?? false;
+}
 
 /**
  * Every artifact participating in the staleness DAG — the union of those that
