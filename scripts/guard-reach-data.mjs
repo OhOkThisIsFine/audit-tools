@@ -1360,6 +1360,11 @@ export const GUARDS = [
     kind: 'contract-test',
     impl: 'tests/shared/green-mechanism-declaration.test.ts',
   },
+  {
+    id: 'static-analysis-declaration-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/static-analysis-declaration.test.ts',
+  },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   {
     id: 'session-registry-test',
@@ -2508,6 +2513,15 @@ export const REACH = [
       'own record path, so no second green ledger can exist beside suiteGreenStamp.mjs. The ' +
       'contract test pins both declaration shape and declared-command execution; the external ' +
       'consumer itself remains outside this repository.',
+  },
+  {
+    area: 'static-analysis declaration',
+    files: ['.claude/static-analysis.json'],
+    guardedBy: ['static-analysis-declaration-test'],
+    note:
+      'the machine-wide nightly runner reads this file from the main checkout and runs each declared ' +
+      'command; the contract test pins the shape and that each command names a package.json script. ' +
+      'The runner itself remains outside this repository.',
   },
   {
     area: 'nightly determinations ledger',

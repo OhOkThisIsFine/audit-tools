@@ -1,0 +1,8 @@
+{
+  "tools": [
+    { "name": "eslint", "command": "npm run check:lint" },
+    { "name": "knip", "command": "npm run check:deadcode" },
+    { "name": "jscpd", "command": "npm run check:dup" },
+    { "name": "dependency-cruiser", "command": "npm run check:depgraph" }
+  ]
+}

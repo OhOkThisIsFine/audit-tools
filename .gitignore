@@ -47,6 +47,9 @@ dist/
 # verify-green ledger defers instead of answering. Tracked on purpose: a fresh
 # clone must carry the declaration, or that checkout gets the false red back.
 !.claude/green-mechanism.json
+# Declares the static-analysis tools the machine-wide nightly runner executes.
+# Tracked on purpose: the runner reads the main checkout.
+!.claude/static-analysis.json
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/
