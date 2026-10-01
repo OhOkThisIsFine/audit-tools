@@ -2505,21 +2505,27 @@
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Widen the scan. Widen the gate to every tracked markdown file, as its header already claims. Add the two retired-infrastructure-exempt markers the widened scan needs (.claude/skills/design-check/SKILL.md and docs/backlog/forward-tracks.md), and delete the \"coordination rather than principle\" paragraph, whose stated blocker no longer describes the tree.",
     "subject": "The retirement gate says it scans every tracked doc and scans one — widen the scan, or correct the sentence?",
     "path": "scripts/check-retired-infrastructure.mjs",
-    "decided_at": "2026-09-24T23:24:36.788Z"
+    "decided_at": "2026-09-24T23:24:36.788Z",
+    "completed_at": "2026-10-01T07:41:35.124Z",
+    "completed_ref": "ab1e9862: gate scans every tracked .md; paragraph deleted; design-check marker added; forward-tracks.md marker moot (no retired mention left)"
   },
   "057c8bbc29b5db67": {
     "disposition": "settled",
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Make one call do both. Fix the code rather than the prose: have writeOpenItems() render the inbox as its last step, so the sentence becomes true and the answering surface cannot lag the queue at all. The separate npm run nightly:inbox entrypoint stays for re-rendering after an ingest.",
     "subject": "The routine says one call is the whole persistence contract, but the answering surface needs a second one — name it, or leave the sentence?",
     "path": "docs/nightly-routine.md",
-    "decided_at": "2026-09-24T23:24:37.132Z"
+    "decided_at": "2026-09-24T23:24:37.132Z",
+    "completed_at": "2026-10-01T07:41:35.203Z",
+    "completed_ref": "ab1e9862: writeOpenItems() ends with writeInbox(root); nightly:inbox kept"
   },
   "263eb495b16ee23b": {
     "disposition": "settled",
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Stop pinning the literal. Remove the hand-typed version from both documents. Have each name the contract by its kind and point at WORKLOAD_CONTRACT_VERSION in src/audit/cli/dispatch/hostHandoff.ts as the one place the revision is stated, so a future bump cannot leave a document behind.",
     "subject": "Two docs pin the host-workload contract version and both are wrong — stop pinning it, or bump both?",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-09-24T23:24:37.402Z"
+    "decided_at": "2026-09-24T23:24:37.402Z",
+    "completed_at": "2026-10-01T07:41:35.283Z",
+    "completed_ref": "ab1e9862: both docs point at WORKLOAD_CONTRACT_VERSION, no literal"
   },
   "f78305ac08246ae5": {
     "disposition": "settled",
@@ -2533,13 +2539,17 @@
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Retry a malformed reply. Keep the lane toolless and leave the schema dropped. Instead extend the sweep’s retry so that a reply which fails to parse or fails the shape is retried once, the way a transport death already is. This is smaller, and it reduces the loss rather than ending it.",
     "subject": "The backlog sweep has lost 258 entries to unparseable replies, and the fix costs the lane its toolless safety — which trade?",
     "path": "scripts/shared/mcp-dispatch-lane.mjs",
-    "decided_at": "2026-09-24T23:24:37.778Z"
+    "decided_at": "2026-09-24T23:24:37.778Z",
+    "completed_at": "2026-10-01T07:41:35.363Z",
+    "completed_ref": "ab1e9862: lane-dispatch retryRecordError retries a MalformedTriageReply once; lane stays toolless"
   },
   "0cb4ac4295ee0539": {
     "disposition": "settled",
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Drop the narrative, keep the rejection. Restate both passages as the design rather than as a transition: keep the rejected option named, with why it was rejected, and remove the wording that narrates the removal and the date it happened. Apply the same edit to both documents.",
     "subject": "Two spec docs narrate when a rejected design was removed — keep the rejection, drop the removal story?",
     "path": "spec/self-scaling-pipeline-design.md",
-    "decided_at": "2026-09-24T23:24:37.890Z"
+    "decided_at": "2026-09-24T23:24:37.890Z",
+    "completed_at": "2026-10-01T07:41:35.546Z",
+    "completed_ref": "ab1e9862 restated the rejection; 3f73d24f later rewrote both specs with no removal narrative left"
   }
 }
