@@ -5,7 +5,7 @@
 
 ## Current state
 
-Published and installed: `v0.54.0`. GitHub branch protection on `main` requires the `checks`
+Published and installed: `v0.55.0`. GitHub branch protection on `main` requires the `checks`
 status check (strict; admins can bypass), and that job judges every tree against the tracked
 loop-core attestation ledger `.claude/loop-core-attestations.json` (143 baseline-only files).
 The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can
