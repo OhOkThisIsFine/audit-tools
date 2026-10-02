@@ -2532,7 +2532,9 @@
     "answer": "Owner, 2026-09-24 (AskUserQuestion at the closeout of the instruction cleanup): Put it in a script. Do not document the step — remove it. Have the dispatch helper create and tear down its own throwaway worktree, so a run cannot reach the refusal and cannot leave residue, and state only the guarantee in the routine.",
     "subject": "The routine asks for a repository-reading lane but never says how to give it one — state the worktree step, or leave it?",
     "path": "docs/nightly-routine.md",
-    "decided_at": "2026-09-24T23:24:37.637Z"
+    "decided_at": "2026-09-24T23:24:37.637Z",
+    "completed_at": "2026-10-02T01:52:37.244Z",
+    "completed_ref": "963b9106 (shipped in v0.54.0)"
   },
   "8f03bcab52363d29": {
     "disposition": "settled",

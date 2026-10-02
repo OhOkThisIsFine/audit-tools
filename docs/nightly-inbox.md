@@ -25,9 +25,6 @@ records them in the tracked ledger, and does the work.
 *Last run: unknown.*
 
 
-> **1 answered item not yet marked done.** An answer records your reply; it does not claim the work exists. Run `node scripts/nightly/answer.mjs --list` to see them.
-
-
 ---
 
 ## Nothing to answer
