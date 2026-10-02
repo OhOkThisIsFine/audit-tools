@@ -1,6 +1,6 @@
 import { EXTERNAL_ANALYZER_CANDIDATES, persistAnalyzerConsent, persistAnalyzerSettings, toPromptPathToken } from "audit-tools/shared";
 import { afterEach, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { functionalPreflightStep, functionalPreflightPath } from "../../src/audit/cli/functionalPreflight.js";
@@ -34,6 +34,27 @@ it("the public next-step emits capability work before semantic or deterministic 
   expect(prompt).toContain("Actor: the host");
   expect(prompt).toContain("operator_approved_degraded");
   expect(prompt).not.toContain("check:tests");
+});
+it("a host that copies the emitted example verbatim satisfies the run binding (the prompt body forward-slashes win32 paths)", async () => {
+  const { root, artifactsDir } = await fixture();
+  await writeFile(join(root, "sample.ts"), "export const sample = 1;\n");
+  await persistAnalyzerSettings(root, { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" });
+  await persistAnalyzerConsent(root, Object.fromEntries(EXTERNAL_ANALYZER_CANDIDATES.map(candidate => [candidate.id, "declined" as const])));
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  await cmdNextStep(["--root", root]);
+  const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
+  const prompt = await readFile(step.prompt_path, "utf8");
+  const example = [...prompt.matchAll(/```json\s*([\s\S]*?)```/gu)]
+    .map(match => JSON.parse(match[1]!))
+    .find(value => value?.contract_version === "audit-functional-preflight/v1");
+  expect(example.repository_root).toBe(toPromptPathToken(await realpath(root)));
+  await writeFile(step.artifact_paths.functional_preflight, JSON.stringify({
+    ...example,
+    source_inspection: { available: true, evidence: "Read sample.ts." },
+    relationship_inspection: { available: true, evidence: "sample.ts declares no import." },
+    decision: "ready",
+  }));
+  expect(await functionalPreflightStep(root, artifactsDir)).toBeUndefined();
 });
 it("ready is run-bound; cleanup invalidates a copied prior report", async () => {
   const { root, artifactsDir } = await fixture();

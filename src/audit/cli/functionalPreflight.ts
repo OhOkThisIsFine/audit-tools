@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   AGENT_FEEDBACK_FILENAME, AgentReflectionSchema,
-  readOptionalJsonFile, readOptionalTextFile, writeTextFile, isJsonParseError,
+  readOptionalJsonFile, readOptionalTextFile, writeTextFile, isJsonParseError, toPromptPathToken,
 } from "audit-tools/shared";
 import { readRunConsentUnlocked } from "../../shared/analyzerRunConsent.js";
 import type { writeCurrentStep } from "./steps.js";
@@ -37,7 +37,10 @@ export async function functionalPreflightStep(
   root: string, artifactsDir: string,
 ): Promise<Parameters<typeof writeCurrentStep>[0] | undefined> {
   return withArtifactTreeHold(artifactsDir, undefined, async () => {
-    const canonicalRoot = await realpath(root);
+    // The host echoes the root it was shown, and writeStepContract forward-slashes every
+    // win32 path in the prompt body: emit and bind the prompt-path token form, or a raw
+    // backslashed root reaches the host rewritten and the report never matches this run.
+    const canonicalRoot = toPromptPathToken(await realpath(root));
     const run = await readRunConsentUnlocked(root, artifactsDir);
     const reportPath = functionalPreflightPath(artifactsDir);
     let problem = "No functional capability evidence has been recorded for this audit.";
@@ -47,7 +50,7 @@ export async function functionalPreflightStep(
       if (raw !== undefined) {
         const parsed = FunctionalPreflightSchema.safeParse(raw);
         if (!parsed.success) problem = `Correct the preflight report: ${parsed.error.issues.map(issue => issue.message).join("; ")}`;
-        else if (parsed.data.run_id !== run.run_id || parsed.data.repository_root !== canonicalRoot) {
+        else if (parsed.data.run_id !== run.run_id || toPromptPathToken(parsed.data.repository_root) !== canonicalRoot) {
           problem = "The preflight report belongs to another run or repository. Check this run again.";
         } else if (parsed.data.decision === "stop") {
           problem = "The operator stopped this audit because required capabilities are unavailable. Do not continue without a new operator decision.";
