@@ -1,4 +1,4 @@
-<!-- review-routing: backlog-forward -->
+<!-- review-routing: no-forward-work -->
 # audit-tools compared with alibaba/open-code-review
 
 Date: 2026-10-01. Source for Open Code Review (OCR): its GitHub README only
@@ -71,5 +71,6 @@ Treat each OCR claim below as the README's claim, not a verified fact.
 5. **Per-path rule targeting.** OCR matches rules to files by path filters. audit-tools selects lenses
    per run. Per-path lens targeting could reduce packet size.
 
-Item 2 and the benchmark question touch the retired benchmark track and recall policy. They need an
-owner decision before any work starts.
+Outcome (owner, 2026-10-02): item 1 shipped in v0.55.0. Item 2 was rejected, because recall comes
+first and an `ungrounded` mark already shows a weak finding without dropping it. Items 3 to 5 were
+deleted from the backlog. No work remains from this record.
