@@ -1,6 +1,7 @@
 import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
+import { INDEPENDENT_CONTEXT } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts
 import {
   type DesignReviewBinding,
@@ -194,9 +195,9 @@ export interface ConceptualDispatch {
   instructionLines: string[];
   /** Contributions to the step's `artifactPaths`. */
   artifactPaths: Record<string, string>;
-  /** Prompt files the host's subagents read. */
+  /** Prompt files the review lanes read. */
   readPaths: string[];
-  /** Result files the host's subagents write. */
+  /** Result files the review lanes write. */
   writePaths: string[];
   /** What a previous emission of this pass's lanes is still owed. */
   shortfall: LaneSubmissionShortfall;
@@ -290,7 +291,7 @@ export async function prepareConceptualDispatch(opts: {
       instructionLines: [
         ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
         ...(settings.reuse_notice ? [settings.reuse_notice] : []),
-        "**Conceptual review** (generative): dispatch a subagent that reads the prompt at the conceptual prompt path and writes findings to the conceptual results path.",
+        `**Conceptual review** (generative): in ${INDEPENDENT_CONTEXT}, read the prompt at the conceptual prompt path and write findings to the conceptual results path.`,
       ],
       artifactPaths: {
         conceptual_prompt: conceptualPromptPath,
@@ -302,7 +303,7 @@ export async function prepareConceptualDispatch(opts: {
     };
   }
 
-  // Deep: real fan-out — N perspective subagents + an independent judge.
+  // Deep: real fan-out — N perspective lanes + an independent judge.
   // Every one of them is a LANE through the same materializer the rest of the
   // audit uses; this pass used to mint its own filenames, which is precisely how
   // a second naming convention (and a second way for a host to mistype one)
@@ -474,17 +475,17 @@ export async function prepareConceptualDispatch(opts: {
         : []),
       ...(pendingCount > 0
         ? [
-            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — one subagent per lane **in parallel** if a subagent facility exists, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
+            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — each in its own context, **in parallel** where the host can run several at once, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
             ...perspectiveLines,
           ]
         : [
             `1. All ${total} perspective lanes have already delivered a submission this round — nothing to execute here.`,
           ]),
-      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — a fresh subagent that is not any of the perspectives when a facility exists; with no facility, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
+      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — in a fresh context that is not any of the perspectives when the host can provide one; when it cannot, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
       "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
     ],
     artifactPaths,
-    // Perspective result files must be in readPaths: the judge subagent reads
+    // Perspective result files must be in readPaths: the judge lane reads
     // them to merge and synthesise the final output (COR-60ca1f72).
     readPaths: [
       ...perspectivePrompts.map((f) => f.promptPath),

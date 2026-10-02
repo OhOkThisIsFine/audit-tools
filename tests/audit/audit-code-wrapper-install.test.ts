@@ -133,7 +133,9 @@ const repoLocalHostCases: RepoLocalHostCase[] = [
       expect(vscodeAgent).toMatch(/# Audit Code Agent/);
       expect(vscodeAgent).toMatch(/host work/);
       expect(vscodeAgent).not.toMatch(/--auditor/);
-      expect(vscodeAgent).toMatch(/node audit-code\.mjs/);
+      // The installed loader reaches third-party repositories: it carries no
+      // audit-tools development wrapper (open-bugs 2026-10-01, O03).
+      expect(vscodeAgent).not.toMatch(/node audit-code\.mjs/);
       // The MCP surface was removed: install no longer writes .vscode/mcp.json.
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## VS Code/);

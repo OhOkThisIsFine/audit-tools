@@ -3,10 +3,10 @@
 Use `audit-code next-step` as the primary interface to the audit workflow.
 
 1. Run `audit-code next-step` directly when shell access is available.
-2. Read the returned JSON far enough to find `prompt_path`, then read and follow the prompt file it points to.
+2. Read the prompt file at the returned step record's `prompt_path`, then follow it.
 3. When a step completes (not blocked), run `audit-code next-step` again.
 4. Stop when the step instructions say to stop.
 
-Use the `task` tool or equivalent for subagent dispatch when the step tells you to fan out review work.
+When the step tells you to fan out review work, run each lane in a separate context when the host can, else yourself.
 
 If shell access to `audit-code next-step` is unavailable, stop and report that no next-step interface is connected.

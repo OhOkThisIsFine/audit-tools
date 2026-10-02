@@ -634,7 +634,7 @@ export async function handleGraphEnrichmentBranch(
 
   // Phase 4B — optional edge-reasoning producing turn. Once analyzer installs
   // are resolved, if the flag is on and the floor carries low-confidence
-  // (< 0.65) edges, emit one bounded host turn (subagent dispatch or a single
+  // (< 0.65) edges, emit one bounded host turn (a separate-context lane or a single
   // host step) to produce reason rewrites, then re-run. The enrichment
   // executor applies the host-supplied rewrites in the SAME advanceAudit call
   // that merges analyzer edges and writes analyzer_capability, so graph_bundle
@@ -743,7 +743,7 @@ type BranchActionResult =
  *
  * Returns:
  *   - `continue`               → one or both lane submissions were consumed; keep folding.
- *   - `design_review_parallel` → both passes still needed; dispatch two subagents.
+ *   - `design_review_parallel` → both passes still needed; dispatch two lanes.
  *   - `design_review_contract` → only contract pass still needed.
  *   - `design_review_conceptual` → only conceptual pass still needed.
  *

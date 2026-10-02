@@ -18,8 +18,8 @@ Normal usage should:
 
 audit-tools owns deterministic discovery, planning, persisted state, strict
 result ingestion, and synthesis. When semantic review is ready it emits a
-complete provider-neutral workload. Delegate those bounded items through the
-host's native subagent facilities when available, then return only the bound
+complete provider-neutral workload. Run those bounded items in separate
+contexts when the host can, then return only the bound
 result artifacts requested by the current prompt.
 
 If the host cannot delegate, complete exactly one emitted review item in the
@@ -36,21 +36,14 @@ audit-code ensure --quiet
 audit-code next-step
 ```
 
-When developing audit-tools itself, use the repository-local wrapper:
-
-```bash
-node audit-code.mjs ensure --quiet
-node audit-code.mjs next-step
-```
-
 The target-directory rule has one full statement in
 `skills/audit-code/audit-code.prompt.md` (whose absolute path `audit-code
 prompt-path` prints); follow it as written there. Do not add provider, model,
 quota, routing, or launch flags.
 
-Read the returned JSON only far enough to find `prompt_path`, then read and
-follow only that prompt. Do not inspect workload, result, schema, or state files
-unless the current prompt directs you to them. When it says to continue, call
+The command prints a JSON step record. Read the prompt file at its
+`prompt_path`, then follow only that prompt. Do not inspect workload, result,
+schema, or state files unless the current prompt directs you to them. When it says to continue, call
 `next-step` again. Stop when it says to stop.
 
 The package install seeds command and skill assets. Use `audit-code install`

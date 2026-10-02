@@ -42,12 +42,12 @@ Then ask for exactly one step:
 remediate-code next-step
 ```
 
-Read the returned JSON only far enough to find `prompt_path`, then read and
-follow only that prompt. Do not inspect workload, result, schema, or state files
-unless the current prompt directs you to them.
+The command prints a JSON step record. Read the prompt file at its
+`prompt_path`, then follow only that prompt. Do not inspect workload, result,
+schema, or state files unless the current prompt directs you to them.
 
-When the prompt emits implementation items, assign them using the host's native
-subagent facilities when available. Do not send provider, model, quota,
+When the prompt emits implementation items, run each in a separate context
+when the host can, else yourself, as the prompt directs. Do not send provider, model, quota,
 context-window, routing, launch, or concurrency configuration to audit-tools.
 Write the bound result artifacts exactly where requested; the next backend step
 validates workload identity, worktree and commit evidence, changed files, and

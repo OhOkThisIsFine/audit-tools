@@ -193,6 +193,20 @@
         "src/audit/orchestrator/staleness.ts": "9fc14544c1c18f7254d6366b51b62b0e819cb437",
         "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
       }
+    },
+    "c468455c3d100370": {
+      "reviewed_by": "claude-opus-5-5-reviewer",
+      "attester_class": "agent",
+      "checked": "npm run build green; vitest tests/audit tests/shared tests/remediate: 6877 passed, 1 failed (known unrelated script-argv-refusal reach gap on check-loop-core-attestations.mjs/seed-loop-core-baseline.mjs), 12 skipped. Independence: INDEPENDENT_CONTEXT is used imperatively in the contract/conceptual instruction lines, and renderFanoutExecutionLines keeps the stop-if-unavailable clause for independent lanes; the judge degraded fallback is unchanged. Inverted tests: the original O03 entry names the unconditional 'node audit-code.mjs' development line in the shipped loader as the defect, so the old assertions pinned the defect. Rendered copies: ran audit-code.mjs install and remediate-code.mjs install in a fresh temp git repo; all 8 tracked .agent/.gemini/.github copies are byte-identical (cmp). Guard: git grep finds sub-agent only in src comments, which the TS-AST literal scanner skips; the scanner fixtures fire on string, template-part and no-substitution literals.",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-02T00:37:57.867Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "b38cfd78aecd2f2340064669c2f42c452f7020b6",
+        "src/audit/cli/nextStepCommand.ts": "e8bc9246d96ac94516dd3c50785d0b8714ac6896",
+        "src/audit/cli/nextStepHelpers.ts": "6c6fcdb8fb57a6fde545daf64724fcc115de9f19",
+        "src/audit/orchestrator/designReviewPrompt.ts": "97e03ee11022042f59f330a9b633d11686569442"
+      }
     }
   },
   "entries": {
@@ -206,7 +220,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c468455c3d100370"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "baseline": "7b79934e86baf378"
@@ -230,10 +244,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c468455c3d100370"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c468455c3d100370"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -302,7 +316,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c468455c3d100370"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "baseline": "7b79934e86baf378"

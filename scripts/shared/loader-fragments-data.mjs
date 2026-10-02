@@ -57,9 +57,9 @@ export const LOADER_FRAGMENTS = [
     // in what a host is permitted to read.
     verbatimIn: [AUDIT_PROMPT, AUDIT_SKILL, REMEDIATE_PROMPT, REMEDIATE_SKILL],
     text:
-      "Read the returned JSON only far enough to find `prompt_path`, then read and " +
-      "follow only that prompt. Do not inspect workload, result, schema, or state files " +
-      "unless the current prompt directs you to them.",
+      "The command prints a JSON step record. Read the prompt file at its " +
+      "`prompt_path`, then follow only that prompt. Do not inspect workload, result, " +
+      "schema, or state files unless the current prompt directs you to them.",
   },
   {
     id: "target-directory",

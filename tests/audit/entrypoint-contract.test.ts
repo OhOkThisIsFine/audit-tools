@@ -38,7 +38,7 @@ test('product docs consistently present /audit-code as the canonical surface', a
   expect(productDirectionLower.includes('repo-local') && productDirectionLower.includes('fallback')).toBeTruthy();
   const skillLower = skill.toLowerCase();
   expect(skillLower.includes('canonical entrypoint') && skill.includes('/audit-code')).toBeTruthy();
-  expect(skillLower.includes("host's native subagent facilities")).toBeTruthy();
+  expect(skillLower.replace(/\s+/g, " ").includes("separate contexts when the host can")).toBeTruthy();
   expect(skillLower.includes('do not invent a smaller task') && skillLower.includes('alternate execution path')).toBeTruthy();
   // The prompt must document both invocation commands and the two stable
   // behavioral instructions (follow only the returned step; stop when told),

@@ -6,6 +6,7 @@ import { ReviewUnavailableError } from "./reviewSubmission.js";
 import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "./argumentContract.js";
 import { functionalPreflightStep } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
+import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -204,8 +205,8 @@ async function prepareConceptualPass(
  * branch (only the contract pass left) cannot drift into two shapes.
  *
  * Two properties ride on this being one function rather than two mirrored
- * blocks. (1) INDEPENDENCE: the adversarial pass is always dispatched to a
- * subagent, never rendered into the host's own step prompt — the host drove the
+ * blocks. (1) INDEPENDENCE: the adversarial pass always runs in an independent
+ * context, never rendered into the host's own step prompt — the host drove the
  * artifacts under review, and an author grading their own work misses exactly
  * what this pass exists to catch. (2) ADVANCE-FREE: the packet carries no
  * `next-step` command, because a worker that runs it becomes a SECOND driver of
@@ -265,7 +266,7 @@ async function prepareContractDispatch(opts: {
 
   return {
     instructionLine:
-      "**Contract review** (adversarial): dispatch a subagent that reads the prompt at the contract prompt path and writes findings to the contract results path.",
+      `**Contract review** (adversarial): in ${INDEPENDENT_CONTEXT}, read the prompt at the contract prompt path and write findings to the contract results path.`,
     artifactPaths: {
       contract_prompt: promptPath,
       contract_results: resultsPath,
@@ -779,7 +780,7 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
   async ({ root, artifactsDir }, result) => {
     // Both passes are unsatisfied — dispatch the contract pass and the
     // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
-    // or deep (N independent perspective subagents + an independent judge),
+    // or deep (N independent perspective lanes + an independent judge),
     // resolved JIT from the user-confirmed checkpoint / session config.
     const continueCommand = nextStepCommand(root, artifactsDir);
 
@@ -821,7 +822,7 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Dispatch the contract and conceptual review subagents in parallel, then run next-step once both results are written.",
+        "Run the contract and conceptual reviews in parallel independent contexts, then run next-step once both results are written.",
       repoRoot: root,
       artifactPaths: {
         ...contract.artifactPaths,
@@ -872,7 +873,7 @@ const emitDesignReviewContract = emissionRow<"design_review_contract">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Dispatch the contract review subagent, then run next-step once the contract results are written.",
+        "Run the contract review in an independent context, then run next-step once the contract results are written.",
       repoRoot: root,
       artifactPaths: contract.artifactPaths,
       prompt: dispatchPrompt,
@@ -888,7 +889,7 @@ const emitDesignReviewContract = emissionRow<"design_review_contract">(
 const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
   async ({ root, artifactsDir }, result) => {
     // Only the conceptual pass remains — shallow (one agent) or deep (N
-    // independent perspective subagents + an independent judge), resolved JIT
+    // independent perspective lanes + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
     const continueCommand = nextStepCommand(root, artifactsDir);
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
@@ -917,7 +918,7 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition: conceptual.deep
-        ? "Dispatch the conceptual perspective subagents in parallel, then the independent judge, then run next-step once the merged conceptual results are written."
+        ? "Run the conceptual perspective lanes in parallel, then the independent judge, then run next-step once the merged conceptual results are written."
         : "Write conceptual review findings to the results path, then run next-step.",
       repoRoot: root,
       artifactPaths: {
@@ -1093,7 +1094,7 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the comparison lane prompt (subagent if available, else yourself), write the correspondences and differences to the results path, then run next-step.",
+        `Execute the comparison lane prompt (${SEPARATE_CONTEXT_OR_SELF}), write the correspondences and differences to the results path, then run next-step.`,
       repoRoot: root,
       artifactPaths: { ...fanout.artifactPaths, ...laneGraphPaths },
       prompt: [
@@ -1489,8 +1490,8 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
     await mkdir(scratchDirPath, { recursive: true });
 
     // Always-materialized (design resolution 2): the (potentially large)
-    // edge-list prompt lives in a lane file on every host — a subagent-capable
-    // host fans it out, any other host reads and follows the same file itself.
+    // edge-list prompt lives in a lane file on every host — a host that can open
+    // a separate context fans it out, any other host reads and follows the same file itself.
     // The retired inline `edge_reasoning` step kind was this branch's other
     // arm. Routed through the same lane materializer as every other fan-out
     // step so the K-of-N/result-exists semantics stay single-sourced.
@@ -1521,7 +1522,7 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the edge-reasoning lane prompt (subagent if available, else yourself), write the rewrites to the results path, then run next-step.",
+        `Execute the edge-reasoning lane prompt (${SEPARATE_CONTEXT_OR_SELF}), write the rewrites to the results path, then run next-step.`,
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [
@@ -1697,7 +1698,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the critical-flow lane prompt (subagent if available, else yourself), write the enrichment to the results path, then run next-step.",
+        `Execute the critical-flow lane prompt (${SEPARATE_CONTEXT_OR_SELF}), write the enrichment to the results path, then run next-step.`,
       repoRoot: root,
       artifactPaths: { ...fanout.artifactPaths, critical_flows: manifestPath },
       prompt: [
@@ -1773,7 +1774,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
       runId: null,
       allowedCommands: [continueCommand],
       stopCondition:
-        "Execute the synthesis-narrative lane prompt (subagent if available, else yourself), write the narrative to the results path, then run next-step.",
+        `Execute the synthesis-narrative lane prompt (${SEPARATE_CONTEXT_OR_SELF}), write the narrative to the results path, then run next-step.`,
       repoRoot: root,
       artifactPaths: fanout.artifactPaths,
       prompt: [

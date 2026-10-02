@@ -292,7 +292,7 @@ function examplePath(bundle: ArtifactBundle): string {
 /**
  * A conceptual-review perspective: a deliberately narrow value system one
  * independent reviewer adopts. The deep conceptual pass fans these out to real
- * parallel subagents (one perspective each), then merges via an independent
+ * parallel lanes (one perspective each), then merges via an independent
  * judge. Provider-neutral — a perspective is a *lens*, never a model.
  */
 export { CONCEPTUAL_PERSPECTIVES, DEFAULT_CONCEPTUAL_PERSPECTIVES, clampPerspectiveCount, selectPerspectives } from "../../shared/types/conceptualPerspective.js";
@@ -770,7 +770,7 @@ export function renderConceptualReviewPrompt(
 
 /**
  * One perspective's conceptual-review prompt (deep fan-out). Each perspective
- * is dispatched to an independent subagent that reviews *only* through its
+ * runs in an independent context that reviews *only* through its
  * assigned value system and must not see the other perspectives' output — a
  * separate judge merges them. This is the real fan-out that replaces the old
  * single-agent "imagine several perspectives" instruction.

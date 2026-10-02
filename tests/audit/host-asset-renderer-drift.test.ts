@@ -75,13 +75,15 @@ test("E1: the canonical workload anchors appear in every IDE asset", () => {
   }
 });
 
-// ── E1: correct in-repo entrypoint (no wrong `node audit-code.mjs` root path) ─
+// ── E1: no development entrypoint in an installed asset ──────────────────────
 
-test("E1: every IDE asset uses the correct in-repo entrypoint, not a stale monorepo path", () => {
+test("E1: no IDE asset carries an audit-tools development entrypoint", () => {
   for (const [kind, asset] of Object.entries(RENDERED_ASSETS)) {
-    // A12 collapsed the monorepo: the dev entrypoint is `audit-code.mjs` at the
-    // repo root, not the old `packages/audit-code/audit-code.mjs`.
-    expect(/\bnode audit-code\.mjs\b/.test(asset), `${kind} asset must reference the repo-root 'node audit-code.mjs' entrypoint`).toBeTruthy();
+    // Every asset is installed into third-party repositories, where the
+    // audit-tools development wrapper does not exist (open-bugs 2026-10-01,
+    // re-opened O03). The bin is `audit-code`; the dev wrapper is documented
+    // in this repository's own CLAUDE.md.
+    expect(/\bnode audit-code\.mjs\b/.test(asset), `${kind} asset must not reference the development 'node audit-code.mjs' wrapper`).toBeFalsy();
     expect(!asset.includes("packages/audit-code/audit-code.mjs"), `${kind} asset must not embed the stale 'packages/audit-code/audit-code.mjs' entrypoint`).toBeTruthy();
   }
 });

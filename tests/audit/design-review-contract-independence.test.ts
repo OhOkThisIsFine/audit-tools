@@ -161,9 +161,10 @@ test(
       const hostPrompt = await readFile(step.prompt_path, "utf8");
       expect(
         hostPrompt,
-        "the host step prompt must not carry the contract-review body (that is the subagent's packet)",
+        "the host step prompt must not carry the contract-review body (that is the independent lane's packet)",
       ).not.toContain("Project contract review (adversarial pass)");
-      expect(hostPrompt).toContain("dispatch a subagent");
+      expect(hostPrompt).toContain("**Contract review** (adversarial): in an independent context");
+      expect(hostPrompt).not.toMatch(/sub-?agent/i);
       expect(hostPrompt).toContain("have been written, run:");
 
       // Packet readable / results writable are pre-declared, as in the parallel branch.
@@ -207,7 +208,8 @@ test(
 
       const hostPrompt = await readFile(step.prompt_path, "utf8");
       expect(hostPrompt).not.toContain("Project contract review (adversarial pass)");
-      expect(hostPrompt).toContain("1. **Contract review** (adversarial): dispatch a subagent");
+      expect(hostPrompt).toContain("1. **Contract review** (adversarial): in an independent context");
+      expect(hostPrompt).not.toMatch(/sub-?agent/i);
       expect(hostPrompt).toContain("both been written, run:");
 
       expect(

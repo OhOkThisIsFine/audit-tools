@@ -19,8 +19,7 @@ Normal usage should:
 The backend owns intake, contract planning, persisted state, dependency and
 phase safety, strict result ingestion, verification, and closeout. When
 implementation is ready it emits every eligible provider-neutral work item.
-Delegate bounded work through the host's native subagent facilities when
-available. The host returns prompt-bound commit and test evidence; the backend
+Run bounded work in separate contexts when the host can. The host returns prompt-bound commit and test evidence; the backend
 corroborates that evidence before it accepts completion.
 
 If the host cannot delegate, complete exactly one emitted work item in the
@@ -43,13 +42,12 @@ them as written there.
 Do not add capability, provider, model, quota, context-window, or concurrency
 flags.
 
-Read the returned JSON only far enough to find `prompt_path`, then read and
-follow only that prompt. Do not inspect workload, result, schema, or state files
-unless the current prompt directs you to them. When it says to continue, call
+The command prints a JSON step record. Read the prompt file at its
+`prompt_path`, then follow only that prompt. Do not inspect workload, result,
+schema, or state files unless the current prompt directs you to them. When it says to continue, call
 `next-step` again. Stop when it says to stop.
 
-When developing audit-tools itself, prefer `node remediate-code.mjs`. Use
-`remediate-code install` for repair or forced asset refresh.
+Use `remediate-code install` for repair or forced asset refresh.
 
 ## Development rule
 

@@ -38,15 +38,31 @@ export function buildCacheablePrompt(parts: CacheablePromptParts): string {
 }
 
 /**
- * Host instruction emitted in dispatch step prompts: each subagent should
- * receive its `prompt_path` file path and follow it directly. Loading worker
- * prompts into the main conversation inflates context for no benefit — the
- * worker executes in its own context and reports results back through its
- * assigned result path. Single-sourced so audit-code and remediate-code stay
- * in parity on the dispatch handoff policy.
+ * The host-facing vocabulary for where a lane runs. Every phrase names the
+ * NEED — a context, separate or independent — and never a delegation mechanism:
+ * hosts differ in how (or whether) they can open another context, and a
+ * mechanism noun is an instruction a host without that mechanism cannot follow.
+ * `tests/shared/host-prompt-vocabulary.test.ts` holds every string literal in
+ * the shipped code to this.
+ *
+ * - `INDEPENDENT_CONTEXT`: a review lane that must not be judged by the agent
+ *   that drove the work under review.
+ * - `SEPARATE_CONTEXT_OR_SELF`: an ordinary lane, run apart from the driving
+ *   conversation when the host can, else by the driver itself.
+ */
+export const INDEPENDENT_CONTEXT = "an independent context that did not drive this audit";
+export const SEPARATE_CONTEXT_OR_SELF = "in a separate context when the host can, else yourself";
+
+/**
+ * Host instruction emitted in dispatch step prompts: each lane handed to a
+ * separate context receives its `prompt_path` file path and follows it
+ * directly. Loading worker prompts into the main conversation inflates context
+ * for no benefit — the worker executes in its own context and reports results
+ * back through its assigned result path. Single-sourced so audit-code and
+ * remediate-code stay in parity on the dispatch handoff policy.
  */
 export const DISPATCH_PROMPT_HANDOFF_NOTE =
-  "For each subagent, pass its `prompt_path` to the agent tool directly — " +
+  "For each lane handed to a separate context, pass its `prompt_path` as the instruction directly — " +
   "do not read the worker prompt file into this conversation. " +
   "Each worker executes in its own context and writes only to its assigned result path.";
 
@@ -61,7 +77,7 @@ export const DISPATCH_PROMPT_HANDOFF_NOTE =
  *
  * ⚠ THE MANDATE STATES THE NEED, NEVER A MECHANISM. It used to say "dispatch it
  * to a fresh, independent sub-agent", which names one way to get independence
- * and presumes the host has it — in-process subagents are not universal, and a
+ * and presumes the host has it — in-process delegation is not universal, and a
  * host without them read an instruction it could not follow (the same defect the
  * former contract-pipeline fan-out carried). Independence is a property of the
  * CONTEXT, so that is what the text requires and the host owns the mechanism.
@@ -116,7 +132,7 @@ export function renderFanoutExecutionLines(params: {
     demand?: { size: string; complexity: string; risk: string };
     reviewRequirement?: "ordinary" | "independent" | "degraded_allowed";
   }[];
-  /** Host-declared max concurrent subagents, when known. */
+  /** Host-declared max concurrent lanes, when known. */
   concurrencyHint?: number | null;
   /** A driver cannot execute these lanes itself; unavailable independence stops the step. */
   independenceRequired?: boolean;
@@ -141,8 +157,8 @@ export function renderFanoutExecutionLines(params: {
       : [];
   return [
     (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
-      ? `Execute the ${n} lane prompt file${plural} below in an independent context that did not drive this audit. The host chooses how to obtain that context. If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.`
-      : `Execute the ${n} lane prompt file${plural} below: dispatch one subagent per file if a subagent facility exists, else read and follow each file sequentially yourself. The same files and result paths apply either way.`,
+      ? `Execute the ${n} lane prompt file${plural} below in ${INDEPENDENT_CONTEXT}. The host chooses how to obtain that context. If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.`
+      : `Execute the ${n} lane prompt file${plural} below, each ${SEPARATE_CONTEXT_OR_SELF} — run separate contexts in parallel where the host can; otherwise read and follow each file sequentially yourself. The same files and result paths apply either way.`,
     "",
     ...concurrency,
     ...(params.lanes.some((lane) => lane.demand !== undefined)
@@ -162,7 +178,7 @@ export function renderFanoutExecutionLines(params: {
     "",
     (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
       ? "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once the independently produced lane results exist."
-      : "When dispatching a lane to a subagent, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
+      : "When handing a lane to a separate context, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
   ];
 }
 
