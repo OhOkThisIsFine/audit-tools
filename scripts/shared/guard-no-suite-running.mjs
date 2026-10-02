@@ -20,21 +20,12 @@ import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hashContent } from './primitives.mjs';
+import { hashContent, processAlive } from './primitives.mjs';
 
+// sites-pinned: tests/shared/suite-lock-parity.test.ts
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const key = hashContent(repoRoot, { length: 12 });
 const lockDir = join(tmpdir(), `audit-tools-vitest-${key}.holders`);
-
-function processAlive(pid) {
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return /** @type {any} */ (err).code === "EPERM";
-  }
-}
 
 // Parity probe: lets tests/shared/suite-lock-parity.test.mjs compare this
 // script's ACTUAL derivation against the TS helper's, rather than re-deriving

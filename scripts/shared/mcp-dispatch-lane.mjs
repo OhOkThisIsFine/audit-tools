@@ -87,9 +87,31 @@
 // schema already travels in the prompt text for a CLI-agent caller and the
 // existing salvage-JSON parser in triage-backlog.mjs already tolerates
 // unschemaed prose.
-import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+//
+// A REPOSITORY-READING LANE RUNS IN A WORKTREE THIS MODULE OWNS (owner answer
+// f78305ac08246ae5, 2026-09-24). A `mode: 'agent'` dispatch — the `dispatch`
+// agent, which can read and write files — whose directory lies in a git
+// repository never runs there. The helper adds a detached worktree of that
+// directory's HEAD at `<container>-worktrees/<repo>/dispatch-lane-<pid>-<hex>`
+// (the checkout `C:/Code/audit-tools` maps to `C:/Code-worktrees/audit-tools/
+// ...`; `<repo>` is the MAIN checkout's name even when the caller sits in a
+// linked worktree), points the job at the same subdirectory inside it, and
+// removes it in a `finally` — on success, on a failed job, on a timeout and on
+// a thrown transport death. It refuses a worktree path inside any repository:
+// a nested worktree breaks test discovery for the outer one. A process killed
+// mid-dispatch never reaches its `finally`, so every repository-reading
+// dispatch first sweeps its repo's `dispatch-lane-<pid>-*` worktrees whose pid
+// is no longer alive. Consequences: the lane reads COMMITTED HEAD, never the
+// caller's uncommitted edits, and its own writes are discarded; the caller's
+// HEAD, index, branches and status are untouched (`--detach` creates no
+// branch). The `answer` agent (every tool denied) and a directory outside git
+// (a disposable snapshot) are passed through unchanged — neither can reach a
+// checkout.
+import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { processAlive } from './primitives.mjs';
 import { resolveSpawn } from './spawn-shell.mjs';
 
 /** The MCP revision this client requests; the server echoes it when it serves it. */
@@ -208,6 +230,134 @@ function stringifyError(error) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
+/** The name every helper-owned lane worktree carries; the pid is its owner. */
+const LANE_WORKTREE_NAME = /^dispatch-lane-(\d+)-[0-9a-f]+$/;
+
+/**
+ * Run git synchronously. stdin is `ignore`d — nothing is fed to git, and a
+ * piped stdin nobody writes is the hang the spawn conventions warn about.
+ *
+ * @param {string[]} args
+ * @param {string} cwd
+ */
+function git(args, cwd) {
+  return spawnSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+}
+
+/** @param {string[]} args @param {string} cwd */
+function gitOrThrow(args, cwd) {
+  const r = git(args, cwd);
+  if (r.status !== 0) {
+    throw new DispatchLaneError(
+      `git ${args.join(' ')} failed in ${cwd} (${r.error?.message ?? `exit ${r.status}`}): ${(r.stderr ?? '').trim()}`,
+    );
+  }
+  return (r.stdout ?? '').trim();
+}
+
+/**
+ * The repository a directory belongs to, or null when it is in none (or does
+ * not exist).
+ *
+ * @param {string} directory
+ * @returns {{ mainTop: string, prefix: string, head: string } | null}
+ */
+function repositoryOf(directory) {
+  if (!existsSync(directory)) return null;
+  const probe = git(['rev-parse', '--is-inside-work-tree'], directory);
+  if (probe.status !== 0 || probe.stdout.trim() !== 'true') return null;
+  const [commonDir, prefix] = gitOrThrow(
+    ['rev-parse', '--path-format=absolute', '--git-common-dir', '--show-prefix'],
+    directory,
+  ).split(/\r?\n/);
+  return { mainTop: dirname(resolve(commonDir)), prefix: prefix ?? '', head: gitOrThrow(['rev-parse', 'HEAD'], directory) };
+}
+
+/**
+ * The directory every lane worktree of a repository lives in:
+ * `<container>-worktrees/<repo>` beside the main checkout's container.
+ *
+ * @param {string} mainTop
+ */
+export function laneWorktreeContainer(mainTop) {
+  return join(`${dirname(mainTop)}-worktrees`, basename(mainTop));
+}
+
+/**
+ * The repository root nearest above `path`, or null. Walks the filesystem,
+ * because the path need not exist yet.
+ *
+ * @param {string} path
+ */
+function enclosingRepository(path) {
+  for (let dir = resolve(path); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+/**
+ * Remove one lane worktree: git's own removal first, the directory and git's
+ * stale record second, so a half-registered worktree still goes.
+ *
+ * @param {string} mainTop
+ * @param {string} path
+ */
+function removeLaneWorktree(mainTop, path) {
+  git(['worktree', 'remove', '--force', path], mainTop);
+  rmSync(path, { recursive: true, force: true });
+  git(['worktree', 'prune'], mainTop);
+}
+
+/**
+ * Remove every lane worktree of this repository whose owning process is gone —
+ * the residue of a dispatch killed before its `finally` ran.
+ *
+ * @param {string} mainTop
+ * @param {string} container
+ */
+export function sweepStaleLaneWorktrees(mainTop, container) {
+  if (!existsSync(container)) return;
+  for (const name of readdirSync(container)) {
+    const owner = LANE_WORKTREE_NAME.exec(name);
+    if (owner && !processAlive(Number(owner[1]))) removeLaneWorktree(mainTop, join(container, name));
+  }
+}
+
+/**
+ * Give a repository-reading dispatch its own worktree. Null when `directory`
+ * is in no repository: nothing there is a checkout to protect.
+ *
+ * @param {string} directory
+ * @returns {{ directory: string, remove: () => void } | null}
+ */
+function openLaneWorktree(directory) {
+  const repo = repositoryOf(directory);
+  if (repo === null) return null;
+  const container = laneWorktreeContainer(repo.mainTop);
+  const nesting = enclosingRepository(container);
+  if (nesting !== null) {
+    throw new DispatchLaneError(
+      `refusing a lane worktree at ${container}: it lies inside the repository ${nesting}, and a nested ` +
+        `worktree breaks that repository's test discovery.`,
+    );
+  }
+  sweepStaleLaneWorktrees(repo.mainTop, container);
+  const path = join(container, `dispatch-lane-${process.pid}-${randomBytes(4).toString('hex')}`);
+  try {
+    gitOrThrow(['worktree', 'add', '--detach', path, repo.head], repo.mainTop);
+  } catch (err) {
+    removeLaneWorktree(repo.mainTop, path);
+    throw err;
+  }
+  const inside = join(path, repo.prefix);
+  return {
+    directory: existsSync(inside) ? inside : path,
+    remove: () => removeLaneWorktree(repo.mainTop, path),
+  };
 }
 
 /**
@@ -508,19 +658,26 @@ export function openDispatchLane({
       const startedAt = Date.now();
       const deadline = startedAt + opts.timeoutMs;
       const agent = opts.mode === 'agent' ? 'dispatch' : 'answer';
-      let sc = await callTool(bridge, 'opencode_fire', {
-        prompt: task,
-        agent,
-        directory: opts.cwd ?? cwd,
-        // providerID/modelID intentionally omitted — see the module header.
-      });
-      if (!TERMINAL_STATUSES.has(sc.status)) {
-        sc = await pollUntilTerminal(bridge, sc.jobId, deadline, startedAt, waitRetryMs);
+      const requested = resolve(opts.cwd ?? cwd);
+      // sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
+      const worktree = agent === 'dispatch' ? openLaneWorktree(requested) : null;
+      try {
+        let sc = await callTool(bridge, 'opencode_fire', {
+          prompt: task,
+          agent,
+          directory: worktree?.directory ?? requested,
+          // providerID/modelID intentionally omitted — see the module header.
+        });
+        if (!TERMINAL_STATUSES.has(sc.status)) {
+          sc = await pollUntilTerminal(bridge, sc.jobId, deadline, startedAt, waitRetryMs);
+        }
+        if (sc.status === 'input_required') {
+          sc = await cancelInputRequired(bridge, sc.jobId);
+        }
+        return finalize(sc);
+      } finally {
+        worktree?.remove();
       }
-      if (sc.status === 'input_required') {
-        sc = await cancelInputRequired(bridge, sc.jobId);
-      }
-      return finalize(sc);
     },
 
     /** End the bridge process; the lane is unusable afterwards. */

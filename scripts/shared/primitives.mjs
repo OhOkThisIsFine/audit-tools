@@ -21,6 +21,10 @@
 // The gate's rule tables list BOTH homes, so a re-roll anywhere in either tree
 // is red. Change one and change the other — the rules treat them as one home in
 // two files, which is what makes the divergence impossible to miss.
+//
+// `processAlive` is not a twin: it is the governance tree's one liveness probe,
+// imported by the prebuild guard and the dispatch lane and re-exported to the
+// test helpers.
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -86,4 +90,20 @@ export function resolveWithinRoot(root, candidate, options = {}) {
   if (rel === "") return options.allowRoot === false ? null : absolutePath;
   if (rel === ".." || rel.startsWith(`..${sep}`) || rel.startsWith("../")) return null;
   return absolutePath;
+}
+
+// sites-pinned: tests/shared/dispatch-lane-worktree.test.ts
+/**
+ * Whether a process with this pid exists. `kill(pid, 0)` sends no signal; it
+ * reports deliverability, so an EPERM answer still means the process EXISTS.
+ * A pid that is not a positive integer names no process.
+ */
+export function processAlive(pid) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return /** @type {any} */ (err).code === "EPERM";
+  }
 }

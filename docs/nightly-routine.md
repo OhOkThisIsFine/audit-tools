@@ -39,7 +39,9 @@ the requirement on a given night is the run's call.
   capacity is exhausted <!-- doc-citation-exempt: docs/design.md is a path in the agent-dispatch repo, not this tree -->
   (agent-dispatch's `docs/design.md` §4), so this is not a "free-provider"
   session. The bridge owns the routing mechanics (endpoint, model, env), so this doc never
-  restates them and cannot drift from them. Treat every reply as an advisory lead and verify it
+  restates them and cannot drift from them. A lane that reads the repository always runs in a
+  throwaway worktree of HEAD that the helper creates outside every repository root and removes
+  afterwards, so it never runs in a checkout and leaves no residue. Treat every reply as an advisory lead and verify it
   against source; quoted evidence is especially fallible.
 - **When no lane meets the requirement**, route the work elsewhere. A dead lane
   may not silently shrink coverage. The `skipped` list must then record which

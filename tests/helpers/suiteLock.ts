@@ -25,6 +25,11 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { processAlive } from "../../scripts/shared/primitives.mjs";
+
+/** Whether a pid is still running. A dead holder's entry is stale, not binding. */
+export { processAlive };
+
 /**
  * Set on every descendant of a running suite (see global-setup.ts). The prebuild
  * guard exempts these: the dev wrapper auto-rebuilds, and several tests spawn it
@@ -45,18 +50,6 @@ export function suiteLockDir(repoRoot: string): string {
   return join(tmpdir(), `audit-tools-vitest-${key}.holders`);
 }
 
-/** Whether a pid is still running. A dead holder's entry is stale, not binding. */
-export function processAlive(pid: unknown): boolean {
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    // Signal 0 is the existence/permission probe — it delivers nothing.
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // ESRCH = gone. EPERM = alive but owned by another user.
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
 
 export interface SuiteHolder {
   pid: number;
