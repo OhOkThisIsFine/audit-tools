@@ -6,7 +6,7 @@
 // so every assertion here is about what it DID to the tree, not about a verdict.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, existsSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -60,6 +60,7 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     git(repo, 'config', 'user.name', 'test');
     git(repo, 'config', 'commit.gpgsign', 'false');
     writeFileSync(join(repo, 'a.txt'), 'one\n');
+    writeFileSync(join(repo, '.gitignore'), '.work/\nnode_modules/\n');
     git(repo, 'add', '.');
     git(repo, 'commit', '-qm', 'initial');
 
@@ -83,6 +84,22 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     // fresh: landed and clean, but touched moments ago — indistinguishable from
     // a concurrent agent between `worktree add` and its first commit.
     git(repo, 'worktree', 'add', '-q', wt('fresh'), '-b', 'wt-fresh');
+
+    // workstate: landed, `git status` clean and idle by the index clock, but it
+    // holds gitignored work state (an audit's `.audit-tools/` tree in the real
+    // incident). `status --porcelain` cannot see it and `worktree remove` deletes
+    // it, so only an `--ignored` read keeps this work alive.
+    git(repo, 'worktree', 'add', '-q', wt('workstate'), '-b', 'wt-workstate');
+    mkdirSync(join(wt('workstate'), '.work'));
+    writeFileSync(join(wt('workstate'), '.work', 'state.json'), '{"run":"in progress"}\n');
+    backdate(wt('workstate'));
+
+    // buildonly: landed, clean and idle; its only ignored content is installed
+    // dependencies, which `npm install` regenerates → still disposable.
+    git(repo, 'worktree', 'add', '-q', wt('buildonly'), '-b', 'wt-buildonly');
+    mkdirSync(join(wt('buildonly'), 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(wt('buildonly'), 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    backdate(wt('buildonly'));
 
     // ONE pass, read by every case below. A pass per case would not be
     // independent: the guard's own `git status` probe rewrites the per-worktree
@@ -138,6 +155,44 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
   it('never touches the checkout the session itself is in', () => {
     expect(existsSync(join(repo, 'a.txt'))).toBe(true);
     expect(isListed(repo)).toBe(true);
+  });
+
+  it('keeps a worktree holding gitignored work state, without even attempting it', () => {
+    expect(existsSync(join(wt('workstate'), '.work', 'state.json'))).toBe(true);
+    expect(isListed(wt('workstate'))).toBe(true);
+    expect(pass.stdout).not.toMatch(/workstate/i);
+  });
+
+  it('still reaps a worktree whose only ignored content is installed dependencies', () => {
+    expect(existsSync(wt('buildonly'))).toBe(false);
+    expect(isListed(wt('buildonly'))).toBe(false);
+    expect(pass.stdout).toMatch(/buildonly/i);
+  });
+
+  it('never touches the worktree the session works in, even when the project dir is another checkout', () => {
+    // The incident: CLAUDE_PROJECT_DIR named the main checkout while the session
+    // worked in a linked worktree, so the self-skip protected the wrong tree.
+    git(repo, 'worktree', 'add', '-q', wt('incwd'), '-b', 'wt-incwd');
+    backdate(wt('incwd'));
+    const inherited = { ...process.env };
+    delete inherited.AUDIT_TOOLS_CHILD_SESSION;
+    const r = spawnSyncHidden(process.execPath, [GUARDS], {
+      cwd: repo,
+      encoding: 'utf8',
+      input: JSON.stringify({
+        hook_event_name: 'SessionStart',
+        session_id: `reap-cwd-${process.pid}`,
+        source: 'resume',
+        cwd: wt('incwd'),
+      }),
+      timeout: 120_000,
+      windowsHide: true,
+      env: { ...inherited, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: repo },
+    });
+    expect(r.status).toBe(0);
+    expect(existsSync(wt('incwd'))).toBe(true);
+    expect(isListed(wt('incwd'))).toBe(true);
+    expect(r.stdout ?? '').not.toMatch(/incwd/);
   });
 
   it('still reaps with a SessionStart payload on stdin — the registration leg runs first and must not break the reap leg', () => {

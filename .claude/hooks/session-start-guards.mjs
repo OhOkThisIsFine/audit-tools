@@ -245,13 +245,25 @@ try {
 // THREE conditions, all required — a stale worktree is not necessarily a
 // duplicate (of four cleared by hand, one held a superseded ALTERNATIVE branch):
 //   landed — HEAD is reachable from a main line, so it holds no unique commit
-//   clean  — no modified or untracked file, so it holds no unsaved work
+//   clean  — no modified, untracked OR IGNORED file beyond installed
+//            dependencies, so it holds no unsaved work. Ignored files count:
+//            `status --porcelain` cannot see them and `worktree remove` deletes
+//            them, and a run's working state (an audit's `.audit-tools/` tree)
+//            lives exactly there — a 2026-10-02 session lost a whole audit run
+//            this way. Only what an install regenerates is disposable.
 //   idle   — a CONCURRENT agent's worktree is landed AND clean for the whole
 //            window between `worktree add` and its first commit, so freshness is
 //            what separates in-flight from abandoned
-// Anything unreadable — a vanished directory, a git that errors — is left alone:
-// this leg only ever acts on a positive answer to all three.
+// The worktree the session itself works in (the payload `cwd`, which differs
+// from CLAUDE_PROJECT_DIR when the session entered a linked worktree) is never a
+// candidate. Anything unreadable — a vanished directory, a git that errors — is
+// left alone: this leg only ever acts on a positive answer to all three.
 const WORKTREE_IDLE_MS = 6 * 60 * 60 * 1000;
+// Ignored top-level entries an install recreates — the only ignored content a
+// reap may discard. Named by what regenerates them, not by size or age. A
+// junction or symlink (how a lap worktree borrows its dependencies) lists
+// without the trailing slash.
+const REGENERABLE_IGNORED = new Set(['node_modules/', 'node_modules']);
 
 /**
  * Milliseconds since the last git activity in a worktree. The per-worktree index
@@ -298,6 +310,11 @@ try {
   const linked = listed.ok ? parseWorktreePorcelain(listed.stdout).slice(1) : [];
   const selfTop = git(['rev-parse', '--show-toplevel'], 5_000);
   const selfPath = selfTop.ok && selfTop.stdout ? selfTop.stdout : ROOT;
+  // The session's working tree: an unreadable cwd yields no path, and the
+  // project-dir self-skip above still holds.
+  const sessionCwd = typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : null;
+  const sessionTop = sessionCwd ? gitIn(sessionCwd, ['rev-parse', '--show-toplevel'], 5_000) : null;
+  const sessionPath = sessionTop?.ok && sessionTop.stdout ? sessionTop.stdout : sessionCwd;
   // Reachability is judged against every main line this checkout has: the local
   // branch and, when a remote was discovered above, its tracking counterpart.
   const mainRefs = [remoteName ? `${remoteName}/main` : null, 'main']
@@ -310,17 +327,24 @@ try {
   for (const wt of linked.sort((a, b) => compareCodeUnits(a.path, b.path))) {
     if (wt.disqualified || !wt.head || !existsSync(wt.path)) continue;
     if (samePath(wt.path, selfPath) || samePath(wt.path, ROOT)) continue;
+    if (sessionPath && samePath(wt.path, sessionPath)) continue;
     // A repo with no main line at all yields no refs, so nothing is reachable
     // and nothing is reaped — the empty case needs no separate guard.
     if (!mainRefs.some((ref) => git(['merge-base', '--is-ancestor', wt.head, ref], 10_000).ok)) continue;
     // Read the clock BEFORE the status call below — status can rewrite the index
     // it reads, which would reset the very signal being measured.
     if (msSinceWorktreeActivity(wt.path) < WORKTREE_IDLE_MS) continue;
-    const status = gitIn(wt.path, ['status', '--porcelain'], 20_000);
+    const status = gitIn(wt.path, ['status', '--porcelain', '--ignored'], 20_000);
     // git re-checks cleanliness during `remove` too, but only as a refusal —
     // without this check a worktree someone is working in would be attempted
-    // every session and reported as "stuck" each time.
-    if (!status.ok || status.stdout !== '') continue;
+    // every session and reported as "stuck" each time. git's own re-check skips
+    // ignored files, so this line is the ONLY guard for them.
+    if (!status.ok) continue;
+    const unsaved = status.stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .filter((line) => !(line.startsWith('!! ') && REGENERABLE_IGNORED.has(line.slice(3))));
+    if (unsaved.length > 0) continue;
     // No --force: git re-checks cleanliness itself, so a race between the check
     // above and the removal still fails closed.
     (git(['worktree', 'remove', wt.path], 60_000).ok ? reaped : stuck).push(wt.path);
