@@ -5,21 +5,22 @@
 
 ## Current state
 
-Published and installed: `v0.53.0`, the outcomes-first simplification
-([plan and record](reviews/outcomes-first-workflow-plan-2026-09-30.md)). The 2026-09-30
-cloud-agent work (#12, #13, #14) was reviewed and adversarially checked on 2026-10-01:
-[evaluation](reviews/chatgpt-work-evaluation-2026-10-01.md). Its main lines hold; its
-defects are filed in [`open-bugs.md`](backlog/open-bugs.md) and
-[`minor-bugs.md`](backlog/minor-bugs.md) under 2026-10-01. The suite is green on Windows.
+Published and installed: `v0.54.0`. GitHub branch protection on `main` requires the `checks`
+status check (strict; admins can bypass), and that job judges every tree against the tracked
+loop-core attestation ledger `.claude/loop-core-attestations.json` (143 baseline-only files).
+The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can
+reach `main` without an attestation": the gate's own files are not loop-core, and an admin's
+direct push skips the required check.
 
 The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
-is present on the owner's machine and was not reviewed in that lap; retain unknown work.
+is present on the owner's machine and has not been reviewed; retain unknown work.
 
 ## Immediate next
 
-Work the 2026-10-01 medium entries in [`open-bugs.md`](backlog/open-bugs.md). The push-gate
-`HEAD` refspec bypass is reproduced and the smallest; the loop-core attestation gap at the
-GitHub merge boundary is the one that let the others land unreviewed.
+Work the 2026-10-01 medium entries in [`open-bugs.md`](backlog/open-bugs.md). The release
+CI-green gate that refuses before CI lists the run is the smallest and hits every release; the
+prompt-body path normalizer blocks the Windows release smoke; the read-only loop-core
+attestation is what let a looping change pass review.
 **Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

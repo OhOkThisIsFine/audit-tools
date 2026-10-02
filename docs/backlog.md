@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 122 entr(y/ies) indexed.
+> and at commit). 127 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -32,37 +32,42 @@
 - `open-bugs.md:10` — A settled nightly answer overtaken by a later decision has no stated handling, so the run decides alone (2026-09-23, medium, friction: ambiguous_direction).
 - `open-bugs.md:11` — The prompt-body path normalizer corrupts a JSON-escaped Windows path into `//` form (2026-10-01, medium, friction: tool_should_decide).
 - `open-bugs.md:12` — `dispatch/merge-results.mjs` and `dispatch/validate-result.mjs` ship but nothing runs them (2026-10-01, low, friction: tool_should_decide).
-- `open-bugs.md:21` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
-- `open-bugs.md:35` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:45` — Loop-core discovery retains a mixed-consumer limit.
-- `open-bugs.md:49` — Divergent attestation preflight can abstain.
-- `open-bugs.md:55` — Derived staleness sets retain their accessor contract.
-- `open-bugs.md:61` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:69` — A comprehensive remaining test-replica sweep is unverified.
-- `open-bugs.md:72` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:100` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:116` — External release and review lanes retain environment-dependent limits.
-- `open-bugs.md:119` — Machine-wide green queries and external lane behavior remain externally owned.
-- `open-bugs.md:123` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:142` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:148` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:13` — The release CI-green gate refuses when CI has not yet listed the run for the pushed SHA (2026-10-01, medium, friction: tool_should_decide).
+- `open-bugs.md:14` — A Claude session started outside the repo is refused as a CHILD at commit (2026-10-01, medium, friction: tool_should_decide).
+- `open-bugs.md:15` — A loop-core attestation can be given after reading alone (2026-10-01, medium, friction: tool_should_decide).
+- `open-bugs.md:24` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
+- `open-bugs.md:38` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:48` — Loop-core discovery retains a mixed-consumer limit.
+- `open-bugs.md:52` — Divergent attestation preflight can abstain.
+- `open-bugs.md:58` — Derived staleness sets retain their accessor contract.
+- `open-bugs.md:64` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:72` — A comprehensive remaining test-replica sweep is unverified.
+- `open-bugs.md:75` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:103` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:119` — External release and review lanes retain environment-dependent limits.
+- `open-bugs.md:122` — Machine-wide green queries and external lane behavior remain externally owned.
+- `open-bugs.md:126` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:145` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:151` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
-- `minor-bugs.md:15` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
-- `minor-bugs.md:16` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
-- `minor-bugs.md:17` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:18` — A memory note can red an unrelated commit (2026-10-01, low).
-- `minor-bugs.md:19` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:20` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:38` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:52` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:73` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:84` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:102` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:107` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:109` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:14` — The remediate clarification answer's `scope_additions` field has no effect (2026-10-01, low).
+- `minor-bugs.md:15` — No command runs the commit gate's legs for the staged set without committing (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:16` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
+- `minor-bugs.md:17` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
+- `minor-bugs.md:18` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
+- `minor-bugs.md:19` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:20` — A memory note can red an unrelated commit (2026-10-01, low).
+- `minor-bugs.md:21` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:22` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
+- `minor-bugs.md:40` — CP-NODE-10 residuals (2026-08-19, low, one entry):
+- `minor-bugs.md:54` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:75` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:86` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `minor-bugs.md:104` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:109` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `minor-bugs.md:111` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
