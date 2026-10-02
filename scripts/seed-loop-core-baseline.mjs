@@ -23,6 +23,7 @@ import {
   seedBaseline,
   serializeLedger,
 } from './shared/loopCoreAttestationLedger.mjs';
+import { guardArgv } from './shared/argvGuard.mjs';
 
 const root = process.cwd();
 
@@ -32,14 +33,13 @@ function fail(msg) {
   process.exit(1);
 }
 
-const argv = process.argv.slice(2);
+const args = guardArgv(process.argv.slice(2), {
+  name: 'seed-loop-core-baseline',
+  usage: 'node scripts/seed-loop-core-baseline.mjs --commit <rev> [--notes "<context>"]',
+  values: ['--commit', '--notes'],
+});
 /** @type {{ commit?: string, notes?: string }} */
-const flags = {};
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--commit') flags.commit = argv[++i];
-  else if (argv[i] === '--notes') flags.notes = argv[++i];
-  else fail(`unknown argument ${argv[i]}`);
-}
+const flags = { commit: args.get('--commit'), notes: args.get('--notes') };
 if (!flags.commit) fail('--commit <rev> is required');
 
 /** @param {string[]} args */

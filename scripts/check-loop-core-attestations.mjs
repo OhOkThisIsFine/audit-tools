@@ -16,16 +16,14 @@
 // Write an entry with `node .claude/hooks/attest-loop-core-review.mjs …`.
 import { spawnSync } from 'node:child_process';
 import { LEDGER_PATH, targetsMain, verifyLedger } from './shared/loopCoreAttestationLedger.mjs';
+import { guardArgv } from './shared/argvGuard.mjs';
 
-const argv = process.argv.slice(2);
-let rev;
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--rev') rev = argv[++i];
-  else {
-    console.error(`check:loop-core-attestations: unknown argument ${argv[i]}`);
-    process.exit(2);
-  }
-}
+/** @type {string | undefined} */
+const rev = guardArgv(process.argv.slice(2), {
+  name: 'check:loop-core-attestations',
+  usage: 'node scripts/check-loop-core-attestations.mjs [--rev <rev>]',
+  values: ['--rev'],
+}).get('--rev');
 
 /** @param {string[]} args */
 function git(args) {

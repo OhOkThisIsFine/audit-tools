@@ -212,6 +212,17 @@ describe("a baseline records starting content and claims no review", () => {
     expect(s.stderr).toContain("already has a baseline");
   });
 
+  test("the gate and the seed refuse a mistyped flag and a flag missing its value with the shared refusal", () => {
+    // A bare trailing `--rev` used to be read as "no rev" and judge the index;
+    // a mistyped seed flag used to fail with its own wording. Both go through
+    // scripts/shared/argvGuard.mjs now: exit 2, one message shape, no work done.
+    for (const r of [check(["--revv", "HEAD"]), check(["--rev"]), seed("--commitx", "HEAD"), seed("--commit")]) {
+      expect(r.status, r.stdout + r.stderr).toBe(2);
+      expect(r.stderr).toContain("refuses arguments it does not recognize");
+    }
+    expect(existsSync(join(repo, LEDGER_PATH))).toBe(false);
+  });
+
   test("the attest hook cannot write a baseline: it has no flag for one, and an attest writes a review", () => {
     expect(attest("--baseline").stderr).toContain("unknown argument: --baseline");
     seededRepo();
