@@ -180,12 +180,10 @@ export interface FindingLocationLineIssue {
  * all, the span is 1-based integers with `line_start <= line_end`. Returns
  * every violated rule with its statement.
  *
- * Consumed by BOTH ingestion doors so neither can drift from the other: the
- * zod refinement ({@link refineFindingLocationLines}) turns these into schema
- * issues at parse time, and the downstream audit-results validator walks the
- * same function over its raw per-location records — the batch lane reaches
- * that validator WITHOUT a worker-projection parse, so the check has to live
- * there too, not only behind the parse.
+ * The audit-results validator walks it over raw per-location records: a
+ * persisted or re-validated result carries the TOOL's derived lines (a reviewer
+ * may not supply any — `WORKER_REFUSED_LOCATION_FIELDS`), and this is what
+ * catches a span corrupted after derivation.
  *
  * The fields stay `unknown`: callers hold everything from fully-parsed
  * locations to raw JSON payloads, and the guards below are exactly what makes
@@ -224,28 +222,17 @@ export function findingLocationLineIssues(location: {
   return issues;
 }
 
-/**
- * Applies {@link findingLocationLineIssues} as a zod refinement. Exported so
- * every projection applies the SAME refinement — `.superRefine` wraps in
- * ZodEffects, which cannot be re-`extend`ed, so each projection composes
- * object + refinement itself rather than this file baking them together and
- * freezing the shape.
- */
-export const refineFindingLocationLines = (
-  location: z.infer<typeof FindingLocationObjectSchema>,
-  context: z.RefinementCtx,
-): void => {
-  for (const issue of findingLocationLineIssues(location)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: [issue.field],
-      message: issue.message,
-    });
-  }
-};
-
-export const FindingLocationSchema =
-  FindingLocationObjectSchema.superRefine(refineFindingLocationLines);
+export const FindingLocationSchema = FindingLocationObjectSchema.superRefine(
+  (location, context) => {
+    for (const issue of findingLocationLineIssues(location)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [issue.field],
+        message: issue.message,
+      });
+    }
+  },
+);
 export type FindingLocation = z.infer<typeof FindingLocationSchema>;
 
 /**

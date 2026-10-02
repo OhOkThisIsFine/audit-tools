@@ -140,13 +140,22 @@ export function mergeVerificationStatus(
  * the absorb mechanics AND audit's identity-key exact merge (`upsertFinding`).
  */
 export function mergeAffectedFiles(survivor: Finding, absorbed: Finding, sort: boolean): void {
-  const seen = new Set(
-    survivor.affected_files.map(
-      (f) => `${f.path}:${f.line_start ?? ""}:${f.line_end ?? ""}:${f.symbol ?? ""}`,
-    ),
-  );
+  // The cited content is part of an entry's identity: an entry whose quote is
+  // absent from its file, or occurs more than once, carries no lines, so two
+  // distinct citations into one file would otherwise share a key and the
+  // absorbed one's quote or declaration would be silently dropped.
+  const entryKey = (f: Finding["affected_files"][number]): string =>
+    JSON.stringify([
+      f.path,
+      f.line_start ?? null,
+      f.line_end ?? null,
+      f.symbol ?? null,
+      f.quoted_text ?? null,
+      f.no_quotable_span ?? null,
+    ]);
+  const seen = new Set(survivor.affected_files.map(entryKey));
   for (const file of absorbed.affected_files) {
-    const key = `${file.path}:${file.line_start ?? ""}:${file.line_end ?? ""}:${file.symbol ?? ""}`;
+    const key = entryKey(file);
     if (!seen.has(key)) {
       survivor.affected_files.push(file);
       seen.add(key);

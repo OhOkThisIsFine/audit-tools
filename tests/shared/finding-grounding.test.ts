@@ -8,7 +8,7 @@ import {
   normalizeForMatch,
   normalizeRepoPath,
   quoteMatches,
-  verifyFindingGrounding,
+  groundFinding,
   findingIsGrounded,
   findingNeedsVerificationBeforeFix,
 } from "audit-tools/shared";
@@ -49,16 +49,16 @@ test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
   expect(quoteMatches(file, "   ")).toBe(false);
 });
 
-test("verifyFindingGrounding grounds a matching quote and flags an absent one", async () => {
+test("groundFinding grounds a matching quote and flags an absent one", async () => {
   const reader: SourceReader = async () => "const secret = process.env.SECRET;\nreturn sign(secret);\n";
-  const ok = await verifyFindingGrounding(
+  const ok = await groundFinding(
     "/repo",
     finding([{ path: "src/auth.ts", quoted_text: "return sign(secret);" }]),
     reader,
   );
   expect(ok.status).toBe("grounded");
 
-  const bad = await verifyFindingGrounding(
+  const bad = await groundFinding(
     "/repo",
     finding([{ path: "src/auth.ts", quoted_text: "DROP TABLE users;" }]),
     reader,

@@ -155,6 +155,23 @@ test("a design-review submission's forged lead_lineage never lands on a finding"
   expect(grounded[0]!.evidence_lane).toBe("design-review-lane");
 });
 
+// Line numbers are tool-owned, derived from a located quote. A design lane
+// grounds by path alone, so a host-typed span would reach the report unchecked:
+// the strip keeps the path, the symbol and the quote, and drops only the lines.
+test("a design-review submission's unverifiable line numbers never land on a finding", () => {
+  const submitted = {
+    ...assessment(seamGraph()).findings[0]!,
+    affected_files: [
+      { path: "src/x.ts", line_start: 500, line_end: 510, symbol: "run", quoted_text: "run()" },
+    ],
+  };
+
+  const grounded = groundDesignFindings([submitted], { files: [] });
+  expect(grounded[0]!.affected_files).toEqual([
+    { path: "src/x.ts", symbol: "run", quoted_text: "run()" },
+  ]);
+});
+
 test("the design-review projection carries lead lineage into the reviewed slice", () => {
   const graph = seamGraph();
   const bundle = {

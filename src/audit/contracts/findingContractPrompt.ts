@@ -21,13 +21,13 @@ import {
   CONFIDENCES,
   LENSES,
   SEVERITIES,
-  FINDING_LINE_END_INTEGER_RULE,
-  FINDING_LINE_ORDER_RULE,
-  FINDING_LINE_START_INTEGER_RULE,
   compareCodeUnits,
 } from "audit-tools/shared";
 import { AUDIT_RESULT_RULES } from "../validation/auditResults.js";
-import { WorkerFindingSchema } from "./workerSchemas.js";
+import {
+  WORKER_REFUSED_LOCATION_FIELDS,
+  WorkerFindingSchema,
+} from "./workerSchemas.js";
 
 /** The JSON-Schema shape this renderer reads. Narrow by design — nothing else is consulted. */
 interface SchemaNode {
@@ -128,21 +128,26 @@ export function findingContractPromptLines(): readonly string[] {
         ([name, node]) =>
           `${name} is optional${typeof node.description === "string" ? `: ${node.description}` : "."}`,
       ),
-    // The line-span rules are enforced by the shared location refinement; the
-    // prompt states the very sentences the refinement emits (the exported
-    // constants), so the check and the statement cannot drift.
-    `Rule: ${FINDING_LINE_START_INTEGER_RULE}`,
-    `Rule: ${FINDING_LINE_END_INTEGER_RULE}`,
-    `Rule: ${FINDING_LINE_ORDER_RULE}`,
     // The grounding ask. It was missing entirely: `quoted_text` was named once,
     // and only as text the tool re-reads, so a reader who obeyed the prompt
     // exactly shipped no quote and every finding grounded `ungrounded`. The
     // sentence is the constant both doors refuse with.
     `Rule: ${AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE}`,
-    // Ingest derives the clean-result affirmation; workers cannot supply it in
-    // the strict host envelope. Only worker-owned rules belong in this prompt.
+    // Line numbers are tool-owned (`WORKER_REFUSED_LOCATION_FIELDS`): the
+    // reviewer cites CODE, and the quote must name one place for the tool to
+    // derive the span from.
+    `Rule: affected_files entries never carry ${Object.keys(WORKER_REFUSED_LOCATION_FIELDS).join(" or ")} — ` +
+      "the tool derives them from where quoted_text occurs. Quote a span that occurs exactly once " +
+      "in its file: a quote that occurs more than once, or not at all, leaves the finding ungrounded.",
+    // Ingest derives the clean-result affirmation, and the coverage span holds
+    // by construction once the tool writes the lines. Only worker-owned rules
+    // belong in this prompt.
     ...AUDIT_RESULT_RULES
-      .filter((rule) => rule.id !== "reviewed_clean_affirmation")
+      .filter(
+        (rule) =>
+          rule.id !== "reviewed_clean_affirmation" &&
+          rule.id !== "affected_span_within_coverage",
+      )
       .map((rule) => `Rule: ${rule.statement}`),
   ];
   renderedContract = lines;

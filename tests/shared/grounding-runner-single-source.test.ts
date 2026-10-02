@@ -10,7 +10,7 @@
  *      its own anchor allowlist or spawn an inspection command directly.
  *   2. The quote-and-verify grounding primitives + the repo-path normalizer live
  *      ONLY in shared/src/validation/findingGrounding.ts. audit-code consumes
- *      them; it does not reimplement verifyFindingGrounding / quoteMatches /
+ *      them; it does not reimplement groundFinding / quoteMatches /
  *      normalizeRepoPath.
  *   3. audit-code IMPORTS the shared grounding runner, allowlist, and quote
  *      grounding primitives.
@@ -78,7 +78,7 @@ test("grounding-single-source/2a: shared owns the quote-grounding primitives + p
   for (const sym of [
     "export function normalizeForMatch(",
     "export function quoteMatches(",
-    "export async function verifyFindingGrounding(",
+    "export async function groundFinding(",
     "export function normalizeRepoPath(",
     "export function findingIsGrounded(",
     "export function findingNeedsVerificationBeforeFix(",

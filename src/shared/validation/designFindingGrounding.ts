@@ -64,7 +64,8 @@ export function groundDesignFinding(
 
 /**
  * Annotate each design finding with its lane and its grounding verdict, and
- * remove the one tool-owned verdict a submission can forge.
+ * remove the tool-owned fields a submission can forge: `lead_lineage`, and the
+ * `line_start`/`line_end` this path has no quote to derive.
  *
  * The LANE stamp is unconditional and comes first: every finding reaching this
  * function arrived on a design-review lane (that is what the call sites are —
@@ -94,7 +95,7 @@ export function groundDesignFinding(
  * A host that legitimately re-emits a lead is unaffected in substance: the
  * provenance it could not have verified is exactly the part the tool refuses to
  * take on its word, and its own `evidence` and `affected_files` ride through
- * unchanged.
+ * unchanged apart from their unverified line numbers.
  *
  * The GROUNDING verdict is conditional. When no repo manifest is available the
  * findings cannot be grounded against a known file set, so they are returned
@@ -106,8 +107,19 @@ export function groundDesignFindings(
   findings: Finding[],
   repoManifest: { files?: Array<{ path: string }> } | undefined,
 ): Finding[] {
+  // Line numbers are tool-owned (`groundFinding` derives them from a located
+  // quote). This lane grounds by path alone and never reads a file, so it has
+  // nothing to derive them from: a submitted span would reach the report
+  // unchecked beside spans that were, so it is dropped.
   const marked = findings.map(({ lead_lineage: _forged, ...finding }) => ({
     ...finding,
+    ...(finding.affected_files === undefined
+      ? {}
+      : {
+          affected_files: finding.affected_files.map(
+            ({ line_start: _start, line_end: _end, ...location }) => location,
+          ),
+        }),
     evidence_lane: "design-review-lane" as const,
   }));
   const known = repoPathUniverse(repoManifest);

@@ -66,6 +66,11 @@ interface IngestIssue {
 interface IngestedFinding {
   readonly id: string;
   readonly grounding?: { readonly status: string; readonly reason?: string };
+  readonly affected_files?: readonly {
+    readonly path: string;
+    readonly line_start?: number;
+    readonly line_end?: number;
+  }[];
 }
 
 interface IngestedResult {
@@ -336,6 +341,89 @@ describe(FAILURE_SIGNATURE, () => {
     expect(published.item.prompt.text).toMatch(
       /Do not supply a `grounding` field/u,
     );
+  });
+});
+
+// A finding cites CODE, and the tool derives the LINES from it. A host-supplied
+// line number was never compared with where its quote sits, so a finding could
+// quote line 2 and cite line 1 and pass every check. Line numbers are now
+// tool-owned, like `grounding`: the host quotes, the tool locates the quote and
+// writes the span. A quote that occurs more than once names no single location,
+// so it grounds nothing — surfaced as ungrounded, never refused.
+describe("contract:audit-lines-derive-from-the-quote:not-yet-satisfied", () => {
+  it("L1: writes line_start/line_end from the located quote", async () => {
+    const published = await publishOneWorkItem();
+    const ingest = await submitFinding(
+      published,
+      baseFinding([{ path: "src/a.ts", quoted_text: "two" }]),
+    );
+
+    expect(ingest.issues ?? []).toEqual([]);
+    const located = ingest.accepted_results[0]?.findings[0]?.affected_files?.[0];
+    expect(located?.line_start).toBe(2);
+    expect(located?.line_end).toBe(2);
+  });
+
+  it("L2: refuses a submission that SUPPLIES its own line numbers", async () => {
+    const published = await publishOneWorkItem();
+    const ingest = await submitFinding(
+      published,
+      baseFinding([{ path: "src/a.ts", line_start: 1, line_end: 1, quoted_text: "two" }]),
+    );
+
+    expect(
+      ingest.completed_work_item_ids,
+      "a host-supplied line number must not be accepted",
+    ).toEqual([]);
+    const issue = (ingest.issues ?? [])[0];
+    expect(issue?.code).toBe("submission_contract_invalid");
+    expect(issue?.message).toMatch(/line_start/u);
+  });
+
+  it("L3: a quote that occurs more than once grounds nothing and carries no lines", async () => {
+    const published = await publishOneWorkItem();
+    // "o" occurs in both "one" and "two".
+    const ingest = await submitFinding(
+      published,
+      baseFinding([{ path: "src/a.ts", quoted_text: "o" }]),
+    );
+
+    expect(ingest.issues ?? [], "an ambiguous quote is surfaced, not refused").toEqual([]);
+    const finding = ingest.accepted_results[0]?.findings[0];
+    expect(finding?.grounding?.status).toBe("ungrounded");
+    expect(finding?.grounding?.reason).toMatch(/occurs 2 times/u);
+    expect(finding?.affected_files?.[0]?.line_start).toBeUndefined();
+  });
+
+  it("L4: the batch lane overwrites supplied lines with the quote's real span", async () => {
+    const { stampToolComputedGrounding } = await import(
+      "../../src/audit/cli/auditStep.js"
+    );
+    const root = await mkdtemp(join(tmpdir(), "audit-batch-lines-"));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+
+    const results = [
+      {
+        task_id: "u1:correctness",
+        findings: [
+          {
+            id: "F-drift",
+            affected_files: [
+              { path: "src/a.ts", line_start: 1, line_end: 1, quoted_text: "two" },
+            ],
+          },
+        ],
+      },
+    ];
+
+    await stampToolComputedGrounding(root, results);
+
+    expect(results[0].findings[0].affected_files[0]).toMatchObject({
+      line_start: 2,
+      line_end: 2,
+    });
   });
 });
 

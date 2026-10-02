@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/quote-grounding.test.ts, tests/shared/finding-grounding.test.ts, tests/audit/host-ingest-grounding.test.ts
 /**
  * Finding grounding primitives — single source for both orchestrators.
  *
@@ -10,11 +11,13 @@
  *
  * Matching is on *content*, normalized for whitespace/CRLF, not on line numbers
  * — later edits that shift line numbers do not false-fail a still-valid quote,
- * while a quote naming code that does not exist cannot match.
+ * while a quote naming code that does not exist cannot match. The line numbers
+ * a finding carries are DERIVED from where its quote occurs (`groundFinding`),
+ * never taken from the reviewer.
  *
  * Before this module the auditor (`quoteGrounding.ts`) and the conceptual-review
  * grounding (`designFindingGrounding.ts`) each carried their own copy of
- * `normalizeForMatch` / `quoteMatches` / `verifyFindingGrounding` and a near-
+ * `normalizeForMatch` / `quoteMatches` / the quote verifier and a near-
  * identical path normalizer; this is the one authority both consume (drift-plan
  * E3 + P7).
  */
@@ -35,7 +38,7 @@ export function normalizeForMatch(text: string): string {
  * The single path normalizer (drift-plan P7) shared by the conceptual-review
  * grounding and any other consumer that matches a cited `affected_files` path
  * against a repo manifest. (Quote-and-verify resolves a cited path against the
- * filesystem instead, so it does not lowercase — see `verifyFindingGrounding`.)
+ * filesystem instead, so it does not lowercase — see `groundFinding`.)
  *
  * INV-B3-1: strips a leading `./` ONLY — it must NEVER strip the leading dot of a
  * dotfile-directory segment (`.claude/…`, `.github/…`). The regex is anchored to
@@ -146,14 +149,64 @@ export async function enumerateTrackedFilePaths(
   return known;
 }
 
+/** One place a quote occurs: TRUE 1-based lines of the raw file, inclusive. */
+interface QuoteSpan {
+  readonly line_start: number;
+  readonly line_end: number;
+}
+
+/**
+ * Every place the (normalized) quote occurs in the (normalized) file content,
+ * each mapped back to the raw file's lines. Overlapping occurrences count: the
+ * question is how many LOCATIONS the quote could name, and `aa` names two places
+ * in `aaa`. An empty quote occurs nowhere (an empty quote grounds nothing).
+ *
+ * The normalized text is built here character by character, recording the raw
+ * line of each kept character, and it is the same text {@link normalizeForMatch}
+ * returns: CR dropped first (so `a\rb` joins to `ab`, exactly as the regex
+ * pass does), each whitespace run collapsed to one space, the ends trimmed. A
+ * collapsed run takes the line of its first character; an occurrence never
+ * starts or ends on a space, because the trimmed needle cannot.
+ */
+function locateQuote(fileContent: string, quotedText: string): QuoteSpan[] {
+  const needle = normalizeForMatch(quotedText);
+  if (needle.length === 0) return [];
+  let text = "";
+  const lineOf: number[] = [];
+  let line = 1;
+  let pendingSpaceLine: number | undefined;
+  for (const char of fileContent) {
+    if (char === "\r") continue;
+    if (/\s/u.test(char)) {
+      if (pendingSpaceLine === undefined && text.length > 0) pendingSpaceLine = line;
+    } else {
+      if (pendingSpaceLine !== undefined) {
+        text += " ";
+        lineOf.push(pendingSpaceLine);
+        pendingSpaceLine = undefined;
+      }
+      text += char;
+      for (let unit = 0; unit < char.length; unit += 1) lineOf.push(line);
+    }
+    if (char === "\n") line += 1;
+  }
+  const spans: QuoteSpan[] = [];
+  for (
+    let at = text.indexOf(needle);
+    at !== -1;
+    at = text.indexOf(needle, at + 1)
+  ) {
+    spans.push({ line_start: lineOf[at]!, line_end: lineOf[at + needle.length - 1]! });
+  }
+  return spans;
+}
+
 /**
  * True when the (normalized) quoted span appears anywhere in the (normalized)
  * file content. An empty quote never matches (an empty quote grounds nothing).
  */
 export function quoteMatches(fileContent: string, quotedText: string): boolean {
-  const needle = normalizeForMatch(quotedText);
-  if (needle.length === 0) return false;
-  return normalizeForMatch(fileContent).includes(needle);
+  return locateQuote(fileContent, quotedText).length > 0;
 }
 
 /** Reads a source file's text; injectable so the verifier is testable without fs. */
@@ -184,31 +237,44 @@ export function createMemoizedSourceReader(): SourceReader {
 }
 
 /**
- * Re-verify a finding's cited verbatim span(s) against disk. A finding is
- * `grounded` as soon as ONE of its `affected_files[].quoted_text` spans matches
- * its cited file; it is `ungrounded` when it carries no quote at all, or when no
- * cited quote can be found on disk (with a reason naming the failed spans).
+ * Ground a finding against disk: re-read each cited verbatim span, and let the
+ * code it quotes — never a number the reviewer typed — say where it is.
+ *
+ * Line numbers are TOOL-OWNED. Every `affected_files` entry loses whatever
+ * `line_start`/`line_end` it arrived with; an entry whose quote occurs exactly
+ * once in its file gets that occurrence's lines written back. A quote that
+ * occurs nowhere names nothing, and one that occurs more than once names no
+ * single place, so neither carries lines. A typed number used to pass every
+ * check while pointing anywhere in the file; a span derived from content the
+ * tool has just found cannot.
+ *
+ * The finding is `grounded` as soon as ONE entry's quote occurs exactly once;
+ * otherwise `ungrounded`, with a reason naming each entry that failed and why.
+ * The verdict is written to `finding.grounding` and also returned. It never
+ * refuses: an unlocatable quote is surfaced as unconfirmed, not discarded with
+ * its sibling findings.
  */
-export async function verifyFindingGrounding(
+export async function groundFinding(
   repoRoot: string,
   finding: Finding,
   readSource: SourceReader = defaultSourceReader,
 ): Promise<FindingGrounding> {
-  const quoted = (finding.affected_files ?? []).filter(
-    (loc): loc is typeof loc & { quoted_text: string } =>
-      typeof loc.quoted_text === "string" && loc.quoted_text.trim().length > 0,
-  );
-
-  if (quoted.length === 0) {
-    return {
-      status: "ungrounded",
-      reason:
-        "no affected_files entry carries a verbatim quoted_text span to re-verify",
-    };
-  }
-
+  const entries = Array.isArray(finding.affected_files) ? finding.affected_files : [];
   const misses: string[] = [];
-  for (const loc of quoted) {
+  let quotedCount = 0;
+  let located = false;
+  for (const loc of entries) {
+    if (typeof loc !== "object" || loc === null) continue;
+    delete loc.line_start;
+    delete loc.line_end;
+    if (
+      typeof loc.path !== "string" ||
+      typeof loc.quoted_text !== "string" ||
+      loc.quoted_text.trim().length === 0
+    ) {
+      continue;
+    }
+    quotedCount += 1;
     const absolutePath = isAbsolute(loc.path) ? loc.path : join(repoRoot, loc.path);
     let content: string;
     try {
@@ -217,13 +283,33 @@ export async function verifyFindingGrounding(
       misses.push(`${loc.path}: file could not be read on disk`);
       continue;
     }
-    if (quoteMatches(content, loc.quoted_text)) {
-      return { status: "grounded" };
+    const spans = locateQuote(content, loc.quoted_text);
+    if (spans.length === 1) {
+      loc.line_start = spans[0]!.line_start;
+      loc.line_end = spans[0]!.line_end;
+      located = true;
+    } else if (spans.length === 0) {
+      misses.push(`${loc.path}: quoted_text not found on disk`);
+    } else {
+      misses.push(
+        `${loc.path}: quoted_text occurs ${spans.length} times, so it names no single ` +
+          "location; quote a span that occurs once",
+      );
     }
-    misses.push(`${loc.path}: quoted_text not found on disk`);
   }
 
-  return { status: "ungrounded", reason: misses.join("; ") };
+  const grounding: FindingGrounding =
+    quotedCount === 0
+      ? {
+          status: "ungrounded",
+          reason:
+            "no affected_files entry carries a verbatim quoted_text span to re-verify",
+        }
+      : located
+        ? { status: "grounded" }
+        : { status: "ungrounded", reason: misses.join("; ") };
+  finding.grounding = grounding;
+  return grounding;
 }
 
 /**

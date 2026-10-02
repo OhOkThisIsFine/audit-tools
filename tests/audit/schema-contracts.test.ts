@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  FindingLocationObjectSchema,
   FindingSchema,
   LensSchema,
   SurfaceManifestSchema,
@@ -19,6 +20,8 @@ import { RuntimeValidationTaskManifestSchema } from "../../src/audit/types/runti
 import { ExternalAnalyzerResultsSchema } from "../../src/shared/analyzers/types.js";
 import {
   WORKER_REFUSED_FINDING_VERDICTS,
+  WORKER_REFUSED_LOCATION_FIELDS,
+  renderWorkerJsonSchema,
   WorkerAuditResultSchema,
   WorkerAuditResultsSchema,
   WorkerAuditTaskSchema,
@@ -159,7 +162,6 @@ test("worker audit result accepts a category more specific than its lens", () =>
           affected_files: [
             {
               path: "src/api/auth.ts",
-              line_start: 1,
               quoted_text: "exec(userInput)",
             },
           ],
@@ -240,6 +242,39 @@ test("worker audit task enforces lens, priority, tags, inputs, and strict keys",
     "non-string input ref",
   );
   rejects(WorkerAuditTaskSchema, { ...base, unexpected: true }, "extra key");
+});
+
+test("the worker location schema omits exactly the refused tool-owned line fields", () => {
+  // The location-level twin of the verdict test below: the generated schema's
+  // location properties and the refusal table `parseFindings` walks must name
+  // the same omitted set, and a supplied line number must really be rejected.
+  const finding = renderWorkerJsonSchema("finding.schema.json") as {
+    properties: { affected_files: { items: { properties: Record<string, unknown> } } };
+  };
+  const advertised = Object.keys(finding.properties.affected_files.items.properties);
+  const omitted = Object.keys(FindingLocationObjectSchema.shape).filter(
+    (key) => !advertised.includes(key),
+  );
+  expect(new Set(omitted)).toEqual(new Set(Object.keys(WORKER_REFUSED_LOCATION_FIELDS)));
+
+  const validFinding = {
+    id: "F-1",
+    title: "A finding",
+    category: "correctness",
+    severity: "high" as const,
+    confidence: "high" as const,
+    summary: "Something is wrong.",
+    affected_files: [{ path: "src/a.ts", quoted_text: "const x = 1;" }],
+    evidence: ["src/a.ts"],
+  };
+  accepts(WorkerFindingSchema, validFinding, "valid worker finding");
+  for (const field of Object.keys(WORKER_REFUSED_LOCATION_FIELDS)) {
+    rejects(
+      WorkerFindingSchema,
+      { ...validFinding, affected_files: [{ ...validFinding.affected_files[0], [field]: 1 }] },
+      `worker location supplying ${field}`,
+    );
+  }
 });
 
 test("the worker finding schema omits exactly the refused tool-owned verdicts (DAT-evidence-lane)", () => {

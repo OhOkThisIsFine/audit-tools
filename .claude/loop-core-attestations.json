@@ -164,6 +164,17 @@
         "src/remediate/steps/prompts.ts": "7cf9ae6a05db4d80888f91b87edc17af45628dec"
       }
     },
+    "285e96075c5d6c00": {
+      "reviewed_by": "claude-opus-5-5-independent-review+agy-refuter",
+      "attester_class": "agent",
+      "checked": "design-check refutation (AGY) + independent Opus review of the full diff; all 5 review findings fixed (ground-before-validate reorder, design-lane line strip, mergeAffectedFiles key, batch-door e2e, comment drift), each red-green validated by inversion; full suite 6912/0, check, check:tests, lint, deadcode, verify:checks green",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-02T05:26:17.804Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "8ff2784ffd29f58e057772c068896639432a2fe5"
+      }
+    },
     "41532bae09b59ca1": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -238,7 +249,7 @@
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "7ecf68a7852f3ff3"
+      "review": "285e96075c5d6c00"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"

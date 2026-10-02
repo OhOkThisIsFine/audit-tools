@@ -71,14 +71,14 @@
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:17` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:18` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:32` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:47` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:56` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:59` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:33` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:48` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:57` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:60` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

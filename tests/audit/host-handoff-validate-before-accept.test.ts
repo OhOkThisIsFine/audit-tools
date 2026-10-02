@@ -49,14 +49,11 @@ const AUDIT_TASK: AuditTask = {
 };
 
 /**
- * Passes the worker finding contract at ingest (every schema-expressed rule
- * holds: evidence present, vocabularies valid, span ordered) yet fails the
- * audit-results validator on a rule only IT enforces — the affected_files span
- * (1-9) falls outside the declared file_coverage (total_lines 2). Exactly the
- * live-lap shape: a worker obeying the tool's own prompt can still produce a
- * result that the content gate must refuse.
+ * A finding every rule accepts. The quote is verbatim from the fixture file
+ * ("one\ntwo\n") and occurs once, so grounding holds and the tool derives its
+ * span.
  */
-const FINDING_OUT_OF_COVERAGE = {
+const VALID_FINDING = {
   id: "F-1",
   title: "Variable overwritten before use",
   category: "correctness",
@@ -64,14 +61,18 @@ const FINDING_OUT_OF_COVERAGE = {
   confidence: "medium",
   lens: "correctness",
   summary: "x is reassigned before the prior value is read.",
-  evidence: ["src/a.ts:1 - x overwritten"],
-  // The quote is verbatim from the fixture file ("one\ntwo\n"), so grounding
-  // holds and the SPAN is the one defect this result carries — which is the
-  // whole point of the fixture.
-  affected_files: [
-    { path: "src/a.ts", line_start: 1, line_end: 9, quoted_text: "one" },
-  ],
+  evidence: ["src/a.ts - x overwritten"],
+  affected_files: [{ path: "src/a.ts", quoted_text: "one" }],
 };
+
+/**
+ * Passes the worker finding contract at ingest (every schema-expressed rule
+ * holds: evidence present, vocabularies valid) yet fails the audit-results
+ * validator on a rule only IT enforces — the finding's lens is not the task's.
+ * Exactly the live-lap shape: a worker obeying the tool's own prompt can still
+ * produce a result that the content gate must refuse.
+ */
+const FINDING_WRONG_LENS = { ...VALID_FINDING, lens: "security" };
 
 async function setup() {
   const root = await mkdtemp(join(tmpdir(), "audit-validate-first-"));
@@ -150,9 +151,9 @@ async function setup() {
 }
 
 describe("contract:host-handoff-validates-before-it-accepts", () => {
-  it("a content-invalid result (span outside declared coverage) is classified-rejected, not accepted-and-wedged", async () => {
+  it("a content-invalid result (lens not the task's) is classified-rejected, not accepted-and-wedged", async () => {
     const ctx = await setup();
-    await ctx.writeResult(FINDING_OUT_OF_COVERAGE);
+    await ctx.writeResult(FINDING_WRONG_LENS);
 
     const first = await ctx.ingest();
     expect(first.accepted_count).toBe(0);
@@ -161,7 +162,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     );
     expect(issue, `the rejection must be classified: ${JSON.stringify(first.issues)}`).toBeDefined();
     expect(issue?.code).toBe("result_validation_failed");
-    expect(issue?.message).toMatch(/inside the declared file_coverage/u);
+    expect(issue?.message).toMatch(/must match the assigned task lens/u);
 
     // Nothing poisoned: the accepted pair holds no entry for the work item.
     const pairAfterReject = await ctx.acceptedPair();
@@ -169,12 +170,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     expect(pairAfterReject.ledgerEntries).toEqual([]);
 
     // The operator fixes the SAME bound file; the next fold re-reads it.
-    await ctx.writeResult({
-      ...FINDING_OUT_OF_COVERAGE,
-      affected_files: [
-        { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
-      ],
-    });
+    await ctx.writeResult(VALID_FINDING);
     const second = await ctx.ingest();
     expect(second.accepted_count).toBe(1);
     expect(second.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
@@ -204,6 +200,29 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     ).resolves.toBeDefined();
   });
 
+  it("a derived span outside the declared coverage is refused at the door, not accepted-and-wedged", async () => {
+    const ctx = await setup();
+    // The file grew after the work item was bound to its 2 lines, and the quote
+    // sits on the new third line. The derived span (3-3) falls outside the
+    // declared coverage (total_lines 2) — the rule the downstream batch gate
+    // throws on — so the door must apply it to the DERIVED lines before accept.
+    await writeFile(join(ctx.root, "src", "a.ts"), "one\ntwo\nthree\n", "utf8");
+    await ctx.writeResult({
+      ...VALID_FINDING,
+      affected_files: [{ path: "src/a.ts", quoted_text: "three" }],
+    });
+
+    const ingested = await ctx.ingest({ "src/a.ts": 3 });
+    expect(ingested.accepted_count).toBe(0);
+    const issue = ingested.issues.find(
+      (entry) => entry.work_item_id === AUDIT_TASK.task_id,
+    );
+    expect(issue?.code).toBe("result_validation_failed");
+    expect(issue?.message).toMatch(/inside the declared file_coverage/u);
+    const pair = await ctx.acceptedPair().catch(() => ({ results: [], ledgerEntries: [] }));
+    expect(pair.results).toEqual([]);
+  });
+
   it("a warning-only result is accepted and NEVER recorded as rejected", async () => {
     const ctx = await setup();
 
@@ -211,12 +230,9 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     // delta — inside the ±2 advisory floor (`significant ? "error" : "warning"`),
     // so the whole result carries only warning-severity validation issues and
     // passes every error rule including the envelope's bound-count check.
-    await ctx.writeResult({
-      ...FINDING_OUT_OF_COVERAGE,
-      // A span-free but GROUNDED location: every error rule holds, so only the
-      // ±1-line coverage delta below can surface — as a warning.
-      affected_files: [{ path: "src/a.ts", quoted_text: "one" }],
-    });
+    // Every error rule holds, so only the ±1-line coverage delta below can
+    // surface — as a warning.
+    await ctx.writeResult(VALID_FINDING);
 
     const ingested = await ctx.ingest({ "src/a.ts": 3 });
     expect(ingested.accepted_count).toBe(1);
@@ -242,11 +258,11 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
   it("a task-unknown (orphan) result passes through UNVALIDATED with the stderr notice", async () => {
     const ctx = await setup();
 
-    // Span outside the declared coverage: would be REJECTED if the orphan were
+    // A lens that is not the task's: would be REJECTED if the orphan were
     // validated. It is a content-invalid shape on purpose — the passthrough must
     // hold even for the worst-shaped result, because refusing an orphan strands
     // it outside the append-only ledger entirely.
-    await ctx.writeResult(FINDING_OUT_OF_COVERAGE);
+    await ctx.writeResult(FINDING_WRONG_LENS);
 
     const stderrChunks: string[] = [];
     const originalWrite = process.stderr.write.bind(process.stderr);

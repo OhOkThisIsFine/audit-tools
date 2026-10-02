@@ -12,7 +12,6 @@ import {
   FindingSchema,
   FindingLocationObjectSchema,
   LensSchema,
-  refineFindingLocationLines,
 } from "audit-tools/shared";
 import {
   AuditTaskSchema,
@@ -21,8 +20,27 @@ import {
 } from "../types.js";
 import { AuditCodeResponseSchema } from "./wrapperResponse.js";
 
-export const WorkerFindingLocationSchema = FindingLocationObjectSchema.strict()
-  .superRefine(refineFindingLocationLines)
+/**
+ * The location fields the per-file projection omits, with the sentence ingestion
+ * refuses each with — the location-level twin of
+ * {@link WORKER_REFUSED_FINDING_VERDICTS}, and one fact for the same reason.
+ *
+ * Line numbers are TOOL-OWNED: `groundFinding` writes them from where the
+ * entry's `quoted_text` occurs. A reviewer-typed number was never compared with
+ * its quote, so it could point anywhere in the file and still pass every check.
+ */
+export const WORKER_REFUSED_LOCATION_FIELDS = {
+  line_start:
+    "line_start is derived at ingest from where quoted_text occurs and must not be supplied",
+  line_end:
+    "line_end is derived at ingest from where quoted_text occurs and must not be supplied",
+} as const;
+
+export const WorkerFindingLocationSchema = FindingLocationObjectSchema.omit({
+  line_start: true,
+  line_end: true,
+})
+  .strict()
   // The audit draw's grounding rule, enforced at the SCHEMA so the host door
   // (`parseFindings`) and the generated JSON schema state it without a second
   // hand-written check. The sentence is the shared constant the dispatch prompt

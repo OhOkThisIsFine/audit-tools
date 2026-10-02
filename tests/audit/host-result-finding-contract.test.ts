@@ -285,9 +285,11 @@ describe(FAILURE_SIGNATURE, () => {
       ).toMatch(new RegExp(`${field}[^\\n]*non-empty`, "u"));
     }
 
-    // The line-span rules are enforced by the shared location refinement; the
-    // exported rule constants ARE their statements, so each must appear in the
-    // rendered contract block read from those constants (no hand-typed text).
+    // Line numbers are tool-owned: the prompt says the reviewer never sends them
+    // and that the tool derives them from a quote that must occur once — and it
+    // states none of the line-span rules a reviewer can no longer break.
+    expect(prompt).toMatch(/never carry line_start or line_end/u);
+    expect(prompt).toMatch(/Quote a span that occurs exactly once/u);
     const {
       FINDING_LINE_START_INTEGER_RULE,
       FINDING_LINE_END_INTEGER_RULE,
@@ -298,17 +300,23 @@ describe(FAILURE_SIGNATURE, () => {
       FINDING_LINE_END_INTEGER_RULE,
       FINDING_LINE_ORDER_RULE,
     ]) {
-      expect(prompt, `the dispatch prompt must state the line-span rule: ${rule}`).toContain(rule);
+      expect(prompt, `a tool-owned line rule must not be asked of the reviewer: ${rule}`)
+        .not.toContain(rule);
     }
 
     // The non-schema rules live in ONE registry; the prompt carries each
-    // worker-owned statement verbatim and the validator emits it verbatim.
+    // worker-owned statement verbatim and the validator emits it verbatim. The
+    // clean affirmation is derived at ingest, and the coverage span holds by
+    // construction once the tool writes the lines.
     const { AUDIT_RESULT_RULES } = await import(
       "../../src/audit/validation/auditResults.js"
     );
     expect(AUDIT_RESULT_RULES.length, "the rule registry must be non-empty").toBeGreaterThan(0);
     for (const rule of AUDIT_RESULT_RULES as readonly { id: string; statement: string }[]) {
-      if (rule.id === "reviewed_clean_affirmation") {
+      if (
+        rule.id === "reviewed_clean_affirmation" ||
+        rule.id === "affected_span_within_coverage"
+      ) {
         expect(prompt).not.toContain(rule.statement);
         continue;
       }
@@ -347,7 +355,7 @@ describe(FAILURE_SIGNATURE, () => {
             // quoteless entry is refused in its own right, and that refusal
             // would pre-empt the evidence refusal this test measures.
             affected_files: [
-              { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
+              { path: "src/a.ts", quoted_text: "one" },
             ],
           },
         ],
@@ -391,7 +399,7 @@ describe(FAILURE_SIGNATURE, () => {
             lens: "correctness",
             summary: "A complete finding under the one-source contract.",
             affected_files: [
-              { path: "src/a.ts", line_start: 1, line_end: 2, quoted_text: "one" },
+              { path: "src/a.ts", quoted_text: "one" },
             ],
             evidence: ["src/a.ts:1 - variable overwritten before use"],
           },
@@ -420,7 +428,7 @@ describe(FAILURE_SIGNATURE, () => {
     expect(errors, `a prompt-obedient submission must validate clean: ${JSON.stringify(issues)}`).toEqual([]);
   });
 
-  it("refuses an inverted or non-integer line span with the one rule wording", async () => {
+  it("refuses any supplied line span — even an invalid one — as tool-owned, naming the field", async () => {
     const published = await publishOneWorkItem();
     for (const affectedFiles of [
       [{ path: "src/a.ts", line_start: 3, line_end: 1 }],
@@ -466,8 +474,9 @@ describe(FAILURE_SIGNATURE, () => {
       );
       expect(issue, `the rejection must be classified: ${JSON.stringify(ingest.issues)}`).toBeDefined();
       const message = (issue as IngestIssue).message;
-      expect(message).toMatch(/findings\[0\]\.affected_files\.0/u);
-      expect(message, `one wording per rule: ${message}`).toMatch(/line_start/u);
+      expect(message).toMatch(
+        /findings\[0\]\.affected_files\[0\]\.line_start: line_start is derived at ingest/u,
+      );
     }
   });
 

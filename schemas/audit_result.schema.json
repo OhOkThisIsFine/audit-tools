@@ -118,14 +118,6 @@
                 "path": {
                   "type": "string"
                 },
-                "line_start": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "line_end": {
-                  "type": "integer",
-                  "minimum": 1
-                },
                 "symbol": {
                   "type": "string"
                 },

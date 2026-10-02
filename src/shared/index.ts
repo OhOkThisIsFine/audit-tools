@@ -102,7 +102,6 @@ export {
   FINDING_LINE_END_INTEGER_RULE,
   FINDING_LINE_ORDER_RULE,
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
-  refineFindingLocationLines,
   findingLocationLineIssues,
   FindingLocationSchema,
   FindingGroundingSchema,
@@ -1152,7 +1151,7 @@ export {
   enumerateTrackedFilePaths,
   quoteMatches,
   createMemoizedSourceReader,
-  verifyFindingGrounding,
+  groundFinding,
   findingIsGrounded,
   findingNeedsVerificationBeforeFix,
 } from "./validation/findingGrounding.js";

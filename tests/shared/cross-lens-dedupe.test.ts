@@ -3,6 +3,7 @@ import {
   absorbFinding,
   crossLensDedupe,
   findingRestatesBanked,
+  mergeAffectedFiles,
   mergeGrounding,
   sameLensDedupe,
   upsertFindingByIdentity,
@@ -694,5 +695,29 @@ describe("lead lineage survives semantic deduplication", () => {
       expect(result.lead_lineage?.producer).toBe("a-detector");
       expect(result.evidence).toEqual(expect.arrayContaining(producers));
     }
+  });
+});
+
+describe("mergeAffectedFiles", () => {
+  // An entry whose quote could not be located carries no lines, so path and
+  // lines alone no longer tell two citations into one file apart.
+  it("keeps line-less entries in one file distinct by their cited content", () => {
+    const survivor = makeFinding({
+      affected_files: [{ path: "src/foo.ts", quoted_text: "first()" }],
+    });
+    const absorbed = makeFinding({
+      id: "F-2",
+      affected_files: [
+        { path: "src/foo.ts", quoted_text: "second()" },
+        { path: "src/foo.ts", no_quotable_span: "the guard is absent" },
+        { path: "src/foo.ts", quoted_text: "first()" },
+      ],
+    });
+    mergeAffectedFiles(survivor, absorbed, false);
+    expect(survivor.affected_files).toEqual([
+      { path: "src/foo.ts", quoted_text: "first()" },
+      { path: "src/foo.ts", quoted_text: "second()" },
+      { path: "src/foo.ts", no_quotable_span: "the guard is absent" },
+    ]);
   });
 });

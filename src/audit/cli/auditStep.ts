@@ -8,7 +8,7 @@ import {
   createMemoizedSourceReader,
   readJsonFile,
   RunLogger,
-  verifyFindingGrounding,
+  groundFinding,
   CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
@@ -351,7 +351,7 @@ export async function stampToolComputedGrounding(
     for (const finding of findings) {
       if (typeof finding !== "object" || finding === null) continue;
       const typed = finding as Finding;
-      typed.grounding = await verifyFindingGrounding(root, typed, readSource);
+      await groundFinding(root, typed, readSource);
     }
   }
 }

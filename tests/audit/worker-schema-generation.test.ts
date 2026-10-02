@@ -55,7 +55,7 @@ test("worker schemas accept a valid worker submission and reject invalid lens", 
         lens: "security",
         summary: "Token boundary not enforced.",
         affected_files: [
-          { path: "src/api/auth.ts", line_start: 1, quoted_text: "verifyToken()" },
+          { path: "src/api/auth.ts", quoted_text: "verifyToken()" },
         ],
         evidence: ["src/api/auth.ts:1 - missing check"],
       },

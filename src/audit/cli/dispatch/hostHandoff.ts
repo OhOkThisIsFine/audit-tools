@@ -41,7 +41,7 @@ import {
   siblingLockPath,
   sameStrings,
   stableStringify,
-  verifyFindingGrounding,
+  groundFinding,
   withFileLock,
   writeBlockedStepContract,
   writeJsonFile,
@@ -53,6 +53,7 @@ import {
 import { findingContractPromptLines } from "../../contracts/findingContractPrompt.js";
 import {
   WORKER_REFUSED_FINDING_VERDICTS,
+  WORKER_REFUSED_LOCATION_FIELDS,
   WorkerFindingSchema,
   type WorkerFinding,
 } from "../../contracts/workerSchemas.js";
@@ -1564,6 +1565,23 @@ function parseFindings(
           };
         }
       }
+      // The same refusal one level down: a location's line numbers are derived
+      // from its quote at ingest, so a supplied one is named, not just unknown.
+      if (Array.isArray(finding.affected_files)) {
+        for (const [entry, location] of finding.affected_files.entries()) {
+          if (!isRecord(location)) continue;
+          for (const [field, reason] of Object.entries(
+            WORKER_REFUSED_LOCATION_FIELDS,
+          )) {
+            if (field in location) {
+              return {
+                ok: false,
+                detail: `findings[${index}].affected_files[${entry}].${field}: ${reason}`,
+              };
+            }
+          }
+        }
+      }
     }
     // The STRICT WORKER PROJECTION — the same contract the dispatch prompt
     // renders (`findingContractPromptLines`). Parsing the lenient base schema
@@ -1959,6 +1977,21 @@ export async function ingestAuditHostResults(params: {
         continue;
       }
 
+      // S7 quote-and-verify: the tool re-reads each cited span from disk, stamps
+      // the verdict, and writes each entry's line numbers from where its quote
+      // occurs. It NEVER rejects — a quote that is absent or occurs more than
+      // once rides through as `ungrounded` and synthesis surfaces it under
+      // "Ungrounded Findings (not confirmed)"; refusing here would discard the
+      // whole submission over one bad citation. It mutates the CONVERTED copy
+      // only: `result` stays the host's submission, which `result_sha256` hashes.
+      // It runs BEFORE validation, so the derived span meets the same coverage
+      // rule here that the downstream batch gate applies: a span that rule would
+      // refuse is refused while the item can still be resubmitted, never
+      // accepted and then replayed into a failing gate on every later step.
+      for (const finding of converted.auditResult.findings) {
+        await groundFinding(paths.root, finding, readSource);
+      }
+
       // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
       // contract (`FindingSchema` admits an evidence-less finding); these are the
       // per-result rules the downstream batch gate applies, applied HERE so an
@@ -2015,18 +2048,6 @@ export async function ingestAuditHostResults(params: {
         );
       }
 
-      // S7 quote-and-verify: the tool re-reads each cited span from disk and
-      // stamps the verdict. It NEVER rejects — a quote that does not re-verify
-      // rides through as `ungrounded` and synthesis surfaces it under "Ungrounded
-      // Findings (not confirmed)"; refusing here would discard the whole
-      // submission over one bad citation.
-      for (const finding of converted.auditResult.findings) {
-        finding.grounding = await verifyFindingGrounding(
-          paths.root,
-          finding,
-          readSource,
-        );
-      }
       resultIds.add(result.result_id);
       // construction-site: AuditResult
       // construction-site: Finding (the `findings` array; `lens` defaults from the enclosing contract, already spread in)
