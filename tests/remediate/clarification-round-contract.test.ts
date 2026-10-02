@@ -242,7 +242,10 @@ describe("the 16a prompt text", () => {
     expect(prompt).toContain("| `clarified` |");
     expect(prompt).toContain("| `reject_finding` |");
     expect(prompt).toContain("| `defer` |");
-    expect(prompt).toContain("its directory must already contain a file that git tracks");
+    // The scope rule states what validation enforces: an addition must already be granted.
+    expect(prompt).toContain("Each path must already be in the unit's reviewed `allowed_files`");
+    expect(prompt).toContain("new write scope needs a revised plan and a fresh review");
+    expect(prompt).not.toMatch(/adds to the fix's write scope|a test the fix must create|may name a new file/);
     expect(prompt).toContain("`F-007`, `F-009`");
     expect(prompt).toContain("A finding with no entry stays paused");
   });

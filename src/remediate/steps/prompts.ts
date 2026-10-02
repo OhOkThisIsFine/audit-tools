@@ -60,10 +60,10 @@ three actions:
 | \`reject_finding\` | The finding itself is not a real issue. | The finding is DROPPED. Never use it to say only that the question was not ambiguous. |
 | \`defer\` | The user chose to skip this finding in this run. | The finding is not fixed in this run. Only the user decides a deferral. |
 
-A \`clarified\` entry can also have \`scope_additions\`: a list of files that the
-answer adds to the fix's write scope, such as a test the fix must create. Write
-each path relative to the repository root. A path may name a new file, but its
-directory must already contain a file that git tracks. Do not put
+A \`clarified\` entry can also have \`scope_additions\`: a list of files the
+answer needs the fix to touch, each relative to the repository root. Each path must already be in the unit's reviewed \`allowed_files\`; the
+entry does not widen the write scope. Any other path, including a test the
+answer would add, is refused: new write scope needs a revised plan and a fresh review. Do not put
 \`scope_additions\` on a \`reject_finding\` or \`defer\` entry. Never edit the
 plan's \`touched_files\` by hand.
 

@@ -9,7 +9,7 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -18,6 +18,7 @@ import type {
   RemediationItemState,
 } from "../../src/remediate/state/types.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+import { assertApprovedRuntimePlan } from "../../src/remediate/contractPipeline/runtimePlanAuthority.js";
 import { permanentlyDeadPendingUnits } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 
@@ -429,5 +430,28 @@ describe("clarification scope delta preserves reviewed execution authority", () 
     // The file was refused (renamed away), and the run re-halts on the question.
     expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
     expect(step.status).toBe("blocked");
+  });
+
+  it("a clarification that re-adds an in-scope file leaves the reviewed revision intact, so the run proceeds instead of wedging", async () => {
+    const st = stateWith([{ ...block("B1", ["F1"]), allowed_files: ["src/b.ts", "src/a.ts"] }], { F1: item("F1", "B1", "needs_clarification") });
+    await mkdir(join(REPO_DIR, "src"), { recursive: true });
+    await writeFile(join(REPO_DIR, "src", "a.ts"), "export const a = 1;\n", "utf8");
+    await writeFile(join(REPO_DIR, "src", "b.ts"), "export const b = 1;\n", "utf8");
+    await harness.writeIntentCheckpoint();
+    await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
+    await new StateStore(ARTIFACTS_DIR).saveState(st);
+    await harness.acknowledgeResume();
+    await writeFile(join(ARTIFACTS_DIR, "clarification_resolution.json"), JSON.stringify([
+      { unit_id: "B1", action: "clarified", rationale: "Touch a.ts as already planned.", scope_additions: ["src/a.ts"] },
+    ]), "utf8");
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    const finalState = JSON.parse(await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8")) as RemediationState;
+    expect(finalState.items!.B1!.status).not.toBe("needs_clarification");
+    expect(finalState.plan!.units.find(unit => unit.id === "B1")!.allowed_files).toEqual(["src/b.ts", "src/a.ts"]);
+    await expect(assertApprovedRuntimePlan(ARTIFACTS_DIR, finalState)).resolves.toBeDefined();
+    expect(step.stop_condition).not.toMatch(/plan\/review issue/);
+    expect(await readFile(step.prompt_path, "utf8")).not.toMatch(/does not match the current independently approved revision/);
   });
 });

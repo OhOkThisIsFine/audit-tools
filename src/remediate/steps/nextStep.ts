@@ -5,7 +5,7 @@ import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type Per
 import { INTENT_INTERPRETATION_FILENAME, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
 import { requestedFindingSelection, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 import { parseCommandString } from "../../shared/tooling/commandShape.js";
-// sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts
+// sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/deferred-clarification.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -1728,10 +1728,10 @@ const PLAN_CLARIFICATION_ACTIONS = ["clarified", "reject_finding", "defer"] as c
  * - `rationale` is REQUIRED and non-empty on `clarified`: it becomes the item's
  *   `clarification_context`, the answer the next worker reads. A `clarified`
  *   entry without it re-opened the item with no answer attached.
- * - `scope_additions` lists the files the answer ADDS to the owning block's
- *   write scope (open-bugs.md:110): every file the fix must create or edit
- *   beyond the promoted scope — the test a node must write, the source a
- *   generated artifact mirrors, a new shared module, a manifest. It is allowed
+ * - `scope_additions` lists the files the answer requires the fix to touch. Each
+ *   must already be in the owning unit's reviewed `allowed_files`; a path outside
+ *   it is refused, because new write scope needs a revised, freshly reviewed plan.
+ *   Accepted entries never rewrite the plan, so its approved revision holds. It is allowed
  *   ONLY on `clarified`, the one action that re-opens the item; on
  *   `reject_finding` or `defer` it used to be ignored without a word. Each path
  *   is validated whole-file fail-closed BEFORE anything is applied
@@ -1894,26 +1894,6 @@ async function validateClarificationScopeAdditions(
 }
 
 /**
- * Normalize already-authorized paths in a clarification resolution. Validation
- * rejects every addition outside the reviewed unit's allowed_files; genuinely
- * new write scope requires plan revision and review. The caller invalidates any
- * current host handoff when it applies the resolution.
- */
-function applyClarificationScopeAdditions(
-  root: string,
-  state: RemediationState,
-  res: PlanClarificationResolution,
-): void {
-  if (res.action !== "clarified" || !res.scope_additions?.length) return;
-  const block = state.plan?.units?.find((b) => b.id === res.unit_id);
-  if (!block) return; // refused upstream by validateClarificationScopeAdditions
-  const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.id);
-  block.allowed_files = [
-    ...new Set([...block.allowed_files, ...normalized.touched_files]),
-  ].sort((left, right) => compareCodeUnits(left, right));
-}
-
-/**
  * Apply one mid-run clarification resolution to its execution unit:
  * `clarified` re-opens it (pending) with the answer as context,
  * `reject_finding` closes it as not-a-real-issue (terminal `deemed_inappropriate`
@@ -1992,8 +1972,10 @@ async function applyPlanClarificationResolution(
   for (const res of resolutions) {
     const item = state.items[res.unit_id];
     if (!item || isTerminalStatus(item.status)) continue;
+    // Validation admits only paths already in the reviewed unit's allowed_files, so an
+    // accepted scope_additions entry changes nothing: the reviewed plan is never rewritten
+    // here, and its revision (which hashes author order) stays the approved one.
     applyClarificationActionToItem(item, res, now);
-    applyClarificationScopeAdditions(root, state, res);
     appliedCount += 1;
   }
   // An applied answer mutates item state that is baked into the dispatch

@@ -152,6 +152,18 @@
     }
   },
   "reviews": {
+    "26cc5e6e718671c5": {
+      "reviewed_by": "claude-opus-5-5-reviewer",
+      "attester_class": "agent",
+      "checked": "npm run build green; vitest tests/remediate 1249 passed 0 failed 4 skipped (covers both suites referencing scope_additions; no other src/test reference). Red proof: reverse-applied the staged nextStep.ts change in the working tree, the new deferred-clarification test failed with RemediationHostPreparationError from assertApprovedRuntimePlan (runtime plan does not match the approved revision), restored to the staged blob. No widening path: applyPlanClarificationResolution is the only applier (one caller), and it runs planClarificationRefusal -> validateClarificationScopeAdditions first on every call, which refuses any normalized path not exactly in block.allowed_files, so the deleted function could only re-sort existing entries. No consumer of allowed_files depends on sort order (grep for sort/compare/join over allowed_files in src finds only an error-message join). The prompt text matches the validator.",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-02T00:12:23.646Z",
+      "vouches": {
+        "src/remediate/steps/nextStep.ts": "b361115df0a56a2d25be69f7ddba1923af46c38b",
+        "src/remediate/steps/prompts.ts": "7cf9ae6a05db4d80888f91b87edc17af45628dec"
+      }
+    },
     "41532bae09b59ca1": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -563,10 +575,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "26cc5e6e718671c5"
     },
     "src/remediate/steps/prompts.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "26cc5e6e718671c5"
     },
     "src/remediate/steps/recoverIngest.ts": {
       "baseline": "7b79934e86baf378"
