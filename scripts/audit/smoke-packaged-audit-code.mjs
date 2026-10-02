@@ -35,7 +35,6 @@ const requiredPackagedPaths = [
   "README.md",
   "dist/audit/index.js",
   "dist/audit/cli.js",
-  "dispatch/lens-definitions.json",
   "schemas/audit_result.schema.json",
   "skills/audit-code/SKILL.md",
   "skills/audit-code/agents/openai.yaml",

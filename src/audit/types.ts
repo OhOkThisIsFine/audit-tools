@@ -7,7 +7,10 @@ import type { Lens } from "audit-tools/shared";
 export type { Lens } from "audit-tools/shared";
 export { isLens } from "audit-tools/shared";
 
-/** Single authoritative record for one audit lens. `order_weight` governs task
+/** Single authoritative record for one audit lens, and the ONE home for lens
+ * prose: the operator's catalog gloss and the worker's review guidance are both
+ * read from here (a third copy, a JSON asset under `dispatch/`, lost its only
+ * reader and silently stopped reaching workers). `order_weight` governs task
  * priority ordering — lower values sort earlier (higher urgency). */
 export interface LensDefinition {
   id: Lens;
@@ -15,21 +18,104 @@ export interface LensDefinition {
   /** Lower = higher priority in task ordering. */
   order_weight: number;
   default_enabled: boolean;
+  /** One-line meaning, shown in the confirm-intent lens catalog. */
+  summary: string;
+  /** What a reviewer under this lens looks for; rendered into every work-item prompt. */
+  focus: string;
+  /** What belongs to other lenses; rendered beside `focus`. */
+  do_not_report: string;
 }
 
 /** Audit-specific metadata is exhaustive over the shared lens vocabulary. */
 const LENS_METADATA = {
-  security: { display_name: "Security", order_weight: 10, default_enabled: true },
-  correctness: { display_name: "Correctness", order_weight: 20, default_enabled: true },
-  reliability: { display_name: "Reliability", order_weight: 30, default_enabled: true },
-  data_integrity: { display_name: "Data Integrity", order_weight: 40, default_enabled: true },
-  performance: { display_name: "Performance", order_weight: 50, default_enabled: true },
-  architecture: { display_name: "Architecture", order_weight: 60, default_enabled: true },
-  operability: { display_name: "Operability", order_weight: 70, default_enabled: true },
-  config_deployment: { display_name: "Config & Deployment", order_weight: 80, default_enabled: true },
-  observability: { display_name: "Observability", order_weight: 90, default_enabled: true },
-  maintainability: { display_name: "Maintainability", order_weight: 100, default_enabled: true },
-  tests: { display_name: "Tests", order_weight: 110, default_enabled: true },
+  security: {
+    display_name: "Security",
+    order_weight: 10,
+    default_enabled: true,
+    summary: "Injection, authn/authz, secret handling, unsafe input, privilege boundaries.",
+    focus: "Injection vulnerabilities (SQL, shell, path traversal), authentication/authorization flaws, secret exposure, insecure deserialization, privilege escalation, unsafe use of eval or child processes with user input.",
+    do_not_report: "Performance or correctness issues that are not security-relevant.",
+  },
+  correctness: {
+    display_name: "Correctness",
+    order_weight: 20,
+    default_enabled: true,
+    summary: "Logic errors, wrong results, broken invariants, mishandled edge cases.",
+    focus: "Logic errors, incorrect algorithm implementations, off-by-one bugs, type mismatches, wrong return values, incorrect state transitions, missing null/undefined guards, misuse of APIs. Focus on code that does the wrong thing.",
+    do_not_report: "Style issues, naming problems, missing tests, or findings that belong to other lenses.",
+  },
+  reliability: {
+    display_name: "Reliability",
+    order_weight: 30,
+    default_enabled: true,
+    summary: "Failure modes, error handling, retries, resource leaks, recovery.",
+    focus: "Failure modes without recovery, missing timeouts, unhandled promise rejections, race conditions, resource leaks (file handles, sockets, timers), incorrect retry logic, cascading failure risks.",
+    do_not_report: "Correctness bugs that do not affect reliability under failure conditions.",
+  },
+  data_integrity: {
+    display_name: "Data Integrity",
+    order_weight: 40,
+    default_enabled: true,
+    summary: "Persistence correctness, schema/serialization drift, races, lost or duplicated state.",
+    focus: "Missing input validation at trust boundaries, schema violations, inconsistent field naming across related schemas, data loss scenarios, missing required fields, enum values that are present in some schemas but not others.",
+    do_not_report: "UI or presentation issues; operational or deployment concerns.",
+  },
+  performance: {
+    display_name: "Performance",
+    order_weight: 50,
+    default_enabled: true,
+    summary: "Hot paths, algorithmic complexity, allocation, avoidable I/O and work.",
+    focus: "Algorithmic inefficiencies (O(n²) where O(n) is possible), unnecessary re-computation, missing caching, synchronous blocking in hot paths, excessive memory allocation.",
+    do_not_report: "Correctness bugs unrelated to performance.",
+  },
+  architecture: {
+    display_name: "Architecture",
+    order_weight: 60,
+    default_enabled: true,
+    summary: "Structure, boundaries, coupling, dependency direction, layering.",
+    focus: "Big-picture design, conceptual elegance, over-engineering, under-engineering, appropriate use of abstractions, and identifying opportunities where custom code should be replaced by third-party tools or standard libraries. Flag a missing single source of truth: the same logic, format, or contract realized in multiple components where it should live in one shared module — the durable fix is extraction to that shared source, not a test or convention that keeps the copies in sync. Flag structural findings that span multiple components as 'systemic: true'.",
+    do_not_report: "Minor style issues, localized logic bugs, or formatting.",
+  },
+  operability: {
+    display_name: "Operability",
+    order_weight: 70,
+    default_enabled: true,
+    summary: "Deploy / runbooks, health, config surface, diagnosability in production.",
+    focus: "Missing or low-quality log output, error messages that don't help operators diagnose problems, missing progress indicators for long operations, no elapsed-time reporting, lack of dry-run or preview modes for destructive operations.",
+    do_not_report: "Correctness bugs or deployment configuration.",
+  },
+  config_deployment: {
+    display_name: "Config & Deployment",
+    order_weight: 80,
+    default_enabled: true,
+    summary: "Build, packaging, CI/CD, release, environment and config wiring.",
+    focus: "CI/CD pipeline correctness (wrong triggers, missing branch filters, floating version pins), deployment safety (no gate before publish, missing rollback), insecure secret handling in configs, mutable action tags that should be pinned to commit SHAs.",
+    do_not_report: "Runtime code issues; findings that belong to other lenses.",
+  },
+  observability: {
+    display_name: "Observability",
+    order_weight: 90,
+    default_enabled: true,
+    summary: "Logging, metrics, tracing, and signal quality for debugging incidents.",
+    focus: "Logging quality, telemetry, distributed tracing context, meaningful metrics, and error reporting context.",
+    do_not_report: "Correctness bugs or deployment configuration.",
+  },
+  maintainability: {
+    display_name: "Maintainability",
+    order_weight: 100,
+    default_enabled: true,
+    summary: "Readability, duplication, complexity, naming, dead code, change cost.",
+    focus: "Code that is hard to change safely: excessive function length, deep nesting, tight coupling between unrelated modules, poor naming, magic constants, duplicated logic, inconsistent abstractions, unclear public APIs. A specific high-value smell: the same logic, format, or contract implemented in two or more places and kept consistent by a test or by convention instead of extracted to one shared source — flag the duplication and recommend single-sourcing it (the sync test is a workaround for the missing abstraction, not the fix). The change-cost tell is 'every edit must be made in N places to stay correct.'",
+    do_not_report: "Correctness bugs, test gaps, or operational concerns.",
+  },
+  tests: {
+    display_name: "Tests",
+    order_weight: 110,
+    default_enabled: true,
+    summary: "Coverage gaps, brittle or flaky tests, missing negative cases, weak assertions.",
+    focus: "Test coverage gaps for important paths, tests that assert incorrect behavior (pinning bugs as expected), fragile or non-deterministic tests, missing negative/edge-case tests, tests that silently pass on stale builds (e.g. importing compiled dist/ rather than source). Also flag a test whose purpose is to keep two copies of logic/format/output in sync (a drift guard): the real defect is the duplication it polices, which should be extracted to one shared source so the guard is unnecessary — report the test as the symptom and call out the duplication to single-source.",
+    do_not_report: "Source code bugs — report only issues with the tests themselves.",
+  },
 } satisfies Record<Lens, Omit<LensDefinition, "id">>;
 
 export const LENS_REGISTRY: readonly LensDefinition[] = Object.entries(LENS_METADATA)
@@ -41,6 +127,11 @@ export const LENS_REGISTRY: readonly LensDefinition[] = Object.entries(LENS_META
  * local guards, which drift (a copy omitting "observability" caused it to be
  * wrongly rejected in flow requeue). */
 export const ALL_LENSES: readonly Lens[] = LENS_REGISTRY.map((d) => d.id);
+
+/** The registry record for `lens`, or undefined for an operator-added custom lens. */
+export function lensDefinition(lens: string): LensDefinition | undefined {
+  return LENS_REGISTRY.find((definition) => definition.id === lens);
+}
 
 export const FileRecordSchema = z.object({
   path: z.string(),

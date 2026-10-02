@@ -6,6 +6,7 @@ import { recordHostRootLogBoundary } from "../../../shared/observability/rootLog
 // task-bindings version bump whose refusal names the remedy)
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { lensDefinition } from "../../types.js";
 
 import {
   createMemoizedSourceReader,
@@ -660,6 +661,26 @@ function renderResultTemplate(
   ].join("\n");
 }
 
+/**
+ * The lens's review guidance, CARRIED into the work-item prompt from the lens
+ * registry (the one home for lens prose). A worker told only a lens id has to
+ * guess where that lens ends and the next begins; the registry states both.
+ * An operator-added custom lens has no registry entry, and the prompt says so
+ * rather than leaving the absence for the worker to notice.
+ */
+function lensGuidanceLines(lens: string): string[] {
+  const definition = lensDefinition(lens);
+  if (!definition) {
+    return [
+      `Lens '${lens}' is a custom lens with no canonical guidance: review against the lens name and the assignment's rationale.`,
+    ];
+  }
+  return [
+    `Lens guidance (${definition.display_name}): ${definition.focus}`,
+    `Do not report under this lens: ${definition.do_not_report}`,
+  ];
+}
+
 function buildPrompt(
   task: AuditHostTask,
   resultPath: string,
@@ -710,6 +731,7 @@ function buildPrompt(
     "```json",
     assignment,
     "```",
+    ...lensGuidanceLines(task.lens),
     verificationLane
       // `verification` is REQUIRED on this lane, and the prompt states ONE rule.
       // It used to say "exactly … and verification" and then call the field

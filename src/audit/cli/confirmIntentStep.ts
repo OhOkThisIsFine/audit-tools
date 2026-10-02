@@ -1,6 +1,7 @@
 // sites-pinned: tests/audit/intent-checkpoint.test.ts
 import { LENSES, IntentCheckpointSchema, FileDispositionStatusSchema } from "audit-tools/shared";
 import { MANDATORY_LENSES } from "../orchestrator/lensSelection.js";
+import { lensDefinition } from "../types.js";
 import {
   CONCEPTUAL_PERSPECTIVES,
   DEFAULT_CONCEPTUAL_PERSPECTIVES,
@@ -45,22 +46,6 @@ function trimExcerptForPrompt(excerpt: string): string {
   const lastBreak = cut.lastIndexOf("\n");
   return `${(lastBreak > 0 ? cut.slice(0, lastBreak) : cut).trimEnd()}\n…`;
 }
-
-// One-line meaning per canonical lens, shown in the confirm-intent catalog so the
-// user can choose deliberately instead of guessing from the bare lens name.
-const LENS_DESCRIPTIONS: Record<string, string> = {
-  correctness: "Logic errors, wrong results, broken invariants, mishandled edge cases.",
-  architecture: "Structure, boundaries, coupling, dependency direction, layering.",
-  maintainability: "Readability, duplication, complexity, naming, dead code, change cost.",
-  security: "Injection, authn/authz, secret handling, unsafe input, privilege boundaries.",
-  reliability: "Failure modes, error handling, retries, resource leaks, recovery.",
-  performance: "Hot paths, algorithmic complexity, allocation, avoidable I/O and work.",
-  data_integrity: "Persistence correctness, schema/serialization drift, races, lost or duplicated state.",
-  tests: "Coverage gaps, brittle or flaky tests, missing negative cases, weak assertions.",
-  operability: "Deploy / runbooks, health, config surface, diagnosability in production.",
-  config_deployment: "Build, packaging, CI/CD, release, environment and config wiring.",
-  observability: "Logging, metrics, tracing, and signal quality for debugging incidents.",
-};
 
 /**
  * Operator-facing gloss per scope-rule guard branch. The disposition's own
@@ -285,7 +270,8 @@ export function renderConfirmIntentPrompt(
     "Canonical lens meanings (for your review; you need not show these to the user):",
     "",
     ...LENSES.map((lens) => {
-      const desc = LENS_DESCRIPTIONS[lens];
+      // The one-line meaning lives in the lens registry, the one home for lens prose.
+      const desc = lensDefinition(lens)?.summary;
       return `- **${lens}**${desc ? ` — ${desc}` : ""}`;
     }),
     "",

@@ -24,28 +24,27 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 122 entr(y/ies) indexed.
+> and at commit). 121 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — A loop-core change can reach `main` without an attestation (2026-10-01, medium).
-- `open-bugs.md:10` — `dispatch/lens-definitions.json` ships with no reader (2026-10-01, medium).
-- `open-bugs.md:11` — The nightly helper does not own a worktree for a repository-reading lane (2026-10-01, medium).
-- `open-bugs.md:12` — A settled nightly answer overtaken by a later decision has no stated handling, so the run decides alone (2026-09-23, medium, friction: ambiguous_direction).
-- `open-bugs.md:21` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
-- `open-bugs.md:35` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:45` — Loop-core discovery retains a mixed-consumer limit.
-- `open-bugs.md:49` — Divergent attestation preflight can abstain.
-- `open-bugs.md:55` — Derived staleness sets retain their accessor contract.
-- `open-bugs.md:61` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:69` — A comprehensive remaining test-replica sweep is unverified.
-- `open-bugs.md:72` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:100` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:116` — External release and review lanes retain environment-dependent limits.
-- `open-bugs.md:119` — Machine-wide green queries and external lane behavior remain externally owned.
-- `open-bugs.md:123` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:142` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:148` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:10` — The nightly helper does not own a worktree for a repository-reading lane (2026-10-01, medium).
+- `open-bugs.md:11` — A settled nightly answer overtaken by a later decision has no stated handling, so the run decides alone (2026-09-23, medium, friction: ambiguous_direction).
+- `open-bugs.md:20` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
+- `open-bugs.md:34` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:44` — Loop-core discovery retains a mixed-consumer limit.
+- `open-bugs.md:48` — Divergent attestation preflight can abstain.
+- `open-bugs.md:54` — Derived staleness sets retain their accessor contract.
+- `open-bugs.md:60` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:68` — A comprehensive remaining test-replica sweep is unverified.
+- `open-bugs.md:71` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:99` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:115` — External release and review lanes retain environment-dependent limits.
+- `open-bugs.md:118` — Machine-wide green queries and external lane behavior remain externally owned.
+- `open-bugs.md:122` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:141` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:147` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 

@@ -175,6 +175,18 @@
         "src/remediate/steps/contractPipeline.ts": "b1a421ab31cf7e041dafdcced579464ad960818e"
       }
     },
+    "7ecf68a7852f3ff3": {
+      "reviewed_by": "claude-opus-5-5-reviewer",
+      "attester_class": "agent",
+      "checked": "npm run build green; vitest tests/audit tests/shared: 479 files, 5644 passed 0 failed 8 skipped, plus 8 vitest-worker onTaskUpdate RPC timeouts under load; targeted rerun of lens-guidance-delivery, intent-checkpoint and every audit test importing hostHandoff/confirmIntentStep: 137 passed, no errors. Fidelity: a script compared HEAD dispatch/lens-definitions.json and HEAD LENS_DESCRIPTIONS against the built LENS_REGISTRY: 11 lenses, focus/do_not_report/summary 0 mismatches. A task carries one lens (AuditHostTask.lens: string) and buildPrompt calls lensGuidanceLines once, so guidance appears once per item. Added size is 213-729 chars per item; no prompt-size test or budget covers it. 467b1e8f retired packetPrompt/buildTaskSections without mentioning lens guidance, while 5b55445e documents the delivery as deliberate, so accidental loss is the right reading. No lens-definitions reference remains outside the guard test and history docs.",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-02T01:01:53.377Z",
+      "vouches": {
+        "src/audit/cli/confirmIntentStep.ts": "ec923feff37e5e9172165d761e8b789df33fc06d",
+        "src/audit/cli/dispatch/hostHandoff.ts": "b474391d6c10d698dd290b85e0c3275dc4ca460a"
+      }
+    },
     "9bc59db653647a3a": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -223,10 +235,10 @@
       "review": "c468455c3d100370"
     },
     "src/audit/cli/confirmIntentStep.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
