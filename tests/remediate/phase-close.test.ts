@@ -822,6 +822,118 @@ describe("runClosePhase", () => {
       expect(report).toContain("`unrelated-dirt.txt`");
     });
 
+    // Manifest scoping decides what the close STAGES, but a commit with no
+    // pathspec records the WHOLE index — so a file the user staged before the
+    // close (and which the close correctly reports as leftover) rode into the
+    // closing commit anyway. The commit itself must be scoped to the manifest.
+    it("never commits a file the user had already STAGED; it stays staged and is reported as leftover", async () => {
+      writeFileSync(join(REPO_DIR, "fixed.ts"), "// the fix");
+      writeFileSync(join(REPO_DIR, "user-staged.txt"), "the user's own staged WIP");
+      execSync("git add -- user-staged.txt", { cwd: REPO_DIR });
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["fixed.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toContain("fixed.ts");
+      expect(committed).not.toContain("user-staged.txt");
+
+      // Still staged, exactly as the user left it.
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).toMatch(/^A {2}user-staged\.txt$/mu);
+
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(jsonReport.closing_result.leftover_files).toContain("user-staged.txt");
+    });
+
+    // A pathspec'd commit records only the paths it names. Git's rename
+    // detection listed a staged `git mv` under its NEW path only, so the old
+    // path's deletion was never named, stayed staged, and the closing commit
+    // recorded a copy instead of the move. Both halves are dirty paths.
+    it("commits BOTH halves of a staged rename on the edit surface", async () => {
+      writeFileSync(join(REPO_DIR, "old-name.ts"), "// moved by the fix\n");
+      execSync("git add -- old-name.ts", { cwd: REPO_DIR });
+      execSync('git commit -qm "add old-name"', { cwd: REPO_DIR });
+      execSync("git mv old-name.ts new-name.ts", { cwd: REPO_DIR });
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["old-name.ts", "new-name.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const committed = committedFilesInLastCommit();
+      expect(committed).toEqual(expect.arrayContaining(["old-name.ts", "new-name.ts"]));
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).not.toContain("old-name.ts");
+    });
+
+    // A case-only rename cannot be committed by pathspec on a case-insensitive
+    // checkout (git: "will not add file alias"). Only a checkout that ignores
+    // case can hold one, so the two cases below run only there.
+    const ignoresCase = (): boolean =>
+      execSync("git config --get core.ignorecase || echo false", { cwd: REPO_DIR }).toString().trim() === "true";
+
+    it("commits a case-only rename when nothing else is staged", async ({ skip }) => {
+      if (!ignoresCase()) skip();
+      writeFileSync(join(REPO_DIR, "Case.ts"), "// renamed by case\n");
+      execSync("git add -- Case.ts", { cwd: REPO_DIR });
+      execSync('git commit -qm "add Case"', { cwd: REPO_DIR });
+      execSync("git mv Case.ts case.ts", { cwd: REPO_DIR });
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["Case.ts", "case.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+      const next = await runClosePhase(state, BASE_OPTIONS);
+      expect(next.status).toBe("complete");
+
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).not.toMatch(/case\.ts/iu);
+      expect(execSync("git ls-files", { cwd: REPO_DIR }).toString()).toMatch(/^case\.ts$/mu);
+    });
+
+    it("refuses a case-only rename commit rather than sweep in another staged path", async ({ skip }) => {
+      if (!ignoresCase()) skip();
+      writeFileSync(join(REPO_DIR, "Case.ts"), "// renamed by case\n");
+      execSync("git add -- Case.ts", { cwd: REPO_DIR });
+      execSync('git commit -qm "add Case"', { cwd: REPO_DIR });
+      execSync("git mv Case.ts case.ts", { cwd: REPO_DIR });
+      writeFileSync(join(REPO_DIR, "user-staged.txt"), "the user's own staged WIP");
+      execSync("git add -- user-staged.txt", { cwd: REPO_DIR });
+
+      const state = makeState({
+        closing_plan: { action: "commit", pre_authorized: true },
+        applied_edit_surface: ["Case.ts", "case.ts"],
+        items: { F1: { finding_id: "F1", status: "resolved", block_id: "B1" } },
+      });
+      await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+      await runClosePhase(state, BASE_OPTIONS);
+
+      expect(committedFilesInLastCommit()).not.toContain("user-staged.txt");
+      const status = execSync("git status --porcelain", { cwd: REPO_DIR }).toString();
+      expect(status).toMatch(/^A {2}user-staged\.txt$/mu);
+      const jsonReport = JSON.parse(
+        await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+      );
+      expect(JSON.stringify(jsonReport.closing_result.commands)).toContain("case-only rename");
+    });
+
     // Finding 1 (adversarial review): a block's touched_files is only a
     // plan-time declaration, not a verified diff. Only the corroborated
     // host-result edit surface may be staged, and run-start dirt remains

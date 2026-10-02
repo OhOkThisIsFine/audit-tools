@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-trap-guards.test.ts
 // PreToolUse guard for Bash / PowerShell commands: mechanize the durable shell
 // traps from `docs/backlog.md` so they cannot be re-hit by any host, strong or
 // weak. Each rule below cost real time at least once and is listed there with a
@@ -20,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
 import {
   stripQuoted,
+  splitShellWords,
   splitShellStatements,
   splitShellStatementsWithSeparators,
   stripHeredocBodies,
@@ -226,13 +228,7 @@ function restoreTargets(sub) {
   // `list`/`show`/`pop`/`apply`/`drop`/`clear`/`store` read the stash or put work
   // BACK, and stay admitted.
   if (/\bgit\b[^|]*\bstash\b/.test(stripped)) {
-    const stashTokens = sub.split(/\s+/);
-    const args = stashTokens
-      .slice(stashTokens.indexOf('stash') + 1)
-      .filter((t) => !t.startsWith('-'));
-    const verb = args[0] ?? 'push'; // a bare `git stash` IS `git stash push`
-    if (!/^(?:push|save)$/.test(verb)) return null;
-    return args.length <= 1 ? ['.'] : args.slice(1);
+    return stashTargets(sub);
   }
 
   if (!/\bgit\b[^|]*\bcheckout\b/.test(stripped)) return null;
@@ -243,6 +239,36 @@ function restoreTargets(sub) {
   const after = tokens.slice(tokens.indexOf('checkout') + 1).filter((t) => !t.startsWith('-'));
   if (after.length === 1 && /^\.(\/|$)/.test(after[0])) return after;
   return null;
+}
+
+// The pathspecs a stash statement takes, read from git's own argument shape. A
+// MESSAGE is never a pathspec: `-m`/`--message` consume the next word (or carry
+// it inline), and `save` takes a message and no pathspec at all — reading the
+// message as a path made every messaged whole-worktree stash look scoped to a
+// file that is never dirty. An option first means the implied verb `push`
+// (`git stash -m wip`). Words stop at the first pipe, list operator or redirect.
+// No pathspec → the whole worktree, tested as `.`.
+function stashTargets(sub) {
+  const words = splitShellWords(sub);
+  const end = words.findIndex((w) => /^(?:\||\|\||&&|;|\d*>|<)/.test(w));
+  const args = words.slice(words.indexOf('stash') + 1, end === -1 ? undefined : end);
+  const explicitVerb = args.length > 0 && !args[0].startsWith('-');
+  const verb = explicitVerb ? args[0] : 'push';
+  if (verb === 'save') return ['.'];
+  if (verb !== 'push') return null;
+  const pathspecs = [];
+  const opts = explicitVerb ? args.slice(1) : args;
+  for (let i = 0; i < opts.length; i++) {
+    const w = opts[i];
+    if (w === '--') {
+      pathspecs.push(...opts.slice(i + 1));
+      break;
+    }
+    if (w === '--message' || /^-[^-]*m$/.test(w)) i++; // the next word is the message
+    else if (w.startsWith('--pathspec-from-file')) return ['.']; // unread list → whole tree
+    else if (!w.startsWith('-')) pathspecs.push(w);
+  }
+  return pathspecs.length > 0 ? pathspecs : ['.'];
 }
 
 for (const sub of subCmds) {
@@ -1015,9 +1041,27 @@ if (
       const target = m && (m[1] || m[2] || m[3]);
       if (target) targets.push(target);
     }
+    // The family is EVERY worktree of the repository, not only the main
+    // checkout's root: a linked worktree may live anywhere on disk (lap
+    // worktrees sit outside the repo root by machine rule), and it shares the
+    // same object store. `git worktree list` names each one; the common-dir
+    // parent stays in the set so a failed listing never narrows the rule.
+    const roots = [family];
+    const listed = git(['worktree', 'list', '--porcelain']);
+    if (listed.ok) {
+      for (const line of listed.stdout.split(/\r?\n/)) {
+        if (line.startsWith('worktree ')) roots.push(norm(line.slice('worktree '.length)));
+      }
+    }
+    // Git Bash spells a drive path `/c/...`; Node on win32 resolves that to
+    // `C:\c\...`, which names no worktree. Translate the drive form first, to
+    // an ABSOLUTE drive root: a bare `c:` is drive-relative and would resolve
+    // to ROOT itself.
+    const fromMsys = (p) =>
+      process.platform === 'win32' ? p.replace(/^\/([A-Za-z])(?:\/|$)/, '$1:/') : p;
     const inFamily = (p) => {
-      const abs = norm(resolvePath(ROOT, p));
-      return abs === family || abs.startsWith(family + '/');
+      const abs = norm(resolvePath(ROOT, fromMsys(p)));
+      return roots.some((root) => abs === root || abs.startsWith(root + '/'));
     };
     // No cd at all: the lane inherits THIS session's cwd, which is this repo.
     if (targets.length === 0 || targets.some(inFamily)) {

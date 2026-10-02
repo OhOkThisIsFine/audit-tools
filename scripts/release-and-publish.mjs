@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/audit/release-resume-main.test.ts
+// sites-pinned: tests/audit/release-resume-main.test.ts, tests/audit/release-ci-gate.test.ts
 // Single-package release helper for `audit-tools`. Bumps the version, tags `vX.Y.Z`,
 // pushes, creates a GitHub Release (which triggers the OIDC trusted-publishing
 // workflow), then waits for the publish run + npm registry propagation.
@@ -345,11 +345,14 @@ function toWorkflowRedGreenRows(rawRuns) {
   }));
 }
 
-// Pure CI-green verdict for one exact commit SHA. Green requires BOTH:
+// Pure CI-green verdict for one exact commit SHA. Green requires ALL of:
 //   1. at least one completed run with conclusion=success on this SHA — a SHA
-//      with zero matching runs is "CI never ran here", not green; and
+//      with zero matching runs is "CI never ran here", not green;
 //   2. no workflow's most-recent completed run on this SHA is red
-//      (latestFailedWorkflows — cancelled/skipped carry no signal either way).
+//      (latestFailedWorkflows — cancelled/skipped carry no signal either way); and
+//   3. no run on this SHA is still in flight (`runs_in_flight`) — one workflow
+//      concluding green says nothing about another that has not concluded, and
+//      the vitest workflow is routinely the slower one.
 // `rawRuns` is the `workflow_runs` array from
 // `gh api repos/{owner}/{repo}/actions/runs?head_sha=<sha>`; filtered here
 // defensively by headSha rather than trusting the query param alone.
@@ -366,6 +369,9 @@ export function evaluateCiGreenForSha(rawRuns, { headSha } = {}) {
   const redWorkflows = latestFailedWorkflows(toWorkflowRedGreenRows(runs));
   if (redWorkflows.length > 0) {
     return { ok: false, reason: "red_workflows", redWorkflows, successfulRuns: [] };
+  }
+  if (classifyCiInFlight(runs, { headSha }).waiting) {
+    return { ok: false, reason: "runs_in_flight", redWorkflows: [], successfulRuns: [] };
   }
   const successfulRuns = runs.filter(
     (runEntry) => runEntry.status === "completed" && runEntry.conclusion === "success",
@@ -459,7 +465,9 @@ export async function ensureCiGreenOnHeadSha(
   const waitedFrom = Date.now();
   let announcedWait = false;
 
-  while (!verdict.ok && verdict.reason === "no_successful_run") {
+  // A red verdict refuses at once; every other not-green verdict is waited on
+  // while a run for the SHA is still in flight.
+  while (!verdict.ok && verdict.reason !== "red_workflows") {
     const inFlight = classifyCiInFlight(response.workflow_runs, { headSha });
     if (!inFlight.waiting) break; // no run at all for this SHA — waiting changes nothing
     if (Date.now() - waitedFrom >= waitMs) {

@@ -312,6 +312,49 @@ test("ensureCiGreenOnHeadSha: watches an IN-FLIGHT run to its green conclusion i
   expect(spawnCalls.some((c) => c.args.includes("workflow_dispatch"))).toBe(false);
 });
 
+test("evaluateCiGreenForSha: one workflow green while another is still IN FLIGHT is not green yet", () => {
+  const sha = "3".repeat(40);
+  const verdict = evaluateCiGreenForSha(
+    [
+      { name: "ci", head_sha: sha, status: "completed", conclusion: "success" },
+      { name: "audit-code-test-suite", head_sha: sha, status: "in_progress", conclusion: null },
+    ],
+    { headSha: sha },
+  );
+  expect(verdict.ok).toBe(false);
+  expect(verdict.reason).toBe("runs_in_flight");
+});
+
+test("ensureCiGreenOnHeadSha: waits out a still-running workflow beside a green one, and refuses when it concludes RED", async () => {
+  const sha = "4".repeat(40);
+  let apiCalls = 0;
+  spawnSyncHandler = (command, args) => {
+    if (command === "git" && args[0] === "rev-parse") return textResult(`${sha}\n`);
+    if (command === "gh" && args[0] === "api") {
+      apiCalls += 1;
+      return jsonResult({
+        workflow_runs: [
+          { name: "ci", head_sha: sha, status: "completed", conclusion: "success", created_at: "2026-01-01T00:00:00Z" },
+          apiCalls < 3
+            ? { name: "audit-code-test-suite", head_sha: sha, status: "in_progress", conclusion: null }
+            : {
+                name: "audit-code-test-suite",
+                head_sha: sha,
+                status: "completed",
+                conclusion: "failure",
+                created_at: "2026-01-01T00:00:00Z",
+              },
+        ],
+      });
+    }
+    throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
+  };
+  await expect(ensureCiGreenOnHeadSha("o/r", { waitMs: 60_000, pollMs: 1 })).rejects.toThrow(
+    /audit-code-test-suite/,
+  );
+  expect(apiCalls, "the gate must re-poll until the running workflow concludes").toBeGreaterThanOrEqual(3);
+});
+
 test("ensureCiGreenOnHeadSha: an in-flight run that concludes RED refuses with the workflow named", async () => {
   const sha = "f".repeat(40).replace(/f/g, "a");
   let apiCalls = 0;

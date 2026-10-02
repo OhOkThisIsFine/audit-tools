@@ -1150,6 +1150,43 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
       }
     });
 
+    // A stash MESSAGE is not a pathspec. Reading `-m wip`'s value as a path
+    // made every whole-worktree stash that carries a message look scoped to a
+    // file named `wip`, which is never dirty — so the sweep was admitted. `save`
+    // takes a message and no pathspec at all, and a bare `git stash` whose first
+    // token is an option is `push`, never a verb named by the message.
+    it('blocks the whole-worktree forms that carry a MESSAGE', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'b.txt'), 'uncommitted elsewhere\n');
+        for (const cmd of [
+          'git stash push -m wip',
+          'git stash push -u -m "wip two"',
+          'git stash push --message=wip',
+          'git stash push --message wip',
+          'git stash -m wip',
+          'git stash save wip',
+          'git stash save "wip"',
+        ]) {
+          const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+          expect(code, `${cmd}\n${stderr}`).toBe(2);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still scopes a messaged stash to its pathspec', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'b.txt'), 'uncommitted elsewhere\n');
+        const { code, stderr } = runHook(SHELL_GUARD, bash('git stash push -m wip -- a.txt'), { root: dir });
+        expect(code, stderr).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('admits the stash verbs that read the stash or put work BACK', () => {
       const { dir } = makeRepo();
       try {
@@ -1524,5 +1561,41 @@ describe('shell-trap-guard: a write-capable lane dispatched into this repo', () 
       env: { AUDIT_TOOLS_ALLOW_REPO_LANE: '1' },
     });
     expect(code).toBe(0);
+  });
+
+  // A linked worktree shares the repository's object store wherever it sits on
+  // disk, and lap worktrees live OUTSIDE the repo root by machine rule. A `cd`
+  // into one is still a lane inside this repository's family.
+  it('refuses a lane pointed into a linked worktree that lives OUTSIDE the repo root', () => {
+    const repo = makeRepoForBypass();
+    const outside = mkdtempSync(join(tmpdir(), 'trap-guard-lap-'));
+    const worktree = join(outside, 'lap').replace(/\\/g, '/');
+    try {
+      const added = spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'lap', worktree], {
+        cwd: repo,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      expect(added.status, added.stderr).toBe(0);
+      const { code, stderr } = runHook(SHELL_GUARD, bash(`cd "${worktree}" && ${LANE_BASH}`), {
+        root: repo,
+      });
+      expect(code, stderr).toBe(2);
+      // Git Bash spells the same directory `/c/...`; Node resolves that to
+      // `C:\c\...`, which is no worktree, so the lane slipped through.
+      if (process.platform === 'win32') {
+        const msys = worktree.replace(/^([A-Za-z]):/, (_, d: string) => `/${d.toLowerCase()}`);
+        const viaMsys = runHook(SHELL_GUARD, bash(`cd "${msys}" && ${LANE_BASH}`), { root: repo });
+        expect(viaMsys.code, `${msys}\n${viaMsys.stderr}`).toBe(2);
+        // A bare drive is the drive ROOT, not a drive-relative path that would
+        // resolve back into the repository.
+        const bareDrive = msys.slice(0, 2);
+        const atRoot = runHook(SHELL_GUARD, bash(`cd ${bareDrive} && ${LANE_BASH}`), { root: repo });
+        expect(atRoot.code, `${bareDrive}\n${atRoot.stderr}`).toBe(0);
+      }
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });

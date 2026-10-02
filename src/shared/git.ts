@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/audit-read-state.test.ts
+// sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "./tooling/exec.js";
@@ -474,7 +474,11 @@ async function dirtyPathsAgainst(root: string, ref: string): Promise<string[] | 
 /** Working-tree changes vs HEAD plus untracked (non-ignored) files. */
 export async function stagedAndUntracked(root: string): Promise<string[]> {
   const files = new Set<string>();
-  for (const file of await gitLines(root, ["diff", "--name-only", "HEAD"])) {
+  // `--no-renames`, as in `dirtyPathsAgainst`: rename detection reports a
+  // moved file under its NEW path only, but the old path is just as dirty — and
+  // a closing commit scoped to these paths would otherwise leave the old path's
+  // deletion staged and record the move as a copy.
+  for (const file of await gitLines(root, ["diff", "--name-only", "--no-renames", "HEAD"])) {
     files.add(file);
   }
   for (const file of await gitLines(root, [

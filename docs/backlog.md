@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 127 entr(y/ies) indexed.
+> and at commit). 130 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -52,22 +52,25 @@
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — The remediate clarification answer's `scope_additions` field has no effect (2026-10-01, low).
-- `minor-bugs.md:15` — No command runs the commit gate's legs for the staged set without committing (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:16` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
-- `minor-bugs.md:17` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
-- `minor-bugs.md:18` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
-- `minor-bugs.md:19` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:20` — A memory note can red an unrelated commit (2026-10-01, low).
-- `minor-bugs.md:21` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:22` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:40` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:54` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:75` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:86` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:104` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:109` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:111` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:14` — The plan-join coverage ledger reads `review_decision.json` with no schema check (2026-10-02, low).
+- `minor-bugs.md:15` — `stashTargets` misreads three rare stash spellings (2026-10-02, low).
+- `minor-bugs.md:16` — The repo-lane rule misses a worktree spelled `/cygdrive/c/...`, `/mnt/c/...` or `~` (2026-10-02, low).
+- `minor-bugs.md:17` — The remediate clarification answer's `scope_additions` field has no effect (2026-10-01, low).
+- `minor-bugs.md:18` — No command runs the commit gate's legs for the staged set without committing (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:19` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
+- `minor-bugs.md:20` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
+- `minor-bugs.md:21` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
+- `minor-bugs.md:22` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:23` — A memory note can red an unrelated commit (2026-10-01, low).
+- `minor-bugs.md:24` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
+- `minor-bugs.md:25` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
+- `minor-bugs.md:43` — CP-NODE-10 residuals (2026-08-19, low, one entry):
+- `minor-bugs.md:57` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:78` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:89` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `minor-bugs.md:107` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:112` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `minor-bugs.md:114` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

@@ -245,6 +245,40 @@ describe("review-approval gate: a decline is recorded and excluded", () => {
   });
 });
 
+// Owner decision: a review decision under a stale schema is DISCARDED AND
+// RE-ASKED. Discarding alone is not enough: the gate opened only when the file
+// was ABSENT, so a present-but-stale record kept it shut, the discarded record
+// replayed as "no declines", and every survivor was approved — reversing the
+// operator's earlier declines in silence. (After the pipeline seed exists the
+// intake handler resumes the pipeline before the gate is reached, so the gate
+// replays a decision only on this pre-seed path.)
+describe("review-approval gate: a stale-schema decision is re-asked, never replayed as approve-all", () => {
+  async function writeStaleDecision(): Promise<void> {
+    await writeFile(
+      decisionPath,
+      JSON.stringify({
+        schema_version: "remediate-code-review-decision/v0",
+        plan_id: "path-a-review-old",
+        approved_ids: [CONCRETE_ID],
+        declined: [{ finding_id: STRATEGIC_ID, reason: "declined under the old schema" }],
+        created_at: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+  }
+
+  it("before the plan exists: re-halts at the review gate instead of seeding every survivor", async () => {
+    await writeAuditIntake();
+    await decideNextStep({ root: REPO_DIR }); // halt + write request
+    await writeStaleDecision();
+
+    const step = await decideNextStep({ root: REPO_DIR });
+
+    expect(step.step_kind).toBe("collect_review_approval");
+    expect(existsSync(seedPath)).toBe(false);
+  });
+});
+
 // Prompt 17b: the gate's default is APPROVE, so a resolution the tool cannot
 // read must never be read as "no declines". A mistyped (here: the retired)
 // field name used to approve the finding the user declined, in silence.

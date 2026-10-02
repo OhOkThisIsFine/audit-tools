@@ -1,5 +1,6 @@
+// sites-pinned: tests/shared/hook-trap-guards.test.ts
 // Quote-aware shell statement utilities plus the shared bypass-token check
-// (stripQuoted, collapseQuoted, stripHeredocBodies, findLiveBackticks,
+// (splitShellWords, stripQuoted, collapseQuoted, stripHeredocBodies, findLiveBackticks,
 // findLiveExpansions, splitShellStatements, bypassEnabled), single-sourced for
 // the PreToolUse hooks (shell-trap-guard.mjs, pre-commit-gate.mjs). Plain node
 // — no deps.
@@ -21,6 +22,43 @@
 // The set is a character-class body, not a regex alternation: `&` here also
 // admits the LONE `&` background separator, which the splitter does not split on.
 export const STATEMENT_SEPARATORS = ';&|\n';
+
+// Split ONE statement into its shell WORDS, the way the shell hands them to the
+// program: whitespace outside quotes separates words, and quote characters are
+// removed while their content (spaces included) stays in the word. Same escape
+// model as stripQuoted. For rules that must read an option's VALUE as one
+// argument — `git stash push -m "wip two"` is two arguments after `push`, not
+// three — which a whitespace split cannot do.
+export function splitShellWords(s) {
+  const words = [];
+  let word = '';
+  let inWord = false;
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote === '"' && c === '\\' && i + 1 < s.length) {
+      word += s[++i];
+    } else if (quote) {
+      if (c === quote) quote = null;
+      else word += c;
+    } else if (c === '\\' && i + 1 < s.length) {
+      word += s[++i];
+      inWord = true;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (/\s/.test(c)) {
+      if (inWord) words.push(word);
+      word = '';
+      inWord = false;
+    } else {
+      word += c;
+      inWord = true;
+    }
+  }
+  if (inWord) words.push(word);
+  return words;
+}
 
 // Blank out single/double-quoted span CONTENT (the quote characters remain,
 // and length is preserved) so shell-syntax reasoning is not fooled by quoted

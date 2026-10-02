@@ -164,17 +164,6 @@
         "src/remediate/steps/prompts.ts": "7cf9ae6a05db4d80888f91b87edc17af45628dec"
       }
     },
-    "285e96075c5d6c00": {
-      "reviewed_by": "claude-opus-5-5-independent-review+agy-refuter",
-      "attester_class": "agent",
-      "checked": "design-check refutation (AGY) + independent Opus review of the full diff; all 5 review findings fixed (ground-before-validate reorder, design-lane line strip, mergeAffectedFiles key, batch-door e2e, comment drift), each red-green validated by inversion; full suite 6912/0, check, check:tests, lint, deadcode, verify:checks green",
-      "verdict": "clear",
-      "override": null,
-      "attested_at": "2026-10-02T05:26:17.804Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "8ff2784ffd29f58e057772c068896639432a2fe5"
-      }
-    },
     "41532bae09b59ca1": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -230,6 +219,18 @@
         "src/audit/cli/nextStepHelpers.ts": "6c6fcdb8fb57a6fde545daf64724fcc115de9f19",
         "src/audit/orchestrator/designReviewPrompt.ts": "97e03ee11022042f59f330a9b633d11686569442"
       }
+    },
+    "fdc48ab94651c535": {
+      "reviewed_by": "opus-subagent-adversarial-review-3-rounds",
+      "attester_class": "agent",
+      "checked": "hostHandoff normalizeTask carries coverage_policy+file_metrics with selective-lane and per-file validation; nextStep review gate reads review_decision through discardOnSchemaVersionMismatch so a stale decision is re-asked; independent adversarial reviewer ran 3 rounds, round-1/2 defects fixed, round 3 found none; full suite 575/575 and verify:checks green",
+      "verdict": "clear",
+      "override": null,
+      "attested_at": "2026-10-02T20:40:27.364Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "83753b24a17ee295100f71ae785b3ac6d4934461",
+        "src/remediate/steps/nextStep.ts": "0e8a85702e19992051f48bd50bbce68ec7695932"
+      }
     }
   },
   "entries": {
@@ -249,7 +250,7 @@
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "285e96075c5d6c00"
+      "review": "fdc48ab94651c535"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -612,7 +613,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "26cc5e6e718671c5"
+      "review": "fdc48ab94651c535"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "26cc5e6e718671c5"

@@ -1070,6 +1070,22 @@ function reviewDecisionPath(artifactsDir: string): string {
 }
 
 /**
+ * The gate's read of the review decision record. Owner decision: a record under
+ * a stale schema is discarded and RE-ASKED, never replayed — its keep/decline
+ * meant something under the old semantics. The gate opens on THIS value, not on
+ * the file's existence, so a discarded record re-opens the gate instead of
+ * replaying as "no declines".
+ */
+async function readReviewDecision(
+  artifactsDir: string,
+): Promise<ReviewDecisionRecord | undefined> {
+  return discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir)),
+    REVIEW_DECISION_SCHEMA_VERSION,
+  );
+}
+
+/**
  * Stamp and persist one review decision. Three sites built this literal — the
  * autonomous and interactive arms of the approval gate, and the planning gate —
  * and a schema stamp that lives in three places is one edit away from meaning
@@ -1214,10 +1230,12 @@ async function runReviewApprovalGate(
 ): Promise<ReviewGateProceed | ReviewGateHalt> {
   const decisionPath = reviewDecisionPath(artifactsDir);
 
-  // First crossing only: no decision yet AND the pipeline has not started.
+  // First crossing only: no READABLE decision yet AND the pipeline has not
+  // started. A stale-schema record counts as no decision, so it is re-asked
+  // here rather than replayed below as "no declines".
   const gateOpen =
     survivors.length > 0 &&
-    !existsSync(decisionPath) &&
+    (await readReviewDecision(artifactsDir)) === undefined &&
     !existsSync(executionPlanPaths(artifactsDir).canonical);
 
   // Autonomous (unattended) mode: the gate NEVER halts. It re-evaluates the
@@ -1288,12 +1306,9 @@ async function runReviewApprovalGate(
   // decision approves a SUBSET with declined EMPTY (leftovers live but not
   // approved), so keying the replay on the declined set alone would silently
   // re-approve every leftover on the next call.
-  // Discarded on mismatch — see the note at the sibling read: a stale-schema
-  // decision record re-asks rather than replaying stale operator intent.
-  const decision = discardOnSchemaVersionMismatch(
-    await readOptionalJsonFile<ReviewDecisionRecord>(decisionPath),
-    REVIEW_DECISION_SCHEMA_VERSION,
-  );
+  // Re-read: the gate above may have just written the record. A stale record
+  // never reaches here — it re-opened the gate, which halted or replaced it.
+  const decision = await readReviewDecision(artifactsDir);
   const declined = decision?.declined ?? [];
   const declinedIds = new Set(declined.map((d) => d.finding_id));
   const approvedIds = decision ? new Set(decision.approved_ids ?? []) : undefined;

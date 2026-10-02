@@ -53,6 +53,15 @@ interface HostTask {
   readonly token_estimate: number;
   /** The task's lane tags — what makes a work item's contract lane-aware. */
   readonly tags?: readonly string[];
+  /** `"selective"` marks the lens steward, which chooses what to open. */
+  readonly coverage_policy?: "complete" | "selective";
+  readonly file_metrics?: readonly {
+    readonly path: string;
+    readonly total_lines: number;
+    readonly score: number;
+    readonly signals: readonly string[];
+    readonly prior_findings: Readonly<Record<string, number>>;
+  }[];
 }
 
 interface HostWorkItem {
@@ -1060,6 +1069,113 @@ describe(FAILURE_SIGNATURE, () => {
         accepted_results?: readonly { verification?: unknown }[];
       }).accepted_results;
       expect(accepted?.[0]?.verification).toBeDefined();
+    });
+
+    // The steward's two selective-lane fields must survive the boundary's own
+    // normalization. `toHostTask` passes them in; if the boundary drops them,
+    // the steward is published under the COMPLETE gate (refused unless it opens
+    // every surface file), its prompt inlines the whole surface, and the scope
+    // carries no metrics to choose from.
+    it("carries coverage_policy and file_metrics from a steward task to its prompt, scope and gate", async () => {
+      const metrics: NonNullable<HostTask["file_metrics"]> = [
+        { path: "src/b.ts", total_lines: 2, score: 5, signals: ["priority:high"], prior_findings: { high: 1 } },
+        { path: "src/a.ts", total_lines: 2, score: 1, signals: [], prior_findings: {} },
+      ];
+      const steward: HostTask = {
+        ...task(
+          "audit-steward",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+          STEWARD_TAGS,
+        ),
+        file_paths: ["src/a.ts", "src/b.ts"],
+        file_line_counts: { "src/a.ts": 2, "src/b.ts": 2 },
+        coverage_policy: "selective",
+        file_metrics: metrics,
+      };
+      const boundary = await loadBoundary();
+      const root = await mkdtemp(join(tmpdir(), "audit-selective-lane-"));
+      cleanupRoots.push(root);
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+      await writeFile(join(root, "src", "b.ts"), "one\ntwo\n", "utf8");
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      const runId = "audit-selective-lane";
+      const prepared = await boundary.prepareAuditHostHandoff({
+        root,
+        artifactsDir,
+        runId,
+        tasks: [steward],
+      });
+      const item = prepared.workload.work_items[0]!;
+
+      // Scope: the metrics ride the workload, in the tool's ranking order.
+      expect((item.scope as { file_metrics?: unknown }).file_metrics).toEqual(metrics);
+      // Prompt: the surface is counted, not inlined.
+      expect(item.prompt.text).toContain("surface_file_count");
+      expect(item.prompt.text).not.toContain("file_line_counts");
+
+      // Gate: a steward that opened ONE of its two surface files is admitted.
+      const resultPath = expectContained(root, item.result_path, "bound result");
+      await mkdir(join(resultPath, ".."), { recursive: true });
+      await writeFile(
+        resultPath,
+        JSON.stringify(
+          boundResult(runId, item, {
+            file_coverage: [{ path: "src/b.ts", reviewed_lines: 2, total_lines: 2 }],
+            verification: {
+              verified: true,
+              needs_followup: false,
+              concerns: [],
+              coverage_concerns: [],
+              confidence_concerns: [],
+              selection_rationale: "Opened the highest-signal file.",
+              followup_tasks: [],
+            },
+          }),
+        ),
+        "utf8",
+      );
+      const summary = await boundary.ingestAuditHostResults({
+        root,
+        artifactsDir,
+        runId,
+        auditTasks: [steward],
+      });
+      expect(
+        summary.accepted_count,
+        `the selective steward result must be accepted: ${JSON.stringify(summary.issues)}`,
+      ).toBe(1);
+    });
+
+    it("refuses file_metrics on a task that is not a selective lane", async () => {
+      const boundary = await loadBoundary();
+      const root = await mkdtemp(join(tmpdir(), "audit-metrics-complete-"));
+      cleanupRoots.push(root);
+      await mkdir(join(root, "src"), { recursive: true });
+      await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+      const base: HostTask = {
+        ...task(
+          "audit-base",
+          "correctness",
+          "src/a.ts",
+          { size: "small", complexity: "standard", risk: "medium" },
+          1200,
+        ),
+        file_metrics: [
+          { path: "src/a.ts", total_lines: 2, score: 1, signals: [], prior_findings: {} },
+        ],
+      };
+      await expect(
+        boundary.prepareAuditHostHandoff({
+          root,
+          artifactsDir: join(root, ".audit-tools", "audit"),
+          runId: "audit-metrics-complete",
+          tasks: [base],
+        }),
+      ).rejects.toThrow(/file_metrics/u);
     });
 
     it("refuses verification on a base-lane item whose contract never asked for it", async () => {

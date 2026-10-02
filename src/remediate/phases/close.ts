@@ -1077,6 +1077,51 @@ async function checkClosingPreview(
 }
 
 /**
+ * Commit exactly the closing `files`, never another staged path.
+ *
+ * The normal form is a pathspec'd commit. Git cannot take one when two of the
+ * paths differ only by case on a case-insensitive checkout (a case-only
+ * rename): it refuses "will not add file alias". The whole index is then the
+ * only commit that records the rename — and it is taken ONLY when nothing
+ * outside `files` is staged. Otherwise the close refuses with the reason
+ * recorded, rather than sweep the user's staged work into its commit.
+ */
+async function commitClosingFiles(
+  root: string,
+  files: readonly string[],
+  message: string,
+  run: (command: string, args: string[]) => Promise<boolean>,
+  commands: ClosingCommandResult[],
+): Promise<boolean> {
+  const foldCollision = new Set(files.map(normalizeRepoPath)).size < files.length;
+  if (!foldCollision) {
+    return run("git", ["commit", "-m", message, "--", ...files]);
+  }
+  const listed = await runTrackedAsync(
+    ["git", "diff", "--cached", "--name-only", "--no-renames", "-z"],
+    { cwd: root, encoding: "utf8", windowsHide: true, timeout: CLOSING_CHILD_DEADLINE_MS },
+  );
+  const own = new Set(files);
+  const foreign = listed.status === 0
+    ? String(listed.stdout).split("\0").filter((path) => path && !own.has(path))
+    : null;
+  if (foreign === null || foreign.length > 0) {
+    commands.push({
+      command: [],
+      exit_code: null,
+      stderr:
+        "closing commit refused: a case-only rename cannot be committed by path, and the index " +
+        (foreign === null
+          ? "could not be listed to prove nothing else is staged"
+          : `also holds staged paths outside this run: ${foreign.join(", ")}`) +
+        ". Commit the rename by hand, or unstage those paths and re-run the close.",
+    });
+    return false;
+  }
+  return run("git", ["commit", "-m", message]);
+}
+
+/**
  * Execute the run's closing action.
  *
  * ASYNC because every command it spawns is awaited — see
@@ -1138,9 +1183,25 @@ export async function executeClosingAction(
     // Awaited stepwise so the `&&` short-circuit survives the async migration:
     // a promise is truthy, so a bare `a() && b()` over async runs would have
     // run BOTH commands and dropped the failure gate.
-    const committed =
-      (await run("git", ["add", "--", ...files])) &&
-      (await run("git", ["commit", "-m", commitMessage]));
+    //
+    // The commit carries the SAME pathspec as the add. Without it, git records
+    // the whole index, so a path the user staged before the close (reported as
+    // `leftover`, never added here) would ride into this commit. With it, git
+    // commits only these paths and leaves the user's other staged entries
+    // staged and untouched.
+    //
+    // A path gone from the working tree is a DELETION, and `git add` refuses it
+    // outright ("pathspec did not match") once the deletion is already staged —
+    // a `git rm`, or the old half of a `git mv`. `git rm --cached` records the
+    // deletion when the index still holds the path and is a no-op when it does
+    // not, so every manifest path reaches the commit without failing the add.
+    const present = files.filter((file) => existsSync(join(options.root, file)));
+    const absent = files.filter((file) => !present.includes(file));
+    const staged =
+      (present.length === 0 || (await run("git", ["add", "--", ...present]))) &&
+      (absent.length === 0 ||
+        (await run("git", ["rm", "--cached", "--ignore-unmatch", "-q", "--", ...absent])));
+    const committed = staged && (await commitClosingFiles(options.root, files, commitMessage, run, commands));
     if (committed && action === "push") {
       await run("git", ["push"]);
     } else if (committed && action === "open-pr") {

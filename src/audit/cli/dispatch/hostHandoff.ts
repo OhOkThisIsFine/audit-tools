@@ -593,6 +593,15 @@ function normalizeTask(
     }
   }
 
+  // The two selective-lane fields are CARRIED, not dropped: the prompt, the
+  // work item's scope and the binding's completeness gate all read them from
+  // this normalized task, so a field lost here publishes the lens steward under
+  // the COMPLETE gate with its whole surface inlined.
+  const coveragePolicy = AuditTaskSchema.shape.coverage_policy.parse(
+    task.coverage_policy,
+  );
+  const fileMetrics = normalizeFileMetrics(task, taskId, root, files, coveragePolicy);
+
   return {
     task_id: taskId,
     unit_id: unitId,
@@ -615,7 +624,54 @@ function normalizeTask(
     ...(Array.isArray(task.tags)
       ? { tags: [...new Set(task.tags)].sort(compareCodeUnits) }
       : {}),
+    ...(coveragePolicy === undefined ? {} : { coverage_policy: coveragePolicy }),
+    ...(fileMetrics === undefined ? {} : { file_metrics: fileMetrics }),
   };
+}
+
+/**
+ * The surface metrics of a selective lane, in the tool's ranking order (the
+ * order is content-derived: strongest prior signal first).
+ *
+ * Metrics belong to a `"selective"` lane only, and state exactly one entry per
+ * assigned file — so each path is normalized like `file_paths`, and a metric
+ * set that names a file outside the assignment, or omits one, is refused.
+ */
+function normalizeFileMetrics(
+  task: AuditHostTask,
+  taskId: string,
+  root: string,
+  files: readonly string[],
+  coveragePolicy: AuditHostTask["coverage_policy"],
+): LensSurfaceFileMetric[] | undefined {
+  if (task.file_metrics === undefined) {
+    return undefined;
+  }
+  if (coveragePolicy !== "selective") {
+    throw new Error(`${taskId}.file_metrics is allowed only on a selective lane`);
+  }
+  if (!isSurfaceFileMetrics(task.file_metrics)) {
+    throw new Error(`${taskId}.file_metrics does not match the surface metric shape`);
+  }
+  const metrics = task.file_metrics.map((metric) => ({
+    ...metric,
+    path: repoRelativePath(
+      root,
+      resolveContainedPath(root, metric.path, `${taskId} file_metrics path`),
+      `${taskId} file_metrics path`,
+    ),
+  }));
+  const metricPaths = new Set(metrics.map((metric) => metric.path));
+  if (
+    metricPaths.size !== metrics.length ||
+    metricPaths.size !== files.length ||
+    !files.every((file) => metricPaths.has(file))
+  ) {
+    throw new Error(
+      `${taskId}.file_metrics must state exactly one entry per assigned file`,
+    );
+  }
+  return metrics;
 }
 
 /**
