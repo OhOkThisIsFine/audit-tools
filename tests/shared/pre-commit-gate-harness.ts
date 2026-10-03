@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeSuiteGreenStamp } from "../../scripts/shared/suiteGreenStamp.mjs";
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 export const GATE = resolve(HERE, "../../.claude/hooks/pre-commit-gate.mjs");
@@ -90,7 +91,18 @@ export function runCommitGate(
   });
 }
 
-export function runAttest(repo: string, args: string[]) {
+// Record a full-suite green on the fixture's CURRENT staged tree, through the
+// real stamp writer: the attest script refuses without one (a review must run
+// the tests, not only read the change). A test of that refusal passes
+// `{ stamp: false }` to `runAttest`.
+export function stampStagedTreeGreen(repo: string) {
+  const tree = g(repo, "write-tree").stdout.trim();
+  if (!writeSuiteGreenStamp(repo, tree)) throw new Error(`could not write a suite-green stamp in ${repo}`);
+  return tree;
+}
+
+export function runAttest(repo: string, args: string[], { stamp = true }: { stamp?: boolean } = {}) {
+  if (stamp) stampStagedTreeGreen(repo);
   return spawnSync(process.execPath, [ATTEST, ...args], {
     cwd: repo,
     encoding: "utf8",

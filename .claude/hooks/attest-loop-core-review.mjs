@@ -36,6 +36,9 @@
 //                     AI agent/session issues it (even relaying a human's words),
 //                     `human` only when a person types this command themselves
 //   --checked         REQUIRED; what was adversarially checked (>= 20 non-space chars)
+//
+//   Also REQUIRED, with no flag: a full-suite green stamp (`npm test`) on the exact
+//   staged tree. The record carries it as `tests_ran`.
 //   --verdict         clear (default) | concerns
 //   --override        reason a `concerns` verdict may still pass the gate (recorded)
 //   --include-unvouched  repeatable; a loop-core path OUTSIDE the staged set whose
@@ -81,6 +84,7 @@ function fail(msg) {
 import { isLoopCorePath } from './loop-core-patterns.mjs';
 import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
 import { resolveNightlyDecisionKeys } from '../../scripts/shared/nightlyDecisionKey.mjs';
+import { readSuiteGreenStamp, suiteGreenVerdict } from '../../scripts/shared/suiteGreenStamp.mjs';
 import {
   LEDGER_PATH,
   applyAttestation,
@@ -263,6 +267,35 @@ if (unnamed.length > 0) {
       `or restore it to the content the ledger vouches for. Nothing was written.`,
   );
 }
+
+// ── the tests ran on THIS content, not just the reading ───────────────────────
+// A review that only READ the change attested `concerns` on one that caused
+// endless replanning (2026-10-01); the end-to-end narrative tests caught it
+// later. So the record must carry evidence that the suite ran on the exact
+// content being bound, and the repo already mints that evidence: the full-suite
+// green stamp (scripts/shared/suiteGreenStamp.mjs), written only by an
+// unfiltered `npm test` and bound to the worktree content tree. A full suite is
+// required rather than a per-area subset (owner decision 2026-10-02): a
+// src/shared change reaches every area anyway, and one evidence kind cannot
+// drift from a second. The stamp must equal the staged tree WITHOUT this run's
+// ledger write — the same tree the preflight below judges, since nothing writes
+// the index in between — so dirt beside the staged set (an unstaged edit, an
+// untracked file) is refused: the suite then ran on other content than the
+// commit carries. Checked before the ledger review is built, which records it.
+const testedTree = git(['write-tree']);
+if (!testedTree.ok || !testedTree.stdout.trim()) {
+  fail(`\`git write-tree\` failed — not a git repo, or the index is unmerged. ${testedTree.stderr}`);
+}
+const suiteGreen = suiteGreenVerdict(readSuiteGreenStamp(root), testedTree.stdout.trim());
+if (!suiteGreen.ok) {
+  fail(
+    `refusing to attest: no full-suite green run covers the staged tree ${testedTree.stdout.trim().slice(0, 12)} — ` +
+      `${suiteGreen.reason}. A review must run the tests, not only read the change: with the working tree ` +
+      'equal to the staged set (no unstaged edits, no untracked files), run `npm test`, then attest again. ' +
+      `No review record was written and ${LEDGER_PATH} was not touched.`,
+  );
+}
+const testsRan = { scope: /** @type {const} */ ('full-suite'), tree: suiteGreen.tree, ran_at: suiteGreen.ranAt };
 const loopCoreFiles = [...new Set([...stagedLoopCore, ...named])].sort();
 const nextLedger = applyAttestation(priorLedger, blobs, loopCoreFiles, {
   reviewed_by: reviewedBy,
@@ -270,6 +303,7 @@ const nextLedger = applyAttestation(priorLedger, blobs, loopCoreFiles, {
   checked,
   verdict: /** @type {'clear'|'concerns'} */ (verdict),
   override: override ?? null,
+  tests_ran: testsRan,
   attested_at: new Date().toISOString(),
 });
 // Changed = the serialized ledger differs from the staged one. With nothing to
@@ -385,6 +419,7 @@ const record = {
   checked,
   verdict,
   override: override ?? null,
+  tests_ran: testsRan,
   loop_core_files: loopCoreFiles,
   // What the preflight was actually able to establish about THIS tree. An
   // abstention is recorded as data rather than passing silently, so "the legs
@@ -411,6 +446,7 @@ console.log(
     `  reviewed_by : ${reviewedBy}\n` +
     `  attester    : ${attesterClass}${agentEnvMarkers.length ? ` (env markers: ${agentEnvMarkers.join(', ')})` : ''}\n` +
     `  verdict     : ${verdict}${override ? ` (override: ${override})` : ''}\n` +
+    `  tests_ran   : full suite green on ${testsRan.tree.slice(0, 12)}${testsRan.ran_at ? ` at ${testsRan.ran_at}` : ''}\n` +
     `  loop_core   : ${loopCoreFiles.length} file(s)\n` +
     loopCoreFiles.map((p) => `                - ${p}`).join('\n') +
     (named.length > 0

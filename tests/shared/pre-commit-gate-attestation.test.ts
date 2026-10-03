@@ -4,7 +4,7 @@
 // end-to-end. Fixture + rationale in pre-commit-gate-harness.ts (shared across
 // the pre-commit-gate-*.test.ts family).
 import { test, describe, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   g as gIn,
@@ -13,6 +13,7 @@ import {
   runCommitGate,
   runGate as runGateIn,
   stageLoopCoreFile as stageLoopCoreFileIn,
+  stampStagedTreeGreen,
   STAGED_LOOP_CORE_PATH,
 } from "./pre-commit-gate-harness.js";
 import { isLoopCorePath } from "../../.claude/hooks/loop-core-patterns.mjs";
@@ -66,6 +67,48 @@ describe("the fixture helper arms what it says it arms", () => {
     const r = runCommit();
     expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
     expect(r.stderr).toContain("no adversarial-review attestation");
+  });
+});
+
+describe("an attestation requires the full suite green on the staged tree (2026-10-01: a read-only review passed a looping change)", () => {
+  const ATTEST_ARGS = ["--reviewed-by", "t", "--attester-class", "agent", "--checked", "checked the staged loop-core change end to end"];
+  const records = () => {
+    const dir = join(repo, ".claude", "loop-core-review");
+    return existsSync(dir) ? readdirSync(dir) : [];
+  };
+
+  test("no stamp at all: refused, and nothing is written or staged", () => {
+    stageLoopCoreFile();
+    const stagedBefore = g("write-tree").stdout.trim();
+    const r = runAttestIn(repo, ATTEST_ARGS, { stamp: false });
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stderr).toContain("no full-suite green run covers the staged tree");
+    expect(records()).toEqual([]);
+    expect(g("write-tree").stdout.trim()).toBe(stagedBefore);
+  });
+
+  test("a stamp on OTHER content (the suite ran before the last staged edit): refused", () => {
+    stageLoopCoreFile();
+    stampStagedTreeGreen(repo);
+    writeFileSync(join(repo, ...STAGED_LOOP_CORE_PATH.split("/")), "export const x = 2;\n");
+    g("add", "-A");
+    const r = runAttestIn(repo, ATTEST_ARGS, { stamp: false });
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stderr).toContain("covered different content");
+    expect(records()).toEqual([]);
+  });
+
+  test("a stamp on the staged tree: the record and the ledger review both carry tests_ran", () => {
+    stageLoopCoreFile();
+    const tested = stampStagedTreeGreen(repo);
+    const r = runAttestIn(repo, ATTEST_ARGS, { stamp: false });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const [file] = records();
+    const record = JSON.parse(readFileSync(join(repo, ".claude", "loop-core-review", file!), "utf8"));
+    expect(record.tests_ran).toMatchObject({ scope: "full-suite", tree: tested });
+    const ledger = JSON.parse(readFileSync(join(repo, ".claude", "loop-core-attestations.json"), "utf8"));
+    const reviews = Object.values(ledger.reviews) as Array<{ tests_ran?: { tree: string } }>;
+    expect(reviews.map((review) => review.tests_ran?.tree)).toEqual([tested]);
   });
 });
 

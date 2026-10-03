@@ -156,6 +156,19 @@ describe("check:loop-core-attestations judges the tree that landed", () => {
     expect(r.status, r.stdout + r.stderr).toBe(1);
     expect(r.stderr).toContain("does not hash to its own key");
   });
+
+  test("a review whose tests_ran is not a full-suite stamp record is refused", () => {
+    attestedCommit("export const x = 1;\n");
+    const ledgerFile = join(repo, LEDGER_PATH);
+    const text = readFileSync(ledgerFile, "utf8");
+    expect(text).toContain('"scope": "full-suite"');
+    writeFileSync(ledgerFile, text.split('"scope": "full-suite"').join('"scope": "audit-only"'));
+    g("add", "-f", "--", LEDGER_PATH);
+    g("commit", "-qm", "narrowed tests_ran");
+    const r = check(["--rev", "HEAD"], { GITHUB_REF: "refs/heads/main" });
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stderr).toContain("`tests_ran` is not a full-suite stamp record");
+  });
 });
 
 describe("a baseline records starting content and claims no review", () => {

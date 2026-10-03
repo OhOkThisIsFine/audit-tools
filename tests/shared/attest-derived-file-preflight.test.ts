@@ -24,6 +24,7 @@ import {
 import { worktreeTree } from "../../scripts/shared/worktree-tree.mjs";
 import { LEDGER_PATH } from "../../scripts/shared/loopCoreAttestationLedger.mjs";
 import { EXPECTED_SRC_REACH_LEG_IDS } from "../helpers/precommitLegExpectations.js";
+import { stampStagedTreeGreen } from "./pre-commit-gate-harness.js";
 
 const REPO_ROOT = join(__dirname, "..", "..");
 const ATTEST_LOOP_CORE = join(REPO_ROOT, ".claude", "hooks", "attest-loop-core-review.mjs");
@@ -82,6 +83,7 @@ function makeFixture(
 }
 
 function runAttest(root: string) {
+  stampStagedTreeGreen(root);
   return spawnSyncHidden(
     "node",
     [ATTEST_LOOP_CORE, "--attester-class", "agent", "--checked", "preflight contract test adversarial pass"],

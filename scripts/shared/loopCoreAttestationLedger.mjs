@@ -65,6 +65,9 @@ const LEDGER_SCHEMA = 'loop-core-attestations/v1';
  * @property {string} checked what was adversarially checked
  * @property {'clear'|'concerns'} verdict
  * @property {string|null} override
+ * @property {{ scope: 'full-suite', tree: string, ran_at: string|null }} [tests_ran] the full-suite
+ *   green stamp the attest script required on the reviewed tree; absent on reviews written before
+ *   that requirement (2026-10-02), so the check validates its shape only when present
  * @property {string} attested_at ISO timestamp
  * @property {Record<string, string>} vouches path → blob: the exact content this review covers
  * @typedef {Omit<Review, 'vouches'>} ReviewMeta what the attester supplies; `vouches` is derived
@@ -157,6 +160,19 @@ function reviewDefect(review) {
     return '`checked` is under 20 non-space characters';
   }
   if (r.verdict !== 'clear' && r.verdict !== 'concerns') return '`verdict` is not "clear" or "concerns"';
+  if (r.tests_ran !== undefined) {
+    const t = r.tests_ran;
+    if (
+      t === null ||
+      typeof t !== 'object' ||
+      t.scope !== 'full-suite' ||
+      typeof t.tree !== 'string' ||
+      !/^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(t.tree) ||
+      (t.ran_at !== null && typeof t.ran_at !== 'string')
+    ) {
+      return '`tests_ran` is not a full-suite stamp record ({ scope: "full-suite", tree, ran_at })';
+    }
+  }
   return vouchesDefect(r.vouches);
 }
 
