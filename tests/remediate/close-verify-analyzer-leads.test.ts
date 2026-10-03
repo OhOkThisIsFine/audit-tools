@@ -13,6 +13,7 @@ import type {
   AcquisitionRunner,
 } from "audit-tools/shared";
 import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
 
@@ -197,6 +198,65 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
     expect(f1.outcome).toBe("resolved");
     const report = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
     expect(report).toMatch(/Mechanical re-verify/);
+  });
+
+  // A replan carries `source_verifications` forward, and the outcomes writer
+  // trusts an entry only when both of its hashes match the CURRENT plan. The
+  // re-verify leg must stamp those hashes over its own verdict only — never
+  // over a source determination an earlier plan revision recorded.
+  it("never re-binds a source determination from an earlier plan revision to the current one", async () => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), FIXED_SOURCE);
+    const state = makeState(provenanceFor(FLAGGED_SOURCE));
+    state.source_verifications = {F1:{
+      disposition_override:"refuted",
+      evidence:{file:"src/dup.ts",line:"1",mechanism:"read_at_head_refutation"},
+      recorded_by_module:"closeVerifyHeadEvidence",
+      review_revision_sha256:"0".repeat(64), source_sha256:"0".repeat(64), head_commit:"1".repeat(40),
+    }};
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
+      root: REPO_DIR,
+      artifactsDir: TEST_DIR,
+      analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
+    });
+    expect(next.status).toBe("complete");
+    const outcomes = JSON.parse(
+      await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"),
+    );
+    const f1 = outcomes.outcomes.find((o: { finding_id: string }) => o.finding_id === "F1");
+    expect(f1.outcome).toBe("resolved");
+    expect(f1.evidence).toBeUndefined();
+    expect(next.source_verifications?.F1).toEqual({
+      mechanical_verification: { status: "verified_mechanically", analyzer_id: "fake-analyzer" },
+      review_revision_sha256: next.plan!.review_revision_sha256,
+      source_sha256: contentSha256(next.plan!.findings[0]),
+    });
+  });
+
+  // A persisting lead returns to triage BEFORE the read-at-HEAD leg runs, so
+  // nothing later in the pass clears what this leg wrote: the persisted entry
+  // itself must not bind the earlier revision's determination.
+  it("persists no earlier-revision determination when a lead routes to triage", async () => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), FLAGGED_SOURCE);
+    const state = makeState(provenanceFor(FLAGGED_SOURCE));
+    state.source_verifications = {F1:{
+      disposition_override:"refuted",
+      evidence:{file:"src/dup.ts",line:"1",mechanism:"read_at_head_refutation"},
+      recorded_by_module:"closeVerifyHeadEvidence",
+      review_revision_sha256:"0".repeat(64), source_sha256:"0".repeat(64), head_commit:"1".repeat(40),
+    }};
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, { skipFinalGate: true,
+      root: REPO_DIR,
+      artifactsDir: TEST_DIR,
+      analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
+    });
+    expect(next.status).toBe("triage");
+    expect(next.source_verifications?.F1).toEqual({
+      mechanical_verification: { status: "lead_persists", analyzer_id: "fake-analyzer" },
+      review_revision_sha256: next.plan!.review_revision_sha256,
+      source_sha256: contentSha256(next.plan!.findings[0]),
+    });
   });
 });
 
