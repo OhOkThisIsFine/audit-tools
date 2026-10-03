@@ -17,11 +17,12 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Work the medium entries in [`open-bugs.md`](backlog/open-bugs.md), first the pre-tag CI-green gate
-that does not test the publish suite's Node `22.14.0` (it cost the `v0.55.2` tag). Then: the commit
-refusal of a session started outside the repo, the worktree reaper's unseen agents, and a settled
-owner answer that a later decision overtook. A loop-core attestation needs a full-suite green stamp
-on the exact staged tree: run `npm test` after the final stage.
+Release runtime coverage now includes the exact publish pin alongside floating supported majors.
+Profile-writer fixtures use temporary ledger and summary destinations.
+Next: the commit refusal of a session started outside the repo, the worktree reaper's unseen agents,
+and a settled owner answer that a later decision overtook, tracked in [`open-bugs.md`](backlog/open-bugs.md).
+A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
+after the final stage. Release publication remains a separately authorized action.
 **Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
