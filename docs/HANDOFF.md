@@ -7,18 +7,20 @@
 
 Published and installed: `v0.55.3` (`v0.55.2` failed at publish and was deleted). GitHub branch protection on `main` requires the `checks`
 status check (strict; admins can bypass), and that job judges every tree against the tracked
-loop-core attestation ledger `.claude/loop-core-attestations.json` (143 baseline-only files).
+loop-core attestation ledger `.claude/loop-core-attestations.json` (18 reviewed files and 125 unchanged baseline-only files).
 The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can
 reach `main` without an attestation": the gate's own files are not loop-core, and an admin's
 direct push skips the required check.
+
+Legacy dispatch validation/merge scripts have been removed from the package; the asset guard
+requires production reference paths for dispatch scripts and data. Release CI includes the exact
+publish runtime, and profile fixtures write to temporary destinations.
 
 The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
 is present on the owner's machine and has not been reviewed; retain unknown work.
 
 ## Immediate next
 
-Release runtime coverage now includes the exact publish pin alongside floating supported majors.
-Profile-writer fixtures use temporary ledger and summary destinations.
 Next: the commit refusal of a session started outside the repo, the worktree reaper's unseen agents,
 and a settled owner answer that a later decision overtook, tracked in [`open-bugs.md`](backlog/open-bugs.md).
 A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`

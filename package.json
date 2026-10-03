@@ -25,7 +25,6 @@
     "audit-code.mjs",
     "wrapper/**",
     "remediate-code.mjs",
-    "dispatch/**",
     "schemas/**",
     "skills/**",
     "scripts/postinstall.mjs",

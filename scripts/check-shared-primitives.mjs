@@ -16,7 +16,7 @@
 // re-roll under a NEW name is red too.
 //
 // SCOPE, stated outright: this gate scans every tracked TypeScript source in
-// `src/`, every `.mjs` of the governance tree (scripts/, wrapper/, dispatch/,
+// `src/`, every `.mjs` of the governance tree (scripts/, wrapper/,
 // .claude/hooks/, the root bins and the test helpers), and its own rule source.
 // The TEST TREE's `.ts` files are deliberately out of scope — a test oracle
 // must not import the code it validates, so `tests/**` may carry its own
@@ -62,8 +62,6 @@ export const SCAN_PATHSPECS = [
   'scripts/**/*.mjs',
   'wrapper/*.mjs',
   'wrapper/**/*.mjs',
-  'dispatch/*.mjs',
-  'dispatch/**/*.mjs',
   '.claude/hooks/*.mjs',
   'audit-code.mjs',
   'remediate-code.mjs',
