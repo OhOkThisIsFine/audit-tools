@@ -17,10 +17,11 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Work the 2026-10-01 medium entries in [`open-bugs.md`](backlog/open-bugs.md). The release
-CI-green gate that refuses before CI lists the run is the smallest and hits every release; the
-prompt-body path normalizer blocks the Windows release smoke; the read-only loop-core
-attestation is what let a looping change pass review.
+Work the remaining medium entries in [`open-bugs.md`](backlog/open-bugs.md). The commit refusal
+of a session started outside the repo blocks every commit of such a session; the worktree reaper
+can still delete a tree an idle or non-dispatch agent works in; the maintenance routine states no
+handling for a settled owner answer that a later decision overtook. A loop-core attestation now needs a full-suite
+green stamp (`npm test`) on the exact staged tree, so run the suite after the final stage.
 **Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

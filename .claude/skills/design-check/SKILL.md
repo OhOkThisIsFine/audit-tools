@@ -60,7 +60,9 @@ re-spent those 20 minutes because this instruction lived only in a friction walk
 
 1. `agy_fire` — model omitted, so the launcher's own default applies; never hand-type an AGY model
    id (AGY serves Claude 4.6 and rejects `--effort` for Claude models). Never run `agy models`: it
-   can steal focus from a console-less agent. 45s, fully cited, on the run that established this.
+   can steal focus from a console-less agent. 45s, fully cited, on the run that established this;
+   9m46s on 2026-10-02 (`gemini-3.8-flash-high`, a three-question refutation that also swept every
+   prompt renderer under `src/`). Do not wait idle: write the failing test while `agy_wait` polls.
 2. `opencode_fire` at a capability tier, through agent-dispatch — when AGY is unavailable or its
    quota is exhausted.
 3. `codex exec --skip-git-repo-check "<prompt>" < /dev/null` — closing stdin is load-bearing.
