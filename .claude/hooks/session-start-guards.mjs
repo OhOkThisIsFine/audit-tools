@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { agentDispatchRepo } from '../../scripts/shared/mcp-dispatch-lane.mjs';
 import { compareCodeUnits } from '../../scripts/shared/primitives.mjs';
 import {
   baselineFromEntries,
@@ -242,7 +243,7 @@ try {
 // that makes a worktree disposable is mechanically checkable, and a note that
 // fires every session is a note that gets read past.
 //
-// THREE conditions, all required — a stale worktree is not necessarily a
+// FOUR conditions, all required — a stale worktree is not necessarily a
 // duplicate (of four cleared by hand, one held a superseded ALTERNATIVE branch):
 //   landed — HEAD is reachable from a main line, so it holds no unique commit
 //   clean  — no modified, untracked OR IGNORED file beyond installed
@@ -254,10 +255,16 @@ try {
 //   idle   — a CONCURRENT agent's worktree is landed AND clean for the whole
 //            window between `worktree add` and its first commit, so freshness is
 //            what separates in-flight from abandoned
+//   unused — no agent-dispatch worker session runs in it. A read-only job, or
+//            a job between edits, is landed, clean and leaves the index clock
+//            alone, so no git signal can see it: a 2026-10-02 review job read
+//            for an hour and lost its tree mid-run. The worker is asked, per
+//            tree (see `workerSessionDirectories`); when it cannot be asked,
+//            every candidate is kept.
 // The worktree the session itself works in (the payload `cwd`, which differs
 // from CLAUDE_PROJECT_DIR when the session entered a linked worktree) is never a
 // candidate. Anything unreadable — a vanished directory, a git that errors — is
-// left alone: this leg only ever acts on a positive answer to all three.
+// left alone: this leg only ever acts on a positive answer to all four.
 const WORKTREE_IDLE_MS = 6 * 60 * 60 * 1000;
 // Ignored top-level entries an install recreates — the only ignored content a
 // reap may discard. Named by what regenerates them, not by size or age. A
@@ -281,6 +288,54 @@ function msSinceWorktreeActivity(path) {
     }
   }
   return 0;
+}
+
+/**
+ * The subset of `paths` in which an agent-dispatch worker session runs, as the
+ * worker itself reports it — or null when the worker cannot be asked, which
+ * the caller reads as "every path may be in use".
+ *
+ * The connection comes from agent-dispatch's own `connectOpenCode`
+ * (src/services/connection.ts in the checkout `agentDispatchRepo` names), so
+ * the URL, the user and the service secret are never restated here.
+ * `GET /session/status?directory=` answers with the sessions that run in
+ * exactly that directory (measured 2026-10-02: a busy session in one linked
+ * worktree did not appear for a sibling worktree or the main checkout, and the
+ * route matched the path regardless of slash direction or drive-letter case).
+ * Any entry that is not `idle` (`busy`, `retry`, or a shape not known here)
+ * counts as live.
+ *
+ * No checkout means agent-dispatch is not installed on this machine, so no
+ * worker exists to run a session: the answer is the empty set, not unknown.
+ *
+ * @param {string[]} paths
+ * @returns {Promise<Set<string> | null>}
+ */
+async function workerSessionDirectories(paths) {
+  const connectionModule = join(agentDispatchRepo(process.env), 'src', 'services', 'connection.ts');
+  if (!existsSync(connectionModule)) return new Set();
+  try {
+    const { connectOpenCode } = await import(pathToFileURL(connectionModule).href);
+    const connection = await connectOpenCode(process.env);
+    const base = String(connection.baseUrl).replace(/\/+$/, '');
+    const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.password}`, 'utf8').toString('base64')}`;
+    const live = await Promise.all(
+      paths.map(async (path) => {
+        const response = await fetch(`${base}/session/status?directory=${encodeURIComponent(path)}`, {
+          headers: { authorization },
+        });
+        if (!response.ok) throw new Error(`worker answered ${response.status}`);
+        const sessions = await response.json();
+        if (sessions === null || typeof sessions !== 'object' || Array.isArray(sessions)) {
+          throw new Error('worker answered with no session map');
+        }
+        return Object.values(sessions).some((status) => status?.type !== 'idle') ? path : null;
+      }),
+    );
+    return new Set(live.filter((path) => path !== null));
+  } catch {
+    return null;
+  }
 }
 
 function parseWorktreePorcelain(text) {
@@ -321,8 +376,7 @@ try {
     .filter(Boolean)
     .filter((ref) => git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], 5_000).ok);
 
-  const reaped = [];
-  const stuck = [];
+  const disposable = [];
   // Sorted by path so the reported order is content-derived, not list order.
   for (const wt of linked.sort((a, b) => compareCodeUnits(a.path, b.path))) {
     if (wt.disqualified || !wt.head || !existsSync(wt.path)) continue;
@@ -345,15 +399,35 @@ try {
       .filter(Boolean)
       .filter((line) => !(line.startsWith('!! ') && REGENERABLE_IGNORED.has(line.slice(3))));
     if (unsaved.length > 0) continue;
-    // No --force: git re-checks cleanliness itself, so a race between the check
-    // above and the removal still fails closed.
-    (git(['worktree', 'remove', wt.path], 60_000).ok ? reaped : stuck).push(wt.path);
+    disposable.push(wt.path);
   }
 
+  // Asked last, and only about trees git already calls disposable: the worker
+  // query is the one leg that reads a secret and crosses a socket.
+  const live = disposable.length > 0 ? await workerSessionDirectories(disposable) : new Set();
+  const reaped = [];
+  const stuck = [];
   const asList = (paths) => paths.map((p) => `    ${p.replace(/\\/g, '/')}`).join('\n');
+  if (live === null) {
+    notes.push(
+      `Kept ${disposable.length} finished worktree(s): could not ask the agent-dispatch worker whether a ` +
+        `session runs in them, and an unknown answer never reaps:\n${asList(disposable)}\n` +
+        `  They are reaped at the first session start that reaches the worker ` +
+        `(\`node ${agentDispatchRepo(process.env)}/src/cli.ts status\`).`,
+    );
+  } else {
+    for (const path of disposable) {
+      if (live.has(path)) continue;
+      // No --force: git re-checks cleanliness itself, so a race between the
+      // check above and the removal still fails closed.
+      (git(['worktree', 'remove', path], 60_000).ok ? reaped : stuck).push(path);
+    }
+  }
+
   if (reaped.length > 0) {
     notes.push(
-      `Reaped ${reaped.length} finished worktree(s) — HEAD already on main, tree clean, idle:\n${asList(reaped)}`,
+      `Reaped ${reaped.length} finished worktree(s) — HEAD already on main, tree clean, idle, no live ` +
+        `worker session:\n${asList(reaped)}`,
     );
   }
   if (stuck.length > 0) {
