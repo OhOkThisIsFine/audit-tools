@@ -14,15 +14,17 @@ direct push skips the required check.
 
 Legacy dispatch validation/merge scripts have been removed from the package; the asset guard
 requires production reference paths for dispatch scripts and data. Release CI includes the exact
-publish runtime, and profile fixtures write to temporary destinations.
+publish runtime, and profile fixtures write to temporary destinations. The mirror guard scans only surviving
+production roots. Superseded answers retain their original ledger entry and record
+the applied remainder, omitted clause, and later owner decision in the inbox.
 
 The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
 is present on the owner's machine and has not been reviewed; retain unknown work.
 
 ## Immediate next
 
-Next: the commit refusal of a session started outside the repo, the worktree reaper's unseen agents,
-and a settled owner answer that a later decision overtook, tracked in [`open-bugs.md`](backlog/open-bugs.md).
+Next: the commit refusal of a session started outside the repo and the worktree reaper's unseen agents,
+tracked in [`open-bugs.md`](backlog/open-bugs.md).
 A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
 after the final stage. Release publication remains a separately authorized action.
 **Live owner decision:** none.

@@ -655,6 +655,35 @@ export function withSubjectKey(item) {
   return { ...item, subject_key: subjectKey(path, subject) };
 }
 
+// Structured supersession receipts become ordinary applied strings so every
+// existing reader and inbox renderer retains the same persisted contract.
+// This validates the binding, not the host's semantic judgement: the host must
+// verify that the cited later OWNER decision actually supersedes this clause.
+function normalizeAppliedReceipts(root, applied) {
+  const decisions = readDecisions(root);
+  return applied.map((receipt) => {
+    if (typeof receipt === 'string') return receipt;
+    if (receipt?.kind !== 'superseded-answer') {
+      throw new Error('writeOpenItems: applied receipt has an unknown kind');
+    }
+    for (const field of ['subject_key', 'applied', 'superseded_clause', 'later_decision_ref']) {
+      if (typeof receipt[field] !== 'string' || !receipt[field].trim()) {
+        throw new Error(`writeOpenItems: applied receipt needs a non-empty ${field}`);
+      }
+    }
+    const decision = decisions[receipt.subject_key];
+    if (decision?.disposition !== 'settled' || typeof decision.answer !== 'string') {
+      throw new Error('writeOpenItems: applied receipt must name a settled answer');
+    }
+    if (!decision.answer.includes(receipt.superseded_clause)) {
+      throw new Error('writeOpenItems: applied receipt clause is absent from the recorded answer');
+    }
+    return `Subject ${receipt.subject_key}: ${receipt.applied.trim()} ` +
+      `Omitted superseded clause ${JSON.stringify(receipt.superseded_clause)}; ` +
+      `later owner decision: ${receipt.later_decision_ref.trim()}.`;
+  });
+}
+
 // Persist this run's items, carrying `first_seen` forward from the previous run
 // so `nights_open` is real. An item that has been open for many nights is the
 // signal the old channel destroyed by repeating everything identically: it means
@@ -667,7 +696,12 @@ export function withSubjectKey(item) {
 // vanished overnight is the second case: drop it as resolved, don't re-write
 // it). Refusal is the load-bearing half; without it a probe-less item would
 // ride the store forever immune to auto-close.
+/**
+ * @param {string} root
+ * @param {{items: any[], applied?: Array<string | object>, skipped?: any[], run?: any}} options
+ */
 export function writeOpenItems(root, { items, applied = [], skipped = [], run = null }) {
+  const appliedReceipts = normalizeAppliedReceipts(root, applied);
   const normalized = items.map(withSubjectKey);
   for (const item of normalized) {
     const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
@@ -812,7 +846,7 @@ export function writeOpenItems(root, { items, applied = [], skipped = [], run = 
     generated_at: generatedAt,
     run,
     items: merged,
-    applied,
+    applied: appliedReceipts,
     skipped,
   };
   writeJson(join(root, OPEN_ITEMS_RELPATH), payload);

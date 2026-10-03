@@ -795,3 +795,53 @@ it('propagates inbox write failure while preserving the accepted queue', () => {
   expect(() => writeOpenItems(root, { items: [item({ id: 'DOC-ONE' })] })).toThrow();
   expect(readOpenItems(root).items[0].id).toBe('DOC-ONE');
 });
+
+
+describe('superseded answer application receipts', () => {
+  const clause = 'Lane choice stays with the retired bridge.';
+  const later = 'owner decision 2026-09-22, replacement commit abc123';
+  const receipt = () => ({
+    kind: 'superseded-answer',
+    subject_key: item().subject_key,
+    applied: 'Documented the independent reviewer requirement.',
+    superseded_clause: clause,
+    later_decision_ref: later,
+  });
+
+  it('persists and renders the remainder, omitted clause and later decision without rewriting or reopening the answer', () => {
+    recordDecision(root, item().subject_key, { answer: `State the independent reviewer requirement. ${clause}` });
+    const ledger = readFileSync(join(root, '.claude/nightly-decisions.json'), 'utf8');
+    const { open } = partitionBySettled([item()], readDecisions(root));
+    writeOpenItems(root, { items: open, applied: ['An ordinary change.', receipt()] });
+    const stored = readOpenItems(root);
+    expect(stored.items).toEqual([]);
+    expect(stored.applied[0]).toBe('An ordinary change.');
+    expect(typeof stored.applied[1]).toBe('string');
+    for (const text of [item().subject_key, receipt().applied, clause, later]) {
+      expect(stored.applied[1]).toContain(text);
+      expect(readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8')).toContain(text);
+    }
+    expect(readFileSync(join(root, '.claude/nightly-decisions.json'), 'utf8')).toBe(ledger);
+    expect(partitionBySettled([item()], readDecisions(root)).open).toEqual([]);
+  });
+
+  it.each([
+    ['unknown subject', { subject_key: 'unknown' }],
+    ['clause absent from the answer', { superseded_clause: 'Invented instruction.' }],
+    ['missing later decision', { later_decision_ref: ' ' }],
+    ['missing applied remainder', { applied: '' }],
+    ['unknown receipt kind', { kind: 'guess' }],
+  ])('refuses %s before changing the queue', (_label, overrides) => {
+    recordDecision(root, item().subject_key, { answer: `State the requirement. ${clause}` });
+    writeOpenItems(root, { items: [], applied: ['Prior run.'] });
+    const prior = readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8');
+    expect(() => writeOpenItems(root, { items: [], applied: [{ ...receipt(), ...overrides }] })).toThrow(/applied receipt/);
+    expect(readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8')).toBe(prior);
+  });
+
+  it('refuses to reinterpret an unanswered question as a superseded answer', () => {
+    recordDecision(root, item().subject_key, { answer: clause, disposition: 'question' });
+    expect(() => writeOpenItems(root, { items: [], applied: [receipt()] })).toThrow(/settled answer/);
+    expect(existsSync(join(root, '.audit-tools/nightly/open-items.json'))).toBe(false);
+  });
+});
