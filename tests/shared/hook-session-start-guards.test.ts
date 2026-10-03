@@ -309,7 +309,10 @@ describe('session-start-guards: a worktree a live worker session uses is kept', 
     }
   });
 
-  it('keeps a clean, landed, idle worktree while a worker session is busy in it, and reaps the one no session uses', async () => {
+  // The hook imports the checkout's `connection.ts`, which needs a Node that strips TypeScript types
+  // (on by default from 22.18; the release workflow pins 22.14.0, where the import fails and the hook
+  // keeps every candidate — the case below covers that answer).
+  it.skipIf(!process.features.typescript)('keeps a clean, landed, idle worktree while a worker session is busy in it, and reaps the one no session uses', async () => {
     const address = worker.address();
     if (address === null || typeof address === 'string') throw new Error('worker has no port');
     // `unreachable` is held out of this pass by a dirt file, so that the next case finds it untouched.
