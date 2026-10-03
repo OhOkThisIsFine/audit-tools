@@ -265,7 +265,11 @@ try {
 // from CLAUDE_PROJECT_DIR when the session entered a linked worktree) is never a
 // candidate. Anything unreadable — a vanished directory, a git that errors — is
 // left alone: this leg only ever acts on a positive answer to all four.
-const WORKTREE_IDLE_MS = 6 * 60 * 60 * 1000;
+// Owner decision 2026-10-02, not a measurement: 24 hours. The floor is the only
+// protection for an agent the worker check cannot see (a Codex, AGY or Claude
+// session, or a worker session idle between turns), and the owner accepts that
+// a quiet agent past it can still lose its tree.
+const WORKTREE_IDLE_MS = 24 * 60 * 60 * 1000;
 // Ignored top-level entries an install recreates — the only ignored content a
 // reap may discard. Named by what regenerates them, not by size or age. A
 // junction or symlink (how a lap worktree borrows its dependencies) lists

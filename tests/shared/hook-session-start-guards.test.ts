@@ -34,7 +34,7 @@ const git = (cwd: string, ...args: string[]) =>
  * files — the same clock the guard reads to tell an abandoned worktree from one
  * a concurrent agent is still working in.
  */
-function backdate(path: string, hours = 7): void {
+function backdate(path: string, hours = 25): void {
   const adminDir = git(path, 'rev-parse', '--absolute-git-dir').stdout.trim();
   const when = new Date(Date.now() - hours * 60 * 60 * 1000);
   for (const p of [join(adminDir, 'index'), adminDir]) {
@@ -93,6 +93,11 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     // fresh: landed and clean, but touched moments ago — indistinguishable from
     // a concurrent agent between `worktree add` and its first commit.
     git(repo, 'worktree', 'add', '-q', wt('fresh'), '-b', 'wt-fresh');
+
+    // halfday: landed and clean, untouched for 12 hours — still inside the
+    // owner's 24-hour idle floor, so a quiet agent there keeps its tree.
+    git(repo, 'worktree', 'add', '-q', wt('halfday'), '-b', 'wt-halfday');
+    backdate(wt('halfday'), 12);
 
     // workstate: landed, `git status` clean and idle by the index clock, but it
     // holds gitignored work state (an audit's `.audit-tools/` tree in the real
@@ -159,6 +164,12 @@ describe('session-start-guards: stale agent worktrees are reaped', () => {
     expect(existsSync(wt('fresh'))).toBe(true);
     expect(isListed(wt('fresh'))).toBe(true);
     expect(pass.stdout).not.toMatch(/fresh/i);
+  });
+
+  it('keeps a worktree idle for less than the 24-hour floor', () => {
+    expect(existsSync(wt('halfday'))).toBe(true);
+    expect(isListed(wt('halfday'))).toBe(true);
+    expect(pass.stdout).not.toMatch(/halfday/i);
   });
 
   it('never touches the checkout the session itself is in', () => {
