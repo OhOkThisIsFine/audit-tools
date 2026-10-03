@@ -62,7 +62,7 @@ gate, so the local preflight is a quick fast-fail, not the full run.
   `scripts/release-and-publish.mjs` owns, in order:
   1. the pre-tag CI-green gate **and** the pre-tag `verify:checks` (a tag is the one
      unrecoverable-cheaply step, so both fail BEFORE `vX.Y.Z` exists rather than after). An IN-FLIGHT
-     CI run on HEAD is WATCHED to its conclusion, not refused on;
+     CI run on HEAD, or one GitHub has not listed yet, is WATCHED to its conclusion, not refused on;
   2. exactly-once `bump` → tag → push → GitHub Release (a release that already exists is left untouched,
      never recreated), which triggers OIDC trusted-publishing `publish-package.yml`;
   3. delayed observation of the publish run — the wait is sized for GitHub's `release`-event delivery

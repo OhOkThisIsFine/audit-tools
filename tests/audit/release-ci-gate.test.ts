@@ -257,11 +257,41 @@ test("ensureCiGreenOnHeadSha: aborts before tagging when no run exists for HEAD'
     if (command === "gh" && args[0] === "api") return jsonResult({ workflow_runs: [] });
     throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
   };
-  await expect(ensureCiGreenOnHeadSha("o/r")).rejects.toThrow(/Pre-tag CI-green gate FAILED/);
+  await expect(ensureCiGreenOnHeadSha("o/r", { waitMs: 0, pollMs: 1 })).rejects.toThrow(
+    /Pre-tag CI-green gate FAILED.*no run was listed for this SHA after waiting/,
+  );
 });
 
-test("ensureCiGreenOnHeadSha: an ABSENT run refuses after exactly one query — it does not wait for a run that will never appear", async () => {
+test("ensureCiGreenOnHeadSha: a SHA GitHub has not LISTED yet is waited on, and passes once its run appears green (v0.54.0 friction)", async () => {
   const sha = "1".repeat(40).replace(/1/g, "9");
+  let apiCalls = 0;
+  spawnSyncHandler = (command, args) => {
+    if (command === "git" && args[0] === "rev-parse") return textResult(`${sha}\n`);
+    if (command === "gh" && args[0] === "api") {
+      apiCalls += 1;
+      if (apiCalls < 3) return jsonResult({ workflow_runs: [] });
+      return jsonResult({
+        workflow_runs: [
+          {
+            name: "ci",
+            head_sha: sha,
+            status: "completed",
+            conclusion: "success",
+            created_at: "2026-01-01T00:00:00Z",
+            html_url: "https://github.com/o/r/actions/runs/88",
+          },
+        ],
+      });
+    }
+    throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
+  };
+  const result = await ensureCiGreenOnHeadSha("o/r", { waitMs: 60_000, pollMs: 1 });
+  expect(apiCalls, "an unlisted SHA must be re-polled, not refused").toBe(3);
+  expect(result.successfulRuns).toHaveLength(1);
+});
+
+test("ensureCiGreenOnHeadSha: a SHA still unlisted when the wait bound passes is refused as unlisted", async () => {
+  const sha = "1".repeat(40).replace(/1/g, "8");
   let apiCalls = 0;
   spawnSyncHandler = (command, args) => {
     if (command === "git" && args[0] === "rev-parse") return textResult(`${sha}\n`);
@@ -271,10 +301,31 @@ test("ensureCiGreenOnHeadSha: an ABSENT run refuses after exactly one query — 
     }
     throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
   };
+  await expect(ensureCiGreenOnHeadSha("o/r", { waitMs: 20, pollMs: 1 })).rejects.toThrow(
+    /no run was listed for this SHA after waiting/,
+  );
+  expect(apiCalls, "the gate polls until the bound passes").toBeGreaterThan(1);
+});
+
+test("ensureCiGreenOnHeadSha: listed runs that all concluded without a success refuse after one query", async () => {
+  const sha = "1".repeat(40).replace(/1/g, "7");
+  let apiCalls = 0;
+  spawnSyncHandler = (command, args) => {
+    if (command === "git" && args[0] === "rev-parse") return textResult(`${sha}\n`);
+    if (command === "gh" && args[0] === "api") {
+      apiCalls += 1;
+      return jsonResult({
+        workflow_runs: [
+          { name: "ci", head_sha: sha, status: "completed", conclusion: "cancelled", created_at: "2026-01-01T00:00:00Z" },
+        ],
+      });
+    }
+    throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
+  };
   await expect(ensureCiGreenOnHeadSha("o/r", { waitMs: 60_000, pollMs: 1 })).rejects.toThrow(
     /no completed run with conclusion=success/,
   );
-  expect(apiCalls, "no run at all is not a wait state").toBe(1);
+  expect(apiCalls, "a concluded, non-green SHA is final").toBe(1);
 });
 
 test("ensureCiGreenOnHeadSha: watches an IN-FLIGHT run to its green conclusion instead of refusing (2026-08-29 friction)", async () => {

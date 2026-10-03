@@ -382,14 +382,14 @@ export function evaluateCiGreenForSha(rawRuns, { headSha } = {}) {
   return { ok: true, reason: "green", redWorkflows: [], successfulRuns };
 }
 
-// Pure split of the NOT-YET-GREEN case into the two states the gate must tell
-// apart, because the right action differs and only one of them is a reason to
-// stop: a run that has not CONCLUDED will conclude and can be waited out (the
+// Pure split of the NOT-YET-GREEN case into the states the gate must tell apart:
+// a run that has not CONCLUDED will conclude and can be waited out (the
 // 2026-08-29 friction — the gate refused ~2 min after a push while both runs for
-// that exact SHA were `in_progress`), while a SHA with no run at all is "CI never
-// ran here" and waiting changes nothing. Kept pure and separate from
-// `evaluateCiGreenForSha` so the green/red verdict stays order-independent and
-// testable without a clock.
+// that exact SHA were `in_progress`), and a SHA with no run LISTED may simply be
+// one GitHub has not listed yet (v0.54.0: the gate refused ~17s after the push).
+// Both are waited on within the same bound; only completed runs with no success
+// are final. Kept pure and separate from `evaluateCiGreenForSha` so the green/red
+// verdict stays order-independent and testable without a clock.
 /** @param {any[]} rawRuns @param {{headSha?: string}} [options] */
 export function classifyCiInFlight(rawRuns, { headSha } = {}) {
   const runs = (Array.isArray(rawRuns) ? rawRuns : []).filter(
@@ -402,6 +402,8 @@ export function classifyCiInFlight(rawRuns, { headSha } = {}) {
   );
   return {
     inFlight,
+    /** True when GitHub lists at least one run for this SHA, concluded or not. */
+    listed: runs.length > 0,
     /** True when GitHub has at least one run for this SHA that has not concluded. */
     waiting: inFlight.length > 0,
     workflows: [
@@ -436,9 +438,10 @@ function fetchRunsForSha(repoSlug, headSha) {
 // so gating on this pre-bump HEAD is gating on the code actually being shipped)
 // and requires GitHub Actions to have confirmed it green.
 //
-// When the SHA's runs are merely IN FLIGHT the gate WATCHES THEM OUT rather than
-// refusing, and it refuses only when no run exists for the SHA at all or one has
-// concluded red. That is the whole point of the gate — a tag is the one
+// When the SHA's runs are merely IN FLIGHT, or not yet LISTED, the gate WATCHES
+// THEM OUT rather than refusing, and it refuses only when a run has concluded
+// red, when the listed runs all concluded without a success, or when the wait
+// bound passes. That is the whole point of the gate — a tag is the one
 // expensive-to-undo step — so declining to wait on a run that is going to
 // conclude in a few minutes was never protecting anything: it turned the
 // script's own remedy into operator prose ("wait for CI (or the in-flight run)
@@ -466,14 +469,34 @@ export async function ensureCiGreenOnHeadSha(
   let announcedWait = false;
 
   // A red verdict refuses at once; every other not-green verdict is waited on
-  // while a run for the SHA is still in flight.
+  // while a run for the SHA is still in flight or none is listed yet.
+  let unlistedWaitSec = null;
   while (!verdict.ok && verdict.reason !== "red_workflows") {
     const inFlight = classifyCiInFlight(response.workflow_runs, { headSha });
-    if (!inFlight.waiting) break; // no run at all for this SHA — waiting changes nothing
+    if (inFlight.listed && !inFlight.waiting) break; // every listed run concluded, none green
+    const waitedSec = Math.round((Date.now() - waitedFrom) / 1000);
+    if (!inFlight.listed) {
+      if (Date.now() - waitedFrom >= waitMs) {
+        unlistedWaitSec = waitedSec;
+        break;
+      }
+      if (!announcedWait) {
+        console.log(
+          `[release] pre-tag CI-green gate: GitHub lists no run for ${headSha} yet — waiting up to ` +
+            `${Math.round(waitMs / 1000)}s for the push's runs to appear. Nothing has been tagged or ` +
+            "pushed; do NOT dispatch anything by hand.",
+        );
+        announcedWait = true;
+      }
+      await sleep(pollMs);
+      response = fetchRunsForSha(repoSlug, headSha);
+      verdict = evaluateCiGreenForSha(response.workflow_runs, { headSha });
+      continue;
+    }
     if (Date.now() - waitedFrom >= waitMs) {
       throw new Error(
         `Pre-tag CI-green gate: ${inFlight.workflows.length} run(s) for HEAD ${headSha} are still in ` +
-          `flight after waiting ${Math.round((Date.now() - waitedFrom) / 1000)}s ` +
+          `flight after waiting ${waitedSec}s ` +
           `(${inFlight.workflows.join(", ")}). This is a WAIT TIMEOUT, not a red run — the runs exist ` +
           `and have not concluded. Inspect them with \`gh run list --commit ${headSha}\`, wait for ` +
           "them to finish, then retry the release; nothing has been tagged or pushed yet.",
@@ -481,7 +504,7 @@ export async function ensureCiGreenOnHeadSha(
     }
     if (!announcedWait) {
       console.log(
-        `[release] pre-tag CI-green gate: ${inFlight.workflows.length} run(s) already in flight for ` +
+        `[release] pre-tag CI-green gate: ${inFlight.workflows.length} run(s) in flight for ` +
           `${headSha} (${inFlight.workflows.join(", ")}) — watching them to conclusion rather than ` +
           "refusing. Nothing has been tagged or pushed; do NOT dispatch anything by hand.",
       );
@@ -497,7 +520,9 @@ export async function ensureCiGreenOnHeadSha(
       verdict.reason === "red_workflows"
         ? `the latest completed run of ${verdict.redWorkflows.length} workflow(s) on this SHA failed: ` +
           verdict.redWorkflows.join(", ")
-        : "no completed run with conclusion=success was found for this SHA";
+        : unlistedWaitSec !== null
+          ? `no run was listed for this SHA after waiting ${unlistedWaitSec}s`
+          : "no completed run with conclusion=success was found for this SHA";
     throw new Error(
       `Pre-tag CI-green gate FAILED for HEAD ${headSha}: ${detail}. Refusing to tag an ` +
         "unverified commit. Push and wait for CI to complete, then retry, or bypass with " +
