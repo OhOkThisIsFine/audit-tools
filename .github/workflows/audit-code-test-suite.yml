@@ -103,7 +103,9 @@ jobs:
       # EVERY Node major the engines range admits and the Node project still
       # ships — the floor (package.json engines.node >=22), the active LTS line
       # and the current line. Floating majors, so each job runs its line's
-      # latest release: that is the support claim under test. ci.yml carries
+      # latest release: that is the support claim under test. Also exercise the
+      # exact publish-package.yml RELEASE_NODE_VERSION pin before tagging: a
+      # floating major can pass while the older publish runtime fails. ci.yml carries
       # only verify:checks on the pinned floor line, so this workflow owns the
       # runtime coverage of every supported major (owner decision b175a773,
       # 2026-08-31, superseding T5's single line). Keep the denominator in the
@@ -111,7 +113,7 @@ jobs:
       # list; tests/audit/release-contract.test.ts pins the matrix shape against
       # package.json.
       matrix:
-        node: ["22", "24", "26"]
+        node: ["22.14.0", "22", "24", "26"]
         shard: [1, 2, 3, 4]
     steps:
       - name: Checkout

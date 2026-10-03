@@ -367,6 +367,35 @@ Call `writeOpenItems(root, { items: open, applied, skipped, run })` so
 `skipped` names every leg or scope that could not run and why. Never hand-write
 the JSON or discard the previous state before this merge.
 
+When a later recorded owner decision overtakes a clause of a settled answer,
+execute only the compatible remainder under the normal gate. Never reinstate
+the retired thing or re-raise the settled subject. Keep the original answer
+unchanged. Verify the later decision against its actual record; a conflicting
+implementation or a run's preference is not an owner decision. If the record
+cannot be verified, report the blocked application in `skipped` and leave the
+subject settled rather than inventing direction.
+
+Record the completed remainder, the exact omitted clause, and a checkable
+reference to the later decision in `applied`. The writer accepts this receipt
+alongside ordinary applied strings:
+
+```js
+{
+  kind: 'superseded-answer',
+  subject_key: '<original settled key>',
+  applied: '<compatible work actually completed, with its change reference>',
+  superseded_clause: '<exact clause quoted from the original answer>',
+  later_decision_ref: '<later owner decision date and record/commit reference>',
+}
+```
+
+`writeOpenItems` refuses missing receipt fields, a subject without a settled
+answer, or a clause absent from that answer before writing the queue. It stores
+the receipt as a human-readable applied string for the existing inbox readers;
+it does not infer supersession or authenticate the later decision reference.
+Completion remains separate: mark the compatible work done only after it lands,
+with the supersession receipt's decision reference included in the completion note.
+
 That ONE call is the whole persistence contract, because it also writes the two
 artifacts derived from the queue — do not write either by hand:
 

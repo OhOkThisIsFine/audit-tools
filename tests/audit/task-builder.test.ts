@@ -282,8 +282,7 @@ test("an unmeasured file does not poison the line budget or masquerade as a tiny
 // route to close. The one genuinely foreign path surface (a worker-supplied
 // string copied into a followup task's file_paths) enters at validation, and
 // the normalization that closes it is pinned there:
-// tests/audit/validation-remediation.test.ts and
-// tests/audit/dispatch-validate.test.ts.
+// tests/audit/validation-remediation.test.ts.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

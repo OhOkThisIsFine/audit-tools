@@ -16,13 +16,13 @@
  *
  *   1. Every canonical lens's rendered work-item prompt carries that lens's
  *      focus and its do-not-report boundary — and not another lens's.
- *   2. A data asset under `dispatch/` (anything that is not an executable
- *      script) has a code reader in `src/`, `wrapper/` or a `dispatch/` script.
+ *   2. Every asset under `dispatch/`, including executable scripts, has a
+ *      reference path from production code or shipped host instructions.
  *      Presence checks (the packaged smoke, `package.json` `files`) are not
  *      readers: they are exactly what let this asset rot.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -88,6 +88,7 @@ describe("lens guidance reaches the work-item prompt", () => {
 
 /** Repo-relative paths of every file under `dir`. */
 function filesUnder(dir: string): string[] {
+  if (!existsSync(join(repoRoot, dir))) return [];
   return (readdirSync(join(repoRoot, dir), { recursive: true, withFileTypes: true }) as import("node:fs").Dirent[])
     .filter((entry) => entry.isFile())
     .map((entry) => relative(repoRoot, join(entry.parentPath, entry.name)).replace(/\\/g, "/"))
@@ -96,15 +97,23 @@ function filesUnder(dir: string): string[] {
 
 const isScript = (path: string) => /\.(?:mjs|cjs|js|ts)$/.test(path);
 
-/** Data assets under `dispatch/` that no reader names. */
+/** Dispatch assets with no reference path from production callers. */
 function unreadDispatchAssets(assets: readonly string[], readers: readonly { path: string; text: string }[]): string[] {
-  return assets.filter((asset) => {
-    const name = asset.slice(asset.lastIndexOf("/") + 1);
-    return !readers.some((reader) => reader.path !== asset && reader.text.includes(name));
-  });
+  const reached = new Set<string>();
+  const frontier = readers.filter((reader) => !assets.includes(reader.path));
+  for (let i = 0; i < frontier.length; i++) {
+    const reader = frontier[i]!;
+    for (const asset of assets) {
+      if (reached.has(asset) || !reader.text.includes(asset.slice(asset.lastIndexOf("/") + 1))) continue;
+      reached.add(asset);
+      const next = readers.find((candidate) => candidate.path === asset);
+      if (next) frontier.push(next);
+    }
+  }
+  return assets.filter((asset) => !reached.has(asset));
 }
 
-describe("a shipped dispatch data asset has a code reader", () => {
+describe("a dispatch asset has a production reference path", () => {
   it("fires on an asset nothing reads, and not on one a reader names", () => {
     const readers = [{ path: "src/a.ts", text: 'join(root, "dispatch", "read.json")' }];
     expect(unreadDispatchAssets(["dispatch/read.json", "dispatch/orphan.json"], readers)).toEqual([
@@ -112,16 +121,29 @@ describe("a shipped dispatch data asset has a code reader", () => {
     ]);
   });
 
-  it("every non-script file under dispatch/ is read by src/, wrapper/ or a dispatch/ script", () => {
-    const assets = filesUnder("dispatch").filter((path) => !isScript(path));
+  it("rejects orphan scripts and cycles, while following a live script to its data", () => {
+    const assets = ["dispatch/live.mjs", "dispatch/read.json", "dispatch/a.mjs", "dispatch/b.mjs"];
+    const readers = [
+      { path: "src/main.ts", text: 'import "live.mjs"' },
+      { path: "dispatch/live.mjs", text: 'readFileSync("read.json")' },
+      { path: "dispatch/a.mjs", text: 'import "b.mjs"' },
+      { path: "dispatch/b.mjs", text: 'import "a.mjs"' },
+    ];
+    expect(unreadDispatchAssets(assets, readers)).toEqual(["dispatch/a.mjs", "dispatch/b.mjs"]);
+  });
+
+  it("every dispatch file is reachable from src/, wrapper/, root bins or shipped skills", () => {
+    const assets = filesUnder("dispatch");
     const readers = [
       ...filesUnder("src").filter((path) => path.endsWith(".ts")),
       ...filesUnder("wrapper").filter(isScript),
       ...filesUnder("dispatch").filter(isScript),
+      ...filesUnder("skills").filter((path) => /\.(md|mjs|js|ts)$/.test(path)),
+      "audit-code.mjs", "remediate-code.mjs",
     ].map((path) => ({ path, text: readFileSync(join(repoRoot, path), "utf8") }));
     expect(
       unreadDispatchAssets(assets, readers),
-      "a shipped data asset with no code reader delivers nothing; wire a reader or delete the asset and its packaging rows",
+      "a dispatch asset must be reachable from production callers; wire a reader or delete the asset and its packaging rows",
     ).toEqual([]);
   });
 });

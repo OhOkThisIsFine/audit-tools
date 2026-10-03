@@ -91,6 +91,25 @@ const NO_OP: HeadEvidenceOutcome = {
 export const HEAD_EVIDENCE_MODULE = "closeVerifyHeadEvidence";
 
 /**
+ * Write one close leg's fields onto a source's verification entry, bound to the
+ * current plan revision and source payload.
+ *
+ * The entry's two hashes bind EVERY field in it: the outcomes writer accepts the
+ * whole entry or none of it. So the prior entry's other fields survive only when
+ * the same two hashes already bound them. A field an earlier plan revision
+ * recorded (carried forward by a replan) is dropped, never re-bound to this one.
+ */
+export function bindSourceVerification(
+  prior: SourceVerification | undefined,
+  binding: { review_revision_sha256: string; source_sha256: string },
+  fields: SourceVerification,
+): SourceVerification {
+  const bound = prior?.review_revision_sha256 === binding.review_revision_sha256 &&
+    prior.source_sha256 === binding.source_sha256;
+  return { ...(bound ? prior : {}), ...fields, ...binding };
+}
+
+/**
  * How wide an emitted `NNN| ` line prefix this leg will strip when asking
  * whether a quote is absent. The emitter's own widths are per-delivery, and no
  * delivery manifest reaches close — so rather than guess one width, the leg
@@ -308,14 +327,18 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
     const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
     return units.length > 0 && units.every(unit => state.items?.[unit.id]?.status === "resolved_no_change");
   }).map(finding => ({ finding }));
-  for (const { finding } of candidates) {
+  // A previous read is not authority for this HEAD — for ANY finding, not only
+  // a current candidate. A finding whose unit was reworked to a real change is
+  // no longer a candidate, and its old `refuted` would otherwise override that
+  // change in the outcome. This leg is the only writer of the four determination
+  // fields, and it re-derives them below for the candidates. The analyzer
+  // verdict belongs to another leg, so it stays with the hashes that bind it.
+  for (const finding of state.plan?.findings ?? []) {
     const old = state.source_verifications?.[finding.id];
-    if (old) {
-      // A previous read is not authority for this HEAD. Retain the independent
-      // analyzer leg, but remove any stale source determination before rereading.
-      state.source_verifications![finding.id] = old.mechanical_verification
-        ? { mechanical_verification: old.mechanical_verification } : {};
-    }
+    if (!old) continue;
+    const { disposition_override: _override, evidence: _evidence, recorded_by_module: _module, head_commit: _head, ...kept } = old;
+    if (kept.mechanical_verification) state.source_verifications![finding.id] = kept;
+    else delete state.source_verifications![finding.id];
   }
   if (candidates.length === 0) return NO_OP;
 
@@ -389,13 +412,12 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
       continue;
     }
     state.source_verifications ??= {};
-    state.source_verifications[finding.id] = {
-      ...state.source_verifications[finding.id],
-      disposition_override: verdict.disposition, evidence: verdict.evidence,
-      recorded_by_module: HEAD_EVIDENCE_MODULE,
-      review_revision_sha256: state.plan!.review_revision_sha256,
-      source_sha256: contentSha256(finding), head_commit: head,
-    };
+    state.source_verifications[finding.id] = bindSourceVerification(
+      state.source_verifications[finding.id],
+      { review_revision_sha256: state.plan!.review_revision_sha256, source_sha256: contentSha256(finding) },
+      { disposition_override: verdict.disposition, evidence: verdict.evidence,
+        recorded_by_module: HEAD_EVIDENCE_MODULE, head_commit: head },
+    );
     recorded[finding.id] = {
       finding_id: finding.id,
       determined: true,

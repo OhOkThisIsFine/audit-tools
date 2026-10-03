@@ -273,14 +273,13 @@ describe("scan reach — the enforcement layer is no longer the one tree exempt"
     expect(joined).toContain("scripts/");
     expect(joined).toContain(".claude/hooks/");
     expect(joined).toContain("wrapper/");
-    expect(joined).toContain("dispatch/");
   });
 
   test("both levels of each tree are named — `**/` requires an intervening directory", () => {
     // The trap: `scripts/**/*.mjs` omits `scripts/*.mjs`, so every top-level
     // check script (including this gate's own) was outside the scan while the
     // pathspec LOOKED like it covered the tree.
-    for (const tree of ["scripts/", "wrapper/", "dispatch/"]) {
+    for (const tree of ["scripts/", "wrapper/"]) {
       expect(SCAN_PATHSPECS, `${tree} top level`).toContain(`${tree}*.mjs`);
       expect(SCAN_PATHSPECS, `${tree} nested`).toContain(`${tree}**/*.mjs`);
     }

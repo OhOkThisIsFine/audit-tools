@@ -60,7 +60,7 @@ const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..", "..");
 const TESTS_ROOT = join(REPO_ROOT, "tests");
 
 /** Production roots: the code a test may legitimately be testing. */
-const PRODUCTION_ROOTS = ["src", "scripts", "dispatch", "wrapper"];
+const PRODUCTION_ROOTS = ["src", "scripts", "wrapper"];
 
 /**
  * Test-declared functions that share a production export's name, branch, and do
@@ -136,9 +136,9 @@ function productionBoundNames(source: string): Set<string> {
     if (specifier.startsWith("node:")) return false;
     if (specifier.startsWith("audit-tools/")) return true;
     // Relative: resolve the intent from the path, not the cwd. Anything that
-    // climbs to `src/`, `scripts/`, `dispatch/` or `wrapper/` is production;
+    // climbs to `src/`, `scripts/` or `wrapper/` is production;
     // anything staying inside `tests/` is not.
-    return /(?:^|\/)(src|scripts|dispatch|wrapper)\//.test(specifier);
+    return /(?:^|\/)(src|scripts|wrapper)\//.test(specifier);
   };
 
   const addClause = (clause: string): void => {

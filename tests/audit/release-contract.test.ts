@@ -250,7 +250,10 @@ test("primary CI workflows validate the lockfile, preserve diagnostics, and make
   const job = suite.jobs?.["orchestration-tests"];
   const nodeAxis = job?.strategy?.matrix?.node;
   expect(Array.isArray(nodeAxis), "orchestration-tests must carry a strategy.matrix.node axis").toBeTruthy();
-  const majors = (nodeAxis as unknown[]).map((value) => Number.parseInt(String(value), 10));
+  const selectors = (nodeAxis as unknown[]).map(String);
+  expect(new Set(selectors).size, "matrix Node selectors must be distinct").toBe(selectors.length);
+  // Exact publish pins supplement, rather than replace, floating supported majors.
+  const majors = selectors.filter((value) => /^\d+$/.test(value)).map(Number);
   expect(majors.length, "the suite must run on more than one Node major").toBeGreaterThanOrEqual(2);
   expect(new Set(majors).size, "matrix majors must be distinct").toBe(majors.length);
   for (const major of majors) {
@@ -382,4 +385,18 @@ test("dead-code gate config is single-sourced in knip.json, not split into the n
   const packageJson = JSON.parse(await readText("package.json"));
   expect(packageJson.scripts?.["check:deadcode"]).toBe("knip --no-config-hints");
   expect(packageJson.scripts?.["check:deadcode"] ?? "", "issue-type filter must live in knip.json, not inline in the script").not.toMatch(/--include/);
+});
+
+test("pre-tag suite exercises the exact publish runtime, not only its floating major", async () => {
+  const publish = parseYaml(await readWorkflow("publish-package.yml"));
+  const suite = parseYaml(await readWorkflow("audit-code-test-suite.yml"));
+  const releaseVersion = publish.env.RELEASE_NODE_VERSION;
+  expect(releaseVersion).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(suite.jobs["orchestration-tests"].strategy.matrix.node,
+    "the pre-tag suite must exercise the publish pin exactly").toContain(releaseVersion);
+  for (const jobName of ["gate", "test", "publish"]) {
+    const setup = publish.jobs[jobName].steps.find((step: { uses?: string }) =>
+      step.uses?.startsWith("actions/setup-node@"));
+    expect(setup?.with?.["node-version"]).toBe("${{ env.RELEASE_NODE_VERSION }}");
+  }
 });

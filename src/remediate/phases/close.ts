@@ -51,6 +51,7 @@ import {
   type LandingGateVerifyOutcome,
 } from "./closeVerifyLandingGates.js";
 import {
+  bindSourceVerification,
   verifyHeadEvidenceAgainstFindings,
   type HeadEvidenceOutcome,
 } from "./closeVerifyHeadEvidence.js";
@@ -2251,10 +2252,11 @@ export async function runClosePhase(
     for (const [findingId, verdict] of Object.entries(analyzerVerify.verdicts)) {
       state.source_verifications ??= {};
       const source = state.plan.findings.find(finding => finding.id === findingId)!;
-      state.source_verifications[findingId] = {
-        ...state.source_verifications[findingId], mechanical_verification: verdict,
-        review_revision_sha256: state.plan.review_revision_sha256, source_sha256: contentSha256(source),
-      };
+      state.source_verifications[findingId] = bindSourceVerification(
+        state.source_verifications[findingId],
+        { review_revision_sha256: state.plan.review_revision_sha256, source_sha256: contentSha256(source) },
+        { mechanical_verification: verdict },
+      );
       if (verdict.status === "lead_persists") {
         for (const unit of state.plan.units.filter(unit => unit.source_finding_ids.includes(findingId))) {
           const item = state.items[unit.id];

@@ -111,8 +111,6 @@ export const PINNED_PATHS = [
   '.claude/hooks/*.mjs',
   'wrapper/*.mjs',
   'wrapper/**/*.mjs',
-  'dispatch/*.mjs',
-  'dispatch/**/*.mjs',
   'audit-code.mjs',
   'remediate-code.mjs',
 ];

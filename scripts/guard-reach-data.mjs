@@ -221,7 +221,7 @@ export const GUARDS = [
     note:
       'single-definition rules plus defect-class pattern rules (comparator body, containment ' +
       'predicate, sha256 chain, localeCompare/ICU collation) over tracked src/**/*.ts AND the ' +
-      'governance tree (scripts/, wrapper/, dispatch/, .claude/hooks/, the root bins) — the ' +
+      'governance tree (scripts/, wrapper/, .claude/hooks/, the root bins) — the ' +
       'enforcement layer used to be the one tree exempt from the rule it enforces (ceremony review ' +
       '2026-08-29, F1), which is why the generated-artifact pattern was written fifteen times there. ' +
       'Three primitives have TWO declared homes: the src/ file and the pre-build twin in ' +
@@ -1023,7 +1023,7 @@ export const GUARDS = [
     impl: 'check:scripts',
     preCommit: 'reach',
     fix:
-      'checkJs typecheck over scripts/, wrapper/, dispatch/, .claude/hooks/ and the root bins ' +
+      'checkJs typecheck over scripts/, wrapper/, .claude/hooks/ and the root bins ' +
       '(tsconfig.scripts.json) failed — fix the type error or annotate with JSDoc; noImplicitAny ' +
       'stays relaxed there by design',
   },
@@ -1801,8 +1801,6 @@ export const REACH = [
       'scripts/**/*.mjs',
       'wrapper/*.mjs',
       'wrapper/**/*.mjs',
-      'dispatch/*.mjs',
-      'dispatch/**/*.mjs',
       '.claude/hooks/*.mjs',
       'audit-code.mjs',
       'remediate-code.mjs',
@@ -2369,12 +2367,6 @@ export const REACH = [
       'generated paths blocks (row above). audit-code-test-suite.yml carries its OWN hand-written ' +
       'duplicated paths block — a known un-generated sibling (the P26 decision scoped generation to ' +
       'ci.yml only)',
-  },
-  {
-    area: 'worker dispatch assets',
-    files: ['dispatch/**'],
-    guardedBy: ['vitest-gate', 'smoke:packaged-audit-code', 'check:scripts'],
-    note: 'validate/merge exercised by tests/audit/dispatch-validate.test.ts and the packaged smoke',
   },
   {
     area: 'schemas',

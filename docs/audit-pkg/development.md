@@ -6,7 +6,6 @@
 - `schemas/`: JSON schemas for public and internal artifacts
 - `examples/`: illustrative artifact examples (see `examples/README.md`; only the three a contract test names are schema-validated)
 - `skills/`: canonical prompts and skill-facing instructions, one subtree per shipped bin
-- `dispatch/`: standalone result validation and merge helpers
 - `tests/`: vitest-based test suite and regression coverage
 - `dist/`: build output (gitignored, not checked in) produced by `npm run build` / the `prepack` script;
   shipped only in the packed npm tarball

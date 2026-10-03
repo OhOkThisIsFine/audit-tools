@@ -5,23 +5,29 @@
 
 ## Current state
 
-Published and installed: `v0.55.3` (`v0.55.2` failed at publish and was deleted). GitHub branch protection on `main` requires the `checks`
+Release metadata is in [package.json](../package.json); publication and global-install evidence
+is in project memory (`memory: release-state`). GitHub branch protection on `main` requires the `checks`
 status check (strict; admins can bypass), and that job judges every tree against the tracked
-loop-core attestation ledger `.claude/loop-core-attestations.json` (143 baseline-only files).
+loop-core attestation ledger `.claude/loop-core-attestations.json` (18 reviewed files and 125 unchanged baseline-only files).
 The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can
 reach `main` without an attestation": the gate's own files are not loop-core, and an admin's
 direct push skips the required check.
+
+Legacy dispatch validation/merge scripts have been removed from the package; the asset guard
+requires production reference paths for dispatch scripts and data. Release CI includes the exact
+publish runtime, and profile fixtures write to temporary destinations. The mirror guard scans only surviving
+production roots. Superseded answers retain their original ledger entry and record
+the applied remainder, omitted clause, and later owner decision in the inbox.
 
 The 2026-09-19 recovery record `C:/Code/audit-tools/.audit-tools/recovery/2026-09-19/README.md`
 is present on the owner's machine and has not been reviewed; retain unknown work.
 
 ## Immediate next
 
-Work the medium entries in [`open-bugs.md`](backlog/open-bugs.md), first the pre-tag CI-green gate
-that does not test the publish suite's Node `22.14.0` (it cost the `v0.55.2` tag). Then: the commit
-refusal of a session started outside the repo, the worktree reaper's unseen agents, and a settled
-owner answer that a later decision overtook. A loop-core attestation needs a full-suite green stamp
-on the exact staged tree: run `npm test` after the final stage.
+Next: the commit refusal of a session started outside the repo and the worktree reaper's unseen agents,
+tracked in [`open-bugs.md`](backlog/open-bugs.md).
+A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
+after the final stage. Release publication remains a separately authorized action.
 **Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->

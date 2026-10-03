@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/pipeline-guard-scripts.test.ts
 // Single-sourced, always-on profiling primitive for the test + release/publish
 // pipelines. Times labeled steps, prints a compact `[profile:<name>] <label>: Xs`
 // line per step, persists a ledger under `.audit-tools-profile/` (gitignored), and
@@ -40,7 +41,7 @@ export function npmCommand() {
  *
  * @param {string} profileName  ledger basename, e.g. "verify-checks"
  * @param {Array<{label:string, command:string, args:string[]}>} commands
- * @param {{ meta?: object, spawnImpl?: typeof spawnSync }} [opts]
+ * @param {{ meta?: object, spawnImpl?: typeof spawnSync, profileDir?: string, summaryPath?: string | null }} [opts]
  *   `spawnImpl` is a test seam (defaults to node's spawnSync) so failure
  *   classification — spawn error, non-zero status, signal termination — is
  *   unit-testable without arranging real child-process deaths.
@@ -81,7 +82,7 @@ export async function runProfiledCommands(profileName, commands, opts = {}) {
       break;
     }
   }
-  writeProfileLedger(profileName, entries, opts.meta);
+  writeProfileLedger(profileName, entries, opts.meta, opts);
   if (failure) throw failure;
   return entries;
 }
@@ -93,8 +94,10 @@ export async function runProfiledCommands(profileName, commands, opts = {}) {
  * @param {string} profileName
  * @param {Array<{label:string, ms:number, status?:number}>} entries
  * @param {object} [meta]  extra fields folded into the ledger (e.g. version, git sha)
+ * @param {{ profileDir?: string, summaryPath?: string | null }} [opts] output destinations; defaults to the checkout and CI summary
  */
-export function writeProfileLedger(profileName, entries, meta = {}) {
+export function writeProfileLedger(profileName, entries, meta = {}, opts = {}) {
+  const outputDir = opts.profileDir ?? profileDir;
   const totalMs = entries.reduce((sum, e) => sum + (e.ms ?? 0), 0);
   const record = {
     profile: profileName,
@@ -109,14 +112,14 @@ export function writeProfileLedger(profileName, entries, meta = {}) {
     ...meta,
   };
   try {
-    mkdirSync(profileDir, { recursive: true });
-    writeFileSync(resolve(profileDir, `${profileName}-latest.json`), JSON.stringify(record, null, 2));
-    appendFileSync(resolve(profileDir, `${profileName}-history.ndjson`), `${JSON.stringify(record)}\n`);
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(resolve(outputDir, `${profileName}-latest.json`), JSON.stringify(record, null, 2));
+    appendFileSync(resolve(outputDir, `${profileName}-history.ndjson`), `${JSON.stringify(record)}\n`);
   } catch (error) {
     // Profiling is advisory — a ledger write failure must never fail a pipeline.
     console.warn(`[profile:${profileName}] ledger write skipped: ${/** @type {any} */ (error)?.message ?? error}`);
   }
-  appendJobSummary(profileName, record);
+  appendJobSummary(profileName, record, opts.summaryPath === undefined ? process.env.GITHUB_STEP_SUMMARY : opts.summaryPath);
   return record;
 }
 
@@ -136,8 +139,7 @@ function renderProfileTable(record) {
   ].join("\n");
 }
 
-function appendJobSummary(profileName, record) {
-  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+function appendJobSummary(profileName, record, summaryPath) {
   if (!summaryPath) return;
   try {
     appendFileSync(summaryPath, `${renderProfileTable(record)}\n`);

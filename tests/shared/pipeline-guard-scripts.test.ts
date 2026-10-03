@@ -4,10 +4,45 @@
  * spawn error, non-zero exit status, AND signal termination (spawnSync yields
  * `status: null` with `signal` set).
  */
-import { test, expect } from "vitest";
+import { test, expect, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { scratchDir } from "../helpers/scratch.js";
 import type { SpawnSyncReturns } from "node:child_process";
 import { runProfiledCommands, toSeconds, npmCommand } from "../../scripts/shared/profile.mjs";
+
+const profileDir = scratchDir("pipeline-guard-profiles");
+const summaryPath = join(profileDir, "summary.md");
+const outputs = { profileDir, summaryPath };
+let nextProfile: string | undefined;
+const checkoutProfiles = fileURLToPath(new URL("../../.audit-tools-profile/", import.meta.url));
+const fixtureNames = ["test-signal", "test-status", "test-spawn-error", "test-green"];
+let priorFiles: Array<{ path: string; content: string | null }> = [];
+
+beforeEach(() => {
+  nextProfile = undefined;
+  mkdirSync(profileDir, { recursive: true });
+  priorFiles = fixtureNames.flatMap((name) => ["latest.json", "history.ndjson"].map((suffix) => {
+    const path = join(checkoutProfiles, `${name}-${suffix}`);
+    return { path, content: existsSync(path) ? readFileSync(path, "utf8") : null };
+  }));
+});
+afterEach(() => {
+  for (const { path, content } of priorFiles) {
+    expect(existsSync(path) ? readFileSync(path, "utf8") : null,
+      "fixture profiling must leave checkout ledgers unchanged").toBe(content);
+  }
+  if (!nextProfile) return;
+  const record = JSON.parse(readFileSync(join(profileDir, `${nextProfile}-latest.json`), "utf8"));
+  expect(record.profile).toBe(nextProfile);
+  expect(record.steps.length).toBeGreaterThan(0);
+  const history = readFileSync(join(profileDir, `${nextProfile}-history.ndjson`), "utf8").trim().split("\n");
+  expect(JSON.parse(history.at(-1)!).profile).toBe(nextProfile);
+  expect(readFileSync(summaryPath, "utf8")).toContain(nextProfile);
+  nextProfile = undefined;
+});
 
 interface FakeSpawnResult {
   status?: number | null;
@@ -48,9 +83,9 @@ test("runProfiledCommands: a signal-terminated step (status null + signal) FAILS
   await assert.rejects(
     () =>
       runProfiledCommands(
-        "test-signal",
+        (nextProfile = "test-signal"),
         [{ label: "gate", command: "fake-cmd", args: [] }],
-        { spawnImpl },
+        { spawnImpl, ...outputs },
       ),
     (err: any) => {
       expect(String(err.message)).toMatch(/SIGKILL/);
@@ -69,13 +104,13 @@ test("runProfiledCommands: a non-zero exit status FAILS fail-fast (later steps n
   await assert.rejects(
     () =>
       runProfiledCommands(
-        "test-status",
+        (nextProfile = "test-status"),
         [
           { label: "ok", command: "a", args: [] },
           { label: "bad", command: "b", args: [] },
           { label: "never", command: "c", args: [] },
         ],
-        { spawnImpl },
+        { spawnImpl, ...outputs },
       ),
     /exited with code 3/,
   );
@@ -87,9 +122,9 @@ test("runProfiledCommands: a spawn error FAILS naming the spawn failure", async 
   await assert.rejects(
     () =>
       runProfiledCommands(
-        "test-spawn-error",
+        (nextProfile = "test-spawn-error"),
         [{ label: "gone", command: "missing", args: [] }],
-        { spawnImpl },
+        { spawnImpl, ...outputs },
       ),
     /failed to spawn.*ENOENT/,
   );
@@ -101,12 +136,12 @@ test("runProfiledCommands: all-success returns one timed entry per step and thro
     { status: 0, signal: null },
   ]);
   const entries = await runProfiledCommands(
-    "test-green",
+    (nextProfile = "test-green"),
     [
       { label: "one", command: "a", args: [] },
       { label: "two", command: "b", args: [] },
     ],
-    { spawnImpl },
+    { spawnImpl, ...outputs },
   );
   expect(entries.map((e: any) => e.label)).toEqual(["one", "two"]);
   for (const entry of entries) expect(entry.status).toBe(0);
