@@ -5,7 +5,8 @@
 
 ## Current state
 
-Published and installed: `v0.55.3` (`v0.55.2` failed at publish and was deleted). GitHub branch protection on `main` requires the `checks`
+Release metadata is in [package.json](../package.json); publication and global-install evidence
+is in project memory (`memory: release-state`). GitHub branch protection on `main` requires the `checks`
 status check (strict; admins can bypass), and that job judges every tree against the tracked
 loop-core attestation ledger `.claude/loop-core-attestations.json` (18 reviewed files and 125 unchanged baseline-only files).
 The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can

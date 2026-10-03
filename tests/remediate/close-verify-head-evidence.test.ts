@@ -1,6 +1,7 @@
 import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { runClosePhase } from "../../src/remediate/phases/close.js";
+import { buildRemediationOutcomesReport, runClosePhase } from "../../src/remediate/phases/close.js";
+import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import {
   verifyHeadEvidenceAgainstFindings,
   HEAD_EVIDENCE_MODULE,
@@ -446,6 +447,55 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
     expect(Object.keys(outcome.recorded)).toEqual(["F1"]);
     expect(state.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
     expect(state.source_verifications?.F1?.recorded_by_module).toBe(HEAD_EVIDENCE_MODULE);
+  });
+
+  // An earlier close pass recorded `refuted` while the unit stood at
+  // resolved_no_change. A later pass finds the unit reworked to a real change,
+  // so the finding is no longer a candidate. The old read is no authority for
+  // this HEAD: it must not survive to override the unit's real outcome.
+  it("clears a prior determination for a finding that is no longer a candidate", async () => {
+    const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+    const state = makeState(
+      [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
+      { F1: "resolved" },
+      { commit: base, dirty_paths: [] },
+    );
+    state.source_verifications = {F1:{
+      disposition_override:"refuted",
+      evidence:{file:"src/parse.ts",line:"2",mechanism:"read_at_head_refutation"},
+      recorded_by_module:HEAD_EVIDENCE_MODULE,
+      review_revision_sha256:state.plan!.review_revision_sha256,
+      source_sha256:contentSha256(state.plan!.findings[0]), head_commit:base,
+    }};
+
+    const outcome = await verifyHeadEvidenceAgainstFindings({ state, root: REPO_DIR });
+
+    expect(outcome.ran).toBe(false);
+    const report = buildRemediationOutcomesReport(state, {contract_version:"remediate-code-closing-result/v1alpha1",action:"none",status:"skipped",commands:[]});
+    expect(report.outcomes.find(entry => entry.finding_id === "F1")?.outcome).toBe("resolved");
+    expect(state.source_verifications?.F1).toBeUndefined();
+  });
+
+  // The leg stamps the current hashes on the entry it writes. An analyzer
+  // verdict that an earlier plan revision recorded is bound to THAT revision:
+  // the stamp must not re-bind it to this one.
+  it("does not re-bind an analyzer verdict from an earlier plan revision", async () => {
+    const { base } = twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
+    const state = makeState(
+      [findingWithAnchor("F1", { quoted: QUOTED_SPAN, lineStart: 2 })],
+      { F1: "resolved_no_change" },
+      { commit: base, dirty_paths: [] },
+    );
+    state.source_verifications = {F1:{
+      mechanical_verification:{status:"verified_mechanically",analyzer_id:"fake-analyzer"},
+      review_revision_sha256:"0".repeat(64), source_sha256:"0".repeat(64),
+    }};
+
+    const { readAtRef } = refsReader({ atBase: DEFECTIVE_SOURCE, atHead: FIXED_SOURCE }, base);
+    await verifyHeadEvidenceAgainstFindings({ state, root: REPO_DIR, overrides: { readAtRef } });
+
+    expect(state.source_verifications?.F1?.disposition_override).toBe("verified_already_fixed");
+    expect(state.source_verifications?.F1?.mechanical_verification).toBeUndefined();
   });
 
   it("resolves a bare-basename citation through the tracked corpus rather than reading nothing", async () => {
