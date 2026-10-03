@@ -12,6 +12,7 @@ const {
   stripAuditToolsControlEnv,
   renderPromptCommand,
   toPromptPathToken,
+  normalizePromptBodyPaths,
   coerceJsonObjectArg,
   resolveSpawnDeadline,
   describeDeadlineMiss,
@@ -65,6 +66,21 @@ test("renderPromptCommand normalizes only path-like Windows command tokens", () 
   expect(renderPromptCommand(["node", "C:\\Path With Spaces\\tool.mjs", "--flag", 'a"b'])).toBe('node "C:/Path With Spaces/tool.mjs" --flag "a\\"b"');
   expect(toPromptPathToken(String.raw`^\d+\w+$`)).toBe(String.raw`^\d+\w+$`);
   expect(renderPromptCommand(["node", String.raw`if (x) console.log("\n")`])).toBe(String.raw`node "if (x) console.log(\"\n\")"`);
+});
+
+test("normalizePromptBodyPaths turns a JSON-escaped path into the JSON encoding of its toPromptPathToken form", () => {
+  // A prompt's ```json example carries a path JSON-escaped: each separator is a
+  // backslash PAIR. Folding each backslash on its own gave `C://Users//x`, which
+  // the host echoed verbatim and the step then refused (the 2026-10-01 smoke).
+  for (const rawPath of [String.raw`C:\Users\ethan\repo`, String.raw`\\server\share\repo`]) {
+    const body = `\`\`\`json\n{ "repository_root": ${JSON.stringify(rawPath)} }\n\`\`\``;
+    expect(normalizePromptBodyPaths(body), rawPath).toBe(
+      `\`\`\`json\n{ "repository_root": ${JSON.stringify(toPromptPathToken(rawPath))} }\n\`\`\``,
+    );
+  }
+  // A raw path in prose keeps today's output, UNC prefix included.
+  expect(normalizePromptBodyPaths(String.raw`read C:\Users\x\a.json now`)).toBe("read C:/Users/x/a.json now");
+  expect(normalizePromptBodyPaths(String.raw`read \\server\share\a.json now`)).toBe("read //server/share/a.json now");
 });
 
 // ── hardening: quotePromptCommandArg/renderPromptCommand must quote any

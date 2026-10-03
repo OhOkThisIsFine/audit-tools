@@ -367,11 +367,17 @@ export function toPromptPathToken(value: string): string {
  * in the path field beside it, because the remainder of such a path holds no
  * further separator to convert. Quoting a path with a space is the reader's
  * problem either way, and free text cannot solve it.
+ *
+ * A path inside a JSON example is JSON-ESCAPED: each separator is a backslash
+ * pair, and a UNC root is four backslashes. Each pair folds to ONE `/` and
+ * either UNC root to `//`, so the escaped text comes out as the JSON encoding
+ * of the same {@link toPromptPathToken} value — never `C://Users//x`, which a
+ * host echoes verbatim and a byte-for-byte binding then refuses.
  */
 export function normalizePromptBodyPaths(body: string): string {
   return body.replace(
-    /(?:[A-Za-z]:\\|\\\\[^\\\s"'`]+\\)[^\s"'`<>|]*/gu,
-    (match) => match.replace(/\\/g, "/"),
+    /(?:[A-Za-z]:\\|\\\\\\\\[^\\\s"'`]+\\\\|\\\\[^\\\s"'`]+\\)[^\s"'`<>|]*/gu,
+    (match) => match.replace(/^\\{2,4}/u, "//").replace(/\\{1,2}/gu, "/"),
   );
 }
 
