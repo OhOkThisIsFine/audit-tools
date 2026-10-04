@@ -2,7 +2,7 @@ import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js"
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT } from "../../shared/prompts.js";
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts
 import {
   type DesignReviewBinding,
   type IntentCheckpoint,
@@ -14,6 +14,7 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import {
   type DesignReviewOptions,
+  designReviewFileMapContext,
   renderConceptualReviewPrompt,
   renderConceptualPerspectivePrompt,
   renderConceptualJudgePrompt,
@@ -252,6 +253,11 @@ export async function prepareConceptualDispatch(opts: {
     max_units: settings.max_units,
     ...(lenses === undefined ? {} : { lenses }),
   };
+  // Built ONCE for the pass: every lane rendered with `reviewOptions` anchors the
+  // same starting points, so the shallow reviewer — or every perspective and
+  // the judge — reads the same read-only, bound map file; each prompt carries
+  // only its summary.
+  const fileMapContext = [designReviewFileMapContext(bundle, reviewOptions).contextFile];
   // A round that is about to be superseded — by a re-review, or by a switch to
   // the shallow pass — will never be ingested, so this is the last moment its
   // perspectives' dispatch rows can be closed with what they actually
@@ -277,12 +283,14 @@ export async function prepareConceptualDispatch(opts: {
           ...SEMANTIC_REVIEW_DEMAND,
           label: "Conceptual review (generative)",
           promptFilename: "design-review-conceptual-prompt.md",
+          generatedContext: fileMapContext,
           promptText:
             renderConceptualReviewPrompt(bundle, reviewOptions) + reReviewSuffix,
         },
       ],
     });
     const conceptualPromptPath = fanout.lanes[0]!.promptPath;
+    const mapPaths = fanout.lanes[0]!.generatedContextPaths;
     await closePriorRound();
     await clearConceptualReviewRoundManifest(artifactsDir);
     return {
@@ -297,7 +305,7 @@ export async function prepareConceptualDispatch(opts: {
         conceptual_prompt: conceptualPromptPath,
         conceptual_results: conceptualResultsPath,
       },
-      readPaths: [conceptualPromptPath],
+      readPaths: [conceptualPromptPath, ...mapPaths],
       writePaths: [conceptualResultsPath],
       shortfall: fanout.shortfall,
     };
@@ -369,6 +377,7 @@ export async function prepareConceptualDispatch(opts: {
       ...SEMANTIC_REVIEW_DEMAND,
       label: `Conceptual perspective — ${f.name}`,
       promptFilename: f.promptFilename,
+      generatedContext: fileMapContext,
       promptText: f.promptText + (perspectiveRefusals.has(laneSubmissionId(f.lane))
         ? `\n\n## Previous submission rejected\n\n${perspectiveRefusals.get(laneSubmissionId(f.lane))!.message}`
         : ""),
@@ -386,6 +395,7 @@ export async function prepareConceptualDispatch(opts: {
       ...SEMANTIC_REVIEW_DEMAND,
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",
+      generatedContext: fileMapContext,
       promptText: judgePromptText,
     },
   ];
@@ -491,6 +501,7 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectivePrompts.map((f) => f.promptPath),
       ...perspectivePrompts.map((f) => f.resultsPath),
       judgePromptPath,
+      ...new Set(fanout.lanes.flatMap((lane) => lane.generatedContextPaths)),
     ],
     writePaths: [
       ...perspectivePrompts.map((f) => f.resultsPath),

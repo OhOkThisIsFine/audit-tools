@@ -152,6 +152,28 @@
     }
   },
   "reviews": {
+    "189c849cd573575f": {
+      "reviewed_by": "claude-opus-5-5-session",
+      "attester_class": "agent",
+      "checked": "fanoutLanes.ts writeGeneratedContext/renderReadOnlyContextSection read whole; generated paths join contextPaths so they are fingerprinted and bound in inputs (re-hashed by auditReviewBindings); ordinary-lane guard; conceptualDispatch/nextStepCommand emission sites pass generatedContext; systemicReviewInputRevision includes map text; plan refuted by independent AGY lane (HOLDS-WITH-CHANGES, adopted); red proofs re-run here: unbound generated paths and missing 0o444 each fail; full suite green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "a71526233df57acb9adf22d9585ba685dbce299b",
+        "ran_at": "2026-10-04T23:47:35.789Z"
+      },
+      "attested_at": "2026-10-04T23:47:44.419Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "7c37598046c5d53f91c6ec276e030c3de4df88cc",
+        "src/audit/cli/fanoutLanes.ts": "3ce826dc3a8a335f8f863bb76119dc06ca02f928",
+        "src/audit/cli/nextStepCommand.ts": "f6bd7f211be809ca247ea5ade9714f0d53d5c2c1",
+        "src/audit/orchestrator/designReviewPrompt.ts": "18cb02d073d7a4c9da53a5fdf42504ebe6dc7706",
+        "src/audit/orchestrator/systemicChallengeExecutor.ts": "30a68ae3f849012c0a3c1da172a37f2b4b8dc26b",
+        "src/audit/systemic/reviewFileMap.ts": "b05396e310c13e69b2749c565ad3b349a2df8400",
+        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "c822ea3dc98d929b7da711836d777bc1d2fbe557"
+      }
+    },
     "4318b8e7432c3e06": {
       "reviewed_by": "claude-opus-5-5-review-subagent",
       "attester_class": "agent",
@@ -280,20 +302,6 @@
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
       }
     },
-    "c468455c3d100370": {
-      "reviewed_by": "claude-opus-5-5-reviewer",
-      "attester_class": "agent",
-      "checked": "npm run build green; vitest tests/audit tests/shared tests/remediate: 6877 passed, 1 failed (known unrelated script-argv-refusal reach gap on check-loop-core-attestations.mjs/seed-loop-core-baseline.mjs), 12 skipped. Independence: INDEPENDENT_CONTEXT is used imperatively in the contract/conceptual instruction lines, and renderFanoutExecutionLines keeps the stop-if-unavailable clause for independent lanes; the judge degraded fallback is unchanged. Inverted tests: the original O03 entry names the unconditional 'node audit-code.mjs' development line in the shipped loader as the defect, so the old assertions pinned the defect. Rendered copies: ran audit-code.mjs install and remediate-code.mjs install in a fresh temp git repo; all 8 tracked .agent/.gemini/.github copies are byte-identical (cmp). Guard: git grep finds sub-agent only in src comments, which the TS-AST literal scanner skips; the scanner fixtures fire on string, template-part and no-substitution literals.",
-      "verdict": "clear",
-      "override": null,
-      "attested_at": "2026-10-02T00:37:57.867Z",
-      "vouches": {
-        "src/audit/cli/conceptualDispatch.ts": "b38cfd78aecd2f2340064669c2f42c452f7020b6",
-        "src/audit/cli/nextStepCommand.ts": "e8bc9246d96ac94516dd3c50785d0b8714ac6896",
-        "src/audit/cli/nextStepHelpers.ts": "6c6fcdb8fb57a6fde545daf64724fcc115de9f19",
-        "src/audit/orchestrator/designReviewPrompt.ts": "97e03ee11022042f59f330a9b633d11686569442"
-      }
-    },
     "fdc48ab94651c535": {
       "reviewed_by": "opus-subagent-adversarial-review-3-rounds",
       "attester_class": "agent",
@@ -327,7 +335,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "c468455c3d100370"
+      "review": "189c849cd573575f"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "7ecf68a7852f3ff3"
@@ -339,7 +347,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "189c849cd573575f"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
@@ -351,7 +359,7 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "c468455c3d100370"
+      "review": "189c849cd573575f"
     },
     "src/audit/cli/nextStepHelpers.ts": {
       "review": "8aa0d48e64560f2e"
@@ -423,7 +431,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "c468455c3d100370"
+      "review": "189c849cd573575f"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "baseline": "7b79934e86baf378"
@@ -615,7 +623,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/systemicChallengeExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "189c849cd573575f"
     },
     "src/audit/orchestrator/taskAffinityGraph.ts": {
       "baseline": "7b79934e86baf378"
@@ -639,10 +647,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/systemic/reviewFileMap.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "189c849cd573575f"
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "189c849cd573575f"
     },
     "src/audit/validation/ingestIssueCodes.ts": {
       "baseline": "7b79934e86baf378"

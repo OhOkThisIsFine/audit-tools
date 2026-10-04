@@ -27,21 +27,6 @@
   eligibility is either measured and shown not to collapse, or aligned with the findings draw's — it
   is not left disjunctive on the grounds that nobody looked.
 
-- **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Each
-  adversarial round spawns FRESH agents that re-grep the same call-site map from scratch (~135k
-  subagent tokens per round, much of it identical recon), because continuing a prior reviewer
-  preserves its context but forfeits the independence the round exists for.
-  **Property to hold:** no review round re-derives a mechanical fact another round already established,
-  and no round judges anything it authored — the verified map is a read-only, provenanced input artifact
-  each round receives labelled as prior recon it did not author, and cannot write back to (updates go
-  through a separate recon step, so it cannot absorb a reviewer's assumptions and then be handed to the
-  next round as fact).
-  **Already refuted, do not re-propose:** that independence of VERDICT and independence of INPUT are in
-  tension — they are not, and the framing is why the obvious fix looked wrong. A round must not judge
-  work it authored; being handed a factual map it did not produce does not compromise that, so
-  re-deriving from scratch was never carrying independence, only paying for redundant derivation.
-  ⚠ Sharing an agent SESSION across rounds is likewise wrong and forfeits exactly what the round is for.
-
 - **Selective-deepening convergence — live validation env-bound.** The pending-task partition and
   prompt-bound audit ingestion now single-source the identity of every deepening task
   (`src/audit/orchestrator/pendingTasks.ts`,

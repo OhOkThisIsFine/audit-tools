@@ -1,10 +1,15 @@
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import { projectConceptualCharterContext } from "./designReviewTask.js";
 import { designReviewInputRevision } from "./designReviewProjection.js";
 import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
-import { buildReviewFileMap, renderReviewFileMap } from "../systemic/reviewFileMap.js";
+import {
+  buildReviewFileMap,
+  reviewFileMapContext,
+  type ReviewFileMapContext,
+  type ReviewFileMapScope,
+} from "../systemic/reviewFileMap.js";
 import {
   deriveUnitScopeDisposition,
   type UnitScopeDisposition,
@@ -103,45 +108,105 @@ function summarizeRisk(bundle: ArtifactBundle): string {
   ].join("\n");
 }
 
-function buildPrioritizedReadingList(
-  bundle: ArtifactBundle,
-  maxUnits: number,
-): string {
+/**
+ * The units the "Starting points" section names: the top `maxUnits` by risk
+ * score, or — with no risk data — the first `maxUnits` units. Single-sourced so
+ * the call-site map anchors exactly the files the reading list names.
+ */
+interface StartingPoints {
+  /** Total risk items (ranked) — 0 when the unranked fallback was used. */
+  risk_item_count: number;
+  entries: Array<{ unit_id: string; risk_score?: number; files: readonly string[] }>;
+}
+
+function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): StartingPoints {
   const items = bundle.risk_register?.items ?? [];
   const units = bundle.unit_manifest?.units ?? [];
-
-  if (items.length === 0 && units.length === 0) {
-    return "No risk or unit data available; read the repository root files to orient yourself.";
-  }
-
-  // Build a map from unit_id → file list for fast lookup
   const unitFiles = new Map<string, string[]>();
   for (const unit of units) {
     unitFiles.set(unit.unit_id, unit.files);
   }
 
   // Sort risk items by score descending, then take the top-N
-  const sorted = [...items].sort((a, b) => b.risk_score - a.risk_score);
-  const top = sorted.slice(0, maxUnits);
-
+  const top = [...items].sort((a, b) => b.risk_score - a.risk_score).slice(0, maxUnits);
   if (top.length === 0) {
-    // Fall back to listing all units if no risk data
-    const allUnits = units.slice(0, maxUnits);
-    const lines = allUnits.map((u) => `- **${u.unit_id}** — ${u.files.join(", ")}`);
+    return {
+      risk_item_count: 0,
+      entries: units
+        .slice(0, maxUnits)
+        .map((unit) => ({ unit_id: unit.unit_id, files: unit.files })),
+    };
+  }
+  return {
+    risk_item_count: items.length,
+    entries: top.map((item) => ({
+      unit_id: item.unit_id,
+      risk_score: item.risk_score,
+      files: unitFiles.get(item.unit_id) ?? [],
+    })),
+  };
+}
+
+/**
+ * What a design-review round is pointed at: the files of its starting-point
+ * units. The round may roam past them, but these are the files its prompt names
+ * as under review, so they are the ones the call-site map anchors — completely.
+ */
+function startingPointReviewScope(points: StartingPoints): ReviewFileMapScope {
+  return {
+    files: points.entries.flatMap((entry) => entry.files),
+    basis:
+      `the files of the ${points.entries.length} starting-point unit(s) listed under ` +
+      `"Starting points" in the review prompt`,
+  };
+}
+
+/** The starting-point count a design-review prompt orients on, unless the caller sets one. */
+function resolveMaxUnits(bundle: ArtifactBundle, options: DesignReviewOptions): number {
+  const unitCount = bundle.unit_manifest?.units.length ?? 0;
+  return options.max_units ?? Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
+}
+
+function fileMapContextFor(bundle: ArtifactBundle, maxUnits: number): ReviewFileMapContext {
+  return reviewFileMapContext(
+    buildReviewFileMap(bundle, startingPointReviewScope(selectStartingPoints(bundle, maxUnits))),
+  );
+}
+
+/**
+ * The call-site map a design-review lane rendered with `options` receives: the
+ * summary its prompt carries and the read-only context file its emission site
+ * passes to the lane materializer. Every contract, conceptual, perspective and
+ * judge prompt with the same bundle and options anchors the same starting
+ * points, so one build serves all of them.
+ */
+export function designReviewFileMapContext(
+  bundle: ArtifactBundle,
+  options: DesignReviewOptions = {},
+): ReviewFileMapContext {
+  return fileMapContextFor(bundle, resolveMaxUnits(bundle, options));
+}
+
+function buildPrioritizedReadingList(points: StartingPoints): string {
+  if (points.entries.length === 0) {
+    return "No risk or unit data available; read the repository root files to orient yourself.";
+  }
+
+  if (points.risk_item_count === 0) {
+    const lines = points.entries.map((u) => `- **${u.unit_id}** — ${u.files.join(", ")}`);
     return [
-      `Top ${allUnits.length} unit(s) (no risk scores available):`,
+      `Top ${points.entries.length} unit(s) (no risk scores available):`,
       ...lines,
     ].join("\n");
   }
 
-  const lines = top.map((item) => {
-    const files = unitFiles.get(item.unit_id);
-    const fileList = files && files.length > 0 ? files.join(", ") : "(files unknown)";
-    return `- **${item.unit_id}** (risk score: ${item.risk_score}) — ${fileList}`;
+  const lines = points.entries.map((entry) => {
+    const fileList = entry.files.length > 0 ? entry.files.join(", ") : "(files unknown)";
+    return `- **${entry.unit_id}** (risk score: ${entry.risk_score}) — ${fileList}`;
   });
 
   return [
-    `Top ${top.length} highest-risk unit(s) by risk score (out of ${items.length} total):`,
+    `Top ${points.entries.length} highest-risk unit(s) by risk score (out of ${points.risk_item_count} total):`,
     ...lines,
   ].join("\n");
 }
@@ -624,7 +689,8 @@ export function renderSharedStructuralContext(
   maxUnits: number,
 ): string {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
-  const prioritizedReadingList = buildPrioritizedReadingList(bundle, maxUnits);
+  const startingPoints = selectStartingPoints(bundle, maxUnits);
+  const prioritizedReadingList = buildPrioritizedReadingList(startingPoints);
 
   // Bind the same complete semantic projection that controls review staleness,
   // including entries omitted by the human-readable summaries below. Cosmetic
@@ -638,7 +704,9 @@ export function renderSharedStructuralContext(
     `Repository: ${bundle.repo_manifest?.repository?.name ?? "unknown"}`,
     "",
     ...renderGraphProvenance(bundle),
-    ...renderReviewFileMap(buildReviewFileMap(bundle)),
+    // The summary only: the complete map reaches the lane as a read-only context
+    // file its emission site binds (`designReviewFileMapContext`).
+    ...fileMapContextFor(bundle, maxUnits).summaryLines,
     "### File inventory",
     "",
     summarizeFiles(bundle),
@@ -686,9 +754,7 @@ export function renderContractReviewPrompt(
   bundle: ArtifactBundle,
   options: DesignReviewOptions = {},
 ): string {
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
+  const maxUnits = resolveMaxUnits(bundle, options);
 
   return [
     "# Project contract review (adversarial pass)",
@@ -743,9 +809,7 @@ export function renderConceptualReviewPrompt(
   bundle: ArtifactBundle,
   options: DesignReviewOptions = {},
 ): string {
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
+  const maxUnits = resolveMaxUnits(bundle, options);
   const charterContext = renderCharterContext(bundle);
 
   return [
@@ -782,9 +846,7 @@ export function renderConceptualPerspectivePrompt(
   total: number,
   options: DesignReviewOptions = {},
 ): string {
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
+  const maxUnits = resolveMaxUnits(bundle, options);
   const charterContext = renderCharterContext(bundle);
 
   return [
@@ -830,9 +892,7 @@ export function renderConceptualJudgePrompt(
   roundId: string,
   options: DesignReviewOptions = {},
 ): string {
-  const unitCount = bundle.unit_manifest?.units.length ?? 0;
-  const defaultMaxUnits = Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
-  const maxUnits = options.max_units ?? defaultMaxUnits;
+  const maxUnits = resolveMaxUnits(bundle, options);
   const sources = perspectiveResults.map(
     (p, i) =>
       `${i + 1}. **${p.name}** — contributor \`${p.contributor_id}\` — \`${p.path}\``,

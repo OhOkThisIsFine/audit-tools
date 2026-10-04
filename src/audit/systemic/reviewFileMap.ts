@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/systemic-challenge.test.ts, tests/audit/review-file-map-context.test.ts
 /**
  * The VERIFIED CALL-SITE MAP a design-review round receives as a read-only,
  * provenanced input.
@@ -13,37 +14,55 @@
  * So the map is derived ONCE, by the tool, from artifacts the round did not
  * produce either (the repository manifest and the dependency graph the audit
  * pipeline already extracted), and handed over labelled as prior verified recon.
- * It is a lane ASSET, not a submission: it is RENDERED into the round's prompt
- * (`renderReviewFileMap`), never written to a path any lane's write scope covers,
- * and no submission schema has a field for it — a round has no route by which to
- * write back, because the only thing it hands over is its own findings. Updates
+ * It is a lane ASSET, not a submission: the complete render
+ * (`renderReviewFileMap`) reaches the round as a READ-ONLY context file the lane
+ * materializer writes and binds into the lane's review binding, so acceptance
+ * re-hashes it and refuses a submission made against an edited copy; the prompt
+ * carries only a summary and the file's path (`reviewFileMapContext`). The file
+ * is never on a path any lane's write scope covers, and no submission schema has
+ * a field for it — a round has no route by which to write back, because the
+ * only thing it hands over is its own findings. Updates
  * go through a separate recon pass (the graph builder), which is the only thing
  * that can change what the next round receives. Otherwise the map quietly
  * absorbs one reviewer's assumption and reaches the next reviewer as fact.
  *
+ * The map is SCOPED to what the reading round reviews — the files its own prompt
+ * names as under review, which only the consumer knows: every file in that scope
+ * gets an anchor carrying its COMPLETE caller and callee lists, and nothing outside
+ * it is anchored. There is no cap. An earlier version anchored the path-sorted
+ * FIRST 60 authored files and listed at most 25 call sites each — neither number
+ * measured — so on a repository with more connected files a round received recon
+ * for files that merely sort early and had to re-derive the map for the ones it
+ * was judging, the exact waste this artefact exists to remove. Whatever the map
+ * leaves out (in-scope files with no edge, files outside the scope) is STATED in
+ * the render: a silently thin map reads as a complete one.
+ *
  * Deterministic and content-derived: every array is ordered by a stable key, so
- * the file does not churn between emissions of an unchanged round. A cap that
- * drops entries STATES the drop — a silently truncated map reads as a complete
- * one, which is the failure mode this whole artefact exists to avoid.
+ * the file does not churn between emissions of an unchanged round.
  */
 
 import { compareCodeUnits } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 
-/** How many call sites per anchor are listed before the drop is stated. */
-const MAX_CALLERS_PER_ANCHOR = 25;
+/**
+ * The files a reading round reviews — the set the map anchors, completely. The
+ * consumer derives it from what its own prompt names as under review (it is the
+ * only party that knows), so the map and the prompt cannot disagree about it.
+ */
+export interface ReviewFileMapScope {
+  /** Repo-relative paths under review. Deduplicated and path-sorted by the map. */
+  files: readonly string[];
+  /** One clause naming what this scope is, stated to the reading lane. */
+  basis: string;
+}
 
 export interface ReviewFileMapAnchor {
   /** The repo-relative file the call sites below target. */
   path: string;
-  /** Files that reference it (path-sorted), capped — see `callers_omitted`. */
+  /** Every file that references it, path-sorted. */
   callers: string[];
-  /** How many callers were dropped by the cap (0 when none were). */
-  callers_omitted: number;
-  /** Files it references (path-sorted), capped — see `callees_omitted`. */
+  /** Every file it references, path-sorted. */
   callees: string[];
-  /** How many callees were dropped by the cap (0 when none were). */
-  callees_omitted: number;
 }
 
 export interface ReviewFileMap {
@@ -58,12 +77,21 @@ export interface ReviewFileMap {
     /** Whether an edge category was present at all in the graph. */
     graph_present: boolean;
   };
-  /** The anchors, path-sorted. */
+  /** What the map covers — stated to the reading lane before the anchors. */
+  scope: {
+    basis: string;
+    /** Files under review: each is anchored or counted in `files_without_edges`. */
+    file_count: number;
+    /**
+     * Authored (manifest) files outside the scope, so not anchored. Stated in the
+     * render: an unanchored file is outside this map, not unconnected.
+     */
+    outside_scope: number;
+  };
+  /** One anchor per in-scope file the graph connects, path-sorted. */
   anchors: ReviewFileMapAnchor[];
-  /** Anchors dropped by the top-level cap, if any. */
-  anchors_omitted: number;
   /**
-   * Authored files the graph records NO edge for, so no anchor could be built.
+   * In-scope files the graph records NO edge for, so no anchor could be built.
    * Always stated: an omission the reading lane has to infer is the silent
    * truncation this artefact exists to avoid, and these are exactly the files
    * whose absence a round must not read as "nothing depends on it".
@@ -71,20 +99,18 @@ export interface ReviewFileMap {
   files_without_edges: number;
 }
 
-/** How many authored files are mapped before the drop is stated. */
-const MAX_ANCHORS = 60;
-
 /**
  * Build the map from the dependency graph the audit already extracted. Edges are
  * read in both directions per anchor — callers and callees — because the review
  * questions this feeds ("what does this change ripple into") need both and a
- * round that re-derives one direction has re-derived the whole thing.
+ * round that re-derives one direction has re-derived the whole thing. Anchors are
+ * exactly the files in `scope`; their callers and callees are whatever the graph
+ * records, in or out of scope.
  */
 export function buildReviewFileMap(
   bundle: ArtifactBundle,
-  options: { maxAnchors?: number } = {},
+  scope: ReviewFileMapScope,
 ): ReviewFileMap {
-  const maxAnchors = options.maxAnchors ?? MAX_ANCHORS;
   const graphs = bundle.graph_bundle?.graphs;
   const sources: string[] = [];
   const outgoing = new Map<string, Set<string>>();
@@ -114,29 +140,22 @@ export function buildReviewFileMap(
   }
   sources.sort(compareCodeUnits);
 
-  // Anchors are the files this repository actually authored — the manifest is the
-  // authority on that, not the graph's node vocabulary, which may include
-  // synthetic roots and external specifiers.
-  const authored = (bundle.repo_manifest?.files ?? [])
-    .map((file) => file.path)
-    .sort(compareCodeUnits);
+  const inScope = [...new Set(scope.files)].sort(compareCodeUnits);
+  const inScopeSet = new Set(inScope);
+  const outsideScope = (bundle.repo_manifest?.files ?? []).filter(
+    (file) => !inScopeSet.has(file.path),
+  ).length;
 
   const anchors: ReviewFileMapAnchor[] = [];
   let filesWithoutEdges = 0;
-  for (const path of authored) {
+  for (const path of inScope) {
     const callers = [...(incoming.get(path) ?? [])].sort(compareCodeUnits);
     const callees = [...(outgoing.get(path) ?? [])].sort(compareCodeUnits);
     if (callers.length === 0 && callees.length === 0) {
       filesWithoutEdges += 1;
       continue;
     }
-    anchors.push({
-      path,
-      callers: callers.slice(0, MAX_CALLERS_PER_ANCHOR),
-      callers_omitted: Math.max(0, callers.length - MAX_CALLERS_PER_ANCHOR),
-      callees: callees.slice(0, MAX_CALLERS_PER_ANCHOR),
-      callees_omitted: Math.max(0, callees.length - MAX_CALLERS_PER_ANCHOR),
-    });
+    anchors.push({ path, callers, callees });
   }
 
   return {
@@ -146,8 +165,12 @@ export function buildReviewFileMap(
       edge_count: edgeCount,
       graph_present: graphs !== undefined,
     },
-    anchors: anchors.slice(0, maxAnchors),
-    anchors_omitted: Math.max(0, anchors.length - maxAnchors),
+    scope: {
+      basis: scope.basis,
+      file_count: inScope.length,
+      outside_scope: outsideScope,
+    },
+    anchors,
     files_without_edges: filesWithoutEdges,
   };
 }
@@ -180,7 +203,19 @@ export function renderReviewFileMap(map: ReviewFileMap): string[] {
           ? " — the dependency graph carried no edges."
           : " — no dependency graph was available."),
     "",
+    `Scope: ${map.scope.basis} — ${map.scope.file_count} file(s) under review. Every one the graph ` +
+      "connects is listed below with its COMPLETE caller and callee lists; nothing is capped.",
+    "",
   ];
+  if (map.scope.outside_scope > 0) {
+    lines.push(
+      `${map.scope.outside_scope} other authored file(s) lie outside this scope and are not ` +
+        "anchored; they still appear as callers or callees wherever an edge reaches them. An " +
+        "unanchored file is outside this map, not unconnected — derive its call sites yourself " +
+        "if your review follows the code there.",
+      "",
+    );
+  }
 
   const noEdgeLine = (count: number): string =>
     `${count} authored file(s) carry no graph edge and are NOT listed — their absence is a gap ` +
@@ -201,32 +236,79 @@ export function renderReviewFileMap(map: ReviewFileMap): string[] {
 
   for (const anchor of map.anchors) {
     lines.push(`- **${anchor.path}**`);
-    lines.push(
-      `  - referenced by: ${anchor.callers.join(", ") || "(none recorded)"}` +
-        (anchor.callers_omitted > 0
-          ? ` — and ${anchor.callers_omitted} more not listed`
-          : ""),
-    );
-    lines.push(
-      `  - references: ${anchor.callees.join(", ") || "(none recorded)"}` +
-        (anchor.callees_omitted > 0
-          ? ` — and ${anchor.callees_omitted} more not listed`
-          : ""),
-    );
-  }
-  if (map.anchors_omitted > 0) {
-    lines.push(
-      "",
-      `⚠ ${map.anchors_omitted} further file(s) with call sites are NOT listed above (this map is ` +
-        "capped). Their absence is a cap, not a finding — do not report an unlisted file as having " +
-        "no connections.",
-    );
+    lines.push(`  - referenced by: ${anchor.callers.join(", ") || "(none recorded)"}`);
+    lines.push(`  - references: ${anchor.callees.join(", ") || "(none recorded)"}`);
   }
   if (map.files_without_edges > 0) {
-    // Distinct from the cap above: these are not omitted by a budget, they are
-    // files the graph has no edge for at all. Both are drops, so both are stated.
+    // In-scope files the graph has no edge for at all: a drop, so it is stated.
     lines.push("", `⚠ ${noEdgeLine(map.files_without_edges)}`);
   }
   lines.push("");
   return lines;
+}
+
+/** A file the tool generates for a lane — the shape a lane spec's `generatedContext` carries. */
+export interface ReviewFileMapContextFile {
+  filename: string;
+  label: string;
+  text: string;
+}
+
+/** One build of the map, split into what the prompt carries and what the file carries. */
+export interface ReviewFileMapContext {
+  /** The prompt's share: provenance, the read-only rule, scope and counts, where the file is. */
+  summaryLines: string[];
+  /** The complete render, written read-only beside the lane prompt and bound into its review. */
+  contextFile: ReviewFileMapContextFile;
+}
+
+/** The context file's name. Its directory is content-addressed by the lane materializer. */
+const REVIEW_FILE_MAP_FILENAME = "review-call-site-map.md";
+
+/**
+ * Split one map into the prompt summary and the read-only context file, so the
+ * two cannot come from different builds. The complete map is uncapped and can be
+ * large, so the prompt does not inline it: it states the provenance, the
+ * read-only rule and every count the map's own render states (scope, anchors,
+ * edge-less files, files outside the scope), and points at the file the lane
+ * materializer lists under its "Read-only context files" section.
+ */
+export function reviewFileMapContext(map: ReviewFileMap): ReviewFileMapContext {
+  const noRecon = "so the map is NO RECON — an absent edge is not evidence that no caller exists";
+  const edges =
+    map.provenance.sources.length > 0
+      ? `from ${map.provenance.sources.join(", ")}`
+      : map.provenance.graph_present
+        ? `the dependency graph carried no edges, ${noRecon}`
+        : `no dependency graph was available, ${noRecon}`;
+  const summaryLines = [
+    "### Verified call-site map (provenance: machine-derived prior recon — you did NOT author this)",
+    "",
+    "The audit tool derived a call-site map from the dependency graph and the repository manifest " +
+      `extracted earlier in this run and wrote it to the read-only file \`${REVIEW_FILE_MAP_FILENAME}\`, ` +
+      'whose full path is listed under "Read-only context files" at the end of this prompt. Read it ' +
+      "BEFORE re-deriving any call site: it is a factual input handed to you so this round spends its " +
+      "budget on judgment, and you are expected to TRUST it as a starting point, not to reproduce it.",
+    "",
+    "**You cannot write back to it.** The file is read-only and bound into this review, so a " +
+      "submission made against an edited copy is refused, and a correction reaches the next round " +
+      "only through a fresh extraction pass. If it disagrees with what you find in the source, say " +
+      "so explicitly in your finding — name the file and the symbol that contradicts the map. Your " +
+      "VERDICT remains entirely your own; only the recon is shared.",
+    "",
+    `Scope: ${map.scope.basis} — ${map.scope.file_count} file(s) under review; ` +
+      `${map.anchors.length} anchored with their complete caller and callee lists; ` +
+      `${map.files_without_edges} carry no graph edge; ` +
+      `${map.scope.outside_scope} other authored file(s) lie outside this scope and are not anchored.`,
+    `Edges consulted: ${map.provenance.edge_count} — ${edges}.`,
+    "",
+  ];
+  return {
+    summaryLines,
+    contextFile: {
+      filename: REVIEW_FILE_MAP_FILENAME,
+      label: "Verified call-site map (tool-generated prior recon)",
+      text: renderReviewFileMap(map).join("\n"),
+    },
+  };
 }

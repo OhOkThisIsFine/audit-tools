@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/audit/systemic-round-identity.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -13,7 +13,10 @@ import type {
 import { hashContent, stableStringify } from "audit-tools/shared";
 import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
-import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
+import {
+  adversaryFileMapContext,
+  renderSecondOrderAdversaryPrompt,
+} from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import {
   SYSTEMIC_ROUND_CEILING,
@@ -105,6 +108,9 @@ export function systemicReviewInputRevision(bundle: ArtifactBundle): string {
       evidencePaths: [],
       bundle,
     }),
+    // The prompt carries only the map's summary; the map itself is a bound
+    // context file, so a rewired call site must re-stale the round here too.
+    fileMap: adversaryFileMapContext(bundle).contextFile.text,
   }));
 }
 

@@ -7,7 +7,7 @@ import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "./argumentContract.
 import { functionalPreflightStep } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
@@ -54,6 +54,7 @@ import {
   edgeReasoningContentHash,
 } from "../orchestrator/edgeReasoning.js";
 import {
+  designReviewFileMapContext,
   renderContractReviewPrompt,
 } from "../orchestrator/designReviewPrompt.js";
 import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
@@ -80,7 +81,10 @@ import { renderCharterComparisonPrompt } from "./charterComparisonPrompt.js";
 import { renderCharterFidelityPrompt } from "./charterFidelityPrompt.js";
 import { buildCharterFidelityPacket } from "../orchestrator/charterFidelityPacket.js";
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
-import { renderSecondOrderAdversaryPrompt } from "../systemic/secondOrderAdversaryPrompt.js";
+import {
+  adversaryFileMapContext,
+  renderSecondOrderAdversaryPrompt,
+} from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import { ensureSupervisorDirs } from "../io/runArtifacts.js";
@@ -236,6 +240,10 @@ async function prepareContractDispatch(opts: {
   const lenses = resolveIntentLensSelection(
     opts.bundle.intent_checkpoint?.lens_selection,
   );
+  const reviewOptions = {
+    max_units: opts.maxUnits,
+    ...(lenses === undefined ? {} : { lenses }),
+  };
   const fanout = await materializeFanoutLanes({
     artifactsDir: opts.artifactsDir,
     runId: AUDIT_GATE_SUBMISSION_SCOPE,
@@ -247,14 +255,14 @@ async function prepareContractDispatch(opts: {
         ...SEMANTIC_REVIEW_DEMAND,
         label: "Contract review (adversarial)",
         promptFilename: "design-review-contract-prompt.md",
+        // The prompt carries the call-site map's summary; the complete map is
+        // this read-only, bound file.
+        generatedContext: [designReviewFileMapContext(opts.bundle, reviewOptions).contextFile],
         // No results-path section here: `materializeFanoutLanes` appends the one
         // canonical footer (bound path + the read-only-executor alternative) to
         // every lane prompt it writes.
         promptText: [
-          renderContractReviewPrompt(opts.bundle, {
-            max_units: opts.maxUnits,
-            ...(lenses === undefined ? {} : { lenses }),
-          }),
+          renderContractReviewPrompt(opts.bundle, reviewOptions),
           ...[notesSection.reReviewSection, notesSection.rejectionNotice]
             .filter((section): section is string => Boolean(section))
             .flatMap((section) => ["", section]),
@@ -271,7 +279,7 @@ async function prepareContractDispatch(opts: {
       contract_prompt: promptPath,
       contract_results: resultsPath,
     },
-    readPaths: [promptPath],
+    readPaths: [promptPath, ...fanout.lanes[0]!.generatedContextPaths],
     writePaths: [resultsPath],
     shortfall: fanout.shortfall,
   };
@@ -1241,7 +1249,7 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
   },
 );
 
-// sites-pinned: tests/audit/systemic-round-identity.test.ts
+// sites-pinned: tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts
 const emitSystemicChallenge = emissionRow<"systemic_challenge">(
   async ({ root, artifactsDir }, result) => {
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
@@ -1284,6 +1292,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
           fileCount: result.bundle.repo_manifest?.files.length ?? 0,
           ...SEMANTIC_REVIEW_DEMAND,
           contextPaths: evidencePaths,
+          generatedContext: [adversaryFileMapContext(result.bundle).contextFile],
           label: "Second-order adversary (improvement-seeking challenge)",
           promptFilename: "systemic-challenge-prompt.md",
           promptText: adversaryPrompt,

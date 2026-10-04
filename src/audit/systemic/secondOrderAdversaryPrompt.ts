@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/shared/prompt-renders-its-contract.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts
 // Phase E — SECOND-ORDER ADVERSARY prompt (host_delegation).
 //
 // The adversary is a SEPARATE agent and receives the evidence the earlier
@@ -21,7 +21,9 @@ import {
 } from "./coveredThemes.js";
 import {
   buildReviewFileMap,
-  renderReviewFileMap,
+  reviewFileMapContext,
+  type ReviewFileMapContext,
+  type ReviewFileMapScope,
   type ReviewFileMap,
 } from "./reviewFileMap.js";
 
@@ -39,6 +41,45 @@ function priorFindings(bundle: ArtifactBundle): Finding[] {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * What this round is pointed at: the files the banked findings implicate and the
+ * files the charter register's goal nodes cover — the two places this prompt
+ * names repository files as under challenge. The call-site map anchors exactly
+ * these, completely, so the round does not re-derive their call sites.
+ */
+function adversaryReviewScope(
+  bundle: ArtifactBundle,
+  bankedFindings: readonly Finding[],
+): ReviewFileMapScope {
+  const findingFiles = bankedFindings.flatMap((finding) =>
+    finding.affected_files.map((entry) => entry.path),
+  );
+  const register = bundle.charter_register;
+  const charterFiles =
+    register && register.status !== "omitted"
+      ? register.lanes.flatMap((lane) => lane.nodes.flatMap((node) => node.files ?? []))
+      : [];
+  return {
+    files: [...findingFiles, ...charterFiles],
+    basis:
+      "the files the banked findings implicate and the files the charter register's goal " +
+      "nodes cover (both projected below)",
+  };
+}
+
+function adversaryFileMap(bundle: ArtifactBundle, bankedFindings: readonly Finding[]): ReviewFileMap {
+  return buildReviewFileMap(bundle, adversaryReviewScope(bundle, bankedFindings));
+}
+
+/**
+ * The call-site map a systemic challenge round receives: the summary its prompt
+ * carries and the read-only context file its emission site passes to the lane
+ * materializer. The same build `renderSecondOrderAdversaryPrompt` summarizes.
+ */
+export function adversaryFileMapContext(bundle: ArtifactBundle): ReviewFileMapContext {
+  return reviewFileMapContext(adversaryFileMap(bundle, priorFindings(bundle)));
 }
 
 function renderPriorFindings(findings: readonly Finding[]): string[] {
@@ -192,9 +233,9 @@ function adversaryIdentityLines(): string[] {
  * REFUSES a finding whose `affected_files` names nothing the run's repository
  * manifest holds. A placeholder is therefore not merely unhelpful — copied
  * verbatim it is a refused round. So the example takes its path from the
- * call-site map this prompt already prints, falling back to the manifest the map
+ * call-site map this round receives, falling back to the manifest the map
  * itself derives from: a reader who copies the example cites a file the reader
- * can also see named above.
+ * can also see named in the map file.
  */
 function examplePath(bundle: ArtifactBundle, fileMap: ReviewFileMap): string {
   return (
@@ -223,7 +264,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
   metricLines.push(`- Max fan-out (out-degree): ${opts.metrics.max_fan_out}`);
   const bankedFindings = priorFindings(opts.bundle);
   const evidencePaths = [...new Set(opts.evidencePaths)].sort();
-  const fileMap = buildReviewFileMap(opts.bundle);
+  const fileMap = adversaryFileMap(opts.bundle, bankedFindings);
   const exampleFilePath = examplePath(opts.bundle, fileMap);
 
   return [
@@ -250,7 +291,9 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Prior verified recon — read this BEFORE re-deriving anything",
     "",
-    ...renderReviewFileMap(fileMap),
+    // The summary only: the complete map reaches the lane as a read-only context
+    // file its emission site binds (`adversaryFileMapContext`).
+    ...reviewFileMapContext(fileMap).summaryLines,
     "## Stated-purpose / goal / delta projection",
     "",
     "Treat a triangulated purpose as a lead. Preserve disagreement, and inspect the full artifact when the projection raises a question:",
@@ -278,7 +321,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Repository/source verification (required)",
     "",
-    "Use the repository and the strongest structural tools available. The call-site map above is " +
+    "Use the repository and the strongest structural tools available. The call-site map file is " +
       "your starting recon — verify the sites it names and the claims you build on them, rather " +
       "than rebuilding it. For every proposed improvement, inspect exact source sites, trace " +
       "relevant callers and callees in both directions, and verify the affected paths. Before any " +
@@ -306,7 +349,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "## Grounding — every improvement names a real file (required)",
     "",
     "Each finding's `affected_files` must name at least one file THIS repository holds, written " +
-      "repo-relative and spelled as the call-site map above spells it. A submission carrying an " +
+      "repo-relative and spelled as the call-site map file spells it. A submission carrying an " +
       "improvement that names no such file is REFUSED as a whole, and the refusal names the " +
       "finding: correct the path and resubmit. An improvement pointing at nothing cannot be " +
       "verified, dispatched, or remediated.",

@@ -15,16 +15,27 @@
 // re-deriving their call-site map, because the rule lived in a document that is loaded when a
 // design-check SWEEP is opened and nowhere near the code that assembles a round. So the rule now has
 // a machine half too: `buildReviewFileMap` derives the map once from artifacts no round authored,
-// `renderReviewFileMap` states its provenance and its read-only-ness in the prompt, and the tests
+// the lane receives it as a read-only, review-bound file, `reviewFileMapContext` states its
+// provenance and its read-only-ness in the prompt, and the tests
 // below exercise the real renderer rather than a paragraph. The prose tests stay — they pin the
 // ORIGINAL design-check sweep, which this change does not rewire.
 import { test, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderConceptualReviewPrompt } from "../../src/audit/orchestrator/designReviewPrompt.js";
-import { renderSecondOrderAdversaryPrompt } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
+import { toPromptPathToken } from "audit-tools/shared";
+import { prepareConceptualDispatch } from "../../src/audit/cli/conceptualDispatch.js";
+import {
+  designReviewFileMapContext,
+  renderConceptualReviewPrompt,
+} from "../../src/audit/orchestrator/designReviewPrompt.js";
+import {
+  adversaryFileMapContext,
+  renderSecondOrderAdversaryPrompt,
+} from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -108,15 +119,63 @@ function reviewBundle(): ArtifactBundle {
     graph_bundle: {
       graphs: { calls: [{ from: "src/caller.ts", to: "src/target.ts" }] },
     },
+    // What points each round at `src/target.ts`: the design-review round's
+    // starting-point unit, and the adversary's banked finding.
+    unit_manifest: {
+      units: [{ unit_id: "target", name: "Target", files: ["src/target.ts"], required_lenses: ["architecture"] }],
+    },
+    risk_register: { items: [{ unit_id: "target", risk_score: 5, signals: [] }] },
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      findings: [],
+      contract_findings: [
+        {
+          id: "CR-001",
+          title: "target is serial",
+          category: "systemic_improvement",
+          severity: "medium",
+          confidence: "medium",
+          lens: "architecture",
+          summary: "target does the work serially",
+          evidence: ["`run` in src/target.ts does the work serially"],
+          affected_files: [{ path: "src/target.ts" }],
+        },
+      ],
+      contract_reviewed: true,
+      conceptual_findings: [],
+      conceptual_reviewed: true,
+    },
   };
 }
 
-test("a review round's prompt carries the verified map, provenanced as recon it did not author", () => {
+/** The map block's anchor for `src/target.ts`, with the caller the round would otherwise re-grep. */
+const TARGET_ANCHOR = "- **src/target.ts**\n  - referenced by: src/caller.ts";
+
+test("a review round receives the verified map as a bound file, provenanced as recon it did not author", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "provenanced-map-"));
+  try {
+    const dispatch = await prepareConceptualDispatch({
+      artifactsDir,
+      bundle: reviewBundle(),
+      settings: { conceptual_depth: "shallow", max_units: 5 },
+    });
+    const prompt = await readFile(dispatch.artifactPaths.conceptual_prompt!, "utf8");
+    const mapPath = dispatch.readPaths.find((path) => path.endsWith("review-call-site-map.md"));
+    expect(mapPath, "the lane's read set must carry the map file").toBeDefined();
+    // The map itself — both ends of the edge the round would otherwise re-grep —
+    // is in the file the prompt names, not in the prompt.
+    expect(await readFile(mapPath!, "utf8")).toContain(TARGET_ANCHOR);
+    expect(prompt).not.toContain(TARGET_ANCHOR);
+    expect(prompt).toContain(`- \`${toPromptPathToken(mapPath!)}\``);
+    expect(prompt).toMatch(/Scope: .* 1 file\(s\) under review; 1 anchored/);
+  } finally {
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
+test("a review round's prompt states the map's provenance", () => {
   const prompt = renderConceptualReviewPrompt(reviewBundle(), { max_units: 5 });
 
-  // The map itself — both ends of the edge the round would otherwise re-grep.
-  expect(prompt).toContain("src/caller.ts");
-  expect(prompt).toContain("src/target.ts");
   // Its PROVENANCE, stated to the lane that reads it rather than assumed.
   expect(prompt, "the map must be labelled machine-derived").toMatch(/machine-derived/i);
   expect(
@@ -161,8 +220,45 @@ test("the systemic adversary — a review round — receives the same provenance
     bundle: reviewBundle(),
     evidencePaths: [],
   });
-  expect(prompt).toContain("src/caller.ts");
-  expect(prompt).toContain("src/target.ts");
+  const map = adversaryFileMapContext(reviewBundle());
+  expect(map.contextFile.text).toContain(TARGET_ANCHOR);
+  expect(prompt).not.toContain(TARGET_ANCHOR);
+  expect(prompt).toContain(map.summaryLines.join("\n"));
   expect(prompt).toMatch(/did NOT author/i);
   expect(prompt).toMatch(/contradicts the map/i);
+});
+
+test("a design-review round's map anchors its starting-point files, not the alphabetically first ones", () => {
+  // 70 connected files: more than the retired 60-anchor cap, which anchored the
+  // path-sorted FIRST 60 whatever the round reviewed. The round here is pointed
+  // at `src/f65.ts` (its only starting-point unit), which sorts past position 60.
+  const files = Array.from({ length: 70 }, (_, i) => `src/f${String(i).padStart(2, "0")}.ts`);
+  const bundle: ArtifactBundle = {
+    repo_manifest: {
+      repository: { name: "wide-fixture", root: "/repo" },
+      generated_at: "2026-01-01T00:00:00.000Z",
+      files: files.map((path) => ({ path, language: "typescript", size_bytes: 10 })),
+    },
+    graph_bundle: {
+      graphs: { imports: files.slice(1).map((from) => ({ from, to: "src/f00.ts" })) },
+    },
+    unit_manifest: {
+      units: [
+        { unit_id: "first", name: "First", files: ["src/f00.ts"], required_lenses: ["architecture"] },
+        { unit_id: "late", name: "Late", files: ["src/f65.ts"], required_lenses: ["architecture"] },
+      ],
+    },
+    risk_register: {
+      items: [
+        { unit_id: "first", risk_score: 1, signals: [] },
+        { unit_id: "late", risk_score: 9, signals: [] },
+      ],
+    },
+  };
+  const prompt = renderConceptualReviewPrompt(bundle, { max_units: 1 });
+  const map = designReviewFileMapContext(bundle, { max_units: 1 }).contextFile.text;
+  expect(map).toContain("- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/f00.ts");
+  expect(prompt).toMatch(/Scope: the files of the 1 starting-point unit\(s\) listed under "Starting points" in the review prompt — 1 file\(s\) under review/);
+  // Not under review, so not anchored — however early it sorts.
+  expect(map).not.toContain("- **src/f00.ts**");
 });

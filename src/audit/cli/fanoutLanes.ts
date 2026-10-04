@@ -2,18 +2,19 @@ import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { auditLaneReviewRequirement } from "./reviewSubmission.js";
 import { bindWorkerPrompt } from "../../shared/submission/workerPromptBinding.js";
 import { hashContent } from "../../shared/hash.js";
-// sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts
+// sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts, tests/audit/review-file-map-context.test.ts
 //
 // This module is the SECOND prompt-writing boundary in the tool (writeStepContract
 // is the first): every lane prompt file on disk is written here, so the path form
 // a lane reader sees is decided here.
 
-import { access, mkdir, readFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeTextFile } from "../../shared/io/json.js";
 import { publishAuditReviewBindings, type AuditReviewBinding } from "./auditReviewBindings.js";
 
 import {
+  compareCodeUnits,
   deriveLaneDemand,
   estimateTokensFromBytes,
   laneAssetsDir,
@@ -29,6 +30,19 @@ import {
   recordExpectedLanes,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
+
+/**
+ * A file the TOOL generates for a lane to read, such as the complete review
+ * call-site map. The prompt carries a summary and the path; the file carries the
+ * content, read-only and bound into the lane's review binding.
+ */
+export interface GeneratedLaneContextFile {
+  /** Basename under the file's content-addressed directory. */
+  filename: string;
+  /** What the file is, as the lane prompt's "Read-only context files" section names it. */
+  label: string;
+  text: string;
+}
 
 /**
  * Always-materialized fan-out lanes (design resolution 2, 2026-08-05).
@@ -81,6 +95,16 @@ export interface FanoutLaneSpec {
   riskScore: number;
   /** Complete artifact/packet files read in addition to the prompt. */
   contextPaths?: readonly string[];
+  /**
+   * Files the TOOL generates for this lane. Each is written read-only under
+   * `<lane-assets>/context/<sha256 of its text>/<filename>`, so a changed text
+   * gets a new path and a file is never rewritten in place; it then joins the
+   * lane's context paths, so it is fingerprinted into the prompt and recorded in
+   * the review binding's `inputs`, which acceptance re-hashes — a lane that
+   * edits it is refused. Only a lane that requires independent review carries a
+   * binding, so an ordinary lane cannot take one.
+   */
+  generatedContext?: readonly GeneratedLaneContextFile[];
   semanticComplexity?: LaneDemand["complexity"];
   /** Complete current input identity, independently checked against the carried bundle at acceptance. */
   semanticInputRevision?: string;
@@ -94,6 +118,8 @@ export interface MaterializedFanoutLane {
   resultPath: string;
   /** True when the lane's submission already exists (K-of-N resume). */
   resultExists: boolean;
+  /** Where this lane's `generatedContext` files were written, in spec order. */
+  generatedContextPaths: string[];
   /**
    * The lane's demand ranking (size / complexity / risk), DERIVED here rather
    * than declared by the caller — every fan-out lane in the package is
@@ -132,6 +158,64 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Write one generated context file and return its path. A file already holding
+ * the same bytes is left alone (its path is content-addressed, so this is the
+ * unchanged-round case). A file holding OTHER bytes was edited in place: it is
+ * made writable and unlinked first, because on Windows a rename over a
+ * read-only file fails with EPERM.
+ */
+async function writeGeneratedContext(
+  promptDir: string,
+  file: GeneratedLaneContextFile,
+): Promise<string> {
+  const path = join(promptDir, "context", hashContent(file.text), file.filename);
+  const expected = Buffer.from(file.text, "utf8");
+  const holdsExpected = async (): Promise<boolean | undefined> => {
+    try {
+      return (await readFile(path)).equals(expected);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  };
+  const existing = await holdsExpected();
+  if (existing === false) {
+    await chmod(path, 0o666);
+    await unlink(path);
+  }
+  if (existing !== true) {
+    try {
+      await writeTextFile(path, file.text);
+    } catch (error) {
+      // A concurrent emission of the same round wrote (and locked) the same
+      // bytes first: the file is what this write would have produced.
+      if ((await holdsExpected()) !== true) throw error;
+    }
+  }
+  await chmod(path, 0o444);
+  return path;
+}
+
+/**
+ * The section naming a lane's generated context files. It precedes the results
+ * footer, which stays the last section of every lane prompt.
+ */
+function renderReadOnlyContextSection(files: ReadonlyArray<{ path: string; label: string }>): string {
+  return [
+    "",
+    "",
+    "## Read-only context files",
+    "",
+    "The audit tool generated each file below for this lane. You did not author it, and you must " +
+      "not edit it: it is read-only and bound into this review, so a submission made against an " +
+      "edited copy is refused. If you disagree with it, say so in your finding, naming the file and " +
+      "line that contradict it.",
+    "",
+    ...files.map((file) => `- \`${toPromptPathToken(file.path)}\` — ${file.label}`),
+  ].join("\n");
 }
 
 /** Heading of the one results-path section any lane prompt carries. */
@@ -228,13 +312,20 @@ export async function materializeFanoutLanes(params: {
     );
     const resultExists = await fileExists(resultPath);
     const requirement = auditLaneReviewRequirement(spec.id);
-    const contextInputs = await Promise.all([...new Set(spec.contextPaths ?? [])].sort().map(async path => {
+    const generated = spec.generatedContext ?? [];
+    if (generated.length > 0 && requirement === "ordinary") {
+      throw new Error(`Lane '${spec.id}' carries generated context but no review binding to bind it into.`);
+    }
+    const generatedContextPaths: string[] = [];
+    for (const file of generated) generatedContextPaths.push(await writeGeneratedContext(promptDir, file));
+    const contextInputs = await Promise.all([...new Set([...(spec.contextPaths ?? []), ...generatedContextPaths])].sort(compareCodeUnits).map(async path => {
       const bytes = await readFile(path);
       return { path, sha256: hashContent(bytes), bytes: bytes.length };
     }));
     const inputBindingText = requirement === "ordinary" || contextInputs.length === 0 ? "" : `\n\n## Bound input fingerprints\n${contextInputs.map(input => `${input.path}: ${input.sha256}`).join("\n")}`;
     const revisionText = spec.semanticInputRevision === undefined ? "" : `\n\nReview input revision: ${spec.semanticInputRevision}`;
-    const body = footedPromptText(spec.promptText + revisionText + inputBindingText, resultPath) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
+    const readOnlyContextText = generated.length === 0 ? "" : renderReadOnlyContextSection(generated.map((file, index) => ({ path: generatedContextPaths[index]!, label: file.label })));
+    const body = footedPromptText(spec.promptText + revisionText + inputBindingText + readOnlyContextText, resultPath) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
     const bound = requirement === "ordinary" ? { text: body, sha256: hashContent(body) } : bindWorkerPrompt(body, digest => [
       "## Bound review submission",
       "Place the domain result described above inside `result` in this envelope. Copy the prompt binding exactly. The review declaration reports the host's execution context; it is not proof of identity.",
@@ -261,6 +352,7 @@ export async function materializeFanoutLanes(params: {
       promptPath,
       resultPath,
       resultExists,
+      generatedContextPaths,
       reviewRequirement: requirement,
       // Derived from the prompt text the tool just wrote — the lane's own
       // bytes, not the caller's claim about them — plus whatever per-mode
@@ -315,7 +407,7 @@ export async function materializeFanoutLanes(params: {
     lanes,
     pendingLanes,
     artifactPaths,
-    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? [])])],
+    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? []), ...lanes.flatMap(lane => lane.generatedContextPaths)])],
     writePaths: pendingLanes.map((lane) => lane.resultPath),
     shortfall,
   };
