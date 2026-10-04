@@ -28,15 +28,4 @@
   round — verdicts are materialized into the baseline (`intentEquivalenceExecutor.ts`), never cached
   per-pair.
 
-- **A spec row's category prefix is load-bearing enough to manufacture work — and one was false
-  (2026-07-28, low, RESOLVED; the open half is the class).** `spec/audit/artifact-contract.md` gave a
-  TRANSIENT host submission (`intent-equivalence-verdict.json`) the same `Durable host input:` prefix as <!-- doc-citation-exempt: transient host submission, written and deleted at runtime -->
-  a registered staleness-DAG leaf, so nightly `docs-3` correctly inferred "register it for consistency"
-  and collided with DD-9's deliberate no-verdict-pair-cache retirement. Fixed by relabelling the row and
-  making the durable row state its registry+DAG membership explicitly; endpoint traces in
-  `docs/reviews/intent-equivalence-verdict-endpoint-trace-2026-07-28.md`.
-  **Open property (the class, not this instance):** a category prefix in a normative table is read as
-  a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
-  only if a second instance appears — one occurrence is not yet a pattern.
-
 

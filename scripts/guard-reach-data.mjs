@@ -572,6 +572,56 @@ export const GUARDS = [
       'must be filed under a section with its prose before it can render',
   },
   {
+    id: 'check:spec-artifact-prefixes',
+    releaseOrder: 20.5,
+    releaseStage: 'checks',
+    kind: 'gate',
+    forms: [
+      // Minimal registry + DAG fixtures: the gate reads the same four source files the mirror generator does.
+      {
+        name: 'transient file under the durable prefix',
+        drive: 'script',
+        script: 'scripts/check-spec-artifact-prefixes.mjs',
+        path: 'spec/audit/artifact-contract.md',
+        sample: '| `tmp.json` | JSON | Durable host input: written then deleted. |',
+        extraFiles: {
+          'src/audit/io/artifacts.ts': 'export const ARTIFACT_DEFINITIONS = {\n  a: jsonArtifact("a.json", "analysis"),\n};\n',
+          'src/audit/orchestrator/dependencyMap.ts': 'export const ARTIFACT_DEPENDS_ON_MAP = {\n  "a.json": [],\n};\n',
+          'src/shared/io/auditToolsPaths.ts': 'export {};\n',
+          'src/shared/agentReflections.ts': 'export {};\n',
+        },
+        expect: 'requires: registered in ARTIFACT_DEFINITIONS AND a leaf',
+      },
+      {
+        name: 'unknown category prefix',
+        drive: 'script',
+        script: 'scripts/check-spec-artifact-prefixes.mjs',
+        path: 'spec/audit/artifact-contract.md',
+        sample: '| `a.json` | JSON | Ephemeral cache: rebuilt on demand. |',
+        extraFiles: {
+          'src/audit/io/artifacts.ts': 'export const ARTIFACT_DEFINITIONS = {\n  a: jsonArtifact("a.json", "analysis"),\n};\n',
+          'src/audit/orchestrator/dependencyMap.ts': 'export const ARTIFACT_DEPENDS_ON_MAP = {\n  "a.json": [],\n};\n',
+          'src/shared/io/auditToolsPaths.ts': 'export {};\n',
+          'src/shared/agentReflections.ts': 'export {};\n',
+        },
+        expect: 'unknown category prefix',
+      },
+    ],
+    impl: 'check:spec-artifact-prefixes',
+    preCommit: 'reach',
+    fix:
+      'a row of spec/audit/artifact-contract.md wears a category prefix (`Durable host input:`, `Marker:`, ' +
+      '`**Transient host submission**`) its file does not have the lifecycle of — fix the row (or the registry / ' +
+      'dependency map it describes), or declare a new prefix with its predicate in ' +
+      'scripts/check-spec-artifact-prefixes.mjs. Prose for generated rows lives in scripts/shared/spec-mirror-data.mjs',
+    note:
+      'each prefix maps to a predicate over ARTIFACT_DEFINITIONS membership and staleness-DAG role (key / ' +
+      'leaf / absent), read by the spec-mirror generator\'s own extraction. uncovered halves, declared: a ' +
+      'prefix-less row makes no claim and is not examined; a prefix is recognized only at the very start of ' +
+      'the Purpose cell; and the predicate proves registry/DAG membership, not the finer lifecycle prose ' +
+      '(that a transient file is actually deleted after ingestion)',
+  },
+  {
     id: 'check:loader-fragments',
     releaseOrder: 3,
     releaseStage: 'checks',
@@ -1958,7 +2008,7 @@ export const REACH = [
       'scripts/shared/generate-spec-mirrors.mjs',
       'scripts/shared/spec-mirror-data.mjs',
     ],
-    guardedBy: ['check:spec-mirrors', 'spec-mirror-drift-test'],
+    guardedBy: ['check:spec-mirrors', 'check:spec-artifact-prefixes', 'spec-mirror-drift-test'],
     note:
       'the three tables that used to hand-mirror ARTIFACT_DEFINITIONS, EXECUTOR_REGISTRY and ' +
       'ARTIFACT_DEPENDS_ON_MAP. Membership is reconciled BOTH ways — a registry row no region ' +

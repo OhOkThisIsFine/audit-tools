@@ -113,6 +113,7 @@
     "check:runtime-artifact-names": "node scripts/shared/generate-runtime-artifact-names.mjs --check",
     "check:executor-producers": "node scripts/shared/generate-executor-producers.mjs --check",
     "check:spec-mirrors": "node scripts/shared/generate-spec-mirrors.mjs --check",
+    "check:spec-artifact-prefixes": "node scripts/check-spec-artifact-prefixes.mjs",
     "check:cli-surface": "node scripts/shared/generate-cli-surface.mjs --check",
     "check:ingestion-checks": "node scripts/shared/generate-ingestion-checks.mjs --check",
     "generate:shard-baseline": "node scripts/shared/generate-vitest-shard-baseline.mjs",

@@ -96,7 +96,7 @@ audit-code into an implementation pipeline.
 | Artifact | Format | Purpose |
 |---|---|---|
 | `scope.json` | JSON | How this run was scoped (`full` vs. `delta` with `--since` seed/expanded file sets). |
-| `coverage_matrix.json` | JSON | Task allocation matrix: files × lens buckets, tracks which are queued/complete. |
+| `coverage_matrix.json` | JSON | Task allocation matrix (files × lens buckets) that tracks which are queued/complete. |
 | `runtime_validation_tasks.json` | JSON | Runtime-validation task specs derived from risk + coverage. |
 | `runtime_validation_report.json` | JSON | Runtime-validation results (initial + import-refreshed). |
 | `external_analyzer_results.json` | JSON | Normalized findings from acquired external analyzers. |

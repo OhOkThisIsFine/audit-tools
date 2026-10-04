@@ -204,7 +204,7 @@ export const SPEC_MIRROR_REGIONS = [
       },
       {
         artifact: "coverage_matrix.json",
-        purpose: "Task allocation matrix: files × lens buckets, tracks which are queued/complete.",
+        purpose: "Task allocation matrix (files × lens buckets) that tracks which are queued/complete.",
       },
       {
         artifact: "runtime_validation_tasks.json",
