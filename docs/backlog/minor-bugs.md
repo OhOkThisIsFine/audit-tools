@@ -41,7 +41,3 @@
   only if a second instance appears — one occurrence is not yet a pattern.
 
 
-- **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
-  (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in
-  [`reviews/dogfood-run-2026-08-06.md`](../reviews/dogfood-run-2026-08-06.md). Open question:
-  should synthesis demand mechanism-grounded (not flow-existence) evidence for `critical`?

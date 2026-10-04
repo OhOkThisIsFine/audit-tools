@@ -340,6 +340,13 @@ export async function deleteLandingBranch({
   }
   const removed = runCommand("git", ["push", remote, "--delete", branch], cwd);
   if (removed.status !== 0) {
+    // GitHub can delete a merged head branch itself; an absent branch is the
+    // goal state. `ls-remote --exit-code` exits 2 when no ref matches.
+    const probe = runCommand("git", ["ls-remote", "--exit-code", remote, `refs/heads/${branch}`], cwd);
+    if (probe.status === 2) {
+      log(`[land] ${remote}/${branch} was already deleted.`);
+      return true;
+    }
     log(`[land] could not delete ${remote}/${branch}: ${removed.stderr.trim()}`);
     return false;
   }

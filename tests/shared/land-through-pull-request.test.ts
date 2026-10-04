@@ -258,6 +258,21 @@ describe("deleteLandingBranch", () => {
     expect(github.calls.at(-1)?.args).toEqual(["push", "origin", "--delete", "release/v1.2.3"]);
   });
 
+  it("reports success when GitHub already deleted the merged branch, and failure when it still exists", async () => {
+    const withBranch = (lsRemoteStatus: number) => {
+      const github = fakeGitHub({ checkRuns: [[]], prStates: ["MERGED"] });
+      return (command: string, args: string[]): Answer => {
+        if (args[0] === "push" && args.includes("--delete")) {
+          return { status: 1, stdout: "", stderr: "error: unable to delete: remote ref does not exist" };
+        }
+        if (args[0] === "ls-remote") return { status: lsRemoteStatus, stdout: "", stderr: "" };
+        return github.answer(command, args);
+      };
+    };
+    expect(await cleanUp(withBranch(2))).toBe(true);
+    expect(await cleanUp(withBranch(0))).toBe(false);
+  });
+
   it("leaves the branch of a pull request closed without a merge", async () => {
     const github = fakeGitHub({ checkRuns: [[]], prStates: ["CLOSED"] });
     expect(await cleanUp(github.answer)).toBe(false);
