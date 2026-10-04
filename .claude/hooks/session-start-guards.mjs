@@ -12,7 +12,6 @@ import { existsSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { agentDispatchRepo } from '../../scripts/shared/mcp-dispatch-lane.mjs';
 import { compareCodeUnits } from '../../scripts/shared/primitives.mjs';
 import {
   baselineFromEntries,
@@ -238,40 +237,31 @@ try {
 }
 
 // ── Stale agent worktrees ────────────────────────────────────────────────────
-// Agent runs add linked worktrees and nothing reaps them once the work lands, so
-// they accumulate across sessions. Reaped rather than reported: every condition
-// that makes a worktree disposable is mechanically checkable, and a note that
-// fires every session is a note that gets read past.
+// Agent runs add linked worktrees, and a tree outlives its work when the lap that
+// made it never closes. This leg REPORTS such trees and removes nothing. Owner
+// decision 2026-10-04: teardown belongs to the lap that owns a tree (`/closeout`)
+// or to the owner. A removal here acted on evidence that cannot be complete — a
+// Codex, AGY or Claude session in another worktree, or a worker session idle
+// between turns, leaves no trace git or the worker can show — and each miss
+// deleted a live agent's directory.
 //
-// FOUR conditions, all required — a stale worktree is not necessarily a
-// duplicate (of four cleared by hand, one held a superseded ALTERNATIVE branch):
+// THREE conditions, all required, decide what is listed:
 //   landed — HEAD is reachable from a main line, so it holds no unique commit
 //   clean  — no modified, untracked OR IGNORED file beyond installed
 //            dependencies, so it holds no unsaved work. Ignored files count:
-//            `status --porcelain` cannot see them and `worktree remove` deletes
-//            them, and a run's working state (an audit's `.audit-tools/` tree)
-//            lives exactly there — a 2026-10-02 session lost a whole audit run
-//            this way. Only what an install regenerates is disposable.
+//            `status --porcelain` cannot see them, and a run's working state
+//            (an audit's `.audit-tools/` tree) lives exactly there.
 //   idle   — a CONCURRENT agent's worktree is landed AND clean for the whole
 //            window between `worktree add` and its first commit, so freshness is
 //            what separates in-flight from abandoned
-//   unused — no agent-dispatch worker session runs in it. A read-only job, or
-//            a job between edits, is landed, clean and leaves the index clock
-//            alone, so no git signal can see it: a 2026-10-02 review job read
-//            for an hour and lost its tree mid-run. The worker is asked, per
-//            tree (see `workerSessionDirectories`); when it cannot be asked,
-//            every candidate is kept.
 // The worktree the session itself works in (the payload `cwd`, which differs
-// from CLAUDE_PROJECT_DIR when the session entered a linked worktree) is never a
-// candidate. Anything unreadable — a vanished directory, a git that errors — is
-// left alone: this leg only ever acts on a positive answer to all four.
-// Owner decision 2026-10-02, not a measurement: 24 hours. The floor is the only
-// protection for an agent the worker check cannot see (a Codex, AGY or Claude
-// session, or a worker session idle between turns), and the owner accepts that
-// a quiet agent past it can still lose its tree.
+// from CLAUDE_PROJECT_DIR when the session entered a linked worktree) is never
+// listed. Anything unreadable — a vanished directory, a git that errors — is left
+// out.
+// Owner decision 2026-10-02, not a measurement: 24 hours.
 const WORKTREE_IDLE_MS = 24 * 60 * 60 * 1000;
 // Ignored top-level entries an install recreates — the only ignored content a
-// reap may discard. Named by what regenerates them, not by size or age. A
+// listed tree may hold. Named by what regenerates them, not by size or age. A
 // junction or symlink (how a lap worktree borrows its dependencies) lists
 // without the trailing slash.
 const REGENERABLE_IGNORED = new Set(['node_modules/', 'node_modules']);
@@ -279,7 +269,7 @@ const REGENERABLE_IGNORED = new Set(['node_modules/', 'node_modules']);
 /**
  * Milliseconds since the last git activity in a worktree. The per-worktree index
  * is rewritten by every status/add/commit, which makes it the cheapest activity
- * clock available. An unknown age reads as ACTIVE (0) — never reap on a guess.
+ * clock available. An unknown age reads as ACTIVE (0) — never list on a guess.
  */
 function msSinceWorktreeActivity(path) {
   const adminDir = gitIn(path, ['rev-parse', '--absolute-git-dir'], 5_000);
@@ -292,54 +282,6 @@ function msSinceWorktreeActivity(path) {
     }
   }
   return 0;
-}
-
-/**
- * The subset of `paths` in which an agent-dispatch worker session runs, as the
- * worker itself reports it — or null when the worker cannot be asked, which
- * the caller reads as "every path may be in use".
- *
- * The connection comes from agent-dispatch's own `connectOpenCode`
- * (src/services/connection.ts in the checkout `agentDispatchRepo` names), so
- * the URL, the user and the service secret are never restated here.
- * `GET /session/status?directory=` answers with the sessions that run in
- * exactly that directory (measured 2026-10-02: a busy session in one linked
- * worktree did not appear for a sibling worktree or the main checkout, and the
- * route matched the path regardless of slash direction or drive-letter case).
- * Any entry that is not `idle` (`busy`, `retry`, or a shape not known here)
- * counts as live.
- *
- * No checkout means agent-dispatch is not installed on this machine, so no
- * worker exists to run a session: the answer is the empty set, not unknown.
- *
- * @param {string[]} paths
- * @returns {Promise<Set<string> | null>}
- */
-async function workerSessionDirectories(paths) {
-  const connectionModule = join(agentDispatchRepo(process.env), 'src', 'services', 'connection.ts');
-  if (!existsSync(connectionModule)) return new Set();
-  try {
-    const { connectOpenCode } = await import(pathToFileURL(connectionModule).href);
-    const connection = await connectOpenCode(process.env);
-    const base = String(connection.baseUrl).replace(/\/+$/, '');
-    const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.password}`, 'utf8').toString('base64')}`;
-    const live = await Promise.all(
-      paths.map(async (path) => {
-        const response = await fetch(`${base}/session/status?directory=${encodeURIComponent(path)}`, {
-          headers: { authorization },
-        });
-        if (!response.ok) throw new Error(`worker answered ${response.status}`);
-        const sessions = await response.json();
-        if (sessions === null || typeof sessions !== 'object' || Array.isArray(sessions)) {
-          throw new Error('worker answered with no session map');
-        }
-        return Object.values(sessions).some((status) => status?.type !== 'idle') ? path : null;
-      }),
-    );
-    return new Set(live.filter((path) => path !== null));
-  } catch {
-    return null;
-  }
 }
 
 function parseWorktreePorcelain(text) {
@@ -365,7 +307,7 @@ function parseWorktreePorcelain(text) {
 try {
   const listed = git(['worktree', 'list', '--porcelain'], 15_000);
   // The main worktree is always listed first and is never a candidate; the
-  // session's own checkout must survive whichever position it holds.
+  // session's own checkout must stay out whichever position it holds.
   const linked = listed.ok ? parseWorktreePorcelain(listed.stdout).slice(1) : [];
   const selfTop = git(['rev-parse', '--show-toplevel'], 5_000);
   const selfPath = selfTop.ok && selfTop.stdout ? selfTop.stdout : ROOT;
@@ -380,68 +322,38 @@ try {
     .filter(Boolean)
     .filter((ref) => git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], 5_000).ok);
 
-  const disposable = [];
+  const stale = [];
   // Sorted by path so the reported order is content-derived, not list order.
   for (const wt of linked.sort((a, b) => compareCodeUnits(a.path, b.path))) {
     if (wt.disqualified || !wt.head || !existsSync(wt.path)) continue;
     if (samePath(wt.path, selfPath) || samePath(wt.path, ROOT)) continue;
     if (sessionPath && samePath(wt.path, sessionPath)) continue;
     // A repo with no main line at all yields no refs, so nothing is reachable
-    // and nothing is reaped — the empty case needs no separate guard.
+    // and nothing is listed — the empty case needs no separate guard.
     if (!mainRefs.some((ref) => git(['merge-base', '--is-ancestor', wt.head, ref], 10_000).ok)) continue;
     // Read the clock BEFORE the status call below — status can rewrite the index
     // it reads, which would reset the very signal being measured.
     if (msSinceWorktreeActivity(wt.path) < WORKTREE_IDLE_MS) continue;
     const status = gitIn(wt.path, ['status', '--porcelain', '--ignored'], 20_000);
-    // git re-checks cleanliness during `remove` too, but only as a refusal —
-    // without this check a worktree someone is working in would be attempted
-    // every session and reported as "stuck" each time. git's own re-check skips
-    // ignored files, so this line is the ONLY guard for them.
     if (!status.ok) continue;
     const unsaved = status.stdout
       .split(/\r?\n/)
       .filter(Boolean)
       .filter((line) => !(line.startsWith('!! ') && REGENERABLE_IGNORED.has(line.slice(3))));
     if (unsaved.length > 0) continue;
-    disposable.push(wt.path);
+    stale.push(wt.path);
   }
 
-  // Asked last, and only about trees git already calls disposable: the worker
-  // query is the one leg that reads a secret and crosses a socket.
-  const live = disposable.length > 0 ? await workerSessionDirectories(disposable) : new Set();
-  const reaped = [];
-  const stuck = [];
-  const asList = (paths) => paths.map((p) => `    ${p.replace(/\\/g, '/')}`).join('\n');
-  if (live === null) {
+  if (stale.length > 0) {
     notes.push(
-      `Kept ${disposable.length} finished worktree(s): could not ask the agent-dispatch worker whether a ` +
-        `session runs in them, and an unknown answer never reaps:\n${asList(disposable)}\n` +
-        `  They are reaped at the first session start that reaches the worker ` +
-        `(\`node ${agentDispatchRepo(process.env)}/src/cli.ts status\`).`,
-    );
-  } else {
-    for (const path of disposable) {
-      if (live.has(path)) continue;
-      // No --force: git re-checks cleanliness itself, so a race between the
-      // check above and the removal still fails closed.
-      (git(['worktree', 'remove', path], 60_000).ok ? reaped : stuck).push(path);
-    }
-  }
-
-  if (reaped.length > 0) {
-    notes.push(
-      `Reaped ${reaped.length} finished worktree(s) — HEAD already on main, tree clean, idle, no live ` +
-        `worker session:\n${asList(reaped)}`,
-    );
-  }
-  if (stuck.length > 0) {
-    notes.push(
-      `Could not remove ${stuck.length} finished worktree(s) — on Windows a still-open handle under ` +
-        `node_modules/ blocks the delete:\n${asList(stuck)}\n  Retry once nothing is running in them.`,
+      `${stale.length} worktree(s) look finished — HEAD already on main, tree clean, idle for 24 hours:\n` +
+        `${stale.map((p) => `    ${p.replace(/\\/g, '/')}`).join('\n')}\n` +
+        `  Nothing removes them automatically: an agent git cannot see may still use one. The lap that ` +
+        `made a tree removes it at its /closeout; remove any other only on the owner's word.`,
     );
   }
 } catch {
-  /* not a git repo / removal fault — stay silent */
+  /* not a git repo / git fault — stay silent */
 }
 
 // ── Offload-lane liveness ────────────────────────────────────────────────────
@@ -458,8 +370,8 @@ try {
 // AUDIT_TOOLS_OFFLOAD_LANE_REGISTRY overrides the path for hermetic tests.
 // Probe only; bringing a lane up is the owner's call — each down note carries
 // its row's remedy verbatim. Silent-unless-down: unprobeable rows state their
-// reasons as registry data and produce no every-session line (the reap leg
-// above states why — a note that fires every session gets read past).
+// reasons as registry data and produce no every-session line: a note that fires
+// every session gets read past.
 //
 // There is NO workspace-trust leg beside this one. One existed until 2026-08-29
 // and reported an untrusted CLAUDE_CONFIG_DIR workspace as "OFFLOAD LANE

@@ -875,3 +875,12 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   again at Sep 1st, 2026", and wrote that lane off for the run. On 2026-08-28 the same lane answered
   a probe in seconds. **Probe every lane at run start; never carry a quota verdict forward from a
   previous run's record** — a stale one silently shrinks coverage while looking like diligence.
+
+- **Five accepted limits, moved from open-bugs (owner decision 2026-10-04) — none is a defect.**
+  (1) Loop-core discovery does not classify a module as core only because both core and non-core
+  modules import it; change that closure rule only on evidence. (2) The attestation preflight can
+  abstain on a staged/worktree mismatch or unknowable external state; an abstention certifies
+  nothing. (3) Read the derived staleness sets through their accessor; never keep an old view.
+  (4) A past release- or review-lane timeout proves nothing about the lane now; read the current
+  result and state any coverage it could not give. (5) Machine-wide green queries and external
+  lane behaviour need their own current evidence; repository tests cannot certify them.

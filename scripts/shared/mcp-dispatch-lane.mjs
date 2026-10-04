@@ -154,7 +154,7 @@ export class DispatchLaneError extends Error {
  *
  * @param {NodeJS.ProcessEnv} env
  */
-export function agentDispatchRepo(env) {
+function agentDispatchRepo(env) {
   return env.AGENT_DISPATCH_REPO || 'C:/Code/agent-dispatch';
 }
 

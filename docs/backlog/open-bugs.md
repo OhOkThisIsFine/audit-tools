@@ -7,14 +7,6 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 - **A loop-core change can reach `main` without an attestation (2026-10-01, medium).** `check:loop-core-attestations` judges every tree against the tracked ledger `.claude/loop-core-attestations.json` inside the `checks` job of `ci.yml`, which branch protection on `main` requires (strict). Two gaps remain. The gate's own files — `src/shared/loopCorePaths.ts`, `.claude/hooks/loop-core-patterns.mjs`, `scripts/check-loop-core-attestations.mjs` and `scripts/shared/loopCoreAttestationLedger.mjs` — are not loop-core, so an edit that narrows the pattern list or weakens the check lands with no attestation (the owner chose to leave this open). And protection does not bind admins (`enforce_admins` is off), so an admin's direct push bypasses the required check and is judged only after it lands. **Property:** no landing path puts unattested loop-core content on `main`, and a change to what the gate attests is itself attested.
-- **The session-start worktree reaper sees only agent-dispatch worker sessions that are running (2026-10-02, medium, friction: tool_should_decide).** Medium because each miss deletes a live agent's directory. `.claude/hooks/session-start-guards.mjs` keeps a landed, clean, idle tree only when git shows work or `GET /session/status` on the agent-dispatch worker reports a non-idle session in it (12ba46d0). Two gaps remain, covered only by the idle floor `WORKTREE_IDLE_MS` (24 h, an owner decision of 2026-10-02 that accepts the risk past it). A worker session that is idle between turns (a job waiting for its orchestrator's next prompt) is not protected: the only record of it is the bridge job store, which keeps stale `running` records. A Codex, AGY or Claude session working in another linked worktree is not seen at all. **Property:** the reaper removes a tree only on a positive answer that no agent of any kind has it open or will resume in it.
-
-
-
-
-
-
-
 
 - **CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a
   DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).** Two `audit-code-test-suite` runs on
@@ -37,25 +29,6 @@
   comment that names a symbol, a workflow shape or an enumeration the code owns is reconciled
   against it mechanically, or it does not state one.
 
-
-
-
-- **Loop-core discovery retains a mixed-consumer limit.** Declared exclusions are checked, but modules shared between core and non-core consumers are not automatically classified as core solely from that mixed import graph. Keep the registry’s stated scope; require evidence before changing the closure rule.
-
-
-
-- **Divergent attestation preflight can abstain.** A staged/worktree mismatch or unpredictable external state can prevent a verdict. Structured abstention preserves the safety boundary; it does not certify the tree or predict unavailable state.
-
-
-
-
-
-- **Derived staleness sets retain their accessor contract.** Consumers must read the current derived sets through the supported accessor rather than retaining an obsolete view. Third-state and affinity regressions are covered; the accessor’s lifetime remains intentional.
-
-
-
-
-
 - **The TASK draw's coherence eligibility is still disjunctive and has never been measured for
   collapse (2026-08-19, medium).** The findings draw moved to `shared_file AND same_lens`;
   `TASK_DRAW_COHERENCE_POLICY` keeps `weighted_score_threshold` deliberately, because no measurement
@@ -63,9 +36,7 @@
   eligibility is either measured and shown not to collapse, or aligned with the findings draw's — it
   is not left disjunctive on the grounds that nobody looked.
 
-
 - **A comprehensive remaining test-replica sweep is unverified.** Bounded production-path replacements and meaningful mutation checks were completed during the September 30 work. They do not establish that every remaining test replica has been found. Review specific suspected replicas through the actual production interface; preserve independent oracles and useful fixtures.
-
 
 - **Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking
   worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test
@@ -91,10 +62,6 @@
   polarities. **Property:** no test worker blocks its event loop ≥60s continuously; until then
   the vitest-gate tolerance is the guard, and raw `npx vitest run` full runs still read red.
 
-
-
-
-
 - **Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).** Each
   adversarial round spawns FRESH agents that re-grep the same call-site map from scratch (~135k
   subagent tokens per round, much of it identical recon), because continuing a prior reviewer
@@ -109,18 +76,6 @@
   work it authored; being handed a factual map it did not produce does not compromise that, so
   re-deriving from scratch was never carrying independence, only paying for redundant derivation.
   ⚠ Sharing an agent SESSION across rounds is likewise wrong and forfeits exactly what the round is for.
-
-
-- **External release and review lanes retain environment-dependent limits.** In-flight release waiting is implemented. A historical lane timeout is not proof of current availability, quota or capability; inspect the current lane result and preserve unavailable coverage explicitly.
-
-
-- **Machine-wide green queries and external lane behavior remain externally owned.** Version-only suite-stamp preservation is covered by real tree-identity tests. Machine-side query routing and review-lane capability require their own current evidence; repository tests cannot certify them.
-
-
-
-
-
-
 
 - **Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured
   2026-07-06).** It sits in a few audit integration files, so

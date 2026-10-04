@@ -24,25 +24,19 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 111 entr(y/ies) indexed.
+> and at commit). 106 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — A loop-core change can reach `main` without an attestation (2026-10-01, medium).
-- `open-bugs.md:10` — The session-start worktree reaper sees only agent-dispatch worker sessions that are running (2026-10-02, medium, friction: tool_should_decide).
-- `open-bugs.md:19` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
-- `open-bugs.md:33` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:43` — Loop-core discovery retains a mixed-consumer limit.
-- `open-bugs.md:47` — Divergent attestation preflight can abstain.
-- `open-bugs.md:53` — Derived staleness sets retain their accessor contract.
-- `open-bugs.md:59` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:67` — A comprehensive remaining test-replica sweep is unverified.
-- `open-bugs.md:70` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:98` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:114` — External release and review lanes retain environment-dependent limits.
-- `open-bugs.md:117` — Machine-wide green queries and external lane behavior remain externally owned.
-- `open-bugs.md:125` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:131` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:11` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
+- `open-bugs.md:25` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:32` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:39` — A comprehensive remaining test-replica sweep is unverified.
+- `open-bugs.md:41` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:65` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:80` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:86` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -154,6 +148,7 @@
 - `durable-traps.md:855` — A successful process exit does not establish a usable review result.
 - `durable-traps.md:862` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
 - `durable-traps.md:873` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
+- `durable-traps.md:879` — Five accepted limits, moved from open-bugs (owner decision 2026-10-04) — none is a defect.
 
 <!-- END GENERATED SEEK INDEX -->
 
