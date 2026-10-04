@@ -89,6 +89,10 @@ test("deep architectural inquiry publishes ready scoped inspection without leaki
     expect(workload.work_items.some((item: { scope: { files: string[] } }) => item.scope.files.includes("src/a.ts"))).toBe(true);
     const hostPrompt = await readFile(step.prompt_path, "utf8");
     expect(hostPrompt).toContain("alongside");
+    // The fold opens the inspection run BESIDE the charter step, so the handoff
+    // names that step, never a semantic-review pause the host was not handed.
+    const handoff = JSON.parse(await readFile(join(artifactsDir, "operator-handoff.json"), "utf8"));
+    expect(handoff.summary).toContain("The current step is charter_extraction");
     // The host sees the two ready work families. Blind readers still receive
     // only their own packet, never the host's combined dispatch envelope.
     const lanePrompts = Object.entries(step.artifact_paths).filter(([key]) => key.startsWith("charter_extraction_") && key.endsWith("_prompt"));

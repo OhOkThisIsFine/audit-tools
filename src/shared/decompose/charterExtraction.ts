@@ -77,10 +77,23 @@ const LaneEdgeInputSchema = z
  * was the one thing in this contract that could only ever check the lane against
  * itself (owner review of prompt 8, 2026-09-17).
  */
+const CharterLaneDagShape = {
+  nodes: z.array(LaneNodeInputSchema).default([]),
+  edges: z.array(LaneEdgeInputSchema).default([]),
+};
+
+/**
+ * `inputs` is the lane's DECLARATION of what it read: the paths of its evidence
+ * packet. A charter step also carries a scoped-inspection workload, and a blind
+ * lane must not read it; the lane gate (`charterLaneSchema`) refuses a
+ * declaration naming anything but the lane's own packet, so the separation is
+ * checked on the submission rather than only asked for in the prompt. The merge
+ * drops it: `CharterMergedLaneSchema` carries the DAG and the tool-stamped kind.
+ */
 export const CharterSubmissionSchema = z
   .object({
-    nodes: z.array(LaneNodeInputSchema).default([]),
-    edges: z.array(LaneEdgeInputSchema).default([]),
+    ...CharterLaneDagShape,
+    inputs: z.array(z.string().min(1)).min(1),
   })
   .strict();
 export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
@@ -90,9 +103,9 @@ export type CharterSubmission = z.infer<typeof CharterSubmissionSchema>;
  * the tool stamped from the bound path it arrived on. This is the shape every
  * consumer downstream of the merge reads, and the only one that carries `kind`.
  */
-export const CharterMergedLaneSchema = CharterSubmissionSchema.extend({
-  kind: CharterLaneKindSchema,
-}).strict();
+export const CharterMergedLaneSchema = z
+  .object({ ...CharterLaneDagShape, kind: CharterLaneKindSchema })
+  .strict();
 export type CharterMergedLane = z.infer<typeof CharterMergedLaneSchema>;
 
 /** The TOOL-merged extraction submission: every lane's DAG, handed to the executor by path. */

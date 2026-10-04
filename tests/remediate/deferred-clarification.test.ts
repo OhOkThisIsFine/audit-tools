@@ -8,7 +8,7 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 // analysis, `permanentlyDeadPendingUnits`.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
@@ -391,13 +391,15 @@ describe("clarification scope delta preserves reviewed execution authority", () 
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    expect(finalState.items.B1.status).toBe("needs_clarification");
+    // `scope_additions` is accepted and ignored (step one of its removal): the
+    // answer applies, and the unit's write scope and reviewed revision are unchanged.
+    expect(finalState.items.B1.status).not.toBe("needs_clarification");
     expect(finalState.plan.units.find((unit: { id: string }) => unit.id === "B1").allowed_files).toEqual(["src/F1.ts"]);
     expect(finalState.plan.review_revision_sha256).toBe(st.plan!.review_revision_sha256);
 
   });
 
-  it("an invalid scope delta refuses the WHOLE resolution file and applies nothing", async () => {
+  it("a scope_additions path outside the repository is ignored, not refused, and widens nothing", async () => {
     const st = needsClarificationState();
     await harness.writeIntentCheckpoint();
     await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
@@ -416,20 +418,18 @@ describe("clarification scope delta preserves reviewed execution authority", () 
       "utf8",
     );
 
-    const step = await decideNextStep({ root: REPO_DIR });
+    await decideNextStep({ root: REPO_DIR });
 
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    // Nothing applied: the item still awaits its answer; the scope is unchanged.
-    expect(finalState.items.B1.status).toBe("needs_clarification");
+    // The answer applied; the ignored field widened nothing.
+    expect(finalState.items.B1.status).not.toBe("needs_clarification");
     const b1 = finalState.plan.units.find(
       (b: { id: string }) => b.id === "B1",
     );
     expect(b1.allowed_files).toEqual(["src/F1.ts"]);
-    // The file was refused (renamed away), and the run re-halts on the question.
-    expect(existsSync(join(ARTIFACTS_DIR, "clarification_resolution.json"))).toBe(false);
-    expect(step.status).toBe("blocked");
+    expect(readdirSync(ARTIFACTS_DIR).some((name) => name.startsWith("clarification_resolution.json.refused-"))).toBe(false);
   });
 
   it("a clarification that re-adds an in-scope file leaves the reviewed revision intact, so the run proceeds instead of wedging", async () => {

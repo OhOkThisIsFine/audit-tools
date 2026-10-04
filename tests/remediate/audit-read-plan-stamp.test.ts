@@ -168,6 +168,36 @@ describe("plan application stamps state.plan.audit_read from the tool's read", (
 });
 
 
+// With zero survivors the review gate never rewrites a stale-schema decision, so
+// the plan-join ledger must not take declines from one: the current run never
+// decided them. The current-schema case is the control that proves the path is
+// reached at all.
+describe("the plan-join coverage ledger reads review declines through the current schema", () => {
+  async function activateWithDecision(schemaVersion: string): Promise<number> {
+    await writeReadyIntake();
+    await seedFrom(RECORDED);
+    await h.writeApprovedExecutionPlan();
+    await writeFile(join(h.ARTIFACTS_DIR, "review_decision.json"), JSON.stringify({
+      schema_version: schemaVersion, plan_id: "REVIEW-OLD", approved_ids: [],
+      declined: [{ finding_id: FINDING.id, reason: "declined in an older run" }],
+      created_at: new Date().toISOString(),
+    }), "utf8");
+    await decideNextStep({ root: h.REPO_DIR });
+    const state = JSON.parse(await readFile(join(h.ARTIFACTS_DIR, "state.json"), "utf8")) as {
+      plan_coverage?: { declined_review_count: number };
+    };
+    return state.plan_coverage!.declined_review_count;
+  }
+
+  it("takes no decline from a stale-schema record", async () => {
+    expect(await activateWithDecision("remediate-code-review-decision/v0")).toBe(0);
+  });
+
+  it("takes the decline from a current-schema record (control)", async () => {
+    expect(await activateWithDecision("remediate-code-review-decision/v1")).toBe(1);
+  });
+});
+
 describe("remediation plan contract ownership", () => {
   it("rejects unused top-level themes while retaining the live intent filter", async () => {
     const { RemediationPlanSchema } = await import("../../src/remediate/state/types.js");

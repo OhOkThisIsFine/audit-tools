@@ -152,29 +152,6 @@
     }
   },
   "reviews": {
-    "26cc5e6e718671c5": {
-      "reviewed_by": "claude-opus-5-5-reviewer",
-      "attester_class": "agent",
-      "checked": "npm run build green; vitest tests/remediate 1249 passed 0 failed 4 skipped (covers both suites referencing scope_additions; no other src/test reference). Red proof: reverse-applied the staged nextStep.ts change in the working tree, the new deferred-clarification test failed with RemediationHostPreparationError from assertApprovedRuntimePlan (runtime plan does not match the approved revision), restored to the staged blob. No widening path: applyPlanClarificationResolution is the only applier (one caller), and it runs planClarificationRefusal -> validateClarificationScopeAdditions first on every call, which refuses any normalized path not exactly in block.allowed_files, so the deleted function could only re-sort existing entries. No consumer of allowed_files depends on sort order (grep for sort/compare/join over allowed_files in src finds only an error-message join). The prompt text matches the validator.",
-      "verdict": "clear",
-      "override": null,
-      "attested_at": "2026-10-02T00:12:23.646Z",
-      "vouches": {
-        "src/remediate/steps/nextStep.ts": "b361115df0a56a2d25be69f7ddba1923af46c38b",
-        "src/remediate/steps/prompts.ts": "7cf9ae6a05db4d80888f91b87edc17af45628dec"
-      }
-    },
-    "41532bae09b59ca1": {
-      "reviewed_by": "claude-opus-5-5-reviewer",
-      "attester_class": "agent",
-      "checked": "npm run build green; vitest tests/remediate plus shared prompt/loop-core/schema suites: 1272 passed 0 failed 4 skipped. Exit proven with a temporary probe test (since deleted): with repair_rounds=8 and the judge blocked, writing a revised plan to the submission file alone is ingested as a new revision, re-asks the owner decision, re-runs critique/critic/judge, and an all-approved revision is approved with the count reset to 0; a revision that is rejected again blocks at once with the new list (count stays 8), which matches the message (revise again or cancel). The cancel lifecycle action exists (src/remediate/state/store.ts). The judge list is the current judge's accepted ids mapped to the merged counterexample entries, bounded by the judge's classifications. The spec text (residual risk accepted by the operator, otherwise a revised plan or cancel) matches the code; no stale 'resolve' wording remains in src/tests/spec/docs.",
-      "verdict": "clear",
-      "override": null,
-      "attested_at": "2026-10-01T23:56:44.712Z",
-      "vouches": {
-        "src/remediate/steps/contractPipeline.ts": "b1a421ab31cf7e041dafdcced579464ad960818e"
-      }
-    },
     "7ecf68a7852f3ff3": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -185,6 +162,27 @@
       "vouches": {
         "src/audit/cli/confirmIntentStep.ts": "ec923feff37e5e9172165d761e8b789df33fc06d",
         "src/audit/cli/dispatch/hostHandoff.ts": "b474391d6c10d698dd290b85e0c3275dc4ca460a"
+      }
+    },
+    "8aa0d48e64560f2e": {
+      "reviewed_by": "claude-sonnet-5-5-charter-subagent",
+      "attester_class": "agent",
+      "checked": "independent opus review APPROVE-WITH-NITS of M8/M1/M5; N1 fold-level handoff test added and red-proven; full npm test green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "42ba345bf7c7a3bbf98c6210cf1655344e1c4d68",
+        "ran_at": "2026-10-04T07:24:22.753Z"
+      },
+      "attested_at": "2026-10-04T07:25:29.364Z",
+      "vouches": {
+        "src/audit/cli/charterExtractionPrompt.ts": "bddfb689e6db800fd60621d6261d7e7b9f2c31ae",
+        "src/audit/cli/laneValidators.ts": "ae95cb4b59c2c2a088c171141db2d6b4ffcf187a",
+        "src/audit/cli/nextStepHelpers.ts": "da14abb01825217ff2b8b065c556832ccf9b1833",
+        "src/remediate/steps/contractPipeline.ts": "8435f8fba5321c12f1293e66d8844e81a1492faa",
+        "src/remediate/steps/nextStep.ts": "2ec1717bec6877db9d256c14afc5673336486dd3",
+        "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
       }
     },
     "9bc59db653647a3a": {
@@ -238,7 +236,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/charterExtractionPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/charterFidelityPrompt.ts": {
       "baseline": "7b79934e86baf378"
@@ -265,13 +263,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/laneValidators.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
       "review": "c468455c3d100370"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "c468455c3d100370"
+      "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -589,7 +587,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "41532bae09b59ca1"
+      "review": "8aa0d48e64560f2e"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -613,10 +611,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "fdc48ab94651c535"
+      "review": "8aa0d48e64560f2e"
     },
     "src/remediate/steps/prompts.ts": {
-      "review": "26cc5e6e718671c5"
+      "review": "8aa0d48e64560f2e"
     },
     "src/remediate/steps/recoverIngest.ts": {
       "baseline": "7b79934e86baf378"

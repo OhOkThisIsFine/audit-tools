@@ -210,7 +210,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "renderCharterKindLanePrompt",
     file: "src/audit/cli/charterExtractionPrompt.ts",
     disposition: "derived",
-    schema: { name: "charterLaneSchema", file: "src/audit/cli/laneValidators.ts", object: charterLaneSchema(new Set()) },
+    schema: { name: "charterLaneSchema", file: "src/audit/cli/laneValidators.ts", object: charterLaneSchema(new Set(), "stated") },
     render: () => renderCharterKindLanePrompt({ kind: "stated", submissionPath: "registry-fixture/submission.json", packetPath: "registry-fixture/packet.json" }),
   },
   {

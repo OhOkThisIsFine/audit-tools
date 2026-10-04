@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-run-lifecycle.test.ts
 import { access, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -342,6 +343,12 @@ interface ReviewPauseParams {
   obligationId: string | null;
   selfCliPath?: string;
   timeoutMs?: number;
+  /**
+   * The step kind the host is being handed INSTEAD of a semantic-review step —
+   * set when the pause only opens the scoped-inspection run beside it (a charter
+   * or design-review step). The handoff then names that step, not a semantic-review pause.
+   */
+  emittedStepKind?: string;
 }
 
 interface ReviewPause {
@@ -414,14 +421,15 @@ function buildReviewPause(
   params: ReviewPauseParams,
   activeReviewRun: ActiveReviewRun,
 ): ReviewPause & { blocker: string } {
-  const blocker = buildManualReviewBlocker();
+  const blocker = buildManualReviewBlocker(params.emittedStepKind);
   const blockedState =
     params.bundle.audit_state?.status === "blocked"
       ? params.bundle.audit_state
       : buildBlockedAuditState({
           state: params.state,
           obligationId: params.obligationId,
-          executor: "semantic_review_executor",
+          executor:
+            params.emittedStepKind === undefined ? "semantic_review_executor" : null,
           blocker,
         });
   return {

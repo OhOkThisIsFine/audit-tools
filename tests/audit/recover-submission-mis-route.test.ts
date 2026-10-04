@@ -87,6 +87,7 @@ async function fixture(deliver: string[] | undefined): Promise<string> {
 async function payload(dir: string, refs: string[]): Promise<string> {
   const path = join(dir, "payload.json");
   await emitAndWriteReviewFixture(dir, "charter_extraction_stated", {
+      inputs: ["charter-extraction-stated-packet.md"],
       nodes: [
         {
           node_id: "top",

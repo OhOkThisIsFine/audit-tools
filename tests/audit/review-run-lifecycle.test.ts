@@ -365,6 +365,27 @@ test("ensureSemanticReviewRunUnlocked creates a blocked host-review handoff for 
   });
 });
 
+test("ensureSemanticReviewRunUnlocked names the emitted step in the handoff when a charter step is current", async () => {
+  await withTempArtifacts(async ({ artifactsDir, root }) => {
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "index.ts"), "export const value = 1;\n");
+    await ensureSemanticReviewRunUnlocked({
+      root,
+      artifactsDir,
+      bundle: {
+        audit_state: minimalState("active"),
+        audit_tasks: [auditTask("task-1", ["src/index.ts"])],
+      },
+      state: minimalState("active"),
+      obligationId: "audit_tasks_completed",
+      emittedStepKind: "charter_extraction",
+    });
+    const handoff = await readHandoff(artifactsDir);
+    expect(handoff.summary).toContain("charter_extraction");
+    expect(handoff.summary).not.toMatch(/^Semantic-review work is ready/u);
+  });
+});
+
 test("ensureSemanticReviewRunUnlocked derives ONE run id while a wave is open, whatever the pending set is", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
     const pending = [auditTask("task-1", ["src/index.ts"])];

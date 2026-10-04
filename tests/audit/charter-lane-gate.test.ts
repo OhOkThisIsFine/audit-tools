@@ -37,7 +37,8 @@ function node(over: Record<string, unknown> = {}): Record<string, unknown> {
 
 describe("charterLaneSchema — the lane submission carries no `kind`", () => {
   it("accepts a submission with nodes and edges only", () => {
-    const parsed = charterLaneSchema(repoFiles).safeParse({
+    const parsed = charterLaneSchema(repoFiles, "stated").safeParse({
+      inputs: ["charter-extraction-stated-packet.md"],
       nodes: [node(), node({ node_id: "leaf" })],
       edges: [
         {
@@ -59,7 +60,8 @@ describe("charterLaneSchema — the lane submission carries no `kind`", () => {
     // Strict, so the retired field is refused LOUDLY rather than ignored. A
     // silently accepted `kind` would leave two answers to "which lane is this",
     // and the tool's answer is the bound path.
-    const parsed = charterLaneSchema(repoFiles).safeParse({
+    const parsed = charterLaneSchema(repoFiles, "stated").safeParse({
+      inputs: ["charter-extraction-stated-packet.md"],
       kind: "stated",
       nodes: [node()],
     });
@@ -73,7 +75,8 @@ describe("charterLaneSchema — the lane submission carries no `kind`", () => {
     // The scope-grounding refinement is the one rule that survived the `kind`
     // removal. Without this the first test could pass against a schema whose
     // superRefine was dropped with the parameter it used to take.
-    const parsed = charterLaneSchema(repoFiles).safeParse({
+    const parsed = charterLaneSchema(repoFiles, "stated").safeParse({
+      inputs: ["charter-extraction-stated-packet.md"],
       nodes: [node({ files: ["src/a.ts", "src/gone.ts"] })],
     });
     expect(parsed.success).toBe(false);
@@ -86,7 +89,8 @@ describe("charterLaneSchema — the lane submission carries no `kind`", () => {
 
 describe("charterLaneSchema — a span citation must carry its quote", () => {
   function issuesFor(provenance: Record<string, unknown>[]): string {
-    const parsed = charterLaneSchema(repoFiles).safeParse({
+    const parsed = charterLaneSchema(repoFiles, "stated").safeParse({
+      inputs: ["charter-extraction-stated-packet.md"],
       nodes: [node({ provenance })],
     });
     return parsed.success ? "" : parsed.error.issues.map((i) => i.message).join("; ");
@@ -135,7 +139,8 @@ describe("charterLaneSchema — a span citation must carry its quote", () => {
   it("checks EDGE provenance too, not nodes alone", () => {
     // An edge carries the same provenance array and the same claim. Checking
     // nodes only would leave half the citations in a submission unchecked.
-    const parsed = charterLaneSchema(repoFiles).safeParse({
+    const parsed = charterLaneSchema(repoFiles, "stated").safeParse({
+      inputs: ["charter-extraction-stated-packet.md"],
       nodes: [node()],
       edges: [
         {

@@ -32,7 +32,7 @@ function blockedItems(state: RemediationState): RemediationItemState[] {
 
 /**
  * The resolution-entry rules: an example entry, the three actions as a table,
- * the `scope_additions` rule, and the whole-file refusal. They state exactly
+ * the write-scope rule, and the whole-file refusal. They state exactly
  * what the one resolution parser (`readPlanClarificationResolutions`,
  * nextStep.ts) accepts.
  */
@@ -60,16 +60,13 @@ three actions:
 | \`reject_finding\` | The finding itself is not a real issue. | The finding is DROPPED. Never use it to say only that the question was not ambiguous. |
 | \`defer\` | The user chose to skip this finding in this run. | The finding is not fixed in this run. Only the user decides a deferral. |
 
-A \`clarified\` entry can also have \`scope_additions\`: a list of files the
-answer needs the fix to touch, each relative to the repository root. Each path must already be in the unit's reviewed \`allowed_files\`; the
-entry does not widen the write scope. Any other path, including a test the
-answer would add, is refused: new write scope needs a revised plan and a fresh review. Do not put
-\`scope_additions\` on a \`reject_finding\` or \`defer\` entry. Never edit the
-plan's \`touched_files\` by hand.
+An answer cannot widen a unit's write scope: a fix that needs a file outside
+the unit's reviewed \`allowed_files\` needs a revised plan and a fresh review.
+Never edit the plan's \`touched_files\` by hand.
 
 The tool refuses the WHOLE file when any entry is wrong: an unknown action, a
-missing or empty \`rationale\` on \`clarified\`, a \`scope_additions\` path that
-breaks the rule above, a duplicate \`unit_id\`, or an id outside the set below.
+missing or empty \`rationale\` on \`clarified\`, a duplicate \`unit_id\`, or an
+id outside the set below.
 The refusal names the entry and the field. Nothing is applied, and this step
 comes back.`;
 }

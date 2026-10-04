@@ -28,6 +28,7 @@ import {
   SystemicChallengeSubmissionSchema,
   isRecord,
   systemicChallengeSchema,
+  type CharterKind,
   type CharterProvenance,
   type SubmissionIssue,
 } from "audit-tools/shared";
@@ -37,6 +38,7 @@ import {
   CONCEPTUAL_PERSPECTIVE_LANE_PREFIX,
   SYSTEMIC_CHALLENGE_LANE_PREFIX,
   GATE_LANES,
+  charterExtractionPacketFilename,
   charterKindForLane,
 } from "./laneSubmissions.js";
 
@@ -94,17 +96,36 @@ export function unwrapSubmissionArray(
  * rather than ignoring it: two answers to "which lane is this" is worse than
  * one refusal, and the tool's answer is the bound path.
  *
- * It took the lane's `kind` as a parameter for that one check, and takes none
- * now: every extraction lane answers to the identical contract, and WHICH lane
- * a submission is, is the bound path it arrived on. The caller still resolves
- * the kind, to decide that this is a charter lane at all.
+ * The lane's `kind` is a parameter again, for a different check: the `inputs`
+ * declaration must name exactly THIS lane's evidence packet (by file name, so a
+ * relative, absolute or backslashed spelling all pass) and nothing else. A
+ * charter step also carries a scoped-inspection workload; a declaration naming
+ * it, or another lane's packet, is a blind lane that read what it must not.
+ * The kind is the one the caller recovered from the bound path, never one the
+ * submission states.
  *
  * `repoFiles` is the manifest's path set. It is a parameter rather than a
  * capture so the gate and the recovery verb apply the identical refinement
  * against the identical universe.
  */
-export function charterLaneSchema(repoFiles: ReadonlySet<string>): ZodTypeAny {
+export function charterLaneSchema(
+  repoFiles: ReadonlySet<string>,
+  kind: CharterKind,
+): ZodTypeAny {
+  const ownPacket = charterExtractionPacketFilename(kind);
   return CharterLaneSubmissionSchema.superRefine((submission, ctx) => {
+    submission.inputs.forEach((input, ii) => {
+      const name = input.split(/[/\\]/u).pop();
+      if (name !== ownPacket) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["inputs", ii],
+          message:
+            `inputs declares "${input}" — a blind ${kind} lane reads ONLY its own evidence packet ` +
+            `(${ownPacket}); never the scoped-inspection workload or another lane's material`,
+        });
+      }
+    });
     submission.nodes.forEach((node, ni) => {
       const unknownFiles = (node.files ?? []).filter((f) => !repoFiles.has(f));
       if (unknownFiles.length > 0) {
@@ -242,7 +263,7 @@ export function laneSubmissionValidator(
   // The kind decides only that this IS an extraction lane; every extraction
   // lane answers to the identical contract.
   if (charterKindForLane(lane)) {
-    const laneSchema = charterLaneSchema(context.repoFiles);
+    const laneSchema = charterLaneSchema(context.repoFiles, charterKindForLane(lane)!);
     return (value) => schemaIssue(laneSchema, value);
   }
 

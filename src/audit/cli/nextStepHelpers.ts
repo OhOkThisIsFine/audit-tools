@@ -2033,7 +2033,7 @@ export async function handleCharterExtractionBranch(
       );
       continue;
     }
-    const parsed = charterLaneSchema(universe).safeParse(incoming.value);
+    const parsed = charterLaneSchema(universe, kind).safeParse(incoming.value);
     if (parsed.success) {
       laneValues.set(kind, { value: parsed.data as CharterLaneSubmission, path: incoming.path });
     } else {
@@ -2059,7 +2059,11 @@ export async function handleCharterExtractionBranch(
     // "which lane is this", and asking the lane to restate it only ever let the
     // lane check itself (owner review of prompt 8, 2026-09-17).
     const merged: CharterExtractionMerged = {
-      lanes: kinds.map((kind) => ({ kind, ...laneValues.get(kind)!.value })),
+      // `inputs` was checked at the gate; the merged lane carries the DAG only.
+      lanes: kinds.map((kind) => {
+        const { inputs: _declared, ...dag } = laneValues.get(kind)!.value;
+        return { kind, ...dag };
+      }),
     };
     // The merged submission is TOOL-written, so it lives with the other lane
     // assets rather than under `submissions/` (which holds only what a host
@@ -3609,6 +3613,7 @@ async function runDeterministicFold(
             bundle: engineOutcome.state,
             state: deriveAuditState(engineOutcome.state, { emitStaleness: false }),
             obligationId: "audit_tasks_completed",
+            emittedStepKind: engineOutcome.step.kind,
           });
           engineOutcome.step = { ...engineOutcome.step, inspectionRun: inspection.activeReviewRun };
         }

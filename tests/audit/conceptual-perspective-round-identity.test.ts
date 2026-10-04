@@ -227,7 +227,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       // stamps it at merge, from the lane-bound path the file arrived on (owner
       // review of prompt 8, 2026-09-17). So every lane writes the same shape.
       for (const kind of ["stated", "structural", "revealed"] as const) {
-        await writeBoundReviewFixture(dir, charterExtractionLane(kind), { nodes: [], edges: [] });
+        await writeBoundReviewFixture(dir, charterExtractionLane(kind), { inputs: [`charter-extraction-${kind}-packet.md`], nodes: [], edges: [] });
       }
       await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
       Object.assign(

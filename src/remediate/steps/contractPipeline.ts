@@ -1,10 +1,9 @@
 // sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
-import { hashContent, stableStringify, readOptionalJsonFile, writeJsonFile, repoRelativePath, toPosixPath, FindingSchema, AuditReadSchema } from "audit-tools/shared";
+import { hashContent, stableStringify, readOptionalJsonFile, writeJsonFile, FindingSchema, AuditReadSchema } from "audit-tools/shared";
 import { bindWorkerPrompt } from "../../shared/submission/workerPromptBinding.js";
 import { parseReviewSubmissionEnvelope, reviewIndependenceIssue } from "../../shared/types/reviewIndependence.js";
 import { readIntakeRiskSignal, adversarialDepthForTier, escalateRiskSignal, writeIntakeRiskSignal, decompositionRiskEvidence } from "../riskSignal.js";
@@ -263,23 +262,3 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
   return null;
 }
 
-export interface BlockWriteScopeNormalization { touched_files: string[]; refusals: string[] }
-export function normalizeBlockTouchedFiles(root: string, files: readonly string[], id: string): BlockWriteScopeNormalization {
-  const normalized = new Set<string>(), refusals: string[] = [];
-  for (const path of files) {
-    try { const relative = repoRelativePath(root, isAbsolute(toPosixPath(path)) ? toPosixPath(path) : resolve(root, toPosixPath(path)), `Unit ${id} write scope`); normalized.add(/[\\/]$/u.test(path) ? `${relative}/` : relative); }
-    catch { refusals.push(`Unit ${id} write scope ${path} must remain beneath ${root}.`); }
-  }
-  return { touched_files: [...normalized].sort(), refusals };
-}
-export async function checkWriteScopePathsAgainstTrackedTree(root: string, paths: readonly string[], label: string): Promise<string[]> {
-  const issues: string[] = [];
-  for (const path of paths) {
-    try {
-      const relative = repoRelativePath(root, path, label);
-      const target = resolve(root, relative);
-      if (!existsSync(target) && !(await stat(dirname(target))).isDirectory()) issues.push(`${label}: parent directory for ${path} does not exist.`);
-    } catch { issues.push(`${label}: invalid/unavailable write path ${path}.`); }
-  }
-  return issues;
-}

@@ -9,7 +9,7 @@ import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { charterExtractionKindsForCeiling } from "../../src/audit/cli/charterExtractionPrompt.js";
-import { GATE_LANES, charterExtractionLane } from "../../src/audit/cli/laneSubmissions.js";
+import { GATE_LANES, charterExtractionLane, charterExtractionPacketFilename } from "../../src/audit/cli/laneSubmissions.js";
 import { handleCharterExtractionBranch, handleCharterComparisonBranch, handleCharterFidelityBranch } from "../../src/audit/cli/nextStepHelpers.js";
 import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { withArtifactTreeHold } from "../../src/shared/io/artifactTreeHold.js";
@@ -121,7 +121,7 @@ for (const kind of ["extraction", "comparison", "fidelity"] as const) {
         expect(step.step_kind).toBe(`charter_${kind}`);
         if (kind === "extraction") {
           for (const laneKind of charterExtractionKindsForCeiling({ rung: "deep" })) {
-            await writeBoundReviewFixture(artifactsDir, charterExtractionLane(laneKind), { nodes: [], edges: [] });
+            await writeBoundReviewFixture(artifactsDir, charterExtractionLane(laneKind), { inputs: [charterExtractionPacketFilename(laneKind)], nodes: [], edges: [] });
           }
         } else if (kind === "comparison") {
           await writeBoundReviewFixture(artifactsDir, GATE_LANES.charter_comparison, {

@@ -132,7 +132,7 @@ describe("the clarification round reads its questions from the paused items", ()
     expect(prompt).toContain("entry [0] `action`");
   });
 
-  it("refuses a clarified entry with no rationale, and scope_additions on a defer", async () => {
+  it("refuses a clarified entry with no rationale, and names no scope_additions problem", async () => {
     await start();
     const { state, prompt } = await submit([
       { unit_id: "F1", action: "clarified", rationale: "   " },
@@ -141,7 +141,8 @@ describe("the clarification round reads its questions from the paused items", ()
     expect(state.items.F1.status).toBe("needs_clarification");
     expect(state.items.F2.status).toBe("needs_clarification");
     expect(prompt).toContain("entry [0] `rationale`");
-    expect(prompt).toContain("entry [1] `scope_additions`");
+    // Accepted and ignored (step one of its removal): never a refusal reason.
+    expect(prompt).not.toContain("scope_additions");
   });
 
   it("refuses the old object wrapper and a duplicate unit_id", async () => {
@@ -232,9 +233,9 @@ describe("the 16a prompt text", () => {
     "/run/clarification_resolution.json",
   ).replace(/[ \t]*\n(?![|\n])/g, " ");
 
-  it("uses the first real id in its example and leaves scope_additions out of it", () => {
+  it("uses the first real id in its example and never asks for scope_additions", () => {
     expect(prompt).toContain('"unit_id": "F-007"');
-    expect(prompt).not.toMatch(/"scope_additions":/);
+    expect(prompt).not.toContain("scope_additions");
     expect(prompt).not.toContain('"unit_id": "..."');
   });
 
@@ -242,9 +243,9 @@ describe("the 16a prompt text", () => {
     expect(prompt).toContain("| `clarified` |");
     expect(prompt).toContain("| `reject_finding` |");
     expect(prompt).toContain("| `defer` |");
-    // The scope rule states what validation enforces: an addition must already be granted.
-    expect(prompt).toContain("Each path must already be in the unit's reviewed `allowed_files`");
-    expect(prompt).toContain("new write scope needs a revised plan and a fresh review");
+    // The scope rule: an answer never widens a unit's write scope.
+    expect(prompt).toContain("An answer cannot widen a unit's write scope");
+    expect(prompt).toContain("needs a revised plan and a fresh review");
     expect(prompt).not.toMatch(/adds to the fix's write scope|a test the fix must create|may name a new file/);
     expect(prompt).toContain("`F-007`, `F-009`");
     expect(prompt).toContain("A finding with no entry stays paused");

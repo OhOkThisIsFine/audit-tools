@@ -118,8 +118,6 @@ import {
   buildNextContractPipelineStep,
   readApprovedExecutionPlan,
   writePathASeedFromFindings,
-  normalizeBlockTouchedFiles,
-  checkWriteScopePathsAgainstTrackedTree,
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
 import { executionPlanPaths, readCanonicalPlan, readPlanSource, readPlanReviewHistory } from "../contractPipeline/executionPlan.js";
@@ -1018,7 +1016,10 @@ async function activateApprovedPlan(
   plan = await applyCheckpointIntentOrdering(artifactsDir, plan);
   if (!existing.run_start_dirty) existing = { ...existing, run_start_dirty: [...await stagedAndUntracked(root)].sort() };
   const filter = await readOptionalJsonFile<PersistedReviewFilterDispositions>(reviewFilterDispositionsPath(artifactsDir));
-  const decision = await readOptionalJsonFile<ReviewDecisionRecord>(reviewDecisionPath(artifactsDir));
+  // Through the schema-checked reader: with zero survivors the review gate never
+  // rewrites a stale-schema record, so a raw read let its declines into the
+  // ledger as declined-by-review although the current run never decided them.
+  const decision = await readReviewDecision(artifactsDir);
   const coverage = buildCoverageLedger({
     planId: plan.plan_id, sourceFindings: filter?.originals ?? source.findings,
     droppedNoEvidence: filter?.droppedNoEvidence ?? [], droppedByCheckpoint: filter?.droppedByCheckpoint ?? [],
@@ -1743,15 +1744,11 @@ const PLAN_CLARIFICATION_ACTIONS = ["clarified", "reject_finding", "defer"] as c
  * - `rationale` is REQUIRED and non-empty on `clarified`: it becomes the item's
  *   `clarification_context`, the answer the next worker reads. A `clarified`
  *   entry without it re-opened the item with no answer attached.
- * - `scope_additions` lists the files the answer requires the fix to touch. Each
- *   must already be in the owning unit's reviewed `allowed_files`; a path outside
- *   it is refused, because new write scope needs a revised, freshly reviewed plan.
- *   Accepted entries never rewrite the plan, so its approved revision holds. It is allowed
- *   ONLY on `clarified`, the one action that re-opens the item; on
- *   `reject_finding` or `defer` it used to be ignored without a word. Each path
- *   is validated whole-file fail-closed BEFORE anything is applied
- *   (`validateClarificationScopeAdditions`), so the host never edits the plan
- *   by hand.
+ * - `scope_additions` is ACCEPTED AND IGNORED, step one of its removal (owner
+ *   decision 2026-10-01). It never had an effect: new write scope needs a
+ *   revised, freshly reviewed plan, so no path could widen a unit. The prompt no
+ *   longer asks for it; the schema still accepts it so a host on an older prompt
+ *   is not refused mid-run. Step two deletes it once a release carries this.
  */
 const PlanClarificationResolutionSchema = z
   .object({
@@ -1768,13 +1765,6 @@ const PlanClarificationResolutionSchema = z
         path: ["rationale"],
         message:
           'is required and must be non-empty when action is "clarified" — it carries the answer to the next worker',
-      });
-    }
-    if (entry.action !== "clarified" && entry.scope_additions !== undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["scope_additions"],
-        message: `is allowed only with action "clarified" — a ${entry.action} entry widens no write scope`,
       });
     }
   });
@@ -1845,16 +1835,13 @@ async function readPlanClarificationResolutions(
 
 /**
  * Every whole-file refusal of a parsed resolution, in check order: the parse,
- * then the closed id set, then the scope additions. Null means the file may be
- * applied.
+ * then the closed id set. Null means the file may be applied.
  */
-async function planClarificationRefusal(
-  root: string,
-  state: RemediationState,
+function planClarificationRefusal(
   parsed: ParsedPlanClarifications,
   validIds: ReadonlySet<string>,
   outsideSetLabel: string,
-): Promise<string | null> {
+): string | null {
   if (!parsed.ok) return parsed.reason;
   const unknownIds = parsed.resolutions
     .map((r) => r.unit_id)
@@ -1862,50 +1849,7 @@ async function planClarificationRefusal(
   if (unknownIds.length > 0) {
     return `finding id(s) ${outsideSetLabel}: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`;
   }
-  const scopeRefusals = await validateClarificationScopeAdditions(root, state, parsed.resolutions);
-  if (scopeRefusals.length > 0) {
-    return `invalid scope_additions — fix and re-submit: ${scopeRefusals.join(" | ")}`;
-  }
   return null;
-}
-
-/**
- * Validate every `clarified` resolution's `scope_additions` BEFORE anything is
- * applied: each entry must normalize beneath the repository root against the
- * finding's owning block (the one write-scope normalizer), must clear the SAME
- * tracked-tree rule the promotion gate enforced (the delta lane must not
- * bypass it), and a finding with no owning block has no scope to widen. ANY
- * refusal refuses the WHOLE resolution file — the uniform id-join contract's
- * shape: a half-applied decision record is worse than a re-ask.
- */
-async function validateClarificationScopeAdditions(
-  root: string,
-  state: RemediationState,
-  resolutions: readonly PlanClarificationResolution[],
-): Promise<string[]> {
-  const refusals: string[] = [];
-  for (const res of resolutions) {
-    if (res.action !== "clarified" || !res.scope_additions?.length) continue;
-    const block = state.plan?.units?.find((b) => b.id === res.unit_id);
-    if (!block) {
-      refusals.push(
-        `scope_additions for \`${res.unit_id}\`: no plan block owns this finding, so ` +
-          `there is no write scope to widen.`,
-      );
-      continue;
-    }
-    const normalized = normalizeBlockTouchedFiles(root, res.scope_additions, block.id);
-    if (normalized.touched_files.some(path => !block.allowed_files.includes(path))) refusals.push(`Unit ${block.id} needs a revised executable plan and fresh review before its write scope can expand.`);
-    refusals.push(...normalized.refusals);
-    refusals.push(
-      ...(await checkWriteScopePathsAgainstTrackedTree(
-        root,
-        normalized.touched_files,
-        `scope_additions for \`${res.unit_id}\` (block "${block.id}")`,
-      )),
-    );
-  }
-  return refusals;
 }
 
 /**
@@ -1954,15 +1898,12 @@ async function applyPlanClarificationResolution(
   if (!state.plan || !state.items) return { kind: "applied", state };
   const resolutionPath = join(artifactsDir, "clarification_resolution.json");
   const parsed = await readPlanClarificationResolutions(resolutionPath);
-  // Uniform whole-file fail-closed contract: a malformed entry, an id outside
-  // the paused set, or an invalid scope addition refuses the WHOLE resolution
-  // (archived, nothing applied) and re-halts with the reason named. The
-  // silent-continue alternative drops the user's answer and leaves its item
-  // waiting on a question nobody is asked, so a decision record never
-  // half-applies (open-bugs.md:110).
-  const refusal = await planClarificationRefusal(
-    root,
-    state,
+  // Uniform whole-file fail-closed contract: a malformed entry or an id outside
+  // the paused set refuses the WHOLE resolution (archived, nothing applied) and
+  // re-halts with the reason named. The silent-continue alternative drops the
+  // user's answer and leaves its item waiting on a question nobody is asked, so
+  // a decision record never half-applies.
+  const refusal = planClarificationRefusal(
     parsed,
     new Set(pausedClarifications(state).map((q) => q.unit_id)),
     "not waiting for a clarification",
@@ -1987,8 +1928,7 @@ async function applyPlanClarificationResolution(
   for (const res of resolutions) {
     const item = state.items[res.unit_id];
     if (!item || isTerminalStatus(item.status)) continue;
-    // Validation admits only paths already in the reviewed unit's allowed_files, so an
-    // accepted scope_additions entry changes nothing: the reviewed plan is never rewritten
+    // A `scope_additions` value is ignored: the reviewed plan is never rewritten
     // here, and its revision (which hashes author order) stays the approved one.
     applyClarificationActionToItem(item, res, now);
     appliedCount += 1;

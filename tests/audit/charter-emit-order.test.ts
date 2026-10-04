@@ -172,6 +172,7 @@ test("the merge stamps each lane with the kind of the PATH it arrived on", async
     for (const [i, path] of writePaths.entries()) {
       await mkdir(dirname(path), { recursive: true });
       await writeBoundReviewFixture(artifactsDir, charterExtractionLane(kinds[i]!), {
+          inputs: [charterExtractionPacketFilename(kinds[i]!)],
           nodes: [
             {
               node_id: `authored-by-${kinds[i]}`,

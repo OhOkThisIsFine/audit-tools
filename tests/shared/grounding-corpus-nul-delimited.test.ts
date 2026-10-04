@@ -20,7 +20,6 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enumerateTrackedFilePaths } from "../../src/shared/validation/findingGrounding.js";
-import { checkWriteScopePathsAgainstTrackedTree } from "../../src/remediate/steps/contractPipeline.js";
 
 const UNICODE_PATH = "src/café-ünïcode.ts";
 const ASCII_PATH = "src/plain.ts";
@@ -64,9 +63,3 @@ test("enumerateTrackedFilePaths keeps a non-ASCII tracked path verbatim (NUL-del
   });
 });
 
-test("reviewed write-scope validation accepts the same real non-ASCII path", async () => {
-  await withUnicodeRepo(async dir => {
-    expect(await checkWriteScopePathsAgainstTrackedTree(dir, [ASCII_PATH, UNICODE_PATH], "fixture")).toEqual([]);
-    expect(await checkWriteScopePathsAgainstTrackedTree(dir, ["../outside.ts"], "fixture")).not.toEqual([]);
-  });
-});
