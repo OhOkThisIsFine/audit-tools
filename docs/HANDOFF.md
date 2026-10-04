@@ -24,8 +24,8 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the commit refusal of a session started outside the repo and the worktree reaper's unseen agents,
-tracked in [`open-bugs.md`](backlog/open-bugs.md).
+Next: the worktree reaper's unseen agents, tracked in [`open-bugs.md`](backlog/open-bugs.md), then
+the rest of the bug backlog before a dogfooding audit (lap of 2026-10-03).
 A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
 after the final stage. Release publication remains a separately authorized action.
 **Live owner decision:** none.

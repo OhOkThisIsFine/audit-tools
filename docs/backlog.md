@@ -24,27 +24,26 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 127 entr(y/ies) indexed.
+> and at commit). 120 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — A loop-core change can reach `main` without an attestation (2026-10-01, medium).
-- `open-bugs.md:10` — A Claude session started outside the repo is refused as a CHILD at commit (2026-10-01, medium, friction: tool_should_decide).
-- `open-bugs.md:11` — The session-start worktree reaper sees only agent-dispatch worker sessions that are running (2026-10-02, medium, friction: tool_should_decide).
-- `open-bugs.md:20` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
-- `open-bugs.md:34` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:44` — Loop-core discovery retains a mixed-consumer limit.
-- `open-bugs.md:48` — Divergent attestation preflight can abstain.
-- `open-bugs.md:54` — Derived staleness sets retain their accessor contract.
-- `open-bugs.md:60` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:68` — A comprehensive remaining test-replica sweep is unverified.
-- `open-bugs.md:71` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
-- `open-bugs.md:99` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
-- `open-bugs.md:115` — External release and review lanes retain environment-dependent limits.
-- `open-bugs.md:118` — Machine-wide green queries and external lane behavior remain externally owned.
-- `open-bugs.md:122` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:141` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:147` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:10` — The session-start worktree reaper sees only agent-dispatch worker sessions that are running (2026-10-02, medium, friction: tool_should_decide).
+- `open-bugs.md:19` — CI orchestration shards time out at 300s with the spawned `audit-code next-step` still alive, on a DIFFERENT test each time (2026-09-04, high, friction: tool_should_decide).
+- `open-bugs.md:33` — Nothing checks a code comment against the code it describes (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:43` — Loop-core discovery retains a mixed-consumer limit.
+- `open-bugs.md:47` — Divergent attestation preflight can abstain.
+- `open-bugs.md:53` — Derived staleness sets retain their accessor contract.
+- `open-bugs.md:59` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:67` — A comprehensive remaining test-replica sweep is unverified.
+- `open-bugs.md:70` — Vitest worker RPC starvation — the false-RED exit is CLOSED at the gate; the >60s blocking worker is unlocated (recharacterized 2026-08-07; was "full-suite exits 1 while every test passes", 2026-08-06).
+- `open-bugs.md:98` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
+- `open-bugs.md:114` — External release and review lanes retain environment-dependent limits.
+- `open-bugs.md:117` — Machine-wide green queries and external lane behavior remain externally owned.
+- `open-bugs.md:121` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
+- `open-bugs.md:140` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:146` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -53,21 +52,15 @@
 - `minor-bugs.md:16` — The background-status rule refuses a SAVED status passed through (2026-10-02, low).
 - `minor-bugs.md:17` — The repo-lane rule misses a worktree spelled `/cygdrive/c/...`, `/mnt/c/...` or `~` (2026-10-02, low).
 - `minor-bugs.md:18` — The remediate clarification answer's `scope_additions` field has no effect (2026-10-01, low).
-- `minor-bugs.md:19` — No command runs the commit gate's legs for the staged set without committing (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:20` — The barrel-spy recognizer misses a relative barrel import (2026-10-01, low).
-- `minor-bugs.md:21` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
-- `minor-bugs.md:22` — `CLAUDE.md` drifted from #14 (2026-10-01, low).
-- `minor-bugs.md:23` — Session gates read the main checkout while an app-made-worktree lap records its state in the worktree (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:24` — A memory note can red an unrelated commit (2026-10-01, low).
-- `minor-bugs.md:25` — `answer.mjs --done` leaves the nightly inbox stale (2026-10-01, low, friction: tool_should_decide).
-- `minor-bugs.md:26` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:44` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:58` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:79` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:90` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:108` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:113` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:115` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:19` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
+- `minor-bugs.md:20` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
+- `minor-bugs.md:38` — CP-NODE-10 residuals (2026-08-19, low, one entry):
+- `minor-bugs.md:52` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:73` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:84` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
+- `minor-bugs.md:102` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:107` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
+- `minor-bugs.md:109` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -144,32 +137,32 @@
 - `durable-traps.md:597` — Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.
 - `durable-traps.md:608` — A backlog entry's bold title must not contain `
 - `durable-traps.md:613` — Child sessions in the shared checkout — session-registry split (2026-08-18, mechanized; supersedes the 2026-08-07/09 kill-switch advice).
-- `durable-traps.md:644` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.
-- `durable-traps.md:653` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
-- `durable-traps.md:660` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
-- `durable-traps.md:674` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
-- `durable-traps.md:685` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
-- `durable-traps.md:694` — An external-delegation directive and the Workflow tool are in tension — Workflow has no external lane (2026-08-27; reworded 2026-09-22 for the switch/agent-dispatch lap <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->).
-- `durable-traps.md:705` — agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run (2026-08-27).
-- `durable-traps.md:713` — An execution override can be accepted without affecting the launched command.
-- `durable-traps.md:718` — A reply that returns nothing usable can have exhausted its output budget.
-- `durable-traps.md:724` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
-- `durable-traps.md:735` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
-- `durable-traps.md:742` — The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).
-- `durable-traps.md:748` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
-- `durable-traps.md:764` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
-- `durable-traps.md:769` — A commit-carries-its-record-update gate has a covered mechanical half and an uncovered semantic half (measured 2026-08-18, closed covered-by-neighbors).
-- `durable-traps.md:783` — Never amend or rebase a landed wave commit after the remediation workload prepare (2026-08-19).
-- `durable-traps.md:791` — A subagent's Read tool can serve STALE pre-edit content for a file another agent is concurrently editing (2026-08-20).
-- `durable-traps.md:799` — A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the failure text tells you to bump the cache version (2026-08-24).
-- `durable-traps.md:807` — CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).
-- `durable-traps.md:809` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
-- `durable-traps.md:811` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
-- `durable-traps.md:823` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
-- `durable-traps.md:839` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
-- `durable-traps.md:856` — A successful process exit does not establish a usable review result.
-- `durable-traps.md:863` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
-- `durable-traps.md:874` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
+- `durable-traps.md:643` — A full-suite-only failure is classified by `runIsolatedDiagnostics` in `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.
+- `durable-traps.md:652` — An offload recon lane reading a file you are concurrently editing reports the POST-edit tree (2026-08-07).
+- `durable-traps.md:659` — Long offload recon jobs die mid-response; short ones do not (2026-08-07).
+- `durable-traps.md:673` — `.audit-tools/remediation-report.md` and `-outcomes.json` are TRACKED — archiving a finished run deletes them (2026-08-09).
+- `durable-traps.md:684` — A background lane piped through `tail`/`head` shows ZERO bytes until it exits (2026-08-09).
+- `durable-traps.md:693` — An external-delegation directive and the Workflow tool are in tension — Workflow has no external lane (2026-08-27; reworded 2026-09-22 for the switch/agent-dispatch lap <!-- retired-infrastructure-exempt: llm-relay — replaced by agent-dispatch -->).
+- `durable-traps.md:704` — agy lanes report no progress until they finish — `stdoutBytes` stays 0 for the whole run (2026-08-27).
+- `durable-traps.md:712` — An execution override can be accepted without affecting the launched command.
+- `durable-traps.md:717` — A reply that returns nothing usable can have exhausted its output budget.
+- `durable-traps.md:723` — `.gitignore`'s `>>> audit-tools managed ignores >>>` block is GENERATED — a rule added between its markers is silently wiped (2026-07-30).
+- `durable-traps.md:734` — The per-project memory store has NO locking, and a concurrent session silently reverts your edits (2026-08-09).
+- `durable-traps.md:741` — The `~/.claude/…/memory/MEMORY.md` index has no size gate, and the harness read limit is a hard cliff (2026-08-09).
+- `durable-traps.md:747` — An attestation binds to the staged tree, and a later gate-demanded regeneration used to void it (2026-08-09; ENFORCED at the attest scripts 2026-08-12, P19).
+- `durable-traps.md:763` — Git-bash `/tmp` and node's `C: mp` are different directories (hit 2026-08-18).
+- `durable-traps.md:768` — A commit-carries-its-record-update gate has a covered mechanical half and an uncovered semantic half (measured 2026-08-18, closed covered-by-neighbors).
+- `durable-traps.md:782` — Never amend or rebase a landed wave commit after the remediation workload prepare (2026-08-19).
+- `durable-traps.md:790` — A subagent's Read tool can serve STALE pre-edit content for a file another agent is concurrently editing (2026-08-20).
+- `durable-traps.md:798` — A COMMENT-only edit to a graph extractor reds the graph-edge cache digest pin, and the failure text tells you to bump the cache version (2026-08-24).
+- `durable-traps.md:806` — CBM graph tools can be absent while its daemon is healthy, and the fallback CLI can be cohort-locked (2026-08-26).
+- `durable-traps.md:808` — Philosophy-audit challenges already answered — do not re-propose without new evidence (2026-08-27).
+- `durable-traps.md:810` — A workflow killed mid-run by the monthly spend limit reports COMPLETED, and its partial results are recoverable by run id (2026-08-27).
+- `durable-traps.md:822` — A long quoted heredoc in the Bash tool can die with "unexpected EOF while looking for matching quote", and the reported line is the last line that arrived (2026-08-27).
+- `durable-traps.md:838` — Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not come back (2026-08-27).
+- `durable-traps.md:855` — A successful process exit does not establish a usable review result.
+- `durable-traps.md:862` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
+- `durable-traps.md:873` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
 
 <!-- END GENERATED SEEK INDEX -->
 

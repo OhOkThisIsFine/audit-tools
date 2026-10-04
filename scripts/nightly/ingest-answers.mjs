@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/nightly-routine.test.ts, tests/shared/nightly-completion-ledger.test.ts
 //
 // Read the owner's ticked boxes out of the tracked markdown inbox and record
 // them in the durable decisions ledger.
@@ -26,7 +27,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { recordDecision, readOpenItems, INBOX_RELPATH } from './items.mjs';
-import { MARKER_RE, CITATION_EXEMPT_RE, writeInbox } from './render-inbox.mjs';
+import { MARKER_RE, CITATION_EXEMPT_RE } from './render-inbox.mjs';
 import { guardArgv } from '../shared/argvGuard.mjs';
 
 const USAGE = 'node scripts/nightly/ingest-answers.mjs [--root <repo>] [--dry-run]';
@@ -130,9 +131,8 @@ export function ingestAnswers(root, { dryRun = false } = {}) {
     recorded.push({ key, id: item?.id ?? key, disposition: parsed.disposition, answer: parsed.answer });
   }
 
-  // Re-render so answered items drop out and the file reflects what is left. A
-  // 'question' disposition deliberately stays open, so it comes back.
-  if (!dryRun && recorded.length > 0) writeInbox(root);
+  // Each recordDecision re-renders the inbox, so answered items have dropped out
+  // and a 'question' disposition has come back open.
 
   return { recorded, errors, unanswered, missing: false };
 }

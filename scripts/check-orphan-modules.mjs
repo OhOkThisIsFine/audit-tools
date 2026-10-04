@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/orphan-modules-relative-import.test.ts
 // Orphan-module gate: every src/**/*.ts file must be REACHABLE from a
 // production root through literal import edges.
 //
@@ -53,7 +54,7 @@
 //
 //   node scripts/check-orphan-modules.mjs        # verify (exit 1 on orphans)
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -87,9 +88,16 @@ const PRODUCTION_ENTRIES = new Set([
 
 const norm = (/** @type {string} */ p) => p.replace(/\\/g, "/");
 
-function trackedFiles() {
-  const out = execFileSync("git", ["ls-files", "-z"], { cwd: repoRoot, encoding: "utf8", windowsHide: true });
-  return out.split("\0").filter(Boolean).map(norm);
+// The tracked files that are on disk. A tracked file deleted in the working
+// tree but not yet staged is still listed by `git ls-files`, and reading it
+// crashed the gate with ENOENT instead of judging the tree that exists.
+export function trackedFiles(root = repoRoot) {
+  const out = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", windowsHide: true });
+  return out
+    .split("\0")
+    .filter(Boolean)
+    .map(norm)
+    .filter((f) => existsSync(join(root, f)));
 }
 
 /** Resolve one import specifier from `importer` to a tracked repo file, or null. */

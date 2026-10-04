@@ -16,13 +16,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const {
   recordDecision,
   recordCompletion,
+  recordReply,
+  INBOX_RELPATH,
   answeredNotDone,
   partitionBySettled,
   readDecisions,
@@ -184,5 +186,25 @@ describe("partitionBySettled — a counter-question is still open", () => {
     const { open, settled } = partitionBySettled([item(k)], { [k]: decision });
     expect(open).toHaveLength(1);
     expect(settled).toEqual([]);
+  });
+});
+
+// The inbox and the queue snapshot are projections of the ledger. A write that
+// skipped the render left them stale, and the commit gate refused until someone
+// ran render-inbox.mjs by hand (`answer.mjs --done`, 2026-10-01).
+describe("every ledger write re-renders the inbox", () => {
+  it.each([
+    ["recordCompletion", () => recordCompletion(root, "k1", "abc1234 — landed")],
+    ["recordDecision", () => recordDecision(root, "k1", { answer: "changed", disposition: "settled" })],
+    ["recordReply", () => recordReply(root, "k1", "a reply")],
+  ])("%s leaves the inbox equal to its projection", async (_name, write) => {
+    const { projectInbox } = await import("../../scripts/nightly/render-inbox.mjs");
+    seed({
+      k1: { disposition: "question", answer: "why?", subject: "s", path: "p", decided_at: "2026-07-28T10:00:00Z" },
+    });
+    mkdirSync(join(root, "docs"), { recursive: true });
+    writeFileSync(join(root, INBOX_RELPATH), "STALE\n", "utf8");
+    write();
+    expect(readFileSync(join(root, INBOX_RELPATH), "utf8")).toBe(projectInbox(root).body);
   });
 });

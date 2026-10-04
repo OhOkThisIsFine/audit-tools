@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/memory-crosslink-gate.test.ts, tests/shared/memory-citations-gate.test.ts
 /**
  * check-memory-citations.mjs — every `memory: <name>` citation in a tracked doc
  * must resolve to a real memory file.
@@ -217,6 +218,22 @@ function pathCandidate(token) {
 
 const RUNTIME_STATE_PREFIXES = [".audit-tools/", ".audit-tools-visibility/"];
 
+/**
+ * A finding read from the STORE is not in the commit being gated: the store lives
+ * outside the repository, so the gate reds whatever commit runs next — a docs
+ * edit was refused for a note a cloud agent's earlier deletion broke
+ * (2026-10-01). It is still a real defect, so the gate still fails, but it says
+ * where the cause is and where the fix goes.
+ */
+function storeCauseNote() {
+  return (
+    `\n  ⚠ These findings are in the host memory store, OUTSIDE this repository:\n` +
+    `    ${memoryDir}\n` +
+    `  Your staged change did not cause them unless it deleted a cited path. Fix the\n` +
+    `  note in that folder, or restore the path it cites.`
+  );
+}
+
 // Pass 1 — collect every path candidate, so the gitignore scoping runs as ONE
 // batched git call over the whole store instead of a spawn per token.
 const candidates = [];
@@ -256,6 +273,7 @@ if (danglingPaths.length > 0) {
   for (const { note, line, path } of danglingPaths) {
     console.error(`  ${note}:${line} → ${path}`);
   }
+  console.error(storeCauseNote());
   console.error(
     `\n  A note citing a path that is gone re-asserts a retired layout with the\n` +
       `  authority of a citation nobody can follow. Repoint it at what exists now,\n` +
@@ -270,6 +288,7 @@ if (dangling.length > 0) {
   for (const { file, line, name, form } of dangling) {
     console.error(`  ${file}:${line || "?"} → ${form ?? "memory:"} ${name}`);
   }
+  if (dangling.some((d) => d.form === "[[…]]")) console.error(storeCauseNote());
   console.error(
     `\n  A citation to a deleted note re-asserts whatever that note said, with the\n` +
       `  authority of a pointer nobody can follow. Repoint it at the note that\n` +

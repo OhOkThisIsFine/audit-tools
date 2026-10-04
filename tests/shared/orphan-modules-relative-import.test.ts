@@ -16,7 +16,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
-import { relativeImportOrphans } from "../../scripts/check-orphan-modules.mjs";
+import { relativeImportOrphans, trackedFiles } from "../../scripts/check-orphan-modules.mjs";
 
 const roots: string[] = [];
 
@@ -122,6 +122,14 @@ describe("relative-import pass — a module whose only production edge is an unc
     };
     const root = fixture(files);
     expect(run(root, files)).toEqual([]);
+  });
+
+  test("a tracked file deleted but not staged is left out, so the gate never reads it", () => {
+    const root = fixture({ "src/shared/kept.ts": "export const k = 1;\n", "src/shared/gone.ts": "export const g = 1;\n" });
+    execFileSyncHidden("git", ["init", "-q"], { cwd: root });
+    execFileSyncHidden("git", ["add", "."], { cwd: root });
+    rmSync(join(root, "src/shared/gone.ts"));
+    expect(trackedFiles(root)).toEqual(["src/shared/kept.ts"]);
   });
 
   test("the LIVE tree raises no relative-import orphan", () => {

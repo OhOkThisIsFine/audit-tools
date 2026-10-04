@@ -308,6 +308,21 @@ export function legRunnable(root, leg) {
   return scriptWired(root, leg.script);
 }
 
+// The spawn options every derived leg runs under — the commit gate's legs and
+// this preflight's are one leg set, so they share one spawn. No deadline: none
+// was ever measured, and a leg killed at an arbitrary limit reads as a FAILED
+// leg (a false red) on a slower machine. The leg owns any timeout it needs.
+/** @param {{ root: string, env?: NodeJS.ProcessEnv }} options */
+export function derivedLegExecutionOptions({ root, env }) {
+  return {
+    cwd: root,
+    ...(env === undefined ? {} : { env }),
+    shell: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  };
+}
+
 // The first repo-relative .mjs path in an npm-script command string —
 // `node scripts/check-doc-manifest.mjs` → `scripts/check-doc-manifest.mjs`.
 // Appending it (plus package.json) to every reach trigger makes "editing the
@@ -531,13 +546,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git, exclude
     // advisory the operator wants, and short-circuiting would create a second
     // code path that can drift from the gate's leg set.
     try {
-      execSync(legCommand(leg).command, /** @type {any} */ ({
-        cwd: root,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      }));
+      execSync(legCommand(leg).command, /** @type {any} */ (derivedLegExecutionOptions({ root })));
       executed.push({ id: leg.id, script: leg.script, fix: leg.fix, tail: '', outcome: 'passed' });
     } catch (err) {
     const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');

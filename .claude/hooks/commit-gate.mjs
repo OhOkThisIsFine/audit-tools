@@ -111,6 +111,7 @@ import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc
 // path and grep domain the handoff widening depends on ride along inside.)
 import {
   buildPreCommitLegs,
+  derivedLegExecutionOptions,
   legCommand,
   legRunnable,
 } from "../../scripts/shared/derived-file-preflight.mjs";
@@ -292,7 +293,6 @@ function runGate(committedPaths) {
       env: gateChildEnv,
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 240_000,
       windowsHide: true,
     }));
   } catch (err) {
@@ -343,7 +343,6 @@ function runGate(committedPaths) {
         env: gateChildEnv,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 240_000,
         windowsHide: true,
       }));
     } catch (err) {
@@ -419,14 +418,10 @@ function runGate(committedPaths) {
       return null;
     }
     try {
-      execSync(legCommand(leg).command, /** @type {any} */ ({
-        cwd: root,
-        env: gateChildEnv,
-        shell: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 60_000,
-        windowsHide: true,
-      }));
+      execSync(
+        legCommand(leg).command,
+        /** @type {any} */ (derivedLegExecutionOptions({ root, env: gateChildEnv })),
+      );
       return null;
     } catch (err) {
       const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');

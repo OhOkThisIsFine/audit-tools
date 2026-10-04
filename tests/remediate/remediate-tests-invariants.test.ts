@@ -290,19 +290,24 @@ describe("INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-expor
   // /…") are a different mechanism and are allowed.
   const THIS_FILE = "remediate-tests-invariants.test.ts";
 
+  // Every spelling of the barrel: the package subpath, and a relative path to
+  // `src/shared/index` itself (the same module object). A relative import of any
+  // OTHER shared module is a different mechanism and stays allowed.
+  const BARREL = String.raw`["'](?:audit-tools\/shared|(?:\.\.?\/)+(?:[\w.-]+\/)*src\/shared\/index(?:\.[jt]s)?["'])`;
+
   /** Variables bound to the audit-tools/shared barrel as a full namespace object. */
   function barrelNamespaceVars(src: string): string[] {
     const names = new Set<string>();
     // `const NS = await import("audit-tools/shared…")` — a `{`-destructure never
     // matches (no identifier after `const`), so only namespace bindings are caught.
     for (const m of src.matchAll(
-      /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+import\(\s*["']audit-tools\/shared/g,
+      new RegExp(String.raw`\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+import\(\s*` + BARREL, "g"),
     )) {
       names.add(m[1]);
     }
     // `import * as NS from "audit-tools/shared…"`
     for (const m of src.matchAll(
-      /\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']audit-tools\/shared/g,
+      new RegExp(String.raw`\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+` + BARREL, "g"),
     )) {
       names.add(m[1]);
     }
@@ -325,6 +330,16 @@ describe("INV-remediate-tests-12: no vi.spyOn on the audit-tools/shared re-expor
       'const spy = vi.spyOn(sharedModule, "detectRepoConventions");',
     ].join("\n");
     expect(barrelSpyViolations(bad)).toEqual(["sharedModule"]);
+
+    // The relative spellings of the SAME barrel module (#12 deleted trap T44 on
+    // the claim this recognizer covered them; it matched only the package path).
+    const relative = [
+      'import * as viaTs from "../../src/shared/index.ts";',
+      'const viaJs = await import("../../src/shared/index.js");',
+      'vi.spyOn(viaTs, "a");',
+      'vi.spyOn(viaJs, "b");',
+    ].join("\n");
+    expect(barrelSpyViolations(relative)).toEqual(["viaJs", "viaTs"]);
 
     const clean = [
       'const { detectRepoConventions } = await import("audit-tools/shared");',

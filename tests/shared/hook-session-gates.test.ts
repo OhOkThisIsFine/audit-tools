@@ -19,7 +19,7 @@ import {
 } from '../../scripts/shared/liveSessionWork.mjs';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, delimiter } from 'node:path';
+import { dirname, join, resolve, delimiter } from 'node:path';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const QUESTION_GATE = join(REPO_ROOT, '.claude', 'hooks', 'question-philosophy-gate.mjs');
@@ -226,6 +226,33 @@ describe('closeout-challenge-gate: the "are you sure?" question, with evidence a
     expect(code).toBe(2);
     expect(stderr).toContain('are you sure that was all taken care of');
     expect(stderr).toContain('dirty.txt');
+  });
+
+  // The session's project folder is the MAIN checkout while it works in a linked
+  // worktree. Rooted at the project folder, the gate read the main checkout's
+  // tree, stamp and render record instead of the worktree's (2026-10-01).
+  it('reads the worktree the session works in, not the project folder', () => {
+    const main = mkdtempSync(join(tmpdir(), 'closeout-main-'));
+    const linked = join(mkdtempSync(join(tmpdir(), 'closeout-wt-')), 'lap');
+    try {
+      const g = (cwd: string, ...args: string[]) =>
+        spawnSyncHidden('git', args, { cwd, encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+      g(main, 'init', '-q');
+      g(main, 'config', 'user.email', 'test@example.com');
+      g(main, 'config', 'user.name', 'test');
+      g(main, 'config', 'commit.gpgsign', 'false');
+      writeFileSync(join(main, 'a.txt'), 'one\n');
+      g(main, 'add', '.');
+      g(main, 'commit', '-qm', 'initial');
+      g(main, 'worktree', 'add', '-q', '-b', 'lap', linked);
+      writeFileSync(join(linked, 'worktree-only.txt'), 'uncommitted\n');
+      const { code, stderr } = runHook(CLOSEOUT_GATE, { ...stop(sid('in-worktree')), cwd: linked }, { root: main });
+      expect(code).toBe(2);
+      expect(stderr).toContain('worktree-only.txt');
+    } finally {
+      rmSync(main, { recursive: true, force: true });
+      rmSync(dirname(linked), { recursive: true, force: true });
+    }
   });
 
   it('names the home doc for every remaining step — the point of the challenge', () => {
@@ -1283,6 +1310,22 @@ describe('question-philosophy-gate: the lap-APPROVAL question is exempt by const
   it('does NOT challenge the FIRST AskUserQuestion at the boundary — the approval request is asked with the tool', async () => {
     const { root, session } = await lapQuestionRoot({ lapStart: true, commitSinceRegistration: false });
     expect(runHook(QUESTION_GATE, lapAsk(session), { root }).code).toBe(0);
+  });
+
+  // The session's project folder is the MAIN checkout while its lap runs in a
+  // linked worktree, where /start-lap wrote the lap record. Read at the project
+  // folder, the gate found no lap and challenged the approval request (2026-10-01).
+  it('reads the lap record in the worktree the session works in, not at the project folder', async () => {
+    const { root, session } = await lapQuestionRoot({ lapStart: false, commitSinceRegistration: false });
+    const linked = join(mkdtempSync(join(tmpdir(), 'philgate-wt-')), 'lap');
+    roots.push(dirname(linked));
+    spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'lap', linked], { cwd: root, encoding: 'utf8' });
+    mkdirSync(join(linked, '.claude'), { recursive: true });
+    writeFileSync(
+      join(linked, '.claude', 'lap-start.json'),
+      JSON.stringify({ start: 'x', date: '2026-01-01', goal: 'the lap', lapId: LAP_ID, checkout: linked }),
+    );
+    expect(runHook(QUESTION_GATE, { ...lapAsk(session), cwd: linked }, { root }).code).toBe(0);
   });
 
   it('DOES challenge a SECOND AskUserQuestion in the same lap — the exemption is ONE question, not the boundary', async () => {

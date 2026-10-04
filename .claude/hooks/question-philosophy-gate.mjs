@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-session-gates.test.ts
 // A question is about to reach the owner — surface the project philosophy FIRST.
 //
 // Most questions the owner gets asked are already answered by a standing
@@ -50,17 +51,13 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, mkdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/sessionRegistry.mjs';
+import {
+  readSessionRegistry,
+  sanitizeSessionId,
+  sessionCheckout,
+} from '../../scripts/shared/sessionRegistry.mjs';
 
 if (process.env.AUDIT_TOOLS_NO_QUESTION_PHILOSOPHY) process.exit(0);
-
-const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state', 'philosophy-injected');
-// The lap-approval exemption's own state, beside the per-session one above and
-// deliberately NOT merged into it: that marker is keyed per SESSION (has this
-// session been injected at all), this one per LAP RECORD (`lapId`) — a session
-// that opens a second lap later must get its approval question exempt again.
-const LAP_EXEMPTION_DIR = join(ROOT, '.claude', 'hooks', '.state', 'lap-approval-exempted');
 
 /**
  * The lap record's `lapId`, or null when there is no usable one.
@@ -186,6 +183,18 @@ try {
 } catch {
   process.exit(0);
 }
+
+// The checkout the session works in: the lap worktree when it works in one,
+// while CLAUDE_PROJECT_DIR still names the main checkout. The lap record lives
+// in that worktree, so reading it at the project folder found no lap and the
+// lap-approval exemption never applied (2026-10-01).
+const ROOT = sessionCheckout(payload?.cwd, process.env.CLAUDE_PROJECT_DIR || process.cwd());
+const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state', 'philosophy-injected');
+// The lap-approval exemption's own state, beside the per-session one above and
+// deliberately NOT merged into it: that marker is keyed per SESSION (has this
+// session been injected at all), this one per LAP RECORD (`lapId`) — a session
+// that opens a second lap later must get its approval question exempt again.
+const LAP_EXEMPTION_DIR = join(ROOT, '.claude', 'hooks', '.state', 'lap-approval-exempted');
 
 const event = payload?.hook_event_name ?? '';
 const isAskTool = (payload?.tool_name ?? '') === 'AskUserQuestion';

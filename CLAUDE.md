@@ -44,6 +44,7 @@ npm run check                     # typecheck only (no emit)
 npm run check:tests               # typecheck the TEST tree too (tsconfig.test.json; in verify:checks)
 npm run check:scripts             # typecheck the .mjs trees (scripts/, wrapper/, .claude/hooks/, dispatch/, the two root entries — tsconfig.scripts.json; in verify:checks, pre-commit leg)
 npm test                          # build + vitest (audit + shared + remediate)
+npm run staged:legs               # the commit gate's derived legs for the staged set, without committing
 
 npx vitest run tests/audit/<file>.test.ts            # single audit test
 npx vitest run tests/remediate/<file>.test.ts        # single remediate test
@@ -97,6 +98,8 @@ Two draws run the shared obligation engine over that one registry:
   Markers (`steps/deterministic-progress.json`), handoff, quarantine, and the durable analyzer
   stores stay mid-fold by design — the delivered property is one CORE write boundary, not one
   persist boundary. The cycle guards live in the fold's ctx and observe per deterministic dispatch.
+  Before the engine draws, and once `planning_artifacts` is satisfied, the fold ingests every
+  host inspection result already landed (`ingestAvailableInspectionResults`).
 - **The plan draw** (`audit-code plan`, and any unforced `advanceAudit`) is the deterministic-only
   draw: classify each engine-selected obligation, run deterministic arms, HALT at the first
   boundary that needs host work or would consume or persist host input. It never consumes a
@@ -129,9 +132,11 @@ Accepts auditor reports or free-form feedback. Advances via bounded step prompts
 **State machine** (`src/remediate/steps/nextStep.ts` → `decideNextStep()`):
 ```
 pending → planning → implementing → closing → complete
-              ↕            ↕
-  waiting_for_clarification  triage → waiting_for_triage
+closing → triage → implementing | closing
+triage ⇄ waiting_for_triage
+implementing | triage → waiting_for_clarification → implementing
 ```
+Planning's clarifications are a pre-state intake gate, not `waiting_for_clarification`.
 
 **Planning and execution:**
 - `steps/contractPipeline.ts` owns author/revise → conceptual critique → independent critic → judge

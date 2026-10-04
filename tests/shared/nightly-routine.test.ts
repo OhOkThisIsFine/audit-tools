@@ -841,7 +841,8 @@ describe('superseded answer application receipts', () => {
 
   it('refuses to reinterpret an unanswered question as a superseded answer', () => {
     recordDecision(root, item().subject_key, { answer: clause, disposition: 'question' });
+    const prior = readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8');
     expect(() => writeOpenItems(root, { items: [], applied: [receipt()] })).toThrow(/settled answer/);
-    expect(existsSync(join(root, '.audit-tools/nightly/open-items.json'))).toBe(false);
+    expect(readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8')).toBe(prior);
   });
 });

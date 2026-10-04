@@ -74,6 +74,32 @@ function repositoryRoot(root) {
   return resolved;
 }
 
+// The checkout a session WORKS IN, for the gates that read per-checkout state —
+// the lap record, the suite-green stamp, the closeout render, tree dirt. That is
+// the git top level of the hook payload's `cwd` when it belongs to the same
+// repository as the project folder: a session in a lap worktree keeps
+// CLAUDE_PROJECT_DIR on the main checkout, so a gate rooted there read the wrong
+// tree (2026-10-01). Another repository, no cwd, or a git fault → the project
+// folder, which is the old behavior.
+export function sessionCheckout(sessionCwd, projectDir) {
+  const fallback = resolve(projectDir);
+  if (typeof sessionCwd !== 'string' || sessionCwd === '') return fallback;
+  let top = '';
+  try {
+    const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: sessionCwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    top = r.error || r.status !== 0 ? '' : (r.stdout ?? '').trim();
+  } catch {
+    return fallback;
+  }
+  if (!top) return fallback;
+  return repositoryRoot(top) === repositoryRoot(fallback) ? resolve(top) : fallback;
+}
+
 export function sessionsDir(root) {
   return join(repositoryRoot(root), ...SESSIONS_DIR_SEGMENTS);
 }
@@ -299,6 +325,39 @@ export function isDispatchedChildEnv(env = process.env) {
   return env.AUDIT_TOOLS_CHILD_SESSION === '1';
 }
 
+// The open lap record, in any checkout of this repository, whose `sessionId` is
+// this session; null when none is. Every worktree, not only `root`: the
+// registry keys on the repository, and a gate's root is the project folder
+// while the lap may run in a linked worktree. Fail-soft like the rest of the
+// module — a git or fs fault finds no lap, which leaves the old refusal.
+export function lapOwnedBy(root, sessionId) {
+  const sid = sanitizeSessionId(sessionId);
+  if (!sid) return null;
+  let listing = '';
+  try {
+    const r = spawnSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: resolve(root),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    if (r.error || r.status !== 0) return null;
+    listing = r.stdout ?? '';
+  } catch {
+    return null;
+  }
+  for (const line of listing.split(/\r?\n/)) {
+    if (!line.startsWith('worktree ')) continue;
+    try {
+      const lap = JSON.parse(readFileSync(join(line.slice('worktree '.length), '.claude', 'lap-start.json'), 'utf8'));
+      if (lap !== null && typeof lap === 'object' && sanitizeSessionId(lap.sessionId) === sid) return lap;
+    } catch {
+      /* no lap record in this checkout, or an unreadable one */
+    }
+  }
+  return null;
+}
+
 // One-call read for every Stop/PreToolUse gate. An EMPTY sessionId is never
 // classified as a child: real children always carry session_id (probed
 // 2026-08-18), so an empty one means an older payload shape — gates keep their
@@ -306,10 +365,34 @@ export function isDispatchedChildEnv(env = process.env) {
 // friction: proceed). A child by env marker is a child ARMED OR NOT: a fresh
 // worktree holds no owner record to arm the registry, and a delegated lane must
 // never be recruited there either.
+//
+// A session the registry does not know but that OWNS an open lap of this
+// repository is registered here, at its first gated action, and is not a child.
+// A desktop session started with no project folder fires no SessionStart hook in
+// the repository, so it had no record and every commit of the session that owned
+// the lap was refused as a child's (2026-10-01). Ownership is a positive fact,
+// never a guess: the machine-wide lap tool writes the opening session's id into
+// the lap record (`sessionId` in `<checkout>/.claude/lap-start.json`), and a
+// child of that session runs under its own id. The env marker still wins — a
+// lane that declares itself a child stays one.
 export function readSessionRegistry(root, rawSessionId, env = process.env) {
   const sessionId = sanitizeSessionId(rawSessionId);
   const armed = enforcementArmed(root);
-  const { state: recordState, record } = readSessionRecord(root, sessionId);
+  let { state: recordState, record } = readSessionRecord(root, sessionId);
+  if (armed && sessionId !== '' && recordState === 'absent' && !isDispatchedChildEnv(env)) {
+    const lap = lapOwnedBy(root, sessionId);
+    if (lap) {
+      writeSessionRecord(root, {
+        version: 1,
+        session_id: sessionId,
+        registered_at: new Date().toISOString(),
+        starting_head: typeof lap.start === 'string' ? lap.start : null,
+        source: 'lap-owner',
+        baseline: [],
+      });
+      ({ state: recordState, record } = readSessionRecord(root, sessionId));
+    }
+  }
   return {
     armed,
     sessionId,

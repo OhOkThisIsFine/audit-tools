@@ -637,9 +637,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
     the bash-form inline prefix or the hook-env form.
   Per-dispatch git allowance: lead the child's specific git command with
   `AUDIT_TOOLS_AGENT_GIT=1` inline (visible in transcript, never standing config); the hook-env
-  form exists for lanes that cannot inline. Owner-session recovery:
-  `node scripts/shared/sessionRegistry.mjs --register <session-id>` from the repo root — explicit
-  id from a hook payload; deliberately no discovery mode.
+  form exists for lanes that cannot inline. A lap's opener self-registers (`lapOwnedBy`). Else:
+  `node scripts/shared/sessionRegistry.mjs --register <session-id>` (explicit id, no discovery).
 
 - **A full-suite-only failure is classified by `runIsolatedDiagnostics` in
   `scripts/shared/run-vitest-gate.mjs`, never from a remembered file list.** The gate reruns every

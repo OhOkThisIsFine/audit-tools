@@ -60,6 +60,10 @@ describe("check-memory-citations covers the note → repo path direction", () =>
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       expect(result.status, output).toBe(1);
       expect(output).toContain("does-not-exist.md");
+      // The store is outside the repository, so the refusal names it as the
+      // cause and the place of the fix — it reds whatever commit runs next.
+      expect(output).toContain("OUTSIDE this repository");
+      expect(output).toContain(memoryDir);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -135,6 +139,8 @@ describe("check-memory-citations covers memory-to-memory [[name]] cross-links", 
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       expect(result.status, output).toBe(1);
       expect(output).toContain("beta");
+      expect(output).toContain("OUTSIDE this repository");
+      expect(output).toContain(memoryDir);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

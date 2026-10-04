@@ -149,6 +149,15 @@ export function readDecisions(root) {
   return data && typeof data === 'object' ? data : {};
 }
 
+// The ONE ledger write. The inbox and the queue snapshot are projections of
+// this ledger, so a write that skips the render leaves them stale, and the
+// commit gate's `check:nightly-inbox` leg then refuses until someone runs
+// `render-inbox.mjs` by hand (seen with `answer.mjs --done`, 2026-10-01).
+function writeDecisions(root, decisions) {
+  writeJson(decisionsPath(root), decisions);
+  writeInbox(root);
+}
+
 // Record the owner's answer for a subject. Permanent by design — this is the
 // mechanism that stops a settled question from being asked again, so it must
 // NOT expire with a run, a findings file, or a branch.
@@ -172,7 +181,7 @@ export function recordDecision(root, key, { answer, disposition, subject, path, 
     ...(prior?.completed_at ? { completed_at: prior.completed_at, completed_ref: prior.completed_ref ?? '' } : {}),
     decided_at: new Date().toISOString(),
   };
-  writeJson(decisionsPath(root), decisions);
+  writeDecisions(root, decisions);
   return decisions;
 }
 
@@ -196,7 +205,7 @@ export function recordReply(root, key, reply) {
   const entry = decisions[key];
   if (!entry) throw new Error(`recordReply: no recorded question "${key}"`);
   decisions[key] = { ...entry, reply: String(reply).trim(), replied_at: new Date().toISOString() };
-  writeJson(decisionsPath(root), decisions);
+  writeDecisions(root, decisions);
   return decisions[key];
 }
 
@@ -218,7 +227,7 @@ export function recordCompletion(root, key, ref) {
     completed_at: new Date().toISOString(),
     completed_ref: String(ref ?? '').trim(),
   };
-  writeJson(decisionsPath(root), decisions);
+  writeDecisions(root, decisions);
   return decisions;
 }
 

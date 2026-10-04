@@ -49,6 +49,7 @@ import {
   readSessionRegistry,
   runPorcelainStatus,
   sanitizeSessionId,
+  sessionCheckout,
   SESSIONS_DIR_SEGMENTS,
 } from '../../scripts/shared/sessionRegistry.mjs';
 
@@ -149,8 +150,6 @@ async function lapIsOpen(checkouts) {
 
 if (process.env.AUDIT_TOOLS_NO_CLOSEOUT_CHALLENGE) process.exit(0);
 
-const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-challenge');
 const CHALLENGE_CAP = 2;
 // The render record for THIS session. One file per SESSION, not one per repo:
 // the repo-global file was last-writer-wins across concurrent sessions, so a
@@ -162,7 +161,6 @@ const CHALLENGE_CAP = 2;
 // ReferenceError at the call site — which this gate's catch-all then reports as
 // "no rendered closeout on record", i.e. a broken check wearing the face of a
 // missing render. (Found exactly that way.)
-const CLOSEOUT_RENDER_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-render');
 
 /** The render record the given session wrote. */
 function closeoutRenderRecordPath(session) {
@@ -179,6 +177,14 @@ try {
   process.exit(0);
 }
 if ((payload?.hook_event_name ?? 'Stop') !== 'Stop') process.exit(0);
+
+// The checkout the session works in: the lap worktree when it works in one,
+// while CLAUDE_PROJECT_DIR still names the main checkout. The suite-green stamp,
+// the closeout render and the tree dirt live in that worktree, so a gate rooted
+// at the project folder reported no green run and no render (2026-10-01).
+const ROOT = sessionCheckout(payload?.cwd, process.env.CLAUDE_PROJECT_DIR || process.cwd());
+const STATE_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-challenge');
+const CLOSEOUT_RENDER_DIR = join(ROOT, '.claude', 'hooks', '.state', 'closeout-render');
 
 // A wait is not a closeout: with live background tasks, scheduled crons, or
 // queued input the harness has yet to deliver, the harness re-invokes this

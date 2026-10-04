@@ -20,6 +20,7 @@ import {
   readSessionStartingHead,
   runPorcelainStatus,
   sanitizeSessionId,
+  sessionCheckout,
   sessionsDir,
   writeSessionRecord,
 } from '../../scripts/shared/sessionRegistry.mjs';
@@ -212,6 +213,59 @@ describe('readSessionRegistry: the one predicate every gate imports (Build 1 con
     // Even a REGISTERED resident is a child under the marker: a delegated lane is never recruited.
     writeSessionRecord(root, record('resident'));
     expect(readSessionRegistry(root, 'resident', { AUDIT_TOOLS_CHILD_SESSION: '1' }).isUnregisteredChild).toBe(true);
+  });
+
+  it('sessionCheckout: the worktree a session works in, only inside the same repository', () => {
+    const main = gitRepo();
+    const linked = join(scratchRoot(), 'wt');
+    spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'wt', linked], {
+      cwd: main,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    mkdirSync(join(linked, 'sub'), { recursive: true });
+    const same = (a: string, b: string) => expect(resolve(a).toLowerCase()).toBe(resolve(b).toLowerCase());
+    same(sessionCheckout(join(linked, 'sub'), main), linked);
+    same(sessionCheckout(main, main), main);
+    // Another repository, no cwd, or a cwd outside any repository → the project folder.
+    same(sessionCheckout(gitRepo(), main), main);
+    same(sessionCheckout(undefined, main), main);
+    same(sessionCheckout(scratchRoot(), main), main);
+  });
+
+  // A desktop session started with no project folder fires no SessionStart in
+  // the repository, so it has no record — and it was refused as a child at every
+  // commit of the lap it owned (open-bugs, 2026-10-01). The lap record names the
+  // session that opened the lap; that positive fact registers it, in whichever
+  // worktree of the repository the lap runs.
+  it('registers the session an open lap record names, in any worktree, and only that session', () => {
+    const main = gitRepo();
+    writeSessionRecord(main, record('resident'));
+    const linked = join(scratchRoot(), 'lap');
+    spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'lap', linked], {
+      cwd: main,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 30_000,
+    });
+    mkdirSync(join(linked, '.claude'), { recursive: true });
+    writeFileSync(
+      join(linked, '.claude', 'lap-start.json'),
+      JSON.stringify({ start: 'a'.repeat(40), goal: 'g', lapId: 'x', sessionId: 'owner-sid' }),
+    );
+
+    // Another session, and the owner's id under the child marker, stay children.
+    expect(readSessionRegistry(main, 'other-sid', {}).isUnregisteredChild).toBe(true);
+    expect(readSessionRegistry(main, 'owner-sid', { AUDIT_TOOLS_CHILD_SESSION: '1' }).isUnregisteredChild).toBe(true);
+    expect(readSessionRecord(main, 'owner-sid').state).toBe('absent');
+
+    // The owner, read from the MAIN checkout while its lap runs in the linked one.
+    const owner = readSessionRegistry(main, 'owner-sid', {});
+    expect(owner.isUnregisteredChild).toBe(false);
+    expect(owner.recordState).toBe('ok');
+    expect(owner.record?.source).toBe('lap-owner');
+    expect(owner.record?.starting_head).toBe('a'.repeat(40));
+    expect(readSessionRecord(main, 'other-sid').state).toBe('absent');
   });
 });
 
