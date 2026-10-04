@@ -118,21 +118,6 @@
 
 
 
-- **Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16,
-  ambiguous-direction, low-medium).** The defect was found BY the run, and committing its fix changed
-  the audited tree → staleness correctly marked the planning chain stale and restarted from
-  `charter_extraction`. Semantics are right (the dependency DAG is truth); the open sliver is that an
-  active run should announce which upstream change invalidated it instead of silently re-planning.
-  **SPEC — keep the cascade, ANNOUNCE it. Do not narrow staleness to make dogfooding cheaper.** The
-  regression to first-planning-step is correct: the audited tree changed, so the planning derived from it
-  is genuinely invalid, and the dependency graph is the source of truth. Any mechanism that spares a
-  self-audit run from its own cascade would be special-casing the tool's convenience against the
-  correctness rule the whole design rests on.
-  What is actually wrong is that a large, expensive, correct action happens SILENTLY and looks like
-  malfunction. The run should state that it was invalidated, by which upstream artifacts, and what it is
-  therefore re-deriving — one message, at the moment it happens.
-  **Property to hold:** an expensive automatic recovery explains itself at the moment it triggers. A user
-  who cannot tell a correct cascade from a wedge will eventually defeat the cascade.
 
 
 

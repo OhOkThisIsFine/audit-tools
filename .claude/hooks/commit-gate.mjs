@@ -111,9 +111,8 @@ import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc
 // path and grep domain the handoff widening depends on ride along inside.)
 import {
   buildPreCommitLegs,
-  derivedLegExecutionOptions,
-  legCommand,
   legRunnable,
+  runDerivedLeg,
 } from "../../scripts/shared/derived-file-preflight.mjs";
 
 // Which git hook invoked us — for the messages only; every leg is the same.
@@ -407,7 +406,7 @@ function runGate(committedPaths) {
     /* unreadable package.json reads as nothing wired — every leg skips, announced */
   }
   const derivedLegs = buildPreCommitLegs({ packageScripts: rootScripts });
-  const runDerivedLeg = (leg) => {
+  const judgeDerivedLeg = (leg) => {
     if (!leg.triggered({ root, staged, git })) return null;
     // The leg's KIND decides both halves: an npm-script gate leg is probed in
     // package.json, a subject-keyed pin leg is a test file probed on disk — and
@@ -418,10 +417,7 @@ function runGate(committedPaths) {
       return null;
     }
     try {
-      execSync(
-        legCommand(leg).command,
-        /** @type {any} */ (derivedLegExecutionOptions({ root, env: gateChildEnv })),
-      );
+      runDerivedLeg(leg, { root, env: gateChildEnv });
       return null;
     } catch (err) {
       const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-20).join('\n');
@@ -434,7 +430,7 @@ function runGate(committedPaths) {
     }
   };
   for (const leg of derivedLegs.filter((l) => l.phase === 'main')) {
-    const result = runDerivedLeg(leg);
+    const result = judgeDerivedLeg(leg);
     if (result) return result;
   }
 
@@ -653,7 +649,7 @@ function runGate(committedPaths) {
   // is the more useful signal. The ordering is REGISTRY DATA, not hook code:
   // preCommit 'final' in scripts/guard-reach-data.mjs puts a leg here.
   for (const leg of derivedLegs.filter((l) => l.phase === 'final')) {
-    const result = runDerivedLeg(leg);
+    const result = judgeDerivedLeg(leg);
     if (result) return result;
   }
 

@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { buildPreCommitLegs, derivedLegExecutionOptions } from '../../scripts/shared/derived-file-preflight.mjs';
+import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 import { GUARDS } from '../../scripts/guard-reach-data.mjs';
 import { EXPECTED_SRC_REACH_LEG_IDS } from '../helpers/precommitLegExpectations.js';
 
@@ -52,18 +52,6 @@ const triggeredIds = (staged: string[]) =>
   legs()
     .filter((l) => l.triggered({ root: EMPTY_ROOT, staged }))
     .map((l) => l.id);
-
-describe('derivedLegExecutionOptions: the one spawn every derived leg runs under', () => {
-  it('imposes no deadline, and passes the caller env only when given', () => {
-    // A leg killed at an unmeasured limit reads as a FAILED leg on a slower machine.
-    const bare = derivedLegExecutionOptions({ root: EMPTY_ROOT });
-    expect(bare).not.toHaveProperty('timeout');
-    expect(bare).not.toHaveProperty('env');
-    expect(bare).toMatchObject({ cwd: EMPTY_ROOT, shell: true, windowsHide: true });
-    const env = { PATH: 'x' };
-    expect(derivedLegExecutionOptions({ root: EMPTY_ROOT, env }).env).toBe(env);
-  });
-});
 
 describe('leg-set membership follows the registry preCommit flags', () => {
   it('every gate with a non-false preCommit flag is a leg; nothing else is', () => {

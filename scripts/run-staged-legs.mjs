@@ -18,6 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { guardArgv } from './shared/argvGuard.mjs';
 import { runDerivedFilePreflight } from './shared/derived-file-preflight.mjs';
 
 function git(root, args) {
@@ -61,5 +62,7 @@ export function runStagedLegs({ root }) {
 }
 
 if (process.argv[1] != null && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // No arguments: an unknown one is refused, never ignored.
+  guardArgv(process.argv.slice(2), { name: 'run-staged-legs', usage: 'npm run staged:legs' });
   process.exit(runStagedLegs({ root: process.cwd() }));
 }

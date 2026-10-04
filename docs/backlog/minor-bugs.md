@@ -35,13 +35,6 @@
 
 
 
-- **CP-NODE-10 residuals (2026-08-19, low, one entry):** (1) the staleness third-state (`partial`)
-  check exempts the 9 map-declared leaves — including `audit-findings.json` — so a truncated leaf
-  body is caught only via dependents (choice-vs-forced split documented at
-  `classifyArtifactPresence`); (2) `StaleArtifactSet`'s `instanceof` discriminator is dropped by
-  `Set.prototype.union`/`structuredClone` (no caller does either today); (3)
-  `computeArtifactMetadata`'s producer-side affinity hash is unguarded — a malformed affinity body
-  dies loudly at restamp (pre-existing, loud, not a livelock).
 
 
 
@@ -81,30 +74,12 @@
   a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
   only if a second instance appears — one occurrence is not yet a pattern.
 
-- **⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25):
-  completion cleanup removes the friction dir before the session stop-gate's close-out walk runs
-  against it.** Ordering property: the close-out walk is part of run completion — cleanup preserves
-  (or the close step completes) the friction record before archiving. Record:
-  [`re-dogfood-friction-2026-07-22.md`](../reviews/re-dogfood-friction-2026-07-22.md) #13.
-  ⚠ **Three findings from the reverted attempt — a naive "exempt friction/ from the rm" does NOT work
-  and introduces a regression.** (1) The audit half's completion cleanup is `promoteFinalAuditReport`
-  (`src/audit/io/artifacts.ts`, called only from `nextStepHelpers.ts`), NOT
-  `cleanupStaleArtifactsDir` — the latter runs at the START of
-  the next advance, so patching it changes nothing at completion. (2) The remediate half's stop-gate is
-  MARKER-gated: `.claude/hooks/friction-stop-gate.mjs` requires a recent `state.json` before it reads
-  `.audit-tools/audit/friction/` at all, and a fully-green close deletes `state.json` — so preserving the record alone
-  still leaves the gate skipping the area. (3) Preserving `.audit-tools/audit/friction/` across cleanups REGRESSES the
-  audit side, where the run id is the hardcoded literal `"run"` (`nextStepHelpers.ts`,
-  `executorRunners.ts`, `operatorHandoff.ts`): every run shares one `friction/run.json`, so a
-  prior run's complete record permanently satisfies both the blocking close-out and the hook's
-  `anyComplete` check. A real fix must address the run-id collision first.
 
 - **LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS
   (2026-07-21, low).** This run's challenge arrived as "round 10" with 11 prior improvements from
   earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
   [`re-dogfood-2026-07-21.md`](../reviews/re-dogfood-2026-07-21.md).
 
-- **A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).** After the design-review passes, the drain re-extracting 11 stale artifacts (repo_manifest/graph over 1250 components / 8466 edges, invalidated by a docs commit) exceeded a 2-minute command timeout with no heartbeat — forcing a blind retry at a longer timeout to see if it was wedged or working. Property to hold: a long deterministic drain should emit a progress/phase heartbeat so a caller can distinguish "working" from "wedged" without a retry. Minor; the retry succeeded.
 
 - **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification
   (2026-08-06, lead, low).** 3 refuted / 6 downgraded — record in

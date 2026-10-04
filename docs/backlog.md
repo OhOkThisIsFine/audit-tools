@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 120 entr(y/ies) indexed.
+> and at commit). 116 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -41,9 +41,8 @@
 - `open-bugs.md:98` — Review rounds re-derive the same file map every time (inefficient-feeding, 2026-07-19).
 - `open-bugs.md:114` — External release and review lanes retain environment-dependent limits.
 - `open-bugs.md:117` — Machine-wide green queries and external lane behavior remain externally owned.
-- `open-bugs.md:121` — Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-16, ambiguous-direction, low-medium).
-- `open-bugs.md:140` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
-- `open-bugs.md:146` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:125` — Top gate optimization — the suite-side tail is subprocess wall, not isolation overhead (measured 2026-07-06).
+- `open-bugs.md:131` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -54,13 +53,10 @@
 - `minor-bugs.md:18` — The remediate clarification answer's `scope_additions` field has no effect (2026-10-01, low).
 - `minor-bugs.md:19` — Charter blind-lane results carry no inputs declaration, and the handoff names the wrong step (2026-10-01, low).
 - `minor-bugs.md:20` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:38` — CP-NODE-10 residuals (2026-08-19, low, one entry):
-- `minor-bugs.md:52` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:73` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:84` — ⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
-- `minor-bugs.md:102` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:107` — A stale-artifact re-extraction `next-step` runs >2min with no progress signal, silently blowing a caller timeout (live dogfood 2026-07-17, inefficient-feeding, low).
-- `minor-bugs.md:109` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:45` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:66` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:78` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:84` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
@@ -193,8 +189,6 @@ confirm the fix validated — or to catch it failing. The matrix below IS those 
 > **Live-validation watch matrix — GENERATED from the entries that carry a `Live-run watch` line; do not hand-edit it.**
 > Each row below IS an entry in this backlog, linked to where it lives, with that entry's own watch line lifted verbatim — so a row can never name an item the backlog does not hold. File an entry with a **⬇ Live-run watch** line and it appears here on the next generation.
 
-- **⬇ Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.** — [minor-bugs.md](backlog/minor-bugs.md)
-  Live-run watch (re-dogfood 2026-07-22, low, medium-difficulty — an ATTEMPTED fix was reverted 2026-07-25): completion cleanup removes the friction dir before the session stop-gate's close-out walk runs against it.
 - **Deterministic analyzers: own-vs-acquire engine.** — [forward-tracks.md](backlog/forward-tracks.md)
   Live-run watch (audit a Rust repo for clippy / a Ruby repo for rubocop, with the per-run consent token so the gate admits the non-default tool): the tool must actually spawn and normalize output into leads (cargo-clippy / bundle-rubocop), not skip.
 

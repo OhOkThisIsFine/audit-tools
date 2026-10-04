@@ -3,8 +3,6 @@
   "entries_over_budget": [],
   "entries_prescribing_mechanism": [
     "durable-traps.md::A global junction to a LIVE working tree silently shadows a registry install. ",
-    "durable-traps.md::After a \"string to replace not found\" on text you JUST wrote, grep for the anc",
-    "minor-bugs.md::A stale-artifact re-extraction `next-step` runs >2min with no progress signal,",
-    "open-bugs.md::Self-audit dogfood loop: fixing the tool mid-run invalidates the run (2026-07-"
+    "durable-traps.md::After a \"string to replace not found\" on text you JUST wrote, grep for the anc"
   ]
 }

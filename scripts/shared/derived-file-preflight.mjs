@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/attest-derived-file-preflight.test.ts, tests/shared/write-time-derived-gates.test.ts
+// sites-pinned: tests/shared/attest-derived-file-preflight.test.ts, tests/shared/write-time-derived-gates.test.ts, tests/shared/derived-leg-spawn.test.ts
 // Single source for the pre-commit gate's DERIVED leg set — imported by
 // `.claude/hooks/pre-commit-gate.mjs` AND both attest scripts (P19, owner
 // decision sol-1, 2026-08-12; leg DERIVATION P34+P26, owner decision
@@ -308,19 +308,23 @@ export function legRunnable(root, leg) {
   return scriptWired(root, leg.script);
 }
 
-// The spawn options every derived leg runs under — the commit gate's legs and
-// this preflight's are one leg set, so they share one spawn. No deadline: none
-// was ever measured, and a leg killed at an arbitrary limit reads as a FAILED
-// leg (a false red) on a slower machine. The leg owns any timeout it needs.
-/** @param {{ root: string, env?: NodeJS.ProcessEnv }} options */
-export function derivedLegExecutionOptions({ root, env }) {
-  return {
+// Run ONE derived leg; throws as `execSync` does when the leg fails. The commit
+// gate's legs and this preflight's are one leg set, so they share one spawn. No
+// deadline: none was ever measured, and a leg killed at an arbitrary limit
+// reads as a FAILED leg (a false red) on a slower machine. The leg owns any
+// timeout it needs.
+/**
+ * @param {{script: string, testPath?: string}} leg
+ * @param {{ root: string, env?: NodeJS.ProcessEnv }} options
+ */
+export function runDerivedLeg(leg, { root, env }) {
+  execSync(legCommand(leg).command, /** @type {any} */ ({
     cwd: root,
     ...(env === undefined ? {} : { env }),
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
-  };
+  }));
 }
 
 // The first repo-relative .mjs path in an npm-script command string —
@@ -546,7 +550,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git, exclude
     // advisory the operator wants, and short-circuiting would create a second
     // code path that can drift from the gate's leg set.
     try {
-      execSync(legCommand(leg).command, /** @type {any} */ (derivedLegExecutionOptions({ root })));
+      runDerivedLeg(leg, { root });
       executed.push({ id: leg.id, script: leg.script, fix: leg.fix, tail: '', outcome: 'passed' });
     } catch (err) {
     const tail = `${/** @type {any} */ (err).stdout ?? ''}\n${/** @type {any} */ (err).stderr ?? ''}`.trim().split('\n').slice(-12).join('\n');
