@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 114 entr(y/ies) indexed.
+> and at commit). 111 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -46,26 +46,23 @@
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — `stashTargets` misreads three rare stash spellings (2026-10-02, low).
-- `minor-bugs.md:15` — The background-status rule refuses a SAVED status passed through (2026-10-02, low).
-- `minor-bugs.md:16` — The repo-lane rule misses a worktree spelled `/cygdrive/c/...`, `/mnt/c/...` or `~` (2026-10-02, low).
-- `minor-bugs.md:17` — The remediate clarification answer still accepts the ignored `scope_additions` field (2026-10-01, low).
-- `minor-bugs.md:18` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
-- `minor-bugs.md:43` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:64` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
-- `minor-bugs.md:76` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
-- `minor-bugs.md:82` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
+- `minor-bugs.md:14` — The remediate clarification answer still accepts the ignored `scope_additions` field (2026-10-01, low).
+- `minor-bugs.md:15` — Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer unlocated (2026-08-29, low, friction: tool_should_decide).
+- `minor-bugs.md:40` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:61` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:73` — LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS (2026-07-21, low).
+- `minor-bugs.md:79` — Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification (2026-08-06, lead, low).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:17` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:16` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:32` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:47` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:56` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:59` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:31` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:46` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:55` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:58` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 

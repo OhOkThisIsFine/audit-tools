@@ -781,6 +781,29 @@ describe('shell-trap-guard: a BACKGROUNDED suite exit laundered by a trailing st
     expect(posix.code, posix.stderr).toBe(0);
   });
 
+  // A SAVED status: `rc=$?` IMMEDIATELY after the status-bearing command, then a
+  // terminal `exit $rc`, reports the suite's status. An assignment that is not
+  // immediately after it captures another command's status and stays refused.
+  it('allows a terminal `exit $rc` when `rc=$?` is the statement right after the suite', () => {
+    const posix = runHook(SHELL_GUARD, bashBg('npm test > log 2>&1; rc=$?; tail log; exit $rc'));
+    expect(posix.code, posix.stderr).toBe(0);
+    const powershell = runHook(
+      SHELL_GUARD,
+      psBg('npm test *> log; $rc = $LASTEXITCODE; Get-Content log -Tail 5; exit $rc'),
+    );
+    expect(powershell.code, powershell.stderr).toBe(0);
+  });
+
+  it('still blocks `exit $rc` when `rc=$?` is NOT immediately after the suite', () => {
+    const posix = runHook(SHELL_GUARD, bashBg('npm test > log 2>&1; tail log; rc=$?; exit $rc'));
+    expect(posix.code, posix.stderr).toBe(2);
+    const powershell = runHook(
+      SHELL_GUARD,
+      psBg('npm test *> log; Get-Content log -Tail 5; $rc = $LASTEXITCODE; exit $rc'),
+    );
+    expect(powershell.code, powershell.stderr).toBe(2);
+  });
+
   it('honors AUDIT_TOOLS_ALLOW_MASKED_EXIT — same trap class, same escape', () => {
     const r = runHook(SHELL_GUARD, bashBg('npm test > run.log 2>&1; echo "EXIT=$?"'), {
       env: { AUDIT_TOOLS_ALLOW_MASKED_EXIT: '1' },
@@ -1218,6 +1241,59 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
       }
     });
 
+    // Property: the verb is the first word after git's OWN options, and a
+    // redirect operator ends a word (its target is never a pathspec).
+    it('reads the verb after git global options: `git -C stash stash push` is a stash', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+        for (const cmd of [
+          'git -C stash stash push',
+          'git -c core.x=1 stash push a.txt',
+          'git --git-dir .git --no-pager stash push a.txt',
+          'git --namespace=n stash push a.txt',
+        ]) {
+          const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+          expect(code, `${cmd}\n${stderr}`).toBe(2);
+        }
+        // A non-stash verb whose ARGUMENT is the word `stash` is not a stash.
+        expect(runHook(SHELL_GUARD, bash('git log stash'), { root: dir }).code).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('ends a pathspec at a glued redirect: `git stash push a.txt>log` scopes to a.txt', () => {
+      const { dir } = makeRepo();
+      try {
+        writeFileSync(join(dir, 'a.txt'), 'uncommitted work\n');
+        for (const cmd of ['git stash push a.txt>log', 'git stash push a.txt>>log', 'git stash push a.txt&>log']) {
+          const { code, stderr } = runHook(SHELL_GUARD, bash(cmd), { root: dir });
+          expect(code, `${cmd}\n${stderr}`).toBe(2);
+        }
+        // The redirect target is not a pathspec, and a quoted `>` is not a redirect.
+        writeFileSync(join(dir, 'a.txt'), 'committed\n');
+        writeFileSync(join(dir, 'b.txt'), 'uncommitted elsewhere\n');
+        expect(runHook(SHELL_GUARD, bash('git stash push a.txt>b.txt'), { root: dir }).code).toBe(0);
+        expect(runHook(SHELL_GUARD, bash('git stash push -m "a>b" a.txt'), { root: dir }).code).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('PowerShell: a backtick-escaped quote is a literal, not a span opener', () => {
+      const { dir } = makeRepo();
+      try {
+        // Only b.txt is dirty; the stash is scoped to a.txt, so it is safe. An
+        // unterminated span swallowed `a.txt` and tested the whole tree (false red).
+        writeFileSync(join(dir, 'b.txt'), 'uncommitted elsewhere\n');
+        const { code, stderr } = runHook(SHELL_GUARD, ps('git stash push -m `"x a.txt'), { root: dir });
+        expect(code, stderr).toBe(0);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('honors the same escape hatch as `checkout --`', () => {
       const { dir } = makeRepo();
       try {
@@ -1596,6 +1672,37 @@ describe('shell-trap-guard: a write-capable lane dispatched into this repo', () 
     } finally {
       rmSync(repo, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // Every shell spelling of a worktree path normalizes to the same native form.
+  it('refuses a lane whose cd target spells the worktree `/cygdrive/c/..`, `/mnt/c/..`, `~/..` or `C:\\..`', () => {
+    const repo = makeRepoForBypass();
+    const home = mkdtempSync(join(tmpdir(), 'trap-guard-home-'));
+    const worktree = join(home, 'lap').replace(/\\/g, '/');
+    try {
+      const added = spawnSyncHidden('git', ['worktree', 'add', '-q', '-b', 'lap', worktree], {
+        cwd: repo,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      expect(added.status, added.stderr).toBe(0);
+      const spellings = ['~/lap'];
+      if (process.platform === 'win32') {
+        const drive = (prefix: string) =>
+          worktree.replace(/^([A-Za-z]):/, (_, d: string) => `${prefix}/${d.toLowerCase()}`);
+        spellings.push(drive('/cygdrive'), drive('/mnt'), `"${worktree.replace(/\//g, '\\')}"`);
+      }
+      for (const target of spellings) {
+        const { code, stderr } = runHook(SHELL_GUARD, bash(`cd ${target} && ${LANE_BASH}`), {
+          root: repo,
+          env: { HOME: home, USERPROFILE: home },
+        });
+        expect(code, `${target}\n${stderr}`).toBe(2);
+      }
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

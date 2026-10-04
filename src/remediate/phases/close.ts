@@ -32,6 +32,7 @@ import {
   runAdmittedProjectTestCommand,
   runAdmittedProjectE2eCommand,
   readSubmissionLedger,
+  assertValidRemediationOutcomesReport,
 } from "audit-tools/shared";
 import type {
   AgentReflection,
@@ -2492,6 +2493,15 @@ export async function runClosePhase(
     },
     ...(outcomeCoverage ? { plan_coverage: outcomeCoverage } : {}),
   };
+
+  // Serialized-output boundary: the close phase is the producer of
+  // `remediation-outcomes.json`, so it runs its own finished value through the
+  // owning schema before persisting it. The on-disk shape is a superset of the
+  // shared subset, so the non-strict schema tolerates the run-level extras and
+  // refuses only a missing/malformed REQUIRED field of the owning contract —
+  // here, BEFORE the write, so a refusal leaves none of the four artifacts
+  // written for a consumer to find much later.
+  assertValidRemediationOutcomesReport(outcomesFile);
 
   const outputDir = dirname(options.artifactsDir);
 

@@ -1129,6 +1129,7 @@ export {
   requireKeys,
 } from "./validation/basic.js";
 export { formatSchemaFailure } from "./validation/schemaFailure.js";
+export { assertValidRemediationOutcomesReport } from "./validation/producerBoundary.js";
 export {
   AUDIT_FINDINGS_CONTRACT_VERSION,
   auditReadOf,

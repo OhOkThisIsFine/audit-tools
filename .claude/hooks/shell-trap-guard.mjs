@@ -19,6 +19,7 @@
 // fault). A guard must never wedge the session.
 import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
+import { homedir } from 'node:os';
 import {
   stripQuoted,
   splitShellWords,
@@ -228,7 +229,8 @@ function restoreTargets(sub) {
   // `list`/`show`/`pop`/`apply`/`drop`/`clear`/`store` read the stash or put work
   // BACK, and stay admitted.
   if (/\bgit\b[^|]*\bstash\b/.test(stripped)) {
-    return stashTargets(sub);
+    const stash = stashTargets(sub);
+    if (stash !== undefined) return stash;
   }
 
   if (!/\bgit\b[^|]*\bcheckout\b/.test(stripped)) return null;
@@ -248,10 +250,35 @@ function restoreTargets(sub) {
 // file that is never dirty. An option first means the implied verb `push`
 // (`git stash -m wip`). Words stop at the first pipe, list operator or redirect.
 // No pathspec → the whole worktree, tested as `.`.
+//
+// The verb is the first word after git's OWN global options (an option that takes
+// a value consumes it, so `git -C stash stash push` has verb `stash`, not the
+// `-C` value). A redirect operator ENDS a word (`a.txt>log` is pathspec `a.txt`
+// and a redirect). In a PowerShell command a backtick-escaped quote is a literal;
+// it is rewritten to the bash-shaped `\"` that splitShellWords already reads as one.
+// Returns undefined when the statement is not a stash at all.
+const GIT_VALUE_OPTIONS = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--config-env']);
 function stashTargets(sub) {
-  const words = splitShellWords(sub);
-  const end = words.findIndex((w) => /^(?:\||\|\||&&|;|\d*>|<)/.test(w));
-  const args = words.slice(words.indexOf('stash') + 1, end === -1 ? undefined : end);
+  const text = toolName === 'PowerShell' ? sub.replace(/`(["'])/g, '\\$1') : sub;
+  // Space out every UNQUOTED redirect operator run (digits-fd / `&` prefix kept
+  // with it) so it forms its own word.
+  const stripped = stripQuoted(text);
+  let spaced = '';
+  let last = 0;
+  for (const m of stripped.matchAll(/(?:(?<=^|\s)\d+)?&?[<>][<>&\d-]*/g)) {
+    spaced += text.slice(last, m.index);
+    if (m.index > 0 && !/\s/.test(text[m.index - 1])) spaced += ' ';
+    last = m.index;
+  }
+  spaced += text.slice(last);
+  const words = splitShellWords(spaced);
+  const end = words.findIndex((w) => /^(?:\||\|\||&&|;|\d*>|&>|<)/.test(w));
+  const live = end === -1 ? words : words.slice(0, end);
+  let v = live.findIndex((w) => /^(?:.*[\\/])?git(?:\.exe)?$/i.test(w)) + 1;
+  if (v === 0) return undefined;
+  while (v < live.length && live[v].startsWith('-')) v += GIT_VALUE_OPTIONS.has(live[v]) ? 2 : 1;
+  if (live[v] !== 'stash') return undefined;
+  const args = live.slice(v + 1);
   const explicitVerb = args.length > 0 && !args[0].startsWith('-');
   const verb = explicitVerb ? args[0] : 'push';
   if (verb === 'save') return ['.'];
@@ -1053,14 +1080,21 @@ if (
         if (line.startsWith('worktree ')) roots.push(norm(line.slice('worktree '.length)));
       }
     }
-    // Git Bash spells a drive path `/c/...`; Node on win32 resolves that to
-    // `C:\c\...`, which names no worktree. Translate the drive form first, to
-    // an ABSOLUTE drive root: a bare `c:` is drive-relative and would resolve
-    // to ROOT itself.
-    const fromMsys = (p) =>
-      process.platform === 'win32' ? p.replace(/^\/([A-Za-z])(?:\/|$)/, '$1:/') : p;
+    // ONE normalization of every shell spelling of a path to its native form:
+    // `~` (os.homedir()), and on win32 the drive forms Git Bash `/c/...`,
+    // Cygwin `/cygdrive/c/...` and WSL-style `/mnt/c/...`, which Node would
+    // resolve to `C:\c\...`, `C:\cygdrive\...` or `C:\mnt\...` (no worktree).
+    // `C:\x` and `C:/x` are already native. The drive form translates to an
+    // ABSOLUTE drive root: a bare `c:` is drive-relative and would resolve to
+    // ROOT itself.
+    const toNativePath = (p) => {
+      const home = p.replace(/^~(?=[\\/]|$)/, () => homedir());
+      return process.platform === 'win32'
+        ? home.replace(/^\/(?:(?:cygdrive|mnt)\/)?([A-Za-z])(?:\/|$)/, '$1:/')
+        : home;
+    };
     const inFamily = (p) => {
-      const abs = norm(resolvePath(ROOT, fromMsys(p)));
+      const abs = norm(resolvePath(ROOT, toNativePath(p)));
       return roots.some((root) => abs === root || abs.startsWith(root + '/'));
     };
     // No cd at all: the lane inherits THIS session's cwd, which is this repo.
@@ -1148,7 +1182,34 @@ const BACKGROUND_STATUS_REMEDIES = defineRemedies({
 if (runInBackground && !bypassEnabled('AUDIT_TOOLS_ALLOW_MASKED_EXIT', cmd)) {
   const seq = splitShellStatementsWithSeparators(cmd);
   const PASSES_STATUS_THROUGH = /^exit\s+(?:\$\?|\$LASTEXITCODE\b|\$\{?PIPESTATUS)/;
-  const finalPassesThrough = seq.length > 0 && PASSES_STATUS_THROUGH.test(seq[seq.length - 1].text);
+  // A SAVED status: a terminal `exit $v` passes when `v` was assigned the status
+  // by the statement IMMEDIATELY after a status-bearing command (`$?` there is
+  // that command's status; one statement later it is another command's) and
+  // nothing reassigns `v` before the exit. The assignment is dialect-specific:
+  // bash `v=$?`, PowerShell `$v = $LASTEXITCODE`.
+  const SAVED_STATUS_EXIT = /^exit\s+(?:"\$(\w+)"|\$\{(\w+)\}|\$(\w+))\s*$/;
+  const savedStatusPasses = () => {
+    const last = seq.length - 1;
+    const m = last >= 0 && SAVED_STATUS_EXIT.exec(seq[last].text);
+    const v = m && (m[1] || m[2] || m[3]);
+    if (!v) return false;
+    const assign = isBash
+      ? new RegExp(`^${v}=\\$\\?$`)
+      : new RegExp(`^\\$${v}\\s*=\\s*\\$LASTEXITCODE$`, 'i');
+    const anyAssign = isBash ? new RegExp(`^${v}=`) : new RegExp(`^\\$${v}\\s*=`, 'i');
+    for (let k = last - 1; k > 0; k--) {
+      if (anyAssign.test(seq[k].text)) {
+        return (
+          assign.test(seq[k].text) &&
+          seq[k].sepBefore !== '||' &&
+          isStatusBearing(stripQuoted(seq[k - 1].text))
+        );
+      }
+    }
+    return false;
+  };
+  const finalPassesThrough =
+    seq.length > 0 && (PASSES_STATUS_THROUGH.test(seq[seq.length - 1].text) || savedStatusPasses());
   const laundered =
     !finalPassesThrough &&
     seq.some(
