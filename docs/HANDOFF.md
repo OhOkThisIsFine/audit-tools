@@ -7,11 +7,11 @@
 
 Release metadata is in [package.json](../package.json); publication and global-install evidence
 is in project memory (`memory: release-state`). GitHub branch protection on `main` requires the `checks`
-status check (strict; admins can bypass), and that job judges every tree against the tracked
-loop-core attestation ledger `.claude/loop-core-attestations.json` (18 reviewed files and 125 unchanged baseline-only files).
-The remaining gap is filed in [`open-bugs.md`](backlog/open-bugs.md) as "A loop-core change can
-reach `main` without an attestation": the gate's own files are not loop-core, and an admin's
-direct push skips the required check.
+status check (strict) and binds admins, so work lands with `npm run land` (a pull request, then a
+fast-forward); that job judges every tree against the tracked loop-core attestation ledger
+`.claude/loop-core-attestations.json`. The remaining gap is filed in
+[`open-bugs.md`](backlog/open-bugs.md) as "The attestation gate judges an edit to itself with the
+edited copy".
 
 Legacy dispatch validation/merge scripts have been removed from the package; the asset guard
 requires production reference paths for dispatch scripts and data. Release CI includes the exact

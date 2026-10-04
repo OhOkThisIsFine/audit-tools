@@ -78,6 +78,7 @@
     "verify:remediate-hosts": "node scripts/remediate/verify-hosts.mjs",
     "pack:smoke": "node scripts/shared/smoke-tarball.mjs",
     "staged:legs": "node scripts/run-staged-legs.mjs",
+    "land": "node scripts/land.mjs",
     "smoke:linked-audit-code": "node scripts/audit/smoke-linked-audit-code.mjs",
     "smoke:packaged-audit-code": "node scripts/audit/smoke-packaged-audit-code.mjs",
     "smoke:linked-remediate-code": "node scripts/remediate/smoke-linked-remediate-code.mjs",

@@ -152,6 +152,25 @@
     }
   },
   "reviews": {
+    "4318b8e7432c3e06": {
+      "reviewed_by": "claude-opus-5-5-review-subagent",
+      "attester_class": "agent",
+      "checked": "two independent opus review passes (REJECT then APPROVE-WITH-NITS); F2-F11 and N1-N4 fixed, each red-proven; full npm test green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "ac2f26d78ee54339154c9938484ac3c41931e747",
+        "ran_at": "2026-10-04T17:46:23.943Z"
+      },
+      "attested_at": "2026-10-04T22:01:59.979Z",
+      "vouches": {
+        ".claude/hooks/loop-core-patterns.mjs": "88b114037614a5eeed5c11aae2d957263b78ea54",
+        "scripts/check-loop-core-attestations.mjs": "5e0cf43a19e6397bf394c5cb5e3e6f0b0476cabe",
+        "scripts/shared/loopCoreAttestationLedger.mjs": "8857e52161ae230e69f72d3871b3c2927e6599f6",
+        "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
+      }
+    },
     "7ecf68a7852f3ff3": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -232,6 +251,15 @@
     }
   },
   "entries": {
+    ".claude/hooks/loop-core-patterns.mjs": {
+      "review": "4318b8e7432c3e06"
+    },
+    "scripts/check-loop-core-attestations.mjs": {
+      "review": "4318b8e7432c3e06"
+    },
+    "scripts/shared/loopCoreAttestationLedger.mjs": {
+      "review": "4318b8e7432c3e06"
+    },
     "src/audit/cli/charterClarificationPrompt.ts": {
       "baseline": "7b79934e86baf378"
     },
@@ -621,6 +649,9 @@
     },
     "src/shared/engine/obligationEngine.ts": {
       "baseline": "7b79934e86baf378"
+    },
+    "src/shared/loopCorePaths.ts": {
+      "review": "4318b8e7432c3e06"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "baseline": "7b79934e86baf378"

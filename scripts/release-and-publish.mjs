@@ -17,6 +17,14 @@ import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
 import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
 import { resolveSpawn } from "./shared/spawn-shell.mjs";
 import { latestFailedWorkflows } from "./shared/ciRedWorkflows.mjs";
+import {
+  CI_CONCLUSION_WAIT_MS,
+  CI_POLL_MS,
+  MAX_CONSECUTIVE_POLL_FAILURES,
+  deleteLandingBranch,
+  landThroughPullRequest,
+  pollFailureBackoffMs,
+} from "./shared/landThroughPullRequest.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -33,7 +41,7 @@ const noWait = process.argv.includes("--no-wait");
 // loudly. Tagging a SHA GitHub Actions never confirmed risks shipping a broken
 // release, so bypassing it must never be the quiet default.
 const skipCiGreen = process.argv.includes("--skip-ci-green");
-const pollIntervalMs = 5_000;
+const pollIntervalMs = CI_POLL_MS;
 const releaseRunTimeoutMs = 10 * 60 * 1000;
 // Registry propagation has exceeded two minutes after a successful publish.
 // This observation window is separate from GitHub release-event delivery.
@@ -62,27 +70,13 @@ const tagTriggerTimeoutMs = 30 * 60 * 1000;
 // "wait for CI (or the in-flight run) to complete, then retry" — so it knew the
 // state and declined to act on it, costing the operator a hand-rolled
 // `gh run watch <id> --exit-status && npm run release:patch:publish` chain that
-// re-implemented a wait this script already knows how to do. 30 minutes covers
-// the whole gate+test matrix on every supported Node major with room to spare;
-// a run still in flight past it is named as such rather than reported as absent.
-const ciInFlightWaitMs = 30 * 60 * 1000;
+// re-implemented a wait this script already knows how to do. The bound and its
+// reason live with the landing protocol, which waits on the same runs.
+const ciInFlightWaitMs = CI_CONCLUSION_WAIT_MS;
 
-// Consecutive-failure budget for `gh api` polls (401/403/5xx/network/timeout, etc.)
-// during the CI-monitoring phase. The run's status on GitHub is ground truth, so a
-// single transient poll fault must never abort a healthy wait — see the 2026-07-09
-// v0.32.44 incident where a mid-wait `Bad credentials (HTTP 401)` blip killed a
-// release that went on to publish cleanly. Back off and re-poll on every failure;
-// only give up after this many CONSECUTIVE failures (any successful poll resets the
-// counter) — by which point the backoff has spanned several minutes and something
-// durable, not transient, is wrong. A definitive API answer (run completed with a
-// failure conclusion) still fails fast, unaffected by this budget.
-const MAX_CONSECUTIVE_POLL_FAILURES = 10;
-const POLL_FAILURE_BACKOFF_STEP_MS = 5_000;
-const POLL_FAILURE_BACKOFF_CAP_MS = 30_000;
-
-function pollFailureBackoffMs(consecutiveFailures) {
-  return Math.min(POLL_FAILURE_BACKOFF_STEP_MS * consecutiveFailures, POLL_FAILURE_BACKOFF_CAP_MS);
-}
+// The consecutive-failure budget for `gh api` polls (MAX_CONSECUTIVE_POLL_FAILURES,
+// pollFailureBackoffMs) lives with the landing protocol, which polls the same API
+// for the same reason; its reason is recorded there.
 
 if (!allowedBumps.has(bump)) {
   console.error(
@@ -318,17 +312,6 @@ function ensureMainBranch() {
   return { branch: verdict.branch, defaultBranch, reason: verdict.reason };
 }
 
-// Resolve the refspec that pushes the release (bump) commit onto the REMOTE
-// default branch. On the default branch itself we push the branch by name; from
-// a linked worktree/feature branch whose HEAD already equals <remote>/<default>,
-// we push HEAD onto the default branch (a fast-forward) so the tag commit lands
-// on the default branch's history — never mutating any primary worktree.
-/** @param {{branch?: string, defaultBranch?: string}} [options] */
-export function resolveReleasePushRefspec({ branch, defaultBranch } = {}) {
-  if (branch === defaultBranch) return { target: defaultBranch };
-  return { target: `HEAD:refs/heads/${defaultBranch}` };
-}
-
 // Normalizes `gh api .../actions/runs` rows onto the shape
 // `latestFailedWorkflows` (scripts/shared/ciRedWorkflows.mjs) expects. That
 // helper exists because `ci` sat green for three commits while
@@ -433,10 +416,11 @@ function fetchRunsForSha(repoSlug, headSha) {
 }
 
 // Pre-tag CI-green gate. Resolves the exact SHA `bumpVersionAndTag` is about to
-// build the tag commit on top of (the tag itself lands on a NEW bump commit
-// that CI deliberately never runs on — see ci.yml's release-bump skip guard —
-// so gating on this pre-bump HEAD is gating on the code actually being shipped)
-// and requires GitHub Actions to have confirmed it green.
+// build the tag commit on top of (the tag itself lands on a NEW bump commit that
+// changes only the version; its required `checks` run happens on the landing pull
+// request, and the vitest suite skips its push to main — see the release-bump
+// skip guards — so gating on this pre-bump HEAD is gating on the code actually
+// being shipped) and requires GitHub Actions to have confirmed it green.
 //
 // When the SHA's runs are merely IN FLIGHT, or not yet LISTED, the gate WATCHES
 // THEM OUT rather than refusing, and it refuses only when a run has concluded
@@ -1211,7 +1195,6 @@ export async function main() {
   };
 
   ensureCleanWorktree();
-  const releaseGate = bumpOnly ? null : ensureMainBranch();
 
   if (bumpOnly) {
     console.log(`[release] bumping ${bump} version`);
@@ -1219,22 +1202,7 @@ export async function main() {
     console.log(`[release] created ${tag} for ${packageAfter.name}@${packageAfter.version}.`);
     return;
   }
-  if (releaseGate === null) {
-    // Unreachable: the bump-only path returned above; here narrows the type.
-    throw new Error("release gate missing outside --bump-only");
-  }
 
-  // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
-  // this script does that cannot be taken back cheaply: once `vX.Y.Z` exists and the
-  // GitHub Release is created, a CI failure costs a delete + cleanup-tag + forward-bump.
-  //
-  // It was `npm run check` (typecheck) alone, justified by "the /ship preflight already
-  // ran it locally" — but the preflight is deliberately a fast SUBSET and never runs
-  // verify:checks, so nothing linted before the tag. v0.39.7 was tagged and released
-  // with five eslint errors and had to be deleted; `tsc` cannot see an unused
-  // destructured binding or a newly-dead import, which is exactly what a refactor
-  // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
-  // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
   // ── resumption: is this a CONTINUATION of an in-flight release? ────────────
   //
   // Decided from the journal before anything destructive runs. The observation
@@ -1250,14 +1218,23 @@ export async function main() {
     headSha: headAtStart,
   });
 
+  // A fresh release must start from the remote default branch (ensureMainBranch).
+  // A RESUME continues the journal's own bump commit, which is not the remote
+  // default while its landing is unfinished — so its gate is the recorded tag
+  // naming HEAD, checked below, not the branch gate a fresh release passes.
+  const releaseGate = resume.resume
+    ? { branch: run("git", ["branch", "--show-current"], { capture: true }).stdout.trim(), defaultBranch: getDefaultBranch(), reason: "resume" }
+    : ensureMainBranch();
+  const published = resume.resume && Boolean(journal?.phases?.["tag+release"]);
+
   if (resume.resume) {
     if (tryGitSha(`${resume.tag}^{commit}`) !== headAtStart) {
       throw new Error(`Cannot resume ${resume.tag}: its local tag is missing or does not name the recorded release commit. Restore the recorded tag before retrying; no new release was started.`);
     }
-    if (!journal?.phases?.["tag+release"]) {
-      throw new Error(`Cannot resume ${resume.tag}: publication creation did not finish. Verify the branch push, tag and GitHub Release before continuing; no new release was started.`);
-    }
-    console.log(`[release] ${resume.reason} — skipping the pre-tag gate and the bump (both already ran).`);
+    console.log(
+      `[release] ${resume.reason} — skipping the pre-tag gate and the bump (both already ran)` +
+        (published ? "." : "; the landing and the tag push did not finish, so they run again (both are idempotent)."),
+    );
   } else {
     // The pre-tag gate runs the WHOLE non-test gate, because a tag is the one thing
     // this script does that cannot be taken back cheaply: once `vX.Y.Z` exists and the
@@ -1278,7 +1255,6 @@ export async function main() {
   }
 
   const remoteName = getRemoteName();
-  const pushRefspec = resolveReleasePushRefspec(releaseGate);
   let packageAfter = packageBefore;
   let tag = `v${packageBefore.version}`;
   let headSha = null;
@@ -1287,17 +1263,6 @@ export async function main() {
   if (resume.resume) {
     tag = /** @type {string} */ (resume.tag);
     packageAfter = readPackageJson();
-    headSha = tryGitSha(`${tag}^{commit}`);
-    // The ORIGINAL push instant, not "now". `selectReleaseRun` falls back to a
-    // freshness gate on `created_at > tagPushedAtMs - skew` when the run cannot be
-    // keyed by SHA; stamped at resume time it would reject the very run the resume
-    // is here to observe. The journal recorded it when the tag was pushed.
-    const recordedPush = readReleaseJournal(repoRoot)?.phases?.["tag+release"];
-    const recordedMs =
-      recordedPush && typeof recordedPush === "object" && "tagPushedAtMs" in recordedPush
-        ? Number(recordedPush.tagPushedAtMs)
-        : Number.NaN;
-    tagPushedAtMs = Number.isFinite(recordedMs) ? recordedMs : Date.now();
   } else {
     console.log(`[release] bumping ${bump} version`);
     const bumped = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
@@ -1305,23 +1270,61 @@ export async function main() {
     tag = bumped.tag;
     openReleaseJournal(repoRoot, { tag, version: packageAfter.version, commit: tryGitSha("HEAD") });
     recordReleasePhase(repoRoot, "bump+tag", { tag, version: packageAfter.version });
+  }
 
-    console.log(
-      `[release] pushing ${releaseGate.branch} -> ${remoteName}/${releaseGate.defaultBranch} (${tag})`,
-    );
-    run("git", ["push", remoteName, pushRefspec.target]);
-    recordReleasePhase(repoRoot, "push-branch", { target: pushRefspec.target });
+  // Resolve the tag commit SHA so the publish-run waiter can key on run identity
+  // (head_sha) rather than the reusable display name. Degrade to timestamp-only
+  // selection if rev-parse fails.
+  headSha = tryGitSha(`${tag}^{commit}`);
+  if (headSha === null) {
+    console.log(`[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only run selection.`);
+  }
 
-    // Resolve the tag commit SHA so the publish-run waiter can key on run identity
-    // (head_sha) rather than the reusable display name. Degrade to timestamp-only
-    // selection if rev-parse fails.
-    try {
-      headSha = run("git", ["rev-parse", `${tag}^{commit}`], { capture: true }).stdout.trim() || null;
-    } catch (error) {
-      console.log(
-        `[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only ` +
-          `run selection (${error instanceof Error ? error.message : String(error)}).`,
+  if (published) {
+    // The ORIGINAL push instant, not "now". `selectReleaseRun` falls back to a
+    // freshness gate on `created_at > tagPushedAtMs - skew` when the run cannot be
+    // keyed by SHA; stamped at resume time it would reject the very run the resume
+    // is here to observe. The journal recorded it when the tag was pushed.
+    const recordedPush = journal?.phases?.["tag+release"];
+    const recordedMs =
+      recordedPush && typeof recordedPush === "object" && "tagPushedAtMs" in recordedPush
+        ? Number(recordedPush.tagPushedAtMs)
+        : Number.NaN;
+    tagPushedAtMs = Number.isFinite(recordedMs) ? recordedMs : Date.now();
+  } else {
+    // Branch protection binds admins, so the bump commit cannot be pushed onto
+    // the default branch directly: it lands through a pull request whose
+    // required checks run on this exact commit, which keeps the local tag valid.
+    // A resume after a failed landing simply runs it again; a resume after a
+    // landing that succeeded (the tag push or the release failed) skips it.
+    const landingBranch = `release/${tag}`;
+    const recordedLand = resume.resume ? journal?.phases?.land : undefined;
+    let prUrl =
+      recordedLand && typeof recordedLand === "object" && "pullRequest" in recordedLand
+        ? String(recordedLand.pullRequest)
+        : "";
+    if (recordedLand) {
+      console.log(`[release] ${tag} already landed (${prUrl || "recorded"}) — skipping the landing.`);
+    } else {
+      const bumpSha = tryGitSha("HEAD");
+      if (bumpSha === null) throw new Error(`Cannot land ${tag}: HEAD does not resolve to a commit. Nothing was pushed.`);
+      console.log(`[release] landing ${tag} on ${remoteName}/${releaseGate.defaultBranch} through a pull request`);
+      const landed = await runPhase("land", () =>
+        landThroughPullRequest({
+          cwd: repoRoot,
+          repoSlug,
+          remote: remoteName,
+          sha: bumpSha,
+          branch: landingBranch,
+          defaultBranch: releaseGate.defaultBranch,
+          title: `release: ${tag}`,
+          body: `Version bump for ${tag}, landed by scripts/release-and-publish.mjs.`,
+          waitMs: ciInFlightWaitMs,
+          pollMs: pollIntervalMs,
+        }),
       );
+      prUrl = landed.prUrl;
+      recordReleasePhase(repoRoot, "land", { pullRequest: prUrl });
     }
 
     // Capture the push instant immediately BEFORE pushing the tag: any genuine
@@ -1343,6 +1346,12 @@ export async function main() {
       }
     });
     recordReleasePhase(repoRoot, "tag+release", { tag, headSha, tagPushedAtMs });
+
+    // The landing branch goes only after the tag and the release exist, so
+    // nothing waits on GitHub's merged-state update. It never throws.
+    if (prUrl) {
+      await deleteLandingBranch({ cwd: repoRoot, repoSlug, remote: remoteName, branch: landingBranch, prUrl, pollMs: pollIntervalMs });
+    }
   }
 
   const releaseMeta = { version: packageAfter.version, tag };

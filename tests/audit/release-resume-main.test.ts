@@ -50,6 +50,18 @@ vi.mock("node:child_process", () => ({
     else if (cmd === "git symbolic-ref refs/remotes/origin/HEAD") stdout = "refs/remotes/origin/main";
     else if (/^git rev-parse (?:--verify --quiet )?HEAD$/.test(cmd)) stdout = fixture.head;
     else if (/^git rev-parse (?:--verify --quiet )?v0.52.1\^\{commit\}$/.test(cmd)) stdout = fixture.tagHead;
+    // The landing protocol (a resume of an unfinished landing re-enters it).
+    else if (cmd === "git fetch --quiet origin main") stdout = "";
+    else if (cmd.startsWith("git merge-base --is-ancestor ")) return { status: 1, stdout: "", stderr: "" };
+    else if (cmd.startsWith("git push origin ")) stdout = "";
+    else if (cmd.startsWith("gh pr list ")) stdout = "[]";
+    else if (cmd.startsWith("gh pr create ")) stdout = "https://github.com/test/repo/pull/9";
+    else if (cmd.endsWith("protection/required_status_checks")) stdout = JSON.stringify({ checks: [{ context: "checks", app_id: 15368 }] });
+    else if (cmd.includes("/check-runs?")) stdout = JSON.stringify({ check_runs: [{ id: 1, name: "checks", status: "completed", conclusion: "success", app: { id: 15368 } }] });
+    else if (cmd.endsWith(`commits/${fixture.head}/status`)) stdout = JSON.stringify({ statuses: [] });
+    else if (cmd.startsWith("gh pr view ")) stdout = JSON.stringify({ state: "MERGED" });
+    else if (cmd.startsWith("gh release view ")) return { status: 1, stdout: "", stderr: "release not found" };
+    else if (cmd.startsWith("gh release create ")) stdout = "";
     else if (cmd === "gh workflow view publish-package.yml") stdout = "";
     else if (cmd.includes("actions/workflows/publish-package.yml/runs?")) stdout = JSON.stringify({
       workflow_runs: [{ id: 17, head_sha: fixture.head, head_branch: "v0.52.1", created_at: "2026-09-19T00:00:00Z", html_url: "https://github.com/test/repo/actions/runs/17" }],
@@ -113,12 +125,44 @@ test("main keeps observing the same version beyond the old two-minute propagatio
   expect(fixture.calls.filter((cmd) => cmd === "npm view audit-tools@0.52.1 version")).toHaveLength(31);
 });
 
-test.each(["missing", "mismatched", "unfinished creation"])("main refuses a %s release identity without starting another release", async (kind) => {
+test.each(["missing", "mismatched"])("main refuses a %s release identity without starting another release", async (kind) => {
   if (kind === "missing") fixture.tagHead = "";
-  else if (kind === "mismatched") fixture.tagHead = "b".repeat(40);
-  else fixture.journal.phases = { "bump+tag": {}, "push-branch": {} };
+  else fixture.tagHead = "b".repeat(40);
   await expect(main()).rejects.toThrow(/Cannot resume/);
   expect(fixture.calls.some((cmd) => /npm version|git (tag|push|commit)|gh release create|verify:checks|npm view/.test(cmd))).toBe(false);
+});
+
+// A failed landing (a red check, a timeout, a moved main) left the bump commit
+// and its local tag, and nothing published. Re-running resumes at the landing:
+// the same commit lands through its pull request, then the tag and the release
+// follow — with no second bump, version or pre-tag gate.
+test("main resumes an unfinished landing: the recorded bump commit lands, then the tag and the release", async () => {
+  fixture.journal.phases = { "bump+tag": {} };
+  await main();
+  const sha = fixture.head;
+  const landMain = fixture.calls.indexOf(`git push origin ${sha}:refs/heads/main`);
+  const tagPush = fixture.calls.indexOf("git push origin v0.52.1");
+  expect(fixture.calls).toContain(`git push origin ${sha}:refs/heads/release/v0.52.1`);
+  expect(landMain).toBeGreaterThan(-1);
+  expect(tagPush).toBeGreaterThan(landMain);
+  expect(fixture.calls.some((cmd) => cmd.startsWith("gh release create v0.52.1"))).toBe(true);
+  expect(fixture.calls.some((cmd) => /npm version|git (tag|commit)|verify:checks|actions\/runs\?head_sha=/.test(cmd))).toBe(false);
+  expect(fixture.journal.phases).toHaveProperty("land");
+  expect(fixture.journal.phases).toHaveProperty("tag+release");
+  expect(fixture.journal.phases).toHaveProperty("reinstall+smoke");
+  // The landing branch goes last, after GitHub reports its pull request merged.
+  expect(fixture.calls.indexOf("git push origin --delete release/v0.52.1")).toBeGreaterThan(tagPush);
+});
+
+// The landing succeeded and the tag push or the release then failed: a resume
+// must not land again (the merged pull request and its deleted branch would make
+// `gh pr create` refuse) — it goes straight to the tag and the release.
+test("main resumes after a recorded landing without landing again", async () => {
+  fixture.journal.phases = { "bump+tag": {}, land: { pullRequest: "https://github.com/test/repo/pull/9" } };
+  await main();
+  expect(fixture.calls.some((cmd) => /refs\/heads\/(main|release\/)|gh pr create|gh pr list|check-runs/.test(cmd))).toBe(false);
+  expect(fixture.calls).toContain("git push origin v0.52.1");
+  expect(fixture.journal.phases).toHaveProperty("tag+release");
 });
 
 test.each(["completed", "stale"])("main sends a %s journal through the pre-tag gate for a new release", async (kind) => {

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // sites-pinned: tests/shared/ci-trigger-paths.test.ts
-// Generate `.github/workflows/ci.yml`'s two `paths:` trigger blocks from the
-// guard-reach registry (`scripts/guard-reach-data.mjs`).
+// Generate `.github/workflows/ci.yml`'s push `paths:` trigger block from the
+// guard-reach registry (`scripts/guard-reach-data.mjs`). The pull_request
+// trigger carries NO path filter (2026-10-04): `checks` is a required status and
+// admins are bound, so a filtered pull request could never land.
 //
 // WHY THIS EXISTS (P26, owner decision 2026-08-18). ci.yml's own comment states
 // the invariant — "a gate's trigger paths must cover every path the gate
@@ -24,9 +26,7 @@
 //
 // Registry globs use check-doc-manifest.mjs's grammar (`*` within a segment,
 // `**` across segments); GitHub's path-filter grammar reads the same strings
-// with the same intent, so they are emitted verbatim. Both blocks are rendered
-// from one source — never rely on YAML anchors for this (GitHub Actions
-// support is too new to trust).
+// with the same intent, so they are emitted verbatim.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -113,10 +113,11 @@ function main() {
     process.exit(1);
   }
   const { output, blocks } = replaceTriggerBlocks(source, deriveTriggerPaths());
-  if (blocks !== 2) {
+  if (blocks !== 1) {
     process.stderr.write(
-      `${TARGET_RELPATH} carries ${blocks} generated ci-trigger-paths block(s), expected 2 ` +
-        `(push + pull_request). Add the BEGIN/END marker comments around both paths: lists.\n`,
+      `${TARGET_RELPATH} carries ${blocks} generated ci-trigger-paths block(s), expected 1 ` +
+        `(push only — the pull_request trigger is never filtered). Keep the BEGIN/END marker ` +
+        `comments around the push paths: list alone.\n`,
     );
     process.exit(1);
   }
@@ -132,7 +133,7 @@ function main() {
       process.exit(1);
     }
     process.stdout.write(
-      `✓ ci-trigger-paths: ${deriveTriggerPaths().length} derived paths rendered identically in both ci.yml blocks\n`,
+      `✓ ci-trigger-paths: ${deriveTriggerPaths().length} derived paths rendered in the ci.yml push block\n`,
     );
     return;
   }

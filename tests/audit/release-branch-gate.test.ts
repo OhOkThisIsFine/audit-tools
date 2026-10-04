@@ -6,7 +6,6 @@ import { test, expect } from "vitest";
 import {
   assessWorktreeCleanliness,
   evaluateReleaseBranch,
-  resolveReleasePushRefspec,
 } from "../../scripts/release-and-publish.mjs";
 
 const DEFAULT = "main";
@@ -88,18 +87,6 @@ test("(f) whitespace SHAs are trimmed before comparison", () => {
   });
   expect(verdict.allowed).toBe(true);
   expect(verdict.reason).toBe("worktree_head_equals_remote_default");
-});
-
-test("push refspec: on the default branch pushes the branch by name", () => {
-  expect(resolveReleasePushRefspec({ branch: DEFAULT, defaultBranch: DEFAULT })).toEqual({
-    target: DEFAULT,
-  });
-});
-
-test("push refspec: from a linked worktree pushes HEAD onto the remote default branch", () => {
-  expect(
-    resolveReleasePushRefspec({ branch: "claude/lap", defaultBranch: DEFAULT }),
-  ).toEqual({ target: `HEAD:refs/heads/${DEFAULT}` });
 });
 
 // ── assessWorktreeCleanliness: tracked dirt blocks, untracked warns ──────────

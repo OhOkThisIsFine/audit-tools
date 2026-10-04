@@ -42,13 +42,18 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 ## 2. Commit + push
 
 - Review `git status`. Exclude stray run artifacts (`tmp*.json`, `*result.json`, worker payloads). Unexplained foreign working-tree edits → partial-stage around them and ask — may be a concurrent session in this checkout.
-- Conventional commit message. Push `main` to the runtime-resolved remote (`"$remote"`, per the rule above).
+- Conventional commit message.
+- **Land with `npm run land`, never `git push … main`.** Branch protection binds admins (owner decision
+  2026-10-04), so a direct push to `main` is refused: the commit carries no required `checks` status yet.
+  `npm run land` (`scripts/land.mjs`) refuses unless the tree is clean, HEAD fast-forwards the remote
+  default branch and a full-suite stamp covers HEAD's tree; then it opens a pull request from the current
+  branch, waits for the required checks on that exact commit, and fast-forwards `main` to it.
 - **Lap-worktree ship (one command, no primary-worktree dance).** Laps run on a `claude/<lap>` linked
   worktree, not the primary `main` checkout. You do NOT need to FF the primary worktree or rebuild its stale
-  `dist/`. Push the lap branch's landed work onto `main` (`git push "$remote" HEAD:main`, a fast-forward),
-  then run the release **from the lap worktree itself** — `scripts/release-and-publish.mjs` admits any
-  branch whose HEAD already equals the remote default ref (`evaluateReleaseBranch()`), pushes the bump commit onto
-  the remote `main` via `HEAD:refs/heads/main`, and never touches the primary worktree. The `ensureCleanWorktree()`
+  `dist/`. Land the lap branch (`npm run land`), fetch, then run the release **from the lap worktree
+  itself** — `scripts/release-and-publish.mjs` admits any branch whose HEAD already equals the remote
+  default ref (`evaluateReleaseBranch()`), lands the bump commit through the same pull-request protocol
+  (`scripts/shared/landThroughPullRequest.mjs`), and never touches the primary worktree. The `ensureCleanWorktree()`
   CRLF/clean-tree guard and the `verify:checks` pre-tag gate still run. No `--root`/branch flag is needed —
   if the lap HEAD has not been fast-forwarded onto the remote default ref first, the guard refuses (fix the sync, do not
   add a flag).
@@ -116,7 +121,7 @@ under GitHub Actions each profile also appends a markdown table to the job summa
 - **Gate:** `verify:checks` runs its sub-steps through `scripts/shared/profile-run.mjs` (profiled npm-script runner, fail-fast preserved) → `.audit-tools-profile/verify-checks-latest.json` + `-history.ndjson` per step (the `check`/`build` double-`tsc`, host verifies, packaged smokes are each timed).
 - **Suite:** `scripts/shared/vitest-timing-reporter.mjs` is wired into `vitest.config.ts` `reporters` → per-area (audit/shared/remediate) subtotals + 10 slowest files, `.audit-tools-profile/vitest-latest.json` (shard runs write `vitest-shard<X>of<Y>-latest.json` — the suffix goes on the
   profile name, not the file suffix).
-- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / push+release / await-run / await-npm / reinstall+smoke) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
+- **Release:** `release-and-publish.mjs` writes a `release` phase profile (pre-tag gate / bump+tag / land / push+release / await-run / await-npm / reinstall+smoke) and, from the completed publish run's job/step API, a `publish-ci` profile (per-job wall + critical-path vs. summed). So the CI half self-profiles on every release.
 
 `*-history.ndjson` is the trend line — diff the latest record against prior runs to catch a time regression.
 

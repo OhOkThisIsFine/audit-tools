@@ -126,3 +126,19 @@ test("the generated predicate agrees with the TS isLoopCorePath over a derived p
   expect(probes.some((p) => isLoopCorePath(p))).toBe(true);
   expect(probes.some((p) => !isLoopCorePath(p))).toBe(true);
 });
+
+// Owner decision 2026-10-04: the files that decide WHAT is attested are loop-core
+// themselves, so an edit that narrows the list or weakens the ledger check
+// carries its own attestation. Both predicates must say so.
+test("the gate's own files are loop-core in both predicates", () => {
+  const gateFiles = [
+    ".claude/hooks/loop-core-patterns.mjs",
+    "scripts/check-loop-core-attestations.mjs",
+    "scripts/shared/loopCoreAttestationLedger.mjs",
+    "src/shared/loopCorePaths.ts",
+  ];
+  for (const path of gateFiles) {
+    expect(isLoopCorePath(path), `${path} must be loop-core`).toBe(true);
+    expect(generatedIsLoopCorePath(path), `${path} must be loop-core in the generated twin`).toBe(true);
+  }
+});

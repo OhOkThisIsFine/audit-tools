@@ -5,6 +5,8 @@
 // `npm run check:ci-trigger-paths`. This is the contract test over the
 // derivation, the marker replacement, and the tracked ci.yml's live parity.
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   ALWAYS_TRIGGER,
@@ -80,6 +82,17 @@ describe('marker replacement', () => {
 
   it('an unterminated block throws instead of eating the file', () => {
     expect(() => replace(`x\n  ${BEGIN_MARKER}\n  paths: []\n`, ['a'])).toThrow(/unterminated/);
+  });
+});
+
+describe('the required check is never path-filtered on a pull request', () => {
+  // `checks` is a REQUIRED status and admins are bound (2026-10-04): a pull
+  // request that produced no `checks` run could never land by any route.
+  it('the tracked ci.yml pull_request trigger has no paths filter', () => {
+    const yaml = readFileSync(join(import.meta.dirname, '..', '..', '.github', 'workflows', 'ci.yml'), 'utf8');
+    const trigger = yaml.slice(yaml.indexOf('\n  pull_request:'), yaml.indexOf('\nconcurrency:'));
+    expect(trigger).toContain('pull_request:');
+    expect(trigger).not.toMatch(/^\s+paths(?:-ignore)?:/m);
   });
 });
 

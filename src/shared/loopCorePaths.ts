@@ -51,6 +51,14 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   // rule claims them). A change to any of these alters what every audit host
   // does next — the same blast radius as the dispatch and orchestrator modules,
   // and the audit counterpart of `src/remediate/steps/prompts.ts`.
+  //
+  // The gate's own files (owner decision 2026-10-04): this list, its generated
+  // twin, the ledger check and the ledger module decide WHAT is attested. An
+  // edit that narrows the list or weakens the check would otherwise land with
+  // no attestation — a change to what the gate attests is itself attested.
+  ".claude/hooks/loop-core-patterns.mjs",
+  "scripts/check-loop-core-attestations.mjs",
+  "scripts/shared/loopCoreAttestationLedger.mjs",
   "src/audit/cli/charterClarificationPrompt.ts",
   "src/audit/cli/charterExtractionPrompt.ts",
   "src/audit/cli/charterFidelityPrompt.ts",
@@ -96,6 +104,7 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/remediate/steps/prompts.ts",
   "src/remediate/steps/recoverIngest.ts",
   "src/shared/engine/",
+  "src/shared/loopCorePaths.ts",
   // Both host boundaries own this persisted, create-once observation history.
   // Keep its baseline and deduplication semantics under the same review gate.
   "src/shared/observability/rootLogObservations.ts",

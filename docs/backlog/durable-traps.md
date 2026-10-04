@@ -414,11 +414,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   --allow-scripts=audit-tools` DOES run the postinstall (as `/ship` says); verify `~/.claude/commands/*.md`
   landed either way (extends [[audit-code-global-bin-traps]]).
 
-- **`git push audit-tools HEAD:main` prints a "Changes must be made through a pull request" advisory that is
-  NOT a rejection.** On a fast-forward push straight to `main` the remote emits that branch-protection
-  message, but the ref still updates (`04a7338c..8279d0de  HEAD -> main`, no `! [remote rejected]`). Confirm
-  by `git fetch audit-tools main && git rev-parse audit-tools/main` == local HEAD — don't assume the push
-  failed on seeing the advisory. Observed 2026-07-08.
+- **A direct push to `main` is refused since 2026-10-04 (`enforce_admins` on).** The required `checks`
+  status must already exist on the pushed commit, and CI attaches it only on a push to `main` or a pull
+  request. Land with `npm run land`; the release script lands its bump the same way. The old
+  "Changes must be made through a pull request" advisory that still let the ref update no longer applies.
 
 - **The `audit-code-completion-*.test.ts` family drives the full audit flow in-process, so a long file
   wall is expected, not a hang.** It was ONE file (`audit-code-completion.test.ts`) and the slowest in the <!-- doc-citation-exempt: names the pre-split file deliberately -->

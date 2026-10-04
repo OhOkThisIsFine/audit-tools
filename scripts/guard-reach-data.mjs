@@ -1859,8 +1859,10 @@ export const REACH = [
     uncovered:
       'it enforces existence, content binding and verdict, not review quality: a ledger entry is ' +
       'hand-writable by anyone who can commit. And a red check stops a landing only where something ' +
-      'requires it — the publish gate always, and branch protection on main requires the `checks` job, ' +
-      'but does not bind admins: an admin direct push to main is judged after it lands',
+      'requires it — the publish gate always, and branch protection on main requires the `checks` job ' +
+      'and binds admins (2026-10-04). It runs from the tree under judgment, so a change that removes ' +
+      'the gate files from the loop-core list, guts the checker, or unwires it (package.json, ci.yml, ' +
+      'loopCoreClosureData.mjs) is judged by the copy it edits — stated in open-bugs.md',
   },
   {
     area: 'loop-core closure sources',
@@ -2249,6 +2251,7 @@ export const REACH = [
       'scripts/shared/**',
       'scripts/postinstall.mjs',
       'scripts/release-and-publish.mjs',
+      'scripts/land.mjs',
       'scripts/poll-log-throttle.mjs',
     ],
     guardedBy: [
@@ -2271,6 +2274,8 @@ export const REACH = [
     uncovered:
       'release-and-publish, update-languages, triage-backlog, rebaseline-flakes and ' +
       'poll-log-throttle run only at release/maintenance time — no build gate executes them ' +
+      '(land.mjs refusals are gate-executed by tests/shared/land-through-pull-request.test.ts, and ' +
+      'the landing protocol against a fake gh; no gate talks to GitHub itself) ' +
       "(triage-backlog's sweep driver is shared lane-dispatch.mjs, gate-executed via " +
       "tests/shared/lane-dispatch.test.ts, and its agent-dispatch bridge lane is mcp-dispatch-lane.mjs, " +
       'gate-executed against a fake MCP server via tests/shared/triage-lane-health.test.ts — the ' +

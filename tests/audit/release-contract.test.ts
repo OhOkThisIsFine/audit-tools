@@ -99,15 +99,17 @@ test("one-command release helper wires the trusted publishing path", async () =>
   expect(helper).toMatch(/run\("git", \["add", "package\.json", "package-lock\.json"\]\)/);
   expect(helper).toMatch(/run\("git", \["commit", "-m", `release: \$\{tag\}`\]\)/);
   expect(helper).toMatch(/run\("git", \["tag", "-a", tag, "-m", tag\]\)/);
-  // CP-NODE-8 (ship-from-linked-worktree): ensureMainBranch now admits a linked-worktree /
-  // feature branch whose HEAD == origin/<default> (via the pure evaluateReleaseBranch), and the
-  // bump lands on the remote default branch via resolveReleasePushRefspec — so the gate result is
-  // `releaseGate` and the push target is the resolved refspec, not the raw branch name.
-  expect(helper).toMatch(/const releaseGate = bumpOnly \? null : ensureMainBranch\(\)/);
+  // CP-NODE-8 (ship-from-linked-worktree): ensureMainBranch admits a linked-worktree /
+  // feature branch whose HEAD == origin/<default> (via the pure evaluateReleaseBranch). Branch
+  // protection binds admins (2026-10-04), so the bump commit lands through the shared
+  // pull-request protocol onto `releaseGate.defaultBranch`, never by a direct push.
+  // A resume continues the journal's own bump commit; only a fresh release passes the branch gate.
+  expect(helper).toMatch(/const releaseGate = resume\.resume\s*\?[\s\S]*?: ensureMainBranch\(\);/);
   expect(helper).toMatch(/function evaluateReleaseBranch\(/);
-  expect(helper).toMatch(/function resolveReleasePushRefspec\(/);
-  expect(helper).toMatch(/const pushRefspec = resolveReleasePushRefspec\(releaseGate\)/);
-  expect(helper).toMatch(/run\("git", \["push", remoteName, pushRefspec\.target\]\)/);
+  expect(helper).toMatch(/landThroughPullRequest\(\{/);
+  expect(helper).toMatch(/defaultBranch: releaseGate\.defaultBranch/);
+  // The tag is the ONE thing the script pushes itself; every commit lands through the protocol.
+  expect(helper.match(/run\("git", \["push", [^\]]*\]\)/g)).toEqual(['run("git", ["push", remoteName, tag])']);
   // The await-run phase says what it is waiting for AND that re-dispatching is
   // the one wrong move: the tag + release already exist, so a slow
   // `release`-event delivery must read as slow, never as missing (v0.49.0: a

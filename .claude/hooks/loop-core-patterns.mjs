@@ -8,6 +8,9 @@
 // home. Run the generator (or `npm run check:loop-core-patterns`) after
 // editing the source.
 export const LOOP_CORE_PATTERNS = [
+  ".claude/hooks/loop-core-patterns.mjs",
+  "scripts/check-loop-core-attestations.mjs",
+  "scripts/shared/loopCoreAttestationLedger.mjs",
   "src/audit/cli/charterClarificationPrompt.ts",
   "src/audit/cli/charterExtractionPrompt.ts",
   "src/audit/cli/charterFidelityPrompt.ts",
@@ -45,6 +48,7 @@ export const LOOP_CORE_PATTERNS = [
   "src/remediate/steps/prompts.ts",
   "src/remediate/steps/recoverIngest.ts",
   "src/shared/engine/",
+  "src/shared/loopCorePaths.ts",
   "src/shared/observability/rootLogObservations.ts",
   "src/shared/steps/",
   "src/shared/submission/",

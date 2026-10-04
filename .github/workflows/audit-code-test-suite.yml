@@ -82,9 +82,14 @@ jobs:
     # exact bump-commit format emitted by scripts/release-and-publish.mjs
     # (`release: vX.Y.Z`) — so a non-bump message that merely shares the prefix
     # (e.g. `release: verify hosts...`) does NOT skip the suite (CE-004). Keep this
-    # predicate identical to the one on ci.yml's `checks` job.
+    # push half identical to the one on ci.yml's `checks` job.
+    # The bump commit now lands through a pull request from `release/v<x.y.z>`
+    # (scripts/release-and-publish.mjs, 2026-10-04), so the suite skips that pull
+    # request too, for the same reason. ci.yml's `checks` job deliberately does NOT
+    # skip it: `checks` is the required status the landing waits for.
     if: >-
-      ${{ github.event_name != 'push'
+      ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/v'))
+          && (github.event_name != 'push'
           || !(startsWith(github.event.head_commit.message, 'release: v0')
             || startsWith(github.event.head_commit.message, 'release: v1')
             || startsWith(github.event.head_commit.message, 'release: v2')
@@ -94,7 +99,7 @@ jobs:
             || startsWith(github.event.head_commit.message, 'release: v6')
             || startsWith(github.event.head_commit.message, 'release: v7')
             || startsWith(github.event.head_commit.message, 'release: v8')
-            || startsWith(github.event.head_commit.message, 'release: v9')) }}
+            || startsWith(github.event.head_commit.message, 'release: v9'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
