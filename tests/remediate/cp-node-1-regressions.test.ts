@@ -197,6 +197,10 @@ describe("DAT-017d52ff StateStore rejects status-incomplete persisted states", (
   });
 
   it("NEGATIVE: a block omitting touched_files fails load validation", async () => {
+    // The block is now the execution UNIT and its declared surface is
+    // `allowed_files`, which the state schema requires on LOAD (the case below).
+    // The original defect, kept as the record:
+    // <!-- comment-citation-exempt: the block-era validator, retired with blocks -->
     // `touched_files` is REQUIRED on the block contract (state/types.ts) and
     // `validateRemediationBlock` enforces it — but that validator is only reached
     // through `validateRemediationPlan`, never on the LOAD path. The load gate

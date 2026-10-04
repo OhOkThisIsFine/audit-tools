@@ -55,6 +55,7 @@ afterEach(async () => {
 describe("RemediationState.status union", () => {
   it("does not include 'documenting' as a valid status", async () => {
     // Read the SHIPPED vocabulary, never a literal re-written here. The previous
+    // <!-- comment-citation-exempt: names the tautological local array this test replaced -->
     // version of this block built a local `validStatuses` array and asserted it
     // did not contain "documenting" — a tautology over a literal the test itself
     // wrote, so a `documenting` status reintroduced into `RemediationState`

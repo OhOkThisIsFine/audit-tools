@@ -5,6 +5,7 @@
  * ships with no reader"). Commit 5b55445e wrote per-lens worker guidance (what
  * each lens looks for, and what it must leave to other lenses) into
  * `dispatch/lens-definitions.json` and threaded it into every packet worker
+ * <!-- comment-citation-exempt: names the builder this comment records as deleted -->
  * prompt through `buildTaskSections`. The execution-substrate retirement
  * (467b1e8f) deleted that builder with the rest of the packet prompt code, and
  * nothing noticed: the asset kept shipping, its only references were presence

@@ -109,6 +109,7 @@ function diagnosticAliases(guards, packageScripts) {
  * Every home a gate is missing from, named in ONE report.
  *
  * The defect this closes (backlog 2026-08-30): registering ONE new gate took
+ * <!-- comment-citation-exempt: the 2026-08-30 homes; STEP_GLOSS was retired since -->
  * edits in five separate homes — the `package.json` script, the `verify:checks`
  * step list, a GUARDS row, a REACH row, and (then) a `STEP_GLOSS` entry — and
  * nothing stated the SET, so each one was discovered by failing the next check

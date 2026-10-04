@@ -49,6 +49,7 @@
  * depth this scan tracks, never by where the next `(` happens to sit.
  *
  * Sentence-ending `.` (followed by whitespace or end-of-input) and newlines
+ * <!-- comment-citation-exempt: illustrative example path -->
  * remain boundaries. The `.` guard is unchanged: it keeps `docs/backlog/x.md`
  * and `PowerShell 5.1` whole, because there the period is followed by a
  * non-space character.

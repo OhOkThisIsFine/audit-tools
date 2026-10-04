@@ -391,6 +391,7 @@ test("validateAuditResults rejects a backslash path that normalizes to an unreco
 // what make that entry tolerant instead of a hard reject. ────────────────────
 
 test("validateAuditResults accepts a correctly-located result when the ASSIGNED task's file_paths entry is un-normalized", () => {
+  // <!-- comment-citation-exempt: names the pre-fix map this test pins the repair of -->
   // The defect: `taskNormMap` mapped normalized → RAW and the raw form was
   // stored as the accepted coverage path, while every downstream lookup
   // (affected_files, the span check, the followup-task gate) keyed on the

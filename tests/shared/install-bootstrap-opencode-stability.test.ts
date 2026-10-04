@@ -9,7 +9,7 @@
  * deployer's edit block seeded `.audit-code/**` before `.audit-tools/**` while
  * the remediate one seeded `.remediate-code/**` first, so running `ensure` (or
  * either postinstall) rewrote `opencode.json` as a pure key-reorder diff with
- * no value changed — dirtying every tree it touched. `stableRuleOrder` in
+ * no value changed — dirtying every tree it touched. `orderOpenCodePermissionRule` in
  * src/shared/opencodePermissions.ts is the fix.
  *
  * Two levels are pinned here, because they fail independently:

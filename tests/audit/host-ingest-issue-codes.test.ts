@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deriveLaneDemand } from "audit-tools/shared";
 
 // P25-d / R6 — the audit host-result ingest must CLASSIFY a failed read, not
+// <!-- comment-citation-exempt: the pre-fix reader this test was written against, since moved -->
 // collapse it to `null`. At HEAD `readSubmittedResult`
 // (src/audit/cli/dispatch/hostHandoff.ts) returns `null` for a missing file, an
 // unparseable file, a contract-invalid body and a failed `toAuditResult`

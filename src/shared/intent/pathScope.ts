@@ -54,6 +54,7 @@ function translateGlobSegment(segment: string): string {
  * A `**` segment folds its ADJACENT separator into its own regex fragment
  * (optional) rather than emitting it as a mandatory literal, so a
  * zero-segment match is possible on either side: `**\/*.env` matches a
+ * <!-- comment-citation-exempt: illustrative glob match -->
  * repo-root `secrets.env`, `src/**\/*.ts` matches `src/index.ts`, and
  * `vendor/**` matches the bare `vendor` entry itself (COR-ef7a209d /
  * COR-ef7a209d-2) — not only paths with an intermediate directory.

@@ -5,6 +5,7 @@ import type { CriticalFlowManifest } from "audit-tools/shared";
 
 // The lens set flow planning admits — DERIVED from the one lens registry
 // (`ALL_LENSES`, itself derived from `LENS_REGISTRY` in src/audit/types.ts),
+// <!-- comment-citation-exempt: names a helper this comment records as deleted -->
 // never hand-copied here. This file previously carried a seven-entry copy named
 // after a `lensSetForFlow` helper that no longer exists: the very hand-copied
 // list whose divergence from `isLens` was the defect `selectFlowLenses` was

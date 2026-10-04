@@ -1,6 +1,7 @@
 /**
  * A gate script that NAMES test files must name files that exist.
  *
+ * <!-- comment-citation-exempt: names the nonexistent path the defect listed -->
  * `test:doc-contract` listed `tests/audit/file-lock-doc-sync.test.ts` for months
  * after `467b1e8f` deleted it. `vitest run <missing path>` does not fail — it
  * silently runs the paths it can resolve — so the gate ran three of its four

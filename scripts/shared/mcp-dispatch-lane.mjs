@@ -75,6 +75,7 @@
 // PROVENANCE. `lane` is `<providerID>/<modelID>` off `result.info`, when the
 // job produced an assistant message; `agent-dispatch` otherwise (a job that
 // never got a turn — a preflight rejection, an immediate failure). There is
+// <!-- comment-citation-exempt: names the llm-relay field that was retired -->
 // no `servedBy` any more: llm-relay's answer-mode deployment name has no
 // opencode_fire/opencode_wait/opencode_check analogue.
 //

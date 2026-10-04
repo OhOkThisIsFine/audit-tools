@@ -272,6 +272,7 @@ function refuseCycles(
  *
  * It scanned the ref itself until 2026-09-17, and the two scanners disagreed on
  * half the forms prompt 8 teaches: this one stripped `#<symbol>` but not a
+ * <!-- comment-citation-exempt: illustrative example citation -->
  * RANGE, the parser stripped a range but not `#<symbol>`. So `src/a.ts:12-19`
  * reached `crossRefPaths`, `assembleComparison` and the fidelity packet as a
  * path no file can match — a correspondence candidate silently missed, a

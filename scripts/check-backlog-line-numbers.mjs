@@ -35,6 +35,7 @@
 //     lives OUTSIDE docs/backlog/, so scanning the entry directory excludes it
 //     by construction; `check:backlog-index` owns its correctness.
 //
+// <!-- comment-citation-exempt: illustrative example path -->
 // KNOWN RESIDUALS, stated rather than hidden. An UNBACKTICKED `src/foo.ts:123`
 // in prose is not caught (this corpus cites in backticks — widen on evidence,
 // not speculation), and neither is a slash-free `identifier:123` form

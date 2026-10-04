@@ -91,6 +91,7 @@ describe("a gate with an empty input set is not_applicable", () => {
   });
 
   it("does not report a not_applicable obligation as PENDING on the operator handoff", () => {
+    // <!-- comment-citation-exempt: names the literal set this test's fix replaced -->
     // `NON_PENDING_OBLIGATION_STATES` was a `Set<ObligationState>` LITERAL, so
     // widening the union is not a compile error there: a new non-actionable
     // member silently falls through to pending and ships on the host-facing

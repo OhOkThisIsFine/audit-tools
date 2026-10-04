@@ -16,7 +16,7 @@ import { isVerifiedCompleteStatus } from "../state/itemStatus.js";
 import type { RemediationState } from "../state/store.js";
 
 /**
- * Item C (`spec/mechanical-analyzer-layer-design.md`) — the close-gate verify
+ * CLAUDE.md's own-vs-acquire analyzer design — the close-gate verify
  * leg for analyzer-born findings. Findings born from analyzer leads are closed
  * by the same analyzer re-run: the one place mechanical output is authoritative
  * rather than a lead, because "this exact provenance identity no longer fires"

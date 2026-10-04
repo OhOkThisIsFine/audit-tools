@@ -318,7 +318,7 @@ function loadBaseline() {
  * being true the entry is dead data that silently widens the gate (a stale ceiling
  * for a shrunk file permits that much growth before anything fires, and a stale
  * amnesty never matches at all). Two refusals keep the baseline as small as its
- * meaning: `staleCeiling` and `vanishedAmnesty`. The one exception is deliberate —
+ * meaning: `staleCeilings` and `vanishedAmnesty`. The one exception is deliberate —
  * an amnestied entry that merely fell UNDER the entry budget is reported through
  * `staleAmnesty` (the `--report` list) rather than refused, because the amnesty
  * carries no recorded size and is inert while the entry is small.

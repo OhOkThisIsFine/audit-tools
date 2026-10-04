@@ -3,6 +3,7 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 // empty-frontier incident, closed by this test's commit).
 //
 // The dispatch guard and the workload builder must draw from ONE frontier
+// <!-- comment-citation-exempt: names the edge-only frontier helper this fix removed -->
 // computation. When they disagreed — `implementableBlocks` (edge-only) said
 // "dispatch" while `hostDependencyLevels` (phase barrier + existence +
 // permanent ineligibility) produced zero work items —

@@ -245,6 +245,25 @@
         "src/remediate/steps/recoverIngest.ts": "5f89da3780ab3255b234c176471511b7fbc71064"
       }
     },
+    "c2fa0250dd9f5ee5": {
+      "reviewed_by": "claude-opus-5-5-session",
+      "attester_class": "agent",
+      "checked": "loop-core paths in this batch change COMMENTS only (comment-citation fixes and comment-citation-exempt markers from the new check:comment-code-citations gate); git diff read per file; no code line changed in loop-core; full suite green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "0745de806eebf831457d197048ce3c468fb288a0",
+        "ran_at": "2026-10-04T22:36:39.924Z"
+      },
+      "attested_at": "2026-10-04T22:36:49.135Z",
+      "vouches": {
+        "src/audit/orchestrator/hostInputPause.ts": "7611b929fa8df7592039cb8d952099caf2d5151f",
+        "src/shared/engine/obligationEngine.ts": "cbd4d1d26ee2d82b1f13fe788f4a51351814c98d",
+        "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
+        "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
+      }
+    },
     "c468455c3d100370": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -430,7 +449,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/hostInputPause.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c2fa0250dd9f5ee5"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
       "review": "9bc59db653647a3a"
@@ -670,7 +689,7 @@
       "review": "beb774a606887b42"
     },
     "src/shared/engine/obligationEngine.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
       "review": "4318b8e7432c3e06"
@@ -706,10 +725,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/submissionLedger.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/submission/submissionScan.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/submission/workerPromptBinding.ts": {
       "baseline": "7b79934e86baf378"

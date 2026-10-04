@@ -1859,8 +1859,8 @@ describe("landing gates", () => {
     // SUBSTRING test, so a reword that appends a second sentence naming a
     // mechanism ("…on the fully merged tree. Dispatch a sub-agent to check.")
     // satisfies it while telling the host to run a thing this item must not
-    // run. The mechanism-absence rule the fan-out wording is held to
-    // (`tests/remediate/dc3.test.ts`) has to hold here too — the sentence is
+    // run. The mechanism-absence rule the fan-out wording was held to
+    // (a since-deleted remediate suite) has to hold here too — the sentence is
     // valid only as the WHOLE of what the prompt says about landing gates.
     expect(item.prompt.text).not.toMatch(/sub-agent/i);
     expect(item.prompt.text).not.toMatch(/dispatch (a|one) /i);

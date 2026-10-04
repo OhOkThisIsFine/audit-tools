@@ -7,7 +7,7 @@
  * about ingestion, and under the old partition a `dispatched` row appended when
  * a refused-and-therefore-still-pending lane was re-materialized would have
  * become that submission's trailing event: the refusal would vanish from
- * `lastRefusals` (so the host is told it "submitted nothing", which is false and
+ * `readTrailingSubmissionRefusals` (so the host is told it "submitted nothing", which is false and
  * points it at the wrong repair) and the report would claim the refusal "was
  * later accepted or re-landed by hand" when nothing had accepted it.
  *

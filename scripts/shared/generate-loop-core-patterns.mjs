@@ -10,10 +10,12 @@
 // BEFORE any build, so they genuinely cannot import the TS module — but that
 // argues for ONE generated sibling they both import, not two hand-kept copies.
 // A parity test held the invariant, so nothing ever landed broken; the cost was
+// <!-- comment-citation-exempt: names a since-retired module from the incident -->
 // the discovery path. Adding `src/audit/cli/dispatchAttempted.ts` meant editing
 // two copies and finding the third only when the parity test went red. The
 // property that should hold: ONE edit adds a loop-core path.
 //
+// <!-- comment-citation-exempt: names the per-hook predicate this generator retired -->
 // The same argument covered the PREDICATE: each hook re-implemented the
 // matching logic as a local `pinsLoopCore`, so the SEMANTICS could fork even
 // while the list stayed byte-equal. The generated module therefore also emits

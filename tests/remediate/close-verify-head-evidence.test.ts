@@ -203,7 +203,7 @@ describe("verifyHeadEvidenceAgainstFindings (unit)", () => {
   });
 
   it("records NOTHING for any item when no audit-read commit B is known", async () => {
-    // The production shape: no `findingBase` is supplied, so neither verdict is
+    // The production shape: the plan carries no `audit_read`, so neither verdict is
     // reachable and every candidate is withheld with that reason.
     twoGenerations(execSync, DEFECTIVE_SOURCE, FIXED_SOURCE);
     const state = makeState(

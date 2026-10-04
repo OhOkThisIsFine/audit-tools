@@ -12,6 +12,7 @@ import type { AuditState } from "../../src/audit/types/auditState.js";
 // P25-f / R7 — a host submission that the tool reads but cannot merge must
 // never be consumed-and-dropped.
 //
+// <!-- comment-citation-exempt: the pre-fix state this test was written against; consumeArraySubmission replaced consumeArrayIncoming -->
 // At HEAD `consumeArrayIncoming` (src/audit/cli/nextStepHelpers.ts) unlinks the
 // file unconditionally on a successful unwrap, and the merge arms in
 // `handleDesignReviewBranch` are guarded by `&& existing`. With no

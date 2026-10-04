@@ -7,6 +7,7 @@
  * because a gate that cries wolf gets bypassed and then the true defect rides
  * in behind it. So the properties pinned here are mostly NEGATIVE — the shapes
  * that must NOT be reported — plus the one positive shape that recurred twice
+ * <!-- comment-citation-exempt: the two readers that shipped the defect, since rewritten -->
  * (`readTestPlanCarry` / `readReviewSnapshot`).
  *
  * The scan is exercised over synthetic sources rather than the live tree, so

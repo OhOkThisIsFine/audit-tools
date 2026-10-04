@@ -71,6 +71,7 @@
     "check:doc-manifest": "node scripts/check-doc-manifest.mjs",
     "check:doc-links": "node scripts/check-doc-links.mjs",
     "check:doc-code-citations": "node scripts/check-doc-code-citations.mjs",
+    "check:comment-code-citations": "node scripts/check-comment-code-citations.mjs",
     "check:philosophy-brief": "node scripts/check-philosophy-brief.mjs",
     "check:readme-sample-report": "node --import tsx/esm scripts/check-readme-sample-report.mjs",
     "check:proposal-red-at": "node scripts/check-proposal-red-at.mjs",

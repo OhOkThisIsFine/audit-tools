@@ -1,6 +1,7 @@
 // Shared scaffolding for the next-step test suite.
 //
 // The next-step tests were originally one ~2800-line monolith
+// <!-- comment-citation-exempt: names the monolithic suite this harness was split from -->
 // (`tests/next-step.test.ts`). They are now split into focused per-concern
 // files (lifecycle, contract-pipeline dispatch, implementation dispatch,
 // resume/intent gates, preview-ack, outcomes contract). Every split file shares

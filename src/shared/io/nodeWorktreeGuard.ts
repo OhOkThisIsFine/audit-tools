@@ -78,7 +78,7 @@ function refusalMessage(what: string, worktree: string): string {
  * CLI's own `process.cwd()` carries no worktree evidence — the wrapper
  * stamps this var from its own cwd instead (the caller's true location). The
  * literal is re-spelled in `wrapper/audit-code-wrapper-lib.mjs` (plain node,
- * cannot import this module pre-build); `tests/shared/node-worktree-guard.test.mjs`
+ * cannot import this module pre-build); `tests/shared/node-worktree-guard.test.ts`
  * pins the two spellings equal. Scrubbed from child commands
  * (`stripAuditToolsControlEnv`) so a worker never inherits the driver's
  * stamped value and reads it as its own.

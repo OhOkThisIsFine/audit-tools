@@ -16,6 +16,9 @@ export const EXPECTED_SRC_REACH_LEG_IDS = [
   "check:control-bytes",
   "check:shared-primitives",
   "check:orphan-modules",
+  // A source comment's backticked citation must resolve against the tree; a
+  // src edit can both write a stale comment and delete what another names.
+  "check:comment-code-citations",
   // Backlog 2026-10-01: a staged loop-core path must carry content the tracked
   // attestation ledger vouches for — the same rule CI and the release gates run.
   // Its reach is every loop-core path; a src-only set outside loop-core skips it.

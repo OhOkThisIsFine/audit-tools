@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/doc-code-citations-gate.test.ts
 // Backticked repo-path citation gate for tracked markdown.
 //
-// Docs here cite code overwhelmingly as a path in backticks (`src/foo/bar.ts`),
+// Docs here cite code overwhelmingly as a path in backticks (`src/shared/types/finding.ts`),
 // not as a markdown link — and until this gate only the link form was checked
 // (`check:doc-links`), so a rename/delete left every backtick citation pointing
 // at nothing. The `.mjs`→`.ts` test conversion alone stranded 31 such citations
@@ -61,82 +62,38 @@
 // Files matching the doc-manifest `excluded` row (dated review records, runtime
 // artifacts, the guidelines file itself) are skipped — same single-sourced set,
 // imported from scripts/doc-manifest-data.mjs, never restated here.
+//
+// What a token IS and whether it RESOLVES lives in
+// scripts/shared/code-citation-resolution.mjs, shared with
+// `check:comment-code-citations`: this file decides only which docs are read,
+// the exemption markers, and the doc-specific rules (line anchors, spec symbols).
 
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, posix, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { DOC_MANIFEST } from "./doc-manifest-data.mjs";
 import { globToRegExp, isGlob } from "./check-doc-manifest.mjs";
 import { RUNTIME_ARTIFACT_NAMES } from "./shared/runtime-artifact-names.generated.mjs";
+import {
+  CODE_EXTENSIONS,
+  HAS_EXTENSION,
+  PATTERN_CHARS,
+  RUNTIME_STATE_PREFIXES,
+  buildPathIndex,
+  classifyPathToken,
+  declaredIdentifierUniverse,
+  hasLineSuffix,
+  ignoreCandidates,
+  ignoredPaths,
+  isNonRepoToken,
+  isSymbolShaped,
+  resolvePathRecord,
+  stripLineSuffix,
+  trackedFiles,
+} from "./shared/code-citation-resolution.mjs";
 
 const root = resolve(process.argv[2] ?? process.cwd());
-
-function git(args, options = {}) {
-  return execFileSync("git", args, {
-    cwd: root,
-    encoding: "utf8",
-    windowsHide: true,
-    ...options,
-  });
-}
-
-/**
- * All versionable files present in the working tree (forward-slashed) — the
- * resolution universe. `git ls-files` alone includes unstaged deletions and
- * omits newly-created source, which made a pre-stage verification both crash
- * on retired docs and reject citations to files being added in the same change.
- * The union below models the tree that `git add -A` would stage without
- * mutating the index.
- *
- * TWO SETS, because the two uses must not move together. `examined` is what the
- * tree COMMITS to — tracked files plus the index, never an untracked scratch
- * file — and it is what the rules that decide WHICH citations are checked read
- * (the bare-name extension-skip set). `universe` adds untracked non-ignored
- * files, which may only RESOLVE a citation as a target: a file being authored in
- * this change must resolve, but a stray `notes.log` at the root must not widen
- * the extension census and flip an unrelated doc's citation from skipped to
- * failing (the 2026-08-19 release-gate refusal, where the same docs had passed
- * the commit gate minutes earlier).
- */
-function trackedFiles() {
-  const deleted = new Set(
-    git(["ls-files", "-z", "--deleted"]).split("\0").filter(Boolean),
-  );
-  const examined = new Set(
-    git(["ls-files", "-z"])
-    .split("\0")
-    .filter((path) => path && !deleted.has(path)),
-  );
-  const universe = new Set(examined);
-  for (const path of git(["ls-files", "-z", "--others", "--exclude-standard"])
-    .split("\0")
-    .filter(Boolean)) {
-    universe.add(path);
-  }
-  return { examined: [...examined], universe: [...universe] };
-}
-
-/**
- * One batched `git check-ignore --stdin -z` over every candidate path →
- * the ignored subset. Rules-based (the tracked .gitignore chain), not a disk
- * probe, so a fresh clone classifies identically. Exit 1 means "none ignored".
- */
-function ignoredPaths(candidates) {
-  const unique = [...new Set(candidates)].filter(Boolean);
-  if (unique.length === 0) return new Set();
-  let out = "";
-  try {
-    out = git(["check-ignore", "--stdin", "-z"], {
-      input: unique.join("\0") + "\0",
-    });
-  } catch (err) {
-    if (err && /** @type {any} */ (err).status === 1) return new Set();
-    throw err;
-  }
-  return new Set(out.split("\0").filter(Boolean));
-}
 
 const EXEMPT_MARKER = /<!--\s*doc-citation-exempt:.*?-->/;
 
@@ -151,16 +108,6 @@ function excludedMatchers() {
   );
 }
 
-/** Strip a trailing line-anchor suffix (`:123`, `:12-34`, `:~653`, `:1,2`). */
-function stripLineSuffix(token) {
-  return token.replace(/:[~\d][\d,~–-]*$/, "");
-}
-
-/** Does this token carry a line-anchor suffix at all? */
-function hasLineSuffix(token) {
-  return stripLineSuffix(token) !== token;
-}
-
 /**
  * A line anchor into SOURCE is refused; into anything else it is allowed.
  *
@@ -170,11 +117,8 @@ function hasLineSuffix(token) {
  * point: it resolves the PATH and has always thrown the line suffix away, so a
  * citation could rot to a completely unrelated statement and every check stayed
  * green. A symbol name survives every edit that does not rename it, and a rename
- * is exactly when the citation SHOULD break.
- */
-const CODE_EXTENSIONS = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx"]);
-
-/**
+ * is exactly when the citation SHOULD break. (`CODE_EXTENSIONS` is the source set.)
+ *
  * ⚠ The rule needs NO exclusion list of its own, and adding one would be a second
  * home for a decision the doc manifest already owns. This gate scans only the
  * docs the manifest does not exclude — 54 of 209 tracked markdown files — and the
@@ -188,94 +132,6 @@ const CODE_EXTENSIONS = new Set(["ts", "tsx", "mjs", "cjs", "js", "jsx"]);
  * class, change the manifest's excluded row — not this file.
  */
 
-const PATTERN_CHARS = /[*{<>…]/;
-const HAS_EXTENSION = /\.([A-Za-z0-9]+)$/;
-
-/** Tokens that name something outside this repository — never citations. */
-function isNonRepoToken(token) {
-  return (
-    token.startsWith("~") ||
-    /^[A-Za-z]:([\\/]|$)/.test(token) ||
-    token.includes("://") ||
-    token.includes("\\") ||
-    token.split("/").some((segment) => segment === "." || segment === "..")
-  );
-}
-
-// The runtime STATE dirs (`.audit-tools` path-module contract). Docs cite paths
-// under them constantly as the run-artifact LAYOUT (`.audit-tools/audit/steps/…`)
-// — those name files a run writes, never repo files, even though the dir itself
-// carries two tracked report artifacts. Layout citations are out of this gate's
-// scope by contract, not by hand-listing.
-const RUNTIME_STATE_PREFIXES = [".audit-tools/", ".audit-tools-visibility/"];
-
-/** Every directory prefix of the tracked set — the DIRECTORY resolution universe. */
-function trackedDirs(tracked) {
-  const dirs = new Set();
-  for (const path of tracked) {
-    let current = path;
-    for (;;) {
-      const slash = current.lastIndexOf("/");
-      if (slash < 0) break;
-      current = current.slice(0, slash);
-      if (dirs.has(current)) break;
-      dirs.add(current);
-    }
-  }
-  return dirs;
-}
-
-/**
- * Every identifier the tree declares or names in a string — the resolution set
- * for the `spec/**` symbol rule. Deliberately WIDER than "declared": a symbol
- * cited from a spec is one the code OWNS, and the spellings that legitimately
- * count are a binding, a type body's field, a member access, a quoted string
- * (an env-var name is a value, not an identifier), and a module's own basename
- * (`nextStepHelpers` is how prose cites a file). Anything narrower reds real
- * citations; anything wider — a template literal's contents, a bare `index` —
- * swallows drift.
- *
- * Reads the same file set the FILE-RESOLUTION rule reads, so a symbol in a
- * source file the tree does not carry cannot green a spec citation.
- */
-function declaredIdentifierUniverse(paths) {
-  const names = new Set();
-  const SOURCE = /\.(ts|tsx|mjs|cjs|js|jsx)$/;
-  const DECLARATION =
-    /\b(?:function|class|interface|type|const|let|var|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
-  const FIELD = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\??\s*:/gm;
-  const MEMBER = /\.([A-Za-z_$][A-Za-z0-9_$]*)/g;
-  const QUOTED = /["']([A-Za-z_$][A-Za-z0-9_$]*)["']/g;
-  for (const path of paths) {
-    if (!SOURCE.test(path)) continue;
-    let source;
-    try {
-      source = readFileSync(join(root, path), "utf8");
-    } catch {
-      continue; // a tracked file absent from this worktree contributes nothing
-    }
-    for (const re of [DECLARATION, FIELD, MEMBER, QUOTED]) {
-      for (const match of source.matchAll(re)) names.add(match[1]);
-    }
-    const base = path.slice(path.lastIndexOf("/") + 1).replace(SOURCE, "");
-    if (base !== "index") names.add(base);
-  }
-  return names;
-}
-
-/**
- * Symbol-shaped backticked tokens: a compound CONSTANT or a lowerCamelCase name.
- * BOTH anchored, and the camel arm anchored at BOTH ends — `/…[A-Z]/` alone
- * matches a PREFIX, so `writeContractArtifact(...)` and `deriveNodeFiles(node)`
- * were reported as dangling symbols when they are call-shaped example prose.
- */
-function isSymbolShaped(token) {
-  return (
-    /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(token) ||
-    /^[a-z_$][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*$/.test(token)
-  );
-}
-
 const SYMBOL_EXEMPT = /<!--\s*symbol-citation-exempt:.*?-->/;
 
 function main() {
@@ -284,39 +140,16 @@ function main() {
   // is what the tree COMMITS to, and it is what decides WHICH citations are
   // looked at — the two must not move together, or an untracked scratch doc
   // changes the verdict of a tree that was green a moment earlier.
-  const { examined, universe } = trackedFiles();
-  const tracked = universe;
-  const trackedSet = new Set(tracked);
-  const dirSet = trackedDirs(tracked);
-  const topDirs = new Set(
-    tracked.filter((p) => p.includes("/")).map((p) => p.split("/", 1)[0]),
-  );
-  const byBasename = new Map();
-  for (const path of tracked) {
-    // Tracked files under the runtime state dirs don't participate in bare-name
-    // resolution: citations INTO those dirs are out of scope by contract, so a
-    // report artifact living there must not manufacture phantom ambiguity.
-    if (RUNTIME_STATE_PREFIXES.some((p) => path.startsWith(p))) continue;
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    const bucket = byBasename.get(name);
-    if (bucket) bucket.push(path);
-    else byBasename.set(name, [path]);
-  }
-  // The EXTENSION-SKIP census reads `examined`, never the resolution universe.
-  // This is the rule that decides which bare-name citations are looked at, so an
-  // untracked scratch file must not be able to change it (see `trackedFiles`).
-  const trackedExtensions = new Set();
-  for (const path of examined) {
-    const ext = HAS_EXTENSION.exec(path);
-    if (ext) trackedExtensions.add(ext[1].toLowerCase());
-  }
+  const { examined, universe } = trackedFiles(root);
+  const index = buildPathIndex({ examined, universe });
   const runtimeNames = new Set(RUNTIME_ARTIFACT_NAMES);
   const excluded = excludedMatchers();
   // WHICH DOCS ARE READ is a decision about the citations the gate examines, so
-  // it reads `examined` — an untracked doc may be CITED (it joins `trackedSet`
-  // above as a resolution target) but must never add citations of its own to
-  // the corpus. The first version of this gate built both from `universe`,
-  // which made an untracked `spec/zz-probe.md` able to red a green tree with a
+  // it reads `examined` — an untracked doc may be CITED (it joins the resolution
+  // universe as a target) but must never add citations of its own to the
+  // corpus. The first version of this gate built both from `universe`, which
+  // <!-- comment-citation-exempt: names the untracked probe doc of a past defect -->
+  // made an untracked `spec/zz-probe.md` able to red a green tree with a
   // citation path resolution would never have visited.
   const markdown = examined.filter(
     (p) => p.endsWith(".md") && !excluded.some((re) => re.test(p)),
@@ -347,6 +180,7 @@ function main() {
   // A THIRD RULE, on `spec/**` ONLY: a backticked SYMBOL citation that names
   // nothing in the tree.
   //
+  // <!-- comment-citation-exempt: names the mechanism a spec cited after it was deleted; the name is the record -->
   // The wiring is what rots. `spec/remediate/remediation-goals.md` named
   // `dependencyAwaitingClarification` as the held-pending mechanism long after
   // the frontier unification deleted it, and `check:doc-code-citations` stayed
@@ -360,7 +194,7 @@ function main() {
   // says only an owner may resolve — the gate would be enforcing at a boundary it
   // does not own (PH-05). So it prints, names the file and line, and exits 0;
   // the mechanical part is that it can no longer be INVISIBLE.
-  const declaredSymbols = declaredIdentifierUniverse(tracked);
+  const declaredSymbols = declaredIdentifierUniverse(root, universe);
   const danglingSymbols = [];
 
   // Pass 1 — collect classified citation records, so gitignore scoping can run
@@ -382,7 +216,6 @@ function main() {
 
         const exempt =
           EXEMPT_MARKER.test(line) || (i > 0 && EXEMPT_MARKER.test(lines[i - 1]));
-        const base = { relPath, line: i + 1, token, exempt };
 
         // The SYMBOL rule, `spec/**` only. A token that is a repo path (it has
         // a slash or an extension) is the other rule's business; this one is
@@ -410,79 +243,23 @@ function main() {
         // Past here is PATH RESOLUTION, which keeps the manifest's narrower
         // scope. A doc outside it was read only for the anchor rule above.
         if (!resolves) continue;
-
-        if (path.endsWith("/")) {
-          const dir = path.replace(/\/+$/, "");
-          if (!dir) continue;
-          records.push({
-            ...base,
-            kind: "dir",
-            candidates: [dir, posix.normalize(posix.join(posix.dirname(relPath), dir))],
-          });
-        } else if (path.includes("/")) {
-          if (!topDirs.has(path.split("/", 1)[0])) continue;
-          if (!HAS_EXTENSION.test(path)) continue;
-          records.push({ ...base, kind: "path", path });
-        } else {
-          if (path.startsWith(".") || path.startsWith("-")) continue;
-          const ext = HAS_EXTENSION.exec(path);
-          if (!ext) continue;
-          if (!trackedExtensions.has(ext[1].toLowerCase())) continue;
-          if (runtimeNames.has(path)) continue;
-          records.push({ ...base, kind: "bare", path });
-        }
+        const record = classifyPathToken(token, relPath, index, { skipBareNames: runtimeNames });
+        if (record) records.push({ ...record, relPath, line: i + 1, token, exempt });
       }
     });
   }
 
-  // Dir candidates are fed slash-terminated: a dir-only ignore pattern
-  // (`dist/`) only matches a NONEXISTENT path when the queried path also ends
-  // in `/` — and the path must not exist on the machine for the answer to be
-  // fresh-clone stable (dist/ exists after a local build, not in CI).
-  const ignored = ignoredPaths(
-    records.flatMap((r) =>
-      r.kind === "dir" ? r.candidates.map((c) => `${c}/`) : r.kind === "path" ? [r.path] : [],
-    ),
-  );
+  const ignored = ignoredPaths(root, ignoreCandidates(records));
 
   // Pass 2 — resolve. A class counter ticks for every citation the gate actually
   // resolved (green or red); gitignored citations are out of scope, not checked.
   const counts = { path: 0, dir: 0, bare: 0 };
   const failures = [];
-  const fail = (record, verdict) => {
-    if (!record.exempt) failures.push({ ...record, verdict });
-  };
-
   for (const record of records) {
-    if (record.kind === "path") {
-      if (ignored.has(record.path)) continue;
-      counts.path += 1;
-      if (trackedSet.has(record.path)) continue;
-      fail(record, "does not name a tracked file");
-    } else if (record.kind === "dir") {
-      if (record.candidates.some((c) => dirSet.has(c))) {
-        counts.dir += 1;
-        continue;
-      }
-      if (record.candidates.some((c) => ignored.has(`${c}/`))) continue;
-      counts.dir += 1;
-      fail(record, "missing directory — no tracked dir at the root-relative or doc-relative path");
-    } else {
-      counts.bare += 1;
-      const candidates = byBasename.get(record.path) ?? [];
-      if (candidates.length === 1) continue;
-      if (candidates.length === 0) {
-        fail(record, "matches no tracked file");
-      } else {
-        // Root-preference tie-break: exactly one candidate at the repo root
-        // wins (the root file is only citable bare — it has no longer form).
-        if (candidates.filter((c) => !c.includes("/")).length === 1) continue;
-        fail(
-          record,
-          `ambiguous (${candidates.length} candidates: ${[...candidates].sort().join(", ")}) — cite the full path`,
-        );
-      }
-    }
+    const result = resolvePathRecord(record, index, ignored);
+    if (result === null) continue;
+    counts[record.kind] += 1;
+    if (!result.ok && !record.exempt) failures.push({ ...record, verdict: result.verdict });
   }
 
   if (failures.length > 0) {

@@ -119,6 +119,7 @@ function productionExports(): Map<string, string> {
  * than a node builtin.
  *
  * A test that imports `stableStringify` from `audit-tools/shared` — or imports it
+ * <!-- comment-citation-exempt: a hypothetical local alias, deliberately absent -->
  * as `stableStringifyImpl` and wraps it — has answered the question this guard
  * asks. Whether the wrapped call is faithful is that wrapper's own test's
  * business, not this one's; what this guard refuses is a function that never

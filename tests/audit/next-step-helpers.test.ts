@@ -550,7 +550,7 @@ await test("tryConsumeSubmission still re-throws genuine IO errors (directory in
 // design-review submission and merge ONLY when `Array.isArray(value)` — any
 // other shape (most commonly a JSON-object-mode host wrapping its array as
 // `{findings:[...]}`) was destroyed with no quarantine, no message, and the
-// identical step re-emitted forever. Fixed via `consumeArrayIncoming`
+// identical step re-emitted forever. Fixed via `consumeArraySubmission`
 // (tolerant single-array-property unwrap, else quarantine-not-delete) plus
 // `renderDesignReviewRejectionNotice` (names the quarantined file + reason in
 // the re-emitted step).

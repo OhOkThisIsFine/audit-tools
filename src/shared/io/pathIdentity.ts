@@ -4,6 +4,7 @@ import { isAbsolute, resolve, sep } from "node:path";
 /**
  * Whether the host filesystem is case-insensitive for path identity. win32 and
  * darwin default to case-insensitive volumes; linux is case-sensitive. Used so
+ * <!-- comment-citation-exempt: illustrative case-collision paths -->
  * `src/A.ts` and `src/a.ts` collide on a Windows/macOS volume (one physical
  * file) but stay distinct on Linux — INV-SOO-09 canonical physical-file identity.
  */

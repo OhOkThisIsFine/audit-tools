@@ -1,5 +1,11 @@
-// Seeded fixture repository for the A-9 autonomy acceptance capstone
-// (`tests/audit/a9.test.mjs`).
+// Seeded fixture repository for the A-9 autonomy acceptance capstone.
+//
+// ⚠ ORPHANED: nothing imports this module. Its consumer (the A-9 capstone test)
+// and the remediation verifier it was shaped for were both deleted, so the
+// names below record the design it was written against, not live code.
+// <!-- comment-citation-exempt: the deleted capstone test and verifier this header describes -->
+//
+// The capstone was `tests/audit/a9.test.mjs`.
 //
 // The capstone drives audit → promote → remediate end-to-end IN-PROCESS over a
 // real backend provider with ZERO host-subagent dispatch. For that to be a real
@@ -161,7 +167,7 @@ export function initAutonomyFixtureGit(root) {
  *
  * Using a fixed contract (rather than whatever the live audit happens to surface)
  * keeps the remediation half's denominator and verify command deterministic — the
- * audit half is still exercised separately by `runAuditHalf` in the test.
+ * audit half was exercised separately by the capstone test's own audit pass.
  */
 export function buildPromotedFindings() {
   return {

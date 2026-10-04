@@ -628,6 +628,7 @@ test("the accepted ledger carries forward across a republication inside one wave
 
 test("ensureSemanticReviewRunUnlocked ADOPTS an in-flight clock-minted run at the derived id", async () => {
   await withTempArtifacts(async ({ artifactsDir, root }) => {
+    // <!-- comment-citation-exempt: names the retired run-id minter -->
     // A run minted by the retired clock-based `buildRunId`, still in flight when
     // this build lands: its published workload, bound paths and accepted pair
     // all hang off the OLD id, and workers are holding its bindings.

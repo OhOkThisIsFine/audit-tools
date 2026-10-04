@@ -4,7 +4,7 @@ import { hashContent } from "../hash.js";
 /**
  * Content-anchored identity of one analyzer lead — the join key that lets
  * remediation's close-verify draw ask "does this exact lead still fire?"
- * mechanically (item C of `spec/mechanical-analyzer-layer-design.md`).
+ * mechanically (CLAUDE.md's own-vs-acquire analyzer design).
  *
  * Anchored on the NORMALIZED flagged snippet, never line numbers: edits shift
  * lines, but an untouched clone/violation re-hashes identically wherever it

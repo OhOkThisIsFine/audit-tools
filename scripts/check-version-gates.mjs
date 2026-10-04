@@ -7,6 +7,7 @@
 // semantics. A module that stamps `schema_version` on write and then casts the
 // parsed file straight to its payload type is not versioned — it is an
 // unchecked cast wearing a version field, and the version field makes it LOOK
+// <!-- comment-citation-exempt: the two readers that shipped the defect, since rewritten -->
 // guarded in review. That defect shipped twice in the same shape
 // (`readTestPlanCarry`, `readReviewSnapshot`), so it is enforced here instead
 // of relied on as authoring discipline.

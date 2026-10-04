@@ -126,8 +126,8 @@ describe("deriveConceptualVerificationStatus", () => {
     );
   });
 
-  // The REACH half. `refuseSuppliedVerificationStatus` lived only inside
-  // `buildConceptualReviewAdjudication`, which the production fold reaches with
+  // The REACH half. The supplied-verdict refusal (now `refuseSuppliedToolVerdict`)
+  // once lived only inside `buildConceptualReviewAdjudication`, which the production fold reaches with
   // an ALREADY-PARSED submission — and `ConceptualJudgeSubmissionSchema` omits
   // `verification_status`, so the parse had stripped the supplied value before
   // the check could look. The check named a field it could never see on the only

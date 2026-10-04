@@ -50,6 +50,7 @@ export const itemMarker = (key) => `<!-- ${MARKER} key=${key} -->`;
 export const MARKER_RE = new RegExp(`<!--\\s*${MARKER}\\s+key=([0-9a-f]+)\\s*-->`, 'g');
 
 // ── citation exemption for quoted item content ───────────────────────────────
+// <!-- comment-citation-exempt: illustrative stale path -->
 // Item prose quotes a code path precisely BECAUSE it is stale ("`src/x.ts` was
 // deleted") — that is the finding, not a citation, so the doc-citation gate
 // (`scripts/check-doc-code-citations.mjs`) has to be told. A hand-placed marker

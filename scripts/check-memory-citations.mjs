@@ -142,7 +142,7 @@ for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
 // the rule is an explicit exemption marker (the same idiom the doc gates use),
 // NEVER a bare existence check, and never inferred from words like "deleted".
 //
-// Confidence is total for a SLASHED path (a `src/foo/bar.ts` token names one
+// Confidence is total for a SLASHED path (a `src/shared/types/finding.ts` token names one
 // file and nothing else). Globs, `<placeholders>`, `*`, line suffixes and
 // non-repo tokens are out of scope by rule — a pattern is not a citation, and a
 // `docs/backlog/` directory citation is resolved against the tracked dir set.

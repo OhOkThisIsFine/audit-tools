@@ -127,6 +127,7 @@ describe("the published tarball carries a coherent, self-contained doc set", () 
     // README is itself shipped, so rule (2) already forbids it a relative link
     // to an unshipped page; pinning equality adds the missing half — a shipped
     // page README does not name.
+    // <!-- comment-citation-exempt: illustrative example path -->
     // Normalized BEFORE the filter: a bullet written `./docs/audit-pkg/x.md`
     // would otherwise be invisible here, and the escaping-link rule would not
     // catch it either — the target IS shipped, it is only spelled differently.

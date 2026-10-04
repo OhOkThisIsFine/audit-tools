@@ -8,12 +8,13 @@
 
 - **The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).** `check:loop-core-attestations` runs in `verify:checks` from the pull request's own tree, so its membership predicate (`.claude/hooks/loop-core-patterns.mjs`) and the checker are the versions under judgment. Since 2026-10-04 the gate's four files are loop-core and admins are bound, so a narrowing that keeps the gate files listed is caught. Not caught: one change that removes the gate files from the list together with their ledger entries, that makes the checker pass, or that unwires it (`package.json` `verify:checks`, `.github/workflows/ci.yml`, `scripts/shared/loopCoreClosureData.mjs`) — each is judged by the copy it edits. **Property:** a required check judges a change to the gate with a copy the change cannot edit.
 
-- **Nothing checks a code comment against the code it describes (2026-08-31, medium, friction:
-  tool_should_decide).** Documentation is gated by `check:doc-code-citations`; comments are gated by
-  nothing, so a comment that names a symbol, an enumeration or a workflow shape drifts silently and
-  is found only when a doc-review lane happens to read the code to check a DOC. **Property:** a
-  comment that names a symbol, a workflow shape or an enumeration the code owns is reconciled
-  against it mechanically, or it does not state one.
+- **A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing
+  (2026-08-31, medium, friction: tool_should_decide).** Since 2026-10-04 `check:comment-code-citations`
+  resolves every backticked path and symbol in a source comment; its guard-reach row lists what it
+  cannot reach. A shape or an enumeration names no single identifier, and a name the same file's code
+  spells is not looked up (the 2026-08-31 `continuityScore` header). **Property:** a comment that
+  states a workflow shape or an enumeration the code owns is reconciled against it mechanically, or it
+  does not state one.
 
 - **The TASK draw's coherence eligibility is still disjunctive and has never been measured for
   collapse (2026-08-19, medium).** The findings draw moved to `shared_file AND same_lens`;

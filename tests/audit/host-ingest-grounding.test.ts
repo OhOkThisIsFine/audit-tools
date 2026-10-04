@@ -1,5 +1,6 @@
 // C1 (docs-16): grounding is TOOL-COMPUTED at ingest, never worker-self-reported.
 //
+// <!-- comment-citation-exempt: names the orphan module deleted in the orphan-module sweep -->
 // `verifyFindingGrounding` existed with zero production callers while the shared
 // `FindingSchema` happily carried a worker-supplied `grounding` verdict straight
 // through ingestion into synthesis — so the "confirmed by the tool's re-check"

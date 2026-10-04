@@ -948,6 +948,7 @@ export interface StagingSelection {
  * (`repoPathExactKey` — forward-slash, `./`-stripped), then the canonical
  * lowercased `normalizeRepoPath` key as a fallback ONLY when unambiguous
  * (exactly one dirty path folds to it). The fold tier is what makes a
+ * <!-- comment-citation-exempt: illustrative case-variant paths -->
  * declared `./Src/Foo.ts` match git's `src/Foo.ts` on win32; the exact tier +
  * ambiguity guard is what stops a case-SIBLING pair on a case-sensitive
  * checkout (`Foo.ts` real, `foo.ts` also real and user-dirty) from sweeping

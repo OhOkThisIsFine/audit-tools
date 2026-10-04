@@ -75,6 +75,7 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
 });
 
 test("cmdStatus does NOT advertise the retired run ledger", async () => {
+  // <!-- comment-citation-exempt: names the retired run-ledger loader -->
   // The run ledger was a provenance plane with no producer: `loadRunLedger`
   // read a file no tracked writer ever created, so its empty result was
   // indistinguishable from a run that recorded nothing — and `status` reported

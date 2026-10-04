@@ -113,6 +113,7 @@ export function runAttest(repo: string, args: string[], { stamp = true }: { stam
 // The path `stageLoopCoreFile` writes. Exported so a test can assert the
 // loop-core MATCHER accepts it (see the harness-contract case in
 // pre-commit-gate-attestation.test.ts): the helper used to write
+// <!-- comment-citation-exempt: illustrative non-loop-core path -->
 // `src/shared/quota/x.ts`, which `isLoopCorePath` returns FALSE for — the quota
 // substrate was retired and the pattern list moved on without the fixture. A
 // helper documented as "arms the loop-core gate" that arms nothing makes a new

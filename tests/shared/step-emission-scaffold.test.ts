@@ -268,6 +268,7 @@ test("handledKeys is snapshotted, so a later mutation of the caller's object can
 test("exactly ONE step-emission scaffold module exists under src/", () => {
   // Scanned as a NAME FAMILY, not one literal identifier: keying on
   // `createStepEmissionScaffold` alone would wave through a
+  // <!-- comment-citation-exempt: a hypothetical near-miss name, deliberately absent -->
   // `createGateEmissionScaffold` sibling — a second scaffold under a
   // near-miss name is the likeliest way the two adopters land two of these.
   const familyExport = /export\s+(?:async\s+)?function\s+\w*EmissionScaffold\w*\b/;

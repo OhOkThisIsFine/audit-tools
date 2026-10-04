@@ -14,6 +14,7 @@ import {
 /**
  * Single source of truth for the step-contract object + writer shared by both
  * orchestrators (drift-plan R3). Before this module existed, audit-code
+ * <!-- comment-citation-exempt: the pre-monorepo package layout this module replaced -->
  * (`src/cli/steps.ts`) and remediate-code (`src/steps/stepWriter.ts`) each had
  * their own `writeCurrentStep` with REAL behavioural drift: remediate
  * normalized every host-facing path to forward slashes via `toPromptPathToken`,

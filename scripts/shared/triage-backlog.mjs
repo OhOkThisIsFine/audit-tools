@@ -340,6 +340,7 @@ export function premiseVerdict(rec, root = ROOT) {
  * WHY (duplicated-guard lap, 2026-07-25). The sweep's per-entry `Paths:` column
  * is MODEL-INVENTED for entries whose prose names no file. The friction walk
  * recorded three such entries, quoted the fabricated paths verbatim
+ * <!-- comment-citation-exempt: deliberately nonexistent example paths -->
  * (`src/scheduler/populate.ts`, `src/review/mapCache.ts`, `src/pinning-gate.ts`)
  * and drew the conclusion the design follows: a path column that reads like
  * evidence is a routing guess, and two of the three entries it described had to

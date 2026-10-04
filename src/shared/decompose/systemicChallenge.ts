@@ -19,7 +19,7 @@ import { FindingSchema } from "../types/finding.js";
 import { groundDesignFinding } from "../validation/designFindingGrounding.js";
 import { normalizeRepoPath } from "../validation/findingGrounding.js";
 
-// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
+// <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * One challenge round's submission from the second-order adversary agent: the
  * improvement findings it surfaced this round. An EMPTY `findings` array is the

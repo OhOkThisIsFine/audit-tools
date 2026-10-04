@@ -98,6 +98,7 @@ function ensureCompiledSource() {
 
 export async function importSourceModule(sourceRelativePath) {
   const distDir = ensureCompiledSource();
+  // <!-- comment-citation-exempt: an audit-relative example path, not a repo path -->
   // Callers pass audit-relative paths (`src/extractors/graph.ts`); the single
   // package compiles audit source to `<tempDir>/audit/...`, so map src/ → audit/.
   const normalized = sourceRelativePath

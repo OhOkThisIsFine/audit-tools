@@ -330,6 +330,7 @@ function failingPathsFromOutput(output: string, root: string): string[] {
  *
  * WHY NOT A HAND-ROLLED DIGEST. The predecessor read each dirty path itself
  * through `normalizeRepoPath` — a lower-casing COMPARISON key — so on a
+ * <!-- comment-citation-exempt: illustrative case-collision path -->
  * case-sensitive checkout two different contents of `src/auditStep.ts` hashed to
  * the same id, and a git-quoted non-ASCII path was dropped outright on win32.
  * Both are silent: the id still looks like an id, and a collision serves a
@@ -453,6 +454,7 @@ export async function attributeGateRed(params: {
   // to do LESS, and its evidence — "no failing path is one this run touched" —
   // is exactly what an ordinary test red looks like: a suite that fails prints
   // the TEST file it choked on, and a run edits source, so the intersection is
+  // <!-- comment-citation-exempt: illustrative example path -->
   // empty. `src/x.ts` edited + `FAIL tests/x.test.ts > adds` printed is a red
   // this run most plausibly caused, and the predecessor rendered it as "do NOT
   // rework remediation items for it". So a failing TEST path is never evidence

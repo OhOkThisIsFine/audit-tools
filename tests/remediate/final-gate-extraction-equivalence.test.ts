@@ -8,6 +8,7 @@
 // edit re-implements one in nextStep.ts instead of re-exporting finalGate.ts's,
 // the identity assertions fail loudly.
 //
+// <!-- comment-citation-exempt: names the coarse backstop this comment records as gone -->
 // The suite's other half used to characterize `applyCoarseReblock` — the coarse
 // backstop that re-opened every item on a whole-repo red and abandoned the run
 // at its bound. That function is gone, and with it those cases: a red now

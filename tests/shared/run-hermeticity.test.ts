@@ -11,6 +11,7 @@
  *
  * ⚠ This file used to pin a second half — that a run leaves the REPO ROOT as it
  * found it, via a `setup`/`teardown` entry-list delta. That half was DELETED on
+ * <!-- comment-citation-exempt: names the helpers deleted by that owner decision -->
  * 2026-08-30 by owner decision, along with `unexpectedRootEntries` and
  * `RUN_OWNED_ROOT_ENTRIES`, so this file no longer asserts anything about the
  * repo root and must not be read as doing so. The reason is in

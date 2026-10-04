@@ -389,6 +389,47 @@ export const GUARDS = [
       '(2026-08-18; extension-census source narrowed 2026-09-10)',
   },
   {
+    id: 'check:comment-code-citations',
+    releaseOrder: 30.5,
+    releaseStage: 'checks',
+    kind: 'gate',
+    forms: [
+      // A tracked src/ file keeps `src/…` a repo path rather than a third-party token.
+      { name: 'comment citing a path the tree does not carry', drive: 'script', script: 'scripts/check-comment-code-citations.mjs',
+        sample: '// the reader lives in `src/does-not-exist.ts`\nexport {};\n', path: 'src/fixture.mjs',
+        extraFiles: { 'src/present.mjs': 'export {};\n' }, expect: 'src/does-not-exist.ts' },
+      { name: 'comment citing a symbol the tree does not declare', drive: 'script', script: 'scripts/check-comment-code-citations.mjs',
+        sample: '// the reader is `goneForeverHelper` and the set is `GONE_FOREVER_SET`\nexport {};\n', path: 'src/fixture.mjs',
+        expect: 'goneForeverHelper' },
+    ],
+    impl: 'check:comment-code-citations',
+    preCommit: 'reach',
+    fix:
+      'a backticked citation in a source COMMENT does not resolve — a slashed path must name a tracked ' +
+      'file, a rooted directory a tracked directory, and a camelCase or CONSTANT_CASE name must be ' +
+      'declared somewhere in the tracked source — re-point the comment at what the code does now, drop ' +
+      'the claim, or (deliberate archaeology / an illustrative example path) put a ' +
+      '`<!-- comment-citation-exempt: <reason> -->` line above it',
+    note:
+      'The comment twin of check:doc-code-citations, on the SAME resolution engine ' +
+      '(scripts/shared/code-citation-resolution.mjs — what a token is and whether it resolves is ' +
+      'single-sourced). Reads backticked tokens in the comments (found by the TypeScript scanner, not a ' +
+      'line-prefix guess) of tracked src/, scripts/, .claude/hooks/, tests/, wrapper/ and dispatch/ ' +
+      'source. Replaced the src-only comment-symbol-drift contract test (P09), which carried a second ' +
+      'copy of the identifier universe. UNCOVERED HALVES, declared: (1) a comment stating a workflow ' +
+      'SHAPE or a prose ENUMERATION names no single identifier, so no text rule reaches it ' +
+      '(conceptual-category-comment-drift-test covers one enumeration class); (2) a token the same ' +
+      "file's CODE spells is self-evidencing and not looked up — the 2026-08-31 continuityScore case " +
+      '(a declared name under a header describing deleted WIRING) is exactly that shape, so this gate ' +
+      'would not catch it; (3) bare filenames and one-segment directories are out of scope — measured ' +
+      'at introduction, they named foreign-ecosystem manifests, runtime artifacts, third-party files ' +
+      'and illustrative fixtures far more often than renamed siblings; (4) single capitalised words, ' +
+      'call/member forms and the camelCase host globals are prose, never citations; (5) a line suffix ' +
+      'is stripped, so whether the anchored line still says what the comment claims is unchecked. ' +
+      'Suppression: a `comment-citation-exempt:` marker exempts its own line and the rest of its ' +
+      'contiguous comment block, for deliberate archaeology and illustrative example paths',
+  },
+  {
     id: 'check:philosophy-brief',
     releaseOrder: 31,
     releaseStage: 'checks',
@@ -1760,33 +1801,6 @@ export const GUARDS = [
       'declaration checked for existence and shape, with pre-mechanism records on a shrinking ' +
       'declared-debt baseline. Uncovered: the gate cannot tell whether the author picked the TRUE row',
   },
-  {
-    id: 'comment-symbol-drift-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/comment-symbol-drift.test.ts',
-    forms: [
-      { name: 'comment citing a symbol the tree does not declare', drive: 'export', module: 'tests/helpers/recognizers.ts', exportName: 'backtickedSymbolsInComments', call: 'text',
-        sample: '// the reader is `goneForeverHelper` and the set is `GONE_FOREVER_SET`' },
-    ],
-    note:
-      'P09: a COMMENT naming a backticked symbol was gated by nothing — DOCS are covered by ' +
-      'check:doc-code-citations and LINKS by check:doc-links, so a comment could keep describing a ' +
-      'symbol the tree had renamed or deleted (the 2026-08-31 finding: continuityScore.ts claimed ' +
-      'audit re-exported computeContinuityScores and biased packet ORDERING with it, long after that ' +
-      'wiring was gone). Resolution is against identifiers, FIELD/MEMBER names, static member ' +
-      'access, string literals, and module basenames declared anywhere in the tracked tree. ' +
-      'UNCOVERED HALF, two directions and neither is "nothing could have noticed". (1) A comment ' +
-      'stating a workflow SHAPE names no identifier, so no text rule reaches it — the two P50-era ' +
-      'category comments are that class and were reconciled by editing them, not by this gate. ' +
-      '(2) A symbol that ALSO appears as a NON-comment token in the same file is skipped, because a ' +
-      'comment referencing the symbol its own file declares is self-evidencing and needs no ' +
-      'cross-tree lookup — the continuityScore case above is exactly that shape (the name survived ' +
-      'as a declaration in its own module while the header described deleted WIRING), so THIS GATE ' +
-      'WOULD NOT HAVE CAUGHT IT either. Also excluded: a host-global camelCase API ' +
-      '(structuredClone, setInterval) by a closed list in the recognizer. Covered by an inline ' +
-      'marker: `comment-symbol-exempt:` reaching the rest of its comment block, for deliberate ' +
-      'archaeology',
-  },
 ];
 
 /** @type {ReachRow[]} */
@@ -2041,6 +2055,7 @@ export const REACH = [
       'prompt-capability-test',
       'prompt-renders-its-contract-test',
       'conceptual-category-comment-drift-test',
+      'check:comment-code-citations',
       'check:invariant-glossary',
     ],
     uncovered:
@@ -2068,7 +2083,7 @@ export const REACH = [
   {
     area: 'tests',
     files: ['tests/**'],
-    guardedBy: ['check:tests', 'vitest-gate', 'check:lint', 'check:dup'],
+    guardedBy: ['check:tests', 'vitest-gate', 'check:lint', 'check:dup', 'check:comment-code-citations'],
     uncovered:
       'checkJs:false excludes the deliberate .mjs holdout(s) from the typecheck (the 563/564 floor), ' +
       'and check:lint likewise lints only tests/**/*.ts; ' +
@@ -2100,6 +2115,7 @@ export const REACH = [
     files: ['.claude/hooks/**'],
     guardedBy: [
       'hook-trap-guards-test',
+      'check:comment-code-citations',
       'guard-form-reach-test',
       'hook-session-gates-test',
       'hook-async-typecheck-test',
@@ -2314,7 +2330,7 @@ export const REACH = [
   {
     area: 'script argv refusal',
     files: ['scripts/**'],
-    guardedBy: ['script-argv-refusal-test', 'check:scripts', 'check:lint'],
+    guardedBy: ['script-argv-refusal-test', 'check:scripts', 'check:lint', 'check:comment-code-citations'],
     note:
       'a script that reads process.argv and does not adopt scripts/shared/argvGuard.mjs must appear in ' +
       'ARGV_GUARD_GAP inside tests/shared/script-argv-refusal.test.ts — the ratchet fails on a new ' +
@@ -2383,6 +2399,7 @@ export const REACH = [
     area: 'bins & wrapper',
     files: ['audit-code.mjs', 'remediate-code.mjs', 'wrapper/**'],
     guardedBy: [
+      'check:comment-code-citations',
       'smoke:packaged-audit-code',
       'smoke:packaged-remediate-code',
       'smoke:linked-audit-code',

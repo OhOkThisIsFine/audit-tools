@@ -28,8 +28,9 @@ afterEach(() => {
 });
 
 describe("pre-commit gate: branch-strand refusal (docs-only commit on a remediation branch)", () => {
-  // `ensureRemediationBranchCheckedOut` switches the PRIMARY checkout onto
-  // `remediation/<runId>` and leaves it there, so a later docs/closeout commit
+  // <!-- comment-citation-exempt: names the closing action deleted since (src/shared/types/closingActions.ts) -->
+  // `ensureRemediationBranchCheckedOut` switched the PRIMARY checkout onto
+  // `remediation/<runId>` and left it there, so a later docs/closeout commit
   // strands off main. It bit three times; the HANDOFF warning did not prevent
   // the third, so the refusal has to be mechanical.
   function stageDoc(relPath: string, body: string = "# doc\n") {

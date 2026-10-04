@@ -103,6 +103,7 @@ describe("the Paths column is resolved against the tree, never invented", () => 
    * The duplicated-guard lap (2026-07-25). The sweep's per-entry `Paths:` are
    * MODEL-INVENTED for entries whose prose names no file — the friction walk
    * recorded three of them verbatim (`src/scheduler/populate.ts`,
+   * <!-- comment-citation-exempt: deliberately nonexistent example paths -->
    * `src/review/mapCache.ts`, `src/pinning-gate.ts`, none of which exist) and
    * drew the rule this implements: a generated triage emits a path only when it
    * resolves against the tree, and marks the rest `unresolved`. A path column

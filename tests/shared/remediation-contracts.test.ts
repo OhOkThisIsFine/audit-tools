@@ -287,7 +287,7 @@ function loadArtifact<T>(name: string): Artifact<T> {
 // DROPPED), while the local copy passed it straight to `JSON.stringify` — so the
 // same fixture could hash two ways. Its own module header states the rule this
 // file was breaking: "There must be exactly ONE such serializer — never write a
-// second." `tests/shared/test-serializer-single-source.test.ts` is the guard that
+// second." `tests/shared/test-mirrors-production.test.ts` is the guard that
 // keeps a third from appearing.
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(compareCodeUnits);

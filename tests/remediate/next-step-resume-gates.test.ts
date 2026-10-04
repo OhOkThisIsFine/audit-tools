@@ -235,8 +235,10 @@ describe("A3 engine rewire: entry-gate freeze (no resurrection after an intake-b
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
     await writeFile(join(REPO_DIR, "src", "a.ts"), "// a\n", "utf8");
     await writeFile(join(REPO_DIR, "src", "b.ts"), "// b\n", "utf8");
-    // A declared sizing window, without which `applyPlanPipeline` refuses and no
-    // planning state is built. This fixture predates the refusal propagating:
+    // A declared sizing window. INERT now: nothing reads `block_quota` since the
+    // backend-sizing substrate was retired, so this write no longer gates the
+    // plan. When it was written, the plan pipeline refused without it and no
+    // planning state was built. This fixture predates the refusal propagating:
     // the refusal used to be swallowed as "corrupted canonical execution plan", so
     // these two cases passed on their NEGATIVE assertions while exercising the
     // re-emit-extraction path the comment above says they must avoid.

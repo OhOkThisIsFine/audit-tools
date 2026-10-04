@@ -313,6 +313,7 @@ export function enforcementArmed(root) {
 // A dispatched child announces itself by ENVIRONMENT: the explicit
 // `AUDIT_TOOLS_CHILD_SESSION=1` a hand-launched lane sets.
 //
+// <!-- comment-citation-exempt: names the retired llm-relay depth marker -->
 // Retired 2026-09-22 (switch/agent-dispatch lap): this used to also recognize
 // `LLM_RELAY_DISPATCH_DEPTH` (a positive integer llm-relay `dispatch` set in
 // every lane child it spawned — measured 2026-09-10, probe job-0011: a relay

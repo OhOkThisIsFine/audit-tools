@@ -80,6 +80,7 @@ export async function teardown(): Promise<void> {
  * cleanliness silently becomes a function of whether tests have run, and one
  * `git add -A` sweeps it into a commit — including as `AD` phantom deletions
  * once a later run removes a dir a previous one staged. Exactly one such file
+ * <!-- comment-citation-exempt: names the leaked artifact of a past incident -->
  * (`tests/remediate/.test-plan-artifacts/not-findings.json`) reached the repo
  * that way and survived a monorepo collapse referenced by nothing.
  *

@@ -171,7 +171,7 @@ for (const sub of subCmds) {
 // `git checkout -- <file>` restores from the INDEX, not HEAD-of-your-intent: on
 // a file that is both staged and further edited it silently destroys every
 // unstaged change, leaving a clean-looking tree. Bit twice — once costing a full
-// re-apply of a 187-line diff, once losing an `assertWindowScopes` call that was
+// re-apply of a 187-line diff, once losing a window-scope assertion call that was
 // only noticed because a red-green then behaved impossibly.
 //
 // `git stash push -- <path>` MOVES the path's uncommitted edits into the stash

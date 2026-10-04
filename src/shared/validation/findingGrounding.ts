@@ -52,6 +52,7 @@ export function normalizeRepoPath(p: string): string {
 
 /**
  * True when `p` is a bare basename — a single path segment with no separator
+ * <!-- comment-citation-exempt: illustrative example path -->
  * (`advance.ts`), as opposed to a nested repo-relative path (`src/x/advance.ts`)
  * or a dotfile-dir path (`.claude/hooks/x.mjs`). A bare basename is the one shape
  * that cannot be resolved by a naive `root/<name>` join when the real file is

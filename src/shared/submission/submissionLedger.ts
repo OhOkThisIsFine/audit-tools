@@ -88,7 +88,7 @@ export const SUBMISSION_EVENT_KINDS = [
 
 export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];
 
-// <!-- comment-symbol-exempt: names deliberately-retired symbols; this block records that history -->
+// <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
 /**
  * Which kinds mean "the TOOL ingested this submission and decided about it".
  *
@@ -97,7 +97,7 @@ export type SubmissionEventKind = (typeof SUBMISSION_EVENT_KINDS)[number];
  * question as `kind !== "expected"` — a partition that silently absorbed every
  * future kind. Under it, a `dispatched` row appended when a refused lane is
  * re-materialized would have become that submission's trailing event, deleting
- * the refusal from `lastRefusals` (so a host whose submission was received and
+ * the refusal from `readTrailingSubmissionRefusals` (so a host whose submission was received and
  * REJECTED is told it "submitted nothing") and making the report claim the
  * refusal "was later accepted or re-landed by hand" when nothing had been.
  */

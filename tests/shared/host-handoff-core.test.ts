@@ -221,6 +221,7 @@ describe("binding identity and dedupe refusals", () => {
     expect(idsAreStrictlyAscending(["a", "b", "c"])).toBe(true);
     expect(idsAreStrictlyAscending(["a", "a"])).toBe(false);
     expect(idsAreStrictlyAscending(["b", "a"])).toBe(false);
+    // <!-- comment-citation-exempt: names the predicate this comment records as deleted -->
     // The "distinct but unsorted" case is the ONLY thing `idsAreUnique` used to
     // add, and `idsAreStrictlyAscending` subsumes it: it is false there, so the
     // duplicate refusal never has to consult a second predicate. The bare

@@ -427,6 +427,7 @@ describe("a red is attributed to the run or to the environment", () => {
   it("FAIL-CLOSED: a red located in a TEST file is never attributed to the environment", async () => {
     // The realistic shape, and the fail-open answer was reached through it. The
     // run edits SOURCE; a suite that fails PRINTS the TEST file it choked on.
+    // <!-- comment-citation-exempt: the fixture's illustrative edit path -->
     // `src/x.ts` is the run's own edit (dirty after the baseline), and
     // `tests/x.test.ts` is a path the run never touched — so the intersection is
     // empty and the verdict was `environment`, whose prompt tells the host "do

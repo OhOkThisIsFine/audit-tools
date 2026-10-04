@@ -101,6 +101,7 @@ export function isSignificantLineCountDivergence(got: number, expected: number):
  * the coverage/flow-planning boundary — rather than re-deriving the rules here,
  * because two hand-rolled normalizers ARE two key spaces the moment one of them
  * learns something the other has not (this one previously stripped only a
+ * <!-- comment-citation-exempt: illustrative example path -->
  * LEADING `./`, so an interior `src/./x.ts` was a different key from `src/x.ts`).
  *
  * Case is preserved: a repo path is the identity of a real file on disk, and
