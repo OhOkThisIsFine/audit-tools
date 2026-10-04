@@ -132,17 +132,25 @@ describe("the clarification round reads its questions from the paused items", ()
     expect(prompt).toContain("entry [0] `action`");
   });
 
-  it("refuses a clarified entry with no rationale, and names no scope_additions problem", async () => {
+  it("refuses a clarified entry with no rationale", async () => {
     await start();
     const { state, prompt } = await submit([
       { unit_id: "F1", action: "clarified", rationale: "   " },
-      { unit_id: "F2", action: "defer", scope_additions: ["src/F2.test.ts"] },
+      { unit_id: "F2", action: "defer" },
     ]);
     expect(state.items.F1.status).toBe("needs_clarification");
     expect(state.items.F2.status).toBe("needs_clarification");
     expect(prompt).toContain("entry [0] `rationale`");
-    // Accepted and ignored (step one of its removal): never a refusal reason.
-    expect(prompt).not.toContain("scope_additions");
+  });
+
+  it("refuses the removed scope_additions field as an unknown field", async () => {
+    await start();
+    const { state, prompt } = await submit([
+      { unit_id: "F1", action: "defer", scope_additions: ["src/F1.test.ts"] },
+    ]);
+    expect(state.items.F1.status).toBe("needs_clarification");
+    expect(prompt).toContain("REFUSED");
+    expect(prompt).toContain("scope_additions");
   });
 
   it("refuses the old object wrapper and a duplicate unit_id", async () => {

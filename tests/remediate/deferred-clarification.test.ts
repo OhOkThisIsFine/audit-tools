@@ -380,7 +380,6 @@ describe("clarification scope delta preserves reviewed execution authority", () 
             unit_id: "B1",
             action: "clarified",
             rationale: "Also create the pinning test and the shared helper.",
-            scope_additions: ["tests/f1-pin.test.ts", "src/shared/f1Helper.ts"],
           },
       ]),
       "utf8",
@@ -391,15 +390,15 @@ describe("clarification scope delta preserves reviewed execution authority", () 
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    // `scope_additions` is accepted and ignored (step one of its removal): the
-    // answer applies, and the unit's write scope and reviewed revision are unchanged.
+    // An answer that asks for more files applies as context only: the unit's
+    // write scope and reviewed revision are unchanged.
     expect(finalState.items.B1.status).not.toBe("needs_clarification");
     expect(finalState.plan.units.find((unit: { id: string }) => unit.id === "B1").allowed_files).toEqual(["src/F1.ts"]);
     expect(finalState.plan.review_revision_sha256).toBe(st.plan!.review_revision_sha256);
 
   });
 
-  it("a scope_additions path outside the repository is ignored, not refused, and widens nothing", async () => {
+  it("an answer carrying the removed scope_additions field is refused and widens nothing", async () => {
     const st = needsClarificationState();
     await harness.writeIntentCheckpoint();
     await writeApprovedPlanFixture(ARTIFACTS_DIR, st);
@@ -423,16 +422,16 @@ describe("clarification scope delta preserves reviewed execution authority", () 
     const finalState = JSON.parse(
       await readFile(join(ARTIFACTS_DIR, "state.json"), "utf8"),
     );
-    // The answer applied; the ignored field widened nothing.
-    expect(finalState.items.B1.status).not.toBe("needs_clarification");
+    // The strict schema refuses the unknown field: the answer did not apply.
+    expect(finalState.items.B1.status).toBe("needs_clarification");
     const b1 = finalState.plan.units.find(
       (b: { id: string }) => b.id === "B1",
     );
     expect(b1.allowed_files).toEqual(["src/F1.ts"]);
-    expect(readdirSync(ARTIFACTS_DIR).some((name) => name.startsWith("clarification_resolution.json.refused-"))).toBe(false);
+    expect(readdirSync(ARTIFACTS_DIR).some((name) => name.startsWith("clarification_resolution.json.refused-"))).toBe(true);
   });
 
-  it("a clarification that re-adds an in-scope file leaves the reviewed revision intact, so the run proceeds instead of wedging", async () => {
+  it("an applied clarification leaves the reviewed revision intact, so the run proceeds instead of wedging", async () => {
     const st = stateWith([{ ...block("B1", ["F1"]), allowed_files: ["src/b.ts", "src/a.ts"] }], { F1: item("F1", "B1", "needs_clarification") });
     await mkdir(join(REPO_DIR, "src"), { recursive: true });
     await writeFile(join(REPO_DIR, "src", "a.ts"), "export const a = 1;\n", "utf8");
@@ -442,7 +441,7 @@ describe("clarification scope delta preserves reviewed execution authority", () 
     await new StateStore(ARTIFACTS_DIR).saveState(st);
     await harness.acknowledgeResume();
     await writeFile(join(ARTIFACTS_DIR, "clarification_resolution.json"), JSON.stringify([
-      { unit_id: "B1", action: "clarified", rationale: "Touch a.ts as already planned.", scope_additions: ["src/a.ts"] },
+      { unit_id: "B1", action: "clarified", rationale: "Touch a.ts as already planned." },
     ]), "utf8");
 
     const step = await decideNextStep({ root: REPO_DIR });

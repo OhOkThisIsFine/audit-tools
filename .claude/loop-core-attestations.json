@@ -204,6 +204,22 @@
         "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
       }
     },
+    "975d57582856a4bd": {
+      "reviewed_by": "claude-opus-5-5-session",
+      "attester_class": "agent",
+      "checked": "nextStep.ts: scope_additions removed from the strict PlanClarificationResolutionSchema (step two; v0.55.5 carries step one) and two comments updated; no other code change; red proofs: field restored -> both refusal tests fail; full suite green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e08509244deeef1a5469d8af186582824e546474",
+        "ran_at": "2026-10-04T23:17:45.645Z"
+      },
+      "attested_at": "2026-10-04T23:17:51.049Z",
+      "vouches": {
+        "src/remediate/steps/nextStep.ts": "c02f9b5e90ab53aef9ec06203c4a2a3fbb58d2a5"
+      }
+    },
     "9bc59db653647a3a": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -680,7 +696,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "975d57582856a4bd"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"

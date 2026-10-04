@@ -1744,18 +1744,16 @@ const PLAN_CLARIFICATION_ACTIONS = ["clarified", "reject_finding", "defer"] as c
  * - `rationale` is REQUIRED and non-empty on `clarified`: it becomes the item's
  *   `clarification_context`, the answer the next worker reads. A `clarified`
  *   entry without it re-opened the item with no answer attached.
- * - `scope_additions` is ACCEPTED AND IGNORED, step one of its removal (owner
- *   decision 2026-10-01). It never had an effect: new write scope needs a
- *   revised, freshly reviewed plan, so no path could widen a unit. The prompt no
- *   longer asks for it; the schema still accepts it so a host on an older prompt
- *   is not refused mid-run. Step two deletes it once a release carries this.
+ * - There is no write-scope field: new write scope needs a revised, freshly
+ *   reviewed plan, so an answer cannot widen a unit (owner decision 2026-10-01;
+ *   the ignored `scope_additions` field was removed in two releases, and is now
+ *   refused as an unknown field).
  */
 const PlanClarificationResolutionSchema = z
   .object({
     unit_id: z.string().min(1, "must be a non-empty finding id"),
     action: z.enum(PLAN_CLARIFICATION_ACTIONS),
     rationale: z.string().optional(),
-    scope_additions: z.array(z.string()).optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -1928,8 +1926,8 @@ async function applyPlanClarificationResolution(
   for (const res of resolutions) {
     const item = state.items[res.unit_id];
     if (!item || isTerminalStatus(item.status)) continue;
-    // A `scope_additions` value is ignored: the reviewed plan is never rewritten
-    // here, and its revision (which hashes author order) stays the approved one.
+    // The reviewed plan is never rewritten here, and its revision (which hashes
+    // author order) stays the approved one.
     applyClarificationActionToItem(item, res, now);
     appliedCount += 1;
   }

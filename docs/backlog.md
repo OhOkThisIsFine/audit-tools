@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 102 entr(y/ies) indexed.
+> and at commit). 101 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -38,9 +38,8 @@
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — The remediate clarification answer still accepts the ignored `scope_additions` field (2026-10-01, low).
-- `minor-bugs.md:15` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
-- `minor-bugs.md:32` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
+- `minor-bugs.md:14` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:31` — A spec row's category prefix is load-bearing enough to manufacture work — and one was false (2026-07-28, low, RESOLVED; the open half is the class).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

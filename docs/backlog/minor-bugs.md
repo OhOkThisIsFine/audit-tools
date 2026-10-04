@@ -11,7 +11,6 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
-- **The remediate clarification answer still accepts the ignored `scope_additions` field (2026-10-01, low).** Owner decision 2026-10-01: remove it in two steps, because the strict parser refuses an unknown field and a host on an older prompt still sends it. Step one landed 2026-10-03: `PlanClarificationResolutionSchema` (`src/remediate/steps/nextStep.ts`) accepts and ignores it, and the prompt no longer asks for it. **Step two, once a published release carries step one:** delete the field from the schema. **Property:** the answer schema carries no field that has no effect.
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
   accepted).** The pair SHIPPED; its mechanism record is the single home —
   [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md).
