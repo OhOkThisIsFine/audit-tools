@@ -140,7 +140,7 @@ test("INV-audit-cli-09: ExternalAnalyzerResults null-guard contract is documente
 // permission/IO failures as "missing results". Fixed: only ENOENT is treated as missing;
 // other errors are re-thrown. Verified structurally: isFileMissingError is used in the catch.
 
-import { isFileMissingError } from "audit-tools/shared";
+import { isFileMissingError, ANALYZER_SETTINGS, AnalyzerSettingSchema } from "audit-tools/shared";
 
 test("INV-audit-cli-11: isFileMissingError correctly classifies ENOENT vs EACCES (COR-6e84f23c)", () => {
   // ENOENT → file missing (treat as "not yet written")
@@ -160,16 +160,29 @@ test("INV-audit-cli-11: isFileMissingError correctly classifies ENOENT vs EACCES
 // The old check `if (batchResultsDir && getFlag(argv, "--results"))` relied on short-circuit
 // evaluation and was opaque. The new check evaluates both flags independently and throws only
 // when both are provided simultaneously. Verified structurally: the check now uses explicit booleans.
-test("INV-audit-cli-12: ingest-results mutex check requires both flags to trigger (COR-d40e2710)", () => {
-  // Structural invariant: both flags present → error; either alone or neither → no error
-  function checkMutex(hasBatchResults: boolean, hasSingleResults: boolean): boolean {
-    // This mirrors the fixed logic in cmdIngestResults
-    return hasBatchResults && hasSingleResults;
-  }
-  expect(checkMutex(true, true), "both present → mutex fires").toBe(true);
-  expect(checkMutex(true, false), "only --batch-results → no mutex error").toBe(false);
-  expect(checkMutex(false, true), "only --results → no mutex error").toBe(false);
-  expect(checkMutex(false, false), "neither → no mutex error").toBe(false);
+test("INV-audit-cli-12: ingest-results mutex check requires both flags to trigger (COR-d40e2710)", async () => {
+  // Drives the real cmdIngestResults. The mutex throws before any work, so the
+  // both-flags cases need no artifact tree; the value-less `--results` token
+  // (COR-79283e3b) must still trip it.
+  const { cmdIngestResults } = await import("../../src/audit/cli/ingestResultsCommand.js");
+  const mutex = /not both/;
+  const base = ["--root", repoRoot, "--artifacts-dir", join(repoRoot, ".audit-tools", "__no_such_artifacts__")];
+  await expect(
+    cmdIngestResults([...base, "--results", "r.json", "--batch-results", "batch"]),
+    "both present → mutex fires",
+  ).rejects.toThrow(mutex);
+  await expect(
+    cmdIngestResults([...base, "--batch-results", "batch", "--results"]),
+    "a value-less --results token still counts as present",
+  ).rejects.toThrow(mutex);
+  // Only --batch-results: the batch path runs and may fail for its own reasons,
+  // but never with the mutex error.
+  await cmdIngestResults([...base, "--batch-results", join(repoRoot, "__no_such_batch__")]).then(
+    () => undefined,
+    (error: unknown) => {
+      expect(String(error), "only --batch-results → no mutex error").not.toMatch(mutex);
+    },
+  );
 });
 
 // ── INV-audit-cli-10: all-invalid analyzer decisions emits diagnostic (COR-03418a9f-2) ─
@@ -178,14 +191,15 @@ test("INV-audit-cli-12: ingest-results mutex check requires both flags to trigge
 // Tested in next-step-helpers.test.mjs integration path; this invariant verifies the
 // recognized value set.
 test("INV-audit-cli-10: recognized analyzer values are the closed set (ephemeral|permanent|skip|repo|auto)", () => {
-  const recognized = new Set(["ephemeral", "permanent", "skip", "repo", "auto"]);
-  // All recognized values parse without entering the diagnostic branch
-  for (const v of recognized) {
-    expect(recognized.has(v), `${v} must be recognized`).toBeTruthy();
+  // The vocabulary is the production `ANALYZER_SETTINGS`, pinned against a
+  // hand-written literal (independent oracle) and exercised through the real
+  // schema the gate filters with.
+  expect([...ANALYZER_SETTINGS].sort()).toEqual(["auto", "ephemeral", "permanent", "repo", "skip"]);
+  for (const v of ["ephemeral", "permanent", "skip", "repo", "auto"]) {
+    expect(AnalyzerSettingSchema.safeParse(v).success, `${v} must be recognized`).toBe(true);
   }
-  // Unknown values fall to the diagnostic branch
   for (const v of ["install", "disable", "true", "false", "1", ""]) {
-    expect(!recognized.has(v), `${v} must NOT be recognized`).toBeTruthy();
+    expect(AnalyzerSettingSchema.safeParse(v).success, `${v} must NOT be recognized`).toBe(false);
   }
 });
 

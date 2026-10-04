@@ -12,41 +12,12 @@
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
 - **The remediate clarification answer still accepts the ignored `scope_additions` field (2026-10-01, low).** Owner decision 2026-10-01: remove it in two steps, because the strict parser refuses an unknown field and a host on an older prompt still sends it. Step one landed 2026-10-03: `PlanClarificationResolutionSchema` (`src/remediate/steps/nextStep.ts`) accepts and ignores it, and the prompt no longer asks for it. **Step two, once a published release carries step one:** delete the field from the schema. **Property:** the answer schema carries no field that has no effect.
-- **Empty repo-root files named backtick and node.id appeared during vitest/build runs, producer
-  unlocated (2026-08-29, low, friction: tool_should_decide).** Both zero bytes, timestamped during
-  targeted vitest invocations in a live session, deleted by hand; the suite's added-root-entry
-  teardown attributed nothing. The redirect-artifact CLASS is a known durable trap — what is new
-  is an apparent in-repo producer during test/build spawns. A lead, not a verdict: watch for
-  recurrence before hunting.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
   accepted).** The pair SHIPPED; its mechanism record is the single home —
   [`intent-gate-charter-slice-design-2026-07-23.md`](../reviews/intent-gate-charter-slice-design-2026-07-23.md).
-  Accepted residuals:
-  (a) over-stale: `charter_clarification` / `systemic_challenge` keep WHOLE-ARTIFACT
-  `repo_manifest` edges (`dependencyMap.ts`; `DEPENDENCY_SLICE_PROJECTIONS` registers
-  `charter_register.json` alone) — a member slice was REFUTED for challenge at HEAD (it consumes the
-  total file count and grounds against the complete path set) and clarification's consumption is
-  unverified; they still re-fire on unrelated manifest churn (cheap steps). Slicing them needs a
-  verified consumption trace first. (b) under-stale, and NARROWER than the first draft of this entry
+  Accepted residuals (`charter_clarification` is sliced since 2026-10-04, and `systemic_challenge`'s
+  whole-manifest edge is exact, not a residual — `dependencySlices.ts` states both):
+  (b) under-stale, and NARROWER than the first draft of this entry
   claimed: `charterReadFileSlice` compares content for consensus members ∪ every `isDocIntentFile`
   path (`doc_only` status **OR** `.md/.markdown/.adoc/.rst/.txt` — single-sourced at
   `buildStructureDecomposition.ts` so it can never be narrower than the decomposition's own doc
@@ -68,12 +39,6 @@
   **Open property (the class, not this instance):** a category prefix in a normative table is read as
   a contract, so two files sharing one must share its lifecycle. Nothing enforces that. Worth a check
   only if a second instance appears — one occurrence is not yet a pattern.
-
-
-- **LEAD (re-dogfood): systemic-challenge round counter + banked improvements carry across RUNS
-  (2026-07-21, low).** This run's challenge arrived as "round 10" with 11 prior improvements from
-  earlier sessions' artifacts. Verify intended (cross-run loop state vs per-run reset). Record:
-  [`re-dogfood-2026-07-21.md`](../reviews/re-dogfood-2026-07-21.md).
 
 
 - **Auditor severity calibration: 0 of 9 self-audit criticals survived mechanism verification

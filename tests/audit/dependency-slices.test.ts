@@ -105,11 +105,18 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   };
 }
 
-test("the registry is contract-pinned: charter_register's three edges and audit_tasks' three late inputs", () => {
+test("the registry is contract-pinned: charter_register's three edges, charter_clarification's two edges, and audit_tasks' three late inputs", () => {
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS).sort()).toEqual([
     "audit_tasks.json",
+    "charter_clarification.json",
     "charter_register.json",
   ]);
+  // Clarification reads repo_manifest only as the normalized path universe
+  // (groundDesignFindings → repoPathUniverse) and the decomposition only as
+  // consensus membership (placeInSubsystem); its register and intent edges are not sliced.
+  expect(
+    Object.keys(DEPENDENCY_SLICE_PROJECTIONS["charter_clarification.json"]!).sort(),
+  ).toEqual(["repo_manifest.json", "structure_decomposition.json"]);
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS["audit_tasks.json"]!).sort()).toEqual([
     "charter_clarification.json",
     "charter_register.json",
@@ -382,6 +389,124 @@ test("staleness: a slice-recorded charter edge ignores out-of-slice manifest chu
     { emit: false },
   );
   expect(staleAfterMember.has("charter_register.json")).toBe(true);
+});
+
+test("staleness: charter_clarification's manifest edge ignores content churn, fires on a path-set change, and keeps the transitive content signal", () => {
+  // The clarification executor reads repo_manifest ONLY through
+  // groundDesignFindings → repoPathUniverse (the normalized path set); file
+  // CONTENT never reaches its output. Content signals arrive through its
+  // whole-artifact charter_register edge instead.
+  const bundle = makeBundle({
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-07-23T00:00:00Z",
+      confirmed_by: "host",
+      scope_summary: "s",
+      intent_summary: "full-audit",
+    },
+    charter_register: makeCharterRegister(),
+    charter_clarification: {
+      generated_at: "2026-07-23T00:00:00Z",
+      target: "charter_clarification",
+      ceiling: { rung: "deep" },
+      attention: 0,
+      status: "omitted",
+      asked: [],
+      banked: [],
+      findings: [],
+      validation_issues: [],
+    } as unknown as ArtifactBundle["charter_clarification"],
+  });
+  const manifest = computeArtifactMetadata(
+    bundle,
+    { metadata_schema_version: METADATA_SCHEMA_VERSION, artifacts: {} },
+    [
+      "repo_manifest.json",
+      "file_disposition.json",
+      "structure_decomposition.json",
+      "intent_checkpoint.json",
+      "charter_register.json",
+      "charter_clarification.json",
+    ],
+  );
+  expect(
+    manifest.artifacts["charter_clarification.json"]!.dependency_slices?.["repo_manifest.json"],
+  ).toBeDefined();
+  const staleAfter = (files: NonNullable<ArtifactBundle["repo_manifest"]>["files"]) => {
+    const next: ArtifactBundle = {
+      ...bundle,
+      artifact_metadata: manifest,
+      repo_manifest: { ...bundle.repo_manifest!, files },
+    };
+    const restamped = computeArtifactMetadata(next, manifest, ["repo_manifest.json"]);
+    return computeStaleArtifacts({ ...next, artifact_metadata: restamped }, { emit: false });
+  };
+  const base = bundle.repo_manifest!.files;
+
+  // The projection on its own (the end-to-end path-add case below ALSO fires
+  // through charter_register's `paths` slice, so it cannot prove this edge
+  // alone): any path-set change moves it, content churn does not.
+  const sliceOf = (files: typeof base) =>
+    computeDependencySliceHash("charter_clarification.json", "repo_manifest.json", {
+      ...bundle,
+      repo_manifest: { ...bundle.repo_manifest!, files },
+    });
+  const baseSlice = sliceOf(base);
+  expect(sliceOf(base.map((f) => ({ ...f, hash: `${f.hash ?? ""}-CHANGED` })))).toBe(baseSlice);
+  expect(sliceOf(base.filter((f) => f.path !== "src/zz.ts"))).not.toBe(baseSlice);
+  expect(
+    sliceOf(base.map((f) => (f.path === "src/zz.ts" ? { ...f, path: "src/renamed.ts" } : f))),
+  ).not.toBe(baseSlice);
+
+  // Content churn on a non-member, path set unchanged: the whole-artifact edge
+  // re-fired clarification here; the path slice does not.
+  const churned = staleAfter(
+    base.map((f) => (f.path === "src/zz.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f)),
+  );
+  expect(churned.has("charter_clarification.json")).toBe(false);
+
+  // A path added anywhere changes what grounding resolves against → fires.
+  const added = staleAfter([
+    ...base,
+    { path: "src/new.ts", language: "ts", size_bytes: 1, hash: "hash-new" },
+  ]);
+  expect(added.has("charter_clarification.json")).toBe(true);
+
+  // Member CONTENT change: charter_register's own slice fires, and clarification
+  // follows it through the whole-artifact charter_register edge.
+  const member = staleAfter(
+    base.map((f) => (f.path === "src/a.ts" ? { ...f, hash: "hash-a2" } : f)),
+  );
+  expect(member.has("charter_register.json")).toBe(true);
+  expect(member.has("charter_clarification.json")).toBe(true);
+});
+
+test("every sliced edge is a declared dependency (staleness reads only declared edges)", () => {
+  // computeStaleArtifacts walks `dependency_revisions`, which carries only the
+  // declared edges: a projection on an undeclared edge is never consulted, so
+  // the read it describes would go unwatched.
+  const dependsOn = ARTIFACT_DEPENDS_ON_MAP as Readonly<Record<string, readonly string[]>>;
+  for (const [downstream, edges] of Object.entries(DEPENDENCY_SLICE_PROJECTIONS)) {
+    for (const upstream of Object.keys(edges ?? {})) {
+      expect(dependsOn[downstream] ?? [], `${downstream} → ${upstream}`).toContain(upstream);
+    }
+  }
+});
+
+test("charter_clarification's decomposition slice is the grouping input: membership and unit ids, never scores", () => {
+  // placeInSubsystem reads `consensus[*].{node_id, members}` only.
+  const hash = (bundle: ArtifactBundle) =>
+    computeDependencySliceHash(
+      "charter_clarification.json",
+      "structure_decomposition.json",
+      bundle,
+    );
+  const baseHash = hash(makeBundle());
+  const withConsensus = (node: DecomposedNode) =>
+    makeBundle({ structure_decomposition: makeStructureDecomposition({ consensus: [node] }) });
+  expect(hash(withConsensus(consensusNode({ agreed_across_source: 0.5 })))).toBe(baseHash);
+  expect(hash(withConsensus(consensusNode({ members: ["src/a.ts"] })))).not.toBe(baseHash);
+  expect(hash(withConsensus(consensusNode({ node_id: "src/b.ts" })))).not.toBe(baseHash);
 });
 
 test("doc-extension files outside docs/ count as docs even when statused included (reviewer F2)", () => {

@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/phase-triage.test.ts
+// sites-pinned: tests/remediate/host-handoff-corroboration-required-test-runner.test.ts, tests/remediate/host-handoff-corroboration-obligations.test.ts, tests/remediate/phase-triage.test.ts
 import { remediationRequiredTestLogsDir } from "../../../shared/io/auditToolsPaths.js";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";

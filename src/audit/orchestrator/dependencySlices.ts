@@ -35,6 +35,7 @@ import {
   memberDependencyEdgeLines,
 } from "./charterPackets.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { repoPathUniverse } from "../../shared/validation/designFindingGrounding.js";
 import { charterQuestionFiles } from "./architectureDiscovery.js";
 
 type SliceProjection = (bundle: ArtifactBundle) => unknown;
@@ -96,18 +97,38 @@ function charterReadFileSlice(bundle: ArtifactBundle): unknown {
 }
 
 /**
- * The edge registry: `downstream → upstream → projection`. Two downstreams are
- * registered: `charter_register.json` (the expensive extraction step, the live
- * incident driver), and `audit_tasks.json` on its three late inputs (see the
- * discovery slices above). Beyond those:
+ * The `repo_manifest` surface `charter_clarification.json` consumes: the
+ * normalized repository path universe, content-free. The clarification
+ * executor (`runCharterClarificationExecutor`) touches the manifest in exactly
+ * one place — `groundDesignFindings(findings, bundle.repo_manifest)`, which
+ * reads `files[].path` through `repoPathUniverse` and nothing else — so the
+ * slice IS that function's output (single-sourced: the grounding set and the
+ * staleness slice cannot drift). File CONTENT reaches clarification only
+ * through its whole-artifact `charter_register` edge: a member/doc content
+ * change moves the register's own slice, the register re-stales, and
+ * propagation carries it here.
+ */
+function clarificationGroundingPathSlice(bundle: ArtifactBundle): unknown {
+  return [...repoPathUniverse(bundle.repo_manifest)].sort(compareCodeUnits);
+}
+
+/**
+ * The edge registry: `downstream → upstream → projection`. Three downstreams
+ * are registered: `charter_register.json` (the expensive extraction step, the
+ * live incident driver), `charter_clarification.json` on its manifest edge
+ * (path universe only, above) and its decomposition edge (consensus membership:
+ * `placeInSubsystem` reads only `{node_id, members}`, and a whole-artifact edge
+ * would re-stale it on every manifest churn through the decomposition's own
+ * whole-manifest edge), and `audit_tasks.json` on its three late inputs (see
+ * the discovery slices above). Beyond those:
  *
- *  - `charter_clarification` / `systemic_challenge` keep their whole-artifact
- *    `repo_manifest` edges — HEAD trace shows `systemic_challenge` consumes the
- *    total file count and grounds findings against the COMPLETE path set
- *    (aggregateMetricsDigest / designFindingGrounding), so a member slice is
- *    directly refuted there, and clarification's consumption is unverified.
- *    Residual: they still over-stale on unrelated manifest churn (cheap steps;
- *    revisit with a verified consumption trace).
+ *  - `systemic_challenge` keeps its whole-artifact `repo_manifest` edge — its
+ *    persisted output is a function of the WHOLE manifest: every round records
+ *    `round_token = systemicPremiseToken(bundle)`, which hashes the complete
+ *    canonical `repo_manifest` (file hashes included), beside the total file
+ *    count (aggregateMetricsDigest), the authored path list (reviewFileMap) and
+ *    full-path-set grounding (designFindingGrounding). No slice narrower than
+ *    the artifact itself is a superset of that.
  *  - `intent_checkpoint.json` edges are handled by the intent-equivalence gate
  *    (revision authority via `intent_baseline`), NOT by a slice projection.
  */
@@ -160,6 +181,10 @@ export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
     "structure_decomposition.json": consensusMembershipSlice,
     "repo_manifest.json": charterReadFileSlice,
     "graph_bundle.json": charterGraphEdgeSlice,
+  },
+  "charter_clarification.json": {
+    "repo_manifest.json": clarificationGroundingPathSlice,
+    "structure_decomposition.json": consensusMembershipSlice,
   },
   "audit_tasks.json": {
     "charter_register.json": charterDiscoverySlice,

@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/host-handoff.test.ts, tests/remediate/host-handoff-corroboration.test.ts
+// sites-pinned: tests/remediate/host-handoff.test.ts, tests/remediate/host-handoff-corroboration-no-change.test.ts, tests/remediate/host-handoff-corroboration-recovery.test.ts, tests/remediate/host-handoff-corroboration-lock-phases.test.ts
 import { SUBMISSION_ISSUE_CODES, WORKLOAD_ISSUE_CODES, type LaneDemand, type SubmissionIssue, type WorkItemOutcome } from "audit-tools/shared";
 import { REMEDIATION_STATE_CONTRACT_VERSION, type RemediationState } from "../../state/store.js";
 import type { RemediationPlan, RemediationItemState, RemediationHostHandoffRecord, ConformanceReviewBinding } from "../../state/types.js";

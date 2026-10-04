@@ -439,6 +439,17 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (`tests/audit/helpers/completion-harness.ts`). Full investigation record: memory
   `audit-no-redundant-reextraction-verified`.
 
+- **A full vitest run can print `[vitest-worker]: Timeout calling "onTaskUpdate"` and exit 1 with 0
+  failed — read it through the gate, never raw.** The worker's RPC reply timeout is a fixed 60s, so the
+  marker means one worker blocked its event loop for 60s or more. `npm test` and CI run through
+  `scripts/shared/run-vitest-gate.mjs`, which renders that exit as a REPORTER-TRANSPORT PASS; a raw
+  `npx vitest run` full run still reads red. A synchronous test spawn is held under
+  `SYNC_BLOCK_BUDGET_MS` (`tests/helpers/trackedSpawn.ts`, pinned by
+  `tests/shared/sync-spawn-budget.test.ts`); no marker appeared in 12 green CI runs after that gate.
+  **Not covered:** a synchronous CPU stretch of 60s or more that is not a spawn. ⚠ `projects:` at the
+  TOP LEVEL of `vitest.config.ts` is silently ignored and voids the whole test config (false GREEN):
+  a config split nests under `test.projects` and proves both exit polarities.
+
 - **One test runner: vitest** (all three areas — `tests/audit`, `tests/shared`, `tests/remediate`).
   Run any subset through the GATE, never vitest directly: `node scripts/shared/run-vitest-gate.mjs <path...>`.
   Every arg is forwarded to `vitest run`, so a single file, several files, a glob, `--shard`, `--retry`

@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
+// sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
 import type { ConformanceReviewIssueCode } from "./hostContracts.js";
 import { readSubmissionDocument } from "../../../shared/submission/submissionClassifier.js";
 import { join, resolve } from "node:path";

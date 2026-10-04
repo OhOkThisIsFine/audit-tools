@@ -223,6 +223,28 @@
         "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
       }
     },
+    "beb774a606887b42": {
+      "reviewed_by": "claude-opus-5-5-session",
+      "attester_class": "agent",
+      "checked": "hostHandoff.ts/requiredTests.ts/recoverIngest.ts/hostContracts.ts/contractConformanceReview.ts: sites-pinned and comment retargets to the split test files only (verified per file by import and test name); dependencyMap.ts: charter_clarification declares structure_decomposition (placeInSubsystem reads it); dependencySlices.ts: clarification edges sliced to path universe and consensus membership; red proofs: map edge, both slices, INV-audit-cli-12 mutex, pollStatusKey; full suite green on staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "7b450e97a843639e3a65d745a9206747d8d91098",
+        "ran_at": "2026-10-04T22:20:43.108Z"
+      },
+      "attested_at": "2026-10-04T22:21:10.496Z",
+      "vouches": {
+        "src/audit/orchestrator/dependencyMap.ts": "276c58341745a8c68a1ae67fb96ff571f941061a",
+        "src/audit/orchestrator/dependencySlices.ts": "398237c879855914f687b6a62be0edabc47753f4",
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "5812867ac47b16e7ebe298cda87e7d7eaf70cb70",
+        "src/remediate/steps/dispatch/hostContracts.ts": "7155379ab34c8c9da6c08430c38a8ef90638109e",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "ecd239649613d0a81967cb6ad703907e22d91e2b",
+        "src/remediate/steps/dispatch/requiredTests.ts": "de01ddcf6e5d423668e4a4ab09d821aef707723e",
+        "src/remediate/steps/recoverIngest.ts": "5f89da3780ab3255b234c176471511b7fbc71064"
+      }
+    },
     "c468455c3d100370": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -357,10 +379,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "beb774a606887b42"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "beb774a606887b42"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
       "baseline": "7b79934e86baf378"
@@ -621,19 +643,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "beb774a606887b42"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "beb774a606887b42"
     },
     "src/remediate/steps/dispatch/hostCorroboration.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "beb774a606887b42"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "beb774a606887b42"
     },
     "src/remediate/steps/frictionCloseout.ts": {
       "baseline": "7b79934e86baf378"
@@ -645,7 +667,7 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/remediate/steps/recoverIngest.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "beb774a606887b42"
     },
     "src/shared/engine/obligationEngine.ts": {
       "baseline": "7b79934e86baf378"

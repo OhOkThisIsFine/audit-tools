@@ -10,8 +10,8 @@ import type { ExecutionUnit, ExecutionRequirement } from "../../../shared/types/
 import { executionPlanReferenceIssues } from "../../../shared/types/executionPlan.js";
 import { executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
 import { assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPlanAuthorityError } from "../../contractPipeline/runtimePlanAuthority.js";
-// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff.test.ts
-//   host-handoff-corroboration: the bounded required-test failure message.
+// sites-pinned: tests/remediate/host-handoff-corroboration.test.ts, tests/remediate/host-handoff-corroboration-required-test-runner.test.ts, tests/remediate/host-handoff.test.ts
+//   host-handoff-corroboration-required-test-runner: the bounded required-test failure message.
 //   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line
 //   or the id-glossary write scope is reverted.
 import { mkdir } from "node:fs/promises";
@@ -1739,7 +1739,7 @@ type HostItemVerdict =
  * sibling item's legitimately landed files do not falsify a later item's claim.
  * Deferring it to the commit phase silently starts refusing honest no-change
  * items (pinned by "excuses a SIBLING's landing accepted earlier in the SAME
- * INGEST" in tests/remediate/host-handoff-corroboration.test.ts).
+ * INGEST" in tests/remediate/host-handoff-corroboration-no-change.test.ts).
  */
 interface HostIngestAccumulators {
   readonly issues: RemediationHostIngestIssue[];

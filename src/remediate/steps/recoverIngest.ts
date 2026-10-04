@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/recover-verb-branches.test.ts, tests/remediate/host-handoff-corroboration.test.ts
+// sites-pinned: tests/remediate/recover-verb-branches.test.ts, tests/remediate/host-handoff-corroboration-recovery.test.ts, tests/remediate/host-handoff-corroboration-lock-phases.test.ts
 import { resolve } from "node:path";
 import { callerWorkingDirectory, discoverRepoRoot, resolveRepoRoot } from "../../shared/io/repoRoot.js";
 import { remediationArtifactsDir, headCommit, SKIP_WRITE, invalidateStepContracts } from "audit-tools/shared";

@@ -131,11 +131,17 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // Depends on the Phase-C charter register (the differences it questions), the confirmed
   // intent checkpoint (the ceiling + attention dials that gate its depth/appetite),
   // and repo_manifest (a source-content change re-stales the register transitively).
+  // It also reads structure_decomposition directly: each difference's report
+  // grouping key is the consensus unit its files overlap most (`placeInSubsystem`),
+  // so the edge is declared here rather than left to ride the register's own
+  // decomposition edge (sliced to consensus membership, dependencySlices.ts).
   // Deterministic: the loop assembles from the register, so re-running is idempotent.
+  // sites-pinned: tests/audit/dependency-slices.test.ts
   "charter_clarification.json": [
     "charter_register.json",
     "intent_checkpoint.json",
     "repo_manifest.json",
+    "structure_decomposition.json",
   ],
   // Phase E systemic improvement-seeking challenge loop. Depends on the Phase-C
   // charter register (the lane goal DAGs its blast-radius ranking reuses), the confirmed

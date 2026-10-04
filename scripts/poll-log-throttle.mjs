@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/poll-log-throttle.test.ts
 // Pure poll-log throttle helper used by scripts/release-and-publish.mjs.
 //
 // This module must stay side-effect free: importing it must not spawn
@@ -18,4 +19,10 @@ function shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey) {
   return attempt % POLL_LOG_EVERY_N_ATTEMPTS === 0;
 }
 
-export { POLL_LOG_EVERY_N_ATTEMPTS, shouldLogPollAttempt };
+// The normalized key a poll response is throttled on: only the status/conclusion
+// enum participates, never volatile fields (timestamps, elapsed ms, counters, URLs).
+function pollStatusKey(status, conclusion) {
+  return `${status ?? "unknown"}/${conclusion ?? "pending"}`;
+}
+
+export { POLL_LOG_EVERY_N_ATTEMPTS, pollStatusKey, shouldLogPollAttempt };

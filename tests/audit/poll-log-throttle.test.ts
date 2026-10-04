@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 // module top level.
 import {
   POLL_LOG_EVERY_N_ATTEMPTS,
+  pollStatusKey,
   shouldLogPollAttempt,
 } from "../../scripts/poll-log-throttle.mjs";
 
@@ -23,11 +24,10 @@ interface PollResponse {
   html_url: string;
 }
 
-// Mirror of how the release scripts derive the normalized status key from a
-// poll response: only the status/conclusion enum participates — never volatile
-// fields like timestamps, elapsed ms, attempt counters, or URLs.
+// The production key derivation (`pollStatusKey`, which release-and-publish.mjs
+// also calls): only the status/conclusion enum participates.
 function normalizeStatusKey(response: Pick<PollResponse, "status" | "conclusion">): string {
-  return `${response.status ?? "unknown"}/${response.conclusion ?? "pending"}`;
+  return pollStatusKey(response.status, response.conclusion);
 }
 
 // Synthetic poll response whose volatile fields differ on every poll.
@@ -149,6 +149,12 @@ test("genuine status transitions log exactly once each, immediately", () => {
     (entry, index) => index > 0 && entry.statusKey !== logged[index - 1].statusKey,
   );
   expect(transitionLogs.length).toBe(2);
+});
+
+test("pollStatusKey normalizes absent fields to literal sentinels", () => {
+  expect(pollStatusKey("completed", "success")).toBe("completed/success");
+  expect(pollStatusKey("in_progress", null)).toBe("in_progress/pending");
+  expect(pollStatusKey(undefined, undefined)).toBe("unknown/pending");
 });
 
 test("volatile-field churn alone never triggers a log", () => {

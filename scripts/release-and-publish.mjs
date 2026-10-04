@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 
-import { shouldLogPollAttempt } from "./poll-log-throttle.mjs";
+import { pollStatusKey, shouldLogPollAttempt } from "./poll-log-throttle.mjs";
 import { toSeconds, writeProfileLedger } from "./shared/profile.mjs";
 import { resolveSpawn } from "./shared/spawn-shell.mjs";
 import { latestFailedWorkflows } from "./shared/ciRedWorkflows.mjs";
@@ -734,7 +734,7 @@ async function waitForRunCompletion(repoSlug, runId, { packageName, packageVersi
       );
       return runEntry;
     }
-    const statusKey = `${runEntry.status ?? "unknown"}/${runEntry.conclusion ?? "pending"}`;
+    const statusKey = pollStatusKey(runEntry.status, runEntry.conclusion);
     if (shouldLogPollAttempt(attempt, statusKey, lastLoggedStatusKey)) {
       console.log(
         `[release] publish run ${runEntry.html_url ?? runId}: attempt ${attempt}, elapsed ${Date.now() - startedAt}ms, status ${runEntry.status ?? "unknown"}, conclusion ${runEntry.conclusion ?? "pending"}`,
