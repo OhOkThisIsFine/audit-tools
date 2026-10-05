@@ -2,8 +2,9 @@ import { assertApprovedRuntimePlan, RemediationPlanAuthorityError } from "../con
 import { executionPlanContextIssues } from "../contractPipeline/executionPlan.js";
 import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema, type ContractReviewOutcome } from "../../shared/types/reviewIndependence.js";
+import { archiveConformanceSubjects, assertSuccessfulConformance } from "./triageConformance.js";
 import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
-// sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/close-committed-ownership.test.ts
+// sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/close-committed-ownership.test.ts, tests/remediate/host-handoff-corroboration-obligations.test.ts
 //   The landing-gate close leg (run once per declared gate, folded into
 //   `fullyGreen`, rendered in the report) is pinned by the landing-gates suite;
 //   the existing close behaviour around it is pinned by phase-close.
@@ -2043,16 +2044,19 @@ export async function cleanupTempBranchesAndArtifacts(
   // directory and say why, not to abort a close that has already written its
   // report.
   const { archiveFrictionRecords, outputDirFor } = await import("audit-tools/shared");
+  let archiveFailure = "friction archive listing failed";
   try {
     await archiveFrictionRecords({
       artifactsDir: options.artifactsDir,
       destDir: outputDirFor(options.artifactsDir),
       prefix: "remediation-friction",
     });
+    archiveFailure = "conformance evidence archive failed";
+    await archiveConformanceSubjects(options.artifactsDir, outputDirFor(options.artifactsDir));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.warn(
-      "Friction close-out records could not be enumerated, so the artifacts " +
+      "Close-out evidence could not be archived, so the artifacts " +
         "directory is kept rather than deleted: " +
         reason,
     );
@@ -2061,7 +2065,7 @@ export async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `friction archive listing failed — artifacts dir preserved (records may exist and were NOT archived): ${reason}`,
+      note: `${archiveFailure} - artifacts dir preserved (records may exist and were NOT archived): ${reason}`,
     });
     return { artifacts_residue: options.artifactsDir };
   }
@@ -2184,6 +2188,8 @@ export async function runClosePhase(
   }
 
   // Check before preview, verification, state mutation, action execution or promotion.
+  // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
+  await assertSuccessfulConformance(options.root, options.artifactsDir, state);
   await assertClosingPlanAuthority(state, options);
 
   // CDC-19 (advisory): a planned finding with no corresponding item in

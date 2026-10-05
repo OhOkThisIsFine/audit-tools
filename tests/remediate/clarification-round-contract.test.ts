@@ -14,10 +14,12 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationItemState } from "../../src/remediate/state/types.js";
+import { runTriagePhase } from "../../src/remediate/phases/triage.js";
+import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { ambiguityReviewPrompt, clarificationPrompt } from "../../src/remediate/steps/prompts.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
@@ -87,6 +89,62 @@ describe("the clarification round reads its questions from the paused items", ()
     const prompt = await readFile(step.prompt_path, "utf8");
     return { step, state, prompt };
   }
+
+  it.each(["immediate", "resumed"] as const)("a %s durable owner halt does not reexecute a stale prior triage success", async (mode) => {
+    const state = twoPausedState();
+    state.status = "triage";
+    state.conformance_review = { run_id: state.plan!.plan_id, enabled: true };
+    for (const id of IDS) state.items![id] = { unit_id: id, status: "blocked", rework_count: 2, failure_reason: "still open" };
+    await mkdir(join(REPO_DIR, "src"));
+    for (const name of ["a", ...IDS]) await writeFile(join(REPO_DIR, "src", `${name}.ts`), "export const value = 1;\n");
+    await writeFile(join(REPO_DIR, ".gitignore"), ".audit-tools/\n");
+    const script = join(ARTIFACTS_DIR, "triage-halt.cjs");
+    const counter = join(ARTIFACTS_DIR, "triage-halt-count");
+    const scriptBody = "const fs=require('node:fs');const p='.audit-tools/remediation/triage-halt-count';const n=fs.existsSync(p)?Number(fs.readFileSync(p)):0;fs.writeFileSync(p,String(n+1));";
+    await writeFile(script, scriptBody + "process.exit(0);");
+    state.plan!.units[0]!.required_tests = ["node .audit-tools/remediation/triage-halt.cjs"];
+    await start(state);
+    await runTriagePhase(state, { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    const reviewPaths = conformanceReviewPaths(ARTIFACTS_DIR, state.plan!.plan_id, "F1");
+    const request = JSON.parse(await readFile(reviewPaths.request, "utf8"));
+    await writeFile(reviewPaths.response, JSON.stringify({ ...request.response_template,
+      declaration: { mode: "independent", reason: "Explicit independent test reviewer" },
+      summary: "The stable source and passing required test satisfy F1", obligations: [{ obligation_id: "REQ-F1", verdict: "satisfied", evidence: ["src/F1.ts exports the reviewed value; the exact required test passed"] }],
+    }));
+    const accepted = await runTriagePhase(state, { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    expect(accepted.items!.F1.status).toBe("resolved_no_change");
+    await new StateStore(ARTIFACTS_DIR).saveState(accepted);
+    // The already-reviewed command changes before the halt; the exact subject
+    // is stale, so reporting it as success would also be dishonest.
+    await writeFile(script, scriptBody + "process.exit(1);");
+    if (mode === "immediate") {
+      await writeFile(join(ARTIFACTS_DIR, "triage_resolution.json"), JSON.stringify({ plan_id: state.plan!.plan_id, items: [{ unit_id: "F2", action: "halt" }] }));
+    } else {
+      accepted.status = "closing";
+      accepted.closing_context = "user_halted";
+      accepted.items!.F2.status = "abandoned";
+      accepted.items!.F2.completed_at = new Date().toISOString();
+      await new StateStore(ARTIFACTS_DIR).saveState(accepted);
+    }
+    await decideNextStep({ root: REPO_DIR, finalGateRunner: harness.finalGateRunner });
+    const after = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(after!.closing_context).toBe("user_halted");
+    expect(await readFile(counter, "utf8")).toBe("1");
+    expect(after!.status).not.toBe("triage");
+    expect(after!.status).not.toBe("waiting_for_triage");
+    expect(after!.items!.F1.status).toBe("abandoned");
+    expect(after!.items!.F1.conformance_review).toEqual(accepted.items!.F1.conformance_review);
+    expect(after!.items!.F1.completed_at).toBeTruthy();
+    expect(JSON.parse(await readFile(reviewPaths.request, "utf8"))).toEqual(request);
+    expect(after!.status).toBe("complete");
+    const outcomes = JSON.parse(await readFile(join(dirname(ARTIFACTS_DIR), "remediation-outcomes.json"), "utf8"));
+    expect(outcomes.execution_outcomes.find((item: { unit_id: string }) => item.unit_id === "F1")).toMatchObject({
+      status: "abandoned", conformance_review: accepted.items!.F1.conformance_review,
+    });
+    const report = await readFile(join(dirname(ARTIFACTS_DIR), "remediation-report.md"), "utf8");
+    expect(report).toContain("abandoned");
+    expect(report).toContain("owner halted");
+  });
 
   it("a partial answer keeps the unanswered item's question", async () => {
     // The measured wedge: the old round cleared the whole run-level list on ANY
