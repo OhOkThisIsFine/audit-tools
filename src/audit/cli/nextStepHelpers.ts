@@ -1,6 +1,6 @@
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/next-step-integrity-reintake.test.ts
 /**
  * Extracted helpers for the next-step command.
  *
@@ -80,7 +80,6 @@ import {
   type ConceptualReviewAdjudication,
 } from "../types/conceptualAdjudication.js";
 import {
-  advanceAudit,
   engineMaxTransitions,
   findExecutorFailure,
   runSingleAdvanceStep,
@@ -3442,8 +3441,8 @@ function foldHeartbeatRecord(obligation: string, durationMs: number): void {
  * Drive the deterministic fold for one `next-step` call.
  *
  * Structure mirrors remediate-code's `decideNextStepLoop` (the proven engine
- * consumer): a PREAMBLE (the `index===0` file-integrity re-intake, the analog of
- * remediate's `forceReplan`) then the shared `advance` running audit's `PRIORITY`
+ * consumer): source-integrity refresh under the hold, then the shared
+ * `advance` running audit's `PRIORITY`
  * obligations. Each deterministic executor `transition`s (folding the whole chain
  * into one host round-trip); host-delegation / dispatch / terminal obligations
  * `emit` the host-actionable step.
@@ -3491,40 +3490,6 @@ async function runDeterministicFold(
     value: params.analyzers,
   };
 
-  // PREAMBLE — file-integrity re-intake (runs once, like remediate's
-  // forceReplan). When pending audit-task files have changed/vanished since the
-  // manifest was built, re-run intake so planning re-grounds. advanceAudit does
-  // not persist (only runAuditStep does), so this is the same diagnostic-then-
-  // reload the hand loop performed on its first iteration: the warning fires and
-  // the fold below starts from the freshly-loaded disk bundle.
-  {
-    const bundle = await loadArtifactBundle(params.artifactsDir);
-    if (bundle.audit_state?.status !== "complete" && bundle.repo_manifest) {
-      const pendingTasks = buildPendingAuditTasks(bundle);
-      const taskFiles = new Set<string>();
-      for (const task of pendingTasks) {
-        for (const fp of Object.keys(task.file_line_counts ?? {})) taskFiles.add(fp);
-      }
-      if (taskFiles.size > 0) {
-        const integrity = await checkFileIntegrity(params.root, bundle.repo_manifest, [...taskFiles]);
-        if (!integrity.is_clean) {
-          // Route this diagnostic OFF stdout: cmdNextStep emits the step
-          // contract as the sole stdout payload via console.log(JSON.stringify),
-          // so a console.log here would corrupt the JSON-on-stdout contract.
-          process.stderr.write(
-            `[audit-code] nextStep: integrity check — ${integrity.changed_files.length} changed, ` +
-              `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
-          );
-          await advanceAudit(bundle, {
-            root: params.root,
-            artifactsDir: params.artifactsDir,
-            preferredExecutor: "intake_executor",
-          });
-        }
-      }
-    }
-  }
-
   const ctx: AuditNextStepCtx = {
     params,
     analyzersRef,
@@ -3562,6 +3527,7 @@ async function runDeterministicFold(
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
       let ingestionExecutions = 0;
+      let intakeExecutions = 0;
       await recoverStagedSubmissions(params.artifactsDir);
       const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
       const consent = params.autoFix?.enabled === undefined && !params.autoFix?.dryRun
@@ -3585,6 +3551,28 @@ async function runDeterministicFold(
       }
       ctx.currentBundleRef.value = startBundle;
       try {
+        // Observe source integrity against the fresh carried authority, under
+        // the same hold and before any old host submission can be ingested.
+        if (startBundle.audit_state?.status !== "complete" && startBundle.repo_manifest) {
+          const taskFiles = [...new Set(buildPendingAuditTasks(startBundle).flatMap((task) => task.file_paths))];
+          if (taskFiles.length > 0) {
+            const integrity = await checkFileIntegrity(params.root, startBundle.repo_manifest, taskFiles);
+            if (!integrity.is_clean) {
+              process.stderr.write(
+                `[audit-code] nextStep: integrity check - ${integrity.changed_files.length} changed, ` +
+                `${integrity.missing_files.length} missing, ${integrity.io_errors.length} io-error(s); re-running intake.\n`,
+              );
+              intakeExecutions = 1;
+              const refreshed = await runSingleAdvanceStep(startBundle, {
+                root: params.root, artifactsDir: params.artifactsDir,
+                preferredExecutor: "intake_executor", scopeIndexMemo: params.scopeIndexMemo,
+                runLogger: foldLogger, heartbeat,
+              });
+              startBundle = refreshed.updated_bundle;
+              ctx.currentBundleRef.value = startBundle;
+            }
+          }
+        }
         if (startBundle.audit_tasks && startBundle.audit_state?.status !== "complete" &&
             deriveAuditState(startBundle, { emitStaleness: false }).obligations.find((obligation) =>
               obligation.id === "planning_artifacts")?.state === "satisfied") {
@@ -3602,10 +3590,10 @@ async function runDeterministicFold(
           ctx,
           {
             maxTransitions: engineMaxTransitions(),
-            maxExecutions: MAX_DRAIN_STEPS - ingestionExecutions,
+            maxExecutions: MAX_DRAIN_STEPS - ingestionExecutions - intakeExecutions,
           },
         );
-        chargedExecutions = engineOutcome.executions + ingestionExecutions;
+        chargedExecutions = engineOutcome.executions + ingestionExecutions + intakeExecutions;
         if (engineOutcome.step && engineOutcome.step.kind !== "terminal_intent" && ARCHITECTURE_WORK_STEPS.has(engineOutcome.step.kind) &&
             buildPendingAuditTasks(engineOutcome.state).length > 0) {
           const inspection = await ensureSemanticReviewRunUnlocked({
