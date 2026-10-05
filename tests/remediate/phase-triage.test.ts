@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RemediationState } from "../../src/remediate/state/store.js";
+import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import type { RemediationItemState } from "../../src/remediate/state/types.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { scratchDir } from "../helpers/scratch.js";
@@ -470,7 +470,9 @@ describe("runTriagePhase", () => {
       "utf8",
     );
 
-    await runTriagePhase(state, BASE_OPTIONS);
+    const prepared = await runTriagePhase(state, BASE_OPTIONS);
+    expect(existsSync(join(TEST_DIR, "triage-outcome.json"))).toBe(false);
+    await new StateStore(TEST_DIR).saveState(prepared);
     const raw = await readFile(join(TEST_DIR, "triage-outcome.json"), "utf8");
     const outcome = JSON.parse(raw) as { items: { unit_id: string; action: string }[] };
     expect(outcome.items).toEqual(
@@ -499,7 +501,9 @@ describe("runTriagePhase", () => {
       "utf8",
     );
 
-    await runTriagePhase(state, BASE_OPTIONS);
+    const prepared = await runTriagePhase(state, BASE_OPTIONS);
+    expect(existsSync(join(TEST_DIR, "triage-outcome.json"))).toBe(false);
+    await new StateStore(TEST_DIR).saveState(prepared);
     const raw = await readFile(join(TEST_DIR, "triage-outcome.json"), "utf8");
     const outcome = JSON.parse(raw) as { items: { unit_id: string; action: string }[] };
     expect(outcome.items).toEqual(

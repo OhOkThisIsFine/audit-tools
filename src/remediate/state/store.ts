@@ -1,3 +1,5 @@
+// sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/phase-triage.test.ts
+import { DecisionApplicationReceiptSchema, reconcileDecisionCleanup, type DecisionApplicationReceipt } from "./decisionConsumption.js";
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts
 import { z } from "zod";
 import { executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
@@ -79,6 +81,7 @@ export interface RemediationState {
    */
   contract_version?: typeof REMEDIATION_STATE_CONTRACT_VERSION;
   status: RemediationRunStatus;
+  decision_applications?: DecisionApplicationReceipt[];
   /** Tool-minted current-run snapshot; survives handoff/frontier replacement. */
   conformance_review?: ConformanceReviewBinding;
   plan?: RemediationPlan;
@@ -247,6 +250,7 @@ function validateState(value: unknown): string[] {
       }
     }
   }
+  if (obj["decision_applications"] !== undefined && !z.array(DecisionApplicationReceiptSchema).safeParse(obj["decision_applications"]).success) errors.push("decision_applications contains invalid application receipts");
   errors.push(...clarificationQuestionErrors(obj));
   if (status === "closing") {
     const closingPlan = obj["closing_plan"];
@@ -521,7 +525,16 @@ export class StateStore {
     // path must not be the one door a worker-context write can still use.
     assertNotNodeWorktreeCwd("a remediation state.json write");
     await this.store.replace(stampedState(state));
+    await this.reconcileDecisionApplications(state);
   }
+  /** Caller holds the existing phase lock, including startup before ordinary decisions. */
+  async reconcileDecisionApplications(state: RemediationState): Promise<void> {
+    if (await reconcileDecisionCleanup(state, this.artifactsDir)) {
+      try { await this.store.replace(stampedState(state)); }
+      catch (error) { throw new Error("Operator decision is committed; pending cleanup receipt persistence. Resume to reconcile before continuing.", { cause: error }); }
+    }
+  }
+
 }
 
 /**

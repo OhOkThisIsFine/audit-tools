@@ -1,11 +1,12 @@
+import { readDecisionSnapshot, decisionContextDigest, type DecisionApplicationReceipt } from "../state/decisionConsumption.js";
 // sites-pinned: tests/remediate/phase-triage.test.ts
 import { runRequiredTest } from "../steps/dispatch/requiredTests.js";
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { join } from "node:path";
+import { relative, join } from "node:path";
 import { existsSync } from "node:fs";
 import { rename } from "node:fs/promises";
-import { readOptionalJsonFile, writeJsonFile, formatValidationIssues, withFsRetry, commandLeavesDeclaredShape } from "audit-tools/shared";
+import { writeJsonFile, formatValidationIssues, withFsRetry, commandLeavesDeclaredShape } from "audit-tools/shared";
 import { validateTriageResolution } from "../validation/remediationState.js";
 import { isTerminalStatus } from "../state/itemStatus.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
@@ -155,27 +156,6 @@ async function archiveIfPresent(path: string, suffix: "consumed" | "stale"): Pro
   await withFsRetry(() => rename(path, `${path}.${suffix}-${Date.now()}`));
 }
 
-async function archiveImplementResultsForRetries(
-  state: RemediationState,
-  options: OrchestratorOptions,
-  unitIds: Set<string>,
-): Promise<void> {
-  const runId = state.plan?.plan_id;
-  if (!runId || unitIds.size === 0) return;
-
-  for (const unitId of unitIds) {
-    await archiveIfPresent(
-      remediationHostResultFilePath({
-        root: options.root,
-        artifactsDir: options.artifactsDir,
-        runId,
-        workItemId: unitId,
-      }),
-      "stale",
-    );
-  }
-}
-
 // ── The ONE closing INTENT out of triage ─────────────────────────────────────
 // INV-RS-10 / OBL-seam-prep-remediate-core-inv-1..4 (CP-NODE-3 review finding):
 // triage never PERSISTS `closing` itself — its single caller
@@ -251,8 +231,10 @@ export async function runTriagePhase(
 
   if (blockedItems.length > 0) {
     const resolutionPath = join(options.artifactsDir, "triage_resolution.json");
+    const inputSnapshot = await readDecisionSnapshot(resolutionPath);
+    const contextDigest = decisionContextDigest(state);
     let resolution: TriageResolution | null | undefined =
-      await readOptionalJsonFile<TriageResolution>(resolutionPath);
+      inputSnapshot ? JSON.parse(inputSnapshot.bytes) as TriageResolution : undefined;
 
     // INV-RSM-RESOLUTION-CORRELATE (COR-227a02ae class): a resolution written
     // for a DIFFERENT plan (a leftover from an earlier run in the same
@@ -284,20 +266,22 @@ export async function runTriagePhase(
       }
       console.log("Found triage_resolution.json. Processing resolutions...");
       let requiresRetry = false;
-      const retryUnitIds = new Set<string>();
 
       // Triage outcome artifact — records per-finding resolution actions.
       const triageOutcome: { unit_id: string; action: string }[] = [];
+      const receipt: DecisionApplicationReceipt = {
+        input: "triage_resolution.json", input_sha256: inputSnapshot!.sha256, input_identity_sha256: inputSnapshot!.identity_sha256, context_sha256: contextDigest,
+        run_id: state.plan!.plan_id, revision_sha256: state.plan!.review_revision_sha256,
+        applied_at: new Date().toISOString(), retry_results: [],
+        outcome: { resolved_at: new Date().toISOString(), items: triageOutcome },
+      };
+      if (!inputSnapshot) throw new Error("Triage input changed during application; retry without accepting it.");
+      (state.decision_applications ??= []).push(receipt);
 
       for (const res of resolution.items) {
         if (res.action === "halt") {
-          await archiveIfPresent(resolutionPath, "consumed");
           console.log("Halt requested during triage. Routing through close (partial report).");
           triageOutcome.push({ unit_id: res.unit_id, action: "halted" });
-          await writeJsonFile(
-            join(options.artifactsDir, "triage-outcome.json"),
-            { resolved_at: new Date().toISOString(), items: triageOutcome },
-          );
           return haltToClosing(state);
         }
 
@@ -310,7 +294,10 @@ export async function runTriagePhase(
             (res.action === undefined && rationaleAsksForRetry(res.rationale));
           if (shouldRetry) {
             retryBlockedItem(item);
-            retryUnitIds.add(res.unit_id);
+            const resultPath = remediationHostResultFilePath({ root: options.root, artifactsDir: options.artifactsDir,
+              runId: state.plan!.plan_id, workItemId: res.unit_id });
+            const snapshot = await readDecisionSnapshot(resultPath);
+            if (snapshot) receipt.retry_results.push({ path: relative(options.artifactsDir, resultPath), sha256: snapshot.sha256, identity_sha256: snapshot.identity_sha256 });
             requiresRetry = true;
             triageOutcome.push({ unit_id: res.unit_id, action: "retried" });
           } else if (res.action === "ignore") {
@@ -322,13 +309,7 @@ export async function runTriagePhase(
         }
       }
 
-      await archiveIfPresent(resolutionPath, "consumed");
-      await writeJsonFile(
-        join(options.artifactsDir, "triage-outcome.json"),
-        { resolved_at: new Date().toISOString(), items: triageOutcome },
-      );
       if (requiresRetry) {
-        await archiveImplementResultsForRetries(state, options, retryUnitIds);
         return { ...state, status: "implementing" };
       }
 

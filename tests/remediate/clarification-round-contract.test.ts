@@ -11,9 +11,9 @@ import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } 
 //      validated, and ANY bad entry refuses the WHOLE file, naming the entry
 //      index and the field.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rm, readdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -144,6 +144,167 @@ describe("the clarification round reads its questions from the paused items", ()
     const report = await readFile(join(dirname(ARTIFACTS_DIR), "remediation-report.md"), "utf8");
     expect(report).toContain("abandoned");
     expect(report).toContain("owner halted");
+  });
+
+  it("keeps a partial answer discoverable when its applied state cannot commit", async () => {
+    await start();
+    await writeFile(resolutionPath, JSON.stringify([
+      { unit_id: "F1", action: "clarified", rationale: "Only the module boundary." },
+    ]));
+    const save = StateStore.prototype.saveState;
+    const fault = vi.spyOn(StateStore.prototype, "saveState").mockImplementation(async function (this: StateStore, state) {
+      if (state.items?.F1?.clarification_context) throw new Error("injected answered-state failure");
+      return save.call(this, state);
+    });
+    try {
+      await expect(decideNextStep({ root: REPO_DIR })).rejects.toThrow("injected answered-state failure");
+    } finally { fault.mockRestore(); }
+    expect(existsSync(resolutionPath)).toBe(true);
+    await decideNextStep({ root: REPO_DIR });
+    const recovered = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(recovered?.items?.F1?.clarification_context).toBe("Only the module boundary.");
+    expect(recovered?.items?.F2?.status).toBe("needs_clarification");
+  });
+
+  it.each(["retry", "ignore", "halt"] as const)("opted-in triage %s survives an answered-state commit failure", async (action) => {
+    const state = twoPausedState();
+    state.status = "waiting_for_triage";
+    state.conformance_review = { run_id: state.plan!.plan_id, enabled: true };
+    state.items!.F2 = { unit_id: "F2", status: "blocked", rework_count: 2, failure_reason: "second failure" };
+    state.items!.F1 = { unit_id: "F1", status: "blocked", rework_count: 2, failure_reason: "still open" };
+    await start(state);
+    const input = join(ARTIFACTS_DIR, "triage_resolution.json");
+    await writeFile(input, JSON.stringify({ plan_id: state.plan!.plan_id, items: [{ unit_id: "F1", action }] }));
+    const save = StateStore.prototype.saveState;
+    const fault = vi.spyOn(StateStore.prototype, "saveState").mockImplementation(async function (this: StateStore, next) {
+      if (next.items?.F1?.status !== "blocked") throw new Error("injected triage commit failure");
+      return save.call(this, next);
+    });
+    try { await expect(decideNextStep({ root: REPO_DIR })).rejects.toThrow("injected triage commit failure"); }
+    finally { fault.mockRestore(); }
+    expect(existsSync(input)).toBe(true);
+    const unchanged = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(unchanged?.items?.F1?.rework_count).toBe(2);
+    await decideNextStep({ root: REPO_DIR });
+    const recovered = await new StateStore(ARTIFACTS_DIR).loadState();
+    if (action === "retry") expect(recovered?.items?.F1?.rework_count).toBe(3);
+    else if (action === "ignore") expect(recovered?.items?.F1?.status).toBe("ignored");
+    else expect(recovered?.closing_context).toBe("user_halted");
+  });
+
+  it("committed retry recovers projection and cleanup exactly once before resuming", async () => {
+    const state = twoPausedState();
+    state.status = "waiting_for_triage";
+    state.conformance_review = { run_id: state.plan!.plan_id, enabled: true };
+    state.items!.F2 = { unit_id: "F2", status: "blocked", rework_count: 2, failure_reason: "second failure" };
+    state.items!.F1 = { unit_id: "F1", status: "blocked", rework_count: 2, failure_reason: "still open" };
+    await start(state);
+    const input = join(ARTIFACTS_DIR, "triage_resolution.json");
+    await writeFile(input, JSON.stringify({ plan_id: state.plan!.plan_id, items: [{ unit_id: "F1", action: "retry" }] }));
+    const obstruction = join(ARTIFACTS_DIR, "triage-outcome.json");
+    await mkdir(obstruction);
+    await expect(decideNextStep({ root: REPO_DIR })).rejects.toThrow("pending cleanup");
+    const committed = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(committed?.items?.F1?.rework_count).toBe(3);
+    expect(committed?.decision_applications?.[0]?.cleanup_complete).toBeUndefined();
+    expect(existsSync(input)).toBe(true);
+    await rm(obstruction, { recursive: true });
+    await decideNextStep({ root: REPO_DIR });
+    await decideNextStep({ root: REPO_DIR });
+    const recovered = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(recovered?.items?.F1?.rework_count).toBe(3);
+    expect(recovered?.decision_applications?.[0]?.cleanup_complete).toBe(true);
+    expect(existsSync(input)).toBe(false);
+    expect(JSON.parse(await readFile(obstruction, "utf8")).items).toEqual([{ unit_id: "F1", action: "retried" }]);
+  });
+
+  it("a durable owner halt reconciles failed cleanup without reexecuting a stale prior success", async () => {
+    const state = twoPausedState();
+    state.status = "triage";
+    state.conformance_review = { run_id: state.plan!.plan_id, enabled: true };
+    for (const id of IDS) state.items![id] = { unit_id: id, status: "blocked", rework_count: 2, failure_reason: "still open" };
+    await mkdir(join(REPO_DIR, "src"));
+    for (const name of ["a", ...IDS]) await writeFile(join(REPO_DIR, "src", `${name}.ts`), "export const value = 1;\n");
+    await writeFile(join(REPO_DIR, ".gitignore"), ".audit-tools/\n");
+    const script = join(ARTIFACTS_DIR, "triage-halt.cjs");
+    const counter = join(ARTIFACTS_DIR, "triage-halt-count");
+    const scriptBody = "const fs=require('node:fs');const p='.audit-tools/remediation/triage-halt-count';const n=fs.existsSync(p)?Number(fs.readFileSync(p)):0;fs.writeFileSync(p,String(n+1));";
+    await writeFile(script, scriptBody + "process.exit(0);");
+    state.plan!.units[0]!.required_tests = ["node .audit-tools/remediation/triage-halt.cjs"];
+    await start(state);
+    await runTriagePhase(state, { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    const reviewPaths = conformanceReviewPaths(ARTIFACTS_DIR, state.plan!.plan_id, "F1");
+    const request = JSON.parse(await readFile(reviewPaths.request, "utf8"));
+    await writeFile(reviewPaths.response, JSON.stringify({ ...request.response_template,
+      declaration: { mode: "independent", reason: "Explicit independent test reviewer" },
+      summary: "The stable source and passing required test satisfy F1", obligations: [{ obligation_id: "REQ-F1", verdict: "satisfied", evidence: ["src/F1.ts exports the reviewed value; the exact required test passed"] }],
+    }));
+    const accepted = await runTriagePhase(state, { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR });
+    expect(accepted.items!.F1.status).toBe("resolved_no_change");
+    await new StateStore(ARTIFACTS_DIR).saveState(accepted);
+    // The already-reviewed command changes before the halt; the exact subject
+    // is stale, so reporting it as success would also be dishonest.
+    await writeFile(script, scriptBody + "process.exit(1);");
+    await writeFile(join(ARTIFACTS_DIR, "triage_resolution.json"), JSON.stringify({ plan_id: state.plan!.plan_id, items: [{ unit_id: "F2", action: "halt" }] }));
+    const input = join(ARTIFACTS_DIR, "triage_resolution.json");
+    const obstruction = join(ARTIFACTS_DIR, "triage-outcome.json");
+    await mkdir(obstruction);
+    await expect(decideNextStep({ root: REPO_DIR, finalGateRunner: harness.finalGateRunner })).rejects.toThrow("pending cleanup");
+    const committed = (await new StateStore(ARTIFACTS_DIR).loadState())!;
+    expect(committed.closing_context).toBe("user_halted");
+    expect(committed.items!.F1.status).toBe("abandoned");
+    expect(committed.items!.F1.conformance_review).toEqual(accepted.items!.F1.conformance_review);
+    expect(committed.items!.F2.status).toBe("abandoned");
+    expect(committed.decision_applications?.[0]?.cleanup_complete).toBeUndefined();
+    expect(existsSync(input)).toBe(true);
+    await rm(obstruction, { recursive: true });
+    await decideNextStep({ root: REPO_DIR, finalGateRunner: harness.finalGateRunner });
+    const after = (await new StateStore(ARTIFACTS_DIR).loadState())!;
+    expect(after.closing_context).toBe("user_halted");
+    expect(await readFile(counter, "utf8")).toBe("1");
+    expect(after.status).not.toBe("triage");
+    expect(after.status).not.toBe("waiting_for_triage");
+    expect(after.items!.F1.status).toBe("abandoned");
+    expect(after.items!.F1.conformance_review).toEqual(accepted.items!.F1.conformance_review);
+    expect(after.decision_applications?.[0]?.cleanup_complete).toBe(true);
+    expect(existsSync(input)).toBe(false);
+    expect(JSON.parse(await readFile(obstruction, "utf8")).items).toEqual([{ unit_id: "F2", action: "halted" }]);
+  });
+
+  it("a consumed answer restored at the live path cannot answer a later question", async () => {
+    await start();
+    await submit([{ unit_id: "F1", action: "clarified", rationale: "Only the module boundary." }]);
+    const store = new StateStore(ARTIFACTS_DIR);
+    const later = (await store.loadState())!;
+    later.items!.F1 = paused("F1");
+    later.items!.F1.clarification_question!.description = "A later question about F1?";
+    later.status = "waiting_for_clarification";
+    delete later.host_handoff;
+    await store.saveState(later);
+    const consumed = (await readdir(ARTIFACTS_DIR)).find(name => name.startsWith("clarification_resolution.json.consumed-"))!;
+    await rename(join(ARTIFACTS_DIR, consumed), resolutionPath);
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect(step.step_kind).toBe("collect_clarifications");
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.items?.F1?.status).toBe("needs_clarification");
+    expect(await readFile(step.prompt_path, "utf8")).toContain("A later question about F1?");
+  });
+
+  it("a fresh identical answer can answer a later question for the same unit", async () => {
+    await start();
+    const answer = [{ unit_id: "F1", action: "clarified", rationale: "Only the module boundary." }];
+    await submit(answer);
+    const store = new StateStore(ARTIFACTS_DIR);
+    const later = (await store.loadState())!;
+    later.items!.F1 = paused("F1");
+    later.items!.F1.clarification_question!.description = "A later question about F1?";
+    later.status = "waiting_for_clarification";
+    delete later.host_handoff;
+    await store.saveState(later);
+    await writeFile(resolutionPath, JSON.stringify(answer));
+    const step = await decideNextStep({ root: REPO_DIR });
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.items?.F1?.status).toBe("pending");
+    expect((await new StateStore(ARTIFACTS_DIR).loadState())?.decision_applications).toHaveLength(2);
+    expect(step.step_kind).toBe("dispatch_implement");
   });
 
   it("a partial answer keeps the unanswered item's question", async () => {

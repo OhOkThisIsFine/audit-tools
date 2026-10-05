@@ -1,3 +1,4 @@
+import { readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
 import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
 import { reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
@@ -1787,10 +1788,11 @@ type ParsedPlanClarifications =
  */
 async function readPlanClarificationResolutions(
   path: string,
+  snapshotBytes?: string,
 ): Promise<ParsedPlanClarifications> {
   let value: unknown;
   try {
-    value = JSON.parse(await readFile(path, "utf8"));
+    value = JSON.parse(snapshotBytes ?? await readFile(path, "utf8"));
   } catch (error) {
     return {
       ok: false,
@@ -1896,7 +1898,9 @@ async function applyPlanClarificationResolution(
 ): Promise<{ kind: "applied"; state: RemediationState } | { kind: "refused"; step: RemediationStep }> {
   if (!state.plan || !state.items) return { kind: "applied", state };
   const resolutionPath = join(artifactsDir, "clarification_resolution.json");
-  const parsed = await readPlanClarificationResolutions(resolutionPath);
+  const inputSnapshot = await readDecisionSnapshot(resolutionPath);
+  const contextDigest = decisionContextDigest(state);
+  const parsed = await readPlanClarificationResolutions(resolutionPath, inputSnapshot?.bytes);
   // Uniform whole-file fail-closed contract: a malformed entry or an id outside
   // the paused set refuses the WHOLE resolution (archived, nothing applied) and
   // re-halts with the reason named. The silent-continue alternative drops the
@@ -1938,9 +1942,10 @@ async function applyPlanClarificationResolution(
   // regenerated workload (and a non-implementing status refuses the save
   // outright). Mirrors the saveStateForPlan strip.
   if (appliedCount > 0) delete state.host_handoff;
-  if (existsSync(resolutionPath)) {
-    await withFsRetry(() => rename(resolutionPath, `${resolutionPath}.consumed-${Date.now()}`));
-  }
+  if (!inputSnapshot) throw new Error("Clarification input changed during application; retry without accepting it.");
+  (state.decision_applications ??= []).push({ input: "clarification_resolution.json", input_sha256: inputSnapshot.sha256, input_identity_sha256: inputSnapshot.identity_sha256,
+    context_sha256: contextDigest, run_id: state.plan.plan_id, revision_sha256: state.plan.review_revision_sha256,
+    applied_at: now, retry_results: [] });
   const remainingPending = state.plan.units.some(
     (f) => state.items?.[f.id]?.status === "pending",
   );
@@ -3697,6 +3702,7 @@ async function advanceUnderPhaseLock(deps: {
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
+  if (state) await store.reconcileDecisionApplications(state);
   let control = await store.loadOperatorLifecycle();
   if (control && control.mode !== "active") {
     return buildOperatorControlStep(root, artifactsDir, state, control);
