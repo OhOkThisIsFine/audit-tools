@@ -136,6 +136,9 @@ export function renderFanoutExecutionLines(params: {
   concurrencyHint?: number | null;
   /** A driver cannot execute these lanes itself; unavailable independence stops the step. */
   independenceRequired?: boolean;
+  // sites-pinned: tests/shared/prompts.test.ts
+  /** Bound review lanes can report unavailability so continuation records a pause. */
+  unavailableReview?: "declare";
 }): string[] {
   const n = params.lanes.length;
   // Defensive coherence: emitters gate on pending work before rendering, so a
@@ -147,6 +150,10 @@ export function renderFanoutExecutionLines(params: {
       "Every lane's result already exists on disk — there is nothing to execute; run the continue command below.",
     ];
   }
+  // sites-pinned: tests/shared/prompts.test.ts
+  const unavailable = params.unavailableReview === "declare"
+    ? "If none is available, write only the lane's bound unavailable declaration and return to the host so continuation records the review pause. Do not substitute self-review or an empty findings result."
+    : "If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.";
   const plural = n === 1 ? "" : "s";
   const concurrency =
     params.concurrencyHint != null && n > 1
@@ -157,7 +164,7 @@ export function renderFanoutExecutionLines(params: {
       : [];
   return [
     (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
-      ? `Execute the ${n} lane prompt file${plural} below in ${INDEPENDENT_CONTEXT}. The host chooses how to obtain that context. If none is available, stop and report that this review could not be performed independently. Do not write a result or run the continue command in that case; this overrides the output and continuation instructions below. An unavailable review is not an empty findings result.`
+      ? `Execute the ${n} lane prompt file${plural} below in ${INDEPENDENT_CONTEXT}. The host chooses how to obtain that context. ${unavailable}`
       : `Execute the ${n} lane prompt file${plural} below, each ${SEPARATE_CONTEXT_OR_SELF} — run separate contexts in parallel where the host can; otherwise read and follow each file sequentially yourself. The same files and result paths apply either way.`,
     "",
     ...concurrency,
@@ -177,7 +184,9 @@ export function renderFanoutExecutionLines(params: {
     ),
     "",
     (params.independenceRequired || params.lanes.some(lane => lane.reviewRequirement === "independent"))
-      ? "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once the independently produced lane results exist."
+      ? (params.unavailableReview === "declare"
+          ? "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once independent results or bound unavailable declarations exist. An unavailable declaration pauses review; it does not complete it."
+          : "Pass each lane's prompt path verbatim to its independent executor. Lane prompt files carry no continue-command; return here once the independently produced lane results exist.")
       : "When handing a lane to a separate context, pass its prompt path verbatim as the instruction — do not read the lane file into this conversation. When executing a lane yourself, read and follow its file directly. Lane prompt files carry no continue-command; return here once the lane results exist.",
   ];
 }
