@@ -135,7 +135,7 @@ export async function assertSuccessfulConformance(root: string, artifactsDir: st
   }
 }
 
-/** Refresh mutable-tree successes through ordinary triage; retain their historical receipts. */
+/** Refresh stale mutable-tree successes, or abandon them after an explicit halt; retain historical receipts. */
 export async function reopenStaleTriageSuccesses(root: string, artifactsDir: string, state: RemediationState): Promise<boolean> {
   if (!state.conformance_review?.enabled || !state.plan) return false;
   let reopened = false;
@@ -147,12 +147,18 @@ export async function reopenStaleTriageSuccesses(root: string, artifactsDir: str
     const context = await triageEvidenceContext(root, state, unit.id);
     const observation = context && await readTriageObservation(artifactsDir, state.plan.plan_id, unit.id, context);
     if (!observation || digest({ context, observation }) !== item.conformance_review.binding) {
-      item.status = "blocked";
-      item.failure_reason = "The working tree changed since this tool-owned success observation was reviewed. Reverify and obtain a current bound review.";
-      delete item.completed_at;
+      if (state.closing_context === "user_halted") {
+        item.status = "abandoned";
+        item.failure_reason = "The owner halted this run after the reviewed tool-owned success observation became stale. Historical conformance evidence is retained; current success is not claimed.";
+        item.completed_at = new Date().toISOString();
+      } else {
+        item.status = "blocked";
+        item.failure_reason = "The working tree changed since this tool-owned success observation was reviewed. Reverify and obtain a current bound review.";
+        delete item.completed_at;
+      }
       reopened = true;
     }
   }
-  if (reopened) state.status = "triage";
+  if (reopened && state.closing_context !== "user_halted") state.status = "triage";
   return reopened;
 }
