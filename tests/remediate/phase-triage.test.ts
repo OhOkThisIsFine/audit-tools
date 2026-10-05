@@ -583,6 +583,32 @@ describe("runTriagePhase", () => {
     expect(state.items!.F1.rework_count).toBe(99);
   });
 
+  it("enabled conformance prevents automatic no-change success without independent review", async () => {
+    const state = makeBaseState({
+      status: "triage", conformance_review: { run_id: "P1", enabled: true },
+      plan: planWithBlocks([{ items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] }]),
+      items: { F1: { unit_id: "F1", status: "blocked", failure_reason: "original failure", rework_count: 0 } },
+    });
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.items!.F1.status).toBe("blocked");
+    expect(next.items!.F1.rework_count).toBe(0);
+    expect(next.status).not.toBe("closing");
+  });
+
+  it("a reviewed candidate never closes over a pending retry from another unit", async () => {
+    const state = makeBaseState({ status: "triage", plan: planWithBlocks([
+      { items: ["F1"], targeted_commands: ['node -e "process.exit(0)"'] },
+      { items: ["F2"], targeted_commands: ['node -e "process.exit(1)"'] },
+    ]), items: {
+      F1: { unit_id: "F1", status: "blocked" },
+      F2: { unit_id: "F2", status: "pending", rework_count: 1 },
+    } });
+    const next = await runTriagePhase(state, { root: TEST_DIR, artifactsDir: TEST_DIR });
+    expect(next.items!.F1.status).toBe("resolved_no_change");
+    expect(next.items!.F2.status).toBe("pending");
+    expect(next.status).toBe("implementing");
+  });
+
   it("still retries when re-verify fails (finding genuinely unsatisfied in the tree)", async () => {
     const state = makeBaseState({
       status: "triage",

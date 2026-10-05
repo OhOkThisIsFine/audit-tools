@@ -10,6 +10,9 @@ import { validateTriageResolution } from "../validation/remediationState.js";
 import { isTerminalStatus } from "../state/itemStatus.js";
 import { rationaleAsksForRetry } from "../steps/stepUtils.js";
 import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js";
+import { stableStringify } from "../../shared/stableStringify.js";
+import { triageEvidenceContext, readTriageObservation, writeTriageObservation, checkTriageConformance } from "./triageConformance.js";
+import type { ConformanceReviewIssue } from "../steps/dispatch/contractConformanceReview.js";
 
 interface TriageResolution {
   /**
@@ -234,6 +237,7 @@ function reconciledToClosing(state: RemediationState): RemediationState {
 export async function runTriagePhase(
   state: RemediationState,
   options: OrchestratorOptions,
+  onConformanceIssue?: (issue: ConformanceReviewIssue) => void,
 ): Promise<RemediationState> {
   console.log("Running Triage Phase...");
 
@@ -358,13 +362,31 @@ export async function runTriagePhase(
       // retry budget before escalating to human triage. The run was approved at
       // the review gate; only budget-exhausted items fall through to a human prompt.
       let autoRetried = false;
+      let awaitingConformance = false;
       for (const item of blockedItems) {
         // Re-verify against the CURRENT tree BEFORE retrying (takes precedence
         // over the retry budget): if the node's own verification now passes, the
         // finding is already satisfied — a lean/hand lap landed it, or this is an
         // obsolete run being resumed after the work shipped — so reconcile to
         // resolved_no_change rather than re-hitting an already-fixed state.
-        if ((await reverifyBlockedItemAgainstTree(item, state, options)) === "satisfied") {
+        const reviewRequired = state.conformance_review?.enabled === true;
+        const context = reviewRequired ? await triageEvidenceContext(options.root, state, item.unit_id) : null;
+        const previousObservation = context && reviewRequired ? await readTriageObservation(options.artifactsDir, state.plan!.plan_id, item.unit_id, context) : null;
+        const verified = previousObservation ? "satisfied" : await reverifyBlockedItemAgainstTree(item, state, options);
+        if (verified === "satisfied") {
+          if (reviewRequired) {
+            const after = await triageEvidenceContext(options.root, state, item.unit_id);
+            if (context && stableStringify(context) === stableStringify(after) && !previousObservation) {
+              await writeTriageObservation(options.artifactsDir, state.plan!.plan_id, item.unit_id, context, state.plan!.units.find(unit => unit.id === item.unit_id)!.required_tests);
+            }
+            const checked = await checkTriageConformance(options.root, options.artifactsDir, state, item.unit_id, context);
+            if (!checked.ok) {
+              awaitingConformance = true;
+              onConformanceIssue?.(checked.issue);
+              continue;
+            }
+            item.conformance_review = checked.receipt;
+          }
           item.status = "resolved_no_change";
           markTerminal(item);
           // NB: do not write `last_successful_step` here — dispatch.ts is its
@@ -395,6 +417,7 @@ export async function runTriagePhase(
         retryBlockedItem(item);
         autoRetried = true;
       }
+      if (awaitingConformance) return { ...state, status: "triage" };
       if (autoRetried) {
         console.log("Auto-retrying blocked findings within their retry budget.");
         return { ...state, status: "implementing" };
@@ -404,6 +427,7 @@ export async function runTriagePhase(
       // resolved_no_change above; only the genuinely-still-open ones remain.
       const stillBlocked = blockedItems.filter((item) => item.status === "blocked");
       if (stillBlocked.length === 0) {
+        if (Object.values(state.items).some(item => item.status === "pending")) return { ...state, status: "implementing" };
         // Every blocked item was already satisfied in the tree — the run is an
         // obsolete/already-landed one; close it cleanly instead of looping its
         // stale nodes through human triage.

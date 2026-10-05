@@ -206,6 +206,23 @@
         "src/audit/systemic/secondOrderAdversaryPrompt.ts": "c822ea3dc98d929b7da711836d777bc1d2fbe557"
       }
     },
+    "2db6d216d6520425": {
+      "reviewed_by": "/root/triage_conformance/w2_design_refute",
+      "attester_class": "agent",
+      "checked": "Independently reviewed actual combined W2 W1 W5 source: opted-in blocked-triage success bypass, persistent working-tree test and independent-review binding, stale terminal backstop, archive-before-cleanup failure preservation, and intact W5 landed-file ownership. Actual original bypass and cleanup-loss red tests; final combined controls and shared-constant/containment adapter controls passed. Genuine no-argv full suite passed 7062 tests on exact staged tree 9c2c84bb9d3ec85cfbd5c978010b93640c6e53b0.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "9c2c84bb9d3ec85cfbd5c978010b93640c6e53b0",
+        "ran_at": "2026-10-05T21:46:49.418Z"
+      },
+      "attested_at": "2026-10-05T21:47:39.423Z",
+      "vouches": {
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "028fe8b2691705367e4ff7c98a36d6b46263eea4",
+        "src/remediate/steps/nextStep.ts": "fca40e3e8b27e83b64ef9a992a1a11cc2558dfbe"
+      }
+    },
     "4318b8e7432c3e06": {
       "reviewed_by": "claude-opus-5-5-review-subagent",
       "attester_class": "agent",
@@ -256,22 +273,6 @@
         "src/remediate/steps/contractPipeline.ts": "8435f8fba5321c12f1293e66d8844e81a1492faa",
         "src/remediate/steps/nextStep.ts": "2ec1717bec6877db9d256c14afc5673336486dd3",
         "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
-      }
-    },
-    "975d57582856a4bd": {
-      "reviewed_by": "claude-opus-5-5-session",
-      "attester_class": "agent",
-      "checked": "nextStep.ts: scope_additions removed from the strict PlanClarificationResolutionSchema (step two; v0.55.5 carries step one) and two comments updated; no other code change; red proofs: field restored -> both refusal tests fail; full suite green on staged tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "e08509244deeef1a5469d8af186582824e546474",
-        "ran_at": "2026-10-04T23:17:45.645Z"
-      },
-      "attested_at": "2026-10-04T23:17:51.049Z",
-      "vouches": {
-        "src/remediate/steps/nextStep.ts": "c02f9b5e90ab53aef9ec06203c4a2a3fbb58d2a5"
       }
     },
     "9bc59db653647a3a": {
@@ -718,7 +719,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "review": "beb774a606887b42"
+      "review": "2db6d216d6520425"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
       "review": "beb774a606887b42"
@@ -736,7 +737,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "975d57582856a4bd"
+      "review": "2db6d216d6520425"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"

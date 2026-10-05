@@ -1,4 +1,5 @@
 import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
+import { reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
 import { presentReportStep } from "./frictionCloseout.js";
 import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type PersistedReviewFilterDispositions } from "../review/filterDispositions.js";
@@ -2071,11 +2072,23 @@ async function handleImplementing(
 ): Promise<RemediateOutcome> {
   const triageStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "triage" });
-  const triaged = await runTriagePhase(state, { root, artifactsDir });
+  // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
+  const conformanceIssues: import("./dispatch/contractConformanceReview.js").ConformanceReviewIssue[] = [];
+  const triaged = await runTriagePhase(state, { root, artifactsDir }, issue => conformanceIssues.push(issue));
   runLogger.event({ phase: "next-step", kind: "executor_end", obligation: state.status, note: "triage", duration_ms: Date.now() - triageStart });
+  if (conformanceIssues.length) {
+    await store.saveState(triaged);
+    return { kind: "emit", step: await writeCurrentStep({
+      stepKind: "review_contract_conformance", status: conformanceIssues.some(issue => issue.code === "conformance_review_unavailable") ? "blocked" : "ready",
+      runId: stateRunId(triaged), repoRoot: root, artifactsDir,
+      prompt: ["Independent contract conformance review is required before triage can accept these tool-owned working-tree observations.", ...conformanceIssues.map(issue => `${issue.work_item_id}: ${issue.message}\nRequest: ${issue.review_request_path}`), "Read each request in an independent context and write its bound response. Self-review cannot satisfy this requirement. Resume next-step after the responses are ready."].join("\n\n"),
+      stopCondition: "Obtain independent conformance review or remain paused.",
+      allowedCommands: [loaderCommand("next-step")],
+    }) };
+  }
   // Triage may enter closing directly: the close itself owns mandatory final
   // acceptance, so a status transition cannot bypass it.
-  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store);
+  if (triaged.status === "closing") return handleAllTerminalTransition(triaged, store, root, artifactsDir);
   await store.saveState(triaged);
   return { kind: "transition", state: triaged };
 }
@@ -2407,7 +2420,14 @@ async function runPhaseBoundaryGate(ctx: {
 async function handleAllTerminalTransition(
   state: RemediationState,
   store: StateStore,
+  root: string,
+  artifactsDir: string,
 ): Promise<RemediateOutcome> {
+  // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
+  if (await reopenStaleTriageSuccesses(root, artifactsDir, state)) {
+    await store.saveState(state);
+    return { kind: "transition", state };
+  }
   // Final acceptance belongs to the actual close execution, after preview
   // pauses. A transition carries no executable verification verdict.
   state.status = "closing";
@@ -2423,6 +2443,11 @@ async function handleClosing(
   store: StateStore,
   options: NextStepOptions,
 ): Promise<RemediateOutcome> {
+  // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
+  if (await reopenStaleTriageSuccesses(root, artifactsDir, state)) {
+    await store.saveState(state);
+    return { kind: "transition", state };
+  }
   const closeStart = Date.now();
   runLogger.event({ phase: "next-step", kind: "executor_start", obligation: state.status, note: "close" });
 
@@ -3587,7 +3612,7 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
           ? "missing"
           : "satisfied",
       execute: async (state) =>
-        handleAllTerminalTransition(requireState(state), store),
+        handleAllTerminalTransition(requireState(state), store, root, artifactsDir),
     },
     {
       id: "closing",

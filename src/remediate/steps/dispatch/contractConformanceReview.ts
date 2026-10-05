@@ -70,47 +70,9 @@ export async function checkContractConformance(params: {
     accepted_counterexamples: params.counterexamples,
     result: params.result,
   };
-  const binding = digest(content);
-  const request = {
-    schema_version: "contract-conformance-request/v1",
-    binding,
-    review_requirement: "independent",
-    content,
-    response_path: paths.response,
-    instructions: [
-      "Review the result's obligation evidence against every reviewed requirement, its scoped assertions, the execution unit and the carried counterexample reproductions in an independent context that did not author the implementation and cannot see its author's reasoning.",
-      `Inspect the cited source and tests at ${verifiedHead ? "the verified_head commit" : "the landed commit"}. Do not accept a citation merely because it exists; explain how it satisfies the obligation and the relevant requirement.`,
-      "Do not edit source, contracts, or the implementation result. Return one evidence-backed verdict per exact obligation id.",
-      "Independence is a host declaration, not mechanically proven identity. If an independent context is unavailable, declare unavailable; self-review/degraded mode cannot satisfy this required lane.",
-      "Use verdict insufficient with actionable missing evidence when the result or implementation needs repair. Write only the response file; the conversation host owns continuation.",
-    ],
-    response_template: {
-      schema_version: "contract-conformance-review/v1", binding,
-      declaration: { mode: "independent", reason: "<how this context is independent of authorship>" },
-      verdict: "pass", summary: "<evidence-based conclusion>",
-      obligations: params.item.obligation_ids.map(obligation_id => ({ obligation_id, verdict: "satisfied", evidence: ["<specific source/test evidence and why it suffices>"] })),
-    },
-  };
-  const existing = await readSubmissionDocument(paths.request);
-  if (stableStringify(existing.kind === "value" ? existing.value : null) !== stableStringify(request)) await writeJsonFile(paths.request, request);
-  const issue = (code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck => ({ ok: false, issue: {
-    code, work_item_id: params.item.id, result_path: paths.response, review_request_path: paths.request, message,
-  } });
-  const raw = await readSubmissionDocument(paths.response);
-  const response = ConformanceResponseSchema.safeParse(raw.kind === "value" ? raw.value : undefined);
-  if (!response.success || response.data.binding !== binding) {
-    return issue("conformance_review_required", `Independent contract conformance review required for ${params.item.id}. Read ${paths.request}; write the bound response to ${paths.response}. A missing, invalid or stale review cannot authorize acceptance.`);
-  }
-  const review = response.data;
-  const independence = reviewIndependenceIssue("independent", review.declaration);
-  if (independence) return issue("conformance_review_unavailable", independence);
-  const ids = review.obligations.map(entry => entry.obligation_id);
-  if (ids.length !== new Set(ids).size || ids.length !== params.item.obligation_ids.length || ids.some(id => !params.item.obligation_ids.includes(id))) {
-    return issue("conformance_review_required", "The review must assess every bound obligation exactly once, with no extra ids; correct the review response.");
-  }
-  if (review.verdict !== "pass" || review.obligations.some(entry => entry.verdict !== "satisfied")) {
-    return issue("conformance_review_insufficient", `Repair the implementation or its obligation evidence, then obtain a fresh bound review: ${review.summary}`);
-  }
+  const checked = await checkConformanceSubject({ artifactsDir: params.artifactsDir, runId: params.runId, itemId: params.item.id, obligationIds: params.item.obligation_ids, content, evidenceInstruction: `Inspect the cited source and tests at ${verifiedHead ? "the verified_head commit" : "the landed commit"}. Do not accept a citation merely because it exists; explain how it satisfies the obligation and the relevant requirement.` });
+  if (!checked.ok) return checked;
+  const issue = (code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck => ({ ok: false, issue: { code, work_item_id: params.item.id, result_path: paths.response, review_request_path: paths.request, message } });
   // The result may have been edited while mechanical test commands were running.
   // Never accept a receipt for bytes other than the ones this pass validated.
   const currentResult = await readSubmissionDocument(resolve(params.root, params.item.result_path));
@@ -120,6 +82,61 @@ export async function checkContractConformance(params: {
   if (verifiedHead && await headCommit(params.root) !== verifiedHead) {
     return issue("conformance_review_required", "Repository HEAD changed during no-change review verification. Re-run next-step to validate and review the current context.");
   }
+  return checked;
+}
+
+/** Common success-review boundary; each evidence source owns acquisition and final freshness guards. */
+export async function checkConformanceSubject(params: { artifactsDir: string; runId: string; itemId: string; obligationIds: readonly string[]; content: unknown; evidenceInstruction: string }): Promise<ConformanceReviewCheck> {
+  const paths = conformanceReviewPaths(params.artifactsDir, params.runId, params.itemId);
+  const content = params.content;
+  const binding = digest(content);
+  const request = {
+    schema_version: "contract-conformance-request/v1",
+    binding,
+    review_requirement: "independent",
+    content,
+    response_path: paths.response,
+    instructions: [
+      "Review the result's obligation evidence against every reviewed requirement, its scoped assertions, the execution unit and the carried counterexample reproductions in an independent context that did not author the implementation and cannot see its author's reasoning.",
+      params.evidenceInstruction,
+      "Do not edit source, contracts, or the implementation result. Return one evidence-backed verdict per exact obligation id.",
+      "Independence is a host declaration, not mechanically proven identity. If an independent context is unavailable, declare unavailable; self-review/degraded mode cannot satisfy this required lane.",
+      "Use verdict insufficient with actionable missing evidence when the result or implementation needs repair. Write only the response file; the conversation host owns continuation.",
+    ],
+    response_template: {
+      schema_version: "contract-conformance-review/v1", binding,
+      declaration: { mode: "independent", reason: "<how this context is independent of authorship>" },
+      verdict: "pass", summary: "<evidence-based conclusion>",
+      obligations: params.obligationIds.map(obligation_id => ({ obligation_id, verdict: "satisfied", evidence: ["<specific source/test evidence and why it suffices>"] })),
+    },
+  };
+  // Retain the exact review subject even when a later tree replaces the live request.
+  const subjectPath = join(params.artifactsDir, "conformance-review", "subjects", `${binding}.json`);
+  const savedSubject = await readSubmissionDocument(subjectPath);
+  if (savedSubject.kind !== "value") await writeJsonFile(subjectPath, request);
+  const existing = await readSubmissionDocument(paths.request);
+  if (stableStringify(existing.kind === "value" ? existing.value : null) !== stableStringify(request)) await writeJsonFile(paths.request, request);
+  const issue = (code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck => ({ ok: false, issue: {
+    code, work_item_id: params.itemId, result_path: paths.response, review_request_path: paths.request, message,
+  } });
+  const raw = await readSubmissionDocument(paths.response);
+  const response = ConformanceResponseSchema.safeParse(raw.kind === "value" ? raw.value : undefined);
+  if (!response.success || response.data.binding !== binding) {
+    return issue("conformance_review_required", `Independent contract conformance review required for ${params.itemId}. Read ${paths.request}; write the bound response to ${paths.response}. A missing, invalid or stale review cannot authorize acceptance.`);
+  }
+  const review = response.data;
+  const independence = reviewIndependenceIssue("independent", review.declaration);
+  if (independence) return issue("conformance_review_unavailable", independence);
+  const ids = review.obligations.map(entry => entry.obligation_id);
+  if (ids.length !== new Set(ids).size || ids.length !== params.obligationIds.length || ids.some(id => !params.obligationIds.includes(id))) {
+    return issue("conformance_review_required", "The review must assess every bound obligation exactly once, with no extra ids; correct the review response.");
+  }
+  if (review.verdict !== "pass" || review.obligations.some(entry => entry.verdict !== "satisfied")) {
+    return issue("conformance_review_insufficient", `Repair the implementation or its obligation evidence, then obtain a fresh bound review: ${review.summary}`);
+  }
+  // Preserve the independently supplied review as history; adapter freshness guards
+  // still decide whether this review can authorize a state transition.
+  await writeJsonFile(join(params.artifactsDir, "conformance-review", "subjects", `${binding}.review.json`), response.data);
   return { ok: true, receipt: AcceptedConformanceReviewSchema.parse({
     requirement: "independent", binding, review: review.declaration, summary: review.summary.slice(0, 2000),
   }) };
