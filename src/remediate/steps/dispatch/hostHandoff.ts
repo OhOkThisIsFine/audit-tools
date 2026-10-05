@@ -1,3 +1,4 @@
+import { DecisionApplicationReceiptSchema } from "../../state/decisionConsumption.js";
 import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
 import { AcceptedConformanceReviewSchema, type AcceptedConformanceReview } from "../../../shared/types/reviewIndependence.js";
 import type { CurrentRemediationHostState, PreparedRemediationHostHandoff, RemediationHostDecision, RemediationHostIngestIssue, RemediationHostIngestSummary, RemediationHostResult, RemediationHostWorkItem, RemediationHostWorkload, RemediationIssueCode, UnsupportedRetiredRemediationState } from "./hostContracts.js";
@@ -173,6 +174,7 @@ export function remediationIssueRemedy(
 type BoundaryPaths = HostHandoffPaths;
 
 const CURRENT_STATE_KEYS = new Set([
+  "decision_applications",
   "applied_edit_surface",
   "closing_context",
   "closing_plan",
@@ -230,6 +232,7 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
   }
 
   if (value.conformance_review !== undefined && !ConformanceReviewBindingSchema.safeParse(value.conformance_review).success) return null;
+  if (value.decision_applications !== undefined && (!Array.isArray(value.decision_applications) || value.decision_applications.some(receipt => !DecisionApplicationReceiptSchema.safeParse(receipt).success))) return null;
   const parsedPlan = RemediationPlanSchema.safeParse(value.plan);
   if (!parsedPlan.success || !isRecord(value.items)) return null;
   const stateItems = value.items;
