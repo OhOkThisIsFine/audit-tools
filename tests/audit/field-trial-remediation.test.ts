@@ -535,12 +535,12 @@ test("buildChunkedAuditTasks claims critical-flow files without overlapping unit
       file_paths: task.file_paths,
     }))).toEqual([
       {
-        task_id: "flow:auth-session:security",
+        task_id: expect.stringMatching(/^flow:auth-session:security:set-[0-9a-f]{12}$/),
         lens: "security",
         file_paths: ["src/api/auth.ts", "src/lib/session.ts"],
       },
       {
-        task_id: "infra-deploy:security",
+        task_id: expect.stringMatching(/^infra-deploy:security:set-[0-9a-f]{12}$/),
         lens: "security",
         file_paths: ["infra/deploy.yml"],
       },
@@ -667,16 +667,18 @@ test("buildChunkedAuditTasks splits aggregate review blocks by line budget", () 
       tags: task.tags,
     }))).toEqual([
       {
-        task_id: "src-unit:correctness:part-1",
+        task_id: expect.stringMatching(/^src-unit:correctness:set-[0-9a-f]{12}$/),
         file_paths: ["src/a.ts", "src/b.ts"],
         tags: ["line_budget_split"],
       },
       {
-        task_id: "src-unit:correctness:part-2",
+        task_id: expect.stringMatching(/^src-unit:correctness:set-[0-9a-f]{12}$/),
         file_paths: ["src/c.ts"],
         tags: ["line_budget_split"],
       },
     ]);
+  // Each part's id comes from its own file set, so the two parts never share one.
+  expect(tasks[0].task_id).not.toBe(tasks[1].task_id);
 });
 
 test("buildChunkedAuditTasks splits an oversized file into its own large_file task", () => {
@@ -716,7 +718,7 @@ test("buildChunkedAuditTasks splits an oversized file into its own large_file ta
     "expected oversized-file task",
   );
   const smallTask = requireDefined(
-    tasks.find((t) => t.task_id === "src-unit:correctness"),
+    tasks.find((t) => /^src-unit:correctness:set-[0-9a-f]{12}$/.test(t.task_id)),
     "expected small-file task",
   );
 

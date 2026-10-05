@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/task-id-names-one-file-set.test.ts, tests/audit/task-builder.test.ts, tests/audit/field-trial-remediation.test.ts
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type {
   AuditTask,
@@ -5,7 +6,7 @@ import type {
   Lens,
 } from "../types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-import { chunkByBudget, compareCodeUnits } from "audit-tools/shared";
+import { chunkByBudget, compareCodeUnits, hashContent, stableStringify } from "audit-tools/shared";
 import { claimFlowReviewBlocks } from "./flowPlanning.js";
 import { isTrivialAuditPath } from "./trivialAudit.js";
 import { LENS_ORDER, priorityRank } from "./auditTaskUtils.js";
@@ -202,14 +203,21 @@ function addTaskBlock(
   const oversizedSet = new Set(oversizedFiles);
   const normalFiles = params.filePaths.filter((path) => !oversizedSet.has(path));
 
+  // A TASK ID NAMES EXACTLY ONE FILE SET, IN EVERY PLAN. Every re-plan re-chunks
+  // the files still pending, and accepted results are re-validated against the
+  // CURRENT tasks each time the run moves on (`executeAdvance`, src/audit/cli/auditStep.ts):
+  // an id that is gone is a tolerated orphan, but an id that survives naming OTHER
+  // files fails validation and stops the run. So a chunk id is derived from the
+  // chunk's own sorted file set, never from its position (`part-N`) or from the
+  // scope alone — the 2026-10-05 dogfood run stopped on 306 such reused ids.
   const normalChunks = chunkByTaskBudget(normalFiles, unitLineIndex, budgetLimits);
-  for (let index = 0; index < normalChunks.length; index++) {
-    const chunk = normalChunks[index];
+  for (const chunk of normalChunks) {
     const splitKind: SplitKind = normalChunks.length > 1 ? "budget" : "none";
-    const taskId =
-      splitKind === "budget"
-        ? `${params.scopeId}:${params.lens}:part-${index + 1}`
-        : `${params.scopeId}:${params.lens}`;
+    const fileSetDigest = hashContent(
+      stableStringify([...chunk].sort((a, b) => compareCodeUnits(a, b))),
+      { length: 12 },
+    );
+    const taskId = `${params.scopeId}:${params.lens}:set-${fileSetDigest}`;
     if (!seen.has(taskId)) {
       seen.add(taskId);
       tasks.push({
