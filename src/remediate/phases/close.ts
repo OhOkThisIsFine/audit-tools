@@ -3,7 +3,7 @@ import { executionPlanContextIssues } from "../contractPipeline/executionPlan.js
 import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 import { AcceptedConformanceReviewSchema, ContractReviewOutcomeSchema, type ContractReviewOutcome } from "../../shared/types/reviewIndependence.js";
 import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
-// sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts
+// sites-pinned: tests/remediate/landing-gates-close.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/close-committed-ownership.test.ts
 //   The landing-gate close leg (run once per declared gate, folded into
 //   `fullyGreen`, rendered in the report) is pinned by the landing-gates suite;
 //   the existing close behaviour around it is pinned by phase-close.
@@ -839,7 +839,9 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
  * `state.applied_edit_surface` is the ground truth: the union of files from each
  *    prompt-bound host result whose landed commit, ancestry, changed-file set,
  *    write scope, and required tests were mechanically corroborated by the
- *    provider-neutral host handoff ingestion boundary.
+ *    provider-neutral host handoff ingestion boundary. Already-landed paths
+ *    are attribution of committed bytes, never a grant to stage later dirt.
+ *    The accepted per-item landing files fence those paths out below.
  *
  * RUN-START-DIRTY GUARD: a file that was ALREADY dirty when the run started
  * (`state.run_start_dirty`, captured at the extracted-plan join site before any
@@ -866,8 +868,19 @@ function resolveEditSurfaceManifest(state: RemediationState): string[] {
   const runStartDirtyKeys = new Set(
     (state.run_start_dirty ?? []).map(normalizeRepoPath),
   );
+  // Accepted source changes already live in their corroborated commits. A
+  // later dirty version, even one restoring the original reviewed bytes, is
+  // not attributed by that commit. Preserve it as leftover rather than stage
+  // it again. This uses actual landed files, never the unit's write grant:
+  // other hand-applied paths retain the existing manifest behavior.
+  const landedKeys = new Set(
+    Object.values(state.items ?? {}).flatMap(item =>
+      item.host_landed_commit ? (item.host_landed_files ?? []).map(normalizeRepoPath) : [],
+    ),
+  );
   const addUnlessPreexistingDirt = (path: string): void => {
-    if (!runStartDirtyKeys.has(normalizeRepoPath(path))) files.add(path);
+    const key = normalizeRepoPath(path);
+    if (!runStartDirtyKeys.has(key) && !landedKeys.has(key)) files.add(path);
   };
   for (const path of state.applied_edit_surface ?? []) {
     addUnlessPreexistingDirt(path);
