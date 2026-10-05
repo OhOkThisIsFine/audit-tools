@@ -168,6 +168,22 @@
         "src/audit/orchestrator/taskBuilder.ts": "d621703a9daf103d16a2f9ba3882c4a28f3926ed"
       }
     },
+    "148e646a5f72168d": {
+      "reviewed_by": "/root/source_refutation",
+      "attester_class": "agent",
+      "checked": "Independent adversarial review of actual f168-main integrated W1 source and tests: updated intake authority is carried under the existing single fold hold before genuine bound-result ingestion; budget and attributed failure commits preserved; unchanged acceptance, stale refusal, nonempty fresh workload, file-set identity and one-hold controls reviewed. Fresh full suite7045passed on228262ad.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "228262ad790722043e85d54307f32272e6812083",
+        "ran_at": "2026-10-05T20:43:33.581Z"
+      },
+      "attested_at": "2026-10-05T20:43:57.367Z",
+      "vouches": {
+        "src/audit/cli/nextStepHelpers.ts": "be7adf2987e8ae3996df6a7e84bd7e003602bc68"
+      }
+    },
     "189c849cd573575f": {
       "reviewed_by": "claude-opus-5-5-session",
       "attester_class": "agent",
@@ -378,7 +394,7 @@
       "review": "189c849cd573575f"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "148e646a5f72168d"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
