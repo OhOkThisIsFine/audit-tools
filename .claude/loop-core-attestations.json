@@ -259,6 +259,22 @@
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
       }
     },
+    "6b1bdd626d6eaa90": {
+      "reviewed_by": "source_refutation",
+      "attester_class": "agent",
+      "checked": "Independent combined review of staged9360673a on C3: default renderer modes unchanged, pending K-of-N evidence retained, sequential independent perspectives and dependent judge use bound unavailable pauses; production fallback regression reproduced red then focused37 and genuine full7080passed/0failed/12skipped/0unfinished.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "9360673a680b524ba7ccb6c53d8a6c54f758ded5",
+        "ran_at": "2026-10-05T23:12:56.723Z"
+      },
+      "attested_at": "2026-10-05T23:13:24.971Z",
+      "vouches": {
+        "src/audit/cli/conceptualDispatch.ts": "175d5952e8d759ca9647f1887085f9120bce0b35"
+      }
+    },
     "7ecf68a7852f3ff3": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -385,7 +401,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "189c849cd573575f"
+      "review": "6b1bdd626d6eaa90"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "7ecf68a7852f3ff3"

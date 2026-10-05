@@ -8,6 +8,14 @@ describe("fanout fallback preserves lane requirements", () => {
     expect(renderFanoutExecutionLines({ lanes }).join("\n")).toContain("follow each file sequentially yourself");
   });
 
+  it("bound unavailable declarations pause without authorizing self-review", () => {
+    const text = renderFanoutExecutionLines({ lanes, independenceRequired: true, unavailableReview: "declare" }).join("\n");
+    expect(text).toContain("bound unavailable declaration");
+    expect(text).toContain("An unavailable declaration pauses review; it does not complete it.");
+    expect(text).not.toContain("Do not write a result or run the continue command");
+    expect(text).not.toContain("follow each file sequentially yourself");
+  });
+
   it("does not ask for independent work when no lane remains pending", () => {
     expect(renderFanoutExecutionLines({ lanes: [], independenceRequired: true }).join("\n")).toContain("nothing to execute");
   });

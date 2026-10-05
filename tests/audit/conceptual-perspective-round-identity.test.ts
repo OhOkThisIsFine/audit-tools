@@ -243,6 +243,29 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     return { dir, root, firstStep, firstPerspectivePaths, firstManifest };
   }
 
+  it("unavailable deep review pauses and retains completed independent perspectives on unchanged resume", async () => {
+    const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
+    await writeBoundReviewFixture(dir, firstManifest.perspectives[0].lane_id, []);
+    const completedBytes = await readFile(firstPerspectivePaths[0]!, "utf8");
+    for (const lane of [firstManifest.perspectives[1].lane_id, firstManifest.judge.lane_id]) {
+      await writeBoundReviewFixture(dir, lane, {});
+      const path = lane === firstManifest.judge.lane_id ? firstStep.artifact_paths.conceptual_results : firstPerspectivePaths[1]!;
+      const envelope = JSON.parse(await readFile(path, "utf8"));
+      envelope.review = { mode: "unavailable", reason: "No independent context is available." };
+      await writeFile(path, JSON.stringify(envelope), "utf8");
+    }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
+      const step = JSON.parse(await readFile(join(dir, "steps", "current-step.json"), "utf8"));
+      expect(step.step_kind).toBe("blocked");
+      expect(await readFile(step.artifact_paths.current_prompt, "utf8")).toMatch(/independent|unavailable/i);
+      expect(await readFile(firstPerspectivePaths[0]!, "utf8")).toBe(completedBytes);
+      expect(step.access.write_paths).not.toContain(firstPerspectivePaths[0]);
+      const assessment = JSON.parse(await readFile(join(dir, "design_assessment.json"), "utf8"));
+      expect(assessment.conceptual_reviewed).not.toBe(true);
+    }
+  });
+
   it("keeps perspective paths stable after next-step rejects a malformed judge", async () => {
     const { dir, root, firstStep, firstPerspectivePaths, firstManifest } = await prepareRetryFixture();
     for (const path of firstPerspectivePaths) await writeBoundReviewFixture(dir, firstManifest.perspectives.find((entry: { result_path: string }) => entry.result_path === path)!.lane_id, []);
@@ -289,9 +312,9 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       await expect(readFile(path, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     }
     const retryPrompt = await readFile(retryStep.artifact_paths.current_prompt, "utf8");
-    expect(retryPrompt).not.toContain("- Perspective 1 (");
-    expect(retryPrompt).toContain("- Perspective 2 (");
-    expect(retryPrompt).toContain("- Perspective 3 (");
+    expect(retryPrompt).not.toContain("- **Perspective 1 (");
+    expect(retryPrompt).toContain("- **Perspective 2 (");
+    expect(retryPrompt).toContain("- **Perspective 3 (");
     for (const ordinal of [2, 3]) {
       const lanePrompt = await readFile(retryStep.artifact_paths[`conceptual_perspective_${ordinal}_prompt`], "utf8");
       expect(lanePrompt).toContain("Previous submission rejected");

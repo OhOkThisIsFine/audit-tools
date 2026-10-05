@@ -361,7 +361,7 @@ describe("deep conceptual resume narrows the instruction surface, not the access
 
   /** The step-1 perspective bullets the host is told to execute. */
   const perspectiveLines = (instructionLines: readonly string[]): string[] =>
-    instructionLines.filter((line) => line.trimStart().startsWith("- Perspective "));
+    instructionLines.filter((line) => line.trimStart().startsWith("- **Perspective "));
 
   const noticeLines = (instructionLines: readonly string[]): string[] =>
     instructionLines.filter((line) => line.includes("already delivered"));

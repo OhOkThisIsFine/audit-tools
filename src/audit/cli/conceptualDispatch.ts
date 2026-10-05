@@ -1,8 +1,8 @@
 import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
-import { INDEPENDENT_CONTEXT } from "../../shared/prompts.js";
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts
+import { INDEPENDENT_CONTEXT, renderFanoutExecutionLines } from "../../shared/prompts.js";
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/conceptual-independent-guidance.test.ts
 import {
   type DesignReviewBinding,
   type IntentCheckpoint,
@@ -449,11 +449,6 @@ export async function prepareConceptualDispatch(opts: {
   const pendingCount = pendingPerspectives.length;
   const deliveredCount = perspectivePrompts.length - pendingCount;
 
-  const perspectiveLines = pendingPerspectives.map(
-    ({ ordinal, f }) =>
-      `   - Perspective ${ordinal} (${f.name}): prompt \`${f.promptPath}\` → findings \`${f.resultsPath}\``,
-  );
-
   const artifactPaths: Record<string, string> = {
     conceptual_results: conceptualResultsPath,
     conceptual_judge_prompt: judgePromptPath,
@@ -483,15 +478,25 @@ export async function prepareConceptualDispatch(opts: {
             `_${deliveredCount} of ${total} perspective lane(s) already delivered a submission this round — reusing that output, not re-executing them._`,
           ]
         : []),
+      // sites-pinned: tests/audit/conceptual-independent-guidance.test.ts, tests/audit/conceptual-perspective-round-identity.test.ts, tests/audit/conceptual-reuse-notice.test.ts
       ...(pendingCount > 0
         ? [
-            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) — each in its own context, **in parallel** where the host can run several at once, else sequentially yourself. Each lane reviews only through its own value system and must NOT see the others' output:`,
-            ...perspectiveLines,
+            `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) in parallel where possible, otherwise sequentially in independent contexts. Each lane reviews only through its own value system and must NOT see the others' output:`,
+            ...renderFanoutExecutionLines({
+              lanes: pendingPerspectives.map(({ ordinal, f }) => ({ label: `Perspective ${ordinal} (${f.name})`, promptPath: f.promptPath, resultPath: f.resultsPath })),
+              independenceRequired: true,
+              unavailableReview: "declare",
+            }),
           ]
         : [
             `1. All ${total} perspective lanes have already delivered a submission this round — nothing to execute here.`,
           ]),
-      `2. When all ${total} perspectives have written their findings, execute ONE **independent judge** lane — in a fresh context that is not any of the perspectives when the host can provide one; when it cannot, execute it yourself as the explicitly-degraded fallback, setting the perspectives' reasoning aside and merging only their written findings: read the prompt at \`${judgePromptPath}\`, write the merged findings to \`${conceptualResultsPath}\`.`,
+      `2. When all ${total} perspectives have written their findings in independent contexts, execute ONE **independent judge** lane in a fresh context that is not any of the perspectives. Merge only their written findings. If a perspective is unavailable, declare the judge unavailable as well and continue to record the pause; preserve completed independent perspectives.`,
+      ...renderFanoutExecutionLines({
+        lanes: [{ label: "Independent judge", promptPath: judgePromptPath, resultPath: conceptualResultsPath }],
+        independenceRequired: true,
+        unavailableReview: "declare",
+      }),
       "Each prompt file above is self-contained — it already defines the reviewer's persona, scope, file grants, and output schema. Pass the `prompt_path` to the executor as its instruction verbatim; do NOT restate the persona or re-describe the task in your dispatch message (the parenthesised name is only a label for you).",
     ],
     artifactPaths,
