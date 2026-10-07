@@ -126,6 +126,65 @@ def build(cfg, role):
     # --entrypoint /usr/bin/env receives -i directly.
     return args+[IMAGE]+command[1:], mounts, network
 
+def validate_created_config(spec, cfg, mounts, network, reviewed_profile):
+    """Pure pre-start inspection gate; missing or ambiguous observations fail closed."""
+    host=spec["HostConfig"]
+    expected={dest:(source,readonly) for source,dest,readonly in mounts}
+    require(len(expected)==len(mounts), "duplicate expected mount")
+    for records,target_key,declared in ((spec.get("Mounts"),"Destination",False),
+                                        (host.get("Mounts"),"Target",True)):
+        require(isinstance(records,list) and len(records)==len(expected),
+                "missing/extra inspected mount")
+        seen=set()
+        for record in records:
+            target=record.get(target_key)
+            require(target in expected and target not in seen, "unexpected/duplicate mount target")
+            seen.add(target)
+            source,readonly=expected[target]
+            require(record.get("Type")=="bind" and record.get("Source")==source,
+                    "unexpected mount type/source")
+            if declared:
+                options=record.get("BindOptions")
+                require(record.get("ReadOnly",False) is readonly and isinstance(options,dict) and
+                        options.get("Propagation")=="rprivate" and
+                        options.get("NonRecursive") is True and
+                        options.get("CreateMountpoint",False) is False and
+                        options.get("ReadOnlyNonRecursive",False) is False and
+                        options.get("ReadOnlyForceRecursive",False) is False,
+                        "declared bind settings mismatch")
+                require(not record.get("VolumeOptions") and not record.get("TmpfsOptions") and
+                        not record.get("ImageOptions"), "unexpected mount options")
+            else:
+                require(record.get("RW") is (not readonly) and
+                        record.get("Propagation")=="rprivate", "observed bind settings mismatch")
+    require(host["NetworkMode"]==network and host["ReadonlyRootfs"] is True and
+            host["Privileged"] is False and not host.get("CapAdd") and
+            set(host["CapDrop"])=={"ALL"} and host["IpcMode"]=="private" and
+            host["CgroupnsMode"]=="private" and not host.get("PidMode") and
+            not host.get("Devices") and not host.get("PortBindings"),
+            "created container grant mismatch; preserve stopped container")
+    require(spec["Config"]["User"]==str(cfg["uid"])+":"+str(cfg["gid"]), "container user mismatch")
+    options=host.get("SecurityOpt")
+    require(isinstance(options,list) and len(options)==2 and
+            options.count("no-new-privileges=true")==1 and
+            all(isinstance(value,str) for value in options), "exact security settings required")
+    seccomp=[value[len("seccomp="):] for value in options if value.startswith("seccomp=")]
+    require(len(seccomp)==1, "single submitted seccomp profile required")
+    def unique_object(pairs):
+        result={}
+        for key,value in pairs:
+            require(key not in result, "duplicate seccomp JSON key")
+            result[key]=value
+        return result
+    try:
+        observed=json.loads(seccomp[0],object_pairs_hook=unique_object)
+    except (ValueError,TypeError) as error:
+        raise RuntimeError("submitted seccomp is not reviewed JSON") from error
+    # Docker CLI sends compact profile JSON, not the local filename. Compare
+    # typed canonical content; never accept builtin/unconfined/profile paths.
+    canonical=lambda value:json.dumps(value,sort_keys=True,separators=(",",":"))
+    require(canonical(observed)==canonical(reviewed_profile), "submitted seccomp profile mismatch")
+
 def preserve_timeout_output(evidence, role, created, error):
     """Save exact partial transport bytes before any cleanup/metadata call."""
     record={"timed_out":True,"container_id":created,"cleanup":"not_yet_observed"}
@@ -232,18 +291,7 @@ def execute(cfg, role, args, mounts, network):
     require(re.fullmatch(r"[0-9a-f]{64}",created), "invalid created container id")
     spec=json.loads(docker("inspect",created))[0]
     (evidence/(role+"-created.json")).write_text(json.dumps(spec,indent=2)+"\n")
-    host=spec["HostConfig"]
-    actual_mounts={(m["Source"],m["Destination"],not m["RW"]) for m in spec["Mounts"]}
-    require(actual_mounts==set(mounts), "unexpected host mount")
-    require(host["NetworkMode"]==network and host["ReadonlyRootfs"] and
-            not host["Privileged"] and not host.get("CapAdd") and
-            set(host["CapDrop"])=={"ALL"} and host["IpcMode"]=="private" and
-            host["CgroupnsMode"]=="private" and not host.get("PidMode") and
-            not host.get("Devices") and not host.get("PortBindings"),
-            "created container grant mismatch; preserve stopped container")
-    require(spec["Config"]["User"]==str(cfg["uid"])+":"+str(cfg["gid"]), "container user mismatch")
-    require(any("no-new-privileges" in v for v in host["SecurityOpt"]) and
-            any(v.startswith("seccomp=") for v in host["SecurityOpt"]), "security settings absent")
+    validate_created_config(spec,cfg,mounts,network,json.loads(profile.read_text()))
     if role=="server":
         docker("start",created)
         print(json.dumps({"role":role,"container_id":created,"qualification":False}))

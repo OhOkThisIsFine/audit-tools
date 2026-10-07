@@ -2,9 +2,9 @@
   "kind": "inactive_repository_source_proposal_not_runtime_attestation",
   "product_source": "38bba3cf410b2deaba54d837429c11a2d512a7a9",
   "preserved_candidate_tree": "a19d72f79a0d47ef0ddc0c0cca4d09635992b38e",
-  "canonical_plan_raw_sha256": "82cc175d9021629a8b9780c34934d31c16fd99ca66c0194c782535c27c5e5090",
+  "canonical_plan_raw_sha256": "0609d7c5cc5365ae46beba32d6b4168e89b5c94d994f69e4fcd55cbbc7239fa6",
   "sha256": {
-    "r05-launcher.py": "f6c259cfbf1c6d5757b98d679211ac876867e9a805f881b1810ce027381ce4f6",
+    "r05-launcher.py": "dcfb9fef46216fb825b8bcca1202c8fd058da7a2fc3ece6cabb549c10ffed4a4",
     "prepare-owned-layout.py": "d50befb1cb590857010821651b9c2a76a43b2ca3694cb5482d6fa936f2c0e967",
     "bind-owned-fixture.py": "9b536eaa9f3f57a7a1e6a346c41633edd3d77d9f4519c325c2d82d4129067e47",
     "native-probe.c": "ad265cc93f4f3b8e147f6b1d89b829381b532bc6129f4d730dfb0fb888be4b22",
@@ -21,7 +21,8 @@
     "net-denial-oracle.h": "8272697d09b3a83505d20a4f7d0f327d180fa70399a9f5f9ea97fc614b19fe07",
     "net-denial-oracle-fixtures.c": "0d67cb8d857a0abd4e4f169d8216d64cefe8e42b45eab1e4772d5309600e9dc8",
     "compile-native-probes.sh": "5a733dbdbd2774215c96f3776fac5443763e0532170e6f679d7636f8e2559eee",
-    "timeout-capture-fixtures.py": "178a71dee98eb04832bacf13bc6ef02cc4913bbfda5d1bd5ed03659a4111380f"
+    "timeout-capture-fixtures.py": "178a71dee98eb04832bacf13bc6ef02cc4913bbfda5d1bd5ed03659a4111380f",
+    "config-inspection-fixtures.py": "c9878215b26f83782734bd28143003f20b76976f0c110559673691e3d6f55002"
   },
   "baseline_canonical_plan_raw_sha256": "eac3bd1c7e3b6e1efe9ee6656c3a553a6b12146cf40c29cf2cd966c28e75ce4f",
   "canonical_plan_path": "docs/reviews/audit-tools-canonical-implementation-plan-2026-10-07.md"
