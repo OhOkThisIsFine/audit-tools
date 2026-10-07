@@ -3327,7 +3327,15 @@ async function withFoldAdvisories(
   if (step.kind !== "semantic_review") {
     return {
       ...step,
-      advisoryNotice: renderCarriedAdvisoryLines(carried),
+      // An architecture step that carries a ready-inspection run names that
+      // run's workload in its own task, above the carried report (the
+      // `withReadyInspection` section); the pending items are in it.
+      advisoryNotice: renderCarriedAdvisoryLines(
+        carried,
+        step.inspectionRun !== undefined && step.kind !== "blocked"
+          ? "named_above"
+          : "next_call",
+      ),
     };
   }
   return {
@@ -3351,14 +3359,18 @@ async function withFoldAdvisories(
  * the bullet format and the headings, and the copy had already gone stale
  * against the section it claimed to match.
  *
- * The workload is `next_call` here: this report rides a step of another kind,
- * so no workload is published below it.
+ * The report rides a step of another kind and follows its whole task, so the
+ * workload is `named_above` when that task names a ready-inspection workload,
+ * and `next_call` otherwise.
  */
-function renderCarriedAdvisoryLines(carried: FoldAdvisories): string[] {
+function renderCarriedAdvisoryLines(
+  carried: FoldAdvisories,
+  workload: "named_above" | "next_call",
+): string[] {
   return renderIngestReportLines({
     issues: carried.ingestIssues,
     remedy: auditIngestRemedy,
-    workload: "next_call",
+    workload,
     advisories: carried.validationWarnings,
   });
 }

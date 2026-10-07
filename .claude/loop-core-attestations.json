@@ -152,22 +152,6 @@
     }
   },
   "reviews": {
-    "148e646a5f72168d": {
-      "reviewed_by": "/root/source_refutation",
-      "attester_class": "agent",
-      "checked": "Independent adversarial review of actual f168-main integrated W1 source and tests: updated intake authority is carried under the existing single fold hold before genuine bound-result ingestion; budget and attributed failure commits preserved; unchanged acceptance, stale refusal, nonempty fresh workload, file-set identity and one-hold controls reviewed. Fresh full suite7045passed on228262ad.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "228262ad790722043e85d54307f32272e6812083",
-        "ran_at": "2026-10-05T20:43:33.581Z"
-      },
-      "attested_at": "2026-10-05T20:43:57.367Z",
-      "vouches": {
-        "src/audit/cli/nextStepHelpers.ts": "be7adf2987e8ae3996df6a7e84bd7e003602bc68"
-      }
-    },
     "189c849cd573575f": {
       "reviewed_by": "claude-opus-5-5-session",
       "attester_class": "agent",
@@ -371,6 +355,25 @@
         "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
       }
+    },
+    "d7acd796ff113751": {
+      "reviewed_by": "opus-subagent-dc6-review,opus-subagent-dc6-delta-review",
+      "attester_class": "agent",
+      "checked": "count-line wait section in all three prompts; carried report placement after ready-inspection with lead line; named_above vs next_call choice; reportNamesResultFiles gate; red-green inversion of each half",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "fa4fb73971fe0708766044e950a4e8b37e08b9da",
+        "ran_at": "2026-10-07T04:18:46.623Z"
+      },
+      "attested_at": "2026-10-07T04:18:51.416Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "c06806f936f6b05457f09f7f1808efeef8f4e3dc",
+        "src/audit/cli/nextStepHelpers.ts": "18b68c79e68660b991e58a575bd7c54adc960376",
+        "src/remediate/steps/nextStep.ts": "e2fa29818ab9631581e8f53fce0f8be614908d03",
+        "src/shared/submission/ingestReport.ts": "50399210ffdbd5498f817ace659c6667d1b55a28"
+      }
     }
   },
   "entries": {
@@ -417,10 +420,10 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "189c849cd573575f"
+      "review": "d7acd796ff113751"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "148e646a5f72168d"
+      "review": "d7acd796ff113751"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -762,7 +765,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "39569921506004b0"
+      "review": "d7acd796ff113751"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"
@@ -795,7 +798,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/ingestReport.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "d7acd796ff113751"
     },
     "src/shared/submission/ingestionChecks.ts": {
       "baseline": "7b79934e86baf378"

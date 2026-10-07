@@ -619,28 +619,27 @@ async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
 }
 
 /**
- * Insert the fold's drained advisory lines just under a prompt's first line —
- * its `# <title>` heading — where session-scoped advisories belong: before the
- * instructions they qualify.
+ * The task above can end with "run next-step and follow only the new prompt",
+ * and the carry is stated on one step only, so the lead tells the reader to act
+ * on the report first.
+ */
+const CARRIED_REPORT_LEAD =
+  "Before you run next-step, read the report below on results from earlier work.";
+
+/**
+ * Append the fold's drained advisory lines AFTER a prompt's own instructions.
  *
- * A prompt that does not start with a heading (or has no second line) is
- * returned unchanged rather than spliced somewhere meaningless. Every audit
- * plan's prompt opens with its heading — each row is a literal template
- * starting with `# ` — so this is the degenerate-input arm, not the norm.
+ * The lines report on OTHER work — the results of an earlier review step — so
+ * they do not qualify this step's instructions, and the step states its own
+ * task first (owner, 2026-10-06, after the 2026-10-05 dogfood run put hundreds
+ * of carried lines between a design-review heading and its instructions).
  */
 function withAdvisoryNoticeInPrompt(
   prompt: string,
   advisoryNotice: readonly string[] | undefined,
 ): string {
   if (advisoryNotice === undefined || advisoryNotice.length === 0) return prompt;
-  const headingEnd = prompt.indexOf("\n");
-  if (!prompt.startsWith("# ") || headingEnd < 0) return prompt;
-  return [
-    prompt.slice(0, headingEnd),
-    "",
-    ...advisoryNotice,
-    prompt.slice(headingEnd + 1),
-  ].join("\n");
+  return [prompt.trimEnd(), "", CARRIED_REPORT_LEAD, "", ...advisoryNotice].join("\n");
 }
 
 /**
@@ -1874,8 +1873,10 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
   },
   // The drained advisory lines decorate the PLAN inside the one writer, so
   // they reach every row (and the fallback) without a second splice per row.
+  // They decorate LAST: the ready-inspection section is part of this step's
+  // own task, and the carried report follows the whole task.
   write: async (plan, ctx) =>
-    writeAuditStep(await withReadyInspection(withAdvisoryNotice(plan, ctx?.advisoryNotice), ctx)),
+    writeAuditStep(withAdvisoryNotice(await withReadyInspection(plan, ctx), ctx?.advisoryNotice)),
   // The tool's only externally-observable per-invocation contract.
   log: (step) => {
     console.log(JSON.stringify(step, null, 2));

@@ -715,6 +715,22 @@ function remediationIngestReportLines(
   });
 }
 
+/**
+ * Whether the ingest report names a result file the host must write: only the
+ * repair and landed-without-result sections do. Pending results render as a
+ * count, listed in the workload, so a report holding only those names no file.
+ */
+export function reportNamesResultFiles(
+  ingested: Pick<RemediationHostIngestSummary, "issues" | "work_item_outcomes">,
+): boolean {
+  return (
+    ingested.issues.some((issue) => remediationIssueRemedy(issue) === "repair") ||
+    [...ingested.work_item_outcomes].some(
+      ([, outcome]) => outcome === "missing_result_with_commit",
+    )
+  );
+}
+
 async function buildImplementDispatchStep(ctx: {
   root: string;
   artifactsDir: string;
@@ -883,7 +899,7 @@ async function buildImplementDispatchStep(ctx: {
     "The file lists every work item that is ready now. Give each item's prompt to a worker. You choose the order, the groups, and how many run at the same time.",
     "",
     ...report,
-    ...(report.length > 0 ? ["Change only the result files named above.", ""] : []),
+    ...(reportNamesResultFiles(ingested) ? ["Change only the result files named above.", ""] : []),
     "Do not edit the workload file.",
     "",
     "When each item has its commit on HEAD and its result file, run:",

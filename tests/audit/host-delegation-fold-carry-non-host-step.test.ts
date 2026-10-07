@@ -55,7 +55,16 @@ describe(CONTRACT_NAME, () => {
     await writeFile(
       carryPath,
       JSON.stringify({
-        ingestIssues: [],
+        ingestIssues: [
+          {
+            code: "submission_missing",
+            check: "result_path",
+            work_item_id: "wi-pending-under-ready-inspection",
+            result_path:
+              ".audit-tools/audit/runs/earlier/host-results/wi-pending.json",
+            message: "work item 'wi-pending-under-ready-inspection' submitted nothing at its bound path",
+          },
+        ],
         validationWarnings: [
           {
             work_item_id: "wi-carried-onto-a-design-review",
@@ -84,6 +93,23 @@ describe(CONTRACT_NAME, () => {
       prompt,
       "a carry must be stated on WHICHEVER step the emission produced, not only on a semantic review",
     ).toContain(carriedMessage);
+    // The carry reports on OTHER work, so it follows the step's own
+    // instructions: the step states its own task first (owner, 2026-10-06).
+    expect(
+      prompt.trimEnd().endsWith(carriedMessage),
+      "the carried report must come after the step's own instructions",
+    ).toBe(true);
+    // This design review carries a ready-inspection workload in its own task,
+    // above the report, and the pending items are in it.
+    const lead = prompt.indexOf("Before you run next-step, read the report below");
+    expect(lead, "a lead line introduces the carried report").toBeGreaterThan(
+      prompt.indexOf("## Ready scoped inspection"),
+    );
+    expect(prompt.indexOf("## Ready scoped inspection")).toBeGreaterThan(-1);
+    expect(prompt).toContain(
+      "1 result is not yet written. The workload file named above lists each one",
+    );
+    expect(prompt).not.toContain("wi-pending-under-ready-inspection");
 
     // Stated once, then drained — the same one-statement property, on the kind
     // that has no advisory channel to carry it as data.

@@ -42,6 +42,20 @@ interface IngestAdvisory {
 const OPERATOR_SECTION_HEADING =
   "## Problems the worker cannot fix — stop and report them to the operator";
 
+/**
+ * Where each pending item and its bound `result_path` is listed, by workload
+ * position. The wait section states a COUNT and points here: every
+ * `submission_missing` item is an item of that workload, and the section is the
+ * one that grows with the whole run (each ingest reports every pending item
+ * again), so one bullet per item put hundreds of lines above a step's own
+ * instructions (dogfood 2026-10-05: 164 KB and 167 KB prompts; owner, 2026-10-06).
+ */
+const WAIT_LIST_LOCATION: Readonly<Record<IngestReportWorkload, string>> = {
+  follows: "The workload below lists each one with its bound `result_path`.",
+  named_above: "The workload file named above lists each one with its bound `result_path`.",
+  next_call: "The next published workload lists each one with its bound `result_path`.",
+};
+
 const REPAIR_PARAGRAPH: Readonly<Record<IngestReportWorkload, string>> = {
   follows:
     "Each item above is still pending and is republished in the workload below. Write its result at the `result_path` the workload binds — the workload is the authority for every path.",
@@ -89,7 +103,15 @@ export function renderIngestReportLines<TCode extends string>(input: {
   );
   const repairable = byRemedy("repair").map(describeIssue);
   return [
-    ...section("## Results not yet written", waiting.map(describeIssue)),
+    ...section(
+      "## Results not yet written",
+      waiting.length === 0
+        ? []
+        : [
+            `${waiting.length} ${waiting.length === 1 ? "result is" : "results are"} not yet written. ` +
+              WAIT_LIST_LOCATION[input.workload],
+          ],
+    ),
     ...section("## Results to repair and write again", repairable),
     // The repair paragraph belongs to the repair section and renders with it.
     // A report holding only settled refusals must not tell the reader to write a

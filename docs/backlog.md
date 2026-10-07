@@ -30,7 +30,7 @@
 
 - `open-bugs.md:9` — The shipped TOML parser carries two high advisories (2026-10-06, high).
 - `open-bugs.md:11` — One invalid accepted result stops the whole audit run (2026-10-05, high).
-- `open-bugs.md:13` — A step prompt lists all pending work before its own instructions (2026-10-05, high).
+- `open-bugs.md:13` — A step contract lists every pending result path (2026-10-05, medium).
 - `open-bugs.md:15` — Staleness re-runs whole charter lanes for an edit no lane read (2026-10-05, medium).
 - `open-bugs.md:17` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
 - `open-bugs.md:19` — Charter packets are sized by accident, not by the charter question (2026-10-05, medium).

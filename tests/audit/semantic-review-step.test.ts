@@ -274,7 +274,10 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     // the reader looking for a bound path the workload does not hold.
     const prompt = await renderWithIssues();
 
-    expect(section(prompt, "## Results not yet written")).toContain("task-a");
+    // Pending results are a COUNT; the workload below lists each one.
+    const waiting = section(prompt, "## Results not yet written");
+    expect(waiting).toContain("1 result is not yet written.");
+    expect(waiting).not.toContain("task-a");
     expect(section(prompt, "## Results to repair and write again")).toContain(
       "task-b",
     );
