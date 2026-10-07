@@ -2008,6 +2008,58 @@ function auditScanMessages(workItemId: string): SubmissionScanMessages {
   };
 }
 
+/**
+ * Evict each accepted entry the batch gate would now refuse.
+ *
+ * Validate-before-accept judges a result against the tree of the fold that
+ * accepts it. The fold replays every pending accepted result into the batch
+ * gate in `executeAdvance`, which throws on any error, against the CURRENT
+ * tree: an audited file edited, or a task re-planned, after acceptance made
+ * one entry fail that gate on every later fold (dogfood 2026-10-05: 75, then
+ * 306 errors), and only the operator verb `unaccept-results` got the run out.
+ *
+ * Only entries of pending, task-known work items are judged: a completed
+ * task's result is never replayed, and an orphan passes unvalidated exactly as
+ * the batch gate retains it. An evicted entry leaves the pair with its
+ * result_id, so the host's repaired file at the same bound path is not refused
+ * as a duplicate.
+ */
+function evictInvalidatedEntries(
+  loaded: AcceptedResultsLedger,
+  params: {
+    readonly auditTasks: readonly AuditTask[];
+    readonly lineIndex?: Record<string, number>;
+    readonly pendingTaskIds: ReadonlySet<string>;
+  },
+): {
+  readonly kept: AcceptedResultsLedger;
+  readonly issues: ReadonlyMap<string, AuditHostIngestIssue>;
+} {
+  const activeTaskIds = new Set(params.auditTasks.map((task) => task.task_id));
+  const issues = new Map<string, AuditHostIngestIssue>();
+  const kept = loaded.entries.filter((entry) => {
+    if (!params.pendingTaskIds.has(entry.work_item_id)) return true;
+    if (!activeTaskIds.has(entry.work_item_id)) return true;
+    const errors = validateOneAuditResult(entry.audit_result, [...params.auditTasks], {
+      lineIndex: params.lineIndex,
+    }).filter((issue) => issue.severity === "error");
+    if (errors.length === 0) return true;
+    issues.set(entry.work_item_id, {
+      code: "result_validation_failed",
+      check: "result_validation",
+      message:
+        `work item '${entry.work_item_id}' was accepted earlier, but its result no longer ` +
+        `validates against the current tree (${errors.length} error(s)), so it was withdrawn; ` +
+        `fix the result file at its bound path and call next-step again: ` +
+        formatAuditResultIssues(errors),
+      work_item_id: entry.work_item_id,
+      result_path: entry.result_path,
+    });
+    return false;
+  });
+  return { kept: { ...loaded, entries: kept }, issues };
+}
+
 export async function ingestAuditHostResults(params: {
   readonly root: string;
   readonly artifactsDir: string;
@@ -2028,11 +2080,28 @@ export async function ingestAuditHostResults(params: {
    * never to errors.
    */
   readonly lineIndex?: Record<string, number>;
+  /**
+   * The tasks whose accepted results the caller will REPLAY into the batch gate
+   * (the fold's pending set), REQUIRED for the same reason `auditTasks` is.
+   * Their ledger entries are validated again against the current tree before
+   * anything else happens; see {@link evictInvalidatedEntries}. An empty set
+   * re-validates nothing.
+   */
+  readonly pendingTaskIds: ReadonlySet<string>;
   /** See {@link prepareAuditHostHandoff}'s `logger`. */
   readonly logger?: RunLogger;
 }): Promise<AuditHostIngestSummary> {
   const paths = resolveBoundaryPaths(params);
-  return withAcceptedResultsLock(paths, params.logger, async (accepted) => {
+  return withAcceptedResultsLock(paths, params.logger, async (loaded) => {
+    // RE-VALIDATE BEFORE REPLAY, and before the binding reads below, because
+    // the stale early return also hands its entries to the batch gate.
+    const eviction = evictInvalidatedEntries(loaded, params);
+    if (eviction.issues.size > 0) await writeAcceptedResults(paths, eviction.kept);
+    const accepted = eviction.kept;
+    const evictionIssues = (excluded: ReadonlySet<string> = new Set()) =>
+      [...eviction.issues.values()].filter(
+        (issue) => !excluded.has(issue.work_item_id ?? ""),
+      );
     // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
     // throw. These are the refusals with a named repair — re-prepare, which this
     // fold performs on its way to the next emission — so they must reach the host
@@ -2058,8 +2127,8 @@ export async function ingestAuditHostResults(params: {
       completed_work_item_ids: [
         ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
       ].sort(compareCodeUnits),
-      issues: [error],
-      raw_issues: [error],
+      issues: [...evictionIssues(), error],
+      raw_issues: [...evictionIssues(), error],
       validation_warnings: [],
     });
     let workload: AuditHostWorkload;
@@ -2249,7 +2318,14 @@ export async function ingestAuditHostResults(params: {
     // so every rejection below already lands there in arrival order. A second
     // writer inside the boundary would double-record the same fact.
 
-    const raw_issues = [...issues];
+    // An evicted item states ONE issue: the eviction, which says why a result
+    // the host was told is accepted must be repaired. The re-read of its
+    // unchanged file fails the same rule and would only repeat it. An evicted
+    // item whose rewritten file was accepted above states none.
+    const raw_issues = [
+      ...evictionIssues(new Set(landed.map((addition) => addition.work_item_id))),
+      ...issues.filter((issue) => !eviction.issues.has(issue.work_item_id ?? "")),
+    ];
     const refusals = await readTrailingSubmissionRefusals(
       paths.artifactsDir,
       raw_issues
@@ -2281,9 +2357,10 @@ export async function ingestAuditHostResults(params: {
 /**
  * Remove accepted entries — the supported way back out of an acceptance.
  *
- * An accepted binding is skipped forever by {@link ingestAuditHostResults}, so
- * before this verb existed the only exit from a poisoned acceptance was editing
- * both files of the pair by hand. This runs under the SAME lock the writers use,
+ * {@link ingestAuditHostResults} skips an accepted binding unless the entry is a
+ * pending task's and no longer validates (then it withdraws the entry itself), so
+ * before this verb existed the only exit from any other poisoned acceptance was
+ * editing both files of the pair by hand. This runs under the SAME lock the writers use,
  * rewrites BOTH files together (they are one logical record), refuses a ledger
  * that fails the strict loader rather than truncating what it cannot validate,
  * records each removal on the shared submission ledger so a repaired run stays

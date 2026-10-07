@@ -94,6 +94,7 @@ interface HostBoundary {
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
     readonly auditTasks: readonly HostTask[];
+    readonly pendingTaskIds: ReadonlySet<string>;
   }) => Promise<IngestSummary>;
 }
 
@@ -182,6 +183,7 @@ describe(FAILURE_SIGNATURE, () => {
     // (a) Malformed bytes at the bound path.
     await writeFile(resultPath, "{ malformed", "utf8");
     const malformed = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -208,6 +210,7 @@ describe(FAILURE_SIGNATURE, () => {
     // (b) Nothing at the bound path at all — a distinct code, not the same silence.
     await rm(resultPath, { force: true });
     const missing = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,

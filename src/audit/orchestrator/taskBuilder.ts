@@ -207,7 +207,8 @@ function addTaskBlock(
   // the files still pending, and accepted results are re-validated against the
   // CURRENT tasks each time the run moves on (`executeAdvance`, src/audit/cli/auditStep.ts):
   // an id that is gone is a tolerated orphan, but an id that survives naming OTHER
-  // files fails validation and stops the run. So a chunk id is derived from the
+  // files fails validation — once it stopped the run; now it is withdrawn and the
+  // item re-reviewed, still wasted work. So a chunk id is derived from the
   // chunk's own sorted file set, never from its position (`part-N`) or from the
   // scope alone — the 2026-10-05 dogfood run stopped on 306 such reused ids.
   const normalChunks = chunkByTaskBudget(normalFiles, unitLineIndex, budgetLimits);

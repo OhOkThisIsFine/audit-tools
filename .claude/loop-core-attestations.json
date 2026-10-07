@@ -296,6 +296,24 @@
         "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
       }
     },
+    "94fc63e054149869": {
+      "reviewed_by": "opus-subagent-dc2-review,agy-gemini-dc2-design-check",
+      "attester_class": "agent",
+      "checked": "eviction scope limited to pending task-known entries; eviction before binding reads (stale path); one issue per evicted item; re-acceptance in same ingest; fold passes pending set; submission-ledger state after eviction; red-green inversion of each half",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "0e71f999c3c40fc66df01914c074f057006e2791",
+        "ran_at": "2026-10-07T04:49:23.824Z"
+      },
+      "attested_at": "2026-10-07T04:49:28.968Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "a95aea013425259ae8b139bdedbc19f91538ea9e",
+        "src/audit/cli/nextStepHelpers.ts": "b04c770f82719738d49c582137d8311f0bc81a59",
+        "src/audit/orchestrator/taskBuilder.ts": "09de1618ed18d7966c76ef3dbdc4829f21cdf5e8"
+      }
+    },
     "9bc59db653647a3a": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -402,7 +420,7 @@
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "3e0aee473b384f14"
+      "review": "94fc63e054149869"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -423,7 +441,7 @@
       "review": "d7acd796ff113751"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "d7acd796ff113751"
+      "review": "94fc63e054149869"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -690,7 +708,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/taskBuilder.ts": {
-      "review": "3e0aee473b384f14"
+      "review": "94fc63e054149869"
     },
     "src/audit/orchestrator/trivialAudit.ts": {
       "baseline": "7b79934e86baf378"

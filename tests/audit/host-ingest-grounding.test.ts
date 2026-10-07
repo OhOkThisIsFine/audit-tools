@@ -98,6 +98,7 @@ interface HostBoundary {
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
     readonly auditTasks: readonly HostTask[];
+    readonly pendingTaskIds: ReadonlySet<string>;
   }) => Promise<IngestSummary>;
 }
 
@@ -191,6 +192,7 @@ async function submitFinding(
     "utf8",
   );
   return await published.boundary.ingestAuditHostResults({
+    pendingTaskIds: new Set(),
     root: published.root,
     artifactsDir: published.artifactsDir,
     runId: published.runId,

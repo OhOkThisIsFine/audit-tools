@@ -448,7 +448,7 @@ test("a changed source revision explicitly refuses the old prompt-bound result",
       bundle, activeReviewRun: (await loadCurrentActiveReviewRun(initial.artifactsDir))!,
     });
     expect(handoff.workload.work_items.find((candidate) => candidate.id === item.id)!.prompt.sha256).not.toBe(item.prompt.sha256);
-    const ingested = await ingestAuditHostResults({ root, artifactsDir: initial.artifactsDir,
+    const ingested = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir: initial.artifactsDir,
       runId: initial.workload.run_id, auditTasks: bundle.audit_tasks!,
     });
     expect(ingested.accepted_results.some((result) => result.task_id === item.id)).toBe(false);

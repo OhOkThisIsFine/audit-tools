@@ -99,7 +99,9 @@ debugging and artifact recovery. Normal conversation use should stay on
 
 `audit-code unaccept-results` removes entries from the run's accepted
 host-results pair — the supported way back out of an acceptance that turned out
-bad (for example a result accepted before a validator change). It refuses a
+bad and that `next-step` does not withdraw itself (it withdraws a pending
+task's entry that no longer validates, for example after a validator change).
+It refuses a
 pair it cannot validate, records each removal so a repaired run stays
 distinguishable from a clean one, invalidates the persisted step contract, and
 the next `next-step` re-reads the bound result files for the dropped items.

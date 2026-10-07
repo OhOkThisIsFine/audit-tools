@@ -100,6 +100,7 @@ async function setup() {
 
   const ingest = () =>
     ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: RUN_ID,

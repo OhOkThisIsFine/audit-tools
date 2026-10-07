@@ -85,6 +85,7 @@ interface HostBoundary {
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
     readonly auditTasks: readonly HostTask[];
+    readonly pendingTaskIds: ReadonlySet<string>;
   }) => Promise<IngestSummary>;
 }
 
@@ -196,6 +197,7 @@ describe(FAILURE_SIGNATURE, () => {
     );
 
     const ingest = await published.boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: published.root,
       artifactsDir: published.artifactsDir,
       runId: published.runId,
@@ -364,6 +366,7 @@ describe(FAILURE_SIGNATURE, () => {
     );
 
     const ingest = await published.boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: published.root,
       artifactsDir: published.artifactsDir,
       runId: published.runId,
@@ -408,6 +411,7 @@ describe(FAILURE_SIGNATURE, () => {
       "utf8",
     );
     const accepted = await published.boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: published.root,
       artifactsDir: published.artifactsDir,
       runId: published.runId,
@@ -460,6 +464,7 @@ describe(FAILURE_SIGNATURE, () => {
         "utf8",
       );
       const ingest = await published.boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,

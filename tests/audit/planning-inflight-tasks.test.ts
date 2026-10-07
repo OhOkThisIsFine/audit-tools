@@ -70,7 +70,7 @@ async function fixture(options: { customArtifacts?: boolean; lens?: "correctness
   const middle = published.workload.work_items.find(item => item.scope.files.includes("src/b.ts"))!;
   const inflight = published.workload.work_items.find(item => item.scope.files.length === 1 && item.scope.files[0] === "src/d.ts")!;
   await submit(middle);
-  const accepted = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: planned.audit_tasks!, lineIndex });
+  const accepted = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: planned.audit_tasks!, lineIndex });
   expect(accepted.accepted_count).toBe(1);
   const ingested = runResultIngestionExecutor(planned, [...accepted.accepted_results]).updated;
   expect(ingested.coverage_matrix!.files.find(file => file.path === "src/b.ts")!.completed_lenses).toContain(lens);
@@ -166,7 +166,7 @@ test("missing source hash cannot preserve prior published authority from file si
   const published = await value.publish(replanned);
   expect(published.workload.work_items.find(item => item.id === task.task_id)!.prompt.sha256).not.toBe(value.inflight.prompt.sha256);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
 });
 
@@ -214,7 +214,7 @@ test("replanning retains published unchanged pending tasks and consumes their ge
   const republished = await value.publish(replanned);
   expect(republished.workload.work_items.find(item => item.id === value.inflight.id)).toEqual(value.inflight);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(true);
   replanned.artifact_metadata = computeArtifactMetadata(replanned);
   expect(deriveAuditState(replanned, { emitStaleness: false }).obligations.find(obligation => obligation.id === "planning_artifacts")!.state).toBe("satisfied");
@@ -239,7 +239,7 @@ test("changed reviewed source refreshes workload authority and cannot reuse the 
   for (const task of currentTasks) expect(task.inputs?.[`source:${path}`]).toBe(file.hash);
   await value.publish(replanned);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
   expect(replanned.coverage_matrix!.files.find(file => file.path === path)!.completed_lenses).not.toContain("correctness");
 });
@@ -254,5 +254,36 @@ test("a genuine late result is consumed by the production fold while its publish
     analyzers: { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" } });
   const resumed = await loadArtifactBundle(value.artifactsDir);
   expect(resumed.audit_results?.some(result => result.task_id === value.inflight.id)).toBe(true);
+  expect(resumed.coverage_matrix!.files.find(file => file.path === "src/d.ts")!.completed_lenses).toContain("correctness");
+});
+
+test("an accepted entry that no longer validates is withdrawn by the production fold, not replayed into a throwing batch gate", async () => {
+  // Dogfood 2026-10-05: one accepted result that no longer validates stopped
+  // every fold (open-bugs: "One invalid accepted result stops the whole audit run").
+  const value = await fixture();
+  value.ingested.artifact_metadata = computeArtifactMetadata(value.ingested);
+  await persistFixture(value.artifactsDir, value.ingested);
+  await value.submit(value.inflight);
+  const early = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: value.ingested.audit_tasks!, lineIndex: value.lineIndex });
+  expect(early.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(true);
+  // The entry no longer validates against the bundle it is replayed against
+  // (a rule the earlier acceptance did not apply; here its lens is not the
+  // task's). Before the fix the batch gate threw on this fold and on every
+  // later one.
+  const ledgerPath = join(value.artifactsDir, "runs", value.runId, "host-accepted-results-ledger.json");
+  type LedgerEntry = { work_item_id: string; audit_result: { lens: string } };
+  const poisoned = JSON.parse(await readFile(ledgerPath, "utf8")) as { entries: LedgerEntry[] };
+  for (const entry of poisoned.entries.filter(entry => entry.work_item_id === value.inflight.id)) {
+    entry.audit_result.lens = "security";
+  }
+  await writeFile(ledgerPath, JSON.stringify(poisoned));
+  await runDeterministicForNextStep({ root: value.root, artifactsDir: value.artifactsDir, selfCliPath: "audit-code.mjs", timeoutMs: 30_000,
+    analyzers: { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" } });
+  // The poisoned entry is withdrawn, and the same ingest re-reads the valid
+  // file still at its bound path, accepts it again, and the fold consumes it.
+  const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as { entries: LedgerEntry[] };
+  expect(ledger.entries.filter(entry => entry.work_item_id === value.inflight.id).map(entry => entry.audit_result.lens)).toEqual(["correctness"]);
+  const resumed = await loadArtifactBundle(value.artifactsDir);
+  expect(resumed.audit_results?.filter(result => result.task_id === value.inflight.id).map(result => result.lens)).toEqual(["correctness"]);
   expect(resumed.coverage_matrix!.files.find(file => file.path === "src/d.ts")!.completed_lenses).toContain("correctness");
 });

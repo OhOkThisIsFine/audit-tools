@@ -141,6 +141,7 @@ async function setup() {
     acceptedPair,
     ingest: (lineIndex: Record<string, number> = { "src/a.ts": 2 }) =>
       ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root,
         artifactsDir,
         runId: RUN_ID,
@@ -255,6 +256,129 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     expect(events.filter((event) => event.kind === "rejected")).toEqual([]);
   });
 
+  it("an accepted result the current tree no longer validates is evicted and returned for repair, not replayed into the batch gate", async () => {
+    // Dogfood 2026-10-05 (open-bugs: "One invalid accepted result stops the
+    // whole audit run"): a result is valid when the ingest accepts it, then an
+    // audited file changes while its task is still pending. The fold replays
+    // every pending accepted result into `executeAdvance`'s batch gate, which
+    // throws — on every later fold, because nothing ever leaves the ledger.
+    const ctx = await setup();
+    await ctx.writeResult(VALID_FINDING);
+    const first = await ctx.ingest();
+    expect(first.accepted_count).toBe(1);
+
+    // src/a.ts is now 10 lines long: the accepted coverage (2 of 2) is an
+    // error-severity mismatch against the current tree.
+    const grown = await ingestAuditHostResults({
+      root: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      runId: RUN_ID,
+      auditTasks: [AUDIT_TASK],
+      lineIndex: { "src/a.ts": 10 },
+      pendingTaskIds: new Set([AUDIT_TASK.task_id]),
+    });
+    expect(grown.accepted_results).toEqual([]);
+    expect(grown.completed_work_item_ids).toEqual([]);
+    const forItem = grown.issues.filter(
+      (entry) => entry.work_item_id === AUDIT_TASK.task_id,
+    );
+    expect(forItem.map((entry) => entry.code)).toEqual(["result_validation_failed"]);
+    expect(forItem[0]?.message).toMatch(/accepted earlier/u);
+    const pair = await ctx.acceptedPair();
+    expect(pair.ledgerEntries).toEqual([]);
+
+    // The batch gate the fold feeds is now consistent with the current tree.
+    await writeFile(
+      join(ctx.artifactsDir, "coverage_matrix.json"),
+      JSON.stringify({ files: [] }),
+      "utf8",
+    );
+    await writeFile(
+      join(ctx.artifactsDir, "audit_tasks.json"),
+      JSON.stringify([AUDIT_TASK]),
+      "utf8",
+    );
+    await expect(
+      runAuditStep({
+        root: ctx.root,
+        artifactsDir: ctx.artifactsDir,
+        preferredExecutor: "result_ingestion_executor",
+        auditResultsData: [...grown.accepted_results],
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  it("an evicted item whose bound file is valid is accepted again in the same ingest, with no issue", async () => {
+    const ctx = await setup();
+    await ctx.writeResult(VALID_FINDING);
+    expect((await ctx.ingest()).accepted_count).toBe(1);
+
+    // The stored entry no longer validates (its lens is not the task's), while
+    // the file at the bound path still does.
+    const ledgerPath = join(
+      ctx.artifactsDir, "runs", RUN_ID, "host-accepted-results-ledger.json",
+    );
+    const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as {
+      entries: { audit_result: { lens: string } }[];
+    };
+    for (const entry of ledger.entries) entry.audit_result.lens = "security";
+    await writeFile(ledgerPath, JSON.stringify(ledger), "utf8");
+
+    const again = await ingestAuditHostResults({
+      root: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      runId: RUN_ID,
+      auditTasks: [AUDIT_TASK],
+      lineIndex: { "src/a.ts": 2 },
+      pendingTaskIds: new Set([AUDIT_TASK.task_id]),
+    });
+    expect(again.accepted_count).toBe(1);
+    expect(again.issues).toEqual([]);
+    expect(again.accepted_results.map((result) => result.lens)).toEqual(["correctness"]);
+  });
+
+  it("the stale-binding early return also hands back only entries that still validate", async () => {
+    // The fold replays what a stale ingest returns before it re-prepares, so the
+    // eviction must run before the binding reads.
+    const ctx = await setup();
+    await ctx.writeResult(VALID_FINDING);
+    expect((await ctx.ingest()).accepted_count).toBe(1);
+    await writeFile(
+      join(ctx.artifactsDir, "runs", RUN_ID, "host-task-bindings.json"),
+      "{ not json",
+      "utf8",
+    );
+
+    const stale = await ingestAuditHostResults({
+      root: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      runId: RUN_ID,
+      auditTasks: [AUDIT_TASK],
+      lineIndex: { "src/a.ts": 10 },
+      pendingTaskIds: new Set([AUDIT_TASK.task_id]),
+    });
+    expect(stale.accepted_results).toEqual([]);
+    expect(stale.issues.map((issue) => issue.code)).toContain("result_validation_failed");
+    expect((await ctx.acceptedPair()).ledgerEntries).toEqual([]);
+  });
+
+  it("a completed task's accepted result is not re-validated: only results the fold will replay are judged again", async () => {
+    const ctx = await setup();
+    await ctx.writeResult(VALID_FINDING);
+    expect((await ctx.ingest()).accepted_count).toBe(1);
+
+    const later = await ingestAuditHostResults({
+      root: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      runId: RUN_ID,
+      auditTasks: [AUDIT_TASK],
+      lineIndex: { "src/a.ts": 10 },
+      pendingTaskIds: new Set<string>(),
+    });
+    expect(later.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
+    expect(later.issues).toEqual([]);
+  });
+
   it("a task-unknown (orphan) result passes through UNVALIDATED with the stderr notice", async () => {
     const ctx = await setup();
 
@@ -273,6 +397,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     let ingested: Awaited<ReturnType<typeof ctx.ingest>>;
     try {
       ingested = await ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: ctx.root,
         artifactsDir: ctx.artifactsDir,
         runId: RUN_ID,

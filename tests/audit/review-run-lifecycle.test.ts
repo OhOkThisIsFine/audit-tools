@@ -538,6 +538,7 @@ test("a partial ingest keeps every carried-over binding: the run identity, the b
     }
     await writeBoundResult(root, before.run.run_id, acceptedB);
     const ingested = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: before.run.run_id,
@@ -596,6 +597,7 @@ test("the accepted ledger carries forward across a republication inside one wave
     }
     await writeBoundResult(root, before.run.run_id, acceptedB);
     await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: before.run.run_id,
@@ -606,6 +608,7 @@ test("the accepted ledger carries forward across a republication inside one wave
     // next-step with task-b accepted and task-a still owed.
     const after = await publishWave(root, artifactsDir, [tasks[0]!], [tasks[1]!]);
     const reingested = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: after.run.run_id,
@@ -678,6 +681,7 @@ test("wave 2 applies a result whose binding is byte-identical to one wave 1 acce
     }
     await writeBoundResult(root, wave1.run.run_id, wave1B);
     const wave1Ingest = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: wave1.run.run_id,
@@ -708,6 +712,7 @@ test("wave 2 applies a result whose binding is byte-identical to one wave 1 acce
     // The worker writes its result at wave 2's OWN bound path.
     await writeBoundResult(root, wave2.run.run_id, wave2B);
     const wave2Ingest = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: wave2.run.run_id,

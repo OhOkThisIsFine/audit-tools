@@ -113,6 +113,7 @@ async function setup() {
       "../../src/audit/cli/dispatch/hostHandoff.js"
     );
     return ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId: RUN_ID,

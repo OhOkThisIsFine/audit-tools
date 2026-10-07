@@ -440,7 +440,7 @@ describe("path containment is the tool's, not the caller's", () => {
       }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     await expect(
-      ingestAuditHostResults({ root, artifactsDir: escaping, runId: AUDIT_RUN_ID, auditTasks: auditManifest(["T1"]) }),
+      ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir: escaping, runId: AUDIT_RUN_ID, auditTasks: auditManifest(["T1"]) }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     // The refusal fires BEFORE any filesystem effect: nothing was created.
     expect(existsSync(escaping)).toBe(false);
@@ -459,6 +459,7 @@ describe("path containment is the tool's, not the caller's", () => {
     map.entries[0]!.result_path = "../escaped.json";
     await writeFile(mapPath, JSON.stringify(map), "utf8");
     const refused = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -533,7 +534,7 @@ describe("the one filename rule and the run-id grammar", () => {
         prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [auditTask("T1")] }),
       ).rejects.toThrow(/Invalid audit host run id/u);
       await expect(
-        ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: auditManifest(["T1"]) }),
+        ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: auditManifest(["T1"]) }),
       ).rejects.toThrow(/Invalid audit host run id/u);
     }
     // No run directory — not even the artifacts dir — was created on the way out.
@@ -548,6 +549,7 @@ describe("the audit accepted-results ledger", () => {
     await submit(fixture, item, auditSubmission(item));
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -576,6 +578,7 @@ describe("the audit accepted-results ledger", () => {
     await submit(fixture, item, auditSubmission(item, { findings: [aFindng()] }));
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -607,6 +610,7 @@ describe("the audit accepted-results ledger", () => {
     await submit(fixture, item, auditSubmission(item, { findings: [finding] }));
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -625,6 +629,7 @@ describe("the audit accepted-results ledger", () => {
     const item = fixture.items[0]!;
     await submit(fixture, item, auditSubmission(item));
     await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -633,6 +638,7 @@ describe("the audit accepted-results ledger", () => {
     const first = await readFile(fixture.ledgerPath, "utf8");
 
     const second = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -650,6 +656,7 @@ describe("the audit accepted-results ledger", () => {
     const first = fixture.items[0]!;
     await submit(fixture, first, auditSubmission(first));
     await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -688,6 +695,7 @@ describe("the audit accepted-results ledger", () => {
     await submitRaw(fixture, second!, "{ not json");
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -713,6 +721,7 @@ describe("the audit accepted-results ledger", () => {
       auditSubmission(first!, { file_coverage: [{ path: AUDITED_FILE, reviewed_lines: 1, total_lines: 1 }] }),
     );
     const coverage = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -734,7 +743,7 @@ describe("the audit accepted-results ledger", () => {
     const item = fixture.items[0]!;
     await submit(fixture, item, auditSubmission(item));
     const params = { root: fixture.root, artifactsDir: fixture.artifactsDir, runId: AUDIT_RUN_ID,
-      auditTasks: auditManifest([item.id]) };
+      auditTasks: auditManifest([item.id]), pendingTaskIds: new Set<string>() };
     expect((await ingestAuditHostResults(params)).accepted_count).toBe(1);
     const ledger = JSON.parse(await readFile(fixture.ledgerPath, "utf8"));
     // Model a prior, distinct full SHA with the same 12-character prefix. No
@@ -768,6 +777,7 @@ describe("the audit accepted-results ledger", () => {
     );
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -804,6 +814,7 @@ describe("the audit accepted-results ledger", () => {
     );
 
     const summary = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
@@ -825,6 +836,7 @@ describe("the audit accepted-results ledger", () => {
     for (const start of [
       () =>
         ingestAuditHostResults({
+          pendingTaskIds: new Set(),
           root: fixture.root,
           artifactsDir: fixture.artifactsDir,
           runId: AUDIT_RUN_ID,
@@ -917,6 +929,7 @@ describe("the audit accepted-results ledger", () => {
     const fixture = await auditFixture(["T1"]);
     await writeFile(join(fixture.runDir, "host-result-map.json"), "{}", "utf8");
     const refused = await ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,

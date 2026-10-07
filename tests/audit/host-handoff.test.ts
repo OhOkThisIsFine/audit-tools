@@ -141,6 +141,7 @@ interface HostBoundary {
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
     readonly auditTasks: readonly HostTask[];
+    readonly pendingTaskIds: ReadonlySet<string>;
   }) => Promise<IngestSummary>;
 }
 
@@ -435,6 +436,7 @@ describe(FAILURE_SIGNATURE, () => {
         "utf8",
       );
       summaries.push(await boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: current.root,
         artifactsDir,
         runId: current.runId,
@@ -489,7 +491,7 @@ describe(FAILURE_SIGNATURE, () => {
       JSON.stringify(boundResult(runId, firstB)),
       "utf8",
     );
-    const firstSummary = await boundary.ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: tasks });
+    const firstSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: tasks });
     expect(firstSummary.accepted_count).toBe(1);
     expect(firstSummary.issues.find((issue) => issue.work_item_id === "audit-a")?.code).toBe(
       "submission_malformed",
@@ -516,7 +518,7 @@ describe(FAILURE_SIGNATURE, () => {
       JSON.stringify(boundResult(secondRunId, secondB)),
       "utf8",
     );
-    const secondSummary = await boundary.ingestAuditHostResults({ root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    const secondSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId: secondRunId, auditTasks: tasks });
     const secondIssue = secondSummary.issues.find((issue) => issue.work_item_id === "audit-a")!;
     expect(secondIssue.code).toBe("submission_rejected");
     expect(secondIssue.message).toContain("submission_malformed");
@@ -527,7 +529,7 @@ describe(FAILURE_SIGNATURE, () => {
     });
 
     await writeFile(secondPath, JSON.stringify(boundResult(secondRunId, secondA)), "utf8");
-    const accepted = await boundary.ingestAuditHostResults({ root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    const accepted = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId: secondRunId, auditTasks: tasks });
     expect(accepted.completed_work_item_ids).toContain("audit-a");
     await recordHostResultOutcomes(artifactsDir, secondRunId, {
       issues: accepted.raw_issues,
@@ -679,6 +681,7 @@ describe(FAILURE_SIGNATURE, () => {
     );
     expect(await readFile(malformed.workload_path, "utf8")).toBe(workloadBytes);
     const malformedIngest = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -691,6 +694,7 @@ describe(FAILURE_SIGNATURE, () => {
     const unboundPath = join(resultA, "..", "unbound-result.json");
     await writeFile(unboundPath, JSON.stringify(boundResult(runId, itemA)), "utf8");
     const unboundIngest = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -709,6 +713,7 @@ describe(FAILURE_SIGNATURE, () => {
         "utf8",
       );
       const rejected = await boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root,
         artifactsDir,
         runId,
@@ -729,6 +734,7 @@ describe(FAILURE_SIGNATURE, () => {
     await writeFile(resultA, JSON.stringify(boundResult(runId, itemA)), "utf8");
     await writeFile(resultB, JSON.stringify(boundResult(runId, itemB)), "utf8");
     const accepted = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -739,6 +745,7 @@ describe(FAILURE_SIGNATURE, () => {
 
     const beforeReplay = await snapshotTree(artifactsDir);
     const replay = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -828,6 +835,7 @@ describe(FAILURE_SIGNATURE, () => {
       );
     }
     const accepted = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -894,6 +902,7 @@ describe(FAILURE_SIGNATURE, () => {
     await writeFile(prepared.workload_path, JSON.stringify(stale), "utf8");
 
     const summary = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,
@@ -1045,6 +1054,7 @@ describe(FAILURE_SIGNATURE, () => {
       );
 
       const summary = await published.boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
@@ -1139,6 +1149,7 @@ describe(FAILURE_SIGNATURE, () => {
         "utf8",
       );
       const summary = await boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root,
         artifactsDir,
         runId,
@@ -1214,6 +1225,7 @@ describe(FAILURE_SIGNATURE, () => {
       );
 
       const summary = await published.boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
@@ -1281,6 +1293,7 @@ describe(FAILURE_SIGNATURE, () => {
         "utf8",
       );
       return published.boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
         root: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
@@ -1696,6 +1709,7 @@ describe(FAILURE_SIGNATURE, () => {
     // contract this build did not mint. (The FOLD then re-prepares in the same
     // call, which is asserted by the next test.)
     const summary = await boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(),
       root,
       artifactsDir,
       runId,

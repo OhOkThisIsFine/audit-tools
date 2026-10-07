@@ -63,7 +63,7 @@ it('reads the complete binding set under the same lock during ingestion', async 
     }
     return original<T>(path);
   });
-  await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] });
+  await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
   expect(reads.length).toBeGreaterThanOrEqual(4);
   expect(reads.every((r) => r.locked)).toBe(true);
 });
@@ -106,11 +106,11 @@ it.each(['workload', 'map', 'bindings', 'json'])('reports repairable %s corrupti
     if (kind === 'bindings') body.entries[0].prompt_sha256 = '0'.repeat(64);
     await writeFile(path, JSON.stringify(body));
   }
-  const summary = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] });
+  const summary = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
   expect(summary.accepted_count).toBe(0);
   expect(summary.issues).toEqual([expect.objectContaining({ code: 'workload_stale', check: 'workload_binding', message: expect.stringMatching(/re-prepare/i) })]);
   await prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [task] });
-  const repaired = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] });
+  const repaired = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
   expect(repaired.issues.some((issue) => issue.code === 'workload_stale')).toBe(false);
 });
 
@@ -122,13 +122,13 @@ it('concurrent preparation and ingestion preserve the accepted partial wave', as
     run_id: runId, work_item_id: item.id, prompt_sha256: item.prompt.sha256,
     file_coverage: [{ path: 'a.ts', reviewed_lines: 1, total_lines: 1 }], findings: [],
   }));
-  const first = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] });
+  const first = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
   expect(first.accepted_count).toBe(1);
   await Promise.all([
     prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [{ ...task, rationale: 'Changed prompt' }] }),
-    ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] }),
+    ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] }),
   ]);
-  const repeated = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] });
+  const repeated = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
   expect(repeated.accepted_count).toBe(0);
   expect(repeated.accepted_results).toHaveLength(1);
   expect(repeated.issues.some((issue) => /identity|prompt/i.test(issue.message))).toBe(true);
@@ -140,12 +140,12 @@ it('keeps real IO and corrupt accepted-ledger failures strict and releases the l
   const ledgerPath = join(runDir, 'host-accepted-results-ledger.json');
   const originalLedger = await readFile(ledgerPath, 'utf8');
   await writeFile(ledgerPath, '{ broken ledger');
-  await expect(ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] })).rejects.toThrow();
+  await expect(ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] })).rejects.toThrow();
   expect(existsSync(join(runDir, 'host-accepted-results.lock'))).toBe(false);
   await writeFile(ledgerPath, originalLedger);
   await rm(prepared.workload_path);
   await mkdir(prepared.workload_path);
-  await expect(ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: [] })).rejects.toThrow();
+  await expect(ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] })).rejects.toThrow();
   expect(existsSync(join(runDir, 'host-accepted-results.lock'))).toBe(false);
   expect(await readFile(ledgerPath, 'utf8')).toBe(originalLedger);
 });

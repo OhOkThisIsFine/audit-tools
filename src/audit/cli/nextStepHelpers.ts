@@ -3179,6 +3179,11 @@ async function ingestAvailableInspectionResults(
     const lineIndexForIngest = bundle.repo_manifest
       ? await buildLineIndex(ctx.params.root, bundle.repo_manifest)
       : undefined;
+    // The set replayed below. The ingest validates those entries again against
+    // this same tree, so the batch gate cannot refuse what it is handed.
+    const pendingIds = new Set(
+      buildPendingAuditTasks(bundle).map((task) => task.task_id),
+    );
     try {
       const ingested = await ingestAuditHostResults({
         root: ctx.params.root,
@@ -3186,6 +3191,7 @@ async function ingestAvailableInspectionResults(
         runId: currentRun.run_id,
         auditTasks: bundle.audit_tasks ?? [],
         lineIndex: lineIndexForIngest,
+        pendingTaskIds: pendingIds,
       });
       acceptedResults = ingested.accepted_results;
       ingestIssues = ingested.issues;
@@ -3222,9 +3228,6 @@ async function ingestAvailableInspectionResults(
     mergeFoldAdvisoriesInto(ctx.foldAdvisoriesRef.value, { issues: ingestIssues, validationWarnings });
     await writePendingAdvisories(ctx.params.artifactsDir, ctx.foldAdvisoriesRef.value);
 
-    const pendingIds = new Set(
-      buildPendingAuditTasks(bundle).map((task) => task.task_id),
-    );
     const pendingAccepted = acceptedResults.filter((result) =>
       pendingIds.has(result.task_id),
     );

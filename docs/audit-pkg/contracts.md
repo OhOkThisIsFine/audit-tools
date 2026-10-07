@@ -124,8 +124,12 @@ advance the run.
 Per-result audit-results validation runs at acceptance, before the accepted
 pair is written: a failing result is classified-rejected (warnings ride a
 separate advisory channel, never the rejection list) and is re-read from its
-bound path on the next `next-step`; `unaccept-results` removes an accepted
-entry so its result is re-ingested from scratch.
+bound path on the next `next-step`. Each later ingest validates again every
+accepted entry of a still-pending task, against the tree that fold will
+replay it into; an entry that now fails is withdrawn from the pair and
+reported as `result_validation_failed`, so one stale acceptance cannot stop
+the run. `unaccept-results` removes an accepted entry so its result is
+re-ingested from scratch.
 
 ## AuditResult
 
