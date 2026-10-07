@@ -9,12 +9,12 @@
 
 
 - **The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment
-  (2026-10-07, medium).** The [mechanical implementation plan](../reviews/mechanical-implementation-plan-2026-10-07.md)
+  (2026-10-07, medium).** The [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md)
   selects mechanisms for bounded source reads (P1), argv command objects (P2), lock ownership without
   lease stealing (P3), no-clobber submission capture (P4), a promotion receipt (P5), owned process-tree
   lifetime (P6), a trusted npm origin (P7) and Gitleaks privacy (P8); its
   [P0/P6.0 source review](../reviews/audit-p0-source-review-2026-10-07.md) approves the first patch.
-  Its line pins are to `2f268f01` and decay: check each against the code before acting. P0 is not
+  Its current source pin is `5756602`; compare later changes before acting. P0 implementation is not
   blocked and is filed in [`open-bugs.md`](open-bugs.md). **Property:** each package lands only with
   its stated platform qualification, or is closed as not wanted.
 
