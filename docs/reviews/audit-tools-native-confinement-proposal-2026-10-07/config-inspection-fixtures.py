@@ -23,6 +23,10 @@ BASE={'Config':{'User':'1001:1001'},'Mounts':[
     'NetworkMode':'none','ReadonlyRootfs':True,'Privileged':False,'CapAdd':None,
     'CapDrop':['ALL'],'IpcMode':'private','CgroupnsMode':'private','PidMode':'',
     'Devices':[],'PortBindings':{},
+    'Memory':536870912,'NanoCpus':1000000000,'PidsLimit':128,
+    'Ulimits':[{'Name':'nofile','Soft':256,'Hard':256},
+               {'Name':'fsize','Soft':8388608,'Hard':8388608}],
+    'LogConfig':{'Type':'json-file','Config':{'max-size':'1m','max-file':'1'}},
     'SecurityOpt':['no-new-privileges=true','seccomp='+json.dumps(PROFILE,separators=(',',':'))],
     'Mounts':[{'Type':'bind','Source':src,'Target':dst,'ReadOnly':ro,
                'BindOptions':{'Propagation':'rprivate','NonRecursive':True}}
@@ -112,6 +116,12 @@ class InspectionFixtures(unittest.TestCase):
             with self.subTest(field=field):
                 self.reject(lambda s:s['HostConfig'].__setitem__(field,value))
         self.reject(lambda s:s['Config'].__setitem__('User','0:0'))
+
+    def test_resource_and_log_bounds_are_required(self):
+        for field,value in [('Memory',0),('NanoCpus',0),('PidsLimit',0),
+                            ('Ulimits',[]),('LogConfig',{'Type':'json-file','Config':{}})]:
+            with self.subTest(field=field):
+                self.reject(lambda s:s['HostConfig'].__setitem__(field,value))
 
     def test_actual_gate_precedes_both_start_paths(self):
         tree=ast.parse((ROOT/'r05-launcher.py').read_text())

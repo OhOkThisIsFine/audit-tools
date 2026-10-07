@@ -108,7 +108,9 @@ def build(cfg, role):
             "--cap-drop=ALL","--security-opt=no-new-privileges=true",
             "--security-opt=seccomp="+harness+"/r05-seccomp.json",
             "--user="+str(cfg["uid"])+":"+str(cfg["gid"]),
-            "--pids-limit=512","--memory=12g","--cpus=4",
+            "--pids-limit=128","--memory=512m","--cpus=1",
+            "--ulimit=nofile=256:256","--ulimit=fsize=8388608:8388608",
+            "--log-driver=json-file","--log-opt=max-size=1m","--log-opt=max-file=1",
             "--workdir=/work/repo","--entrypoint=/usr/bin/env"]
     for source,dest,readonly in mounts:
         value = "type=bind,src="+source+",dst="+dest+",bind-propagation=rprivate,bind-recursive=disabled"
@@ -163,6 +165,14 @@ def validate_created_config(spec, cfg, mounts, network, reviewed_profile):
             host["CgroupnsMode"]=="private" and not host.get("PidMode") and
             not host.get("Devices") and not host.get("PortBindings"),
             "created container grant mismatch; preserve stopped container")
+    require(host.get("Memory")==512*1024*1024 and host.get("NanoCpus")==1000000000 and
+            host.get("PidsLimit")==128, "synthetic resource bounds mismatch")
+    limits=host.get("Ulimits")
+    require(isinstance(limits,list) and len(limits)==2 and
+            {item["Name"]:(item["Soft"],item["Hard"]) for item in limits}==
+            {"nofile":(256,256),"fsize":(8388608,8388608)}, "synthetic ulimits mismatch")
+    require(host.get("LogConfig")=={"Type":"json-file","Config":{"max-size":"1m","max-file":"1"}},
+            "bounded Docker logging required")
     require(spec["Config"]["User"]==str(cfg["uid"])+":"+str(cfg["gid"]), "container user mismatch")
     options=host.get("SecurityOpt")
     require(isinstance(options,list) and len(options)==2 and

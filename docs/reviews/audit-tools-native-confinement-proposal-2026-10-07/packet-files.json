@@ -2,9 +2,9 @@
   "kind": "inactive_repository_source_proposal_not_runtime_attestation",
   "product_source": "38bba3cf410b2deaba54d837429c11a2d512a7a9",
   "preserved_candidate_tree": "a19d72f79a0d47ef0ddc0c0cca4d09635992b38e",
-  "canonical_plan_raw_sha256": "0609d7c5cc5365ae46beba32d6b4168e89b5c94d994f69e4fcd55cbbc7239fa6",
+  "canonical_plan_raw_sha256": "f7fb173540235e4157532150726345212d7ecf41885f336802a465924a4242b4",
   "sha256": {
-    "r05-launcher.py": "dcfb9fef46216fb825b8bcca1202c8fd058da7a2fc3ece6cabb549c10ffed4a4",
+    "r05-launcher.py": "32c317675a428999c6580ac4927c1be56acf6a51b19502f4aaedc129ee77c857",
     "prepare-owned-layout.py": "d50befb1cb590857010821651b9c2a76a43b2ca3694cb5482d6fa936f2c0e967",
     "bind-owned-fixture.py": "9b536eaa9f3f57a7a1e6a346c41633edd3d77d9f4519c325c2d82d4129067e47",
     "native-probe.c": "ad265cc93f4f3b8e147f6b1d89b829381b532bc6129f4d730dfb0fb888be4b22",
@@ -17,12 +17,18 @@
     "node-image-linux-amd64.json": "c4d5523090a817b7aa86d2111241fdd4f66d1e27782b44160e6aa63b357ecb2d",
     "node-image-config.json": "8f3dff4193637723b9f3f4ded64cccf28c7b35dc1c96d3320b1f5a64ff41e76d",
     "validate-source.py": "fc2261837531212fb7c21512fec0e0db6fbe39429835ce752241f6f05b5b8d56",
-    "rendered-launches.json": "ff2cf4c36993b176f7e0bcaa6ed33c6e605033f02793e4543c0b7d56a962f5be",
+    "rendered-launches.json": "e7e2c223124e2c3345282f301bbac306038f1f506959931a84b34f6782ac35c2",
     "net-denial-oracle.h": "8272697d09b3a83505d20a4f7d0f327d180fa70399a9f5f9ea97fc614b19fe07",
     "net-denial-oracle-fixtures.c": "0d67cb8d857a0abd4e4f169d8216d64cefe8e42b45eab1e4772d5309600e9dc8",
-    "compile-native-probes.sh": "5a733dbdbd2774215c96f3776fac5443763e0532170e6f679d7636f8e2559eee",
+    "compile-native-probes.sh": "e8d27cc375bd139dc29b924db84aacd976e4d7c9b2dfd782fb8e221b643d82c0",
     "timeout-capture-fixtures.py": "178a71dee98eb04832bacf13bc6ef02cc4913bbfda5d1bd5ed03659a4111380f",
-    "config-inspection-fixtures.py": "c9878215b26f83782734bd28143003f20b76976f0c110559673691e3d6f55002"
+    "config-inspection-fixtures.py": "a68ae6fd25079140426de3c6306b023f5d8dc9831949dea43a321f1500d1dbe3",
+    "synthetic-bootstrap.py": "5499ec6d9f428a2e5ea4e84d1ea3490ff6f9cd0cc4588de5880697050e1c7860",
+    "owned-teardown.py": "493871bc9f79cbd4020bce40d260d2e3faa50db41e6747c27197fbf8a011b3ef",
+    "evidence-log-bundle.py": "49711ccdfa7ee0b6a580e3dca548e7bf3948a73391f0e0fc4b136c050d39e08a",
+    "workflow-source-fixtures.py": "219f4dfd771d839e7063d0808a3496e06637b43e52f05532ddc24356e6eda24d",
+    "node-release-key.asc": "5115095e2f8010c75da052ecb1cfb3af630e084f0f8daa93a863557b01b0f90a",
+    "node-SHASUMS256.txt.asc": "e82087fe2cf383fce187b0789eb5ea50fd92f9b68afb4f4e174d65ec59acba4a"
   },
   "baseline_canonical_plan_raw_sha256": "eac3bd1c7e3b6e1efe9ee6656c3a553a6b12146cf40c29cf2cd966c28e75ce4f",
   "canonical_plan_path": "docs/reviews/audit-tools-canonical-implementation-plan-2026-10-07.md"
