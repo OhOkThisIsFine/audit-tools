@@ -1,0 +1,36 @@
+{
+  "kind": "inactive_source_workflow_binding_not_runtime_attestation",
+  "packet_commit": "19afe180c4603e28da89c6bf7f0c0543f21b4662",
+  "packet_tree": "8558d04f7229df9e43f77e540388ef55b55a8134",
+  "workflow_path": "docs/reviews/audit-tools-native-synthetic-workflow-2026-10-07.yml.inactive",
+  "workflow_sha256": "4a4c6ae246a94dd5365a5f9cf15c72b353e570bd3342d877e9039dd59249a16d",
+  "manifest_sha256": "fa888c921c75ee43f1dc4fb6311f2abb442f9cec17ae00f66807e98dbfb28990",
+  "bootstrap_sha256": "2794516ebf19ffb331d55e52b6ae958a003175b83f80e0dcf623c76b8b3f947c",
+  "bundle_sha256": "49711ccdfa7ee0b6a580e3dca548e7bf3948a73391f0e0fc4b136c050d39e08a",
+  "canonical_plan_sha256": "f7fb173540235e4157532150726345212d7ecf41885f336802a465924a4242b4",
+  "trigger_branch": "probe/r05-native-synthetic-20261007-01",
+  "runner": "ubuntu-24.04",
+  "source_checks": "passed",
+  "source_hash_count": 25,
+  "inherited_workflow_matches": 0,
+  "uploaded_artifact_cache_bytes": 0,
+  "bundle_max_compressed_bytes": 4194304,
+  "bundle_max_input_bytes": 8388608,
+  "job_max_minutes": 18,
+  "actual_runtime_or_workflow_execution": "not_run",
+  "independent_review": "pending",
+  "full_R05_R6_P0_acceptance": false,
+  "P0_trees": {
+    "original": "f2f2def9fa9817dbb3939435db66f67b4016bf7c",
+    "current": "a19d72f79a0d47ef0ddc0c0cca4d09635992b38e"
+  },
+  "validation_commands": {
+    "python.exe -I docs/reviews/audit-tools-native-confinement-proposal-2026-10-07/workflow-source-fixtures.py -v": "10 passed",
+    "python.exe -I docs/reviews/audit-tools-native-confinement-proposal-2026-10-07/config-inspection-fixtures.py -v": "9 passed",
+    "python.exe -I docs/reviews/audit-tools-native-confinement-proposal-2026-10-07/timeout-capture-fixtures.py -v": "5 passed",
+    "python.exe -I docs/reviews/audit-tools-native-confinement-proposal-2026-10-07/validate-source.py": "passed",
+    "python.exe -I docs/reviews/audit-tools-native-synthetic-workflow-validate-2026-10-07.py": "passed with preinstalled PyYAML6.0.3",
+    "git diff --cached --check": "passed after staging"
+  },
+  "rollback": "Leave proposal inactive or revert docs-only commits on proposal branch, retaining source/evidence. No active workflow, trigger branch, Docker object, account setting or production service was created; preserve both P0 trees."
+}
