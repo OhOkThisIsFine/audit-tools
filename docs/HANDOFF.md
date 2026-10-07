@@ -24,8 +24,11 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the worktree reaper's unseen agents, tracked in [`open-bugs.md`](backlog/open-bugs.md), then
-the rest of the bug backlog before a dogfooding audit (lap of 2026-10-03).
+Next: the paused 2026-10-05 dogfood run (worktree `C:/Code/audit-tools/.claude/worktrees/goofy-hamilton-efc64a`,
+notes in [`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) resumes only on
+an installed build carrying its efficiency fixes — unreleased on `main` since v0.55.5 — so a release is
+the first step, and it needs owner authorization. Then the frozen-snapshot track in
+[`forward-tracks.md`](backlog/forward-tracks.md), which now also owns charter-lane reuse.
 A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
 after the final stage. Release publication remains a separately authorized action.
 **Live owner decision:** none.
