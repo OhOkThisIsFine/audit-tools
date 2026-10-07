@@ -31,6 +31,7 @@ class FakeDocker:
         if args[0]=='ps':return CID if self.container_present else ''
         if args[:2]==('network','ls'):return NID if self.network_present else ''
         if args[0]=='inspect':return json.dumps([self.container])
+        if args==('logs',CID):return CLEAN['DockerTransport'](b'terminal stdout\xff',b'terminal stderr\x00')
         if args[:2]==('network','inspect'):return json.dumps([self.network])
         if args==('stop','--time','5',CID):self.container['State']['Running']=False;return CID
         if args==('rm',CID):self.container_present=False;return CID
@@ -48,8 +49,16 @@ class OrchestrationFixtures(unittest.TestCase):
         fake=FakeDocker();result=self.run_cleanup(fake)
         self.assertTrue(result['complete'])
         self.assertFalse(fake.container_present);self.assertFalse(fake.network_present)
-        self.assertLess(fake.calls.index(('stop','--time','5',CID)),fake.calls.index(('rm',CID)))
+        self.assertLess(fake.calls.index(('stop','--time','5',CID)),fake.calls.index(('logs',CID)))
+        self.assertLess(fake.calls.index(('logs',CID)),fake.calls.index(('rm',CID)))
         self.assertTrue(all('prune' not in call and '--force' not in call for call in fake.calls))
+
+    def test_owned_cleanup_preserves_exact_terminal_binary_transport(self):
+        with tempfile.TemporaryDirectory(prefix='r05-pure-cleanup-') as directory:
+            root=Path(directory);(root/'evidence').mkdir()
+            CLEAN['teardown'](root,{'task_id':TASK},FakeDocker())
+            self.assertEqual((root/'evidence/server-cleanup.stdout').read_bytes(),b'terminal stdout\xff')
+            self.assertEqual((root/'evidence/server-cleanup.stderr').read_bytes(),b'terminal stderr\x00')
 
     def test_foreign_or_weakened_objects_are_not_mutated(self):
         variants=[('container','Id','c'*64),('container','Name','/other'),

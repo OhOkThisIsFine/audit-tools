@@ -7,6 +7,11 @@ import re
 import subprocess
 
 ROLES={'compiler','server','control','probe'}
+class DockerTransport(str):
+    def __new__(cls,stdout,stderr):
+        value=super().__new__(cls,stdout.decode('utf-8',errors='replace'))
+        value.stdout_bytes=stdout;value.stderr_bytes=stderr
+        return value
 def require(ok,message):
     if not ok: raise RuntimeError(message)
 
@@ -56,7 +61,10 @@ def teardown(root,cfg,docker):
         require(container_identity(terminal,task)==(cid,role) and
                 terminal['State']['Running'] is False,'owned container not terminal')
         (evidence/(role+'-cleanup-terminal.json')).write_text(json.dumps(terminal,indent=2)+'\n')
-        docker('rm',cid)  # never force; terminal identity observed before removal
+        logs=docker('logs',cid)
+        (evidence/(role+'-cleanup.stdout')).write_bytes(getattr(logs,'stdout_bytes',logs.encode('utf-8')))
+        (evidence/(role+'-cleanup.stderr')).write_bytes(getattr(logs,'stderr_bytes',b''))
+        docker('rm',cid)  # terminal identity and final transport saved before removal
         result['containers'].append({'id':cid,'role':role,'terminal_exit':terminal['State']['ExitCode'],'removed':True})
     for nid in networks:
         current=json.loads(docker('network','inspect',nid))[0]
@@ -88,7 +96,8 @@ if __name__=='__main__':
     root,cfg=checked_root(args.config)
     env={'PATH':'/usr/bin:/bin','HOME':str(root/'client-home'),'DOCKER_CONFIG':str(root/'docker-config')}
     def docker(*values):
-        return subprocess.run(['/usr/bin/docker','--host=unix:///var/run/docker.sock',*values],
-                              env=env,stdin=subprocess.DEVNULL,capture_output=True,text=True,
-                              timeout=15,check=True).stdout
+        result=subprocess.run(['/usr/bin/docker','--host=unix:///var/run/docker.sock',*values],
+                              env=env,stdin=subprocess.DEVNULL,capture_output=True,
+                              timeout=15,check=True)
+        return DockerTransport(result.stdout,result.stderr)
     print(json.dumps(teardown(root,cfg,docker)))

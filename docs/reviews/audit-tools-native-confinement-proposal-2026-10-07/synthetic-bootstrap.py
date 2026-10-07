@@ -79,18 +79,22 @@ def main():
             (evidence/(name+'-exit.json')).write_text(json.dumps({'exit':result.returncode})+'\n')
             require(len(result.stdout)<=1048576 and len(result.stderr)<=1048576,'transport bound exceeded')
             require(result.returncode==0,name+' failed: observe retained transport/exit')
-            return result.stdout.decode('utf-8')
+            return result.stdout.decode('utf-8',errors='replace')
         except subprocess.TimeoutExpired as error:
             for suffix,value in [('stdout',error.stdout),('stderr',error.stderr)]:
                 (evidence/(name+'.'+suffix)).write_bytes(value or b'')
             (evidence/(name+'-exit.json')).write_text(json.dumps({'exit':None,'timed_out':True})+'\n')
             raise RuntimeError(name+' timed out; not a pass') from error
-    docker_sequence=0
+    docker_sequence=0;locals_for_cleanup={}
     def observed_docker(*values,timeout=15):
         nonlocal docker_sequence
         docker_sequence+=1
-        return record_command('docker-'+str(docker_sequence),
-            ['/usr/bin/docker','--host=unix:///var/run/docker.sock',*values],timeout)
+        name='docker-'+str(docker_sequence)
+        text=record_command(name,['/usr/bin/docker','--host=unix:///var/run/docker.sock',*values],timeout)
+        if values[0]=='logs' and 'cleanup_transport' in locals_for_cleanup:
+            return locals_for_cleanup['cleanup_transport']((evidence/(name+'.stdout')).read_bytes(),
+                                                          (evidence/(name+'.stderr')).read_bytes())
+        return text
     def watchdog(signum,frame): raise RuntimeError('600s bootstrap/probe watchdog; qualification failed')
     signal.signal(signal.SIGALRM,watchdog);signal.signal(signal.SIGTERM,watchdog);signal.alarm(600)
     try:
@@ -185,6 +189,7 @@ def main():
         if config_path is not None:
             try:
                 module=runpy.run_path(str(packet/'owned-teardown.py'),run_name='owned_cleanup_import')
+                locals_for_cleanup['cleanup_transport']=module['DockerTransport']
                 root,cfg=module['checked_root'](config_path)
                 module['teardown'](root,cfg,observed_docker)
             except BaseException as error:

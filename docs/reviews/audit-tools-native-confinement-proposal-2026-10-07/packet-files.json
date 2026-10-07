@@ -23,10 +23,10 @@
     "compile-native-probes.sh": "e8d27cc375bd139dc29b924db84aacd976e4d7c9b2dfd782fb8e221b643d82c0",
     "timeout-capture-fixtures.py": "178a71dee98eb04832bacf13bc6ef02cc4913bbfda5d1bd5ed03659a4111380f",
     "config-inspection-fixtures.py": "a68ae6fd25079140426de3c6306b023f5d8dc9831949dea43a321f1500d1dbe3",
-    "synthetic-bootstrap.py": "5499ec6d9f428a2e5ea4e84d1ea3490ff6f9cd0cc4588de5880697050e1c7860",
-    "owned-teardown.py": "493871bc9f79cbd4020bce40d260d2e3faa50db41e6747c27197fbf8a011b3ef",
+    "synthetic-bootstrap.py": "2794516ebf19ffb331d55e52b6ae958a003175b83f80e0dcf623c76b8b3f947c",
+    "owned-teardown.py": "8862d2c70705824baa9dd30e28f92357dccd633e85416d06690dc64146a28da3",
     "evidence-log-bundle.py": "49711ccdfa7ee0b6a580e3dca548e7bf3948a73391f0e0fc4b136c050d39e08a",
-    "workflow-source-fixtures.py": "219f4dfd771d839e7063d0808a3496e06637b43e52f05532ddc24356e6eda24d",
+    "workflow-source-fixtures.py": "c1957f46ddc0acb3f1852316127da5ffccf6fe31b6810c00286de8aa237f9e7e",
     "node-release-key.asc": "5115095e2f8010c75da052ecb1cfb3af630e084f0f8daa93a863557b01b0f90a",
     "node-SHASUMS256.txt.asc": "e82087fe2cf383fce187b0789eb5ea50fd92f9b68afb4f4e174d65ec59acba4a"
   },
