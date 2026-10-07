@@ -1,5 +1,7 @@
 # audit-tools: mechanical implementation contract
 
+> Historical record. For current source bindings, remaining implementation instructions and release gates, start with the [canonical plan](audit-tools-canonical-implementation-plan-2026-10-07.md) and its [source-review record](audit-tools-canonical-source-review-2026-10-07.md). The original review scope and evidence below remain historical.
+
 <!-- review-routing: deferred -->
 
 This is the archived implementation plan requested for repository publication on 7 October 2026. Remaining implementation and execution qualification are deferred to a suitable isolated execution environment; the routing category is [deferred work](../backlog/deferred.md). This record is not a new normative contract or a claim of completed implementation.
