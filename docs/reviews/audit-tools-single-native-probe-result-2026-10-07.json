@@ -1,0 +1,106 @@
+{
+  "kind": "actual_preliminary_linux_native_probe_evidence_not_full_R05_R6_P0_acceptance",
+  "run_id": 37688546034,
+  "job_id": 113022540268,
+  "run_attempt": 1,
+  "activation_commit": "44d595644886c1f4d8e2523c6931637dfba0e2dc",
+  "packet_commit": "19afe180c4603e28da89c6bf7f0c0543f21b4662",
+  "source_inspection_readback": "all_four_created_specs_passed_actual_validator",
+  "observed_platform": {
+    "kernel": "6.17.0-1022-azure",
+    "uid": 1001,
+    "gid": 1001,
+    "image_os": "ubuntu24",
+    "image_version": "20260927.320.1",
+    "packet_commit": "19afe180c4603e28da89c6bf7f0c0543f21b4662",
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "storage_driver": "\"overlay2\"",
+    "free_bytes": 92425383936,
+    "product_executed": false
+  },
+  "node": "v22.23.3",
+  "npm": "10.9.9",
+  "docker_client_server": "28.0.4 linux amd64",
+  "C_oracle_fixtures": {
+    "passed": 28,
+    "failed": 0
+  },
+  "control_outcomes": 7,
+  "probe_outcomes": 30,
+  "TCP_UDP_IPv4_IPv6": "four positive echoes, four ENETUNREACH connect refusals",
+  "restricted_socket_families": "AF_PACKET17 AF_ALG38 AF_VSOCK40 EPERM observed",
+  "cleanup": {
+    "task_id": "364fdb9b-3383-4f2d-b6cd-e4f4cf607553",
+    "containers": [
+      {
+        "id": "7caf38c29a28a1b0ce394f3df8f846d182b675425be02a8439b9d4b8df2bfd8b",
+        "role": "probe",
+        "terminal_exit": 0,
+        "removed": true
+      },
+      {
+        "id": "76b8778de431ae5bfba66299af6376195bb6ef3e962fd68072003b93e5dd4006",
+        "role": "control",
+        "terminal_exit": 0,
+        "removed": true
+      },
+      {
+        "id": "2345de37ffa38923ff90cb0e414ce04a3d85abba155eaf3ed3b02295e83ba7a5",
+        "role": "server",
+        "terminal_exit": 137,
+        "removed": true
+      },
+      {
+        "id": "b0d1515485c01807b6fc0f7497c4f845a8fceedb8d315dbf25831da81e4209fb",
+        "role": "compiler",
+        "terminal_exit": 0,
+        "removed": true
+      }
+    ],
+    "networks": [
+      {
+        "id": "e9dc7e224de7fd34ee66dc015c9c6148fcfdc50ba1287e3ae4fc14403b5e6f4a",
+        "removed": true
+      }
+    ],
+    "complete": true
+  },
+  "echo_server_terminal": {
+    "exit": 137,
+    "OOMKilled": false,
+    "context": "task-owned docker stop --time 5 during reviewed teardown; not a test exit0"
+  },
+  "artifact_count": 0,
+  "evidence_bundle": {
+    "bundle_bytes": 75011,
+    "files": 210,
+    "input_bytes": 1132421,
+    "kind": "synthetic_preliminary_native_evidence_not_R05_R6_P0_acceptance",
+    "sha256": "258431ae140134697a15474a77a0ac86fc6db4723f3a66e33ee06d1f6df4db40",
+    "uploaded_artifact_bytes": 0
+  },
+  "accepted_scope": "tested preliminary Linux native-child filesystem/network assertions only",
+  "full_R05": false,
+  "R6": false,
+  "P0_tests": false,
+  "Windows_lane": "failed_retained_not_qualified",
+  "product_imports": "none",
+  "reruns": "none",
+  "main_unchanged": "38bba3cf410b2deaba54d837429c11a2d512a7a9",
+  "proposal_source_review": "98d344f1baebc46e3e5681fa40a5ece2cd3d8918",
+  "workflow_sha256": "4a4c6ae246a94dd5365a5f9cf15c72b353e570bd3342d877e9039dd59249a16d",
+  "exact_commit_workflow_run_count": 1,
+  "workflow_lookup_source": "direct GitHub REST via existing gh CLI; connector returned empty list inconsistently and was not used for verdict",
+  "P0_trees_unchanged": {
+    "original": "f2f2def9fa9817dbb3939435db66f67b4016bf7c",
+    "current": "a19d72f79a0d47ef0ddc0c0cca4d09635992b38e"
+  },
+  "actual_commands": {
+    "gh run watch 37688546034 --repo OhOkThisIsFine/audit-tools --interval 15 --exit-status": "completed success, exit0",
+    "GitHub REST runs/jobs/logs/artifacts GET via gh api": "retained run metadata, one ubuntu-24.04 job, all steps success, artifacts0",
+    "source synthetic bootstrap compiler/server/control/probe and owned teardown": "actual runtime pass for bounded preliminary Linux probes only",
+    "local evidence-envelope and actual-inspection/result readback": "passed exact bundle/source/grants/native outcomes/terminal cleanup checks"
+  },
+  "rollback": "Run is terminal and owned containers/network are removed. Retain evidence and freeze the exact activation branch; no more pushes/reruns/dispatches in this bounded turn. Report commits can be reverted on the non-trigger docs branch. Any future branch retirement is separate coordination, with no reset/cleanup of existing stopped worktrees or service changes.",
+  "original_P0_repository_pin": "2f268f019523d87ba02d8ac6821224d468ca2182"
+}
