@@ -1,0 +1,743 @@
+# audit-tools: mechanical implementation contract
+
+<!-- review-routing: deferred -->
+
+This is the archived implementation plan requested for repository publication on 7 October 2026. Remaining implementation and execution qualification are deferred to a suitable isolated execution environment; the routing category is [deferred work](../backlog/deferred.md). This record is not a new normative contract or a claim of completed implementation.
+
+For the subsequent P0/P6.0 draft and its exact source-review and execution limits, see [P0/P6.0 source review and status](audit-p0-source-review-2026-10-07.md). Only these documentation records are being published. The code, dependency lock, CI configuration, existing attestations and working installations are unchanged by this publication. The owner approved documentation-only GitHub publication without local pre-commit tests because the execution environment was quota-blocked. That exception does not waive product gates, required GitHub checks or truthful exact-tree evidence.
+
+## Decision, evidence and scope
+
+This contract is based on **OhOkThisIsFine/audit-tools at 2f268f019523d87ba02d8ac6821224d468ca2182**, package **0.55.5**, reviewed on 6 October 2026. It does not substitute current main for that pin. The earlier recommendation remains unchanged; this is its separate implementation contract.
+
+After separate implementation opt-in, use an **isolated checkout of 2f268f019523d87ba02d8ac6821224d468ca2182** for these repairs by default. Unpublished W6 **b69b12dd5a91c3c5b14732cae125adb10f9c965a**, its stopped working-tree changes and final release-verification exit remain uninspected. Preserve W6 and all its uncommitted/untracked work; do not resume, replace or modify them. Inspecting or comparing W6/current work is not a prerequisite for the isolated pinned repair lane. Only if later explicitly asked to integrate with W6 or current work, first make the permitted read-only comparison and reconcile the changed seams, preserving existing repairs and unfinished work. A real conflict in that authorized integration pauses only its affected seam.
+
+During preparation of this original contract, no product code, tests, builds, installs, audit runs, repository writes or computer tasks were performed. Repository reads were pinned connector reads. Subsequent P0/P6.0 draft work is described separately in the linked review; this publication changes documentation only. A pinned recursive tree and a source-symbol inventory covering its 433 src TypeScript files were inspected for the shared affected seams. Execution claims below are deliberately future acceptance conditions.
+
+Readiness meanings:
+- **mechanical-ready**: the source-level behavior, edit locations, helper contracts and test oracles are chosen. Implementation still requires its tests.
+- **execution-or-owner-gated**: a specifically named environment fact, external host capability, release operation or quiescence permission is missing. Follow the stated branch; do not invent a design.
+- **needs-source-resolution**: source or design questions still require a bounded review before implementation. P6's revised interfaces, admission and process protocols passed the bounded independent source review; a later explicitly authorized W6/current-work integration comparison can expose additional package-local deltas; it does not gate the isolated pinned repair lane.
+
+Overall: P6 passed the bounded independent source-contract recheck; its source choices are mechanical-ready within that scope. This is not implementation or runtime acceptance. Other packages retain their stated grades. Actual deployment and platform qualification remain execution-or-owner-gated, without a blanket all-packages block.
+
+### Architecture choices
+
+Keep the native Node 22 substrate and the existing shared stores. Do not add a scheduler, worker roster, execution backend selection, database, generic transaction framework, proper-lockfile, write-file-atomic, Execa or cross-spawn for this repair. Native host assignment/retry ownership remains the [design of record](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/spec/multi-ide-concurrent-runs-design.md#L1-L79).
+
+Chosen mechanisms:
+1. Live owners are never lease-stolen. Narrow, proved-dead local recovery is retained.
+2. A host-writable inode is never hard-linked into an immutable recovery/publication destination. Capture it, copy its bytes privately, then publish the owned snapshot exclusively.
+3. JSON remains the report authority. A small hash receipt detects incomplete publication; it is not a generation pointer or a second report authority.
+4. Process return, output completeness and process-tree cleanup are separate outcomes. Unconfirmed writers retain a scoped recovery block.
+5. Continuation execution uses executable/argv/cwd objects. Printed shell commands require a declared, qualified dialect; unknown dialect is never guessed from OS.
+6. Reader authorization lives before an owned descriptor read, including when test seams are injected.
+
+[CLAUDE.md](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/CLAUDE.md#L187-L252) requires atomic replacement of old mechanisms, generated universal host assets and green-at-every-commit review. The same file’s parser policy at lines 323–324 favors vetted parsing, not handwritten TOML.
+
+## 0. Shared preflight and implementation order
+
+### Exact preflight evidence
+
+Apply each gate at the operation that depends on it, after separate implementation authorization:
+- Before editing the isolated pinned target, check its actual HEAD/branch, clean/dirty diff, uncommitted/untracked files and applicable repository/workspace instructions. Preserve any target changes. Record available package-manager/Node versions and the exact verification catalog from scripts/guard-reach-data.mjs. An actual target mismatch or conflicting instruction requires a scoped resolution; it does not require inspecting the untouched stopped W6 tree or choosing a new baseline by default.
+- Before dependent native tests or activation, establish filesystem type, same-filesystem link support, realpath behavior and private-directory protection for the actual target platform. Missing qualification blocks those dependent operations and their acceptance claims, not independent source preparation.
+- Before host/shell-dependent tests or activation, establish the actual host execution surface, shell version and native-argument mode without persisting provider identity into workflow state.
+- Before live protocol migration or rollback, identify and quiesce the affected audit/remediation CLI holders and direct host producers under the migration rules below. Live quiescence is not a prerequisite for isolated P0/P1 source preparation.
+
+Do not ask the owner to resolve algorithm choices below. Ask only for missing authority, an explicit destructive recovery, or an external host capability that cannot be observed.
+
+### Test isolation is a prerequisite to running, not to editing
+
+Keep the suite guard and existing per-worker state/cache redirects in [tests/helpers/state-dir-setup.mjs:17–37](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/tests/helpers/state-dir-setup.mjs#L17-L37) and [vitest.config.ts:25–35](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/vitest.config.ts#L25-L35). Do not rebuild dist under a running suite.
+
+Before any affected Windows baseline, apply P6.0's nonexecuting unit-test repair: the pinned fake PID 4242 test can reach real taskkill. Do not execute that original test merely to obtain a pre-change baseline. Record this necessary harness-only deviation and preserve the other baseline legs.
+
+For real CLI, packaging and linked smoke checks:
+- Allocate private HOME, USERPROFILE, npm prefix/cache/userconfig/globalconfig and test state/analyzer/binary caches. Strip unrelated credential and Git redirection variables; supply synthetic credentials only.
+- For Git fixtures, isolate global/system config, templates, hooks and signing; verify gitdir/worktree paths are under the fixture before mutation. Extend [tests/audit/helpers/submoduleRepo.mjs:31–83](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/tests/audit/helpers/submoduleRepo.mjs#L31-L83), not every test independently.
+- Apply the registry-derived analyzer-acquisition opt-out to smoke children or provision pinned offline test tools in an owned trusted PATH. A state-dir override alone does not stop npx/PATH acquisition.
+- Deny external egress for ordinary regression runs. Deliberate registry/download qualification uses a separate, authorized network test and recorded origins.
+- Install credential-read and outside-write sentinels. Assert no writes to the real home, global npm prefix, real project or unrelated cache. Verify teardown.
+- Do not run linked smoke against an existing user installation: [scripts/audit/smoke-linked-audit-code.mjs:37–112](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/scripts/audit/smoke-linked-audit-code.mjs#L37-L112) links/removes globally. Packaged smoke [63–145](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/scripts/audit/smoke-packaged-audit-code.mjs#L63-L145) inherits home configuration and can run postinstall host-asset writes.
+
+If a sentinel or isolation assertion fails, stop that test class and repair its harness. Do not run the full aggregate against live state to discover whether the risk is real.
+
+### Ordered packages
+
+1. P0 parser advisory patch; P1 bounded descriptor readers; P2 command objects can be developed independently.
+2. P3 lock ownership/lifecycle identity, including its hold API and quiesced migration.
+3. P4 private submission capture/restoration and hand-recovery reconciliation on P3.
+4. P5 verified report publication/cleanup on P3/P4.
+5. P6 native execution/output/deadline ownership; P7 trusted npm origin can proceed beside P3–P5.
+6. P8 private Gitleaks lifecycle on P1/P6/P7’s relevant binary-origin gate.
+7. Composition, actual platform/host qualification, complete baseline and exact-final-commit release gates.
+
+These are reviewable packages, not permission to land an incomplete replacement on main. Within a branch, temporary seams must remain green and disappear before merge.
+
+## P0. Patch smol-toml with narrowly scoped dependency changes
+
+**Grade: mechanical-ready; runtime/lockfile acceptance execution-gated.**
+
+### Source and chosen edit
+
+The [package manifest](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/package.json) declares production smol-toml ^1.6.1. The lock resolves 1.6.1. [parseTomlSafe, toml.ts:17–25](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/extractors/graphManifestEdges/toml.ts#L17-L25) invokes it synchronously; Cargo and pyproject consume it at cargo.ts:18–30 and pyproject.ts:17–21.
+
+Change the declared minimum to **^1.9.0**, regenerate only the necessary lock resolution and integrity with the selected trusted npm version, and inspect the lock diff. No major upgrades or parser replacement. A lockfile containing the old resolution fails acceptance even if package.json changed.
+
+The [EOF-comment advisory](https://github.com/squirrelchat/smol-toml/security/advisories/GHSA-7w5x-hrqm-74c2) is patched by 1.7.1; [the separate quadratic parsing advisory](https://github.com/advisories/GHSA-r4xh-jqrq-34v2) requires 1.9.0. Thus 1.7.1 alone is not the chosen endpoint. The [1.9.0 release](https://github.com/squirrelchat/smol-toml/releases/tag/v1.9.0) also changes object/prototype/parsing behavior. Existing safe table access uses typeof/object checks, not instance methods; keep it that way.
+
+### Tests and oracle
+
+Extend tests/audit/graph-manifest-edges.test.ts; put the direct parser/advisory child fixtures in a new tests/audit/graph-manifest-toml.test.ts:
+- Cargo member/exclude forms: dotted key, inline table, quoted key, multiline arrays/strings. Assert exact expected sorted edge tuples, not just nonempty output.
+- pyproject testpaths table/dotted/inline/scalar/array variants. Assert the same graph edges as equivalent existing fixtures.
+- Null-prototype tables, keys named constructor/__proto__/hasOwnProperty and malformed fallback. Assert no prototype mutation, no unexpected exception and unchanged empty-fallback semantics.
+- Tiny malformed EOF-comment array and inline-table inputs in an externally bounded child, never the Vitest worker. On the patched version, child exits normally and parseTomlSafe returns {}; watchdog firing is failure.
+- Valid dot-free-key documents at 8k/16k/32k keys in an isolated child. Record runtimes and maximum memory; use a generous absolute watchdog and a repeated-run scaling check, not a flaky single millisecond ratio. Oracle: every result has exactly N keys, no watchdog and no quadratic growth trend over warmed repeated samples.
+- Node 22 minimum supported API smoke and the packed artifact: resolve the packaged installed smol-toml version and exercise both graph adapters.
+
+Stop only P0 if the candidate breaks valid fixture semantics. Do not weaken the parser or silently retain 1.6.1; report the exact input and output difference for source resolution.
+
+Separate maintenance: CI currently pins 22.14.0 (ci.yml:213; publish-package.yml:33), tests include 22.14.0/22/24/26 (audit-code-test-suite.yml:121), and publish-package.yml:177 installs npm 11.5.1. Keep Node 22.22.2, npm 11.18.0 and dev brace-expansion 5.0.12 as separately qualified patch candidates from the overnight plan. Record actual runtime and dependency-tree exposure before accepting them. Run clean npm-ci, optional-native dependency/package-content/OIDC dry-run and lint/glob/type tests as applicable. No publish, engine-support change or global installation is authorized by this planning document.
+
+## P1. One authorized, bounded source-reader boundary
+
+**Grade: mechanical-ready for cooperative, stable repository trees. Hostile concurrent same-user namespace mutation is explicitly execution/owner-gated, not solved by portable realpath.**
+
+### Edit locations and helper contract
+
+Reuse [resolveWithinRoot in pathContainment.ts:38–68](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/pathContainment.ts#L38-L68) for lexical segment containment. Do not use canonicalizeFilePath’s “realpath failed, fall back lexically” branch as an authorization decision; [pathIdentity.ts:33–58](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/pathIdentity.ts#L33-L58) is an identity heuristic.
+
+Add src/shared/io/repositorySource.ts with two thin adapters over the same validation rules:
+- readRepositorySource(root, candidate, options?): Promise<RepositorySource>
+- readRepositorySourceSync(root, candidate, options?): RepositorySource
+- RepositorySource = { text, repoRelativePath, canonicalPath, byteLength, identity: {dev, ino} }
+- options.maxBytes defaults to 1 MiB, must be a finite positive safe integer; no unbounded sentinel. A caller needing more must declare it.
+- RepositorySourceError.code is one of invalid_path, outside_root, non_regular, too_large, changed_during_read, unreadable, close_failed.
+- Test injection is a low-level filesystem/descriptor operations adapter. Remove externally supplied arbitrary “readSource(absolutePath) returns bytes” authority from the grounding boundary; tests cannot bypass authorization by returning fixture text for an outside path.
+
+Chosen algorithm:
+1. Canonicalize the root with realpath; failure is refusal. Reject empty/NUL references, URI schemes, Windows drive-relative paths and device/extended namespaces. Cross-platform absolute syntax is recognized even when tests run on another OS. A well-formed absolute path is accepted only when both lexical and physical containment hold.
+2. Resolve lexical containment against the original absolute logical root, then realpath the candidate and check physical containment against the canonical root. This deliberately accepts an absolute path through the same symlinked-root alias. In-root symlinks are supported only when their resolved target remains inside the canonical root. A symlinked root is supported. In-root submodule files remain ordinary in-root paths; out-of-root submodule links are refused.
+3. lstat/stat the resolved target and refuse known nonregular objects before open. Open read-only; where supplied by the platform, use O_NOFOLLOW on the resolved final component and O_NONBLOCK to avoid a FIFO swap hanging the open.
+4. fstat the owned descriptor. Require a regular file and matching observed dev/ino identity. Recheck canonical containment/identity before accepting bytes. Read through that descriptor in bounded chunks; count bytes actually read, not only stat.size. If the file grows beyond the cap or identity/size/mtime/ctime changes across the read, reject the whole result.
+5. Always close in finally. Preserve a primary read failure; add close_failed as secondary metadata without exposing bytes. If close is the only failure, fail the operation.
+6. Decode UTF-8 incrementally with StringDecoder after byte admission; do not return partial source on any error.
+
+This rejects static traversal and common replacement races; it is not an openat2-style sandbox. O_NOFOLLOW does not constrain all ancestors and Windows lacks identical flags. If the task includes an actively hostile same-user process swapping ancestors, do not certify this reader as confinement. Use an already-authorized isolated, stable snapshot or stop only that untrusted reading operation and request the required isolation authority. Do not silently deny all ordinary repositories or add a sandbox product to this patch.
+
+### Wire the actual readers
+
+- [charterFidelityPacket.ts:18–43, 50–80](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/charterFidelityPacket.ts#L18-L80): sliceFor calls the async reader; inspect provenance kind first. Non-file provenance emits a non-file annotation without opening a path. A refused file emits a neutral unavailable-source line, never error text containing file contents.
+- [findingGrounding.ts:258–313](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/validation/findingGrounding.ts#L258-L313): authorize before quote matching. Failure remains ungrounded; strip incoming line claims as today.
+- [citationGrounding.ts:299–318, 335–486](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/validation/citationGrounding.ts#L299-L486): preserve basename-to-corpus resolution, but authorize the resolved file even for path-only/no-quote citations. Memoize by validated canonical identity for one pass. Assignment/delivered-evidence warnings remain separate from repository authority.
+- [acquisitionEngine.ts:695–709](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/acquisitionEngine.ts#L695-L709): its synchronous normalizer callback uses readRepositorySourceSync. Keep source_read_failures and dropped-row accounting; do not weaken non-file provenance.
+
+Export only needed symbols from src/shared/index.ts. Node built-ins add no dependency. Update tests and types together rather than preserving an unsafe reader overload.
+
+### Fixtures and exact oracles
+
+Existing targets: tests/shared/finding-grounding.test.ts, tests/shared/citation-grounding.test.ts, tests/audit/charter-fidelity-executor.test.ts, tests/audit/charter-current-context.test.ts, tests/shared/analyzer-acquisition-engine.test.ts.
+
+Use a temp repo with src/in.ts, nested unique basename, a valid submodule fixture, an outside sibling sentinel, in-root file symlink, outside symlink and ancestor symlink. Exercise ../, absolute POSIX/Windows/UNC refs, ..cache, drive-relative names, non-file provenance, empty/oversized/growing files and descriptor-close exceptions. Barriers pause immediately before open and after fstat to replace target/ancestor.
+
+The integration oracle must ingest an actually bound accepted comparison and emit its fidelity packet: neither the outside sentinel nor any substring of it appears in packet, step, status, logs or normalized findings. Valid in-root/no-quote/basename/submodule cases still pass. Descriptor opens and closes balance on every branch. Platform-only FIFO/symlink tests are explicitly reported skipped when unsupported, never counted as a safety pass.
+
+## P2. Structural continuation commands; qualified shell rendering only
+
+**Grade: mechanical-ready internal contract; actual host/dialect qualification execution-or-owner-gated.**
+
+### Chosen schema
+
+Replace executable string authority with:
+- ExecCommand = { executable: string, args: string[], cwd: string }
+- CommandTemplate = { executable: string, args: (string | { parameter: string })[], cwd: string }
+- allowed_commands contains ExecCommand objects only.
+- Missing required user values such as <path> belong to command_templates and explanatory text; they are not runnable commands.
+- ShellDialect is an ephemeral renderer argument: {kind:"posix"} | {kind:"powershell", major:7, nativeArgumentPassing:"Standard"|"Windows"} | {kind:"cmd", delayedExpansion:false}. It never becomes a workflow routing field or CLI option.
+- renderShellCommand(command,dialect) returns {ok:true,text} or {ok:false,reason:"unsupported_dialect"|"unrepresentable"}.
+- Unknown dialect always uses the structured host execution interface. If no such interface exists, return a blocked continuation with the structured object and exact capability needed; do not reinterpret it as a universal string.
+
+No shell program is invoked for Node/native executables in the structured route. Existing Windows batch handling remains special: .cmd/.bat may traverse cmd, so reject unsupported percent/newline/delayed-expansion cases rather than claiming literal argv.
+
+### Exact edit set
+
+[exec.ts:384–420](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/tooling/exec.ts#L384-L420) removes the universal double-quote rule. Add command-object constructors and dialect rendering in src/shared/tooling/promptCommand.ts, imported by exec.ts; do not leave quotePromptCommandArg exported as a safe universal API.
+
+Change:
+- src/audit/cli/args.ts:56–60 renderCommand and aliases;
+- src/shared/io/stepContractWriter.ts:201–258 and 325–343;
+- src/audit/cli/steps.ts:17, 74–113, 172–192;
+- src/remediate/steps/types.ts:120–128 and stepWriter.ts:14–56;
+- src/audit/cli/functionalPreflight.ts:78–98;
+- src/audit/supervisor/operatorHandoff.ts:155–166 and quick_start at 289;
+- src/remediate/steps/prompts.ts:22–26 loaderCommand: accept argv arrays, remove whitespace splitting of a shell string;
+- src/remediate/steps/intakeResolver.ts:70, 114–116, 246–250, 437, 466, 509 and contractPipeline.ts:81–82;
+- src/remediate/steps/nextStep.ts executable test/e2e strings at 1015–1016, all loaderCommand call sites, and their downstream settings/required-test adapters. Do not convert a shell program from a user-owned test configuration into argv by guessing; preserve its declared command semantics separately.
+- src/shared/index.ts exports around 755–757.
+- canonical skills/audit-code/audit-code.prompt.md and skills/remediate-code/remediate-code.prompt.md; regenerate host assets via src/shared/hostAssets.ts:129 and existing renderer/install plan. Never hand-edit each IDE loader.
+- regenerate schemas/audit-code-v1alpha1.schema.json and any derived contract mirrors using the existing schema generator, updating contract versions consistently (audit step v1alpha2 and remediation step v1alpha2, replacing its pinned remediate-code-step/v1alpha1 at src/remediate/steps/types.ts:2–3).
+
+Audit all typed string-construction call sites exposed by the changed return types. Do not parse existing rendered commands back into argv. At each site build from the original token array. For templates, move placeholder arguments into command_templates.
+
+The shared writer’s extraFields currently spreads after allowed_commands. Write validated allowed_commands/command_templates **after** extraFields, and reject attempts to supply those keys through extras. normalizePromptBodyPaths must not rewrite embedded command-object JSON or already-escaped shell text. Normalize only declared path tokens before rendering; preserve ordinary argument bytes.
+
+### Renderer algorithms and execution qualification
+
+POSIX: single-quote every token, with each embedded apostrophe represented by closing the quote, an escaped apostrophe and reopening; empty string remains quoted empty. Reject NUL. Do not normalize generic argument backslashes.
+
+PowerShell: use call operator & plus individually single-quoted tokens, doubling embedded apostrophes. Enable only the exact PowerShell 7 native-argument modes that pass the emitted-command argv fixture. Legacy/Windows PowerShell is unsupported by this renderer; structured route remains available.
+
+cmd: intentionally support only a restricted, qualified token set (nonempty tokens composed of ASCII alphanumerics, underscore, hyphen, slash, backslash, colon, dot, equals and comma; no whitespace, percent, exclamation, quotes, control bytes or shell operators). All other cases return unrepresentable and use the structured route. Do not add a “best effort” arbitrary-string cmd quoting algorithm.
+
+Existing tests: tests/shared/exec.test.ts; tests/audit/command-rendering.test.ts; tests/remediate/command-rendering.test.ts; tests/shared/step-contract-writer.test.ts; tests/audit/steps-write-current-step.test.ts; tests/audit/host-asset-renderer-drift.test.ts; tests/shared/prompt-renders-its-contract.test.ts.
+
+Add an argv-echo fixture that writes JSON argv and a harmless side-effect sentinel. Execute the actual post-writer command through POSIX sh, qualified PowerShell modes and qualified cmd on their real platforms. Matrix: empty arg, quotes, dollar/backtick/command substitution text, percent/exclamation, spaces, Unicode, UNC paths, newline and backslashes. Oracle: exact input argv, no side effect. Unsupported cases must refuse rendering while the structured route still preserves argv. Snapshot assertions supplement, not replace, actual shell tests. A missing Windows/PowerShell runner gates those adapters only.
+
+## P3. Exclusion, bounded recovery and cleanup ownership
+
+**Grade: mechanical-ready. Automatic recovery qualification and live-run migration are execution/owner-gated per lock.**
+
+### Replace lease stealing, retain proved-dead recovery
+
+Pinned [fileLock.ts:76–172, 241–374](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/fileLock.ts#L76-L374) treats mtime as authority, reclaims .steal by age and logs removal without knowing it happened. Replace that protocol, not just its token check.
+
+LockRecord v2: {version:2, token, pid, ownerScope, createdAt}. token is a random UUID; ownerScope carries independently observed host/boot/PID-namespace identity where available. mtime/heartbeat is observability only, never proof of death.
+
+APIs:
+- acquireLock retains Promise<string> for current callers; the string is the opaque token, not inferred process identity.
+- withFileLock(lockPath, fn:(hold:FileLockHold)=>Promise<T>, timeoutMs?, logger?, options?) supplies a hold.
+- FileLockHold.assertOwned(): Promise<void>; FileLockHold.signal: AbortSignal; FileLockHold.markUnsafe(reason): Promise<void>.
+- Lost ownership throws FileLockOwnershipLostError and permanently aborts that hold. A callback’s original failure remains primary if release also fails.
+- tryReapDeadOwner(lockPath, observed, deadline) returns "removed" | "not_removed" | "refused", never void.
+
+Acquisition: atomic wx create, write complete metadata, close; on contention check deadline before expensive work, exponential 50→500 ms backoff bounded by remaining budget. Zero timeout gets exactly one create attempt and no recovery probe. Positive-timeout acquisition may spend at most min(1,000 ms, remaining acquisition budget) on the dead-owner probe. Check both budgets between each filesystem/process operation; no asynchronous unlink is started after expiration and no timed-out task is left to unlink later. Filesystem operations themselves are not magically cancelable: qualification excludes hung/network filesystems, and an uninterruptible OS I/O fault is not claimed to obey a JavaScript timer. A stale candidate or failed unlink never resets the deadline and never logs “removed”.
+
+Automatic recovery is allowed only if all of these are true:
+1. Lock metadata is well-formed v2 and belongs to the same independently observed local process-identity scope.
+2. The filesystem is qualified local storage with the required exclusive-create/unlink behavior. Initial Linux admission uses statfs on the canonical lock parent and only the explicitly tested ext-family (0xEF53), XFS (0x58465342), btrfs (0x9123683E), tmpfs (0x01021994) or overlayfs (0x794c7630) types, using the unsigned statfs type. These values come from the [Linux UAPI filesystem magic header](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/magic.h); ext2/3/4 share that ext magic, so the type is not falsely labeled proof of ext4. NFS/SMB/FUSE and unknown types refuse automatic reaping. A required local-filesystem race qualification must pass for that adapter; a type label alone is not treated as a cross-host coordination guarantee.
+3. The owner is proved absent. Initial implementation qualifies Linux with boot_id and /proc/self/ns/pid identity plus process.kill(pid,0) yielding ESRCH. Success, EPERM, unavailable identity, namespace mismatch, malformed/legacy metadata or PID reuse is ambiguous/live and is never reclaimed.
+4. Acquire an exclusive wx **non-stealable** lockPath.reap claim, then reread exact lock metadata and prove the same owner absent again. Perform at most one unlink of that observed lock, release the owned claim, and retry ordinary exclusive creation.
+5. Reaper claims are not age-stolen. If a reaper crashes, this claim prevents future automatic reaping for that lock only. Ordinary create/release of a free main lock still works and must not require acquiring the reaper claim.
+
+Why this is safe: no legitimate reclaimer deletes a live owner, so a paused owner cannot resume after its lock was reassigned. The non-stealable reaper serializes the only removal right; a remover never loops and unlinks a newly created successor. There is no recursive “reap the reaper” lease race. A reused PID is a conservative liveness false negative, not authority to delete. Linux proof failure does not turn into a Windows/hostname guess.
+
+Why not automatic everywhere: existing tokens contain pid/time/random but no machine/PID-namespace authority, and mtime is not owner death. The pinned source has no cross-platform process-start identity or OS lock primitive proving more. Windows/macOS can use ordinary exclusive locks now; their ambiguous dead owners require scoped recovery until equivalent exact evidence is implemented and tested. This is a declared availability cost, not a claim that every stale lock needs intervention.
+
+Heartbeat may remain for diagnostics, using the held descriptor’s utimes, not read-path-then-touch. Stop and await in-flight heartbeat work before release. Latch ownership mismatch and block all later writes. These checks are not “fencing”; exclusion comes from never stealing live ownership under the qualified cooperative protocol.
+
+### Durable holds and deletion
+
+[src/shared/io/artifactTreeHold.ts:13–25](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/artifactTreeHold.ts#L13-L25) is the one acquisition seam. Extend it to carry FileLockHold. Move [artifactTreeLockPath, auditToolsPaths.ts:108–118](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/auditToolsPaths.ts#L108-L118) to a sibling .audit-tools-locks/<sha256(canonical-artifact-identity)>.lock outside the exact rm target.
+
+Canonical identity: realpath the existing artifact directory, or realpath its nearest existing parent and append the missing suffix. Refuse unreadable/dangling symlink ambiguity. Reuse canonicalizeFilePath for final separator/case normalization after successful physical resolution; its case folding can conservatively over-serialize case-distinct volumes but must never authorize a file read. Never silently fall back to a different lock identity after resolution failure.
+
+Split cleanupStaleArtifactsDir into a public acquiring wrapper and cleanupStaleArtifactsDirUnderHold(artifactsDir,options,hold). The existing entry points [cleanup.ts:46–93](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/cli/cleanup.ts#L46-L93), cleanupCommand.ts:107 and nextStepCommand.ts:345 revalidate eligibility under this same hold. Pass the hold to commit/promotion/cleanup; never reacquire recursively.
+
+Wire assertOwned immediately before persistence in [lockedJsonStore.ts:120–153](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/lockedJsonStore.ts#L120-L153), fileLock.ts lockedJsonMutate:396–420 and fold commit. [nextStepHelpers.ts:3608–3631](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/cli/nextStepHelpers.ts#L3608-L3631) must not commit-on-throw after ownership loss or unsafe execution. Preserve state and submissions instead. Ordinary executor failures still use the current commit-on-throw behavior.
+
+### Recovery operator and migration
+
+If acquisition times out, return lock_busy with lock identity and diagnostic owner state. Do not label busy as corrupt. If a v2 dead owner cannot be reaped, return lock_recovery_required only for that lock.
+
+Exact manual recovery procedure: stop the named run’s CLI holders and direct host producers; verify no command is still writing the guarded tree; copy the lock, reaper claim and retained artifacts to a private recovery location; compare the observed lock token once more; remove only those named stale control files while quiesced; restart one new-version invocation. Do not remove artifacts, ledgers or unrelated locks. If absence cannot be established, keep the lock and stop that workspace’s mutation.
+
+Upgrade/rollback requires quiescence because old and new lock paths/protocols cannot exclude each other. Detect surviving legacy in-tree lock files and refuse mutation until this migration is completed. Never automatically delete a live old lock. Roll back only after new holders stop, with new records/recovery snapshots retained.
+
+### Tests
+
+Extend tests/shared/fileLock.test.ts, tests/shared/fileLock-clock-seam.test.ts, tests/shared/locked-json-store.test.ts, tests/audit/artifact-tree-lock.test.ts, tests/audit/artifact-tree-lock-single-surface.test.ts, tests/audit/one-lock-hold-per-next-step.test.ts and tests/audit/cleanup.test.ts.
+
+Replace old “mtime old implies steal” expectations (fileLock.test.ts:152, 183, 320, 607) with:
+- suspended live owner with expired mtime: second writer times out, maximum simultaneous mutators = 1;
+- same-scope dead v2 owner: exactly one reaper removal, one winner, no lost updates;
+- PID reused/live, EPERM, foreign namespace, malformed/legacy owner: no unlink;
+- reaper crashes at claim creation/before unlink/after unlink: later live acquisition/release remains safe; only blocked reaping requires scoped repair;
+- release paused before unlink, successor attempts acquisition, stale sidecar, slow failed unlink and deadline expiration: no successor deletion and no false “removed” log;
+- ownership loss injected before normal store persist and commit-on-throw: zero subsequent authoritative writes;
+- aliases map to one lock; cleanup paused after eligibility cannot delete a changed active tree; lifecycle lock survives rm.
+
+No timing-only race tests: use child-process/barrier acknowledgements and independently count critical-section entries.
+
+## P4. Submission capture, no-clobber restoration and hand recovery
+
+**Grade: mechanical-ready on the P3 hold; direct host producer behavior and live-state migration execution/owner-gated.**
+
+### Capture ownership and publication primitives
+
+Replace [foldTransaction.ts moveFile/stage/recovery/commit, lines 172–429](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/cli/foldTransaction.ts#L172-L429). Existing fixed lane staging slots and copy/unlink fallback are not retained.
+
+Add narrow helpers, not a generic transaction library:
+- captureBoundSubmission(artifactsDir,lane,hold): Promise<absent | OwnedSubmission>
+- OwnedSubmission = {lane,boundPath,entryDir,capturedPath,snapshotPath,contentHash,byteLength}
+- publishPreparedExclusive(snapshotPath,destination): Promise<"published"|"occupied">; other errors are typed PublicationUnsupportedError/IO failure.
+- restoreOrPreserve(submission,hold): Promise<{disposition:"restored"|"preserved",recoveryPath,reason?}>.
+
+Capture algorithm:
+1. Under hold, first reconcile all surviving legacy/new staging for the lane. A surviving unresolved entry is not reusable. If the bound path is absent, return absent without creating directories.
+2. Create a private unique entry directory under submission-staging using mkdtemp, mode 0700 where supported. Record lane and bound identity in an immutable metadata file; do not derive arbitrary paths from decoded untrusted filenames.
+3. Atomically rename the bound path to entryDir/captured.json. The destination is unique and tool-owned. ENOENT at this source operation means absent. EXDEV/unsupported rename preserves the source and refuses capture; there is no copy/unlink of the replaceable bound path.
+4. Open the captured file by descriptor, validate regular-file/type/size and copy into a distinct private snapshot inode. Default cap 16 MiB; reject oversize without deleting captured bytes. Hash exactly the read bytes, flush/close and read back the snapshot. Snapshot and original captured inode remain separate.
+5. Parse/apply only the verified snapshot. Never hard-link captured.json: a host may still hold that inode open. Changes observed during capture are refusal/preservation, not acceptance.
+6. Cooperative submission contract requires a complete payload published atomically and not modified in place after publication. The tool can preserve a concurrently open inode but cannot manufacture a coherent historical snapshot of arbitrary hostile writes. An observed violation stops that lane, keeps both buffers and requires producer quiescence. Do not represent instruction prose as enforcement against hostile processes.
+
+Restoration algorithm:
+- Link the prepared, closed snapshot to the bound destination using fs.link. EEXIST is occupied and leaves the current bound bytes untouched.
+- On success, the restored bound inode is now host-visible; stop treating it as an immutable private master. Retain the separately captured/recovery copy until recovery is verified.
+- On occupied, preserve the snapshot in the entry directory or a unique private quarantine destination and record that the newer bound submission wins. Never retry by overwrite, rename or force-copy.
+- EXDEV, ENOTSUP, permissions or disk failure means preserve/refuse. Do not fall back to COPYFILE_EXCL, which does not provide an atomic completed-file publication.
+- If cleanup unlink fails, keep the entry registered and return preserved, never report “moved” and reuse its slot.
+
+[Node 22 link semantics](https://nodejs.org/download/release/v22.0.0/docs/api/fs.html#fspromiseslinkexistingpath-newpath) provide the exclusive destination creation primitive; fs.rename’s replace semantics and [writeFileAtomic, json.ts:100–124](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/json.ts#L100-L124) remain appropriate only for owned intentional replacement.
+
+### Fold and quarantine integration
+
+StagedSubmission references the owned entry/snapshot. Both recoverStagedSubmissions and the unapplied arm of commitFold call restoreOrPreserve. No separate weaker rollback path.
+
+All quarantine call sites in nextStepHelpers.ts (651, 681, 846, 907, 961, 1003, 1029, 1277, 1510) must receive an OwnedSubmission or first capture under the same hold. A classifier may not read a replaceable bound path and later quarantine whatever happens to be there. Update quarantineSubmissionFile to require an owned source, preserving its honest nullable path/sourceSurvived outcome. A failed quarantine leaves the entry unreusable and recoverable.
+
+Keep commit ordering: write core bundle; write pending snapshots; delete applied staged payload; append accepted event; shift completed transaction entry. Do not casually reverse delete/ledger order. Existing content-hash duplicate protection and accepted-ledger suppression remain active on restart and same-transaction retry. Retain metadata sufficient to identify leftovers; an accepted event is never inferred from a failed copy. A failed discard/delete is not acceptance.
+
+Legacy fixed-slot files are imported once while quiesced: copy/verify into unique private entries without replacing originals, verify lane bindings, then remove only verified originals. Unknown filenames are preserved and reported, not skipped before terminal deletion.
+
+### Hand recovery chosen behavior
+
+[handRecovery.ts:100–251](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/submission/handRecovery.ts#L100-L251) currently overwrites then rolls back by path; a new host submission can be destroyed by either half.
+
+Normal recovery now **refuses an occupied bound destination**. It does not acquire permission to replace it from the existence of a tool lock. Replacing an occupied host payload requires stopped producers and an explicit operator recovery action: preserve/verify the old payload in private recovery storage, remove only that quiesced bound payload, then rerun normal recovery. No unconditional overwrite flag is added.
+
+For absent destinations, use the same prepared snapshot/link helper and a narrow durable hand-recovery intent:
+1. Under the artifact/lane consumption hold, validate with the existing normal lane validator; prepare private snapshot and record intent {version:1,run_id,submission_id,lane,content_sha256,snapshot_relative_path}.
+2. Publish exclusively. Occupied leaves B unchanged and retains A privately; return submission_rejected with no successful recovery event.
+3. Append recovered_by_hand using existing content_sha256 in [submissionLedger.ts:142–192](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/submission/submissionLedger.ts#L142-L192). Suppress duplicate records by (run_id,submission_id,kind,content_sha256) under the existing ledger lock.
+4. Remove the intent only after the append succeeds. A failed append does not unlink or overwrite the bound path. It returns pending recovery with the private snapshot location.
+5. Every tool consumption first reconciles outstanding intents under the hold. Bound bytes equal the intended hash: finish the idempotent ledger event, then allow consumption. Bound absent: preserve the snapshot and report pending, without pretending it landed. Different B: preserve A and record supersession/refusal; never label B hand-recovered. An unreadable intent or ledger blocks that lane only.
+6. No consumer may ingest the intended payload as a clean first submission while its recovery intent remains unresolved.
+
+Callers: audit recoverSubmissionCommand.ts:198 and remediation index.ts:581–605; share the same helper and the same hold hierarchy. Existing remediation recovery ingestion in steps/recoverIngest.ts is a different evidence operation; retain its landed-commit semantics.
+
+### Tests and oracle
+
+Extend tests/audit/submission-staging.test.ts (existing cases 59, 76, 105, 144, 164, 181, 204, 294, 334, 380), tests/shared/hand-recovery-uses-the-same-validator.test.ts, tests/audit/recover-submission-mis-route.test.ts and terminal promotion tests.
+
+Required sequence: stage A; publish B; fail before apply; fail quarantine; restart twice; complete/promote. Oracle: B byte-identical, A recoverable through a returned existing path, A never resubmitted over B, accepted count unchanged except one true acceptance, retained entry never reused. Inject link EEXIST, EXDEV, ENOTSUP, wrong-byte copy, read/write/close/unlink failures and an open host writer. Kill at each core/deletion/accepted-ledger boundary and use the real restart path.
+
+Hand fixtures: validator rejection, absent publication, occupied B, ledger failure, crash after link, crash after ledger before intent removal, host B during failed recovery, malformed intent. The old tests asserting overwrite-and-restore are intentionally replaced with occupied-refusal and recoverability assertions. No payload disappears or is reported at a nonexistent quarantine path.
+
+## P5. Verified, retryable report publication and terminal cleanup
+
+**Grade: mechanical-ready on P3/P4. Old complete-tree and live-producer migration are execution/owner-gated.**
+
+### Authority and receipt
+
+Source: [artifacts.ts:517–784](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/io/artifacts.ts#L517-L784), [nextStepHelpers.ts:413–434](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/cli/nextStepHelpers.ts#L413-L434), and [frictionCapture.ts:288–335](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/io/frictionCapture.ts#L288-L335).
+
+Keep JSON authoritative and Markdown its rendered companion. Do not introduce a generation pointer. Add one **audit-promotion/v1 receipt**, committed last, containing run identity, canonical artifacts identity, a sorted manifest of required promoted/recovery files with byte lengths and SHA-256, and source-member absence classifications captured at source reads. This receipt only proves completeness of named bytes; it cannot make two renames physically atomic.
+
+A reader sees either a verified complete receipt or an explicit in-progress/incomplete condition. Raw files can briefly show different generations; no CLI/host step may call that complete. Preserve the previous complete files in a private uniquely named backup directory before replacing any of them. Retain at least that previous verified set until the new receipt is fully verified. Do not delete historical recovery payloads as incidental cleanup.
+
+Helpers:
+- collectPromotionMembers(artifactsDir,hold): Promise<PromotionMember[]>
+- prepareVerifiedPromotion(members,destination,hold): Promise<PreparedPromotion>
+- publishPreparedPromotion(prepared,hold): Promise<PromotionResult>
+- verifyPromotionReceipt(outputDir,expectedIdentity?): Promise<complete | incomplete | missing>
+- PromotionResult = {publication:"none"|"partial"|"complete", preservation:"complete"|"incomplete", cleanup:"not_attempted"|"retained"|"removed", failures:typed[]}. Keep old booleans only as derived compatibility fields during the branch, remove ambiguous callers before merge.
+
+### Ordered algorithm
+
+1. Under the lifecycle hold, revalidate terminal eligibility and check unresolved execution/recovery markers. Snapshot source membership: report, findings, feedback, ledger, all friction files, staging/quarantine/hand-recovery payloads and metadata. Worker-appended files require quiesced producers before deletion; if quiescence is unknown, promotion may complete but cleanup remains retained.
+2. Read each source through its owned descriptor. Only ENOENT from that exact source read can classify an optional member absent. A destination/copy/readback ENOENT is failure. Report and findings are required for a new-format completed run.
+3. Stage each member into private unique storage on the destination filesystem. Verify the exact bytes or streamed hash/length against the source; for these existing bounded artifact sizes prefer the existing Buffer.compare standard. Wrong-byte “successful” copies fail.
+4. Preserve and verify the previous complete set before replacing canonical destinations. On first migration with no receipt, snapshot and byte-verify every preexisting destination as a legacy backup too, without calling that legacy set complete. On any preservation failure, replace nothing and retain all sources.
+5. Intentionally replace canonical JSON then its derived Markdown using the existing atomic writer/rename discipline. Preserve all diagnostics/recovery payloads in private archive destinations outside the deleted tree. Friction archiving must verify bytes, not merely compare counts.
+6. Read back every destination and write the receipt atomically last. A crash after one replacement leaves the old receipt mismatching and therefore incomplete. Retry from source/prepared bytes; do not infer completion from the report alone.
+7. Only after complete preservation, receipt verification and producer quiescence may rm remove artifactsDir. The sibling lifecycle lock remains held throughout. Removal failure returns complete publication plus retained cleanup; it does not invalidate the report or claim deletion.
+
+Retained recovery archives stay private and gitignored; no secret-containing quarantine payload is moved into a public report or source-tracked path. Permission qualification failure retains the original tree instead.
+
+### Real readers and writers to change
+
+- promoteFinalAuditReport and isWorkingDirFullyPromoted use the same manifest/receipt verifier; a verify-only mode must be genuinely read-only.
+- promoteCompletedReport never uses report-text equality as a complete fast path while source exists. It invokes verified retry; after source removal it accepts only a valid receipt for the expected identity.
+- cleanupStaleArtifactsDir also preserves retained recovery data for not_started state; “no audit started” is not proof that quarantine is empty. --force is an explicit destructive operator action; do not invoke it automatically to bypass preservation.
+- [remediation nextStep.ts:291–361](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/steps/nextStep.ts#L291-L361) default input discovery must not fall back to promoted Markdown when its canonical JSON/receipt is incomplete. Return the existing input-not-ready/blocked route for that canonical pair. Independently user-supplied noncanonical reports retain their explicit-input semantics.
+- [resynthesizeCommand.ts:74–78](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/cli/resynthesizeCommand.ts#L74-L78) currently writes both canonical files directly. Route it through the same under-hold publisher and prior-set preservation. Do not trust comments suggesting a sanctioned publisher already exists: the pinned command bypasses it.
+- Keep autonomous remediation leftovers on their existing separate paths; do not reintroduce canonical-pair overwrite from remediation.
+
+Legacy branch is fixed: if a pre-upgrade run has only a human report, it can be presented as a legacy report but is not upgraded to a complete JSON-authoritative receipt. Keep the original tree. If the tree was already deleted and only a legacy promoted report remains, return legacy/unverified completion evidence and require explicit input/migration rather than fabricating the missing JSON or a successful receipt.
+
+### Tests
+
+Existing: tests/audit/seam-atomic-promote-findings.test.ts, tests/audit/cleanup-promotion-parity.test.ts, tests/audit/cleanup.test.ts, tests/audit/audit-code-completion-promote.test.ts, tests/audit/resynthesize-command.test.ts, tests/remediate/pipeline-command-defaults.test.ts, tests/remediate/intake-resolver.test.ts.
+
+Revise the old missing-findings “promoted:true and clean” case to the explicit legacy branch. Inject failure at every member read, archive, byte verification, first/second canonical replacement, receipt write and rm. Distinguish source ENOENT from destination ENOENT. Crash/restart using terminal next-step after the report already matches but findings/recovery archive does not.
+
+Oracle: no source-only member is deleted; old complete generation remains recoverable; incomplete/mixed bytes never pass the receipt; retry reaches one complete set; true post-cleanup reentry works; report-only legacy data is preserved; package P4’s A survives completion and B remains authoritative.
+
+## P6. Native child lifetime, complete output and one acquisition budget
+
+**Grade: bounded independent P6 source-contract pass.** The source changes below are selected, not alternatives for the implementer to choose. Actual platform qualification remains execution-gated. No implementation or runtime pass is claimed.
+
+### P6.0 First prerequisite: make the inherited baseline safe
+
+Before running any affected Windows baseline, repair the test itself. [runtime-command-bounded-wait.test.ts:99–129](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/tests/audit/runtime-command-bounded-wait.test.ts#L99-L129) passes fabricated PID 4242 into a real taskkill branch in [runtimeCommand.ts:232–245](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/runtimeCommand.ts#L232-L245). HOME/cache isolation does not protect that PID’s owner.
+
+Replace that unit test with a nonexecuting injected ProcessControl adapter. Its fake identities are opaque test tokens and may never reach process.kill, ChildProcess.kill, taskkill, a Win32 termination call or any OS process lookup. Unit tests assert requested control operations only. Real termination fixtures create and own their actual processes separately. Remove the assertion that the direct POSIX child represents the whole tree.
+
+Replace the _getActiveHandles()/Timeout count at lines 81–97 with an external fixture launcher observing actual CLI process exit. Keep the existing eventual-timeout regression, but do not count its 60-second ceiling as the new 3-second cleanup proof. This prerequisite is a test-harness repair before baseline execution, not a permission to run the unsafe original.
+
+### P6.1 One request object and one safety-bearing result
+
+Put the shared contracts and budget helpers in **src/shared/tooling/executionContext.ts**; keep public runTrackedAsync in exec.ts and put the platform implementations in **src/shared/tooling/processLifecycle.ts**. Resolve executable/platform argv exactly once before entering processLifecycle. Neither a child helper nor a callback re-runs resolveExecArgv.
+
+Keep the synchronous runTracked return truthful: introduce RunTrackedSyncResult containing its existing legacy fields, and let the async RunTrackedResult extend the shared base with the fields below. Do not fabricate synchronous tree/cleanup proof to satisfy the new async type, and do not migrate unrelated synchronous callers in this package.
+
+The required async seam is **ExecutionRunner = (request: ExecutionRequest) => Promise<RunTrackedResult>**, with:
+- request.argv: readonly nonempty string[]; request.cwd: absolute string; optional request.env and request.input (string or Buffer, preserving NUL bytes).
+- request.context: ExecutionContext, required.
+- ExecutionContext = { budget: ExecutionBudget; signal?: AbortSignal; timeoutMs: positive finite number; writeScopes: readonly CanonicalScope[] | null; ownedScratch: readonly string[]; treePolicy: "ordinary" | "all_descendants"; output: OutputPolicy; hold?: FileLockHold; scopeLease?: ExecutionScopeLease }.
+- CanonicalScope = { path: absolute canonical physical path; kind:"tree"|"file" }. null means a caller-audited nonmutating query. An empty array is rejected; it is not a read-only default.
+- ExecutionBudget = { wireDeadlineAt:number; expiresMonotonicMs:number; clockId:"this-process"; remainingMs():number }. All in-process descendants share the same budget instance; functions lower their local timeout cap without minting a new budget.
+- OutputPolicy = {mode:"complete"; maxBytesPerStream:positive finite integer} | {mode:"tail"; maxBytes:number; maxLines:number; overflow:"truncate"}. Tail mode is presentation only; it is never a machine-output parser input.
+- An injected runner receives this exact request and returns the full result. Test fakes must supply the new fields explicitly; missing fields are failure, not inferred success.
+
+RunTrackedResult retains **status as the actual requested command’s exit code**, even if it is 0 and output or cleanup later fails. The PowerShell/guardian exit code never replaces it. It also carries:
+- argv, cwd, duration_ms, stdout, stderr, signal and the original error;
+- admission:"not_started"|"helper_created"|"command_started";
+- output_complete:boolean and output_truncated:boolean;
+- cleanup:{state:"not_started"|"confirmed"|"unconfirmed"; coverage:"none"|"posix_group"|"windows_job"; reason?:stable code};
+- first_failure?:{code,message}; secondary_failures:readonly {code,message}[];
+- invocation_id and scope_lease_id when a writing lease exists.
+
+First failure is latched once: timeout, abort, output overflow, spawn/protocol failure or external command termination. Secondary cleanup/receipt errors never overwrite it. A helper created before requested-command admission is a real created process: cleanup:not_started is permitted only when **no helper or target process was ever created**. Lack of a direct-command result prevents ordinary command success but does not prevent independently confirmed job/group cleanup after cancellation.
+
+Add two shared, pure predicates:
+- usableCommandOutput(result, acceptedExitCodes): no primary execution failure, output_complete=true, and actual status in acceptedExitCodes.
+- completedOwnedCommand(result, acceptedExitCodes, context:Pick<ExecutionContext,"treePolicy"|"output">, platform): apply the actual request’s explicit output policy, require no primary/error failure, require an accepted actual status, and require confirmed cleanup at that context’s coverage. Every P6.8 projection passes this actual context; the predicate must not infer policy from result flags.
+
+For complete-mode requests the second predicate requires output_complete=true and output_truncated=false; either incompleteness or truncation refuses success. For a tail-mode request, intentional truncation may pass only with accepted actual status, no primary/error failure and confirmed required coverage. output_truncated remains visible. Preserve the immutable {treePolicy,output} request-policy snapshot alongside an observation reused by combined/terminal acceptance (execution_policy on CombinedTestResult and FinalGateCommandResult); a receiving gate cannot relabel a failed complete capture as tail output. usableCommandOutput remains strictly complete-only. A writing command may never pass solely on status=0. A genuine read-only query may use complete output with unconfirmed cleanup; it must not create a repo mutation prohibition just because its platform lacks strong containment.
+
+**Selected policy for existing callers:** all current CLI-owned commands in this package use treePolicy:"ordinary". On qualified POSIX that means the current process group, on qualified Windows the owned no-breakaway Job Object. This preserves ordinary operation; it is not a claim of confinement against every descendant. Only an explicitly requested strict operation sets all_descendants. No current ordinary caller is silently changed to strict. There is no all-descendant-certified backend in this bounded patch: strict admission returns execution_unavailable before the target starts. Ordinary descendants changing session/group, including daemonizing tools, and Windows launches through out-of-job services/WMI are outside the ordinary proof. If such an escape is observed, latch cleanup unconfirmed and retain the writing scope. Do not turn a group-only proof into a strict pass.
+
+### P6.2 Exact callback, cancellation and hold wiring
+
+Replace, do not overload with an unsafe fallback:
+- [AcquisitionRunner, acquisitionEngine.ts:262–275](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/acquisitionEngine.ts#L262-L275) with ExecutionRunner.
+- [BinaryCommandRunner, binaryAcquisition.ts:69–81](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/binaryAcquisition.ts#L69-L81) with ExecutionRunner.
+- [InstallToCacheOptions.run, analyzerDeps.ts:177–211](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/tooling/analyzerDeps.ts#L177-L211) with ExecutionRunner.
+- [GitSpawn/GitSpawnResult, disposition.ts:171–200](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/extractors/disposition.ts#L171-L200) with that same request/result; retain command-purpose labeling at the caller, not a reduced runner result.
+- GateRunner at finalGate.ts:162–168 becomes ExecutionRunner. Resolve package_dir to effective cwd before forming the request. terminalUnit.execute accepts the same request and cannot discard its context.
+- LandingGateVerifyOverrides.run at closeVerifyLandingGates.ts:84–91 accepts {request,role:"landing-gate"} and returns the safety-bearing ProjectTestAdmissionOutcome; discovery still owns admission.
+
+Thread one execution context through:
+1. nextStepHelpers.ts’s withArtifactTreeHold callback at 3520, AuditNextStepCtx, executeAndRecord at 2317–2395, runSingleAdvanceStep, [AdvanceAuditOptions, advanceTypes.ts:20–143](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/advanceTypes.ts#L20-L143), AuditExecutorCtx and [EXECUTOR_RUNNERS](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/executorRunners.ts#L45-L170).
+2. Runtime validation specifically: EXECUTOR_RUNNERS → runRuntimeValidationExecutor(bundle,root,executionContext) at ingestionExecutors.ts:304–348 → runCommand({argv,cwd,context}). Deduplicated runtime results retain coverage/completeness; no cache of an unsafe result becomes success.
+3. ExternalAcquisitionAdvanceOptions → resolveBinaryCandidates and runAcquisitionEngine, including runner probes, fetch, extraction and report reads. The executor currently passes neither deadline nor signal at the final seam; add both through context.
+4. Remediation [nextStep.ts:3672–3706](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/steps/nextStep.ts#L3672-L3706): the phase-lock callback receives P3’s FileLockHold and adds it to advanceUnderPhaseLock deps and OrchestratorOptions. Pass it to close/final/required/landing gates and their callbacks.
+5. StateStore.withActiveOperator at store.ts:412–416 supplies that same hold to recovery ingestion; it does not create an unrelated uncancellable execution context.
+
+Compose caller abort and hold.signal once with a small disposable signal combiner; the returned dispose removes its forwarding listeners on every terminal branch. A hold abort is checked before every new child/fetch and before resume of a suspended helper. On unconfirmed writing cleanup, synchronously latch the active hold unsafe, ensure the already-persisted scope lease remains unresolved, then return/throw the typed safety failure. A coverage-status record alone cannot authorize the current fold to continue. Both the normal and commit-on-throw paths at nextStepHelpers.ts:3608–3631 must see the latched hold and refuse authoritative persistence. No later cleanup/promotion runs on that hold.
+
+An entrypoint without an existing hold must explicitly create its own ExecutionContext/budget; the internal runner never silently invents a null write scope or uncancellable operation.
+
+### P6.3 Discoverable, atomic cross-invocation admission
+
+Implement **src/shared/io/executionOwnership.ts** using the P3 lock and existing atomic JSON writer. This is a short admission/recovery store, not a scheduler or worker roster.
+
+Authority: canonical **resolveAuditCodeStateDir()/execution-ownership/v1/** for both CLIs, with registry.json and registry.lock plus private invocations/<uuid>/ directories. It is outside every repository artifactsDir/extraction cleanup target. The existing state-dir override remains available to the isolated test harness; all fixture CLIs participating in one scenario receive the same value.
+
+Prevent accidental split authorities: at each canonical repository root, atomically establish .audit-tools/execution-namespace.json = {version:1,control_root:canonical authority}. At a shared binary/analyzer cache root use .execution-namespace.json. Include **every canonical common Git directory** in namespaceRoots and atomically establish/check **<commonGitDir>/audit-tools-execution-namespace.json** using that same no-overwrite protocol before admission. Resolve the actual common directory through the trusted read-only Git probe (git rev-parse --git-common-dir, resolving a relative answer against that probe’s cwd and then realpath); never infer it from the presence or name of .git. Use the same effective Git path configuration as the operation. This covers linked worktrees and bare repositories; linked worktrees share repository data ([Git worktree details](https://git-scm.com/docs/git-worktree#_details)). Worktree, common-Git and cache bindings must all agree. An existing differing binding is a coordination_namespace_mismatch for mutation, never silently overwritten or followed to an untrusted directory. All relevant roots must agree before admission. Namespace invariant: any two operations with overlapping declared scopes must discover the same namespace authority or refuse mutation. Per-root bindings cannot certify disjointness merely because they were created under different state roots. resolveNamespaceAgreement(namespaceRoots,writeScopes) returns namespace_scope_ambiguous when a common authority for an overlapping/parent-child non-Git scope cannot be established; it must not admit such a case as unrelated. Existing conflicting ancestor/descendant bindings are namespace mismatches. Ordinary reads and genuinely unrelated authorities remain available.
+
+These tiny bindings are excluded from artifact/version/scratch deletion; a cleanup target containing one must preserve it or refuse. Changing a namespace is a quiesced migration, never a per-command escape. Reading and unrelated roots are still available. This coordinates cooperative invocations using the same account and configured authority; it is not protection against a user deliberately deleting control files.
+
+Registry v1 is a strict object keyed by lease UUID. Each lease records:
+- owner token/process-identity scope, sorted canonical writeScopes, ownedScratch paths, phase:"prepared"|"active"|"uncertain";
+- child entries keyed by invocation UUID with phase:"starting"|"helper_created"|"command_started"|"cleanup_confirmed"|"not_started"|"uncertain";
+- command digest and nonsecret purpose label, backend/coverage, created timestamp, observed identities and stable failure codes.
+Do not persist argv/environment/secret report bytes in registry.json.
+
+Exact API:
+- prepareExecutionScope({writeScopes,ownedScratch,owner,namespaceRoots,budget,signal}): Promise<ExecutionScopeLease>
+- activateExecutionScope(lease): Promise<void> persists lease phase active **before** any callback may write outside control storage, including callbacks that spawn no child.
+- startOwnedInvocation(lease,invocationId): Promise<void> writes starting **before** process creation.
+- markInvocationStarted(lease,invocationId,observation): Promise<void>.
+- markExecutionUncertain(lease,invocationId,reason): Promise<void>.
+- finishOwnedInvocation(lease,invocationId,evidence): Promise<void>.
+- settleExecutionScope(lease): Promise<void>, removing the lease only after every created process has qualifying cleanup evidence and callback-owned writes/cleanup are finished.
+- assertScopesAdmissible(scopes,{ownLease?}): Promise<void>; withExecutionScope(input,fn) is the finally-owning wrapper over these operations.
+
+**Every registry mutation** (prepare, activate, start, mark-started, mark-uncertain, finish, settle, recovery and removal) takes the same registry.lock, rereads the current strict registry, validates the lease UUID/owner token and permitted phase, changes only the owned entry, and commits before releasing the lock. Never write a snapshot read before locking; atomic file replacement alone does not prevent lost updates between disjoint leases. Read-only inspection may use a snapshot but cannot feed an unguarded later write.
+
+prepareExecutionScope takes registry.lock under this rule, checks every prepared/active/uncertain **other** lease for overlap, and writes the new prepared lease under that same hold. It then releases the metadata lock before any command runs. Therefore two simultaneous overlapping admissions cannot both pass; unrelated roots/scratch can run concurrently. A live overlap returns execution_scope_busy; uncertainty returns execution_scope_unsafe. No retry counter, expiry lease or PID-death heuristic steals an execution lease.
+
+Overlap is segment-aware over canonical physical paths: equal tree, parent tree/descendant tree or file-in-tree overlap; distinct files do not overlap; repo is not a prefix match for repo2. Resolve aliases with P3’s successful physical identity rules. Every known write location is declared, including repository worktree/common git directory, explicit temp index and selected cache/scratch. Child-specific cache uncertainty retains that cache lease; it aborts the current hold but does not fabricate an unconfirmed repository writer after the repository operation has stopped its own known writes and has no unresolved in-scope child. A declaration coordinates known effects; it is not an OS sandbox for arbitrary repository commands.
+
+Lock order is existing artifact/phase hold → registry.lock; registry operations never acquire artifact/phase locks and never run user callbacks under registry.lock. A parent operation reuses its verified in-process lease for sequential child commands whose scopes are a subset. A separate disjoint cache/scratch operation obtains its own short-lived lease before its first write; its request carries that lease explicitly. A child process cannot acquire an exemption by an environment variable. No lease expands after launch: reserve the union for that operation before its first write, or create a separate disjoint operation. An overlapping nested operation must use the already-verified parent lease rather than reacquire and deadlock.
+
+Crash transitions:
+- withExecutionScope awaits activateExecutionScope’s persisted active transition before invoking any mutating callback. No callback runs under registry.lock. Activation failure invokes no callback.
+- only **never-activated** prepared state with no starting child can be released after the qualified original owner is proved dead and preparation wrote nothing outside owned control storage. A no-child callback crash after activation remains unresolved until its filesystem effects are reconciled; absence of a starting child does not turn active back into prepared.
+- starting includes the create-before-identity-recording window and is unresolved after crash.
+- helper_created/command_started/active after owner disappearance remain unresolved; a dead recorded leader is not proof descendants are gone.
+- cleanup_confirmed plus confirmed completion of callback-owned writes can settle idempotently.
+- a failed registry update after creation leaves the earlier starting record in force, latches the hold unsafe and returns failure. It never “forgets” a child because the PID field did not persist.
+- registry/control corruption or unavailable private storage refuses the affected mutation; it cannot produce a read-only failure purely because a writing backend is absent.
+
+Entry and pre-mutation wiring:
+- audit cmdNextStepBody (nextStepCommand.ts:330–345), withArtifactTreeHold mutation consumers, cleanup/promotion and executeAndRecord use withExecutionScope around the entire mutating operation, reserving canonical repository/common-Git/artifacts scopes before cleanup or state/source writes. A separate check followed by an uncoordinated write is prohibited. Children reuse that operation's lease where their scopes fit; a disjoint cache operation reserves its own lease. A read-only status path never obtains this writing lease.
+- remediation decideNextStepLoop/advanceUnderPhaseLock (nextStep.ts:3653–3706), StateStore.withActiveOperator and required-test ingestion similarly reserve their entire mutation region through withExecutionScope under the existing phase/hold ordering. Status/inspection remains read-only. This prevents another process from admitting an overlapping writer between a preflight check and a Node-side state write.
+- each writing runner request either carries the active verified lease or obtains a child-operation lease before startup.
+- [worktreeContentId, gateCommands.ts:363–418](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/steps/gateCommands.ts#L363-L418) reserves the repo/common-git scope and one unique private index directory for the **whole** read-tree/add/write-tree sequence. It is not a null-scope query. Replace the PID/time filename with a private invocation-owned directory. Its finally removes the index only after cleanup confirmed; uncertainty retains the index and lease. A null diagnostic result does not override that retention.
+
+Recovery never signals a stored PID/PGID. A live adapter may finish and publish qualified evidence for its own lease. After loss of that adapter, reconcile existing verified terminal evidence plus filesystem state, or require the operator to stop/verify the exact affected writers and acknowledge scoped recovery. Do not auto-clear because only the recorded owner/leader is absent. Other scopes and read-only inspection remain available.
+
+### P6.4 POSIX: a live group guardian, never a late numeric group kill
+
+Ship **scripts/shared/posix-group-runner.mjs**. The parent launches this fixed package-owned Node helper with detached:true, target stdout/stderr/stdin pipes and a separate Node IPC channel. It starts in its own session/process group; the target is launched only after a nonce-bound ready/ack exchange. Bootstrap environment is trusted (no NODE_OPTIONS/NODE_PATH); target environment is the caller’s separate environment.
+
+The guardian is the stable lifetime anchor and never changes group or exits while normal cleanup is in progress. It launches the requested target with detached:false and only stdio 0/1/2 inherited; the IPC channel must not be inherited by the target. Install signal/control handlers before announcing ready. If disconnected or expired before ack, no target starts.
+
+**Only the guardian signals, using process.kill(0, signal) against its own current group.** The parent sends stop over its retained IPC channel; IPC disconnect/parent death also requests stop. The parent never sends a signal to guardian.pid, a target PID or -pgid, and it does not use POSIX ChildProcess.kill as a late escalation. This avoids the numeric-identifier reuse problem identified in [Node 22.14 Unix process.c](https://github.com/nodejs/node/blob/v22.14.0/deps/uv/src/unix/process.c#L1009-L1025). A zero PID selects the caller’s current group rather than a cached ID ([Linux/POSIX kill semantics](https://man7.org/linux/man-pages/man2/kill.2.html)).
+
+Guardian protocol:
+1. Receive/validate ExecutionRequest data from its private request file; ready/ack and stop travel over IPC with protocol version, invocation ID and nonce. Reject extra/invalid fields. Never reconstruct a shell command.
+2. Write direct-result.json atomically when the requested target exits, preserving its actual status/signal/spawn failure. Keep the guardian alive. Target exit, even with closed stdio, does not establish tree cleanup.
+3. On abort/timeout/overflow/control disconnect, record stop state and send SIGTERM to its own group once. Its own SIGTERM handler latches the stop and survives this signal; it cannot recursively start another stop. At +2,000 ms on the guardian’s nonrenewable cleanup clock, it invokes process.kill(0,"SIGKILL"), including itself. Any error before self-kill is recorded if possible and remains uncertainty; a successful signal return is not proof all members are gone.
+4. On normal target exit, atomically record the direct outcome and use immediate self-group SIGKILL to end remaining ordinary children and the anchor. This is a deliberate ownership behavior change: commands do not leave same-group background services running after their main command has returned. The requested exit status remains distinct from the guardian’s expected SIGKILL.
+5. Parent joins the direct result, stream completion and guardian exit with an **observation-only**, current-invocation group-absence probe. ESRCH after the anchor has exited can establish posix_group cleanup; EPERM, group still present, identifier-reuse ambiguity or a missing required protocol observation is unconfirmed. The probe never authorizes a subsequent signal. A reused numeric group can at worst retain uncertainty; it cannot be killed by this process.
+6. If the guardian is paused/hung or unexpectedly dies before executing the protocol, the parent closes IPC, detaches/unrefs owned handles at the deadline and returns unconfirmed. There is no numeric rescue. The lease remains. A killed Node parent does not itself guarantee group death: a responsive guardian reacts to disconnect, while a paused guardian can only react on resumption.
+7. After restart there is no group probing used to kill and no auto-clean based only on the saved PGID. Old records require actual terminal evidence or scoped operator recovery.
+
+The proof is **current-group coverage only**, not all process descendants. Any process that changes group/session may escape, including ordinary daemonizing tools. The default ordinary result always states cleanup.coverage:"posix_group"; user-facing summaries must say group cleanup, not every descendant. A strict all_descendants consumer refuses this coverage even if state is confirmed. A fixture that deliberately uses setsid tests this refusal/known limitation under an external owner; it may not be counted as a containment success. If the running adapter is actually informed of an escape, its result is unconfirmed and its writing lease stays unsafe. Do not pretend the portable group adapter can detect every unannounced escape.
+
+This one helper replaces late parent-side numeric signaling without adding an OS-specific C build, process library or service. Its group-creation/self-signal behavior must pass real Linux/macOS qualification before the ordinary writing route is enabled there. Bounded read-only queries remain usable when that qualification is unavailable.
+
+### P6.5 Windows: selected runtime, exact kernel obligations and no PID rescue
+
+The selected supported surface is **native Windows 10 / Server 2016 or newer, trusted system Windows PowerShell 5.1, .NET Framework 4.8-compatible APIs, Node 22**. Use conservative C# syntax accepted by that CodeDOM surface and framework DataContractJsonSerializer; do not depend on System.Text.Json, recent .NET-only APIs, a compiler download or PowerShell 7. PowerShell 7 is not an automatic fallback in this patch. Constrained-language/blocked-script/absent-framework capability refuses only the writing operation before the target starts. Read-only queries retain the bounded route.
+
+Ship scripts/shared/windows-job-runner.ps1, windows-job-runner.cs and windows-job-child.mjs. Resolve all helpers relative to the installed module URL/package root, never cwd. The fixed -NoLogo -NoProfile -NonInteractive -File bootstrap passes request paths as data, uses literal paths for Add-Type, stops on compile error and emits no success-stream objects. Bootstrap diagnostics go to a separate bounded private bootstrap-error record, never target stdout/stderr. Set private TEMP/TMP before PowerShell/Add-Type starts. Do not bypass execution policy or change settings.
+
+Keep two environments:
+- bootstrap: trusted minimal system/Node/helper environment, stripping code-injection variables before either helper runtime starts;
+- target: caller-prepared environment, preserving normal runtime/final-gate variables and intentional GIT_INDEX_FILE. Only the existing wrapper-control scrub is global. P7 acquisition’s stricter policy stays local to acquisition.
+Normalize duplicate Windows key casing deterministically: last explicitly supplied value wins, keys case-folded for comparison. Preserve Unicode, empty values and equals signs within values; reject NUL and invalid names. Build a double-NUL-terminated UTF-16 block and set CREATE_UNICODE_ENVIRONMENT with an explicit absolute cwd.
+
+Windows ordinary ownership is a configured, unnamed, non-inheritable Job Object with KILL_ON_JOB_CLOSE and neither breakaway flag. Create-time JOB_LIST closes the suspended-before-assignment gap; it is supported on the selected baseline ([attribute API](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)). Do not use AssignProcessToJobObject as a post-create fallback.
+
+Required native sequence:
+1. Open the parent process once with SYNCHRONIZE/QUERY_LIMITED_INFORMATION; record GetProcessTimes creation FILETIME losslessly as a decimal string. Ready/ack binds this handle instance. A numeric PID is never reopened for termination later.
+2. Create/configure the owned job and verify every syscall. Allocate STARTUPINFOEX attributes for JOB_LIST and HANDLE_LIST; retain their arrays/native storage through CreateProcessW and DeleteProcThreadAttributeList. Use pointer-sized IntPtr/UIntPtr and correct platform struct layouts.
+3. Duplicate valid stdin/stdout/stderr handles as inheritable, list only these handles, set STARTF_USESTDHANDLES and all three hStd fields, and pass bInheritHandles=true. Job/parent/control handles remain noninheritable. An absent stdin becomes NUL only when the request declares no input; supplied stdin cannot disappear. Raw data, including NUL-separated Git input, never passes through a PowerShell text pipeline.
+4. Create trusted Node/windows-job-child.mjs with explicit lpApplicationName, correctly quoted fixed launcher arguments, CREATE_SUSPENDED, EXTENDED_STARTUPINFO_PRESENT, CREATE_UNICODE_ENVIRONMENT and the configured JOB_LIST. Only the helper argv is serialized into this native bootstrap command line; arbitrary target argv remains JSON data.
+5. Call IsProcessInJob(childHandle, **ownedJobHandle**, out member). Both API success and member=true are required; membership in any outer job is insufficient. Recheck parent handle, one-time ack, cancel and remaining deadline immediately before ResumeThread. Require ResumeThread return **exactly 1**. -1, 0 and >1 are failure branches requiring termination/verification, never proof the target was admitted. See [membership](https://learn.microsoft.com/en-us/windows/win32/api/jobapi/nf-jobapi-isprocessinjob) and [resume semantics](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread).
+6. Once CreateProcessW returned a process, cleanup is not not_started even if target admission failed. Terminate the owned job on failed verification/resume/cancel/deadline. TerminateJobObject initiates termination; continue bounded accounting, since termination can await I/O cancellation ([TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess)).
+7. The Node child helper calls bare spawn once with already-resolved argv, shell:false, detached:false and inherited raw stdio; no recursive runner or second argv resolution. It writes only direct-result.json, then exits.
+8. C# queries the owned job’s ActiveProcesses after helper creation/admission or attempted cleanup. Zero before launch is not a terminal proof. Require successful query and zero active processes at the terminal observation. Close no-longer-needed thread/process references promptly after reading their outcomes, including failed membership/resume paths, rather than keeping all references until accounting finishes.
+9. C# writes result.json with final job-accounting evidence and exits. Outer Node independently joins that receipt with target byte-stream EOF and supervisor closure. C# must not wait for EOF on pipe handles still held by its own PowerShell process.
+10. On hung adapter or failed cancel-file write, outer Node terminates its still-owned PowerShell ChildProcess through the retained Windows process handle. This closes the sole job handle; without the verified terminal receipt, cleanup remains unconfirmed. **Remove all taskkill/PID rescue from this route**, including later recovery. No synthetic or cached PID is ever a termination authority.
+
+Valid nested jobs remain supported. Test a real compatible IDE/Node outer job and a genuine incompatible restriction; “already in a job” is not a rejection by itself. Node 22.14’s own Windows libuv job and access-denied handling are a separate relationship, not this adapter’s proof ([pinned libuv source](https://github.com/nodejs/node/blob/v22.14.0/deps/uv/src/win/process.c#L65-L114)). Record which job caused termination in the parent-death tests. Wine and older Windows do not count as native qualification.
+
+### P6.6 Versioned controls, output streams and receipt authority
+
+Private protocol version **audit-tools-execution/v1**:
+- request.json: maximum 1 MiB, exact schema with invocation_id/nonce, backend, package-helper identity, resolved argv, cwd, target/bootstrap environment distinction, input policy (bytes remain on stdin), parent identity request, ordinary/strict policy and initial budget;
+- ready.json/ack.json/cancel.json/direct-result.json/result.json: each at most 4 KiB, strict schema, matching version/invocation/nonce and permitted phase transitions. Missing/extra/duplicate or invalid fields refuse the observation. Use the framework JSON reader/serializer plus an explicit allowed-key/type check, not a handwritten JSON parser.
+- ready supplies a fresh ready_nonce, helper identity/parent FILETIME and helper monotonic anchor. Ack must echo that exact ready state once. No ack reuse, schema fallback or stale pre-admission final result is accepted.
+- direct-result names command_started, actual exit code/signal or stable spawn error. Only the target Node helper/guardian produces it.
+- Windows result names helper_created, resume_succeeded, requested-command observation if available, final_query_succeeded, active_processes, coverage, termination/query error codes and parent identity. **Only C# writes this job receipt.** An empty-job receipt after cancellation can confirm cleanup even when no direct result exists; it cannot invent command success.
+- process FILETIME/counter identities use decimal strings or high/low words, never imprecise JS Numbers.
+
+Private directories and nonces prevent accidental cross-run/stale confusion; they do **not** authenticate files against the same user’s arbitrary target command. The target could forge a file it can access. These are cooperative execution receipts, not hostile same-user attestation. A malicious-forgery characterization test must document that limit, not be called a security pass. Strict hostile isolation is unavailable in this patch.
+
+Outer Node owns raw stream collection. Preserve input Buffers and strings byte-for-byte, close stdin exactly once, and keep the existing harmless early-EPIPE handling. Decode UTF-8 with one StringDecoder per stream; complete mode counts bytes, accepts exactly the cap and fails at cap+1 with ENOBUFS/output_complete=false. Default cap is 10 MiB per stream, preserving explicit larger bounds, including shared Git’s 64 MiB **and scopeIndexBaseline.ts:75–80’s 256 MiB**. Preserve final newlines. Human-tail callers retain their existing line/character marker semantics and explicitly report truncation.
+
+After final settlement detach policy/abort/timer callbacks but retain harmless error consumers on destroyed streams/process objects that can emit late errors. Unref/close owned pipes and IPC as appropriate so a resolved fixture CLI actually exits. Do not remove every error listener and create a post-return unhandled exception.
+
+### P6.7 One clock, including bootstrap, IPC and cleanup
+
+At the outer operation boundary compute initialRemaining = min(local cap, max(0, wireDeadlineAt - Date.now())) once; set expiresMonotonicMs = performance.now() + initialRemaining. Every lower layer uses that same monotonic budget. A missing caller deadline is converted once from its explicit caller cap; it is not renewed per probe/extraction/test. Expired/aborted admission creates no requested child.
+
+Arm the outer deadline before PowerShell/Add-Type or the POSIX guardian starts. Set stopStartedAt at the first outer stop trigger and cleanupEndsAt = min(stopStartedAt+3,000 ms, originalExpiresMonotonicMs+3,000 ms). Never reset it for a failed reaper, delayed EOF, handshake retry or second failure. Parent-first direct exit may have up to 1,000 ms for ordinary drain only while still inside the original execution deadline; it does not earn another 1,000 ms after timeout. POSIX TERM→self-group KILL uses +2,000 ms within this allowance; Windows requests job termination immediately. Failed cancel-file/control write invokes the supported owned-supervisor fallback immediately (Windows handle kill; POSIX IPC disconnect), not a new timeout.
+
+Cross-process transfer is deliberately conservative:
+1. Helper records its own monotonic ready anchor H0 and sends ready. Parent reads it and retains **P0**, the parent monotonic timestamp used to calculate the accepted ack’s **R = max(0, outerExpires - P0)** after that read. Retain the matching H0/P0/ready_nonce association for the invocation; a later message cannot replace these anchors.
+2. Ack carries R and the one-time ready_nonce. Helper’s expiry is **H0 + R**, not helperReceiveTime + R. Time spent delivering ready/ack therefore shortens the helper’s budget; it never extends the parent’s.
+3. Handshake itself is capped by min(5,000 ms, outer remaining). No ack is issued after parent expiry/abort. Helper rechecks its H0+R and parent/control state immediately before target launch/resume.
+4. Parent remains final deadline authority; local helper budgets only shorten execution. Every delivered stop message carries **cleanupEndOffsetMs = parentCleanupEndsAt - P0**, bound to the accepted ready_nonce. The helper cutoff is **H0 + cleanupEndOffsetMs**, never receiveTime plus a remaining duration. H0 precedes the matching parent P0 in real time, so this is conservative despite delivery delay. Clamp self-group SIGKILL/job termination/verification to that cutoff; if it has already passed, grant no fresh grace. Repeated valid stops may only shorten the previous cutoff, and a mismatched ready_nonce is rejected.
+5. IPC disconnect/parent disappearance without a delivered final stop payload starts local stop immediately, with its two-second POSIX grace (immediate Windows job termination) capped by the previously admitted helper execution deadline plus 3,000 ms. It cannot reconstruct an earlier unreceived parent cutoff: retain uncertainty, while the outer parent’s own return deadline remains independently bounded. Do not claim that a lost stop message carries its earlier cutoff implicitly.
+6. Windows uses Stopwatch.GetTimestamp/Frequency; POSIX helper uses its own performance.now. Only durations tied to the helper’s supplied ready anchor cross processes; no false assumption that performance.now origins or wall clocks match.
+
+A responsive adapter polls at 25 ms. This is a polling cadence, not an unconditional parent-death wall-clock guarantee when a process, Add-Type, filesystem or OS scheduler is paused. Parent handle retention prevents PID reopening; it does not make parent death atomic with resume. An independent outer test watchdog has its own stated scheduling allowance. No JavaScript promise can promise progress through an uninterruptible OS I/O failure.
+
+### P6.8 Source consumers: preserve outcome truth all the way to gates
+
+Apply these explicit policies, not a generic “update wrappers” instruction:
+
+- [close.ts:733–824](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/phases/close.ts#L733-L824): extend ClosingCommandResult with execution_failure, output_complete/truncated, cleanup, invocation_id and actual exit_code. commandResult copies them. isSuccess uses completedOwnedCommand with accepted code 0 and ordinary coverage. git push/npm publish/custom commands remain potentially writing and cannot pass an uncertain result.
+- close.ts:1321–1354 and 1520–1545: both project_facts and explicit combined/e2e arms use the same safety predicate. CombinedTestResult retains the full execution observation, not only passed/exit/output.
+- [closeAcceptance.ts:71–84](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/phases/closeAcceptance.ts#L71-L84): terminalUnit.execute returns the actual observation from the same request/combined run. Remove the conversion of a true status 0 to null to communicate failure; communicate failure in its own fields. A nominal 0+unconfirmed/incomplete observation cannot pass the floor.
+- [finalGate.ts:251–310](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/remediate/steps/finalGate.ts#L251-L310): both default runner and terminal override return full results. FinalGateCommandResult persists safety fields; ran/admission, primary failure, output policy and ordinary coverage jointly determine passed. Uncertainty is blocked/inconclusive, not a red test attributed to an arbitrary item.
+- [projectTestAdmission.ts:119–227](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/tooling/projectTestAdmission.ts#L119-L227): preserve discovery-based test/e2e/landing admission but delete its independent spawn/timeout/kill implementation. Forward an ExecutionRequest to the shared lifecycle adapter. Add the safety observation to ProjectTestAdmissionOutcome. Its existing 4 MiB human capture/truncated marker remains a tail presentation policy, not complete machine output; ordinary confirmed command completion can pass with an explicitly truncated human tail. Remove the separate 5,000 ms kill grace in favor of the selected shared cleanup clock, updating its exported constant/tests as a documented compatibility change.
+- closeVerifyLandingGates.ts:84–138 and other consumers of ProjectTestAdmissionOutcome preserve these fields and apply the same completion predicate; timed_out/spawn_error alone is no longer sufficient.
+- [localCommands.ts:174–197](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/localCommands.ts#L174-L197): LocalCommandResult carries completeness/cleanup, not a new Error without safety metadata. Auto-fix callers stop on unconfirmed writes; a later fallback candidate is not launched.
+- requiredTests.ts:160–175: null/no-failure requires actual status 0, no primary failure, complete output and ordinary confirmed cleanup. Persist truthful actual status and safety fields in the bounded output log; do not manufacture null exit code for status-0/overflow.
+- runtimeCommand.ts and ingestionExecutors.ts: runtime tests are potentially writing ordinary commands. Map uncertainty to inconclusive, never confirmed; intentional tail clipping keeps its visible marker.
+- shared/git.ts:29–37,101–113,378–386; disposition.ts; executionPlan.ts:343–347; hostCorroboration.ts; rootLogObservations.ts; findingGrounding.ts; scopeIndexBaseline.ts: all complete-output consumers use usableCommandOutput before parse. Keep each operation’s existing allowed statuses, including git check-ignore=1 and git diff’s “different” status. Read-only probes can remain available with group/job proof unavailable. Commands that stage/create objects/worktrees are writing and use completedOwnedCommand.
+- acquisitionEngine.ts:634–664: never parse output_complete=false; command-owned report reading/removal requires confirmed ordinary cleanup. Preserve failure classifications and P8 privacy suppression.
+- binaryAcquisition.ts:435–454 and analyzerDeps.ts: installation/extraction writes reserve all owned cache/scratch scopes. Do not rm archive/version/index scratch until writer cleanup is confirmed. result.status=0 cannot override error/incomplete/uncertain state.
+
+Pinned direct runner inventory remains:
+audit/disposition.ts:194; audit/localCommands.ts:174; audit/scopeIndexBaseline.ts:75; remediate/executionPlan.ts:343–346; close.ts:814,1117,1345,1535; hostCorroboration.ts:49,64,113,122,137,201; requiredTests.ts:160; finalGate.ts:271; gateCommands.ts:377; acquisitionEngine.ts:556; binaryAcquisition.ts:323; shared/git.ts:29,45,58,73,101,268,378,421; rootLogObservations.ts:54; analyzerDeps.ts:211; findingGrounding.ts:136. Add the independent projectTestAdmission spawn to the replacement inventory.
+
+Selected scopes: current runtime/tests/formatters/closing commands reserve the canonical repo tree and common Git directory plus known explicit write locations; extraction/install reserve their private scratch and selected cache roots; worktreeContentId additionally reserves its index directory. Audited nonmutating Git probes use null only with the existing read-only/config/helper-safe invocation. None of these current ordinary calls defaults to all_descendants.
+
+### P6.9 Acquisition budget remains one operation
+
+BinaryFetcher becomes (request:{url,context:Pick<ExecutionContext,"budget"|"signal">,maxBytes:number}) => Promise<Uint8Array|null>. [acquisitionExecutor.ts:60–67,106–130](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/acquisitionExecutor.ts#L60-L130) supplies the same operation budget and composed signal to resolveBinaryCandidates, fetch, extraction and runAcquisitionEngine.
+
+Native fetch uses an AbortController tied to that signal and remaining budget. Stream and count actual bytes: checksum 1 MiB, archive 128 MiB; Content-Length is only an early refusal. Cancel rejected/unused bodies and transport. At most two transient network/5xx attempts consume the same budget; no retry after expiry/checksum mismatch. Remove listeners/timers in finally. A fetch failure may be a coverage failure, but an unconfirmed writing extractor latches the hold unsafe and prevents continuation.
+
+Cache publication remains private-prepare → verify → owned atomic publish under its existing version lock. Compressed-byte limits do not establish a disk quota. Unconfirmed extraction retains its scratch/lease; a subsequent resolution cannot purge it and call a new result verified.
+
+### P6.10 Ordered edits and concrete qualification oracles
+
+Edit in this order:
+1. Nonexecuting process-control unit seam; remove fake-PID taskkill and unreliable timer-handle assertions.
+2. ExecutionRequest/Context/Result and budget/signal combiner, then all callback/projection types. Compile failures identify remaining erased-context adapters; do not cast them away.
+3. executionOwnership store, bindings, exact state transitions and atomic overlap tests.
+4. POSIX guardian and Windows helper protocol, isolated from public verdict logic.
+5. Audit/remediation hold chain, all success predicates and scratch retention, including projectTestAdmission and terminal acceptance.
+6. Packed helper/OS qualification and real caller tests; only then full isolated baseline.
+
+Existing targets: tests/shared/exec.test.ts; tests/audit/runtime-command.test.ts; tests/audit/runtime-command-bounded-wait.test.ts; tests/shared/binary-acquisition.test.ts; tests/audit/acquisition-executor.test.ts; tests/shared/analyzer-acquisition-engine.test.ts; tests/remediate/phase-close.test.ts; tests/remediate/final-acceptance-window.test.ts; tests/remediate/final-gate-red-pause.test.ts; tests/remediate/final-gate-extraction-equivalence.test.ts; tests/remediate/landing-gates-close.test.ts. Add tests/shared/execution-ownership.test.ts, tests/shared/posix-group-runner.test.ts, tests/shared/windows-job-runner.test.ts and tests/remediate/execution-result-projection.test.ts.
+
+Required oracles:
+1. **No fake process control:** inject all OS-control calls in unit truth-table tests. PID 4242 and every invented identifier never reach the real OS. Real fixtures create/own their actual instances.
+2. **Projection truth:** first give identical status-zero/confirmed, output_complete=false/output_truncated=true result metadata to complete versus intentional-tail request policies: only the tail request may pass. A terminal override must preserve the producer’s execution_policy and cannot relabel a complete-mode failure. Then status 0 + valid-looking output + unconfirmed cleanup while a fixture writes a sentinel must fail close/final/combined/e2e/required/runtime/landing gates; status 0 + ENOBUFS/output_complete=false must fail complete-output paths. A read-only query with complete output remains usable. Terminal acceptance preserves the actual 0 and separate failure metadata.
+3. **Context propagation:** a spy at every runner callback gets the same budget object, composed signal, explicit scopes, input and output policy. Abort P3’s hold during probe/fetch/extraction/analyzer/runtime/required/closing command: no later admission, no catch-path commit, no unsafe scratch deletion.
+4. **Atomic admission:** two linked worktrees share one canonical common Git directory but receive different AUDIT_CODE_STATE_DIR values. Pause concurrent binding/admission: at most one common-Git control-root binding wins; the other returns namespace mismatch before its first repository/Git write. Repeat using the same authority and require overlap-busy. A non-Git parent/child authority ambiguity refuses mutation rather than claiming disjointness. Separately run disjoint leases concurrently through start/mark-uncertain/finish/settle; both entries’ latest states and unrelated fields survive. Crash a no-child callback just after its first Node-side owned write: its prior persisted active phase cannot be cleared by prepared recovery. Then pause two independent CLIs between overlap read and registry write; exactly one overlapping lease succeeds. Parent/child scope, aliases and common Git directory conflict; repo vs repo2 and unrelated cache entries do not. Prepared/starting/helper-created/command-started crash barriers retain or release exactly as specified. A conflicting namespace binding refuses mutation only.
+5. **POSIX current-group proof:** parent-first child with closed stdio still writing, inherited pipes, SIGTERM refusal, guardian IPC disconnect, guardian pause/death and parent kill before identity persistence. Only guardian kill(0,...) is permitted. Inject numeric reuse evidence into observation, never force real reuse or signal an invented group. Uncertainty retains the lease. Explicit session/group escape is a strict-policy refusal/limitation characterization, never a strict containment success; ordinary coverage is labeled posix_group.
+6. **Windows kernel truth table:** kill adapter after create-time JOB_LIST creation but before membership/resume; no target sentinel. Membership API false, out=false, wrong outer job and owned-job true; ResumeThread -1/0/>1/1. Only owned true/exactly 1 admits. Created-but-unverified helpers require cleanup confirmation or retained uncertainty.
+7. **All event combinations:** parent exit with open pipes; closed pipes with live descendant; EOF before exit; direct result with active job; empty job without direct result; supervisor exit without receipt. Command success and cleanup certainty are independent.
+8. **Protocol/runtime:** version/nonce/ready_nonce mismatch, oversize/truncated/extra-field controls, stale final receipt, ack failure, failed cancel write, missing direct result and failed final write. Same-user forgery is an explicitly unsupported adversarial characterization. Native Windows 10+/PowerShell 5.1/.NET baseline, compatible and incompatible outer jobs, Node’s own nested job and alternative runtimes are recorded separately.
+9. **Bytes/environment/package:** Unicode/empty args, quotes/trailing backslashes, qualified batch percent/exclamation handling, duplicate PATH casing, Unicode/empty/equal-sign environment values, binary/NUL stdin and early EPIPE. Helpers installed under spaces/Unicode and launched from unrelated cwd. Bootstrap/compiler diagnostics never enter target machine streams. Retain explicit 64/256 MiB cap semantics and tail markers.
+10. **One bound and actual process exit:** queue an early-abort stop payload for 2,500 ms while the helper remains responsive after delivery. Assert the final escalation is still bounded by H0+cleanupEndOffsetMs and never moves later by that delay. Repeat stop messages, wrong ready_nonce, an already-passed cutoff and parent death without a final payload; no renewed grace, missing evidence retains uncertainty. Then competing timeout/abort/overflow/error, failed control write, stuck query/adapter, delayed EOF. First failure unchanged; outer result uses one cleanup ceiling. External launcher observes the fixture CLI’s actual exit within execution budget +3,000 ms cleanup +2,000 ms scheduling allowance, then independently checks survivor instances/sentinels. No timer/pipe/reaper handle is mistaken for cleanup success.
+11. **Owned scratch:** worktreeContentId’s private indexes are unique under concurrency and retained after uncertainty; extraction/archive/report paths are not deleted under surviving writers. A later real CLI blocks only overlapping mutation; ordinary inspection and another repo/cache proceed.
+
+PowerShell and C# require actual packed-install compilation/runtime tests; check:scripts only checks the MJS portion. Explicitly ship all four helper files (the three Windows files and posix-group-runner.mjs). No installation of another compiler, process library or service is part of this patch.
+
+Return this revised P6 to the same narrow reviewer. The requested review result is a source-contract verdict on these specific mechanisms and projections, followed separately by execution evidence when authorized; it is not self-certification.
+
+## P7. Trusted acquisition origin without a new tool manager
+
+**Grade: mechanical-ready implementation contract; trusted npm/binary provisioning and transitive lock evidence execution-gated.**
+
+### Reuse and harden the existing native cache seam
+
+Do not keep [acquisitionEngine.ts:242–250,599–618](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/acquisitionEngine.ts#L242-L250)’s acquired npx invocation in audited cwd. npm exec can select local executables and project configuration, as documented by [npm exec](https://docs.npmjs.com/cli/v10/commands/npm-exec/) and [npmrc](https://docs.npmjs.com/cli/v10/configuring-npm/npmrc/).
+
+Reuse the directory/spec conventions in [analyzerDeps.ts:39–73,196–260](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/tooling/analyzerDeps.ts#L39-L260), but do not route acquired candidates through resolveAnalyzerDep’s repo-first arm at 141–164. Add a narrow trusted acquisition resolver there, retaining the deliberately approved repo-local analyzer role separately.
+
+resolveAcquiredNpmTool({spec,peers,bin,deadline,signal,trustedNpm}): Promise<resolved | unavailable>.
+Resolved output carries absolute launch argv, exact package version, lock hash, manifest/integrity evidence and private install root. No bare npx/bin is returned.
+
+Algorithm:
+1. Parse the existing exact candidate spec and exact peers; reject ranges in the acquired role. Cache key includes the sorted full spec+peer set, Node major and platform/arch as required by optional packages.
+2. Use a private unique install directory outside the audited tree. Verify it and its configuration are not symlinks into the project.
+3. Invoke an independently selected trusted absolute npm CLI through its trusted Node, not cwd/PATH npx. If that launcher cannot be established, this candidate is not_resolved; do not probe a repository substitute.
+4. Supply a clean minimal environment. Clear inherited npm_config/NPM_CONFIG entries, NODE_OPTIONS/NODE_PATH and credential/config variables not explicitly required. Use owned empty user/global config files, private cache, explicit public registry https://registry.npmjs.org, --ignore-scripts, --no-audit and --no-fund.
+5. Write a minimal private manifest with the exact candidate/peer dependencies. Resolve and retain a full lock in that trusted context; inspect origins/integrity and exact top-level versions; install with npm ci from that lock with scripts disabled. Unexpected non-registry/git/file origins are unavailable and preserved for diagnosis, not silently allowed. Never widen an install-script exception after a failure.
+6. Validate package.json name/version and the selected bin mapping. Resolve the real bin strictly inside the verified package/install root. Launch Node bins as [trustedNode,absoluteBin,...args], avoiding Windows .cmd shims; native bins require their own verified executable contract.
+7. Analysis runs with audited cwd only after tool resolution. Preserve the existing per-run acquired-role consent; config-executing candidates still need it. Record the lock/origin evidence without credential values.
+8. Cache publication is version-locked and verified, with P6 scratch/cleanup rules. Old existence-only caches are not accepted as provenance.
+
+Initial pinned npm candidates: eslint@9.39.5, knip@6.34.0, jscpd@4.3.0, type-coverage@2.29.7 plus typescript@5.9.3. Type-coverage is the consent-free default exposure. Preserve peers rather than resolving a new TypeScript major.
+
+Binary PATH branch at binaryAcquisition.ts:328–335 must not accept any status-0 --version then return a bare name. Resolve a trusted absolute executable outside the audited repo; match expected version/capabilities, then invoke that exact path. Add BinarySpec.parseVersion and required-capability validation with per-candidate fixtures. A spoofable version string is not independent origin evidence: trusted installation location/source remains a prerequisite. Same-release checksums and cache rehashing prove consistency, not an independent supply-chain witness. Where reviewed digests/attestations already exist, validate them; do not invent them or introduce a second policy registry.
+
+pipx/cargo/bundle retain explicit role/consent semantics and are not declared origin-safe by this npm patch. Do not enable a default acquired candidate from them unless its trusted launcher/config boundary is qualified; an unqualified candidate alone is reported unavailable. Repo-approved tool execution remains distinct from consent-free acquisition.
+
+### Test matrix
+
+Extend tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/binary-acquisition.test.ts, tests/shared/analyzerDeps.test.ts and tests/shared/analyzerDeps-injectable-log.test.ts; add tests/shared/acquired-npm-origin.test.ts, tests/audit/cli-fixture-analyzer-acquisition.test.ts and tests/shared/candidates-safety.test.ts.
+
+Harmless repo-local node_modules/.bin substitute, project .npmrc, user registry override, NODE_OPTIONS, malicious bin traversal/symlink, absent peer, wrong top-level version, wrong PATH version, cache tampering and install-script sentinel must never run or affect the selected acquired executable. Assert acquisition cwd/config/env and analysis cwd separately. Offline branch returns unavailable or a fully verified cache; no silent online fallback. POSIX/Windows executable argv are exact. The real clean-registry test records the full lock, resolved URLs, integrities, launcher and Node versions; its absence gates acquired npm execution, not parser/reader/report repairs.
+
+## P8. Gitleaks privacy, report completeness and cleanup ownership
+
+**Grade: mechanical-ready on P1/P6 and binary-origin qualification.**
+
+### Exact changes
+
+[candidates.ts:95–173](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/candidates.ts#L95-L173) uses a PID-wide temp filename, invokes reportFile independently and parses empty input as []. [acquisitionEngine.ts:610–790](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/shared/analyzers/acquisitionEngine.ts#L610-L790) has early returns before cleanup and persists output/error snippets.
+
+Change ExternalAnalyzerCandidate’s file-report API to an invocation descriptor:
+prepareInvocation(prefix,root,{privateDir}): {argv,report?:{path,format:"json",maxBytes},privacy:"ordinary"|"secret-scan"}.
+The engine allocates one mkdtemp directory per call, passes that exact path once, owns report reading and finally cleanup, and never mutates the global candidate. Non-file reporters use the same existing buildArgv through a thin adapter.
+
+Gitleaks remains pinned at 8.21.2. Include **--redact=100** in the argv before running and retain --report-format json, --report-path, --no-banner, --exit-code 0. [Pinned Gitleaks flag implementation](https://github.com/gitleaks/gitleaks/blob/v8.21.2/cmd/root.go) and [JSON report writer](https://github.com/gitleaks/gitleaks/blob/v8.21.2/report/json.go) are the qualification references. Do not retry without redaction.
+
+Directory contract: private unique directory, 0700 where effective; file reads remain invocation-owned and bounded at 16 MiB. On Windows, verify inherited per-user ACL protection before spawn; chmod is not ACL evidence. If privacy cannot be established, only this scanner returns not_resolved, with no invocation. No automatic permission broadening is added.
+
+Read expected report through an owned descriptor, reject symlink/nonregular/oversized/changing content and always close. Missing, unreadable, empty, oversized and malformed reports are parse_error/failed with a stable reason code. A genuine JSON [] with clean exit is the zero-findings success; remove JSON.parse(report || "[]"). Retain dropped-row accounting for malformed rows.
+
+Secret-scan statuses/logs persist only tool id, normalized finding metadata, exit/signal/failure code, durations and cleanup state. Suppress raw stdout, stderr, output_snippet, stderr_snippet and exception-message prefixes for this privacy class, including spawn/parser exceptions. Sanitizing only Secret/Match is insufficient; a diagnostic can itself contain source text. Validate/limit native rule/path/fingerprint metadata; no raw object or secret-bearing description passes through unchecked. Existing secret-scanner findings should use a tool-owned generic summary based on a bounded rule identifier, not arbitrary report Description.
+
+finally runs for success, result.error, nonzero/null exit, report/parse/normalizer exception and cancellation. Cleanup waits on P6 tree certainty. If uncertain, retain the invocation directory privately with a recovery reference; never recursively remove it while a descendant can recreate/write it. A deletion failure is secondary cleanup_uncertain, without secret bytes and without changing the first failure. A successful scan with failed cleanup is not an unqualified clean status.
+
+### Tests
+
+Extend tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-candidates.test.ts and tests/shared/candidates-safety.test.ts; add tests/shared/gitleaks-invocation-lifecycle.test.ts for the failure-injection matrix.
+
+Use synthetic secret sentinels in report Secret/Match/Description, stdout, stderr and thrown errors. Cases: [] success; findings success; missing/unreadable/empty/malformed/oversized report; invalid rows; nonzero/null exit; result.error; spawn/parser/normalizer exception; failed rm; concurrent same-process calls; timeout and uncertain descendants.
+
+Oracle: each invocation’s argv/read/cleanup names the same unique private report; no cross-call overwrite; no sensitive sentinel in persistent status, normalized findings, prompt, log or thrown public error; all known-stopped branches attempt cleanup; uncertain branches retain only their private owned directory and report uncertainty. Redaction capability failure is unavailable, never an unredacted retry. Report byte cap is not claimed as a disk quota.
+
+## 9. Generated outputs, test commands and full acceptance baseline
+
+No new production dependency is required except the scoped smol-toml minimum/lock update. New modules use Node 22 built-ins and existing zod/hash/json/lock conventions; the Windows adapter uses the already-installed, qualified PowerShell/.NET and Win32 APIs. Add scripts/shared/windows-job-runner.ps1, scripts/shared/windows-job-runner.cs, scripts/shared/windows-job-child.mjs and scripts/shared/posix-group-runner.mjs explicitly to package.json files, because the current selected scripts/shared entries do not ship them automatically. No install/build-time compiler download is introduced. Do not use Node 24-only mkdtempDisposable: @types/node 24.13.2 in the lock can typecheck an API absent from the supported runtime.
+
+Keep one-package tsc build, shared exports and the package’s dist/** shipping layout. Update:
+- affected shared exports, CLI schemas/version constants, schema generator output and canonical host prompt assets;
+- runtime-artifact-name registry/mirrors for new receipts/control files, if its existing declaration rules cover them;
+- filelock export surface generator/data and tests after the hold API changes;
+- docs/audit-pkg/contracts.md, operator-guide.md and the native concurrent-run design where the protocol changes;
+- sites-pinned/citation/guard registries for new authority tests using existing generators; do not hand-edit generated counterparts or add an unregistered guard.
+
+Focused test invocation after one isolated build: node scripts/shared/run-vitest-gate.mjs <explicit tests/... targets from the package>. Do not call a bare second Vitest while the checkout suite lock is held. Newly added tests must match tests/helpers/testFileContract and remain visible to check:tests.
+
+Complete pre-change baseline and final baseline, on the selected isolated environment:
+1. npm run build
+2. npm run check
+3. npm run check:tests
+4. npm run check:scripts
+5. npm run check:lint
+6. focused falsifying regressions for each package, then npm test
+7. npm run verify:checks
+8. npm run verify:release, including its full suite/packaged/linked smoke membership under the verified isolation harness
+9. actual Windows/POSIX host-command/lifecycle qualification and minimum supported Node 22 API/packaged smoke
+
+The authoritative ordered catalogs are [scripts/shared/verify-steps.mjs:7–20](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/scripts/shared/verify-steps.mjs#L7-L20) and [guard-reach-data.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/scripts/guard-reach-data.mjs). The pinned checks catalog includes host verification, pack smoke and both packaged smokes; release adds the full suite and linked smokes. A typecheck/focused suite is not a substitute.
+
+Record exact command, commit/tree, environment versions, exit code, failed/skipped targets, duration and evidence files for every leg. A preexisting failure is not waived silently: compare before/after and report the specific unchanged failure. Tests modified after a pass invalidate that pass for the final tree.
+
+### Final deterministic acceptance branches
+
+- All source invariants and applicable actual-platform tests pass: package is locally verified. Exact-commit required CI must still pass before “CI verified”.
+- A platform capability is absent: ship only a fail-closed, explicitly unavailable branch on that platform; do not certify the adapter. Other qualified packages/scopes remain usable.
+- A source consumer contradicts the new contract: needs-source-resolution for that consumer/package, preserve the existing branch and report the exact file/symbol. Do not paper over it with string parsing or a fallback overwrite.
+- Mixed old/new producers or incompatible locks/receipts: owner-gated quiescence, preserve all state. Do not auto-migrate a running tree.
+- Unconfirmed writing descendant: block only overlapping write scope and preserve scratch/recovery evidence; later CLI invocation must honor it.
+- Failed archive/no-clobber/permission qualification: leave originals intact, return the typed failure/recovery path, retry only when the same safe operation is possible.
+- Publish/merge/install are separate facts and separate authorized operations. This document certifies none of them.
+
+## 10. Rollback and stop rules
+
+Parser/read-boundary patches do not require a live-run protocol migration; they may proceed while P3/P4/P5 await quiescence. Do not roll the parser back to an advisory-affected version as an unnoticed compatibility fix.
+
+Lock/submission/promotion/command-schema rollback requires all affected old/new writers and host consumers stopped. Preserve v2 lock records, unique submission entries, hand-recovery intents, lifecycle records, archives and promotion receipts. Never downgrade their interpretation or discard a new-format file because an older executable cannot read it. Restore a verified prior complete report set under the same lifecycle hold and write a matching receipt only when its bytes are proved. If an older reader cannot honor the receipt, keep it off that active tree until explicitly migrated.
+
+Stop conditions are local and named: unknown source delta; unsafe test harness; unavailable trusted launcher; unproved private report directory; failed identity/containment; unresolved same-scope lock/process owner; blocked no-clobber publication; failed archive verification; or an unqualified actual host execution route. Each has a preserve/refuse path above. None licenses destructive cleanup, an architecture substitution or calling partial verification complete.
