@@ -61,15 +61,8 @@
       "npm_config_prefix=/work/home/profile/npm-prefix",
       "npm_config_update_notifier=false",
       "npm_config_userconfig=/work/home/profile/user.npmrc",
-      "/usr/bin/gcc",
-      "-std=c11",
-      "-O2",
-      "-Wall",
-      "-Wextra",
-      "-Werror",
-      "/harness/native-probe.c",
-      "-o",
-      "/work/probe/native-probe"
+      "/bin/bash",
+      "/harness/compile-native-probes.sh"
     ],
     "not_runtime_evidence": true
   },

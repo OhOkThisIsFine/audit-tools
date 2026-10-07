@@ -18,7 +18,16 @@ function run(file, args, want = 0) {
   else assert.equal(result.status, want, file + ': unexpected status');
   return result.stdout.trim();
 }
-const native = args => run(root+'/native-probe', args);
+const native = args => {
+  const output = run(root+'/native-probe', args);
+  if (args[0] === 'net' && args.at(-1) === 'deny') {
+    const observed = JSON.parse(output);
+    assert.equal(observed.classification, 'confinement_refusal');
+    assert.equal(observed.succeeded, false);
+    assert(['connect','connect_result','send'].includes(observed.stage));
+  }
+  return output;
+};
 const ip4 = process.env.R05_ENDPOINT4;
 const ip6 = process.env.R05_ENDPOINT6;
 const token = process.env.R05_TOKEN;

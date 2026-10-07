@@ -43,7 +43,8 @@ def main():
     for name in ("user.npmrc","global.npmrc","gitconfig"):
         (home/name).write_text("")
     for name in ("r05-seccomp.json","docker-28.0.4-default-seccomp.json",
-                 "native-probe.c","fixture-server.mjs","probe.mjs"):
+                 "native-probe.c","net-denial-oracle.h","net-denial-oracle-fixtures.c",
+                 "compile-native-probes.sh","fixture-server.mjs","probe.mjs"):
         shutil.copyfile(packet/name,root/"harness"/name)
     uid,gid=os.getuid(),os.getgid()
     (root/"harness/passwd").write_text(

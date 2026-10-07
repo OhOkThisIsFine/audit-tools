@@ -118,14 +118,25 @@ def build(cfg, role):
     # env -i strips image default variables too. Never inherit a host env file.
     command = ["/usr/bin/env","-i"]+[k+"="+v for k,v in sorted(env.items())]
     if role == "compiler":
-        command += ["/usr/bin/gcc","-std=c11","-O2","-Wall","-Wextra","-Werror",
-                    "/harness/native-probe.c","-o","/work/probe/native-probe"]
+        command += ["/bin/bash","/harness/compile-native-probes.sh"]
     elif role == "server":
         command += ["/tools/bin/node","/harness/fixture-server.mjs"]
     else:
         command += ["/tools/bin/node","/harness/probe.mjs"]
     # --entrypoint /usr/bin/env receives -i directly.
     return args+[IMAGE]+command[1:], mounts, network
+
+def preserve_timeout_output(evidence, role, created, error):
+    """Save exact partial transport bytes before any cleanup/metadata call."""
+    record={"timed_out":True,"container_id":created,"cleanup":"not_yet_observed"}
+    for suffix, captured in (("stdout",error.stdout),("stderr",error.stderr)):
+        payload = captured if isinstance(captured,bytes) else (captured or "").encode("utf-8")
+        (evidence/(role+"."+suffix)).write_bytes(payload)
+        record[suffix+"_capture_available"] = captured is not None
+        record[suffix+"_bytes"] = len(payload)
+        record[suffix+"_sha256"] = hashlib.sha256(payload).hexdigest()
+    (evidence/(role+"-timeout.json")).write_text(json.dumps(record)+"\n")
+    return record
 
 def execute(cfg, role, args, mounts, network):
     require(platform.system()=="Linux" and platform.machine()=="x86_64", "Linux x64 only")
@@ -153,7 +164,8 @@ def execute(cfg, role, args, mounts, network):
             require(hashlib.file_digest(member,"sha256").hexdigest()==sha(root/"runtime"/NODE_ROOT/relative),
                     "extracted tool bytes mismatch")
     source_manifest=json.loads((root/"source-manifest.json").read_text())
-    for name in ("native-probe.c","fixture-server.mjs","probe.mjs"):
+    for name in ("native-probe.c","net-denial-oracle.h","net-denial-oracle-fixtures.c",
+                 "compile-native-probes.sh","fixture-server.mjs","probe.mjs"):
         require(sha(root/"harness"/name)==source_manifest["sha256"][name],
                 "reviewed probe source drift")
     upstream = root/"harness"/"docker-28.0.4-default-seccomp.json"
@@ -248,13 +260,17 @@ def execute(cfg, role, args, mounts, network):
             require("R05_ORDINARY_WARNING_SENTINEL" in result.stderr, "ordinary warning hidden")
         require(exitcode==0, "qualification process failed; product remains blocked")
     except subprocess.TimeoutExpired as error:
+        # TimeoutExpired may contain bytes even when text=True. Save the
+        # partial transport bytes before any ownership query/cleanup can fail.
+        timeout_record=preserve_timeout_output(evidence,role,created,error)
         # Never target names/PIDs or other containers: immutable created CID + label.
         current=json.loads(docker("inspect",created))[0]
         require(current["Config"]["Labels"].get("r05.task")==cfg["task_id"],
                 "cleanup ownership uncertain")
         if current["State"]["Running"]:
             docker("kill",created)
-        (evidence/(role+"-timeout.json")).write_text(json.dumps({"timed_out":True,"container_id":created})+"\n")
+        timeout_record["cleanup"]="owned_stop_requested" if current["State"]["Running"] else "already_terminal"
+        (evidence/(role+"-timeout.json")).write_text(json.dumps(timeout_record)+"\n")
         raise RuntimeError("owned qualification watchdog fired; preserve evidence") from error
     finally:
         terminal=json.loads(docker("inspect",created))[0]

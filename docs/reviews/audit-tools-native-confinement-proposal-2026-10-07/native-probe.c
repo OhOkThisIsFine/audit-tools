@@ -10,11 +10,21 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include "net-denial-oracle.h"
 
 static int verdict(const char *op, int ok, int err, int expect_ok) {
     printf("{\"operation\":\"%s\",\"succeeded\":%s,\"errno\":%d}\n",
            op, ok ? "true" : "false", err);
     return ok == expect_ok ? 0 : 1;
+}
+static int net_denial(int succeeded, int err, enum r05_net_stage stage, int udp) {
+    enum r05_denial result = r05_classify_net_denial(succeeded, err, stage, udp);
+    printf("{\"operation\":\"net\",\"succeeded\":%s,\"errno\":%d,"
+           "\"stage\":\"%s\",\"classification\":\"%s\"}\n",
+           succeeded ? "true" : "false", err,
+           r05_stage_name(stage), r05_denial_name(result));
+    if (result == R05_CONFINEMENT_REFUSAL) return 0;
+    return result == R05_UNAVAILABLE ? 2 : 1;
 }
 int main(int argc, char **argv) {
     if (argc < 4) return 2;
@@ -58,26 +68,39 @@ int main(int argc, char **argv) {
         len = sizeof *a;
     }
     int fd = socket(family, type, 0);
-    if (fd < 0) return verdict("net", 0, errno, expect_ok);
-    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) { close(fd); return 2; }
+    if (fd < 0) {
+        int err = errno;
+        return expect_ok ? verdict("net", 0, err, 1) :
+            net_denial(0, err, R05_SOCKET, type == SOCK_DGRAM);
+    }
+    if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0) {
+        int err = errno; close(fd);
+        return expect_ok ? verdict("net", 0, err, 1) :
+            net_denial(0, err, R05_SETUP, type == SOCK_DGRAM);
+    }
     int rc = connect(fd, (struct sockaddr *)&addr, len), err = rc < 0 ? errno : 0;
+    enum r05_net_stage stage = R05_CONNECT;
     if (rc < 0 && err == EINPROGRESS) {
         struct pollfd p = {fd, POLLOUT, 0};
         rc = poll(&p, 1, 1500);
         if (rc > 0) {
             socklen_t size = sizeof err;
-            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &size) < 0) err = errno;
-        } else err = rc == 0 ? ETIMEDOUT : errno;
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &size) < 0) {
+                err = errno; stage = R05_SO_ERROR_QUERY;
+            } else stage = R05_CONNECT_RESULT;
+        } else { err = rc == 0 ? ETIMEDOUT : errno; stage = R05_POLL; }
     }
     int connected = err == 0;
     if (!expect_ok) {
-        // Denial oracle is inability to connect/send, not absence of echo.
+        // Only ENETUNREACH from connect/result or UDP send proves this
+        // selected no-route boundary. Timeouts and other errors stay red.
         if (connected && type == SOCK_DGRAM) {
             ssize_t sent = send(fd, argv[6], strlen(argv[6]), 0);
+            stage = R05_SEND;
             if (sent < 0) { connected = 0; err = errno; }
         }
         close(fd);
-        return verdict("net", connected, err, 0);
+        return net_denial(connected, err, stage, type == SOCK_DGRAM);
     }
     int ok = connected;
     if (ok) {

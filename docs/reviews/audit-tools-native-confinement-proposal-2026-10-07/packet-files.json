@@ -2,13 +2,13 @@
   "kind": "inactive_repository_source_proposal_not_runtime_attestation",
   "product_source": "38bba3cf410b2deaba54d837429c11a2d512a7a9",
   "preserved_candidate_tree": "a19d72f79a0d47ef0ddc0c0cca4d09635992b38e",
-  "canonical_plan_raw_sha256": "eac3bd1c7e3b6e1efe9ee6656c3a553a6b12146cf40c29cf2cd966c28e75ce4f",
+  "canonical_plan_raw_sha256": "82cc175d9021629a8b9780c34934d31c16fd99ca66c0194c782535c27c5e5090",
   "sha256": {
-    "r05-launcher.py": "26e5d8cb9203f9284a49bf8e9316da63ef9fe17d03f2fb5193d20c31be4fb05b",
-    "prepare-owned-layout.py": "7061c924eeaaa67e474eca3c2b4bca6a338a64bd0a447f73a10b6b0ae31c6ba3",
+    "r05-launcher.py": "f6c259cfbf1c6d5757b98d679211ac876867e9a805f881b1810ce027381ce4f6",
+    "prepare-owned-layout.py": "d50befb1cb590857010821651b9c2a76a43b2ca3694cb5482d6fa936f2c0e967",
     "bind-owned-fixture.py": "9b536eaa9f3f57a7a1e6a346c41633edd3d77d9f4519c325c2d82d4129067e47",
-    "native-probe.c": "1b16426af3edefa7402ff9853d7acab1a8b8c05ba385718cb2b5d2c803e61c62",
-    "probe.mjs": "4b21cc4f9dba8480af9bc70525600483b19a77188de61709127709e15cd9f189",
+    "native-probe.c": "ad265cc93f4f3b8e147f6b1d89b829381b532bc6129f4d730dfb0fb888be4b22",
+    "probe.mjs": "011538c4f5f3d4c12364353635b5620228c30369713576de3ff24a401f15d519",
     "fixture-server.mjs": "59026ad06159b2a7c269a7282cccc990288239e3c57da2903ce067793561214e",
     "r05-seccomp.json": "fca8efb7120a8a8eb6c0a1c1efce139f0c6f663c77dcad7bb0e5d1e264b16bb2",
     "docker-28.0.4-default-seccomp.json": "9c1025c88ccaa517b648da571961838744ea2137f176bfe6a48b21294cae9c76",
@@ -17,6 +17,12 @@
     "node-image-linux-amd64.json": "c4d5523090a817b7aa86d2111241fdd4f66d1e27782b44160e6aa63b357ecb2d",
     "node-image-config.json": "8f3dff4193637723b9f3f4ded64cccf28c7b35dc1c96d3320b1f5a64ff41e76d",
     "validate-source.py": "fc2261837531212fb7c21512fec0e0db6fbe39429835ce752241f6f05b5b8d56",
-    "rendered-launches.json": "bee4767d2c22fb575c9eb4f997e35ff91b3f9cc2fafc90c838531eb5cc11f8cc"
-  }
+    "rendered-launches.json": "ff2cf4c36993b176f7e0bcaa6ed33c6e605033f02793e4543c0b7d56a962f5be",
+    "net-denial-oracle.h": "8272697d09b3a83505d20a4f7d0f327d180fa70399a9f5f9ea97fc614b19fe07",
+    "net-denial-oracle-fixtures.c": "0d67cb8d857a0abd4e4f169d8216d64cefe8e42b45eab1e4772d5309600e9dc8",
+    "compile-native-probes.sh": "5a733dbdbd2774215c96f3776fac5443763e0532170e6f679d7636f8e2559eee",
+    "timeout-capture-fixtures.py": "178a71dee98eb04832bacf13bc6ef02cc4913bbfda5d1bd5ed03659a4111380f"
+  },
+  "baseline_canonical_plan_raw_sha256": "eac3bd1c7e3b6e1efe9ee6656c3a553a6b12146cf40c29cf2cd966c28e75ce4f",
+  "canonical_plan_path": "docs/reviews/audit-tools-canonical-implementation-plan-2026-10-07.md"
 }
