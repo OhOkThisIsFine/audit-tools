@@ -1,0 +1,123 @@
+name: R05 preliminary native synthetic probes
+# INACTIVE REVIEW ARTIFACT. Do not copy to .github/workflows or push to the
+# trigger branch until independent review covers this exact workflow and packet.
+'on':
+  push:
+    branches:
+      - probe/r05-native-synthetic-20261007-01
+permissions: {}
+concurrency:
+  group: r05-native-synthetic-20261007-01
+  cancel-in-progress: false
+jobs:
+  synthetic:
+    if: >-
+      github.repository == 'OhOkThisIsFine/audit-tools' &&
+      github.ref == 'refs/heads/probe/r05-native-synthetic-20261007-01' &&
+      github.event_name == 'push' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKET_COMMIT: 19afe180c4603e28da89c6bf7f0c0543f21b4662
+      MANIFEST_SHA: fa888c921c75ee43f1dc4fb6311f2abb442f9cec17ae00f66807e98dbfb28990
+      BOOTSTRAP_SHA: 2794516ebf19ffb331d55e52b6ae958a003175b83f80e0dcf623c76b8b3f947c
+      BUNDLE_SHA: 49711ccdfa7ee0b6a580e3dca548e7bf3948a73391f0e0fc4b136c050d39e08a
+    steps:
+      - name: Fetch exact reviewed orchestration only
+        timeout-minutes: 2
+        run: |
+          python3 -I - <<'PY'
+          import hashlib, json, os, pathlib, re, time, urllib.request, uuid
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs): raise RuntimeError('redirect refused')
+          temp=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          stage=temp/('r05-stage-'+str(uuid.uuid4()))
+          stage.mkdir(mode=0o700);(stage/'evidence').mkdir()
+          with open(os.environ['GITHUB_ENV'],'a') as target:
+              target.write('R05_STAGE='+str(stage)+'\n')
+          commit=os.environ['PACKET_COMMIT'];manifest=os.environ['MANIFEST_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}',commit) and re.fullmatch(r'[0-9a-f]{64}',manifest)
+          (stage/'workflow-fetch.json').write_text(json.dumps({'packet_commit':commit,'manifest_sha':manifest})+'\n')
+          opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+          base='https://raw.githubusercontent.com/OhOkThisIsFine/audit-tools/'+commit+'/docs/reviews/audit-tools-native-confinement-proposal-2026-10-07/'
+          try:
+              for name,digest in [('evidence-log-bundle.py',os.environ['BUNDLE_SHA']),('synthetic-bootstrap.py',os.environ['BOOTSTRAP_SHA'])]:
+                  assert re.fullmatch(r'[0-9a-f]{64}',digest)
+                  deadline=time.monotonic()+45
+                  data=bytearray()
+                  with opener.open(base+name,timeout=15) as response:
+                      while True:
+                          if time.monotonic()>deadline: raise RuntimeError('source download time bound')
+                          chunk=response.read(65536)
+                          if not chunk: break
+                          data.extend(chunk)
+                          if len(data)>1048576: raise RuntimeError('source download size bound')
+                  if hashlib.sha256(data).hexdigest()!=digest: raise RuntimeError('reviewed orchestration hash mismatch')
+                  (stage/name).write_bytes(data)
+          except BaseException as error:
+              (stage/'evidence/fetch-failure.json').write_text(json.dumps({'failure':type(error).__name__+': '+str(error),'qualification':False})+'\n')
+              raise
+          PY
+      - name: Fixed synthetic compiler echo controls and native denial
+        timeout-minutes: 12
+        run: |
+          /usr/bin/python3 -I "$R05_STAGE/synthetic-bootstrap.py" --stage "$R05_STAGE" --packet-commit "$PACKET_COMMIT" --manifest-sha "$MANIFEST_SHA"
+      - name: Observe task-owned terminal cleanup after any outcome
+        if: always()
+        timeout-minutes: 2
+        run: |
+          python3 -I - <<'PY'
+          import hashlib,json,os,pathlib,runpy,subprocess,sys
+          value=os.environ.get('R05_STAGE')
+          if not value:
+              print('No stage created; no synthetic qualification.');sys.exit(0)
+          stage=pathlib.Path(value);temp=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert stage.is_relative_to(temp) and stage!=temp and stage.resolve(strict=True)==stage
+          prepared=stage/'prepared-config.json'
+          if not prepared.is_file():
+              print('No container-capable prepared task; observe failed fetch/bootstrap evidence.');sys.exit(0)
+          manifest_path=stage/'packet/packet-files.json'
+          assert hashlib.sha256(manifest_path.read_bytes()).hexdigest()==os.environ['MANIFEST_SHA']
+          manifest=json.loads(manifest_path.read_text())
+          helper=stage/'packet/owned-teardown.py'
+          assert not helper.is_symlink() and hashlib.sha256(helper.read_bytes()).hexdigest()==manifest['sha256']['owned-teardown.py']
+          config=json.loads(prepared.read_text())['config']
+          scope=runpy.run_path(str(helper),run_name='verified_fallback_source')
+          task_root,cfg=scope['checked_root'](config)
+          env={'PATH':'/usr/bin:/bin','RUNNER_TEMP':str(temp)}
+          try:
+              result=subprocess.run(['/usr/bin/python3','-I',str(helper),'--config',config],env=env,stdin=subprocess.DEVNULL,capture_output=True,timeout=100)
+              stdout,stderr,code=result.stdout,result.stderr,result.returncode
+              record={'exit':code,'timed_out':False,'full_R05_R6_P0_acceptance':False}
+          except subprocess.TimeoutExpired as error:
+              stdout,stderr,code=error.stdout or b'',error.stderr or b'',1
+              record={'exit':None,'timed_out':True,'full_R05_R6_P0_acceptance':False}
+          (stage/'evidence/fallback-teardown.stdout').write_bytes(stdout)
+          (stage/'evidence/fallback-teardown.stderr').write_bytes(stderr)
+          (stage/'evidence/fallback-teardown-exit.json').write_text(json.dumps(record)+'\n')
+          for file in sorted((task_root/'evidence').glob('*')):
+              if not file.is_file() or file.is_symlink(): raise RuntimeError('nonregular fallback evidence')
+              (stage/'evidence'/('fallback-task-'+file.name)).write_bytes(file.read_bytes())
+          sys.exit(code)
+          PY
+      - name: Preserve bounded exact evidence in logs with zero artifact storage
+        if: always()
+        timeout-minutes: 1
+        run: |
+          python3 -I - <<'PY'
+          import hashlib,os,pathlib,runpy,sys
+          value=os.environ.get('R05_STAGE')
+          if not value:
+              print('No evidence stage; qualification unavailable.');sys.exit(0)
+          stage=pathlib.Path(value);temp=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert stage.is_relative_to(temp) and stage!=temp and stage.resolve(strict=True)==stage
+          helper=stage/'evidence-log-bundle.py'
+          if not helper.is_file():
+              print('Evidence helper unavailable; no envelope or qualification.');sys.exit(1)
+          assert not helper.is_symlink() and hashlib.sha256(helper.read_bytes()).hexdigest()==os.environ['BUNDLE_SHA']
+          sys.argv=[str(helper),'--evidence',str(stage/'evidence')]
+          runpy.run_path(str(helper),run_name='__main__')
+          PY
