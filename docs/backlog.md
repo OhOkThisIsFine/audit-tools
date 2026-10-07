@@ -24,38 +24,60 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 100 entr(y/ies) indexed.
+> and at commit). 122 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — A re-plan discards in-flight inspection work for every re-chunked task (2026-10-05, medium).
-- `open-bugs.md:11` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:13` — A loop-core commit needs a second full suite before it can land (2026-10-04, medium, friction: tool_should_decide).
-- `open-bugs.md:15` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:17` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:25` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:32` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:9` — The shipped TOML parser carries two high advisories (2026-10-06, high).
+- `open-bugs.md:11` — One invalid accepted result stops the whole audit run (2026-10-05, high).
+- `open-bugs.md:13` — A step prompt lists all pending work before its own instructions (2026-10-05, high).
+- `open-bugs.md:15` — Staleness re-runs whole charter lanes for an edit no lane read (2026-10-05, medium).
+- `open-bugs.md:17` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
+- `open-bugs.md:19` — Charter packets are sized by accident, not by the charter question (2026-10-05, medium).
+- `open-bugs.md:21` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
+- `open-bugs.md:23` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
+- `open-bugs.md:25` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
+- `open-bugs.md:27` — A re-plan discards in-flight inspection work for every re-chunked task (2026-10-05, medium).
+- `open-bugs.md:29` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:31` — A loop-core commit needs a second full suite before it can land (2026-10-04, medium, friction: tool_should_decide).
+- `open-bugs.md:33` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:35` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:43` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:50` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:14` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
+- `minor-bugs.md:16` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
+- `minor-bugs.md:18` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
+- `minor-bugs.md:20` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
+- `minor-bugs.md:22` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
+- `minor-bugs.md:24` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
+- `minor-bugs.md:26` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
+- `minor-bugs.md:28` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
+- `minor-bugs.md:30` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
+- `minor-bugs.md:32` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
+- `minor-bugs.md:34` — The stale-main guard reports a sync that already happened (2026-10-05, low).
+- `minor-bugs.md:36` — Test-command discovery knows only npm, Go and pytest (2026-10-06, low).
+- `minor-bugs.md:38` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:16` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:17` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:31` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:46` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:55` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:58` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:32` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:47` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:56` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:59` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
-- `deferred.md:11` — A7 multi-host validation — automated half green, manual GUI half never run.
-- `deferred.md:21` — Manual real-OpenCode validation
-- `deferred.md:24` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
+- `deferred.md:11` — The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment (2026-10-07, medium).
+- `deferred.md:21` — A7 multi-host validation — automated half green, manual GUI half never run.
+- `deferred.md:31` — Manual real-OpenCode validation
+- `deferred.md:34` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 

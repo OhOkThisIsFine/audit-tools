@@ -8,6 +8,7 @@
 
 ## Open tracks
 
+- **An audit run audits a frozen snapshot of the repository (owner direction, 2026-10-05).** The run pins a commit at start and audits its own worktree of that commit, so no edit made during the run can make the run's artifacts stale. The staleness machinery then serves sequential audits: a later audit reviews only files changed since the last completed audit's pinned commit. Existing pieces: the delta scope and `applyContentAddressedPreservation` (`src/audit/orchestrator/planningExecutors.ts`). Open design points: a dirty tree, a repository without git, repo-local tool dependencies in the snapshot, and mapping findings onto the live tree for remediation. **Property:** no edit to the live tree during a run changes that run's inputs.
 
 - **Governance consolidation retains explicit scope limits.** The executable gate catalog, backlog corpus, document pins, shared vocabulary, outcome evaluation and graph reachability are consolidated. Snapshot retention stays consumer-specific. A validation-receipt cache and a universal execution/mutation-certification gate are deliberately omitted without demonstrated value. Source-to-test declarations provide navigation, not behavioral proof. Remaining specific test-replica claims require independent evidence rather than another generic certification subsystem.
 

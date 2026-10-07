@@ -8,6 +8,16 @@
 
 
 
+- **The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment
+  (2026-10-07, medium).** The [mechanical implementation plan](../reviews/mechanical-implementation-plan-2026-10-07.md)
+  selects mechanisms for bounded source reads (P1), argv command objects (P2), lock ownership without
+  lease stealing (P3), no-clobber submission capture (P4), a promotion receipt (P5), owned process-tree
+  lifetime (P6), a trusted npm origin (P7) and Gitleaks privacy (P8); its
+  [P0/P6.0 source review](../reviews/audit-p0-source-review-2026-10-07.md) approves the first patch.
+  Its line pins are to `2f268f01` and decay: check each against the code before acting. P0 is not
+  blocked and is filed in [`open-bugs.md`](open-bugs.md). **Property:** each package lands only with
+  its stated platform qualification, or is closed as not wanted.
+
 - **A7 multi-host validation — automated half green, manual GUI half never run.** Both no-drift gates
   are in `verify:release` and pass: `npm run verify:hosts` (`scripts/audit/verify-hosts.mjs`) and
   `npm run verify:remediate-hosts`, each deploying every host in `INSTALL_HOST_ORDER`

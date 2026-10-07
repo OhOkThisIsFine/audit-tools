@@ -8,6 +8,15 @@ run state survive the loss of the local machine. The next session routes each en
 (`docs/backlog/open-bugs.md`, `docs/backlog/minor-bugs.md`, `docs/backlog/durable-traps.md`, or
 `C:/Code/docs/backlog.md` for machine-wide items) and then writes the final dogfood record.
 
+## Routing (2026-10-06)
+
+Every entry below now lives in its backlog file (`open-bugs.md`, `minor-bugs.md`, `forward-tracks.md`;
+machine-wide items in `C:/Code/docs/backlog.md`). Three leads were checked against source and refuted, so
+they have no entry: `runDeterministicFold` keeps the refreshed intake bundle; DR-001 is fixed by `000d8067`
+(`resolveEditSurfaceManifest` fences landed paths); and remediation does pause with "Verification command
+required" when no command is discovered. The AGY false-fact item has no entry: the machine rule to verify
+every lane output against source already covers it. The final record waits for the end of the run.
+
 ## Run state at pause
 
 - Run: audit-code dev wrapper on the lap worktree, run id `9d4d3419-3c01-42b3-b880-493e9fab32b5`, 1245 files.
