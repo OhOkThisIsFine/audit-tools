@@ -18,7 +18,10 @@ import {
 } from "./runtimeValidation.js";
 import {
   buildChunkedAuditTasks,
+  fileAssignmentKey,
+  taskLeadsAreCurrent,
 } from "./taskBuilder.js";
+import { getExternalSignalPaths } from "./requeueUtils.js";
 import {
   buildAuditPlanMetrics,
   sizeIndexFromManifest,
@@ -35,11 +38,14 @@ import {
   readCoverageElementBaselines,
   recordCoverageElementBaselines,
   withCoverageElementBaselines,
+  deriveCoverageElementKey,
 } from "./coverageElementBaseline.js";
 import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AuditTask, Lens } from "../types.js";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
+import { isSha256 } from "audit-tools/shared";
+import { derivePendingTaskPartition } from "./pendingTasks.js";
 
 // ---------------------------------------------------------------------------
 // Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
@@ -77,6 +83,7 @@ export async function runPlanningExecutor(
   lineIndex: Record<string, number> = {},
   sizeIndex?: Record<string, number>,
   scope?: AuditScopeManifest,
+  publishedTaskIds: ReadonlySet<string> = new Set(),
 ): Promise<ExecutorRunResult> {
   if (!bundle.repo_manifest) {
     throw new Error("Cannot run planning executor without repo_manifest");
@@ -201,12 +208,41 @@ export async function runPlanningExecutor(
     );
   }
 
-  const auditTasks = buildChunkedAuditTasks(coverage, lineIndex, {
+  const taskBuildOptions = {
     external_analyzer_results: externalAnalyzerResults,
     critical_flows: bundle.critical_flows,
     ...(effectiveLenses !== undefined ? { limit_lenses: effectiveLenses } : {}),
     ...(intentBoostLenses.length > 0 ? { intent_priority_boost: intentBoostLenses } : {}),
-  });
+  };
+  // Ask the existing flow-first builder who owns every current review subject,
+  // including paths another result already covered, before reserving old work.
+  // Ownership is compared per file (`fileAssignmentKey`): the chunks of this
+  // all-pending build differ from the published ones, so a chunk-level fact
+  // (priority, signal, split) would reject an unchanged published task.
+  // `publishedTaskIds` is the one input of this plan that the dependency map does
+  // not declare: it chooses which pending tasks keep their ids, never which
+  // lens:path pairs are planned, so it adds no staleness edge.
+  const assignmentTasks = buildChunkedAuditTasks({ ...coverage, files: coverage.files.map(file => file.audit_status === "excluded" ? file :
+    { ...file, audit_status: "pending" as const, completed_lenses: [] }) }, lineIndex, taskBuildOptions);
+  const liveAssignments = new Map(assignmentTasks.flatMap(task => task.file_paths.map(path => [`${task.lens}:${path}`, fileAssignmentKey(task)] as const)));
+  const externalPaths = getExternalSignalPaths(externalAnalyzerResults);
+  const liveCoverage = new Map(coverage.files.map(file => [file.path, file]));
+  const oldBaselines = readCoverageElementBaselines(bundle.artifact_metadata);
+  const partition = derivePendingTaskPartition(bundle);
+  const preservedReviewTasks = partition.pendingTasks.filter(task => publishedTaskIds.has(task.task_id) &&
+    !partition.staleResultTaskIds.has(task.task_id) && !task.tags?.includes(DEEPENING_TAG) && !isArchitectureDiscoveryTask(task) &&
+    taskLeadsAreCurrent(task, externalPaths, intentBoostLenses) &&
+    task.file_paths.every(path => {
+      const file = liveCoverage.get(path);
+      const source = coverageContentSig[path];
+      return file && file.audit_status !== "excluded" && file.required_lenses.includes(task.lens) &&
+        isSha256(source) && task.inputs?.[`source:${path}`] === source &&
+        oldBaselines?.[path] === deriveCoverageElementKey(file, source) && liveAssignments.get(`${task.lens}:${path}`) === fileAssignmentKey(task);
+    }));
+  const reserved = new Set(preservedReviewTasks.flatMap(task => task.file_paths.map(path => `${task.lens}:${path}`)));
+  const remainingCoverage = { ...coverage, files: coverage.files.map(file => ({ ...file,
+    completed_lenses: [...new Set([...file.completed_lenses, ...file.required_lenses.filter(lens => reserved.has(`${lens}:${file.path}`))])] })) };
+  const auditTasks = buildChunkedAuditTasks(remainingCoverage, lineIndex, taskBuildOptions);
   const taggedAuditTasks = auditTasks.map((task) => ({
     ...task,
     status: task.status ?? ("pending" as const),
@@ -226,7 +262,7 @@ export async function runPlanningExecutor(
   // (INV-PLAN-PERSIST-COMPLETE).
   const pendingRequeueTasks = foldPendingRequeueTasks({
     requeueTasks: requeuePayload.tasks,
-    auditTasks: taggedAuditTasks,
+    auditTasks: [...preservedReviewTasks, ...taggedAuditTasks],
     lineIndex,
     effectiveLenses,
   });
@@ -244,6 +280,8 @@ export async function runPlanningExecutor(
   });
   const enrichedAuditTasks = taggedAuditTasks.map(freezeEstimates);
   const allReviewTasks = canonicalizeAuditTasks([
+    // Keep the original frozen subject, including its source snapshots and prompt rationale.
+    ...preservedReviewTasks,
     ...enrichedAuditTasks,
     ...pendingRequeueTasks.map(freezeEstimates),
     // Reconciliation must not drop unrelated in-flight verification work.

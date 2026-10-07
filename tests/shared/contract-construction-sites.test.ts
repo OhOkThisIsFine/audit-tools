@@ -384,12 +384,15 @@ describe("the real tree", () => {
     // reads as coverage. Walked over the REAL producer sources.
     const types = new Set(CONTRACT_PROPERTY_SHAPES.map((c) => c.type));
     for (const rel of [
-      "src/audit/cli/semanticReviewStep.ts",
+      "src/audit/cli/dispatch/hostHandoff.ts",
       "src/shared/validation/designFindingGrounding.ts",
       "src/audit/orchestrator/partitionTaskGraph.ts",
     ]) {
       const markers = parseSiteMarkers(readFileSync(join(REPO_ROOT, rel), "utf8"));
       expect(markers.length, `${rel} declares no construction site`).toBeGreaterThan(0);
+      if (rel === "src/audit/cli/dispatch/hostHandoff.ts") {
+        expect(markers.map(marker => marker.type)).toContain("AuditTask");
+      }
       for (const marker of markers) {
         expect(types.has(marker.type), `${rel} → unknown type ${marker.type}`).toBe(true);
       }

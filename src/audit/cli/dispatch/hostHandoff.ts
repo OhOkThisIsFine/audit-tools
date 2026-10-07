@@ -4,13 +4,18 @@ import { recordHostRootLogBoundary } from "../../../shared/observability/rootLog
 // optional envelope key, the refusal of that key on a lane whose contract never
 // asked for it, the enforcement of every property the prompt states, and the
 // task-bindings version bump whose refusal names the remedy)
+import type { ArtifactBundle } from "../../io/artifacts.js";
+import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
+import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { lensDefinition } from "../../types.js";
 
 import {
   createMemoizedSourceReader,
+  deriveLaneDemand,
   appendSubmissionEvent,
+  assertSubmissionRunId,
   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
   bindingIdentity,
   compareCodeUnits,
@@ -220,6 +225,54 @@ export interface AuditHostTask {
 
 /** One surface file's metrics, exactly as `AuditTask.file_metrics` declares them. */
 type LensSurfaceFileMetric = NonNullable<AuditTask["file_metrics"]>[number];
+
+/**
+ * The audit draw's lane demand.
+ *
+ * The bounding rules are the SHARED ones ({@link deriveLaneDemand}); the draw
+ * supplies only the genuinely per-mode input — its frozen, content-derived
+ * `risk_estimate`. The banding helpers that used to live here read the task's
+ * `priority` enum as if it were a risk score, which is what put a coarsely
+ * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
+ */
+export function toAuditHostTask(task: AuditTask, manifest: ArtifactBundle["repo_manifest"]): AuditHostTask {
+  const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
+  const demand = deriveLaneDemand({
+    tokenEstimate,
+    fileCount: task.file_paths.length,
+    riskScore: task.risk_estimate ?? 0,
+  });
+  // construction-site: AuditTask (the host-facing work item; `demand` is handoff metadata, the rest is the contract)
+  return {
+    task_id: task.task_id,
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    lens: task.lens,
+    file_paths: task.file_paths,
+    file_line_counts: task.file_line_counts ?? {},
+    rationale: task.rationale + "\nSource revision: " + JSON.stringify(task.file_paths.map((path) => ({
+      path, hash: manifest?.files.find((file) => file.path === path)?.hash ?? "unversioned",
+    }))),
+    priority: task.priority ?? "low",
+    demand,
+    token_estimate: tokenEstimate,
+    // The lane tags ride the harness so the boundary can tell the steward lane
+    // (whose contract asks for `verification` metadata) from the base one. A
+    // boundary that cannot see the lane cannot render a lane-aware contract, and
+    // this mapper is where that signal was being dropped.
+    ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
+    // The coverage policy and the surface metrics ride the harness for the same
+    // reason the tags do: the boundary decides from them whether the result must
+    // cover every assigned file, and what the lane is told about the surface it
+    // chooses from. Dropped here, a steward would be dispatched its whole
+    // surface under the COMPLETE gate and refused for not reading all of it.
+    ...(task.coverage_policy === undefined
+      ? {}
+      : { coverage_policy: task.coverage_policy }),
+    ...(task.file_metrics === undefined ? {} : { file_metrics: task.file_metrics }),
+  };
+}
+
 
 export interface AuditHostWorkItem {
   readonly id: string;
@@ -1548,6 +1601,49 @@ function validateHandoffBinding(
     );
   }
   return items;
+}
+
+/** Snapshot current publication under its existing lock; release before planning. */
+export async function readPublishedAuditTaskIds(params: {
+  root: string; artifactsDir: string; tasks: readonly AuditTask[];
+  manifest: ArtifactBundle["repo_manifest"]; lineIndex: Readonly<Record<string, number>>; logger?: RunLogger;
+}): Promise<ReadonlySet<string>> {
+  let run;
+  try { run = ActiveReviewRunSchema.safeParse(await readJsonFile<unknown>(join(params.artifactsDir, "dispatch", CURRENT_TASK_FILENAME))); }
+  catch (error) { if (isFileMissingError(error) || isJsonParseError(error)) return new Set(); throw error; }
+  if (!run.success) return new Set();
+  // The pointer schema accepts strings; only the existing run-id grammar may
+  // authorize a directory segment. An unusable pointer is not publication.
+  try { assertSubmissionRunId(run.data.run_id); }
+  catch { return new Set(); }
+  const paths = resolveBoundaryPaths({ root: params.root, artifactsDir: params.artifactsDir, runId: run.data.run_id });
+  return withAcceptedResultsLock(paths, params.logger, async () => {
+    let items: Map<string, AuditHostWorkItem>;
+    let bindings: Map<string, AuditHostTaskBinding>;
+    try {
+      const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId);
+      const resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), paths.runId);
+      bindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), paths.runId);
+      items = validateHandoffBinding(paths, workload, resultMap, bindings);
+    } catch (error) {
+      if (isFileMissingError(error) || isJsonParseError(error) || error instanceof StaleAuditHostWorkloadError ||
+        error instanceof StaleAuditHostTaskBindingsError || error instanceof AuditHostBindingError) return new Set<string>();
+      throw error;
+    }
+    const ids = new Set<string>();
+    for (const task of params.tasks) {
+      const item = items.get(task.task_id), binding = bindings.get(task.task_id);
+      if (!item || !binding || task.file_paths.some(path => !Number.isInteger(params.lineIndex[path]) || params.lineIndex[path]! < 0)) continue;
+      const measuredTask = { ...task, file_line_counts: Object.fromEntries(task.file_paths.map(path => [path, params.lineIndex[path]!])) };
+      const expected = buildWorkItem(paths, toAuditHostTask(measuredTask, params.manifest));
+      if (binding.pass_id !== task.pass_id || !sameStrings([...binding.tags], task.tags ?? []) ||
+          binding.coverage_policy !== (task.coverage_policy ?? "complete")) continue;
+      // Re-render with CURRENT source revisions and review/lens contract code,
+      // not merely the historical tuple's self-consistency.
+      if (stableStringify(expected) === stableStringify(item)) ids.add(task.task_id);
+    }
+    return ids;
+  });
 }
 
 /** Recognized tool-owned binding corruption; the owning emitter can re-prepare it. */

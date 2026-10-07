@@ -256,6 +256,52 @@ function withSignalTag(baseTags: string[], hasExternalSignal: boolean): string[]
   return hasExternalSignal ? [...baseTags, "external_analyzer_signal"] : baseTags;
 }
 
+// Tags this builder decides for a whole block or chunk, never for one file. A
+// re-plan chunks a different pending set, so these tags never say who owns a file.
+const GROUP_DERIVED_TAGS: ReadonlySet<string> = new Set([
+  "external_analyzer_signal",
+  "unmeasured_line_count",
+  "line_budget_split",
+]);
+
+/**
+ * Who owns one lens:path in a plan, from the facts this builder decides per file:
+ * the unit, the pass, and the per-file tags (flow membership, `large_file`).
+ * Flow membership is per file because the flow claim runs over the eligible
+ * set. Priority and the group-derived tags follow the chunk, so they are left
+ * out; {@link taskLeadsAreCurrent} checks them against the task's own files.
+ */
+export function fileAssignmentKey(task: AuditTask): string {
+  return stableStringify({
+    unit_id: task.unit_id,
+    pass_id: task.pass_id,
+    tags: (task.tags ?? []).filter((tag) => !GROUP_DERIVED_TAGS.has(tag)).sort(compareCodeUnits),
+  });
+}
+
+/**
+ * True when a published task's chunk-level facts still hold under the current
+ * plan inputs:
+ * - it carries the external analyzer signal when one of its own files earns it;
+ * - its priority is the one this builder gives its tags under the current intent
+ *   boost (priority gates selective deepening, so a stale one is wrong work).
+ * A signal that a sibling chunk of its block earned may stay on the task: a
+ * published task cannot tell a sibling's signal from a signal that is gone.
+ * The unmeasured lead needs no check: a task with an unmeasured file is never
+ * counted as published (`readPublishedAuditTaskIds` needs a measured count).
+ */
+export function taskLeadsAreCurrent(
+  task: AuditTask,
+  externalPaths: ReadonlySet<string>,
+  intentPriorityBoost: readonly string[] | undefined,
+): boolean {
+  const tags = new Set(task.tags ?? []);
+  const signalTag = tags.has("external_analyzer_signal");
+  if (!signalTag && task.file_paths.some((path) => externalPaths.has(path))) return false;
+  const boost = intentPriorityBoost && intentPriorityBoost.length > 0 ? new Set(intentPriorityBoost) : undefined;
+  return task.priority === taskPriority(signalTag, task.lens, tags.has("critical_flow"), boost);
+}
+
 /**
  * Resolve option defaults and build the map of pending (file path → lens)
  * pairs from the coverage matrix, filtering out excluded files, completed
@@ -292,9 +338,15 @@ function buildPendingByLens(
     enforceLensFilter: boolean;
     tinyTestFileLines: number;
   },
-): { pendingByLens: Map<string, Set<string>>; unmeasuredPaths: Set<string> } {
+): {
+  pendingByLens: Map<string, Set<string>>;
+  eligibleByLens: Map<string, Set<string>>;
+  unmeasuredPaths: Set<string>;
+} {
   const allowed = new Set(options.limit_lenses ?? []);
   const pendingByLens = new Map<string, Set<string>>();
+  // The same set before completions are removed: what the plan reviews in total.
+  const eligibleByLens = new Map<string, Set<string>>();
   const unmeasuredPaths = new Set<string>();
 
   for (const file of coverageMatrix.files) {
@@ -303,9 +355,6 @@ function buildPendingByLens(
     }
     const unmeasured = isUnmeasuredLineCount(unitLineIndex[file.path]);
     for (const lens of file.required_lenses) {
-      if (file.completed_lenses.includes(lens)) {
-        continue;
-      }
       if (options.enforceLensFilter && !allowed.has(lens)) {
         continue;
       }
@@ -318,6 +367,12 @@ function buildPendingByLens(
       ) {
         continue;
       }
+      const eligible = eligibleByLens.get(lens) ?? new Set<string>();
+      eligible.add(file.path);
+      eligibleByLens.set(lens, eligible);
+      if (file.completed_lenses.includes(lens)) {
+        continue;
+      }
       if (unmeasured) {
         unmeasuredPaths.add(file.path);
       }
@@ -326,7 +381,7 @@ function buildPendingByLens(
       pendingByLens.set(lens, pending);
     }
   }
-  return { pendingByLens, unmeasuredPaths };
+  return { pendingByLens, eligibleByLens, unmeasuredPaths };
 }
 
 /**
@@ -395,7 +450,7 @@ export function buildChunkedAuditTasks(
   const externalPaths = getExternalSignalPaths(options.external_analyzer_results);
 
   // Phase 1: resolve pending work by lens.
-  const { pendingByLens, unmeasuredPaths } = buildPendingByLens(
+  const { pendingByLens, eligibleByLens, unmeasuredPaths } = buildPendingByLens(
     coverageMatrix,
     unitLineIndex,
     externalPaths,
@@ -443,16 +498,26 @@ export function buildChunkedAuditTasks(
   //
   // THE CLAIM CONTRACT IS THE ONLY CHANNEL (`artifact:flow-claim-contract`).
   // `claimFlowReviewBlocks` writes nothing back through its arguments, so the
-  // post-claim state must be read off the RETURN value: `claim.pending` is the
-  // pending map with every claimed path removed, `claim.assigned` the claim keys.
-  // Reading the pre-claim arguments instead re-emits every flow-claimed path as
-  // a remainder task — the same lens:path reviewed twice.
+  // post-claim state must be read off the RETURN value: `claim.assigned` holds
+  // the claim keys, and the remainder phase skips every one of them. Reading the
+  // pre-claim arguments instead re-emits every flow-claimed path as a remainder
+  // task — the same lens:path reviewed twice.
+  //
+  // FLOW OWNERSHIP IS DECIDED OVER THE ELIGIBLE SET, NOT THE PENDING SET. The
+  // claim gives a file shared by two flows to the flow with more paths, so a
+  // claim over the pending set moves that file to another flow as work
+  // completes. A re-plan then renames the file's task, and a host result bound
+  // to the published id is lost. Each block keeps only its pending paths.
   const claim = options.critical_flows
-    ? claimFlowReviewBlocks(options.critical_flows, pendingByLens, new Set<string>())
+    ? claimFlowReviewBlocks(options.critical_flows, eligibleByLens, new Set<string>())
     : undefined;
-  const flowBlocks = claim ?? [];
-  const remainingPending: ReadonlyMap<string, ReadonlySet<string>> =
-    claim?.pending ?? pendingByLens;
+  const flowBlocks = (claim ?? [])
+    .map((block) => ({
+      ...block,
+      file_paths: block.file_paths.filter((path) => pendingByLens.get(block.lens)?.has(path)),
+    }))
+    .filter((block) => block.file_paths.length > 0);
+  const remainingPending: ReadonlyMap<string, ReadonlySet<string>> = pendingByLens;
   const assigned: ReadonlySet<string> = claim?.assigned ?? new Set<string>();
 
   for (const block of flowBlocks) {

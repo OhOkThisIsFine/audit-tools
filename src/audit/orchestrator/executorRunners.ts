@@ -12,6 +12,7 @@ import {
   runStructureDecompositionExecutor,
 } from "./structureExecutors.js";
 import { runPlanningExecutor } from "./planningExecutors.js";
+import { readPublishedAuditTaskIds } from "../cli/dispatch/hostHandoff.js";
 import {
   runResultIngestionExecutor,
   runRuntimeValidationExecutor,
@@ -157,6 +158,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       options.lineIndex ?? {},
       options.sizeIndex,
       plannedScope,
+      options.artifactsDir ? await readPublishedAuditTaskIds({ root, artifactsDir: options.artifactsDir,
+        tasks: bundle.audit_tasks ?? [], manifest: bundle.repo_manifest, lineIndex: options.lineIndex ?? {}, logger: log }) : new Set(),
     );
   },
   result_ingestion_executor: async (bundle, { options }) =>

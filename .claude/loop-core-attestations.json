@@ -152,22 +152,6 @@
     }
   },
   "reviews": {
-    "0cbf97835fc5974d": {
-      "reviewed_by": "agy:gemini-3.8-flash-high+claude-opus-5-5-session",
-      "attester_class": "agent",
-      "checked": "design-check AGY refutation (no retirement collision; leads verified); red-green test task-id-names-one-file-set; targeted 188 tests; full suite green on staged tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "3e3fbbf773ab040876a351652bdb6e04dffcd9c5",
-        "ran_at": "2026-10-05T18:17:09.238Z"
-      },
-      "attested_at": "2026-10-05T18:17:17.487Z",
-      "vouches": {
-        "src/audit/orchestrator/taskBuilder.ts": "d621703a9daf103d16a2f9ba3882c4a28f3926ed"
-      }
-    },
     "148e646a5f72168d": {
       "reviewed_by": "/root/source_refutation",
       "attester_class": "agent",
@@ -238,6 +222,26 @@
       "vouches": {
         "src/remediate/steps/dispatch/hostHandoff.ts": "8be479d44148e79dee8639d55c4e1c378c4a8715",
         "src/remediate/steps/nextStep.ts": "b83eb1b0c659e3f85eafca035eb3e75e8d5b3730"
+      }
+    },
+    "3e0aee473b384f14": {
+      "reviewed_by": "opus-subagent-w6-review,opus-subagent-w6-delta-review",
+      "attester_class": "agent",
+      "checked": "Two independent read-only Opus reviews (CONCERNS each): property gaps, lock order, plan-draw purity, determinism, fallbacks, test reach. Fixed: per-file ownership key, lead+priority check, flow claim over eligible set. Each new test red-proven by inverting its half. Full suite 595/595 on tree fb3936cb.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "fb3936cb5ecf4cffcc15f6a7a2b36421a99c1bec",
+        "ran_at": "2026-10-07T03:39:30.231Z"
+      },
+      "attested_at": "2026-10-07T03:39:42.175Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "92612e121d1a64a5a8d6f7342a6e3438b1e89be6",
+        "src/audit/cli/semanticReviewStep.ts": "017f0f4f534453565d06c737e54dcc5d716a84ef",
+        "src/audit/orchestrator/executorRunners.ts": "3a2f5cfd2fe01400e99e8d26be9df24449903efe",
+        "src/audit/orchestrator/planningExecutors.ts": "7c14a773bbb946d89875dc3fe828f9f147004ae7",
+        "src/audit/orchestrator/taskBuilder.ts": "fcd8cb4902bf1e81523e8d7a2163f90ebb7e5dae"
       }
     },
     "4318b8e7432c3e06": {
@@ -367,18 +371,6 @@
         "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
       }
-    },
-    "fdc48ab94651c535": {
-      "reviewed_by": "opus-subagent-adversarial-review-3-rounds",
-      "attester_class": "agent",
-      "checked": "hostHandoff normalizeTask carries coverage_policy+file_metrics with selective-lane and per-file validation; nextStep review gate reads review_decision through discardOnSchemaVersionMismatch so a stale decision is re-asked; independent adversarial reviewer ran 3 rounds, round-1/2 defects fixed, round 3 found none; full suite 575/575 and verify:checks green",
-      "verdict": "clear",
-      "override": null,
-      "attested_at": "2026-10-02T20:40:27.364Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "83753b24a17ee295100f71ae785b3ac6d4934461",
-        "src/remediate/steps/nextStep.ts": "0e8a85702e19992051f48bd50bbce68ec7695932"
-      }
     }
   },
   "entries": {
@@ -407,7 +399,7 @@
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "fdc48ab94651c535"
+      "review": "3e0aee473b384f14"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -434,7 +426,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/semanticReviewStep.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "3e0aee473b384f14"
     },
     "src/audit/orchestrator/accessMemory.ts": {
       "baseline": "7b79934e86baf378"
@@ -512,7 +504,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "3e0aee473b384f14"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "9bc59db653647a3a"
@@ -593,7 +585,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/planningExecutors.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "3e0aee473b384f14"
     },
     "src/audit/orchestrator/requeue.ts": {
       "baseline": "7b79934e86baf378"
@@ -695,7 +687,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/taskBuilder.ts": {
-      "review": "0cbf97835fc5974d"
+      "review": "3e0aee473b384f14"
     },
     "src/audit/orchestrator/trivialAudit.ts": {
       "baseline": "7b79934e86baf378"

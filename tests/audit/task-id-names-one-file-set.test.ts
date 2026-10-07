@@ -71,3 +71,26 @@ test("an unchanged pending set keeps its task ids across a re-plan", () => {
   const second = plan(paths.map((p) => file(p)), lineIndex).map((t) => t.task_id);
   expect(second).toEqual(first);
 });
+
+test("a file shared by two critical flows keeps its flow owner as work completes", () => {
+  // F1 has three paths and F2 two, so F1 owns the shared src/d.ts. When src/b.ts
+  // and src/c.ts complete, F1 has fewer PENDING paths than F2; a claim over the
+  // pending set would move src/d.ts to F2 and rename its task under a re-plan.
+  const lineIndex: Record<string, number> = { "src/a.ts": 1500, "src/b.ts": 2000, "src/c.ts": 1000, "src/d.ts": 1500 };
+  const critical_flows = { flows: [
+    { id: "f1", name: "F1", entrypoints: ["src/b.ts"], paths: ["src/b.ts", "src/c.ts", "src/d.ts"], concerns: ["correctness"] },
+    { id: "f2", name: "F2", entrypoints: ["src/a.ts"], paths: ["src/a.ts", "src/d.ts"], concerns: ["correctness"] },
+  ] };
+  const flowPlan = (completed: string[]) => buildChunkedAuditTasks(
+    { files: Object.keys(lineIndex).map((p) => file(p, completed.includes(p) ? ["correctness"] : [])) },
+    lineIndex,
+    { critical_flows },
+  ).filter((t) => t.lens === "correctness");
+  const ownerOfD = (tasks: AuditTask[]) => tasks.filter((t) => t.file_paths.includes("src/d.ts")).map((t) => t.unit_id);
+  const before = flowPlan([]);
+  expect(ownerOfD(before)).toEqual(["flow:f1"]);
+  const after = flowPlan(["src/b.ts", "src/c.ts"]);
+  expect(ownerOfD(after)).toEqual(["flow:f1"]);
+  expect(after.find((t) => t.file_paths.includes("src/d.ts"))!.task_id).toBe(before.find((t) => t.file_paths.includes("src/d.ts"))!.task_id);
+  expectNoIdNamesTwoFileSets(before, after);
+});

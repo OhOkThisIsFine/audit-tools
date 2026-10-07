@@ -1072,7 +1072,7 @@ describe(FAILURE_SIGNATURE, () => {
     });
 
     // The steward's two selective-lane fields must survive the boundary's own
-    // normalization. `toHostTask` passes them in; if the boundary drops them,
+    // normalization. `toAuditHostTask` passes them in; if the boundary drops them,
     // the steward is published under the COMPLETE gate (refused unless it opens
     // every surface file), its prompt inlines the whole surface, and the scope
     // carries no metrics to choose from.

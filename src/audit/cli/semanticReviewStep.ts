@@ -1,11 +1,10 @@
 // sites-pinned: tests/audit/host-handoff.test.ts
 // (the steward-lane verification
-// contract — `toHostTask` is where the lane tags were being dropped, so this is
+// contract — `toAuditHostTask` is where the lane tags were being dropped, so this is
 // the site whose revert makes the prompt branch unreachable)
 import { resolve } from "node:path";
 
 import {
-  deriveLaneDemand,
   linkFrictionRunIds,
   readJsonFile,
 } from "audit-tools/shared";
@@ -23,58 +22,12 @@ import {
 import { renderIngestReportLines } from "audit-tools/shared";
 import {
   prepareAuditHostHandoff,
-  type AuditHostTask,
+  toAuditHostTask,
   type AuditHostValidationWarning,
 } from "./dispatch/hostHandoff.js";
 import { nextStepCommand } from "./prompts.js";
 import { writeCurrentStep } from "./steps.js";
 
-/**
- * The audit draw's lane demand.
- *
- * The bounding rules are the SHARED ones ({@link deriveLaneDemand}); the draw
- * supplies only the genuinely per-mode input — its frozen, content-derived
- * `risk_estimate`. The banding helpers that used to live here read the task's
- * `priority` enum as if it were a risk score, which is what put a coarsely
- * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
- */
-function toHostTask(task: AuditTask, manifest: ArtifactBundle["repo_manifest"]): AuditHostTask {
-  const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
-  const demand = deriveLaneDemand({
-    tokenEstimate,
-    fileCount: task.file_paths.length,
-    riskScore: task.risk_estimate ?? 0,
-  });
-  // construction-site: AuditTask (the host-facing work item; `demand` is handoff metadata, the rest is the contract)
-  return {
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-    pass_id: task.pass_id,
-    lens: task.lens,
-    file_paths: task.file_paths,
-    file_line_counts: task.file_line_counts ?? {},
-    rationale: task.rationale + "\nSource revision: " + JSON.stringify(task.file_paths.map((path) => ({
-      path, hash: manifest?.files.find((file) => file.path === path)?.hash ?? "unversioned",
-    }))),
-    priority: task.priority ?? "low",
-    demand,
-    token_estimate: tokenEstimate,
-    // The lane tags ride the harness so the boundary can tell the steward lane
-    // (whose contract asks for `verification` metadata) from the base one. A
-    // boundary that cannot see the lane cannot render a lane-aware contract, and
-    // this mapper is where that signal was being dropped.
-    ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
-    // The coverage policy and the surface metrics ride the harness for the same
-    // reason the tags do: the boundary decides from them whether the result must
-    // cover every assigned file, and what the lane is told about the surface it
-    // chooses from. Dropped here, a steward would be dispatched its whole
-    // surface under the COMPLETE gate and refused for not reading all of it.
-    ...(task.coverage_policy === undefined
-      ? {}
-      : { coverage_policy: task.coverage_policy }),
-    ...(task.file_metrics === undefined ? {} : { file_metrics: task.file_metrics }),
-  };
-}
 
 /**
  * Publish the complete semantic-review workload. The host owns every execution
@@ -125,7 +78,7 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
     root,
     artifactsDir,
     runId: activeReviewRun.run_id,
-    tasks: tasks.map((task) => toHostTask(task, params.bundle.repo_manifest)),
+    tasks: tasks.map((task) => toAuditHostTask(task, params.bundle.repo_manifest)),
     pendingTaskCount: pendingTasks.length,
   });
   // Name this round's runs on the audit friction record, which is keyed by a fixed
