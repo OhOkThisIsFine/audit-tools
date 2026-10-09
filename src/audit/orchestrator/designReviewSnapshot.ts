@@ -64,7 +64,8 @@ export type DesignReviewSnapshotBundle = Partial<
   Record<DesignReviewPass, DesignReviewSnapshot>
 >;
 
-const SNAPSHOT_DIRNAME = "design-review-snapshots";
+// sites-pinned: tests/audit/artifacts-dir-rollover.test.ts
+export const SNAPSHOT_DIRNAME = "design-review-snapshots";
 
 function snapshotDir(artifactsDir: string): string {
   return join(artifactsDir, SNAPSHOT_DIRNAME);

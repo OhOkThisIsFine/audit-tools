@@ -157,16 +157,25 @@ into partial success.
   configured; it never replaces, gates, or is required by the deterministic output.
 - On completion, `promoteFinalAuditReport` copies the final report/findings one level up from the
   working artifacts dir — into `.audit-tools/` for the canonical `.audit-tools/audit/` dir — and
-  then deletes the now-superseded working artifacts dir — so cleanup IS part of the completion
-  transition, folded into promotion rather than routed through `cleanupStaleArtifactsDir`. A
-  separate mechanism, `cleanupStaleArtifactsDir`, clears a *stale* working artifacts dir under ONE
+  archives beside them every diagnostic record the next run will drop. The working dir is KEPT
+  (owner decision 2026-10-08): the next audit starts from it.
+- A terminal step that presents a promoted report ENDS the run, whatever its status: it removes
+  the run's snapshot and writes the run-ended marker. At the next `next-step` entry an ended run is
+  ROLLED OVER (`rollOverFinishedRun`, under the artifact-tree lock): diagnostics appended after
+  promotion are archived again (a member that does not archive keeps the whole dir), then its
+  derived artifacts and staleness baselines stay for the dependency DAG to judge, the operator's
+  hand-authored session intent stays, and every other entry — run identity, consent, per-run
+  choices, intake, steps, submissions, lanes, logs — is deleted, by allow-list, the state file and
+  the marker last. So a later audit re-reviews only what changed.
+- A separate mechanism, `cleanupStaleArtifactsDir`, clears a *stale* working artifacts dir under ONE
   eligibility rule shared by its two callers, the `cleanup` CLI command and the pre-run sweep at
   `next-step` entry: a dir is stale when its run is `not_started` (nothing was produced), or
   `complete` with nothing left for the completion transition to do — every artifact promotion
   archives is already one level up, byte-identical, as decided by promotion's own archive walk run
-  in verify-only mode, never by a second enumeration of the archive set. A `complete` dir with work
-  left (an unpromoted render or unarchived diagnostic evidence) is a live
-  continuation for BOTH callers: `next-step` finishes it through the terminal step, and the
+  in verify-only mode, never by a second enumeration of the archive set (at `next-step` entry an
+  ENDED run has already been rolled over).
+  A `complete` dir with work left (an unpromoted render or unarchived diagnostic evidence) is a
+  live continuation for BOTH callers: `next-step` finishes it through the terminal step, and the
   `cleanup` command refuses it without `--force`. `active`/`blocked` runs are never swept
   mid-flight.
 - Deletion contract: every cleanup path removes only the working artifacts dir. The promoted final

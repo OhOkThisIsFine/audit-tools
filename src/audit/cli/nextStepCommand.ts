@@ -7,7 +7,7 @@ import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "./argumentContract.
 import { functionalPreflightStep } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/artifacts-dir-rollover.test.ts
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
@@ -31,6 +31,7 @@ import type { AnalyzerPolicy } from "audit-tools/shared";
 import { createStepEmissionScaffold } from "../../shared/steps/stepEmissionScaffold.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
+import { rollOverFinishedRun } from "../io/rollover.js";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
@@ -338,16 +339,20 @@ async function cmdNextStepBody(
   root: string,
   artifactsDir: string,
 ): Promise<void> {
+  // Rollover (owner decision 2026-10-08, "keep the artifacts dir"): a run that
+  // ENDED — its terminal step presented a promoted report — becomes this run's
+  // starting point: its derived work stays for the staleness DAG to judge, and
+  // everything that belonged to it goes. A run whose report was never promoted
+  // has no run-ended marker; the fold's terminal step presents and promotes it,
+  // so it is not rolled over. Must run BEFORE the sweep, the mkdir and applyGuidanceFile
+  // below (fresh guidance must never be swept), and before the fold loads the
+  // bundle (a retained `complete` state would short-circuit every derivation).
+  await rollOverFinishedRun(artifactsDir);
   // Pre-run sweep (docs-14; one rule, 74c89b226ab9b9cd): clear a stale working
   // dir so the fresh run starts clean — one whose run is `not_started` (junk
-  // from a run that never got going) or `complete` with its promotion already
-  // finished (a leftover from an rm that failed). The rule is the same one the
-  // `cleanup` verb applies; a `complete` dir with work left is a live
-  // continuation the fold's terminal step presents and promotes, so it survives
-  // entry. Must run BEFORE the mkdir below and BEFORE applyGuidanceFile (fresh
-  // guidance must never be swept). Inside the backstop, a malformed
-  // audit_state.json re-throw becomes a blocked-step contract rather than a raw
-  // crash.
+  // from a run that never got going). The rule is the same one the `cleanup`
+  // verb applies. Inside the backstop, a malformed audit_state.json re-throw
+  // becomes a blocked-step contract rather than a raw crash.
   await cleanupStaleArtifactsDir(artifactsDir);
   // Inside the backstop (AGY review catch): a supervisor-dir IO failure must
   // yield a blocked step too. The backstop's own writer needs no pre-created

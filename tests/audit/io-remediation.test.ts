@@ -353,18 +353,19 @@ test("final report promotion preserves artifacts when destination is not writabl
     );
 
     expect(result.promoted).toBe(false);
-    expect(result.cleaned).toBe(false);
+    expect(result.archived).toBe(false);
     expect(result.warning).toMatch(/could not promote final report/i);
     expect(warnings.length).toBe(1);
     expect(existsSync(join(artifactsDir, "audit-report.md"))).toBe(true);
   });
 });
 
-test("promoteFinalAuditReport archives the friction record with the promoted deliverables before deleting the artifacts dir", async () => {
+test("promoteFinalAuditReport archives the friction record with the promoted deliverables", async () => {
   // The friction close-out walk completes BEFORE promotion (the close gate
   // enforces it), then promotion rm-rf'd the whole artifacts dir — destroying
   // the record no consumer had read (2026-08-05 + 2026-08-06 dogfoods). The
-  // record must ride along with the promoted deliverables.
+  // dir is now kept and the next run's rollover deletes the record, so it
+  // must still ride along with the promoted deliverables.
   await withTempDir("audit-code-report-promotion-friction-", async (tempDir: string) => {
     const artifactsDir = join(tempDir, "artifacts");
     await writeCoreArtifacts(artifactsDir, {
@@ -383,8 +384,8 @@ test("promoteFinalAuditReport archives the friction record with the promoted del
     const result = await promoteFinalAuditReport({ artifactsDir });
 
     expect(result.promoted).toBe(true);
-    expect(result.cleaned).toBe(true);
-    expect(existsSync(artifactsDir)).toBe(false);
+    expect(result.archived).toBe(true);
+    expect(existsSync(artifactsDir)).toBe(true);
     const archived = join(tempDir, "audit-friction-run.json");
     expect(existsSync(archived), "friction record must be archived beside the promoted report").toBe(true);
     expect(JSON.parse(await readFile(archived, "utf8"))).toEqual(record);
@@ -455,7 +456,7 @@ test("promoteFinalAuditReport announces a failed audit-findings.json copy AND ex
     expect(result.promoted, "promoted must be true when only audit-findings.json copy fails").toBe(true);
     // SUPERSEDES the old `warning === undefined` pin: a caller must be able to
     // tell a lossy promotion from a clean one, so the loss is in the RESULT.
-    expect(result.cleaned, "a promotion that could not archive the contract must not report clean").toBe(false);
+    expect(result.archived, "a promotion that could not archive the contract must not report archived").toBe(false);
     expect(result.unarchived, "the loss must be nameable by the caller").toEqual([
       expect.stringContaining("audit-findings.json"),
     ]);

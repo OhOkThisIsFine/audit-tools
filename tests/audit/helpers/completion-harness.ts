@@ -207,7 +207,7 @@ export async function nextStepUntilPresentReport(root: string, extraArgs: string
           { category: "tool_should_decide", note: "none this run" },
           { category: "inefficient_feeding", note: "none this run" },
         ];
-        // promoteFinalAuditReport deletes artifactsDir; recreate the friction
+        // The friction dir may not exist yet; create the friction
         // subdir so the write and the subsequent next-step call both succeed.
         await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
         await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");

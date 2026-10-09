@@ -81,13 +81,12 @@ test("next-step presents the rendered report instead of a run-limit block", { ti
     // artifacts dir). The step contract normalizes the path to forward slashes.
     expect(presented.artifact_paths.final_report).toBe(toPromptPathToken(join(root, ".audit-tools", "audit-report.md")));
     expect(await readFile(presented.artifact_paths.final_report, "utf8")).toMatch(/# Audit Report/);
-    // The audit working state is cleaned out (promotion removes the artifact
-    // bundle), but next-step still leaves the present_report step scaffolding so
-    // the host can read and follow `prompt_path`. Assert the working artifacts
-    // are gone while the prompt the host must follow remains readable.
+    // The audit working state is KEPT for the next run to roll over (owner
+    // decision 2026-10-08, "keep the artifacts dir"), and the prompt the host
+    // must follow remains readable.
     expect(await access(join(artifactsDir, "audit_tasks.json"))
         .then(() => true)
-        .catch(() => false), "audit working artifacts must be cleaned on completion").toBe(false);
+        .catch(() => false), "audit working artifacts are kept on completion").toBe(true);
     expect(await readFile(presented.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });

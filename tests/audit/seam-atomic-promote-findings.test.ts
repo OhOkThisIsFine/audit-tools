@@ -27,10 +27,11 @@
  *      a warning is emitted.
  *   D. audit-report.md failure is fatal to promotion: returns promoted:false
  *      and does NOT attempt to copy audit-findings.json.
- *   E. Post-promotion cleanup: artifactsDir is removed on a full successful
- *      promotion (returned cleaned:true).
+ *   E. Post-promotion: artifactsDir is KEPT on a full successful promotion
+ *      (returned archived:true) — the next run rolls it over (owner decision
+ *      2026-10-08, "keep the artifacts dir").
  *   F. Interface stability: promoteFinalAuditReport accepts { artifactsDir }
- *      and returns { promoted, cleaned, warning? } — no undeclared properties.
+ *      and returns { promoted, archived, warning? } — no undeclared properties.
  *   G. AUDIT_REPORT_FILENAME constant is "audit-report.md" — the literal used
  *      by nextStepHelpers.ts to compute finalReportPath after promotion.
  */
@@ -208,7 +209,7 @@ test("D: promotion returns promoted:false when audit-report.md source is missing
     );
 
     expect(result.promoted, "promoted must be false when source report is missing").toBe(false);
-    expect(result.cleaned, "cleaned must be false when promotion fails").toBe(false);
+    expect(result.archived, "archived must be false when promotion fails").toBe(false);
     expect(typeof result.warning, "warning string must be present on failure").toBe("string");
     expect(result.warning!.includes("could not promote"), "warning must describe the promotion failure").toBeTruthy();
   });
@@ -249,7 +250,7 @@ test("D2: promotion with missing report does NOT place audit-findings.json at de
 // E. Post-promotion cleanup
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("E1: artifactsDir is removed after successful promotion (cleaned:true)", async () => {
+test("E1: artifactsDir is kept after successful promotion (archived:true)", async () => {
   await withTempDir("seam-promote-E1-", async (root) => {
     const artifactsDir = join(root, "audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -263,40 +264,8 @@ test("E1: artifactsDir is removed after successful promotion (cleaned:true)", as
 
     const result = await promoteFinalAuditReport({ artifactsDir });
 
-    expect(result.cleaned, "cleaned must be true after successful promotion+cleanup").toBe(true);
-    await assert.rejects(
-      () => stat(artifactsDir),
-      { code: "ENOENT" },
-      "artifactsDir must be removed after promotion",
-    );
-  });
-});
-
-test("E2: promoted:true but cleaned:false when remove throws (warning emitted)", async () => {
-  await withTempDir("seam-promote-E2-", async (root) => {
-    const artifactsDir = join(root, "audit");
-    await mkdir(artifactsDir, { recursive: true });
-
-    await writeFile(join(artifactsDir, AUDIT_REPORT_FILENAME), "# Report", "utf8");
-    await writeFile(
-      join(artifactsDir, AUDIT_FINDINGS_FILENAME),
-      JSON.stringify({ contract_version: "v1" }),
-      "utf8",
-    );
-
-    const warnings: string[] = [];
-    const result = await promoteFinalAuditReport(
-      { artifactsDir },
-      {
-        remove: async () => { throw new Error("remove blocked for test"); },
-        warn: (msg) => warnings.push(msg),
-      },
-    );
-
-    expect(result.promoted, "promoted must still be true when only cleanup fails").toBe(true);
-    expect(result.cleaned, "cleaned must be false when remove throws").toBe(false);
-    expect(typeof result.warning, "a warning must be emitted for the cleanup failure").toBe("string");
-    expect(warnings.length > 0, "warn callback must have been called").toBeTruthy();
+    expect(result.archived, "archived must be true after a complete promotion").toBe(true);
+    expect((await stat(artifactsDir)).isDirectory(), "artifactsDir must be kept for the next run").toBe(true);
   });
 });
 
@@ -304,7 +273,7 @@ test("E2: promoted:true but cleaned:false when remove throws (warning emitted)",
 // F. Interface stability
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("F: promoteFinalAuditReport return shape has only promoted/cleaned/warning properties", async () => {
+test("F: promoteFinalAuditReport return shape has only promoted/archived/warning properties", async () => {
   await withTempDir("seam-promote-F-", async (root) => {
     const artifactsDir = join(root, "audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -319,12 +288,12 @@ test("F: promoteFinalAuditReport return shape has only promoted/cleaned/warning 
     const result = await promoteFinalAuditReport({ artifactsDir });
 
     // Only these three keys are part of the seam contract
-    const knownKeys = new Set(["promoted", "cleaned", "warning"]);
+    const knownKeys = new Set(["promoted", "archived", "warning"]);
     for (const key of Object.keys(result)) {
       expect(knownKeys.has(key), `unexpected property '${key}' in promoteFinalAuditReport result — seam contract violation`).toBeTruthy();
     }
     expect(typeof result.promoted).toBe("boolean");
-    expect(typeof result.cleaned).toBe("boolean");
+    expect(typeof result.archived).toBe("boolean");
     // warning is optional; when present it must be a string
     if ("warning" in result && result.warning !== undefined) {
       expect(typeof result.warning).toBe("string");
@@ -343,7 +312,7 @@ test("F: promoteFinalAuditReport is a function accepting { artifactsDir } param"
 //
 // The recursive delete used to be unconditional: a failed audit-findings.json
 // copy was a warn() with no effect on the result, so the machine contract could
-// be destroyed while the call returned { promoted: true, cleaned: true }. A
+// be destroyed while the call returned { promoted: true, archived: true }. A
 // caller had no way to tell a clean promotion from a lossy one.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -372,7 +341,7 @@ test("H1: agent-feedback.jsonl is archived, and a complete promotion still repor
     const result = await promoteFinalAuditReport({ artifactsDir });
 
     // POLARITY ONE: nothing failed, so the run is clean and says so.
-    expect(result.cleaned, "a complete archive still cleans up").toBe(true);
+    expect(result.archived, "a complete archive says so").toBe(true);
     expect(result.unarchived, "a clean promotion names no loss").toBeUndefined();
     // Worker-owned, append-only, and inside artifactsDir — so the rm destroys
     // it. It had no archive step at all while the friction records and the
@@ -384,7 +353,7 @@ test("H1: agent-feedback.jsonl is archived, and a complete promotion still repor
   });
 });
 
-test("H2: a failed findings archive ABORTS the delete and reports the loss", async () => {
+test("H2: a failed findings archive BLOCKS the rollover and reports the loss", async () => {
   await withTempDir("seam-promote-H2-", async (root) => {
     const artifactsDir = await seedArtifacts(root);
     const warnings: string[] = [];
@@ -415,8 +384,8 @@ test("H2: a failed findings archive ABORTS the delete and reports the loss", asy
       "the unarchived machine contract must still be on disk",
     ).toContain("audit-findings/v1");
 
-    // And the RESULT says so — { promoted: true, cleaned: true } would be a lie.
-    expect(result.cleaned).toBe(false);
+    // And the RESULT says so — { promoted: true, archived: true } would be a lie.
+    expect(result.archived).toBe(false);
     expect(result.unarchived, "the loss must be nameable by the caller").toEqual([
       expect.stringContaining(AUDIT_FINDINGS_FILENAME),
     ]);
@@ -526,7 +495,7 @@ test("I2: a clean ledger sets the events field and leaves no drop field", async 
   });
 });
 
-test("H4: a failed LEDGER archive also aborts the delete (the archive set is one class)", async () => {
+test("H4: a failed LEDGER archive also blocks the rollover (the archive set is one class)", async () => {
   await withTempDir("seam-promote-H4-", async (root) => {
     const artifactsDir = await seedArtifacts(root);
     await writeFile(
@@ -557,12 +526,12 @@ test("H4: a failed LEDGER archive also aborts the delete (the archive set is one
       (await stat(artifactsDir)).isDirectory(),
       "the directory holding the unarchived ledger must NOT be deleted",
     ).toBe(true);
-    expect(result.cleaned).toBe(false);
+    expect(result.archived).toBe(false);
     expect(result.unarchived?.join(" ")).toContain("submission ledger");
   });
 });
 
-test("H5: a friction record that cannot be archived also aborts the delete", async () => {
+test("H5: a friction record that cannot be archived also blocks the rollover", async () => {
   await withTempDir("seam-promote-H5-", async (root) => {
     const artifactsDir = await seedArtifacts(root);
     const frictionDir = join(artifactsDir, "friction");
@@ -589,7 +558,7 @@ test("H5: a friction record that cannot be archived also aborts the delete", asy
       (await stat(artifactsDir)).isDirectory(),
       "the directory holding the unarchived friction record must NOT be deleted",
     ).toBe(true);
-    expect(result.cleaned).toBe(false);
+    expect(result.archived).toBe(false);
     expect(
       result.unarchived?.join(" "),
       "the friction shortfall must be nameable by the caller",
@@ -597,7 +566,7 @@ test("H5: a friction record that cannot be archived also aborts the delete", asy
   });
 });
 
-test("H6: a friction dir that cannot be LISTED also aborts the delete", async () => {
+test("H6: a friction dir that cannot be LISTED also blocks the rollover", async () => {
   await withTempDir("seam-promote-H6-", async (root) => {
     const artifactsDir = await seedArtifacts(root);
     // The dir EXISTS and holds records; it simply cannot be enumerated, because
@@ -619,7 +588,7 @@ test("H6: a friction dir that cannot be LISTED also aborts the delete", async ()
       (await stat(artifactsDir)).isDirectory(),
       "a directory whose friction records could not be enumerated must NOT be deleted",
     ).toBe(true);
-    expect(result.cleaned).toBe(false);
+    expect(result.archived).toBe(false);
     expect(
       result.unarchived?.join(" "),
       "the unlistable-directory refusal must be nameable by the caller",
@@ -627,19 +596,19 @@ test("H6: a friction dir that cannot be LISTED also aborts the delete", async ()
   });
 });
 
-test("H7: an ABSENT friction dir is not a shortfall — the delete still happens", async () => {
+test("H7: an ABSENT friction dir is not a shortfall — the archive is still complete", async () => {
   // The counterweight to H6, and the reason the errno split exists rather than a
   // blanket throw: a run that recorded no friction has no `friction/` dir at
   // all, which is the ordinary clean run. Treating ENOENT as a shortfall would
-  // preserve every artifacts dir forever and red every green audit.
+  // block every rollover forever and red every green audit.
   await withTempDir("seam-promote-H7-", async (root) => {
     const artifactsDir = await seedArtifacts(root);
     expect(existsSync(join(artifactsDir, "friction"))).toBe(false);
 
     const result = await promoteFinalAuditReport({ artifactsDir });
 
-    expect(result.cleaned).toBe(true);
+    expect(result.archived).toBe(true);
     expect(result.unarchived ?? []).toEqual([]);
-    expect(existsSync(artifactsDir)).toBe(false);
+    expect(existsSync(artifactsDir)).toBe(true);
   });
 });

@@ -28,6 +28,7 @@ test("external audit presents its current report and archives pending diagnostic
     const archived = JSON.parse(await readFile(join(root, ".audit-tools", "audit-friction-run.json"), "utf8"));
     expect(archived.frictions.some((f: { id: string }) => f.id === "pending-event")).toBe(true);
     expect(archived.category_attestations ?? []).toEqual([]);
-    expect(existsSync(join(artifactsDir, "friction"))).toBe(false);
+    // The working dir is kept until the next run rolls it over; the record is already archived.
+    expect(existsSync(join(artifactsDir, "friction"))).toBe(true);
   });
 });

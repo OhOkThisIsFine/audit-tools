@@ -5,6 +5,7 @@ import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
@@ -98,6 +99,9 @@ await test("buildTerminalStep returns complete when bundle.audit_report is set",
     expect(result.kind).toBe("complete");
     if (result.kind !== "complete") throw new Error("expected kind=complete");
     expect(result.finalReportPath.endsWith("audit-report.md")).toBeTruthy();
+    // Presenting a promoted report ENDS the run, whatever its status, so the
+    // next next-step rolls the dir over instead of re-reading the frozen snapshot.
+    expect(existsSync(join(artifactsDir, "run-ended.json"))).toBe(true);
   });
 });
 

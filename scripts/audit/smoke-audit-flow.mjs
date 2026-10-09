@@ -721,11 +721,11 @@ export async function runAuditFlowPhase({
     true,
   );
   await stat(join(root, ".audit-tools", "audit-findings.json"));
-  // Completion cleans the audit working artifacts (only the present_report
-  // step scaffolding remains so the host can follow prompt_path).
-  await assert.rejects(() =>
-    stat(join(root, ".audit-tools", "audit", "audit_tasks.json")),
-  );
+  // Completion KEEPS the working artifacts and marks the run ended: the next
+  // next-step rolls them over into a fresh audit (owner decision 2026-10-08,
+  // "keep the artifacts dir"), which the rerun below checks.
+  await stat(join(root, ".audit-tools", "audit", "audit_tasks.json"));
+  await stat(join(root, ".audit-tools", "audit", "run-ended.json"));
   log.elapsed("next-step until present_report", stepStart);
 
   stepStart = Date.now();

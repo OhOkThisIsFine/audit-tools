@@ -13,6 +13,9 @@ import { AnalyzerRunConsentDecisionSchema, readRunConsentUnlocked, updateRunCons
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
+  AUDIT_FINDINGS_FILENAME,
+  auditFindingsPath,
+  promotedAuditFindingsPath,
   advance,
   ANALYZER_SETTINGS,
   describeStoppedFold,
@@ -41,6 +44,7 @@ import {
   promoteFinalAuditReport,
 } from "../io/artifacts.js";
 import { ensureRunSourceRoot, removeRunSnapshot, resolveRunSince } from "../io/runSnapshot.js";
+import { markRunEnded } from "../io/rollover.js";
 import {
   auditReportPath,
   groundDesignFindings,
@@ -431,13 +435,6 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
  * target repository's audit completion contract.
  */
 async function promoteCompletedReport(artifactsDir: string): Promise<string> {
-  // Promotion deletes the artifacts dir — whatever the run's status, a rendered
-  // report on a run that is not complete included — and that dir holds the
-  // record of the run's frozen snapshot. So the snapshot goes first, on every
-  // path through here (the already-promoted one too), or it would leak.
-  for (const problem of await removeRunSnapshot(artifactsDir)) {
-    process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
-  }
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -451,14 +448,37 @@ async function promoteCompletedReport(artifactsDir: string): Promise<string> {
     readFile(inPlacePath, "utf8").catch(() => null),
   ]);
   // A missing in-place render alongside an existing promoted file is the
-  // legitimate re-entry AFTER promotion (promotion deletes artifactsDir);
+  // legitimate re-entry AFTER promotion (the next run's rollover deletes it);
   // a PRESENT in-place render that differs is precisely the stale-promotion
   // case and must fall through to promote.
   const alreadyPromoted =
     promotedText !== null && (inPlaceText === null || promotedText === inPlaceText);
-  if (alreadyPromoted) return promotedPath;
-  const promoted = await promoteFinalAuditReport({ artifactsDir });
-  return promoted.promoted ? promotedPath : inPlacePath;
+  // The machine contract must be one level up before the run may end: the
+  // rollover deletes the in-place copy and re-archives only the append-only
+  // diagnostics (INV 1). Identity, not existence, here too — a PREVIOUS
+  // audit's promoted contract always exists — so a contract whose earlier copy
+  // failed is promoted again rather than taken as archived.
+  const [inPlaceFindings, promotedFindings] = await Promise.all([
+    readFile(auditFindingsPath(artifactsDir)).catch(() => null),
+    readFile(promotedAuditFindingsPath(artifactsDir)).catch(() => null),
+  ]);
+  const findingsCurrent =
+    inPlaceFindings === null || (promotedFindings !== null && inPlaceFindings.equals(promotedFindings));
+  let findingsArchived = true;
+  if (!alreadyPromoted || !findingsCurrent) {
+    const promoted = await promoteFinalAuditReport({ artifactsDir });
+    if (!promoted.promoted) return inPlacePath;
+    findingsArchived = !(promoted.unarchived ?? []).some((member) => member.startsWith(AUDIT_FINDINGS_FILENAME));
+  }
+  // A presented, promoted report ENDS the run, whatever its status (a rendered
+  // report on a stopped fold included — re-reading the same frozen snapshot
+  // would only stop it again): its snapshot goes, and the marker lets the next
+  // next-step roll the dir over (`rollOverFinishedRun`).
+  for (const problem of await removeRunSnapshot(artifactsDir)) {
+    process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
+  }
+  if (findingsArchived) await markRunEnded(artifactsDir);
+  return promotedPath;
 }
 
 /**
@@ -2528,8 +2548,8 @@ export async function checkNoProgressBeforeDispatch(ctx: {
       },
     );
     // A terminal INTENT, not the built terminal: `buildTerminalStep` can
-    // PROMOTE (which deletes artifactsDir), so it must run after the fold's
-    // commit and outside its hold. The marker above is the in-fold record.
+    // PROMOTE (which writes outside the dir and removes a complete run's
+    // snapshot), so it must run after the fold's commit and outside its hold. The marker above is the in-fold record.
     return {
       kind: "terminal_intent",
       bundle: ctx.bundle,
@@ -3727,15 +3747,15 @@ async function runDeterministicFold(
   // obligation that produces most of it, is what makes "stated on exactly one
   // emitted step, WHICHEVER step that is" true for every kind. A terminal
   // intent is deliberately excluded: it is not a step, and the terminal
-  // conversion below promotes and deletes the artifacts dir — the carry has
-  // nowhere left to be stated, and the run is over.
+  // conversion below promotes — the carry has nowhere left to be stated, and
+  // the run is over.
   if (outcome.step && outcome.step.kind !== "terminal_intent") {
     return await withFoldAdvisories(outcome.step, ctx);
   }
 
   if (outcome.step) {
     // Guard terminals convert POST-commit, POST-hold: buildTerminalStep can
-    // promote, and promotion deletes artifactsDir.
+    // promote, which writes outside the dir and removes a complete run's snapshot.
     return await buildTerminalStep(
       params,
       outcome.step.bundle,

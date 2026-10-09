@@ -1,7 +1,7 @@
-// sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts
+// sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts, tests/audit/seam-atomic-promote-findings.test.ts
 import type { ZodTypeAny } from "zod";
 import { AuditTaskSchema, AuditResultSchema, CoverageMatrixSchema } from "../types.js";
-import { cp, readFile, rm, unlink } from "node:fs/promises";
+import { cp, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   AuditFindingsReportSchema,
@@ -546,77 +546,25 @@ async function archiveVerified(
   return verifyArchivedBytes(to, sourceBytes);
 }
 
-export async function promoteFinalAuditReport(params: {
+/**
+ * Archive the run's append-only diagnostics one level up — agent feedback,
+ * friction records and the submission ledger — and name every member that did
+ * not archive. Promotion runs it; so does the next run's rollover
+ * (`rollOverFinishedRun`), because a host may append to these after promotion
+ * and the rollover deletes them.
+ */
+export async function archiveRunDiagnostics(params: {
   artifactsDir: string;
 }, options: {
   copy?: typeof cp;
-  remove?: typeof rm;
   warn?: (message: string) => void;
-} = {}): Promise<{
-  promoted: boolean;
-  cleaned: boolean;
-  warning?: string;
-  /**
-   * Artifacts that could NOT be archived before the cleanup. Non-empty means the
-   * delete was ABORTED, so a caller reading { promoted: true, cleaned: true } can
-   * trust that nothing was lost — which is exactly what it could not do while a
-   * findings-copy failure was a `warn()` with no effect on the returned shape
-   * (INV 3 / DAT-4802dc9e-2, -3).
-   */
-  unarchived?: readonly string[];
-  /**
-   * Ledger lines the reader could not parse, surfaced so the promotion result
-   * never describes a record cleaner than the run actually was.
-   */
-  ledger_dropped?: readonly SubmissionLedgerDrop[];
-}> {
+} = {}): Promise<{ lost: string[]; ledger_dropped: SubmissionLedgerDrop[] }> {
   const lost: string[] = [];
-  const source = auditReportPath(params.artifactsDir);
   const destination = promotedAuditReportPath(params.artifactsDir);
   const copy = options.copy ?? cp;
-  const remove = options.remove ?? rm;
-  const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));
-  try {
-    await copy(source, destination, { force: true });
-  } catch (error) {
-    const warning =
-      `audit-code: completed audit but could not promote final report to ${destination}: ` +
-      (error instanceof Error ? error.message : String(error));
-    warn(warning);
-    return { promoted: false, cleaned: false, warning };
-  }
-  // Promote the canonical machine contract alongside the human report. Missing
-  // (e.g. legacy bundle) or unreadable: best-effort, never blocks completion.
-  try {
-    const mismatch = await archiveVerified(
-      copy,
-      auditFindingsPath(params.artifactsDir),
-      promotedAuditFindingsPath(params.artifactsDir),
-    );
-    if (mismatch) lost.push(AUDIT_FINDINGS_FILENAME + " (" + mismatch + ")");
-  } catch (error) {
-    // The warning is unchanged — an absent findings file (the legacy-bundle
-    // case) still announces a partial promotion. What changed is the DELETE
-    // GATE: an absent file has nothing to lose, but any OTHER failure means the
-    // machine contract is about to be destroyed by the rm below with no copy
-    // anywhere, and warning-and-proceeding turned that into silent data loss
-    // reported as { promoted: true, cleaned: true }.
-    warn(
-      `audit-code: could not promote ${AUDIT_FINDINGS_FILENAME} to ${promotedAuditFindingsPath(params.artifactsDir)}: ` +
-        (error instanceof Error ? error.message : String(error)),
-    );
-    // An ABSENT findings file (the legacy-bundle case) has nothing to lose. Any
-    // other failure means the machine contract is about to be destroyed by the
-    // rm below with no copy anywhere — DAT-4802dc9e-2 / -3 — so it is recorded
-    // as loss and gates the delete.
-    if (!isFileMissingError(error)) {
-      lost.push(
-        `${AUDIT_FINDINGS_FILENAME} (${error instanceof Error ? error.message : String(error)})`,
-      );
-    }
-  }
+  const warn = options.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
   // agent-feedback.jsonl is worker-owned, append-only, and lives inside
-  // artifactsDir — so the rm below destroys it. It had no archive step at all
+  // artifactsDir — so the rollover destroys it. It had no archive step at all
   // while the friction records and the ledger beside it both had one
   // (DAT-4802dc9e).
   try {
@@ -637,8 +585,8 @@ export async function promoteFinalAuditReport(params: {
   // Records may be untriaged: development reflection is not a product gate.
   // The RETURN is consumed, not discarded. `archiveFrictionRecords` warns per
   // failed file and simply omits it from the archived list, so dropping the
-  // return meant a friction record that failed to copy was destroyed by the rm
-  // below with nothing gating it - the same class as the findings and ledger
+  // return meant a friction record that failed to copy was destroyed by the
+  // delete with nothing gating it - the same class as the findings and ledger
   // archives beside it. Comparing the archived count against what is on disk
   // surfaces a per-file failure without reaching into that module's internals.
   // The listing is the SAME helper `archiveFrictionRecords` walks, so the two
@@ -647,10 +595,10 @@ export async function promoteFinalAuditReport(params: {
   // AN UNLISTABLE DIR IS A SHORTFALL, not an empty one. The listing used to
   // return `[]` for every readdir failure alike, and the archive that walks the
   // same helper degraded the same way — so both sides read zero, the comparison
-  // below was satisfied, and the rm destroyed a directory full of records with
-  // nothing gating it. It now throws on anything but ENOENT: an absent dir
+  // below was satisfied, and the delete destroyed a directory full of records
+  // with nothing gating it. It now throws on anything but ENOENT: an absent dir
   // really has nothing to lose, any other errno means records may exist and
-  // were NOT archived, so the delete is refused — the same answer an
+  // were NOT archived, so the rollover is refused — the same answer an
   // unarchivable FILE already gets (the CP-NODE-3 residual: "an unlistable
   // directory refuses the delete, same as an unarchivable file").
   let frictionNames: string[] = [];
@@ -679,7 +627,7 @@ export async function promoteFinalAuditReport(params: {
   }
   // The submission ledger rides the same seam. It is the only durable statement
   // that a run drifted and was repaired — a rejection, a re-emit, a hand
-  // recovery — so letting the tree rm take it would mean the distinction
+  // recovery — so letting the rollover take it would mean the distinction
   // between a clean run and a repaired one survives only in a transcript.
   // Best-effort: a run that never drifted has no ledger to archive.
   const ledgerSource = submissionLedgerPath(params.artifactsDir);
@@ -700,13 +648,13 @@ export async function promoteFinalAuditReport(params: {
   } catch (error) {
     // A missing ledger is the ordinary case (nothing was ever submitted through
     // a gate) and says nothing. Any OTHER failure means the one durable record
-    // that this run drifted is about to be destroyed by the rm below — so it is
+    // that this run drifted is about to be destroyed by the rollover — so it is
     // announced, exactly as the friction-archive seam announces its own copy
     // failures. Still best-effort: bookkeeping must not fail a completed audit.
     if (!isFileMissingError(error)) {
-      // GATES THE DELETE, like every other member of the archive set. Warning
+      // GATES THE ROLLOVER, like every other member of the archive set. Warning
       // and falling through meant the one durable statement that this run
-      // drifted and was repaired got destroyed by the rm below - the exact loss
+      // drifted and was repaired got destroyed by the rollover - the exact loss
       // the ledger exists to prevent, with only a console line left behind.
       lost.push(
         "the submission ledger (" +
@@ -714,40 +662,115 @@ export async function promoteFinalAuditReport(params: {
       );
     }
   }
+  return { lost, ledger_dropped: [...ledgerDropped] };
+}
+
+/**
+ * Promote the run's deliverables one level up and ARCHIVE every member that
+ * the next run's rollover (`rollOverFinishedRun`) will delete: the findings
+ * contract, agent feedback, friction records and the submission ledger. The
+ * working dir itself is KEPT (owner decision 2026-10-08, "keep the artifacts
+ * dir"): the next run reuses its derived artifacts through the staleness DAG.
+ * `archived` is the rollover's gate (through `isWorkingDirFullyPromoted`): a
+ * member that did not archive keeps the dir from being rolled over, so its only
+ * copy is never deleted.
+ */
+export async function promoteFinalAuditReport(params: {
+  artifactsDir: string;
+}, options: {
+  copy?: typeof cp;
+  warn?: (message: string) => void;
+} = {}): Promise<{
+  promoted: boolean;
+  /** Every archive member is verified one level up (INV 1). */
+  archived: boolean;
+  warning?: string;
+  /**
+   * Artifacts that could NOT be archived. Non-empty means `archived` is false,
+   * so a caller reading { promoted: true, archived: true } can trust that
+   * nothing will be lost — which is exactly what it could not do while a
+   * findings-copy failure was a `warn()` with no effect on the returned shape
+   * (INV 3 / DAT-4802dc9e-2, -3).
+   */
+  unarchived?: readonly string[];
+  /**
+   * Ledger lines the reader could not parse, surfaced so the promotion result
+   * never describes a record cleaner than the run actually was.
+   */
+  ledger_dropped?: readonly SubmissionLedgerDrop[];
+}> {
+  const lost: string[] = [];
+  const source = auditReportPath(params.artifactsDir);
+  const destination = promotedAuditReportPath(params.artifactsDir);
+  const copy = options.copy ?? cp;
+  const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));
+  try {
+    await copy(source, destination, { force: true });
+  } catch (error) {
+    const warning =
+      `audit-code: completed audit but could not promote final report to ${destination}: ` +
+      (error instanceof Error ? error.message : String(error));
+    warn(warning);
+    return { promoted: false, archived: false, warning };
+  }
+  // Promote the canonical machine contract alongside the human report. Missing
+  // (e.g. legacy bundle) or unreadable: best-effort, never blocks completion.
+  try {
+    const mismatch = await archiveVerified(
+      copy,
+      auditFindingsPath(params.artifactsDir),
+      promotedAuditFindingsPath(params.artifactsDir),
+    );
+    if (mismatch) lost.push(AUDIT_FINDINGS_FILENAME + " (" + mismatch + ")");
+  } catch (error) {
+    // The warning is unchanged — an absent findings file (the legacy-bundle
+    // case) still announces a partial promotion. What changed is the DELETE
+    // GATE: an absent file has nothing to lose, but any OTHER failure means the
+    // machine contract is about to be destroyed by the rollover with no copy
+    // anywhere, and warning-and-proceeding turned that into silent data loss
+    // reported as { promoted: true, cleaned: true }.
+    warn(
+      `audit-code: could not promote ${AUDIT_FINDINGS_FILENAME} to ${promotedAuditFindingsPath(params.artifactsDir)}: ` +
+        (error instanceof Error ? error.message : String(error)),
+    );
+    // An ABSENT findings file (the legacy-bundle case) has nothing to lose. Any
+    // other failure means the machine contract is about to be destroyed by the
+    // rollover with no copy anywhere — DAT-4802dc9e-2 / -3 — so it is recorded
+    // as loss and gates the delete.
+    if (!isFileMissingError(error)) {
+      lost.push(
+        `${AUDIT_FINDINGS_FILENAME} (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+  }
+  const diagnostics = await archiveRunDiagnostics({ artifactsDir: params.artifactsDir }, { copy, warn });
+  lost.push(...diagnostics.lost);
+  const ledgerDropped = diagnostics.ledger_dropped;
   const dropped = ledgerDropped.length > 0 ? { ledger_dropped: ledgerDropped } : {};
-  // THE DELETE IS CONDITIONED ON VERIFIED COPIES (INV 1). Anything that failed
-  // to archive still exists only inside artifactsDir, so removing it destroys
-  // the sole copy. Keeping the directory is always recoverable; the delete is
-  // not — REL-4802dc9e.
+  // THE ROLLOVER IS CONDITIONED ON VERIFIED COPIES (INV 1). Anything that failed
+  // to archive still exists only inside artifactsDir, so rolling it over
+  // destroys the sole copy. Keeping the run is always recoverable; the delete
+  // is not — REL-4802dc9e.
   if (lost.length > 0) {
     const warning =
       `audit-code: promoted final report to ${destination}, but could NOT archive ` +
-      `${lost.join("; ")} — leaving ${params.artifactsDir} in place rather than ` +
-      "destroying the only copy. Recover those files, then remove the directory by hand.";
+      `${lost.join("; ")} — the next audit will not roll ${params.artifactsDir} over ` +
+      "while it holds the only copy. Recover those files, then run `audit-code cleanup --force`.";
     warn(warning);
-    return { promoted: true, cleaned: false, warning, unarchived: lost, ...dropped };
+    return { promoted: true, archived: false, warning, unarchived: lost, ...dropped };
   }
-  try {
-    await remove(params.artifactsDir, { recursive: true, force: true });
-    return { promoted: true, cleaned: true, ...dropped };
-  } catch (error) {
-    const warning =
-      `audit-code: promoted final report to ${destination}, but could not remove ${params.artifactsDir}: ` +
-      (error instanceof Error ? error.message : String(error));
-    warn(warning);
-    return { promoted: true, cleaned: false, warning, ...dropped };
-  }
+  return { promoted: true, archived: true, ...dropped };
 }
 
 /**
  * Has the completion transition NOTHING left to do for this working dir — is
  * every artifact `promoteFinalAuditReport` archives already one level up,
- * byte-identical? This is the stale-dir cleanup rule's question
+ * byte-identical? This is the stale-dir rule's question
  * (`cleanupStaleArtifactsDir`), and it is answered by promotion's OWN archive
  * walk rather than by a second enumeration of the archive set: the walk runs
  * with its copy replaced by a byte comparison against what is already at each
- * destination and its delete replaced by a no-op, so "fully promoted" means
- * exactly "the delete gate (INV 1) would pass without copying anything". A
+ * destination, so "fully promoted" means exactly "the archive gate (INV 1)
+ * would pass without copying anything". A
  * member promotion archives is a member this walk checks; the two cannot drift.
  *
  * Identity, not existence: a destination that is missing, or that differs from
@@ -779,7 +802,7 @@ export async function isWorkingDirFullyPromoted(artifactsDir: string): Promise<b
   };
   const result = await promoteFinalAuditReport(
     { artifactsDir },
-    { copy: verifyOnly, remove: async () => {}, warn: () => {} },
+    { copy: verifyOnly, warn: () => {} },
   );
-  return result.promoted && result.cleaned;
+  return result.promoted && result.archived;
 }

@@ -191,6 +191,27 @@
         "src/remediate/steps/nextStep.ts": "fca40e3e8b27e83b64ef9a992a1a11cc2558dfbe"
       }
     },
+    "339be913c2e2c76d": {
+      "reviewed_by": "agy-refuter-818ea54a,opus-rounds-4-5-6-a00ad870db1f974a0",
+      "attester_class": "agent",
+      "checked": "Design-check refutation (AGY, report-only; verdicts checked by measurement and test) and three independent report-only Opus review rounds of the artifacts-dir rollover (marker gate with contract identity, rollover under the hold with re-archive, allow-list, state file and marker last, never a lock; sweep keeps an unremovable snapshot unless forced). Every finding fixed and pinned by a red-green test. Full suite green on this staged tree; the packaged smoke asserts the kept dir and the run-ended marker.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "53765c17324306ecfa1c98709060e032910c700f",
+        "ran_at": "2026-10-09T07:03:59.999Z"
+      },
+      "attested_at": "2026-10-09T07:04:07.348Z",
+      "vouches": {
+        ".claude/hooks/loop-core-patterns.mjs": "532f7ba33688b61bb950c1c143ce2cdd5c45e002",
+        "src/audit/cli/nextStepCommand.ts": "552e52227293e133f884c0f9ed983290b1c360a3",
+        "src/audit/cli/nextStepHelpers.ts": "8c824e9d2ab7ce4afa5902c48cab85bfd973a1c6",
+        "src/audit/io/rollover.ts": "6524616644b4d98b75749b1ef34589d74200de0f",
+        "src/audit/orchestrator/designReviewSnapshot.ts": "d3ca10aeed888ffa1383dfcb4e287e730b744c8d",
+        "src/shared/loopCorePaths.ts": "e0cfba1a93352c4986a8f9cf9f5ffe1b16c871c8"
+      }
+    },
     "392554939aa89e3b": {
       "reviewed_by": "a2b9be05ae07da55c-opus-round3",
       "attester_class": "agent",
@@ -408,7 +429,7 @@
   },
   "entries": {
     ".claude/hooks/loop-core-patterns.mjs": {
-      "review": "392554939aa89e3b"
+      "review": "339be913c2e2c76d"
     },
     "scripts/check-loop-core-attestations.mjs": {
       "review": "4318b8e7432c3e06"
@@ -450,16 +471,19 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "392554939aa89e3b"
+      "review": "339be913c2e2c76d"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "392554939aa89e3b"
+      "review": "339be913c2e2c76d"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/semanticReviewStep.ts": {
       "review": "392554939aa89e3b"
+    },
+    "src/audit/io/rollover.ts": {
+      "review": "339be913c2e2c76d"
     },
     "src/audit/io/runSnapshot.ts": {
       "review": "392554939aa89e3b"
@@ -528,7 +552,7 @@
       "review": "189c849cd573575f"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "339be913c2e2c76d"
     },
     "src/audit/orchestrator/designReviewTask.ts": {
       "baseline": "7b79934e86baf378"
@@ -810,7 +834,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
-      "review": "392554939aa89e3b"
+      "review": "339be913c2e2c76d"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "baseline": "7b79934e86baf378"

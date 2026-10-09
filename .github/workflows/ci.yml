@@ -133,6 +133,7 @@ on:
       - "src/audit/cli/semanticReviewStep.ts"
       - "src/audit/contracts/workerSchemas.ts"
       - "src/audit/io/artifacts.ts"
+      - "src/audit/io/rollover.ts"
       - "src/audit/io/runArtifacts.ts"
       - "src/audit/io/runSnapshot.ts"
       - "src/audit/orchestrator/**"

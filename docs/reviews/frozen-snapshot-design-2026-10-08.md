@@ -101,8 +101,9 @@ charter lanes whose evidence changed.
   copied, symlink targets stay inside the snapshot.
 - **Round 3 — 6 findings, none high.** Fixed: the live index tree is written from a COPY of the
   index file (`write-tree` on the live index takes the user's `index.lock`, so a held lock silently
-  dropped the staged set); promotion removes the snapshot whatever the status (it deletes the
-  artifacts dir for a rendered report on an unfinished run too); a TRACKED path under a
+  dropped the staged set); promotion removed the snapshot whatever the status while it deleted the
+  artifacts dir (superseded by the rollover, which keeps the dir: only a complete run's snapshot
+  goes — see [`artifacts-dir-rollover-plan-2026-10-08.md`](artifacts-dir-rollover-plan-2026-10-08.md)); a TRACKED path under a
   `.audit-tools` segment is content; an untracked nested repository is copied through its own
   listing and its ignored entries placed, never copied; an absolute symlink target inside the
   repository maps onto the snapshot; an unborn checkout is intact only while its `HEAD` names the

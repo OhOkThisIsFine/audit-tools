@@ -2,7 +2,6 @@
 // T4: no single test file may dominate a CI shard). Test bodies are a verbatim
 // move; the shared fixture lives in helpers/completion-harness.ts.
 import { test, expect } from "vitest";
-import assert from "node:assert/strict";
 import { writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
@@ -55,13 +54,10 @@ test("next-step reaches dispatch_review, ingest-results consumes synthetic resul
     expect(auditReport).toMatch(/# Audit Report/);
     await access(join(root, ".audit-tools", "audit-findings.json"));
 
-    // The audit working state is cleaned out (promotion removes the artifact
-    // bundle); only the present_report step scaffolding remains so the host
-    // can read and follow `prompt_path`.
-    await assert.rejects(
-      () => access(join(artifactsDir, "audit_tasks.json")),
-      /ENOENT/i,
-    );
+    // The audit working state is KEPT for the next run to roll over (owner
+    // decision 2026-10-08, "keep the artifacts dir"), and the present_report
+    // step scaffolding lets the host read and follow `prompt_path`.
+    await access(join(artifactsDir, "audit_tasks.json"));
     expect(await readFile(presented.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });

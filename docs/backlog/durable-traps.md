@@ -894,3 +894,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (4) A past release- or review-lane timeout proves nothing about the lane now; read the current
   result and state any coverage it could not give. (5) Machine-wide green queries and external
   lane behaviour need their own current evidence; repository tests cannot certify them.
+
+- **A targeted vitest run after a source edit can red on a half-built `dist/` (2026-10-08).** The
+  dev wrapper (`wrapper/audit-code-wrapper-build.mjs`) runs `npm run build` (clean-dist, then `tsc`)
+  whenever `src/` is newer than `dist/`. A test file that spawns the wrapper (`runWrapper`, e.g.
+  `cleanup.test.ts`) therefore deletes `dist/` while files running beside it read it; they fail
+  with EPERM or "cannot load the AuditResult validator from dist/". `npm test` builds first and is
+  immune. After editing `src/`, run `npm run build` before a targeted run that mixes such files.

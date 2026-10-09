@@ -106,6 +106,12 @@ pair it cannot validate, records each removal so a repaired run stays
 distinguishable from a clean one, invalidates the persisted step contract, and
 the next `next-step` re-reads the bound result files for the dropped items.
 
+A completed audit keeps `.audit-tools/audit/`: the next `next-step` rolls it
+over, keeping the derived work (so only what changed is reviewed again) and the
+session intent file below, and deleting everything that belonged to the finished
+run — the analyzer policy file below included, so each audit asks its analyzer
+questions again.
+
 `audit-code cleanup` removes `.audit-tools/audit/` only when nothing in the
 directory is still owed to the host: the persisted run is `not_started`, or it
 is `complete` and every artifact promotion archives is already one level up.
@@ -139,14 +145,15 @@ unknown key or invalid value fails closed.
 it never authorizes audit-tools to launch semantic work. `observability`
 accepts `standard` or `verbose`.
 
-Durable external-analyzer choices live separately at:
+External-analyzer choices for the current audit live separately at:
 
 ```text
 .audit-tools/audit/analyzer-policy.json
 ```
 
-That strict artifact retains `analyzers` resolution choices, not standing
-permission to install or run analyzers. Grants and declines apply only to the
+That strict artifact retains `analyzers` resolution choices across the
+continuations of one audit, not standing permission to install or run
+analyzers; the next audit's rollover deletes it. Grants and declines apply only to the
 current audit, recorded in its tool-owned `run-consent.json`. Resume keeps that
 run's decisions; a fresh run asks again. Legacy `analyzer_consent` entries are
 ignored as authorization. Transient consent tokens are never persisted.

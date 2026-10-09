@@ -34,12 +34,9 @@ test("isWorkingDirFullyPromoted follows promoteFinalAuditReport's own archive wa
 
     expect(await isWorkingDirFullyPromoted(artifactsDir), "nothing promoted yet").toBe(false);
 
-    // Promote for real, but keep the working dir so the predicate can be asked again.
-    const result = await promoteFinalAuditReport(
-      { artifactsDir },
-      { remove: async () => {}, warn: () => {} },
-    );
-    expect(result.promoted && result.cleaned, "the fixture must promote cleanly").toBe(true);
+    // Promote for real; the working dir is kept, so the predicate can be asked again.
+    const result = await promoteFinalAuditReport({ artifactsDir }, { warn: () => {} });
+    expect(result.promoted && result.archived, "the fixture must promote cleanly").toBe(true);
     expect(await isWorkingDirFullyPromoted(artifactsDir), "after promotion nothing is left to archive").toBe(true);
 
     // The verify-only walk reads the SAME destinations promotion wrote: losing

@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 122 entr(y/ies) indexed.
+> and at commit). 123 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -165,6 +165,7 @@
 - `durable-traps.md:872` — A literal `<<'EOF'` heredoc still loses one level of backslash, because the TOOL JSON eats it before the shell ever sees it (2026-08-28).
 - `durable-traps.md:883` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
 - `durable-traps.md:889` — Five accepted limits, moved from open-bugs (owner decision 2026-10-04) — none is a defect.
+- `durable-traps.md:898` — A targeted vitest run after a source edit can red on a half-built `dist/` (2026-10-08).
 
 <!-- END GENERATED SEEK INDEX -->
 

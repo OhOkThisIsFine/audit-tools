@@ -77,6 +77,7 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/cli/prompts.ts",
   "src/audit/cli/semanticReviewStep.ts",
+  "src/audit/io/rollover.ts",
   "src/audit/io/runSnapshot.ts",
   "src/audit/orchestrator/",
   "src/audit/reporting/criticalFlowFallbackPrompt.ts",

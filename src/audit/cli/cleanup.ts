@@ -32,7 +32,10 @@ export type CleanupResult = {
 // unarchived contract, friction triage pending — is a live continuation for
 // BOTH callers: at next-step entry the fold's terminal step presents and
 // promotes it; the verb refuses it without --force. Sweeping it would destroy
-// the only copy of a finished audit.
+// the only copy of a finished audit. (At next-step entry an ENDED run never
+// reaches this sweep: `rollOverFinishedRun` runs first and turns it into the
+// next run's starting point, so for that caller the complete arm covers only
+// a promoted run whose terminal step never wrote the run-ended marker.)
 //
 // Deletion contract: only the working artifacts dir is removed. The promoted
 // final reports live one level up (promotedAuditReportPath /
@@ -79,7 +82,7 @@ export async function cleanupStaleArtifactsDir(
     // audit until the completion transition promotes it.
     if (status === "complete") {
       const reason =
-        "audit is complete but its final report is not fully promoted — this dir holds the only copy; run next-step to present and promote it, or use --force to delete anyway";
+        "audit is complete but its final report is not fully promoted — this dir holds the only copy; run next-step to present and promote it (or, for a run that already ended, to archive it and start the next audit from it), or use --force to delete anyway";
       return { action: "skipped", status, reason };
     }
     // unknown (missing state file) — no-op by default; caller decides how to
@@ -92,9 +95,23 @@ export async function cleanupStaleArtifactsDir(
   }
 
   // The run's frozen snapshot lives outside the repository; its record is in
-  // this dir, so it goes first or it would leak.
-  for (const problem of await removeRunSnapshot(artifactsDir)) {
-    process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
+  // this dir, so it goes first. When it cannot be removed the dir is kept —
+  // deleting the record would leak the snapshot (a checkout, a worktree
+  // registration and a ref in the user's repository) — unless the operator
+  // forces it: `--force` is the escape hatch, and a corrupt record would
+  // otherwise refuse it for good. A forced delete names what it leaves behind.
+  const problems = await removeRunSnapshot(artifactsDir);
+  if (problems.length > 0) {
+    if (!force) {
+      return {
+        action: "skipped",
+        status,
+        reason: `the run's snapshot could not be removed (${problems.join("; ")}); fix that, or use --force to delete anyway`,
+      };
+    }
+    for (const problem of problems) {
+      process.stderr.write(`[audit-code] run snapshot cleanup (left behind): ${problem}\n`);
+    }
   }
   await rm(artifactsDir, { recursive: true, force: true });
   return { action: "deleted", status };
