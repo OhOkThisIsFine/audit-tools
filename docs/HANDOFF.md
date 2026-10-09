@@ -24,12 +24,10 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the release held (owner, 2026-10-07) until the frozen-snapshot track shipped; the track is
-now on `main`. That release also carries the dogfood efficiency fixes, unreleased since v0.55.5.
-The paused 2026-10-05 dogfood run (notes in
-[`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) resumes only on
-an installed build from that release.
-**Live owner decision:** authorize that release; publication is a separately authorized action.
+Next: resume the paused 2026-10-05 dogfood run (notes in
+[`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) on the installed
+0.55.6, which carries the dogfood efficiency fixes and the frozen-snapshot track.
+**Live owner decision:** authorize resuming that run; it is a separately authorized action.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
