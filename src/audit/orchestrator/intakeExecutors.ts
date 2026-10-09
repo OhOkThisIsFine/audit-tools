@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { isGitRepo, writeJsonFile } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
@@ -87,14 +87,23 @@ function readPackageJson(dir: string): PackageJsonShape | undefined {
   }
 }
 
+// sites-pinned: tests/audit/frozen-snapshot.test.ts
 export async function runIntakeExecutor(
   bundle: ArtifactBundle,
   root: string,
   artifactsDir?: string,
+  /**
+   * The LIVE repository root when `root` is the run's frozen snapshot: the
+   * manifest is named after it and `scope_summary.repo_root` states it, so a
+   * new snapshot path never renames the manifest (which would re-stale the
+   * whole dependency DAG) and the host is told which repository is audited.
+   */
+  repositoryRoot: string = root,
 ): Promise<ExecutorRunResult> {
   const ignore = await loadIgnoreFile(root);
   const repoManifest = await buildRepoManifestFromFs({
     root,
+    name: basename(resolve(repositoryRoot)),
     ignore,
     hash_files: true,
   });
@@ -105,12 +114,12 @@ export async function runIntakeExecutor(
 
   if (auditableCount === 0) {
     throw new Error(
-      `No auditable files found in ${root}. The repository may be empty, generated-only, documentation-only, or filtered by .auditorignore.`,
+      `No auditable files found in ${repositoryRoot}. The repository may be empty, generated-only, documentation-only, or filtered by .auditorignore.`,
     );
   }
 
   const scopeSummary: ScopeSummary = {
-    repo_root: root,
+    repo_root: repositoryRoot,
     auditable_file_count: auditableCount,
     git_available: await isGitRepo(root),
     mis_scope_smells: await detectMisScopeSmells(root),

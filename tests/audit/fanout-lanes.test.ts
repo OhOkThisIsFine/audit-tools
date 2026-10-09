@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import os from "node:os";
 import type { FanoutLaneSpec } from "../../src/audit/cli/fanoutLanes.js";
+import { sourceTreeInstruction } from "../../src/audit/io/runSnapshot.js";
 
 const { materializeFanoutLanes } = await import("../../src/audit/cli/fanoutLanes.js");
 const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE } = await import(
@@ -42,6 +43,7 @@ describe("materializeFanoutLanes", () => {
   const materialize = (artifactsDir: string) =>
     materializeFanoutLanes({
       artifactsDir,
+      sourceRoot: artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: lanes(artifactsDir),
     });
@@ -52,6 +54,8 @@ describe("materializeFanoutLanes", () => {
       const fanout = await materialize(artifactsDir);
       expect(fanout.pendingLanes.map((l) => l.id)).toEqual(["alpha", "beta"]);
       expect(await readFile(fanout.lanes[0].promptPath, "utf8")).toContain("# alpha lane");
+      // Every lane prompt states where the run's source is (the frozen snapshot).
+      expect(await readFile(fanout.lanes[0].promptPath, "utf8")).toContain(sourceTreeInstruction(artifactsDir));
       expect(Object.keys(fanout.artifactPaths).sort()).toEqual([
         "alpha_prompt",
         "alpha_results",

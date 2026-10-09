@@ -103,7 +103,7 @@ test("COR-df0bf37c: Array.isArray guard distinguishes null/absent results from e
 
 test("COR-0ae3577b: handleGraphEnrichmentBranch accepts the trimmed params shape", async () => {
   const { handleGraphEnrichmentBranch } = await import("../../src/audit/cli/nextStepCommand.js");
-  const params = { root: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
+  const params = { root: ".", sourceRoot: ".", artifactsDir: ".", graphLlmEdgeReasoning: false, since: undefined };
   const result = await handleGraphEnrichmentBranch(
     params,
     {},
@@ -140,7 +140,7 @@ test("COR-03418a9f-2: handleGraphEnrichmentBranch emits stderr for all-invalid a
     try {
       const bundle = {};
       const state = { status: "active", obligations: [], blockers: [] } satisfies AuditState;
-      const params = { root: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
+      const params = { root: dir, sourceRoot: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
       // With no manifest, unresolved = [] → falls to edge reasoning check → fallthrough
       // (decisions file is only consumed when unresolved.length > 0)
       const result = await handleGraphEnrichmentBranch(params, bundle, state, { value: undefined }, createFoldTransaction());
@@ -304,7 +304,7 @@ test("COR-1faa3e31: the quarantine diagnostic actually EMITS when a misshapen de
 
     try {
       const state = { status: "active", obligations: [], blockers: [] } satisfies AuditState;
-      const params = { root: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
+      const params = { root: dir, sourceRoot: dir, artifactsDir: dir, graphLlmEdgeReasoning: false, since: undefined };
       await handleGraphEnrichmentBranch(
         params,
         {},

@@ -135,6 +135,7 @@ describe("the audit draw's emitted lane names demand only", () => {
 
     const prepared = await prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir: join(root, ".audit-tools", "audit"),
       runId: "lane-demand-run",
       tasks: [
@@ -178,6 +179,7 @@ describe("the fan-out lane carries the same demand ranking", () => {
     roots.push(artifactsDir);
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot: artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {

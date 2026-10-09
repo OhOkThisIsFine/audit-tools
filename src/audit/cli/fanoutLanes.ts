@@ -22,6 +22,7 @@ import {
   type LaneDemand,
 } from "audit-tools/shared";
 import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
+import { sourceTreeInstruction } from "../io/runSnapshot.js";
 
 import {
   laneSubmissionPath,
@@ -269,9 +270,10 @@ export function renderLaneResultsFooter(resultPath: string): string {
  * the same file. `normalizePromptBodyPaths` is anchored on a drive letter or a
  * UNC root, so a regex or an escape sequence inside a prompt body is untouched.
  */
-function footedPromptText(promptText: string, resultPath: string): string {
+function footedPromptText(promptText: string, resultPath: string, sourceRoot: string): string {
   return normalizePromptBodyPaths(
-    `${promptText.replace(/\s+$/, "")}\n\n${renderLaneResultsFooter(resultPath)}`,
+    `${promptText.replace(/\s+$/, "")}\n\n## Source tree\n\n${sourceTreeInstruction(sourceRoot)}\n\n` +
+      renderLaneResultsFooter(resultPath),
   );
 }
 
@@ -294,6 +296,12 @@ export async function materializeFanoutLanes(params: {
    * never drag the current round's rate down.
    */
   roundId?: string;
+  /**
+   * The run's frozen snapshot root. Every lane prompt states it (the shared
+   * source-tree section), so a lane that verifies against source reads the tree
+   * the run audits, not the live repository.
+   */
+  sourceRoot: string;
   lanes: FanoutLaneSpec[];
 }): Promise<MaterializedFanout> {
   const promptDir = laneAssetsDir(params.artifactsDir);
@@ -325,7 +333,7 @@ export async function materializeFanoutLanes(params: {
     const inputBindingText = requirement === "ordinary" || contextInputs.length === 0 ? "" : `\n\n## Bound input fingerprints\n${contextInputs.map(input => `${input.path}: ${input.sha256}`).join("\n")}`;
     const revisionText = spec.semanticInputRevision === undefined ? "" : `\n\nReview input revision: ${spec.semanticInputRevision}`;
     const readOnlyContextText = generated.length === 0 ? "" : renderReadOnlyContextSection(generated.map((file, index) => ({ path: generatedContextPaths[index]!, label: file.label })));
-    const body = footedPromptText(spec.promptText + revisionText + inputBindingText + readOnlyContextText, resultPath) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
+    const body = footedPromptText(spec.promptText + revisionText + inputBindingText + readOnlyContextText, resultPath, params.sourceRoot) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
     const bound = requirement === "ordinary" ? { text: body, sha256: hashContent(body) } : bindWorkerPrompt(body, digest => [
       "## Bound review submission",
       "Place the domain result described above inside `result` in this envelope. Copy the prompt binding exactly. The review declaration reports the host's execution context; it is not proof of identity.",

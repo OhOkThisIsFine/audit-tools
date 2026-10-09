@@ -36,6 +36,8 @@ import { writeCurrentStep } from "./steps.js";
  */
 interface SemanticReviewStepParams {
   root: string;
+  /** The run's frozen snapshot root the workload's prompts direct host lanes to. */
+  sourceRoot: string;
   artifactsDir: string;
   activeReviewRun: ActiveReviewRun;
   /**
@@ -76,6 +78,7 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
   const { completedTaskIds, pendingTasks } = derivePendingTaskPartition(params.bundle);
   const handoff = await prepareAuditHostHandoff({
     root,
+    sourceRoot: params.sourceRoot,
     artifactsDir,
     runId: activeReviewRun.run_id,
     tasks: tasks.map((task) => toAuditHostTask(task, params.bundle.repo_manifest)),

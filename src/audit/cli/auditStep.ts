@@ -1,4 +1,5 @@
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { ensureRunSourceRoot, resolveRunSince } from "../io/runSnapshot.js";
 import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./reviewSubmission.js";
 import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
@@ -46,8 +47,20 @@ import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisit
 import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
 
 export interface RunAuditStepOptions {
+  /** The LIVE repository root: identity (consent, manifest name, write-back). */
   root: string;
   artifactsDir: string;
+  /**
+   * The run's frozen snapshot root every content read uses. The fold passes the
+   * one it resolved under its hold; {@link runAuditStep} resolves it itself.
+   */
+  sourceRoot?: string;
+  /**
+   * Overwrite every supplied finding's `grounding` with the tool's own re-check
+   * against the source root, before validation (the CLI batch lane's half of the
+   * S7 grounding contract — see {@link stampToolComputedGrounding}).
+   */
+  groundAuditResults?: boolean;
   preferredExecutor?: string;
   auditResultsPath?: string;
   /**
@@ -103,9 +116,15 @@ export async function runAuditStep(
   // Deterministic bundle mutation is one heartbeat-protected critical section.
   // Host semantic review never runs here: it is emitted as a workload and this
   // lock only covers local artifact derivation and result ingestion.
-  return await withArtifactTreeHold(options.artifactsDir, runLogger, () =>
-    runAuditStepLocked(options, runLogger),
-  );
+  return await withArtifactTreeHold(options.artifactsDir, runLogger, async () => {
+    // The run's frozen snapshot is run state: created once per run, under the
+    // hold, and read by every content reader of this step.
+    const sourceRoot = await ensureRunSourceRoot(options.root, options.artifactsDir);
+    const since = options.since === undefined
+      ? undefined
+      : await resolveRunSince(options.root, options.artifactsDir, options.since);
+    return runAuditStepLocked({ ...options, since }, runLogger, sourceRoot);
+  });
 }
 
 /**
@@ -125,7 +144,7 @@ export async function runAuditStep(
  * and exported so the fold cannot reach the locking half by accident.
  */
 export async function runAuditStepUnlocked(
-  options: RunAuditStepOptions,
+  options: RunAuditStepOptions & { sourceRoot: string },
   bundle: ArtifactBundle,
   runLogger?: RunLogger,
 ): Promise<AdvanceAuditResult> {
@@ -134,15 +153,16 @@ export async function runAuditStepUnlocked(
     new RunLogger(join(options.artifactsDir, "run.log.jsonl"), {
       enabled: options.runLog ?? true,
     });
-  return await executeAdvance(options, bundle, logger);
+  return await executeAdvance(options, bundle, logger, options.sourceRoot);
 }
 
 async function runAuditStepLocked(
   options: RunAuditStepOptions,
   runLogger: RunLogger,
+  sourceRoot: string,
 ): Promise<AdvanceAuditResult> {
   const bundle = await loadArtifactBundle(options.artifactsDir);
-  const result = await executeAdvance(options, bundle, runLogger);
+  const result = await executeAdvance(options, bundle, runLogger, sourceRoot);
   // Prune: result.updated_bundle is the full accumulated bundle, so an artifact
   // an executor cleared to `undefined` must be removed from disk (not left to
   // reload as a stale "present" artifact). Safe only because this is the
@@ -161,9 +181,10 @@ async function executeAdvance(
   options: RunAuditStepOptions,
   bundle: ArtifactBundle,
   runLogger: RunLogger,
+  sourceRoot: string,
 ): Promise<AdvanceAuditResult> {
   const lineIndex = bundle.repo_manifest
-    ? await buildLineIndex(options.root, bundle.repo_manifest)
+    ? await buildLineIndex(sourceRoot, bundle.repo_manifest)
     : undefined;
   const sizeIndex = bundle.repo_manifest
     ? sizeIndexFromManifest(bundle.repo_manifest)
@@ -181,6 +202,9 @@ async function executeAdvance(
     (options.auditResultsPath
       ? await readJsonFile<unknown>(options.auditResultsPath)
       : undefined);
+  if (options.groundAuditResults === true && Array.isArray(auditResults)) {
+    await stampToolComputedGrounding(sourceRoot, auditResults);
+  }
   if (auditResults !== undefined) {
     // Partition results whose task_id is no longer in the active manifest — e.g.
     // selective-deepening tasks pruned by a later re-plan. Only the RETAINED
@@ -259,12 +283,12 @@ async function executeAdvance(
     : undefined;
   const charterComparisonSubmission = options.charterComparisonSubmissionPath
     ? CharterComparisonSubmissionSchema.parse(
-        await readAuditReviewSubmission<unknown>(options.charterComparisonSubmissionPath, options.artifactsDir, GATE_LANES.charter_comparison, () => currentAuditReviewInputRevision(options.root, bundle, GATE_LANES.charter_comparison)),
+        await readAuditReviewSubmission<unknown>(options.charterComparisonSubmissionPath, options.artifactsDir, GATE_LANES.charter_comparison, () => currentAuditReviewInputRevision(sourceRoot, bundle, GATE_LANES.charter_comparison)),
       )
     : undefined;
   const charterFidelitySubmission = options.charterFidelitySubmissionPath
     ? CharterFidelitySubmissionSchema.parse(
-        await readAuditReviewSubmission<unknown>(options.charterFidelitySubmissionPath, options.artifactsDir, GATE_LANES.charter_fidelity, () => currentAuditReviewInputRevision(options.root, bundle, GATE_LANES.charter_fidelity)),
+        await readAuditReviewSubmission<unknown>(options.charterFidelitySubmissionPath, options.artifactsDir, GATE_LANES.charter_fidelity, () => currentAuditReviewInputRevision(sourceRoot, bundle, GATE_LANES.charter_fidelity)),
       )
     : undefined;
   const clarificationAnswers = options.clarificationAnswersPath
@@ -276,11 +300,12 @@ async function executeAdvance(
     ? (systemicChallengeSchema(
         repoPathUniverse(bundle.repo_manifest),
       ).parse(
-        await readAuditReviewSubmission<unknown>(options.systemicChallengePath, options.artifactsDir, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []), () => currentAuditReviewInputRevision(options.root, bundle, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []))),
+        await readAuditReviewSubmission<unknown>(options.systemicChallengePath, options.artifactsDir, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []), () => currentAuditReviewInputRevision(sourceRoot, bundle, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []))),
       ) as SystemicChallengeSubmission)
     : undefined;
   const result = await advanceAudit(bundle, {
-    root: options.root,
+    root: sourceRoot,
+    repositoryRoot: options.root,
     artifactsDir: options.artifactsDir,
     lineIndex,
     sizeIndex,
@@ -372,13 +397,13 @@ export async function ingestBatchAuditResults(options: {
   const auditResultsData = payloads.flatMap((payload) =>
     Array.isArray(payload) ? payload : [payload],
   ) as AuditResult[];
-  await stampToolComputedGrounding(options.root, auditResultsData);
   const step = batchFiles.length > 0
     ? await runAuditStep({
         root: options.root,
         artifactsDir: options.artifactsDir,
         preferredExecutor: "result_ingestion_executor",
         auditResultsData,
+        groundAuditResults: true,
       })
     : null;
 

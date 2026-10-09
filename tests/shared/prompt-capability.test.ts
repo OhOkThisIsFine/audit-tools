@@ -65,6 +65,7 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
     try {
       const fanout = await materializeFanoutLanes({
         artifactsDir: dir,
+        sourceRoot: dir,
         runId: "c2-capability-scope",
         lanes: [
           {
@@ -129,6 +130,7 @@ describe("every fan-out lane prompt states a bound path AND a read-only alternat
       const uncPath = String.raw`\\build01\share\.audit-tools\audit\audit-findings.json`;
       const fanout = await materializeFanoutLanes({
         artifactsDir: dir,
+        sourceRoot: dir,
         runId: "c2-body-path-scope",
         lanes: [
           {

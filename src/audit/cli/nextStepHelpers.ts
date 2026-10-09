@@ -40,6 +40,7 @@ import {
   loadArtifactBundle,
   promoteFinalAuditReport,
 } from "../io/artifacts.js";
+import { ensureRunSourceRoot, removeRunSnapshot, resolveRunSince } from "../io/runSnapshot.js";
 import {
   auditReportPath,
   groundDesignFindings,
@@ -237,7 +238,14 @@ export async function tryConsumeSubmission<T>(
 // ── Parameters type shared across all nextStep helpers ──────────────────────
 
 export type NextStepParams = {
+  /** The LIVE repository root: identity only (consent, policy, handoff, re-issued commands). */
   root: string;
+  /**
+   * The run's frozen snapshot root (`src/audit/io/runSnapshot.ts`), set by the
+   * fold under its hold before any other work. Every CONTENT read and
+   * repo-local spawn of the fold uses it, through {@link requireSourceRoot}.
+   */
+  sourceRoot?: string;
   artifactsDir: string;
   selfCliPath: string;
   timeoutMs: number;
@@ -266,6 +274,18 @@ export type NextStepParams = {
    */
   scopeIndexMemo?: ScopeIndexMemo;
 };
+
+/**
+ * The fold's source root. Throws when read before the fold resolved the run's
+ * snapshot: a content read against the LIVE root would silently break the
+ * frozen-input property, so there is no fallback.
+ */
+export function requireSourceRoot(params: Pick<NextStepParams, "sourceRoot">): string {
+  if (params.sourceRoot === undefined) {
+    throw new Error("next-step: a content read ran before the run's snapshot was resolved");
+  }
+  return params.sourceRoot;
+}
 
 export type TerminalStepResult =
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
@@ -411,6 +431,13 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
  * target repository's audit completion contract.
  */
 async function promoteCompletedReport(artifactsDir: string): Promise<string> {
+  // Promotion deletes the artifacts dir — whatever the run's status, a rendered
+  // report on a run that is not complete included — and that dir holds the
+  // record of the run's frozen snapshot. So the snapshot goes first, on every
+  // path through here (the already-promoted one too), or it would leak.
+  for (const problem of await removeRunSnapshot(artifactsDir)) {
+    process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
+  }
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -445,7 +472,7 @@ async function promoteCompletedReport(artifactsDir: string): Promise<string> {
  * written. With no report yet, the stop is a genuine block.
  */
 export async function buildTerminalStep(
-  params: Pick<NextStepParams, "root" | "artifactsDir">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir">,
   bundle: ArtifactBundle,
   state: AuditState,
   blockedReason: string,
@@ -505,14 +532,14 @@ function applyRunConsent(
 }
 
 export async function handleAnalyzerConsentBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "externalAcquisition">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "externalAcquisition">,
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
   tx: FoldTransaction,
 ): Promise<AnalyzerConsentBranchResult> {
   const pending = pendingAnalyzerConsent({
-    root: params.root,
+    root: requireSourceRoot(params),
     analyzers: analyzersRef.value,
     externalAcquisitionEnabled: params.externalAcquisition?.enabled,
     analyzerConsent: params.externalAcquisition?.analyzerConsent,
@@ -567,7 +594,7 @@ type GraphEnrichmentBranchResult =
  *   - `fallthrough` → nothing submitted; run the deterministic executor.
  */
 export async function handleGraphEnrichmentBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "graphLlmEdgeReasoning" | "since">,
   bundle: ArtifactBundle,
   state: AuditState,
   analyzersRef: { value: Record<string, AnalyzerSetting> | undefined },
@@ -595,7 +622,7 @@ export async function handleGraphEnrichmentBranch(
   // plan draw's classifier (`obligationPolicy.ts`) and this fold agree EXACTLY
   // on when the analyzer-install consent / edge-reasoning turns are owed.
   const pauseInputs = {
-    root: params.root,
+    root: requireSourceRoot(params),
     analyzers: analyzersRef.value,
     graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
   };
@@ -704,6 +731,7 @@ export async function handleGraphEnrichmentBranch(
         const applied = await runStep(
           {
             root: params.root,
+            sourceRoot: requireSourceRoot(params),
             artifactsDir: params.artifactsDir,
             analyzers: analyzersRef.value,
             graphLlmEdgeReasoning: true,
@@ -1752,7 +1780,7 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
   apply: (
     value: TIncoming,
     path: string,
-    params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+    params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
     bundle: ArtifactBundle,
     staged: { contentHash?: string },
   ) => Promise<AdvanceAuditResult>;
@@ -1775,7 +1803,7 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
  */
 async function runOmittableGate<TIncoming, TStepKind extends string>(
   descriptor: OmittableGateDescriptor<TIncoming, TStepKind>,
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1784,7 +1812,7 @@ async function runOmittableGate<TIncoming, TStepKind extends string>(
     params.artifactsDir,
     descriptor.lane,
     tx,
-    auditLaneReviewRequirement(descriptor.lane) === "ordinary" ? undefined : () => currentAuditReviewInputRevision(params.root, bundle, descriptor.lane),
+    auditLaneReviewRequirement(descriptor.lane) === "ordinary" ? undefined : () => currentAuditReviewInputRevision(requireSourceRoot(params), bundle, descriptor.lane),
   );
   if (incoming.status === "malformed") {
     // Not-JSON submission: same quarantine-loudly lifecycle as a mis-shaped one.
@@ -1855,6 +1883,7 @@ export async function handleSynthesisNarrativeBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "synthesis_narrative_executor",
             narrativeResultsPath: path,
@@ -1886,7 +1915,7 @@ export async function handleSynthesisNarrativeBranch(
  *   - `return`    → a prose-only delta awaits the host judge; emit the step.
  */
 export async function handleIntentEquivalenceBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1907,6 +1936,7 @@ export async function handleIntentEquivalenceBranch(
       const applied = await runAuditStepUnlocked(
         {
           root: params.root,
+          sourceRoot: requireSourceRoot(params),
           artifactsDir: params.artifactsDir,
           preferredExecutor: "intent_equivalence_executor",
           intentEquivalenceVerdictPath: incoming.path,
@@ -1945,7 +1975,7 @@ export async function handleIntentEquivalenceBranch(
  * `run_omit` is never returned (shouldOmit is constant-false).
  */
 export async function handleCriticalFlowFallbackBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -1959,6 +1989,7 @@ export async function handleCriticalFlowFallbackBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "critical_flow_fallback_executor",
             criticalFlowFallbackResultsPath: path,
@@ -1989,7 +2020,7 @@ export async function handleCriticalFlowFallbackBranch(
  *     that renders the charter-extraction prompt.
  */
 export async function handleCharterExtractionBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2020,7 +2051,7 @@ export async function handleCharterExtractionBranch(
     // Staged per lane; an INCOMPLETE set is restored to its bound paths at
     // commit (un-applied), which is exactly the K-of-N resume the design
     // wants — pending lanes survive on disk until every lane is present.
-    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx, () => currentAuditReviewInputRevision(params.root, bundle, lane));
+    const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx, () => currentAuditReviewInputRevision(requireSourceRoot(params), bundle, lane));
     if (incoming.status === "absent") continue;
     if (incoming.status === "malformed") {
       quarantinedAny = true;
@@ -2075,6 +2106,7 @@ export async function handleCharterExtractionBranch(
     const applied = await runAuditStepUnlocked(
       {
         root: params.root,
+        sourceRoot: requireSourceRoot(params),
         artifactsDir: params.artifactsDir,
         preferredExecutor: "charter_extraction_executor",
         charterSubmissionPath: mergedPath,
@@ -2128,7 +2160,7 @@ export async function handleCharterExtractionBranch(
  *     step that renders the comparison prompt.
  */
 export async function handleCharterComparisonBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2142,6 +2174,7 @@ export async function handleCharterComparisonBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "charter_comparison_executor",
             charterComparisonSubmissionPath: path,
@@ -2164,7 +2197,7 @@ export async function handleCharterComparisonBranch(
  * `fidelity_pending`.
  */
 export async function handleCharterFidelityBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2178,6 +2211,7 @@ export async function handleCharterFidelityBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "charter_fidelity_executor",
             charterFidelitySubmissionPath: path,
@@ -2209,7 +2243,7 @@ export async function handleCharterFidelityBranch(
  *     yet → `return` the host step that relays the VOI queue.
  */
 export async function handleCharterClarificationBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2223,6 +2257,7 @@ export async function handleCharterClarificationBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "charter_clarification_executor",
             clarificationAnswersPath: path,
@@ -2256,7 +2291,7 @@ export async function handleCharterClarificationBranch(
  * it (the priority scan skips a satisfied obligation).
  */
 export async function handleSystemicChallengeBranch(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
   state: AuditState,
   tx: FoldTransaction,
@@ -2276,6 +2311,7 @@ export async function handleSystemicChallengeBranch(
         runAuditStepUnlocked(
           {
             root: p.root,
+            sourceRoot: requireSourceRoot(p),
             artifactsDir: p.artifactsDir,
             preferredExecutor: "systemic_challenge_executor",
             systemicChallengePath: path,
@@ -2315,7 +2351,7 @@ export async function handleSystemicChallengeBranch(
  * lock acquisition (the deleted O2 RMW).
  */
 export async function executeAndRecord(
-  params: Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "autoFix" | "since" | "scopeIndexMemo">,
+  params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "graphLlmEdgeReasoning" | "externalAcquisition" | "autoFix" | "since" | "scopeIndexMemo">,
   analyzers: Record<string, AnalyzerSetting> | undefined,
   decision: ReturnType<typeof decideNextStep>,
   index: number,
@@ -2337,9 +2373,10 @@ export async function executeAndRecord(
       status: "running",
       started_at: startedAt,
     });
-    const indexes = await manifestIndexes(params.root, bundle, ctx.manifestIndexCache);
+    const indexes = await manifestIndexes(requireSourceRoot(params), bundle, ctx.manifestIndexCache);
     const result = await runSingleAdvanceStep(bundle, {
-      root: params.root,
+      root: requireSourceRoot(params),
+      repositoryRoot: params.root,
       artifactsDir: params.artifactsDir,
       analyzers,
       graphLlmEdgeReasoning: params.graphLlmEdgeReasoning,
@@ -3177,7 +3214,7 @@ async function ingestAvailableInspectionResults(
     // so the accept decision sees the same disk truth `runAuditStep`'s batch gate
     // validates against; the audit-task manifest comes from the same bundle.
     const lineIndexForIngest = bundle.repo_manifest
-      ? await buildLineIndex(ctx.params.root, bundle.repo_manifest)
+      ? await buildLineIndex(requireSourceRoot(ctx.params), bundle.repo_manifest)
       : undefined;
     // The set replayed below. The ingest validates those entries again against
     // this same tree, so the batch gate cannot refuse what it is handed.
@@ -3187,6 +3224,7 @@ async function ingestAvailableInspectionResults(
     try {
       const ingested = await ingestAuditHostResults({
         root: ctx.params.root,
+        sourceRoot: requireSourceRoot(ctx.params),
         artifactsDir: ctx.params.artifactsDir,
         runId: currentRun.run_id,
         auditTasks: bundle.audit_tasks ?? [],
@@ -3237,6 +3275,7 @@ async function ingestAvailableInspectionResults(
       const ingested = await runAuditStepUnlocked(
         {
           root: ctx.params.root,
+          sourceRoot: requireSourceRoot(ctx.params),
           artifactsDir: ctx.params.artifactsDir,
           preferredExecutor: "result_ingestion_executor",
           auditResultsData: [...pendingAccepted],
@@ -3271,6 +3310,7 @@ async function runHostDelegationObligation(
   // other half).
   const review = await ensureSemanticReviewRunUnlocked({
     root: ctx.params.root,
+    sourceRoot: requireSourceRoot(ctx.params),
     artifactsDir: ctx.params.artifactsDir,
     bundle,
     state,
@@ -3473,14 +3513,17 @@ function foldHeartbeatRecord(obligation: string, durationMs: number): void {
  */
 export async function runDeterministicForNextStep(
   params: NextStepParams,
-): Promise<NextStepResult> {
+): Promise<NextStepResult & { readonly sourceRoot: string }> {
   // The heartbeat wraps the WHOLE call, throw path included: a drain that dies
   // halfway is exactly when a caller most needs to know how far it got, and the
   // interval beat has no other owner on this path (the fold drives the shared
   // engine directly rather than through `advanceAudit`).
   const heartbeat = startAdvanceHeartbeat();
   try {
-    return await runDeterministicFold(params, heartbeat);
+    const result = await runDeterministicFold(params, heartbeat);
+    // The fold resolved the run's snapshot under its hold; the emission renders
+    // every packet and workload from the same tree.
+    return { ...result, sourceRoot: requireSourceRoot(params) };
   } finally {
     heartbeat.stop();
   }
@@ -3545,6 +3588,15 @@ async function runDeterministicFold(
       let intakeExecutions = 0;
       await recoverStagedSubmissions(params.artifactsDir);
       const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
+      // The run's frozen snapshot, under the same hold as the consent record it
+      // shares a lifetime with: created at run start, re-checked out on resume.
+      // Every content read of this fold uses it (`requireSourceRoot`); the
+      // complete-run rule lives in `ensureRunSourceRoot`, shared with every
+      // standalone step command.
+      params.sourceRoot = await ensureRunSourceRoot(params.root, params.artifactsDir);
+      if (params.since !== undefined) {
+        params.since = await resolveRunSince(params.root, params.artifactsDir, params.since);
+      }
       const consent = params.autoFix?.enabled === undefined && !params.autoFix?.dryRun
         ? previousConsent
         : await updateRunConsentUnlocked(params.root, params.artifactsDir, {}, params.autoFix?.enabled, params.autoFix?.dryRun);
@@ -3571,7 +3623,7 @@ async function runDeterministicFold(
         if (startBundle.audit_state?.status !== "complete" && startBundle.repo_manifest) {
           const taskFiles = [...new Set(buildPendingAuditTasks(startBundle).flatMap((task) => task.file_paths))];
           if (taskFiles.length > 0) {
-            const integrity = await checkFileIntegrity(params.root, startBundle.repo_manifest, taskFiles);
+            const integrity = await checkFileIntegrity(requireSourceRoot(params), startBundle.repo_manifest, taskFiles);
             if (!integrity.is_clean) {
               process.stderr.write(
                 `[audit-code] nextStep: integrity check - ${integrity.changed_files.length} changed, ` +
@@ -3579,7 +3631,7 @@ async function runDeterministicFold(
               );
               intakeExecutions = 1;
               const refreshed = await runSingleAdvanceStep(startBundle, {
-                root: params.root, artifactsDir: params.artifactsDir,
+                root: requireSourceRoot(params), repositoryRoot: params.root, artifactsDir: params.artifactsDir,
                 preferredExecutor: "intake_executor", scopeIndexMemo: params.scopeIndexMemo,
                 runLogger: foldLogger, heartbeat,
               });
@@ -3612,7 +3664,7 @@ async function runDeterministicFold(
         if (engineOutcome.step && engineOutcome.step.kind !== "terminal_intent" && ARCHITECTURE_WORK_STEPS.has(engineOutcome.step.kind) &&
             buildPendingAuditTasks(engineOutcome.state).length > 0) {
           const inspection = await ensureSemanticReviewRunUnlocked({
-            root: params.root, artifactsDir: params.artifactsDir,
+            root: params.root, sourceRoot: requireSourceRoot(params), artifactsDir: params.artifactsDir,
             bundle: engineOutcome.state,
             state: deriveAuditState(engineOutcome.state, { emitStaleness: false }),
             obligationId: "audit_tasks_completed",

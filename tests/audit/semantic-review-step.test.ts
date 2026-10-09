@@ -102,6 +102,7 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
       await fixture();
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -143,6 +144,7 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -174,6 +176,7 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     ]);
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -194,6 +197,7 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const first = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -201,6 +205,7 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
     const firstBytes = await readFile(first.artifact_paths.host_workload!, "utf8");
     const second = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -230,6 +235,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -298,6 +304,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,
@@ -334,6 +341,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
     const step = await renderSemanticReviewStep({
       root,
+      sourceRoot: root,
       artifactsDir,
       activeReviewRun,
       bundle,

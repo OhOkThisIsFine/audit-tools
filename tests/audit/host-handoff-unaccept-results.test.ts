@@ -64,6 +64,7 @@ async function setup() {
   }));
   const prepared = await prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir,
     runId: RUN_ID,
     tasks,
@@ -102,6 +103,7 @@ async function setup() {
     ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: RUN_ID,
       auditTasks: [...tasks],

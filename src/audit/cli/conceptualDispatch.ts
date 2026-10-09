@@ -215,6 +215,8 @@ export interface ConceptualDispatch {
  */
 export async function prepareConceptualDispatch(opts: {
   artifactsDir: string;
+  /** The run's frozen snapshot root, stated in every lane prompt. */
+  sourceRoot: string;
   bundle: ArtifactBundle;
   settings: ConceptualReviewSettings;
   /**
@@ -274,6 +276,7 @@ export async function prepareConceptualDispatch(opts: {
   if (settings.conceptual_depth !== "deep") {
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot: opts.sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -402,6 +405,7 @@ export async function prepareConceptualDispatch(opts: {
   await closePriorRound(roundToken);
   const fanout = await materializeFanoutLanes({
     artifactsDir,
+    sourceRoot: opts.sourceRoot,
     runId: AUDIT_GATE_SUBMISSION_SCOPE,
     roundId: roundToken,
     lanes: laneSpecs,

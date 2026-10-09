@@ -239,6 +239,7 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
     });
     await prepareConceptualDispatch({
       artifactsDir,
+      sourceRoot: artifactsDir,
       bundle,
       settings: { conceptual_depth: "deep", perspectives: 2 },
     });
@@ -353,6 +354,7 @@ test("the ingest fold quarantines a judge submission that supplies verification_
     });
     await prepareConceptualDispatch({
       artifactsDir,
+      sourceRoot: artifactsDir,
       bundle,
       settings: { conceptual_depth: "deep", perspectives: 1 },
     });

@@ -303,9 +303,9 @@ test("a temporarily empty ready frontier does not close a wave with held work", 
   const { reviewWaveClosedPath } = await import("../../src/audit/io/runArtifacts.js");
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
-    await prepareAuditHostHandoff({ root, artifactsDir, runId: "held-wave", tasks: [], pendingTaskCount: 1 });
+    await prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId: "held-wave", tasks: [], pendingTaskCount: 1 });
     expect(JSON.parse(await readFile(reviewWaveClosedPath(artifactsDir, "held-wave"), "utf8")).closed).toBe(false);
-    await prepareAuditHostHandoff({ root, artifactsDir, runId: "held-wave", tasks: [], pendingTaskCount: 0 });
+    await prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId: "held-wave", tasks: [], pendingTaskCount: 0 });
     expect(JSON.parse(await readFile(reviewWaveClosedPath(artifactsDir, "held-wave"), "utf8")).closed).toBe(true);
   });
 });
@@ -444,11 +444,11 @@ test("a changed source revision explicitly refuses the old prompt-bound result",
     await writeEmptyBoundResult(root, initial.workload, item, initial.tasks);
     const bundle = await loadArtifactBundle(initial.artifactsDir);
     bundle.repo_manifest!.files.find((file) => file.path === "src/a.ts")!.hash = "new-source-revision";
-    const { handoff } = await prepareSemanticReviewWorkload({ root, artifactsDir: initial.artifactsDir,
+    const { handoff } = await prepareSemanticReviewWorkload({ root, sourceRoot: root, artifactsDir: initial.artifactsDir,
       bundle, activeReviewRun: (await loadCurrentActiveReviewRun(initial.artifactsDir))!,
     });
     expect(handoff.workload.work_items.find((candidate) => candidate.id === item.id)!.prompt.sha256).not.toBe(item.prompt.sha256);
-    const ingested = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir: initial.artifactsDir,
+    const ingested = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir: initial.artifactsDir,
       runId: initial.workload.run_id, auditTasks: bundle.audit_tasks!,
     });
     expect(ingested.accepted_results.some((result) => result.task_id === item.id)).toBe(false);

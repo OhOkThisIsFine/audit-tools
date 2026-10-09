@@ -1,8 +1,10 @@
+// sites-pinned: tests/audit/frozen-snapshot.test.ts
 import { readJsonFile } from "audit-tools/shared";
 import { resolve } from "node:path";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { validateAuditResults } from "../validation/auditResults.js";
 import { buildLineIndex } from "./lineIndex.js";
+import { readRunSourceRoot } from "../io/runSnapshot.js";
 import { getArtifactsDir, getFlag, getRootDir } from "./args.js";
 
 export async function cmdValidateResults(argv: string[]): Promise<void> {
@@ -13,7 +15,7 @@ export async function cmdValidateResults(argv: string[]): Promise<void> {
   }
   const bundle = await loadArtifactBundle(artifactsDir);
   const lineIndex = bundle.repo_manifest
-    ? await buildLineIndex(getRootDir(argv), bundle.repo_manifest)
+    ? await buildLineIndex(await readRunSourceRoot(getRootDir(argv), artifactsDir), bundle.repo_manifest)
     : undefined;
   const auditResults = await readJsonFile<unknown>(resultsPath);
   const issues = validateAuditResults(auditResults, bundle.audit_tasks ?? [], {

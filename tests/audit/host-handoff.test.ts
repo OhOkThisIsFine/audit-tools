@@ -131,12 +131,14 @@ interface IngestSummary {
 interface HostBoundary {
   readonly prepareAuditHostHandoff: (input: {
     readonly root: string;
+    readonly sourceRoot: string;
     readonly artifactsDir: string;
     readonly runId: string;
     readonly tasks: readonly HostTask[];
   }) => Promise<PreparedHandoff>;
   readonly ingestAuditHostResults: (input: {
     readonly root: string;
+    readonly sourceRoot: string;
     readonly artifactsDir: string;
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
@@ -425,6 +427,7 @@ describe(FAILURE_SIGNATURE, () => {
       await writeFile(join(current.root, "src", "a.ts"), "one\ntwo\n", "utf8");
       const prepared = await boundary.prepareAuditHostHandoff({
         root: current.root,
+        sourceRoot: current.root,
         artifactsDir,
         runId: current.runId,
         tasks,
@@ -438,6 +441,7 @@ describe(FAILURE_SIGNATURE, () => {
       summaries.push(await boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root: current.root,
+        sourceRoot: current.root,
         artifactsDir,
         runId: current.runId,
         auditTasks: tasks,
@@ -482,7 +486,7 @@ describe(FAILURE_SIGNATURE, () => {
     await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
     await writeFile(join(root, "src", "b.ts"), "one\ntwo\n", "utf8");
 
-    const first = await boundary.prepareAuditHostHandoff({ root, artifactsDir, runId, tasks });
+    const first = await boundary.prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId, tasks });
     const firstA = first.workload.work_items.find((item) => item.id === "audit-a")!;
     const firstB = first.workload.work_items.find((item) => item.id === "audit-b")!;
     await writeFile(expectContained(root, firstA.result_path, "first A result"), "{broken", "utf8");
@@ -491,7 +495,7 @@ describe(FAILURE_SIGNATURE, () => {
       JSON.stringify(boundResult(runId, firstB)),
       "utf8",
     );
-    const firstSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: tasks });
+    const firstSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: tasks });
     expect(firstSummary.accepted_count).toBe(1);
     expect(firstSummary.issues.find((issue) => issue.work_item_id === "audit-a")?.code).toBe(
       "submission_malformed",
@@ -504,6 +508,7 @@ describe(FAILURE_SIGNATURE, () => {
     const secondRunId = "host-diagnostics-002";
     const rebound = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: secondRunId,
       tasks,
@@ -518,7 +523,7 @@ describe(FAILURE_SIGNATURE, () => {
       JSON.stringify(boundResult(secondRunId, secondB)),
       "utf8",
     );
-    const secondSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    const secondSummary = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId: secondRunId, auditTasks: tasks });
     const secondIssue = secondSummary.issues.find((issue) => issue.work_item_id === "audit-a")!;
     expect(secondIssue.code).toBe("submission_rejected");
     expect(secondIssue.message).toContain("submission_malformed");
@@ -529,7 +534,7 @@ describe(FAILURE_SIGNATURE, () => {
     });
 
     await writeFile(secondPath, JSON.stringify(boundResult(secondRunId, secondA)), "utf8");
-    const accepted = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId: secondRunId, auditTasks: tasks });
+    const accepted = await boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId: secondRunId, auditTasks: tasks });
     expect(accepted.completed_work_item_ids).toContain("audit-a");
     await recordHostResultOutcomes(artifactsDir, secondRunId, {
       issues: accepted.raw_issues,
@@ -571,6 +576,7 @@ describe(FAILURE_SIGNATURE, () => {
 
     const first = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks,
@@ -648,6 +654,7 @@ describe(FAILURE_SIGNATURE, () => {
 
     const permuted = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [...tasks].reverse(),
@@ -672,6 +679,7 @@ describe(FAILURE_SIGNATURE, () => {
     await writeFile(resultA, "{ malformed", "utf8");
     const malformed = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks,
@@ -683,6 +691,7 @@ describe(FAILURE_SIGNATURE, () => {
     const malformedIngest = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -696,6 +705,7 @@ describe(FAILURE_SIGNATURE, () => {
     const unboundIngest = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -715,6 +725,7 @@ describe(FAILURE_SIGNATURE, () => {
       const rejected = await boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root,
+        sourceRoot: root,
         artifactsDir,
         runId,
         auditTasks: tasks,
@@ -722,6 +733,7 @@ describe(FAILURE_SIGNATURE, () => {
       expect(rejected.completed_work_item_ids).toEqual([]);
       const pending = await boundary.prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir,
         runId,
         tasks,
@@ -736,6 +748,7 @@ describe(FAILURE_SIGNATURE, () => {
     const accepted = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -747,6 +760,7 @@ describe(FAILURE_SIGNATURE, () => {
     const replay = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -764,6 +778,7 @@ describe(FAILURE_SIGNATURE, () => {
     // advertising work that is no longer owed.
     const complete = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [],
@@ -782,6 +797,7 @@ describe(FAILURE_SIGNATURE, () => {
     // published at all.
     const reopened = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [tasks[0]!],
@@ -822,6 +838,7 @@ describe(FAILURE_SIGNATURE, () => {
 
     const first = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks,
@@ -837,6 +854,7 @@ describe(FAILURE_SIGNATURE, () => {
     const accepted = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -847,6 +865,7 @@ describe(FAILURE_SIGNATURE, () => {
     // the task is pending again — while `audit-reopen-b` stays settled.
     const reopened = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [tasks[0]!],
@@ -880,6 +899,7 @@ describe(FAILURE_SIGNATURE, () => {
 
     const prepared = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks,
@@ -904,6 +924,7 @@ describe(FAILURE_SIGNATURE, () => {
     const summary = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: tasks,
@@ -960,6 +981,7 @@ describe(FAILURE_SIGNATURE, () => {
       const runId = "audit-verification-lane";
       const prepared = await boundary.prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir,
         runId,
         tasks: items,
@@ -1056,6 +1078,7 @@ describe(FAILURE_SIGNATURE, () => {
       const summary = await published.boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root: published.root,
+        sourceRoot: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
         auditTasks: [
@@ -1115,6 +1138,7 @@ describe(FAILURE_SIGNATURE, () => {
       const runId = "audit-selective-lane";
       const prepared = await boundary.prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir,
         runId,
         tasks: [steward],
@@ -1151,6 +1175,7 @@ describe(FAILURE_SIGNATURE, () => {
       const summary = await boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root,
+        sourceRoot: root,
         artifactsDir,
         runId,
         auditTasks: [steward],
@@ -1182,6 +1207,7 @@ describe(FAILURE_SIGNATURE, () => {
       await expect(
         boundary.prepareAuditHostHandoff({
           root,
+          sourceRoot: root,
           artifactsDir: join(root, ".audit-tools", "audit"),
           runId: "audit-metrics-complete",
           tasks: [base],
@@ -1227,6 +1253,7 @@ describe(FAILURE_SIGNATURE, () => {
       const summary = await published.boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root: published.root,
+        sourceRoot: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
         auditTasks: [
@@ -1295,6 +1322,7 @@ describe(FAILURE_SIGNATURE, () => {
       return published.boundary.ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root: published.root,
+        sourceRoot: published.root,
         artifactsDir: published.artifactsDir,
         runId: published.runId,
         auditTasks: [
@@ -1659,6 +1687,7 @@ describe(FAILURE_SIGNATURE, () => {
     const runId = "audit-old-bindings";
     const published = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [
@@ -1711,6 +1740,7 @@ describe(FAILURE_SIGNATURE, () => {
     const summary = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       auditTasks: [
@@ -1858,6 +1888,7 @@ describe(FAILURE_SIGNATURE, () => {
     const boundary = await loadBoundary();
     const published = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [oldTask],
@@ -1924,6 +1955,7 @@ describe("prompt 20: tool-filled result template (audit draw)", () => {
     await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
     const prepared = await boundary.prepareAuditHostHandoff({
       root,
+      sourceRoot: root,
       artifactsDir,
       runId,
       tasks: [

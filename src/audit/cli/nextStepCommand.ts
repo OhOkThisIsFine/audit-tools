@@ -93,6 +93,7 @@ import {
 } from "./reviewRun.js";
 import { renderSemanticReviewStep, prepareSemanticReviewWorkload } from "./semanticReviewStep.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { lookupRunSince } from "../io/runSnapshot.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
@@ -187,6 +188,7 @@ async function designReviewNotesSection(
  */
 async function prepareConceptualPass(
   artifactsDir: string,
+  sourceRoot: string,
   bundle: ArtifactBundle,
   settings: ConceptualReviewSettings,
 ): Promise<ConceptualDispatch> {
@@ -197,6 +199,7 @@ async function prepareConceptualPass(
   );
   return prepareConceptualDispatch({
     artifactsDir,
+    sourceRoot,
     bundle,
     settings,
     ...notesSection,
@@ -218,6 +221,8 @@ async function prepareConceptualPass(
  */
 async function prepareContractDispatch(opts: {
   artifactsDir: string;
+  /** The run's frozen snapshot root, stated in every lane prompt. */
+  sourceRoot: string;
   bundle: ArtifactBundle;
   maxUnits: number | undefined;
 }): Promise<ContractDispatch> {
@@ -246,6 +251,7 @@ async function prepareContractDispatch(opts: {
   };
   const fanout = await materializeFanoutLanes({
     artifactsDir: opts.artifactsDir,
+    sourceRoot: opts.sourceRoot,
     runId: AUDIT_GATE_SUBMISSION_SCOPE,
     lanes: [
       {
@@ -421,6 +427,7 @@ async function cmdNextStepBody(
     advisoryNotice: result.advisoryNotice,
     argv,
     root,
+    sourceRoot: result.sourceRoot,
     artifactsDir,
     analyzerPolicy,
     result,
@@ -440,7 +447,10 @@ async function cmdNextStepBody(
 /** What an emission row is given: the invocation's bindings plus its own result. */
 interface NextStepEmitContext {
   argv: string[];
+  /** The LIVE repository root: the step contract's repo_root and every re-issued command. */
   root: string;
+  /** The run's frozen snapshot root, which every packet and workload is rendered from. */
+  sourceRoot: string;
   artifactsDir: string;
   /**
    * The durable analyzer policy, loaded before any dispatch decision. Present
@@ -576,7 +586,7 @@ async function withReadyInspection(
   const inspectionRun = ctx?.result.inspectionRun;
   if (plan.via !== "current" || !ctx || !inspectionRun) return plan;
   const { handoff, resultPaths } = await prepareSemanticReviewWorkload({
-    root: ctx.root, artifactsDir: ctx.artifactsDir,
+    root: ctx.root, sourceRoot: ctx.sourceRoot, artifactsDir: ctx.artifactsDir,
     bundle: ctx.result.bundle, activeReviewRun: inspectionRun,
   });
   return {
@@ -784,7 +794,7 @@ function renderIgnoredReviewNoticeLines(
 }
 
 const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Both passes are unsatisfied — dispatch the contract pass and the
     // conceptual pass simultaneously. The conceptual pass is shallow (one agent)
     // or deep (N independent perspective lanes + an independent judge),
@@ -794,11 +804,13 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const contract = await prepareContractDispatch({
       artifactsDir,
+      sourceRoot,
       bundle: result.bundle,
       maxUnits: conceptualSettings.max_units,
     });
     const conceptual = await prepareConceptualPass(
       artifactsDir,
+      sourceRoot,
       result.bundle,
       conceptualSettings,
     );
@@ -846,7 +858,7 @@ const emitDesignReviewParallel = emissionRow<"design_review_parallel">(
 );
 
 const emitDesignReviewContract = emissionRow<"design_review_contract">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Only the contract pass remains — dispatched exactly as in the parallel
     // branch. This branch is reached whenever the conceptual pass is already
     // done, i.e. late in a run the host itself drove, which is precisely when
@@ -856,6 +868,7 @@ const emitDesignReviewContract = emissionRow<"design_review_contract">(
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const contract = await prepareContractDispatch({
       artifactsDir,
+      sourceRoot,
       bundle: result.bundle,
       maxUnits: conceptualSettings.max_units,
     });
@@ -894,7 +907,7 @@ const emitDesignReviewContract = emissionRow<"design_review_contract">(
 );
 
 const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Only the conceptual pass remains — shallow (one agent) or deep (N
     // independent perspective lanes + an independent judge), resolved JIT
     // from the user-confirmed checkpoint / session config.
@@ -902,6 +915,7 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
     const conceptualSettings = resolveConceptualReviewSettings(result.bundle);
     const conceptual = await prepareConceptualPass(
       artifactsDir,
+      sourceRoot,
       result.bundle,
       conceptualSettings,
     );
@@ -943,7 +957,7 @@ const emitDesignReviewConceptual = emissionRow<"design_review_conceptual">(
 );
 
 const emitCharterExtraction = emissionRow<"charter_extraction">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Phase C charter layer (conceptual, teleological): one blind, materialized
     // LANE per charter kind (design resolution 2 — independence is the shape of
     // the artifacts, not a merge instruction); the tool merges the per-kind
@@ -968,7 +982,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
           charterExtractionPacketFilename(kind),
         );
         const packet = await materializeCharterPacket({
-          root,
+          root: sourceRoot,
           bundle: result.bundle,
           kind,
         });
@@ -1001,6 +1015,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
     );
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: laneSpecs,
     });
@@ -1058,7 +1073,7 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
 );
 
 const emitCharterComparison = emissionRow<"charter_comparison">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Steps 2–3 of the charter layer: the comparison reader (it authored none of
     // the three lane DAGs) confirms the tool's correspondence candidates and
     // records the typed differences; the tool assembles, routes and pre-checks at
@@ -1080,6 +1095,7 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
     const lanePrompt = renderCharterComparisonPrompt(result.bundle, { submissionPath, laneGraphPaths });
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -1136,7 +1152,7 @@ const emitCharterComparison = emissionRow<"charter_comparison">(
 );
 
 const emitCharterFidelity = emissionRow<"charter_fidelity">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Step 4 of the charter layer: a SEPARATE lane judges, per finding candidate,
     // whether the sources genuinely differ. Blind by input: the tool materializes
     // a packet holding the accounts, their citations and the source slices at
@@ -1144,11 +1160,12 @@ const emitCharterFidelity = emissionRow<"charter_fidelity">(
     const continueCommand = nextStepCommand(root, artifactsDir);
     const submissionPath = laneSubmissionPath(artifactsDir, GATE_LANES.charter_fidelity);
     const packetPath = join(laneAssetsDir(artifactsDir), "charter-fidelity-packet.md");
-    const fidelityPacket = await buildCharterFidelityPacket(result.bundle, root);
+    const fidelityPacket = await buildCharterFidelityPacket(result.bundle, sourceRoot);
     await writeFile(packetPath, fidelityPacket, "utf8");
     const lanePrompt = renderCharterFidelityPrompt({ submissionPath, packetPath });
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -1250,7 +1267,7 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
 
 // sites-pinned: tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts
 const emitSystemicChallenge = emissionRow<"systemic_challenge">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
     // and computed the language-neutral aggregate-metrics digest. The host dispatches
     // a SEPARATE adversary agent whose mandate is optimization/better-way; it writes
@@ -1282,6 +1299,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
     // FILE — the adversary is a SEPARATE agent by lane class, on every host.
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: lane,
       lanes: [
@@ -1351,13 +1369,16 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
 );
 
 const emitConfirmIntent = emissionRow<"confirm_intent">(
-  async ({ root, artifactsDir, argv }, result) => {
+  async ({ root, sourceRoot, artifactsDir, argv }, result) => {
     const intentCheckpointPath = join(artifactsDir, "intent_checkpoint.json");
     const continueCommand = nextStepCommand(root, artifactsDir);
+    // The `--since` commit the fold resolved and recorded for this run, so the
+    // pre-digest names the same delta the planning draw uses.
+    const sinceFlag = getFlag(argv, "--since");
     const preDigest = await computeScopePreDigest(
       result.bundle,
-      root,
-      getFlag(argv, "--since"),
+      sourceRoot,
+      sinceFlag === undefined ? undefined : await lookupRunSince(artifactsDir, sinceFlag),
     );
     let bootstrappedGuidance: string | undefined;
     if (!result.bundle.intent_checkpoint) {
@@ -1473,7 +1494,7 @@ const emitAnalyzerInstall = emissionRow<"analyzer_install">(
 );
 
 const emitEdgeReasoning = emissionRow<"edge_reasoning">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     const edgeReasoningResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.edge_reasoning,
@@ -1505,6 +1526,7 @@ const emitEdgeReasoning = emissionRow<"edge_reasoning">(
     // step so the K-of-N/result-exists semantics stay single-sourced.
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -1669,7 +1691,7 @@ const emitIntentEquivalence = emissionRow<"intent_equivalence">(
 );
 
 const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     const fallbackResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.critical_flow_fallback,
@@ -1685,6 +1707,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
     const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -1737,7 +1760,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
 );
 
 const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
-  async ({ root, artifactsDir }, result) => {
+  async ({ root, sourceRoot, artifactsDir }, result) => {
     const narrativeResultsPath = laneSubmissionPath(
       artifactsDir,
       GATE_LANES.synthesis_narrative,
@@ -1761,6 +1784,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
     const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
+      sourceRoot,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -1862,6 +1886,7 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
     const result = ctx.result as NextStepResultOf<"semantic_review">;
     return semanticReviewPlan({
       root: ctx.root,
+      sourceRoot: ctx.sourceRoot,
       artifactsDir: ctx.artifactsDir,
       activeReviewRun: result.activeReviewRun,
       bundle: result.bundle,

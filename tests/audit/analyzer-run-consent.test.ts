@@ -80,7 +80,7 @@ test("an accepted current-run answer replaces an earlier decline without a stale
     await writeFile(path, JSON.stringify({ eslint: "granted", knip: "declined" }));
     const externalAcquisition: ExternalAcquisitionAdvanceOptions = { enabled: true, analyzerConsent: { eslint: "declined" } };
     const tx = createFoldTransaction();
-    const branch = await handleAnalyzerConsentBranch({ root, artifactsDir, externalAcquisition }, {}, { status: "active", obligations: [] }, { value: undefined }, tx);
+    const branch = await handleAnalyzerConsentBranch({ root, sourceRoot: root, artifactsDir, externalAcquisition }, {}, { status: "active", obligations: [] }, { value: undefined }, tx);
     await commitFold(artifactsDir, {}, tx);
     expect(branch.action).toBe("continue");
     expect(externalAcquisition.analyzerConsent).toEqual({ knip: "declined" });
@@ -106,7 +106,7 @@ test("real folds retain dry-run and consent across separate continuation paramet
       expect(options.externalAcquisition?.consentToken?.tools).toEqual(["eslint"]);
       throw new Error("stop at formatter boundary");
     };
-    const base = { root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000 };
+    const base = { root, sourceRoot: root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000 };
     await expect(runDeterministicForNextStep({ ...base, autoFix: { enabled: true, dryRun: true }, externalAcquisition: { enabled: true } })).rejects.toThrow("stop at formatter boundary");
     await expect(runDeterministicForNextStep({ ...base, externalAcquisition: { enabled: true } })).rejects.toThrow("stop at formatter boundary");
     expect(seen).toEqual([{ enabled: true, dryRun: true }, { enabled: true, dryRun: true }]);
@@ -124,7 +124,7 @@ test("late formatting opt-in reruns the formatter obligation once, not on every 
       seen.push(context.options.autoFix);
       return original!(bundle, context);
     };
-    const base = { root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000 };
+    const base = { root, sourceRoot: root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000 };
     await runDeterministicForNextStep({ ...base });
     await runDeterministicForNextStep({ ...base, autoFix: { enabled: true } });
     await runDeterministicForNextStep({ ...base, autoFix: { enabled: true } });

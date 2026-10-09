@@ -50,16 +50,16 @@ async function fixture(options: { customArtifacts?: boolean; lens?: "correctness
   const planned = (await runPlanningExecutor(bundle, root, lineIndex)).updated;
   const tasks = planned.audit_tasks!.filter(task => task.lens === lens);
   expect(tasks.map(task => task.file_paths).sort()).toEqual([["src/a.ts"], ["src/b.ts", "src/c.ts"], ["src/d.ts"]].sort());
-  const reviewRun = await materializeReviewRun({ root, artifactsDir, bundle: planned, obligationId: "audit_tasks_completed", tasksOverride: tasks });
+  const reviewRun = await materializeReviewRun({ root, sourceRoot: root, artifactsDir, bundle: planned, obligationId: "audit_tasks_completed", tasksOverride: tasks });
   await writeHandoffOnly({ root, artifactsDir, bundle: planned, audit_state: deriveAuditState(planned), progress_summary: "Published inspection fixture", activeReviewRun: reviewRun.activeReviewRun });
   const runId = reviewRun.activeReviewRun.run_id;
   // Publish through the production path: the pending-task manifest with
   // disk-measured line counts, then the semantic review workload built from it.
   const publish = async (current: ArtifactBundle) => {
-    const run = await materializeReviewRun({ root, artifactsDir, bundle: current, obligationId: "audit_tasks_completed",
+    const run = await materializeReviewRun({ root, sourceRoot: root, artifactsDir, bundle: current, obligationId: "audit_tasks_completed",
       tasksOverride: current.audit_tasks!.filter(task => task.lens === lens && task.status !== "complete") });
     expect(run.activeReviewRun.run_id).toBe(runId);
-    return (await prepareSemanticReviewWorkload({ root, artifactsDir, activeReviewRun: run.activeReviewRun, bundle: current })).handoff;
+    return (await prepareSemanticReviewWorkload({ root, sourceRoot: root, artifactsDir, activeReviewRun: run.activeReviewRun, bundle: current })).handoff;
   };
   const published = await publish(planned);
   const submit = async (item: AuditHostWorkItem) => {
@@ -70,7 +70,7 @@ async function fixture(options: { customArtifacts?: boolean; lens?: "correctness
   const middle = published.workload.work_items.find(item => item.scope.files.includes("src/b.ts"))!;
   const inflight = published.workload.work_items.find(item => item.scope.files.length === 1 && item.scope.files[0] === "src/d.ts")!;
   await submit(middle);
-  const accepted = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: planned.audit_tasks!, lineIndex });
+  const accepted = await ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: planned.audit_tasks!, lineIndex });
   expect(accepted.accepted_count).toBe(1);
   const ingested = runResultIngestionExecutor(planned, [...accepted.accepted_results]).updated;
   expect(ingested.coverage_matrix!.files.find(file => file.path === "src/b.ts")!.completed_lenses).toContain(lens);
@@ -166,14 +166,14 @@ test("missing source hash cannot preserve prior published authority from file si
   const published = await value.publish(replanned);
   expect(published.workload.work_items.find(item => item.id === task.task_id)!.prompt.sha256).not.toBe(value.inflight.prompt.sha256);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, sourceRoot: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
 });
 
 test("changed current review premise cannot preserve a historically valid prompt", async () => {
   const value = await fixture();
   value.ingested.audit_tasks!.find(task => task.task_id === value.inflight.id)!.rationale = "A different review requirement";
-  const publishedIds = await readPublishedAuditTaskIds({ root: value.root, artifactsDir: value.artifactsDir, tasks: value.ingested.audit_tasks!, manifest: value.ingested.repo_manifest, lineIndex: value.lineIndex });
+  const publishedIds = await readPublishedAuditTaskIds({ root: value.root, sourceRoot: value.root, artifactsDir: value.artifactsDir, tasks: value.ingested.audit_tasks!, manifest: value.ingested.repo_manifest, lineIndex: value.lineIndex });
   expect(publishedIds.has(value.inflight.id)).toBe(false);
   const replanned = await replan(value);
   expect(replanned.audit_tasks!.find(task => task.task_id === value.inflight.id)!.rationale).not.toBe("A different review requirement");
@@ -214,7 +214,7 @@ test("replanning retains published unchanged pending tasks and consumes their ge
   const republished = await value.publish(replanned);
   expect(republished.workload.work_items.find(item => item.id === value.inflight.id)).toEqual(value.inflight);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, sourceRoot: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(true);
   replanned.artifact_metadata = computeArtifactMetadata(replanned);
   expect(deriveAuditState(replanned, { emitStaleness: false }).obligations.find(obligation => obligation.id === "planning_artifacts")!.state).toBe("satisfied");
@@ -239,7 +239,7 @@ test("changed reviewed source refreshes workload authority and cannot reuse the 
   for (const task of currentTasks) expect(task.inputs?.[`source:${path}`]).toBe(file.hash);
   await value.publish(replanned);
   await value.submit(value.inflight);
-  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
+  const late = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, sourceRoot: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
   expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
   expect(replanned.coverage_matrix!.files.find(file => file.path === path)!.completed_lenses).not.toContain("correctness");
 });
@@ -264,7 +264,7 @@ test("an accepted entry that no longer validates is withdrawn by the production 
   value.ingested.artifact_metadata = computeArtifactMetadata(value.ingested);
   await persistFixture(value.artifactsDir, value.ingested);
   await value.submit(value.inflight);
-  const early = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: value.ingested.audit_tasks!, lineIndex: value.lineIndex });
+  const early = await ingestAuditHostResults({ pendingTaskIds: new Set(), root: value.root, sourceRoot: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: value.ingested.audit_tasks!, lineIndex: value.lineIndex });
   expect(early.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(true);
   // The entry no longer validates against the bundle it is replayed against
   // (a rule the earlier acceptance did not apply; here its lens is not the

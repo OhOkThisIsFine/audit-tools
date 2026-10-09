@@ -371,6 +371,7 @@ describe("deep conceptual resume narrows the instruction surface, not the access
 
     const dispatch = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle: {} as ArtifactBundle,
       settings: { ...DEEP },
     });
@@ -410,6 +411,7 @@ describe("deep conceptual resume narrows the instruction surface, not the access
 
     const first = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings: { ...DEEP },
     });
@@ -424,6 +426,7 @@ describe("deep conceptual resume narrows the instruction surface, not the access
 
     const resumed = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings: { ...DEEP },
     });
@@ -483,8 +486,8 @@ describe("explicit conceptual perspective selections", () => {
     expect(selectPerspectives(settings.perspectives).map(p => p.name)).toEqual(["Pragmatist", "Accessibility"]);
     const dir = await mkdtemp(join(tmpdir(), "exact-perspectives-"));
     try {
-      const first = await prepareConceptualDispatch({ artifactsDir: dir, bundle: { intent_checkpoint: checkpoint }, settings });
-      const resumed = await prepareConceptualDispatch({ artifactsDir: dir, bundle: { intent_checkpoint: checkpoint }, settings });
+      const first = await prepareConceptualDispatch({ artifactsDir: dir, sourceRoot: dir, bundle: { intent_checkpoint: checkpoint }, settings });
+      const resumed = await prepareConceptualDispatch({ artifactsDir: dir, sourceRoot: dir, bundle: { intent_checkpoint: checkpoint }, settings });
       expect(first.deep).toBe(true);
       expect(first.instructionLines.join("\n")).toContain("Pragmatist");
       expect(first.instructionLines.join("\n")).toContain("Accessibility");

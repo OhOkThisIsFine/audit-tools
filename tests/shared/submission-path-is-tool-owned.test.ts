@@ -300,6 +300,7 @@ async function auditFixture(taskIds: readonly string[] = ["T1"]): Promise<AuditF
   const artifactsDir = join(root, ".audit-tools", "audit");
   const prepared = await prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir,
     runId: AUDIT_RUN_ID,
     tasks: taskIds.map(auditTask),
@@ -434,13 +435,14 @@ describe("path containment is the tool's, not the caller's", () => {
     await expect(
       prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir: escaping,
         runId: AUDIT_RUN_ID,
         tasks: [auditTask("T1")],
       }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     await expect(
-      ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir: escaping, runId: AUDIT_RUN_ID, auditTasks: auditManifest(["T1"]) }),
+      ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir: escaping, runId: AUDIT_RUN_ID, auditTasks: auditManifest(["T1"]) }),
     ).rejects.toThrow(/artifactsDir must remain beneath/u);
     // The refusal fires BEFORE any filesystem effect: nothing was created.
     expect(existsSync(escaping)).toBe(false);
@@ -461,6 +463,7 @@ describe("path containment is the tool's, not the caller's", () => {
     const refused = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -531,10 +534,10 @@ describe("the one filename rule and the run-id grammar", () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     for (const runId of ["..", "a/b", ""]) {
       await expect(
-        prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [auditTask("T1")] }),
+        prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId, tasks: [auditTask("T1")] }),
       ).rejects.toThrow(/Invalid audit host run id/u);
       await expect(
-        ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: auditManifest(["T1"]) }),
+        ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: auditManifest(["T1"]) }),
       ).rejects.toThrow(/Invalid audit host run id/u);
     }
     // No run directory — not even the artifacts dir — was created on the way out.
@@ -551,6 +554,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -580,6 +584,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((itemItem) => itemItem.id)),
@@ -612,6 +617,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((itemItem) => itemItem.id)),
@@ -631,6 +637,7 @@ describe("the audit accepted-results ledger", () => {
     await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -640,6 +647,7 @@ describe("the audit accepted-results ledger", () => {
     const second = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -658,6 +666,7 @@ describe("the audit accepted-results ledger", () => {
     await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -667,6 +676,7 @@ describe("the audit accepted-results ledger", () => {
     // is owed. The boundary publishes it whole.
     const owed = await prepareAuditHostHandoff({
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       tasks: ["T2"].map(auditTask),
@@ -679,6 +689,7 @@ describe("the audit accepted-results ledger", () => {
     // acceptance is how a re-opened item becomes invisible to replay.
     const reopened = await prepareAuditHostHandoff({
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       tasks: ["T1", "T2"].map(auditTask),
@@ -697,6 +708,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -723,6 +735,7 @@ describe("the audit accepted-results ledger", () => {
     const coverage = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -742,7 +755,7 @@ describe("the audit accepted-results ledger", () => {
     const fixture = await auditFixture(["T1"]);
     const item = fixture.items[0]!;
     await submit(fixture, item, auditSubmission(item));
-    const params = { root: fixture.root, artifactsDir: fixture.artifactsDir, runId: AUDIT_RUN_ID,
+    const params = { root: fixture.root, sourceRoot: fixture.root, artifactsDir: fixture.artifactsDir, runId: AUDIT_RUN_ID,
       auditTasks: auditManifest([item.id]), pendingTaskIds: new Set<string>() };
     expect((await ingestAuditHostResults(params)).accepted_count).toBe(1);
     const ledger = JSON.parse(await readFile(fixture.ledgerPath, "utf8"));
@@ -779,6 +792,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -816,6 +830,7 @@ describe("the audit accepted-results ledger", () => {
     const summary = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
     auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -838,6 +853,7 @@ describe("the audit accepted-results ledger", () => {
         ingestAuditHostResults({
           pendingTaskIds: new Set(),
           root: fixture.root,
+          sourceRoot: fixture.root,
           artifactsDir: fixture.artifactsDir,
           runId: AUDIT_RUN_ID,
         auditTasks: auditManifest(fixture.items.map((item) => item.id)),
@@ -845,6 +861,7 @@ describe("the audit accepted-results ledger", () => {
       () =>
         prepareAuditHostHandoff({
           root: fixture.root,
+          sourceRoot: fixture.root,
           artifactsDir: fixture.artifactsDir,
           runId: AUDIT_RUN_ID,
           tasks: [auditTask("T1")],
@@ -888,6 +905,7 @@ describe("the audit accepted-results ledger", () => {
 
     await prepareAuditHostHandoff({
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       tasks: [auditTask("T1")],
@@ -910,6 +928,7 @@ describe("the audit accepted-results ledger", () => {
     await expect(
       prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir,
         runId: AUDIT_RUN_ID,
         tasks: [auditTask("T1"), auditTask("T1")],
@@ -919,6 +938,7 @@ describe("the audit accepted-results ledger", () => {
     await expect(
       prepareAuditHostHandoff({
         root,
+        sourceRoot: root,
         artifactsDir,
         runId: AUDIT_RUN_ID,
         tasks: [{ ...auditTask("T1"), file_line_counts: {} }],
@@ -931,6 +951,7 @@ describe("the audit accepted-results ledger", () => {
     const refused = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root: fixture.root,
+      sourceRoot: fixture.root,
       artifactsDir: fixture.artifactsDir,
       runId: AUDIT_RUN_ID,
       auditTasks: auditManifest(fixture.items.map((item) => item.id)),

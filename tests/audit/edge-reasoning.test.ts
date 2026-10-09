@@ -175,6 +175,7 @@ test("emitting the edge-reasoning dispatch creates the scratch dir its note name
     const plan = (await row({
       argv: ["node", "audit-code", "--root", root],
       root,
+      sourceRoot: root,
       artifactsDir,
       analyzerPolicy: null,
       result: {

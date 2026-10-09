@@ -2,16 +2,11 @@
 import { isFileMissingError } from "../../shared/io/json.js";
 import { hashContent } from "../../shared/hash.js";
 import { discoverProjectCommands } from "../../shared/tooling/testCommand.js";
-import { existsSync, rmSync, statSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, statSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRepoPath } from "../../shared/validation/findingGrounding.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
-import { headCommit, stagedAndUntracked } from "../../shared/git.js";
-import {
-  runTrackedAsync,
-  TRACKED_CHILD_DEADLINE_MS,
-} from "../../shared/tooling/exec.js";
+import { headCommit, stagedAndUntracked, workingTreeTree } from "../../shared/git.js";
 
 // Pinned, deterministically-derived gate command set for the audit-tools monorepo.
 // Single-sourced here so BOTH the tool-owned final gate / phase-boundary gate
@@ -364,52 +359,10 @@ function failingPathsFromOutput(output: string, root: string): string[] {
  */
 export async function worktreeContentId(root: string): Promise<string | null> {
   if ((await headCommit(root)) === null) return null;
-
-  // Under `tmpdir()`, not under `root`: the index must never appear as a dirty
-  // path in the tree it is taking the identity OF. `TMPDIR` can be unset, so
-  // the fallback keeps the name absolute rather than relative to the cwd.
-  const scratchRoot = process.env.TMPDIR ?? tmpdir();
-  const indexFile = join(
-    scratchRoot,
-    `remediate-content-id-${String(process.pid)}-${String(Date.now())}.idx`,
-  );
-  const git = async (args: string[]): Promise<string | null> => {
-    const result = await runTrackedAsync(["git", ...args], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: TRACKED_CHILD_DEADLINE_MS,
-      // The temporary index lives on this spawn's environment only, so the
-      // caller's real index is never touched. `stripAuditToolsControlEnv` runs
-      // inside the boundary and preserves it (it drops one wrapper-only var).
-      env: { ...process.env, GIT_INDEX_FILE: indexFile },
-    });
-    if (result.status !== 0) return null;
-    return result.stdout.trim();
-  };
-
-  try {
-    if ((await git(["read-tree", "HEAD"])) === null) return null;
-    if ((await git(["add", "-A"])) === null) return null;
-    // Remove the run's own scratch from the index, so the identity does not move
-    // on every call. `-f` because the path is being dropped from THIS index
-    // only; absent from the index entirely is not an error.
-    await git(["rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", RUN_SCRATCH_PREFIX]);
-    const tree = await git(["write-tree"]);
-    // A tree id is 40 hex chars (SHA-1) or 64 (SHA-256); anything else means the
-    // plumbing answered with something that is not an identity.
-    if (tree === null || !/^[0-9a-f]{40}$|^[0-9a-f]{64}$/u.test(tree)) return null;
-    return tree;
-  } catch {
-    // "Cannot tell". A gate must not fail on the diagnostic it was deriving, and
-    // an unreadable index is a MISS (the floor runs), never a partial key.
-    return null;
-  } finally {
-    try {
-      rmSync(indexFile, { force: true });
-    } catch {
-      /* temp index already gone — nothing to reclaim */
-    }
-  }
+  // The shared temporary-index tree — the same carve-outs (ignored files by
+  // construction, {@link RUN_SCRATCH_PREFIX} explicitly) the audit run's
+  // snapshot pin is built from.
+  return workingTreeTree(root);
 }
 
 /**

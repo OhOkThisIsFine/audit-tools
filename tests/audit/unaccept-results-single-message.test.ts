@@ -53,6 +53,7 @@ describe("contract:unaccept-results-argument-rule-has-one-copy", () => {
     // not from a missing-manifest error ahead of it.
     await materializeReviewRun({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {},
       obligationId: null,

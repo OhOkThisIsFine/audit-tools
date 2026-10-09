@@ -142,7 +142,7 @@ for (const kind of ["extraction", "comparison", "fidelity"] as const) {
         const tx = createFoldTransaction();
         const handler = { extraction: handleCharterExtractionBranch, comparison: handleCharterComparisonBranch, fidelity: handleCharterFidelityBranch }[kind];
         const branch = await withArtifactTreeHold<CharterBranchResult>(artifactsDir, undefined, () => handler(
-          { root, artifactsDir }, current, { status: "active", obligations: [] }, tx));
+          { root, sourceRoot: root, artifactsDir }, current, { status: "active", obligations: [] }, tx));
         expect(branch.action).toBe(change ? "return" : "continue");
         expect(tx.staged.some((entry) => entry.applied)).toBe(!change);
         if (change) {

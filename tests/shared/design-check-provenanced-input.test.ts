@@ -156,6 +156,7 @@ test("a review round receives the verified map as a bound file, provenanced as r
   try {
     const dispatch = await prepareConceptualDispatch({
       artifactsDir,
+      sourceRoot: artifactsDir,
       bundle: reviewBundle(),
       settings: { conceptual_depth: "shallow", max_units: 5 },
     });

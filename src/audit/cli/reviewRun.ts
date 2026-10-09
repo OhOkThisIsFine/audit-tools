@@ -86,6 +86,8 @@ export async function writeHandoffOnly(params: {
 
 export interface MaterializeReviewRunParams {
   root: string;
+  /** The run's frozen snapshot root: each pending task's line counts are measured in it. */
+  sourceRoot: string;
   artifactsDir: string;
   bundle: ArtifactBundle;
   obligationId: string | null;
@@ -296,7 +298,7 @@ export async function materializeReviewRun(
   // depends on it, and the ordering is what makes that visible — a partial
   // ingest shrinks the pending set, and must not move the run identity.
   const pendingTasks = await addFileLineCountHints(
-    params.root,
+    params.sourceRoot,
     params.tasksOverride ?? buildPendingAuditTasks(params.bundle),
   );
   const generation =
@@ -337,6 +339,8 @@ export async function materializeReviewRun(
 
 interface ReviewPauseParams {
   root: string;
+  /** The run's frozen snapshot root (see {@link MaterializeReviewRunParams.sourceRoot}). */
+  sourceRoot: string;
   artifactsDir: string;
   bundle: ArtifactBundle;
   state: AuditState;

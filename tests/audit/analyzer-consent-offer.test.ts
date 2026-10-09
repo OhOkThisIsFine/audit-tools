@@ -238,7 +238,7 @@ describe("the consent gate refuses a submission it understands nothing in", () =
       run: async () => {
         const tx = createFoldTransaction();
         const branch = await handleAnalyzerConsentBranch(
-          { root, artifactsDir, externalAcquisition } as never,
+          { root, sourceRoot: root, artifactsDir, externalAcquisition } as never,
           {} as never,
           { status: "active", obligations: [] } as never,
           { value: undefined },

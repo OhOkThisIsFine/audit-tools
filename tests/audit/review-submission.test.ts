@@ -18,7 +18,7 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 test("required review lanes refuse raw/self/stale output and accept only their bound independent declaration", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-submission-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const fanout = await materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Contract reviewer", promptFilename: "review.md", promptText: "Review the approved contract.", fileCount: 1, riskScore: 0.8, semanticComplexity: "deep" }] });
+  const fanout = await materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Contract reviewer", promptFilename: "review.md", promptText: "Review the approved contract.", fileCount: 1, riskScore: 0.8, semanticComplexity: "deep" }] });
   const path = fanout.lanes[0]!.resultPath;
   await writeFile(path, JSON.stringify({ findings: [] }));
   expect((await tryConsumeSubmission(artifactsDir, lane)).status).toBe("malformed");
@@ -41,7 +41,7 @@ test("required review lanes refuse raw/self/stale output and accept only their b
 test("A to B to A re-emission restores the current binding without duplicating lane counts", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-rebind-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
+  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
   await emit("A");
   const first = (await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "prompt_bound").at(-1)!;
   await emit("B");
@@ -61,7 +61,7 @@ test("unavailable review pauses without consuming or quarantining the bound resp
   const { createFoldTransaction, commitFold } = await import("../../src/audit/cli/foldTransaction.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-paused-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const fanout = await materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
+  const fanout = await materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
   const binding = (await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "prompt_bound").at(-1)!;
   const bytes = JSON.stringify({ contract_version: "review-submission/v1", prompt_sha256: binding.prompt_sha256, review: { mode: "unavailable", reason: "No independent context is currently available" }, result: null });
   const path = fanout.lanes[0]!.resultPath;
@@ -78,7 +78,7 @@ test("corrupt active bindings cannot resurrect a historical ledger authority", a
   const { laneAssetsDir } = await import("../../src/shared/index.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-corrupt-binding-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const fanout = await materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
+  const fanout = await materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
   const binding = (await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "prompt_bound").at(-1)!;
   await writeFile(join(laneAssetsDir(artifactsDir), "review-bindings.json"), '{"version":"corrupt"}');
   await writeFile(fanout.lanes[0]!.resultPath, JSON.stringify({ contract_version: "review-submission/v1", prompt_sha256: binding.prompt_sha256, review: { mode: "independent", reason: "Separate author context" }, result: { findings: [] } }));
@@ -92,7 +92,7 @@ test("pointer-only input changes invalidate old reviews and re-emission mints a 
   const packet = join(artifactsDir, "packet.json");
   await writeFile(packet, '{"version":1}');
   const lane = GATE_LANES.design_review_contract;
-  const emit = () => materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: `Read ${packet}`, contextPaths: [packet], fileCount: 1, riskScore: 0.8 }] });
+  const emit = () => materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: `Read ${packet}`, contextPaths: [packet], fileCount: 1, riskScore: 0.8 }] });
   const first = await emit();
   const oldPrompt = await readFile(first.lanes[0]!.promptPath, "utf8");
   const oldBinding = await auditReviewBinding(artifactsDir, lane);
@@ -113,7 +113,7 @@ test("concurrent emission publishes only complete matching prompt bindings and m
   const { hashContent } = await import("../../src/shared/hash.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-concurrent-binding-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
+  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
   await Promise.all([emit("A"), emit("B")]);
   let binding = await readAuditReviewBinding(artifactsDir, lane);
   expect(binding).toBeDefined();
@@ -129,7 +129,7 @@ test("re-emission repairs a tampered required prompt even when its result alread
   const { readAuditReviewBinding } = await import("../../src/audit/cli/auditReviewBindings.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-repair-prompt-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const emit = () => materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
+  const emit = () => materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText: "Review", fileCount: 1, riskScore: 0.8 }] });
   const first = await emit();
   await writeFile(first.lanes[0]!.resultPath, "{}");
   await writeFile(first.lanes[0]!.promptPath, "tampered");
@@ -143,7 +143,7 @@ test("review rebinding waits for the artifact hold that owns acceptance and comm
   const { auditReviewBinding } = await import("../../src/audit/cli/reviewSubmission.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-acceptance-hold-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
-  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
+  const emit = (promptText: string) => materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE, lanes: [{ id: lane, label: "Review", promptFilename: "review.md", promptText, fileCount: 1, riskScore: 0.8 }] });
   const initial = await emit("A");
   const prior = await auditReviewBinding(artifactsDir, lane);
   await writeFile(initial.lanes[0]!.resultPath, JSON.stringify({ contract_version: "review-submission/v1", prompt_sha256: prior.promptSha256, review: { mode: "independent", reason: "Separate reviewer" }, result: { findings: [] } }));
@@ -196,7 +196,8 @@ test("a hidden structural input changes the real review binding while cosmetic p
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-complete-input-")); roots.push(artifactsDir);
   const lane = GATE_LANES.design_review_contract;
   const emit = (bundle: ArtifactBundle) => materializeFanoutLanes({
-    artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    artifactsDir,
+    sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
     lanes: [{ id: lane, label: "Contract review", promptFilename: "contract.md",
       promptText: renderContractReviewPrompt(bundle), semanticInputRevision: designReviewInputRevision(bundle), fileCount: 0, riskScore: 0.8 }],
   });
@@ -229,7 +230,7 @@ test("deep conceptual rounds rotate for hidden structural changes but preserve c
   const { readConceptualReviewRoundManifest } = await import("../../src/audit/types/conceptualAdjudication.js");
   const artifactsDir = await mkdtemp(join(tmpdir(), "review-complete-round-")); roots.push(artifactsDir);
   const emit = async (bundle: ArtifactBundle) => {
-    await prepareConceptualDispatch({ artifactsDir, bundle,
+    await prepareConceptualDispatch({ artifactsDir, sourceRoot: artifactsDir, bundle,
       settings: { conceptual_depth: "deep", perspectives: 1 } });
     return (await readConceptualReviewRoundManifest(artifactsDir))!.round_id;
   };
@@ -259,13 +260,13 @@ for (const kind of ["contract", "shallow", "deep"] as const) {
       if (kind !== "contract") original.intent_checkpoint = reviewCheckpoint(kind);
       const lane = kind === "contract" ? GATE_LANES.design_review_contract : GATE_LANES.design_review_conceptual;
       if (kind === "contract") {
-        await materializeFanoutLanes({ artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
+        await materializeFanoutLanes({ artifactsDir, sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
           lanes: [{ id: lane, label: "Contract review", promptFilename: "contract.md",
             promptText: renderContractReviewPrompt(original), semanticInputRevision: designReviewInputRevision(original), fileCount: 0, riskScore: 0.8 }],
         });
         await writeBoundReviewFixture(artifactsDir, lane, { findings: [] });
       } else {
-        await prepareConceptualDispatch({ artifactsDir, bundle: original,
+        await prepareConceptualDispatch({ artifactsDir, sourceRoot: artifactsDir, bundle: original,
           settings: { conceptual_depth: kind, perspectives: 1 } });
         if (kind === "deep") {
           const manifest = (await readConceptualReviewRoundManifest(artifactsDir))!;
@@ -329,7 +330,7 @@ for (const change of ["depth", "perspectives", "lenses", "charter purpose", "cha
         correspondences: [{ correspondence_id: "budget", members: [{ kind: "stated", node_ids: ["purpose-1"] }], basis: "tool", evidence: [] }],
       },
     };
-    await prepareConceptualDispatch({ artifactsDir, bundle: original, settings: resolveConceptualReviewSettings(original) });
+    await prepareConceptualDispatch({ artifactsDir, sourceRoot: artifactsDir, bundle: original, settings: resolveConceptualReviewSettings(original) });
     const manifest = await readConceptualReviewRoundManifest(artifactsDir);
     if (manifest) {
       for (const perspective of manifest.perspectives) await writeBoundReviewFixture(artifactsDir, perspective.lane_id, { findings: [] });

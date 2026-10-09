@@ -25,7 +25,8 @@ export async function emitAndWriteReviewFixture(artifactsDir: string, lane: stri
   const { materializeFanoutLanes } = await import("../../../src/audit/cli/fanoutLanes.js");
   const { AUDIT_GATE_SUBMISSION_SCOPE } = await import("../../../src/audit/cli/laneSubmissions.js");
   await materializeFanoutLanes({
-    artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
+    artifactsDir,
+    sourceRoot: artifactsDir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
     lanes: [{ id: lane, label: "Fixture reviewer", promptFilename: `${lane}.md`,
       promptText: "Review the fixture's supplied domain result independently of its author.",
       semanticInputRevision: designReviewInputRevision(reviewedBundle, lane === GATE_LANES.design_review_contract ? "contract" : "conceptual"),

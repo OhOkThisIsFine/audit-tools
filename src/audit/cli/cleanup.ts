@@ -1,7 +1,9 @@
+// sites-pinned: tests/audit/frozen-snapshot.test.ts
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import { isWorkingDirFullyPromoted } from "../io/artifacts.js";
+import { removeRunSnapshot } from "../io/runSnapshot.js";
 import type { AuditState } from "../types/auditState.js";
 
 export type CleanupOptions = {
@@ -89,6 +91,11 @@ export async function cleanupStaleArtifactsDir(
     return { action: "dry-run", status };
   }
 
+  // The run's frozen snapshot lives outside the repository; its record is in
+  // this dir, so it goes first or it would leak.
+  for (const problem of await removeRunSnapshot(artifactsDir)) {
+    process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
+  }
   await rm(artifactsDir, { recursive: true, force: true });
   return { action: "deleted", status };
 }

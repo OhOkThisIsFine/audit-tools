@@ -397,6 +397,7 @@ describe("conceptual review adjudication", () => {
     });
     await prepareConceptualDispatch({
       artifactsDir,
+      sourceRoot: artifactsDir,
       bundle,
       settings: { conceptual_depth: "deep", perspectives: 2 },
     });
@@ -502,6 +503,7 @@ describe("conceptual review adjudication", () => {
     );
     await prepareConceptualDispatch({
       artifactsDir,
+      sourceRoot: artifactsDir,
       bundle,
       settings: { conceptual_depth: "shallow", perspectives: 1 },
     });

@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { readRunSnapshotLinks } from "../io/runSnapshot.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AdvanceAuditOptions } from "./advanceTypes.js";
 import { RunLogger, readAuditReadState } from "audit-tools/shared";
@@ -86,6 +87,7 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "intake_executor"),
       options.artifactsDir,
+      options.repositoryRoot ?? options.root,
     ),
   // DD-9: deterministic arms resolve directly; prose-only change requires the
   // consumed, pair-bound host verdict.
@@ -158,7 +160,7 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       options.lineIndex ?? {},
       options.sizeIndex,
       plannedScope,
-      options.artifactsDir ? await readPublishedAuditTaskIds({ root, artifactsDir: options.artifactsDir,
+      options.artifactsDir ? await readPublishedAuditTaskIds({ root: options.repositoryRoot ?? root, sourceRoot: root, artifactsDir: options.artifactsDir,
         tasks: bundle.audit_tasks ?? [], manifest: bundle.repo_manifest, lineIndex: options.lineIndex ?? {}, logger: log }) : new Set(),
     );
   },
@@ -180,7 +182,9 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   synthesis_executor: async (bundle, { options }) =>
     runSynthesisExecutor(bundle, options.auditResults, {
       auditRead: options.root
-        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read)
+        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
+            excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
+          })
         : null,
       sizeIndex: options.sizeIndex,
       packetArchive: options.artifactsDir
@@ -192,7 +196,9 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       // Read only on the fallback where no base report exists yet; a persisted
       // report's own `audit_read` rides through `applyNarrative` untouched.
       auditRead: options.root
-        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read)
+        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
+            excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
+          })
         : null,
       sizeIndex: options.sizeIndex,
       packetArchive: options.artifactsDir
@@ -232,6 +238,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       // dispatch, not only at the executor's direct seam — the shape the
       // decline veto was once found dead in (CP-NODE-5).
       autoFix: options.autoFix,
+      repositoryRoot: options.repositoryRoot,
+      artifactsDir: options.artifactsDir,
     }),
   syntax_resolution_executor: async (bundle, { options }) =>
     runSyntaxResolutionExecutor(

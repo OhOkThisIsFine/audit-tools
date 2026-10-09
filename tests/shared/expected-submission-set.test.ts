@@ -137,6 +137,7 @@ describe("the expected-submission set", () => {
 
       const fanout = await materializeFanoutLanes({
         artifactsDir,
+        sourceRoot: artifactsDir,
         runId: "p25-fanout-run",
         lanes: CHARTER_LANES.map((lane) => ({
           id: `charter_${lane}`,

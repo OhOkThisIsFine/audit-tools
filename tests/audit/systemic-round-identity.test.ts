@@ -96,12 +96,12 @@ function openRegister(
   };
 }
 
-async function makeRoot(): Promise<{ root: string; artifactsDir: string }> {
+async function makeRoot(): Promise<{ root: string; sourceRoot: string; artifactsDir: string }> {
   const root = await mkdtemp(join(tmpdir(), "systemic-round-identity-"));
   cleanupRoots.push(root);
   const artifactsDir = join(root, ".audit-tools", "audit");
   await satisfyFunctionalPreflight(root, artifactsDir);
-  return { root, artifactsDir };
+  return { root, sourceRoot: root, artifactsDir };
 }
 
 async function emitSystemicStep(
@@ -113,6 +113,8 @@ async function emitSystemicStep(
     kind: "systemic_challenge",
     state: { status: "active", obligations: [] } satisfies AuditState,
     bundle,
+    // The real fold resolves the run's snapshot; this planner stub reads in place.
+    sourceRoot: root,
   });
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   try {
@@ -155,7 +157,7 @@ describe("systemic challenge round identity", () => {
     expect(systemicPremiseToken(current) === premiseA).toBe(!changed);
     const before = structuredClone(current.systemic_challenge);
     const tx = createFoldTransaction();
-    const outcome = await handleSystemicChallengeBranch({ root, artifactsDir }, current, emptyState, tx);
+    const outcome = await handleSystemicChallengeBranch({ root, sourceRoot: root, artifactsDir }, current, emptyState, tx);
     expect(outcome.action).toBe(changed ? "return" : "continue");
     if (changed) {
       if (outcome.action !== "return") throw new Error("stale premise was consumed");
@@ -202,7 +204,7 @@ describe("systemic challenge round identity", () => {
     expect(current.systemic_challenge).toEqual(issued.systemic_challenge);
     expect(JSON.parse(await readFile(assessmentPath, "utf8"))).toEqual(issued.design_assessment);
     const tx = createFoldTransaction();
-    const outcome = await handleSystemicChallengeBranch({ root, artifactsDir }, current, emptyState, tx);
+    const outcome = await handleSystemicChallengeBranch({ root, sourceRoot: root, artifactsDir }, current, emptyState, tx);
     expect(outcome.action).toBe(change === "timestamp" ? "continue" : "return");
     if (change !== "timestamp") {
       if (outcome.action !== "return") throw new Error("stale prior findings were accepted");
@@ -292,7 +294,7 @@ describe("systemic challenge round identity", () => {
     const round2Bytes = await readFile(round2Path, "utf8");
     const tx2 = createFoldTransaction();
     const round2 = await handleSystemicChallengeBranch(
-      { root, artifactsDir },
+      { root, sourceRoot: root, artifactsDir },
       prior,
       emptyState,
       tx2,
@@ -316,7 +318,7 @@ describe("systemic challenge round identity", () => {
     await writeFile(round2Path, round2Bytes);
     const replayTx = createFoldTransaction();
     const replay = await handleSystemicChallengeBranch(
-      { root, artifactsDir }, round2.bundle, emptyState, replayTx,
+      { root, sourceRoot: root, artifactsDir }, round2.bundle, emptyState, replayTx,
     );
     expect(replay.action).toBe("return");
     expect(replayTx.staged).toHaveLength(0);
@@ -324,7 +326,7 @@ describe("systemic challenge round identity", () => {
     await writeBoundReviewFixture(artifactsDir, systemicChallengeLane(round2.bundle.systemic_challenge!.rounds), { findings: [] });
     const tx3 = createFoldTransaction();
     const round3 = await handleSystemicChallengeBranch(
-      { root, artifactsDir },
+      { root, sourceRoot: root, artifactsDir },
       round2.bundle,
       emptyState,
       tx3,

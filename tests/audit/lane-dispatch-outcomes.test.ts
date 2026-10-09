@@ -127,6 +127,7 @@ describe("dispatch rows", () => {
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1", "p2"]),
@@ -152,6 +153,7 @@ describe("dispatch rows", () => {
     const emit = () =>
       materializeFanoutLanes({
         artifactsDir: dir,
+        sourceRoot: dir,
         runId: AUDIT_GATE_SUBMISSION_SCOPE,
         roundId: "round-a",
         lanes: lanes(["p1", "p2"]),
@@ -168,6 +170,7 @@ describe("outcome observation at the ingest boundary", () => {
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1", "p2"]),
@@ -196,6 +199,7 @@ describe("outcome observation at the ingest boundary", () => {
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1", "p2"]),
@@ -219,6 +223,7 @@ describe("outcome observation at the ingest boundary", () => {
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1"]),
@@ -235,6 +240,7 @@ describe("outcome observation at the ingest boundary", () => {
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1_a", "p2_a"]),
@@ -247,6 +253,7 @@ describe("outcome observation at the ingest boundary", () => {
     });
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-b",
       lanes: lanes(["p1_b"]),
@@ -283,6 +290,7 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
     const lane = "design_review_contract";
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -305,6 +313,7 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
     // erase the refusal by becoming the trailing event.
     const again = await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -335,6 +344,7 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
     });
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [
         {
@@ -364,6 +374,7 @@ describe("the new kinds do not corrupt the readers that already existed", () => 
     const dir = await artifactsDir();
     await materializeFanoutLanes({
       artifactsDir: dir,
+      sourceRoot: dir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       roundId: "round-a",
       lanes: lanes(["p1", "p2"]),

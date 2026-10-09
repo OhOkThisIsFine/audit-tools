@@ -58,6 +58,7 @@ async function renderedPrompt(lens: string): Promise<string> {
   } as unknown as AuditHostTask;
   const prepared = await prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir: join(root, ".audit-tools", "audit"),
     runId: `run-${lens}`,
     tasks: [task],

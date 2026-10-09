@@ -87,7 +87,7 @@ await test("buildTerminalStep returns complete when bundle.audit_report is set",
     // Write a fake audit-report.md so promoteFinalAuditReport can find it
     await writeFile(join(artifactsDir, "audit-report.md"), "# report", "utf8");
 
-    const params = { root: artifactsDir, artifactsDir };
+    const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir };
     const bundle = {
       audit_report: "# report",
       // minimal bundle — other fields undefined
@@ -110,7 +110,7 @@ await test("buildTerminalStep returns blocked when audit_report is falsy and sta
       "utf8",
     );
 
-    const params = { root: artifactsDir, artifactsDir };
+    const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir };
     const bundle = {}; // no audit_report
     const state: AuditState = { status: "active", obligations: [] };
 
@@ -144,6 +144,7 @@ await test("handleGraphEnrichmentBranch returns analyzer_install when unresolved
     // Use a root path that has no session-config.json so the registry uses defaults
     const params = {
       root: artifactsDir,
+      sourceRoot: artifactsDir,
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
@@ -193,6 +194,7 @@ await test("handleGraphEnrichmentBranch returns continue after consuming a valid
     const analyzersRef = { value: undefined };
     const params = {
       root: artifactsDir,
+      sourceRoot: artifactsDir,
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
@@ -213,6 +215,7 @@ await test("handleGraphEnrichmentBranch returns fallthrough when unresolved is e
     const analyzersRef = { value: undefined };
     const params = {
       root: artifactsDir,
+      sourceRoot: artifactsDir,
       artifactsDir,
       graphLlmEdgeReasoning: false,
       since: undefined,
@@ -397,7 +400,7 @@ await test("checkFinalizationCycle returns undefined when distinct state count i
     const obligationTrail: string[] = [];
     const seenStateSignatures = new Set<string>();
     const tolerance = 4;
-    const params = { artifactsDir, root: artifactsDir };
+    const params = { artifactsDir, root: artifactsDir , sourceRoot: artifactsDir};
 
     // Add 3 distinct signatures — well within tolerance of 4
     for (let i = 0; i < 3; i++) {
@@ -440,7 +443,7 @@ await test("checkFinalizationCycle triggers terminal step after TOLERANCE repeat
     );
 
     const tolerance = 4;
-    const params = { artifactsDir, root: artifactsDir };
+    const params = { artifactsDir, root: artifactsDir , sourceRoot: artifactsDir};
 
     // Simulate 10 iterations that have only produced 2 distinct states
     const obligationTrail: string[] = Array(10).fill("synthesis_current");
@@ -913,8 +916,8 @@ function edgeReasoningBundle(): ArtifactBundle {
 
 function edgeReasoningParams(
   artifactsDir: string,
-): Pick<NextStepParams, "root" | "artifactsDir" | "graphLlmEdgeReasoning" | "since"> {
-  return { root: artifactsDir, artifactsDir, graphLlmEdgeReasoning: true, since: undefined };
+): Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "graphLlmEdgeReasoning" | "since"> {
+  return { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir, graphLlmEdgeReasoning: true, since: undefined };
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -1244,7 +1247,7 @@ for (const gate of OMITTABLE_GATES) {
       // A bare number fails every top-level object schema ("expected object,
       // received number") — a shape no gate could ever legitimately accept.
 
-      const params = { root: artifactsDir, artifactsDir };
+      const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir };
       const bundle = gate.bundle ?? {};
       await emitAndWriteReviewFixture(artifactsDir, gate.lane, 42, bundle);
       const state: AuditState = { status: "active", obligations: [] };
@@ -1383,6 +1386,7 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
       const plan = await row({
         argv: ["node", "audit-code", "--root", artifactsDir],
         root: artifactsDir,
+        sourceRoot: artifactsDir,
         artifactsDir,
         analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
         result: { kind, state, bundle, ...(extras[kind] ?? {}) },
@@ -1449,6 +1453,7 @@ test("an acquisition-bearing row REFUSES to emit when the analyzer policy did no
     const ctx = {
       argv: ["node", "audit-code"],
       root: artifactsDir,
+      sourceRoot: artifactsDir,
       artifactsDir,
       analyzerPolicy: null,
     };
@@ -1565,6 +1570,7 @@ test("BOTH blocked paths carry the same operator-handoff contract, built from ON
     const plan = (await row({
       argv: ["node", "audit-code", "--root", root],
       root,
+      sourceRoot: root,
       artifactsDir: stepB.artifacts_dir,
       analyzerPolicy: { analyzers: {}, analyzer_consent: {} },
       result: {

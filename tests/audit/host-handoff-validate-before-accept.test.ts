@@ -82,6 +82,7 @@ async function setup() {
   await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
   const prepared = await prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir,
     runId: RUN_ID,
     tasks: [
@@ -143,6 +144,7 @@ async function setup() {
       ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root,
+        sourceRoot: root,
         artifactsDir,
         runId: RUN_ID,
         auditTasks: [AUDIT_TASK],
@@ -271,6 +273,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     // error-severity mismatch against the current tree.
     const grown = await ingestAuditHostResults({
       root: ctx.root,
+      sourceRoot: ctx.root,
       artifactsDir: ctx.artifactsDir,
       runId: RUN_ID,
       auditTasks: [AUDIT_TASK],
@@ -326,6 +329,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
 
     const again = await ingestAuditHostResults({
       root: ctx.root,
+      sourceRoot: ctx.root,
       artifactsDir: ctx.artifactsDir,
       runId: RUN_ID,
       auditTasks: [AUDIT_TASK],
@@ -351,6 +355,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
 
     const stale = await ingestAuditHostResults({
       root: ctx.root,
+      sourceRoot: ctx.root,
       artifactsDir: ctx.artifactsDir,
       runId: RUN_ID,
       auditTasks: [AUDIT_TASK],
@@ -369,6 +374,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
 
     const later = await ingestAuditHostResults({
       root: ctx.root,
+      sourceRoot: ctx.root,
       artifactsDir: ctx.artifactsDir,
       runId: RUN_ID,
       auditTasks: [AUDIT_TASK],
@@ -399,6 +405,7 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
       ingested = await ingestAuditHostResults({
         pendingTaskIds: new Set(),
         root: ctx.root,
+        sourceRoot: ctx.root,
         artifactsDir: ctx.artifactsDir,
         runId: RUN_ID,
         auditTasks: [], // manifest WITHOUT the submitted work item → orphan

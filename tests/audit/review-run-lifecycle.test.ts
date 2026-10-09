@@ -123,6 +123,7 @@ async function publishWave(
 ): Promise<{ run: ActiveReviewRun; workload: PublishedWorkload }> {
   const pause = await ensureSemanticReviewRunUnlocked({
     root,
+    sourceRoot: root,
     artifactsDir,
     bundle: {
       audit_state: minimalState("active"),
@@ -136,6 +137,7 @@ async function publishWave(
   });
   const handoff = await prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir,
     runId: pause.activeReviewRun.run_id,
     tasks: tasks.map(hostTask),
@@ -266,6 +268,7 @@ test("materializeReviewRun persists only review identity and canonical pending t
 
     const { activeReviewRun, pendingTasks } = await materializeReviewRun({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {},
       obligationId: "audit_tasks_completed",
@@ -335,6 +338,7 @@ test("ensureSemanticReviewRunUnlocked creates a blocked host-review handoff for 
 
     const result = await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -371,6 +375,7 @@ test("ensureSemanticReviewRunUnlocked names the emitted step in the handoff when
     await writeFile(join(root, "src", "index.ts"), "export const value = 1;\n");
     await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -394,6 +399,7 @@ test("ensureSemanticReviewRunUnlocked derives ONE run id while a wave is open, w
 
     const first = await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -409,6 +415,7 @@ test("ensureSemanticReviewRunUnlocked derives ONE run id while a wave is open, w
     // input that used to re-mint the run.
     const second = await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -442,6 +449,7 @@ test("ensureSemanticReviewRunUnlocked rewrites the pending manifest in place whe
 
     const result = await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -540,6 +548,7 @@ test("a partial ingest keeps every carried-over binding: the run identity, the b
     const ingested = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: before.run.run_id,
       auditTasks: tasks,
@@ -599,6 +608,7 @@ test("the accepted ledger carries forward across a republication inside one wave
     await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: before.run.run_id,
       auditTasks: tasks,
@@ -610,6 +620,7 @@ test("the accepted ledger carries forward across a republication inside one wave
     const reingested = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: after.run.run_id,
       auditTasks: tasks,
@@ -643,6 +654,7 @@ test("ensureSemanticReviewRunUnlocked ADOPTS an in-flight clock-minted run at th
 
     const result = await ensureSemanticReviewRunUnlocked({
       root,
+      sourceRoot: root,
       artifactsDir,
       bundle: {
         audit_state: minimalState("active"),
@@ -683,6 +695,7 @@ test("wave 2 applies a result whose binding is byte-identical to one wave 1 acce
     const wave1Ingest = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: wave1.run.run_id,
       auditTasks: tasks,
@@ -714,6 +727,7 @@ test("wave 2 applies a result whose binding is byte-identical to one wave 1 acce
     const wave2Ingest = await ingestAuditHostResults({
       pendingTaskIds: new Set(),
       root,
+      sourceRoot: root,
       artifactsDir,
       runId: wave2.run.run_id,
       auditTasks: tasks,

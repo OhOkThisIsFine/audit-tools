@@ -25,6 +25,7 @@ export const LOOP_CORE_PATTERNS = [
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/cli/prompts.ts",
   "src/audit/cli/semanticReviewStep.ts",
+  "src/audit/io/runSnapshot.ts",
   "src/audit/orchestrator/",
   "src/audit/reporting/criticalFlowFallbackPrompt.ts",
   "src/audit/reporting/synthesisNarrativePrompt.ts",

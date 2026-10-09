@@ -443,6 +443,7 @@ describe("prepareConceptualDispatch with an explicit selection", () => {
 
     const first = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings,
     });
@@ -463,6 +464,7 @@ describe("prepareConceptualDispatch with an explicit selection", () => {
 
     const resumed = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings,
     });
@@ -487,6 +489,7 @@ describe("prepareConceptualDispatch with an explicit selection", () => {
 
     const first = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings,
     });
@@ -504,6 +507,7 @@ describe("prepareConceptualDispatch with an explicit selection", () => {
 
     const resumed = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings,
     });

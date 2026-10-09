@@ -24,24 +24,25 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 121 entr(y/ies) indexed.
+> and at commit). 122 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
-- `open-bugs.md:11` — The shipped TOML parser carries two high advisories (2026-10-06, high).
-- `open-bugs.md:13` — A step contract lists every pending result path (2026-10-05, medium).
-- `open-bugs.md:15` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
-- `open-bugs.md:17` — Charter packets are sized by accident, not by the charter question (2026-10-05, medium).
-- `open-bugs.md:19` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
-- `open-bugs.md:21` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
-- `open-bugs.md:23` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
-- `open-bugs.md:25` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:27` — A loop-core commit needs a second full suite before it can land (2026-10-04, medium, friction: tool_should_decide).
-- `open-bugs.md:29` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:31` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:39` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:46` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:9` — Two audit tests time out under full-suite load and pass alone (2026-10-08, medium).
+- `open-bugs.md:11` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
+- `open-bugs.md:13` — The shipped TOML parser carries two high advisories (2026-10-06, high).
+- `open-bugs.md:15` — A step contract lists every pending result path (2026-10-05, medium).
+- `open-bugs.md:17` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
+- `open-bugs.md:19` — Charter packets are sized by accident, not by the charter question (2026-10-05, medium).
+- `open-bugs.md:21` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
+- `open-bugs.md:23` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
+- `open-bugs.md:25` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
+- `open-bugs.md:27` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:29` — A loop-core commit needs a second full suite before it can land (2026-10-04, medium, friction: tool_should_decide).
+- `open-bugs.md:31` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:33` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:41` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:48` — Selective-deepening convergence — live validation env-bound.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 

@@ -191,6 +191,34 @@
         "src/remediate/steps/nextStep.ts": "fca40e3e8b27e83b64ef9a992a1a11cc2558dfbe"
       }
     },
+    "392554939aa89e3b": {
+      "reviewed_by": "a2b9be05ae07da55c-opus-round3",
+      "attester_class": "agent",
+      "checked": "Three independent report-only Opus review rounds of the frozen-snapshot change (runSnapshot.ts, the source-root split through the fold, step, handoff, fan-out, review and intake paths, auto-fix write-back, snapshot removal at promotion and cleanup). Round 1: 12 findings (synthetic HEAD class) reworked; round 2: 12 fixed; round 3: 6 fixed, each verified against source and pinned by a red-green regression test. Full suite green on this staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "ea65394828b35b46b12cfbdf36cfb348a879cb3b",
+        "ran_at": "2026-10-09T02:05:53.617Z"
+      },
+      "attested_at": "2026-10-09T02:06:07.660Z",
+      "vouches": {
+        ".claude/hooks/loop-core-patterns.mjs": "6ce8110b014840df0fcb78be366695540e2a4571",
+        "src/audit/cli/conceptualDispatch.ts": "aa28f661bfb189be5ff208294cc1990a3cf22e13",
+        "src/audit/cli/dispatch/hostHandoff.ts": "5bb93ac8aa66e47393e81d6c3e508ed3f7dbcc6e",
+        "src/audit/cli/fanoutLanes.ts": "c1b05362d8e4140ee65749fc052052c3ca11da2f",
+        "src/audit/cli/nextStepCommand.ts": "e20618dd60e63d46452bcc2c3ce478641b327946",
+        "src/audit/cli/nextStepHelpers.ts": "eba3563a0c46b3bae61372ebf0b3fb3f3c6de8c9",
+        "src/audit/cli/semanticReviewStep.ts": "b72d399ee66b2c53dc1e16879d450620d1801bde",
+        "src/audit/io/runSnapshot.ts": "eaf0ba372e2ecc7f9ad6a3459611bbd0c985a374",
+        "src/audit/orchestrator/advanceTypes.ts": "2f455d82178e8c3fc663c384bc00d2a4ee243afe",
+        "src/audit/orchestrator/autoFixExecutor.ts": "8a1a6bc6ba269a18772edf1058d1fddcf2b8c6e7",
+        "src/audit/orchestrator/executorRunners.ts": "f26c7d132139d95a3452540350a5f71068c572ed",
+        "src/audit/orchestrator/intakeExecutors.ts": "1fad5f05f01f2ed434d20a1be96b85357d841d3c",
+        "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
+      }
+    },
     "39569921506004b0": {
       "reviewed_by": "w3_design_review",
       "attester_class": "agent",
@@ -245,22 +273,6 @@
         "scripts/check-loop-core-attestations.mjs": "5e0cf43a19e6397bf394c5cb5e3e6f0b0476cabe",
         "scripts/shared/loopCoreAttestationLedger.mjs": "8857e52161ae230e69f72d3871b3c2927e6599f6",
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
-      }
-    },
-    "6b1bdd626d6eaa90": {
-      "reviewed_by": "source_refutation",
-      "attester_class": "agent",
-      "checked": "Independent combined review of staged9360673a on C3: default renderer modes unchanged, pending K-of-N evidence retained, sequential independent perspectives and dependent judge use bound unavailable pauses; production fallback regression reproduced red then focused37 and genuine full7080passed/0failed/12skipped/0unfinished.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "9360673a680b524ba7ccb6c53d8a6c54f758ded5",
-        "ran_at": "2026-10-05T23:12:56.723Z"
-      },
-      "attested_at": "2026-10-05T23:13:24.971Z",
-      "vouches": {
-        "src/audit/cli/conceptualDispatch.ts": "175d5952e8d759ca9647f1887085f9120bce0b35"
       }
     },
     "7ecf68a7852f3ff3": {
@@ -396,7 +408,7 @@
   },
   "entries": {
     ".claude/hooks/loop-core-patterns.mjs": {
-      "review": "4318b8e7432c3e06"
+      "review": "392554939aa89e3b"
     },
     "scripts/check-loop-core-attestations.mjs": {
       "review": "4318b8e7432c3e06"
@@ -414,19 +426,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "6b1bdd626d6eaa90"
+      "review": "392554939aa89e3b"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "94fc63e054149869"
+      "review": "392554939aa89e3b"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "189c849cd573575f"
+      "review": "392554939aa89e3b"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
@@ -438,16 +450,19 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "d7acd796ff113751"
+      "review": "392554939aa89e3b"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "94fc63e054149869"
+      "review": "392554939aa89e3b"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/semanticReviewStep.ts": {
-      "review": "3e0aee473b384f14"
+      "review": "392554939aa89e3b"
+    },
+    "src/audit/io/runSnapshot.ts": {
+      "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/accessMemory.ts": {
       "baseline": "7b79934e86baf378"
@@ -459,7 +474,7 @@
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
       "review": "9bc59db653647a3a"
@@ -471,7 +486,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/charterClarificationExecutor.ts": {
       "baseline": "7b79934e86baf378"
@@ -525,7 +540,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "3e0aee473b384f14"
+      "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "9bc59db653647a3a"
@@ -558,7 +573,7 @@
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/intentCheckpointExecutor.ts": {
       "baseline": "7b79934e86baf378"
@@ -795,7 +810,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/loopCorePaths.ts": {
-      "review": "4318b8e7432c3e06"
+      "review": "392554939aa89e3b"
     },
     "src/shared/observability/rootLogObservations.ts": {
       "baseline": "7b79934e86baf378"

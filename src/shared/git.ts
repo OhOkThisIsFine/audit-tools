@@ -1,5 +1,7 @@
 // sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts
-import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "./tooling/exec.js";
 import { compareCodeUnits } from "./compareCodeUnits.js";
@@ -78,6 +80,63 @@ export async function headCommit(root: string): Promise<string | null> {
   if (result.status !== 0) return null;
   const sha = result.stdout.trim();
   return sha.length > 0 ? sha : null;
+}
+
+/**
+ * The tree id of `root`'s working tree as a commit would record it — tracked
+ * content with its uncommitted changes, plus untracked files that are not
+ * ignored — minus the `.audit-tools/` scratch. A repository with no commit yet
+ * starts from the empty tree.
+ *
+ * Built in a TEMPORARY index (`GIT_INDEX_FILE` on these spawns only, under the
+ * OS temp dir so it is never a dirty path of the tree it describes): the
+ * caller's real index and refs are never touched. `.audit-tools/` is
+ * subtracted explicitly for a repository whose `.gitignore` does not know it,
+ * because the run rewrites that scratch on every call.
+ *
+ * `excludePaths` (repository-relative) are subtracted the same way: a caller's
+ * own placements that are not content, such as an audit snapshot's links.
+ *
+ * `null` is "cannot tell" — not a repository, or any plumbing step failing. A
+ * partial id is never returned. Never throws.
+ */
+export async function workingTreeTree(
+  root: string,
+  options: { excludePaths?: readonly string[] } = {},
+): Promise<string | null> {
+  const indexFile = join(
+    process.env.TMPDIR ?? tmpdir(),
+    `audit-tools-tree-${String(process.pid)}-${randomUUID()}.idx`,
+  );
+  const git = async (args: string[]): Promise<string | null> => {
+    const result = await runTrackedAsync(["git", ...args], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: TRACKED_CHILD_DEADLINE_MS,
+      env: { ...process.env, GIT_INDEX_FILE: indexFile },
+    });
+    return result.status === 0 ? result.stdout.trim() : null;
+  };
+  try {
+    const head = await headCommit(root);
+    if ((await git(head === null ? ["read-tree", "--empty"] : ["read-tree", head])) === null) return null;
+    if ((await git(["add", "-A"])) === null) return null;
+    await git(["rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", `${AUDIT_TOOLS_DIRNAME}/`]);
+    for (const path of options.excludePaths ?? []) {
+      await git(["rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", "--", path]);
+    }
+    const tree = await git(["write-tree"]);
+    // A tree id is 40 hex chars (SHA-1) or 64 (SHA-256); anything else is not an identity.
+    return tree !== null && /^[0-9a-f]{40}$|^[0-9a-f]{64}$/u.test(tree) ? tree : null;
+  } catch {
+    return null;
+  } finally {
+    try {
+      rmSync(indexFile, { force: true });
+    } catch {
+      /* temp index already gone — nothing to reclaim */
+    }
+  }
 }
 
 /**
@@ -412,6 +471,15 @@ async function gitPathsOrNull(root: string, args: string[]): Promise<string[] | 
 export async function readAuditReadState(
   root: string,
   prior?: { commit: string; dirty_paths: readonly string[] } | null,
+  options: {
+    /**
+     * Paths the tool itself placed in `root` that are not audit input: a run's
+     * frozen snapshot links the live tree's ignored directories into place, and
+     * a dir-only ignore pattern (`node_modules/`) does not match a symlink, so on
+     * POSIX git would list each link as untracked.
+     */
+    excludePaths?: readonly string[];
+  } = {},
 ): Promise<{ commit: string; dirty_paths: string[] } | null> {
   const commit = await headCommit(root);
   if (commit === null) return null;
@@ -424,14 +492,15 @@ export async function readAuditReadState(
     timeout: TRACKED_CHILD_DEADLINE_MS,
   });
   if (prefix.status !== 0 || prefix.stdout.trim().length > 0) return null;
-  const dirty = await dirtyPathsAgainst(root, commit);
+  const excluded = options.excludePaths ?? [];
+  const dirty = await dirtyPathsAgainst(root, commit, excluded);
   if (dirty === null) return null;
   if (prior && prior.commit !== commit && (await gitRefExists(root, prior.commit))) {
     const sameAsPrior = (paths: readonly string[] | null): boolean =>
       paths !== null &&
       paths.length === prior.dirty_paths.length &&
       paths.every((path, index) => path === prior.dirty_paths[index]);
-    if (sameAsPrior(dirty) && sameAsPrior(await dirtyPathsAgainst(root, prior.commit))) {
+    if (sameAsPrior(dirty) && sameAsPrior(await dirtyPathsAgainst(root, prior.commit, excluded))) {
       return { commit: prior.commit, dirty_paths: dirty };
     }
   }
@@ -443,7 +512,11 @@ export async function readAuditReadState(
  * against it, plus untracked non-ignored files), in code-unit order; `null` when
  * either listing failed.
  */
-async function dirtyPathsAgainst(root: string, ref: string): Promise<string[] | null> {
+async function dirtyPathsAgainst(
+  root: string,
+  ref: string,
+  excluded: readonly string[],
+): Promise<string[] | null> {
   // `--no-renames`: with rename detection (git's default) a moved file is
   // reported under its NEW path only, and the old path — whose blob at `ref` is
   // just as much "not what the audit read" — would be missing from the list.
@@ -466,8 +539,10 @@ async function dirtyPathsAgainst(root: string, ref: string): Promise<string[] | 
   // does not ignore it every step rewrites files there — which would both bloat
   // the list and defeat the re-synthesis stability rule above.
   const ownState = `${AUDIT_TOOLS_DIRNAME}/`;
+  const isExcluded = (path: string): boolean =>
+    excluded.some((entry) => path === entry || path.startsWith(`${entry}/`));
   return [...new Set([...changed, ...untracked])]
-    .filter((path) => !path.startsWith(ownState))
+    .filter((path) => !path.startsWith(ownState) && !isExcluded(path))
     .sort(compareCodeUnits);
 }
 

@@ -13,7 +13,7 @@ test("pointer lanes count their readable packet bytes and preserve semantic judg
   const packet = join(dir, "full-evidence.json");
   await writeFile(packet, JSON.stringify({ evidence: "x".repeat(100_000) }));
   const lanes = [{ id: "context-demand", label: "Review", promptFilename: "review.md", promptText: `Read ${packet}`, fileCount: 1, riskScore: 0.8, contextPaths: [packet], semanticComplexity: "deep" as const }];
-  const result = await materializeFanoutLanes({ artifactsDir: dir, runId: "run", lanes });
+  const result = await materializeFanoutLanes({ artifactsDir: dir, sourceRoot: dir, runId: "run", lanes });
   expect(result.lanes[0]!.demand).toEqual({ size: "large", complexity: "deep", risk: "high" });
   expect(result.readPaths).toContain(packet);
 });
@@ -22,6 +22,6 @@ test("short semantic lanes retain deep judgment even with small concrete scope",
   const dir = await mkdtemp(join(tmpdir(), "fanout-semantic-"));
   roots.push(dir);
   const lanes = [{ id: "semantic-demand", label: "Review", promptFilename: "review.md", promptText: "Review the contract.", fileCount: 1, riskScore: 0.8, semanticComplexity: "deep" as const }];
-  const result = await materializeFanoutLanes({ artifactsDir: dir, runId: "run", lanes });
+  const result = await materializeFanoutLanes({ artifactsDir: dir, sourceRoot: dir, runId: "run", lanes });
   expect(result.lanes[0]!.demand).toEqual({ size: "small", complexity: "deep", risk: "high" });
 });

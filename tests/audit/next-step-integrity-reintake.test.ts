@@ -9,6 +9,7 @@ import { hashContent } from "audit-tools/shared";
 import { MAX_DRAIN_STEPS } from "../../src/audit/orchestrator/advance.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { countLines } from "../../src/audit/cli/args.js";
+import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 
 const observation = vi.hoisted(() => ({ intake: 0, holds: 0, failAfterIntake: false, engineBudget: 0 }));
 vi.mock("../../src/audit/orchestrator/intakeExecutors.js", async (original) => {
@@ -34,6 +35,17 @@ vi.mock("audit-tools/shared", async (original) => {
   }) as typeof actual.advance };
 });
 
+/**
+ * The run's frozen snapshot root. A live-tree edit no longer reaches a run
+ * (tests/audit/frozen-snapshot.test.ts); what the integrity re-check still
+ * guards is an edit to the tree the run READS — a host lane or the tool's own
+ * auto-fix writing into the snapshot — so these cases edit the snapshot.
+ */
+async function runSourceRoot(root: string): Promise<string> {
+  const record = JSON.parse(await readFile(runSnapshotPath(join(root, ".audit-tools", "audit")), "utf8")) as { source_root: string };
+  return record.source_root;
+}
+
 function resume(root: string) {
   return runDeterministicForNextStep({ root, artifactsDir: join(root, ".audit-tools", "audit"),
     selfCliPath: "audit-code", timeoutMs: 30_000, narrativeEnabled: false, graphLlmEdgeReasoning: false,
@@ -57,7 +69,7 @@ test("same-line-count pending source edit refreshes returned and persisted autho
     await writeCoreArtifacts(artifactsDir, before);
     observation.intake = 0;
     observation.holds = 0;
-    const source = join(root, "src", "api", "auth.ts");
+    const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
     await writeFile(source, (await readFile(source, "utf8")).replace("length > 0", "length > 1"));
     const result = await runDeterministicForNextStep({ root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000,
       narrativeEnabled: false, graphLlmEdgeReasoning: false,
@@ -84,7 +96,7 @@ test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commit
     const before = await loadArtifactBundle(artifactsDir);
     expect(buildPendingAuditTasks(before).some((task) => task.file_paths.includes("src/api/auth.ts"))).toBe(true);
     observation.intake = 0;
-    const source = join(root, "src", "api", "auth.ts");
+    const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
     if (scenario === "deleted file") await unlink(source);
     else await writeFile(source, (await readFile(source, "utf8")) + "export const extra = 1;\n");
     observation.failAfterIntake = scenario === "post-intake failure";
@@ -107,7 +119,7 @@ test.each([false, true])("bound old result acceptance with changed source = %s",
     const item = workload.work_items.find((entry: { scope: { files: string[] } }) => entry.scope.files.includes("src/api/auth.ts"));
     expect(item).toBeTruthy();
     const fileCoverage = await Promise.all(item.scope.files.map(async (path: string) => {
-      const lines = await countLines(join(root, path));
+      const lines = await countLines(join(await runSourceRoot(root), path));
       return { path, reviewed_lines: lines, total_lines: lines };
     }));
     await writeFile(join(root, item.result_path), JSON.stringify({ contract_version: "audit-host-result/v1alpha1",
@@ -115,7 +127,7 @@ test.each([false, true])("bound old result acceptance with changed source = %s",
       work_item_id: item.id, prompt_sha256: item.prompt.sha256, file_coverage: fileCoverage, findings: [] }));
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
-    const source = join(root, "src", "api", "auth.ts");
+    const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
     if (changed) await writeFile(source, (await readFile(source, "utf8")).replace("length > 0", "length > 1"));
     await resume(root);
     const after = await loadArtifactBundle(artifactsDir);
@@ -143,8 +155,8 @@ test.each([false, true])("bound old result acceptance with changed source = %s",
 test("failed integrity intake commits its named failure without accepting old work", async () => {
   await withTempRepo(async (root) => {
     expect((await advancePastDesignReview(root)).step_kind).toBe("dispatch_review");
-    await unlink(join(root, "src", "api", "auth.ts"));
-    await unlink(join(root, "package.json"));
+    await unlink(join(await runSourceRoot(root), "src", "api", "auth.ts"));
+    await unlink(join(await runSourceRoot(root), "package.json"));
     await expect(resume(root)).rejects.toThrow("No auditable files found");
     const after = await loadArtifactBundle(join(root, ".audit-tools", "audit"));
     expect(after.audit_state?.last_executor).toBe("intake_executor");

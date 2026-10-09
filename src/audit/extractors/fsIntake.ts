@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/frozen-snapshot.test.ts, tests/audit/run-snapshot.test.ts
 import { readdir, readFile, stat } from "node:fs/promises";
 import { hashContent, toPosixPath } from "audit-tools/shared";
 import { join, relative, resolve } from "node:path";
@@ -6,6 +7,12 @@ import { buildRepoManifest } from "./fileInventory.js";
 
 export interface IntakeOptions {
   root: string;
+  /**
+   * The manifest's name. A run reads a frozen snapshot whose directory name is
+   * not the repository's, so the caller names the manifest after the LIVE root;
+   * defaults to the basename of `root`.
+   */
+  name?: string;
   ignore?: string[];
   hash_files?: boolean;
   max_file_size_bytes?: number;
@@ -25,6 +32,16 @@ const DEFAULT_IGNORES = [
   ".claude",
   "coverage",
 ];
+
+/**
+ * True when intake skips `relativePath` — its default set plus `extra` (the
+ * repository's `.auditorignore` rules). The one rule a frozen copy of a non-git
+ * root (`runSnapshot.ts`) uses to decide what it links instead of copying, so
+ * the copy and the walk can never disagree about what intake reads.
+ */
+export function isIntakeIgnored(relativePath: string, extra: readonly string[] = []): boolean {
+  return shouldIgnore(relativePath, [...DEFAULT_IGNORES, ...extra]);
+}
 
 function shouldIgnore(relativePath: string, ignores: string[]): boolean {
   const normalized = toPosixPath(relativePath);
@@ -126,5 +143,5 @@ export async function buildRepoManifestFromFs(
     maxFileSizeBytes: options.max_file_size_bytes ?? 1024 * 1024,
   };
   await walk(ctx, root, files);
-  return buildRepoManifest(root.split(/[\\/]/).pop() ?? "repo", files);
+  return buildRepoManifest(options.name ?? root.split(/[\\/]/).pop() ?? "repo", files);
 }

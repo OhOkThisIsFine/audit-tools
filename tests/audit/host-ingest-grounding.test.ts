@@ -88,12 +88,14 @@ interface IngestSummary {
 interface HostBoundary {
   readonly prepareAuditHostHandoff: (input: {
     readonly root: string;
+    readonly sourceRoot: string;
     readonly artifactsDir: string;
     readonly runId: string;
     readonly tasks: readonly HostTask[];
   }) => Promise<PreparedHandoff>;
   readonly ingestAuditHostResults: (input: {
     readonly root: string;
+    readonly sourceRoot: string;
     readonly artifactsDir: string;
     readonly runId: string;
     /** The same manifest prepareAuditHostHandoff published. */
@@ -160,6 +162,7 @@ async function publishOneWorkItem(): Promise<{
 
   const prepared = await boundary.prepareAuditHostHandoff({
     root,
+    sourceRoot: root,
     artifactsDir,
     runId,
     tasks: [task("audit-task-a", "correctness", "src/a.ts")],
@@ -194,6 +197,7 @@ async function submitFinding(
   return await published.boundary.ingestAuditHostResults({
     pendingTaskIds: new Set(),
     root: published.root,
+    sourceRoot: published.root,
     artifactsDir: published.artifactsDir,
     runId: published.runId,
     auditTasks: [task("audit-task-a", "correctness", "src/a.ts")],

@@ -18,8 +18,8 @@ beforeEach(async () => {
   git('add', '.'); git('commit', '-qm', 'fixture');
 });
 afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
-const prepare = () => prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: [task] });
-const ingest = () => ingestAuditHostResults({ pendingTaskIds: new Set(), root, artifactsDir, runId, auditTasks: [] });
+const prepare = () => prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId, tasks: [task] });
+const ingest = () => ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: [] });
 
 it('observes only new ignored root logs once across reprepare, without attributing or deleting them', async () => {
   await writeFile(join(root, 'old.log'), 'before');

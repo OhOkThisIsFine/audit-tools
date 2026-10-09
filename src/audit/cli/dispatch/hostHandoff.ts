@@ -6,6 +6,7 @@ import { recordHostRootLogBoundary } from "../../../shared/observability/rootLog
 // task-bindings version bump whose refusal names the remedy)
 import type { ArtifactBundle } from "../../io/artifacts.js";
 import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
+import { sourceTreeInstruction } from "../../io/runSnapshot.js";
 import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -453,7 +454,15 @@ interface AuditHostTaskBindings {
 }
 
 interface ResolvedBoundaryPaths {
+  /** The LIVE repository root: the artifacts dir and every result path are contained in it. */
   readonly root: string;
+  /**
+   * The run's frozen snapshot root: the directory a host lane reads its listed
+   * files from (stated in every work-item prompt) and the tree ingest grounds
+   * cited text against. Present on every path that renders a prompt or grounds
+   * a finding — read through {@link boundarySourceRoot}.
+   */
+  readonly sourceRoot?: string;
   readonly runId: string;
   readonly artifactsDir: string;
   readonly runDir: string;
@@ -492,7 +501,7 @@ interface ResolvedBoundaryPaths {
  * accepted-results pair with its one serializing lock.
  */
 function resolveBoundaryPaths(
-  params: Parameters<typeof resolveHostHandoffPaths>[0],
+  params: Parameters<typeof resolveHostHandoffPaths>[0] & { readonly sourceRoot?: string },
 ): ResolvedBoundaryPaths {
   const core = resolveHostHandoffPaths({
     ...params,
@@ -501,6 +510,7 @@ function resolveBoundaryPaths(
   });
   return {
     root: core.root,
+    ...(params.sourceRoot === undefined ? {} : { sourceRoot: params.sourceRoot }),
     runId: params.runId,
     artifactsDir: core.artifactsDir,
     runDir: core.runDir,
@@ -583,6 +593,14 @@ function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string
   // the core shape passes through whole — no re-flattening step that could drop
   // a field the shared rule later starts reading.
   return hostHandoffResultPath(paths, workItemId);
+}
+
+/** The boundary's source root; a prompt or a grounding without one would read the live tree. */
+function boundarySourceRoot(paths: ResolvedBoundaryPaths): string {
+  if (paths.sourceRoot === undefined) {
+    throw new Error("audit host handoff: no source root for a prompt or grounding read");
+  }
+  return paths.sourceRoot;
 }
 
 function normalizeTask(
@@ -795,6 +813,7 @@ function buildPrompt(
   task: AuditHostTask,
   resultPath: string,
   workloadPath: string,
+  sourceRoot: string,
 ): string {
   // A `"selective"` lane's file list is NOT inlined. Its assignment is the whole
   // surface its lens was applied to, which runs to hundreds of files on a real
@@ -826,6 +845,10 @@ function buildPrompt(
     // single long JSON blob, which buries the one fact a reader must not have to
     // search for: a result written anywhere else is never ingested.
     `Write one JSON object to this exact path: ${resultPath}`,
+    // WHERE TO READ, stated rather than left to the host's working directory:
+    // the run audits a frozen snapshot, and the live tree may have moved since
+    // the run started. Line counts and cited text are checked against this tree.
+    sourceTreeInstruction(sourceRoot),
     // LANE-AWARE, because "review every listed file" is true of the base lane
     // and false of a steward under selective coverage — whose whole task is to
     // decide what is worth opening.
@@ -1059,7 +1082,7 @@ function buildWorkItem(
   // The SAME path the caller writes the workload to, so a selective lane is told
   // where its surface actually is rather than where it is expected to be.
   const prompt = bindWorkerPrompt(
-    buildPrompt(task, resultPath, paths.workloadPath),
+    buildPrompt(task, resultPath, paths.workloadPath, boundarySourceRoot(paths)),
     (digest) => renderResultTemplate(paths.runId, task.task_id, resultPath, digest),
   );
   return {
@@ -1154,6 +1177,8 @@ async function loadAcceptedResults(
 
 export async function prepareAuditHostHandoff(params: {
   readonly root: string;
+  /** The run's frozen snapshot root (see {@link ResolvedBoundaryPaths.sourceRoot}). */
+  readonly sourceRoot: string;
   readonly artifactsDir: string;
   readonly runId: string;
   readonly tasks: readonly AuditHostTask[];
@@ -1605,7 +1630,7 @@ function validateHandoffBinding(
 
 /** Snapshot current publication under its existing lock; release before planning. */
 export async function readPublishedAuditTaskIds(params: {
-  root: string; artifactsDir: string; tasks: readonly AuditTask[];
+  root: string; sourceRoot: string; artifactsDir: string; tasks: readonly AuditTask[];
   manifest: ArtifactBundle["repo_manifest"]; lineIndex: Readonly<Record<string, number>>; logger?: RunLogger;
 }): Promise<ReadonlySet<string>> {
   let run;
@@ -1616,7 +1641,7 @@ export async function readPublishedAuditTaskIds(params: {
   // authorize a directory segment. An unusable pointer is not publication.
   try { assertSubmissionRunId(run.data.run_id); }
   catch { return new Set(); }
-  const paths = resolveBoundaryPaths({ root: params.root, artifactsDir: params.artifactsDir, runId: run.data.run_id });
+  const paths = resolveBoundaryPaths({ root: params.root, sourceRoot: params.sourceRoot, artifactsDir: params.artifactsDir, runId: run.data.run_id });
   return withAcceptedResultsLock(paths, params.logger, async () => {
     let items: Map<string, AuditHostWorkItem>;
     let bindings: Map<string, AuditHostTaskBinding>;
@@ -2062,6 +2087,8 @@ function evictInvalidatedEntries(
 
 export async function ingestAuditHostResults(params: {
   readonly root: string;
+  /** The run's frozen snapshot root: cited text is grounded against it. */
+  readonly sourceRoot: string;
   readonly artifactsDir: string;
   readonly runId: string;
   /**
@@ -2210,7 +2237,7 @@ export async function ingestAuditHostResults(params: {
       // refuse is refused while the item can still be resubmitted, never
       // accepted and then replayed into a failing gate on every later step.
       for (const finding of converted.auditResult.findings) {
-        await groundFinding(paths.root, finding, readSource);
+        await groundFinding(boundarySourceRoot(paths), finding, readSource);
       }
 
       // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope

@@ -2,7 +2,8 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import { access, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { repinRunSnapshot, writeBackSnapshotEdits } from "../io/runSnapshot.js";
 import type { AnalyzerConsentDecisions } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
@@ -168,6 +169,15 @@ export async function runAutoFixExecutor(
      * would have resolved.
      */
     autoFix?: { enabled?: boolean; dryRun?: boolean };
+    /**
+     * The LIVE repository root when `root` is the run's frozen snapshot. The
+     * formatters rewrite the SNAPSHOT (so the run audits the formatted bytes);
+     * each rewritten file is then written back here only when its live bytes are
+     * still the run-start bytes, and the snapshot is re-pinned.
+     */
+    repositoryRoot?: string;
+    /** The run's artifacts dir, holding the snapshot record to re-pin. */
+    artifactsDir?: string;
   } = {},
 ): Promise<ExecutorRunResult> {
   if (!bundle.file_disposition) {
@@ -286,6 +296,31 @@ export async function runAutoFixExecutor(
     ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
+  let writeBackDetail = "";
+  if (
+    executedTools.length > 0 &&
+    options.repositoryRoot !== undefined &&
+    resolve(options.repositoryRoot) !== resolve(root)
+  ) {
+    const startHashes = new Map(
+      (bundle.repo_manifest?.files ?? []).flatMap((file) =>
+        file.hash === undefined ? [] : [[file.path, file.hash] as const],
+      ),
+    );
+    const { written, skipped } = await writeBackSnapshotEdits({
+      sourceRoot: root,
+      repositoryRoot: options.repositoryRoot,
+      paths: [...byExtension.values()].flat(),
+      startHashes,
+    });
+    if (options.artifactsDir !== undefined) await repinRunSnapshot(options.artifactsDir);
+    writeBackDetail =
+      ` Wrote ${written.length} formatted file(s) back to the live tree.` +
+      (skipped.length > 0
+        ? ` Not written back, because the live file changed since the run started: ${skipped.join(", ")}.`
+        : "");
+  }
+
   const resultsArtifact = {
     executed_tools: executedTools,
     failed_tools: failedTools,
@@ -310,6 +345,6 @@ export async function runAutoFixExecutor(
       auto_fixes_applied: resultsArtifact,
     },
     artifacts_written: ["auto_fixes_applied.json"],
-    progress_summary: `Phase 1 Deterministic Auto-Fix complete. ${progressDetail}`,
+    progress_summary: `Phase 1 Deterministic Auto-Fix complete. ${progressDetail}${writeBackDetail}`,
   };
 }

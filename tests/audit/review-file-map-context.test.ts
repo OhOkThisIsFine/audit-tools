@@ -47,6 +47,7 @@ function reviewBundle(): ArtifactBundle {
 async function emitShallow(artifactsDir: string, bundle: ArtifactBundle = reviewBundle()) {
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
+    sourceRoot: artifactsDir,
     bundle,
     settings: { conceptual_depth: "shallow", max_units: 5 },
   });
@@ -131,6 +132,7 @@ test("a deep round builds the map once: every perspective and the judge bind the
   const artifactsDir = await tempArtifacts("map-file-deep-");
   const dispatch = await prepareConceptualDispatch({
     artifactsDir,
+    sourceRoot: artifactsDir,
     bundle: reviewBundle(),
     settings: { conceptual_depth: "deep", perspectives: 2, max_units: 5 },
   });
@@ -152,6 +154,7 @@ test("a lane that requires no review binding cannot take generated context", asy
   await expect(
     materializeFanoutLanes({
       artifactsDir,
+      sourceRoot: artifactsDir,
       runId: AUDIT_GATE_SUBMISSION_SCOPE,
       lanes: [{
         id: "synthesis_narrative",

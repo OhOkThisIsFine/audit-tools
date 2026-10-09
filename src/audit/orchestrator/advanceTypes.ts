@@ -18,7 +18,18 @@ import type { ScopeIndexMemo } from "./scopeIndexBaseline.js";
  * (ARC-1fa005bb: madge counts type-only edges).
  */
 export interface AdvanceAuditOptions {
+  /**
+   * The root every CONTENT read and repo-local spawn uses — inside a run, the
+   * run's frozen snapshot (`src/audit/io/runSnapshot.ts`), never the live tree.
+   */
   root?: string;
+  /**
+   * The LIVE repository root, for the few identity uses inside an executor: the
+   * manifest's name and `scope_summary.repo_root` (intake), and the auto-fix
+   * phase's write-back of formatted files. Absent for a bare call with no run
+   * snapshot, where `root` IS the repository root.
+   */
+  repositoryRoot?: string;
   /**
    * Directory the artifact bundle is persisted to (`.audit-tools/audit/`). The
    * intake executor writes `scope_summary.json` here directly (a side-artifact,

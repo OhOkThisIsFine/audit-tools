@@ -77,6 +77,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
 
     const first = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings: { ...SETTINGS },
     });
@@ -89,6 +90,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     // perspective is NOT re-asked.
     const reEmit = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings: { ...SETTINGS },
     });
@@ -100,6 +102,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     // A genuine re-review (diff section present) is a NEW round.
     const second = await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle,
       settings: { ...SETTINGS },
       reReviewSection: "## Diff-based re-review\n\nupstream changed",
@@ -120,6 +123,7 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     const dir = await artifactsDir();
     await prepareConceptualDispatch({
       artifactsDir: dir,
+      sourceRoot: dir,
       bundle: {} as ArtifactBundle,
       settings: { ...SETTINGS },
     });
