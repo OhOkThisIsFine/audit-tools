@@ -24,10 +24,9 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: resume the paused 2026-10-05 dogfood run (notes in
-[`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) on the installed
-0.55.6, which carries the dogfood efficiency fixes and the frozen-snapshot track.
-**Live owner decision:** authorize resuming that run; it is a separately authorized action.
+Next: nothing is pinned; choose from [`docs/backlog/`](backlog/). The owner discarded the paused
+2026-10-05 dogfood run (2026-10-09); a new dogfood run is the owner's call and would use 0.55.6.
+**Live owner decision:** none.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->
