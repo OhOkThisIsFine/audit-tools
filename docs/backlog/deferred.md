@@ -15,7 +15,9 @@
   lifetime (P6), a trusted npm origin (P7) and Gitleaks privacy (P8); its
   [P0/P6.0 source review](../reviews/audit-p0-source-review-2026-10-07.md) approves the first patch.
   Its current source pin is `5756602`; compare later changes before acting. P0 implementation is not
-  blocked and is filed in [`open-bugs.md`](open-bugs.md). **Property:** each package lands only with
+  blocked and is filed in [`open-bugs.md`](open-bugs.md). P5 step 7 removes the working tree after
+  promotion; the owner decided on 2026-10-08 to keep it (the next run's `rollOverFinishedRun`,
+  `src/audit/io/rollover.ts`, resets it), so redraw P5 around the rollover first. **Property:** each package lands only with
   its stated platform qualification, or is closed as not wanted.
 
 - **A7 multi-host validation — automated half green, manual GUI half never run.** Both no-drift gates

@@ -24,15 +24,12 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the frozen-snapshot track in [`forward-tracks.md`](backlog/forward-tracks.md), which now also
-owns charter-lane reuse. The owner decided (2026-10-07) to hold the release until that track ships:
-one release then carries it and the dogfood efficiency fixes, unreleased on `main` since v0.55.5.
-The paused 2026-10-05 dogfood run (worktree `C:/Code/audit-tools/.claude/worktrees/goofy-hamilton-efc64a`,
-notes in [`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) resumes only on
+Next: the release held (owner, 2026-10-07) until the frozen-snapshot track shipped; the track is
+now on `main`. That release also carries the dogfood efficiency fixes, unreleased since v0.55.5.
+The paused 2026-10-05 dogfood run (notes in
+[`dogfood-run-interim-2026-10-05.md`](reviews/dogfood-run-interim-2026-10-05.md)) resumes only on
 an installed build from that release.
-A loop-core attestation needs a full-suite green stamp on the exact staged tree: run `npm test`
-after the final stage. Release publication remains a separately authorized action.
-**Live owner decision:** none.
+**Live owner decision:** authorize that release; publication is a separately authorized action.
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 <!-- END GENERATED LIVE STATUS -->

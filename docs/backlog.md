@@ -63,21 +63,21 @@
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:17` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:15` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:32` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:47` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:56` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:59` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:30` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:45` — CI wall-clock: shard balance and the single-file floor.
+- `forward-tracks.md:54` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:57` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
 - `deferred.md:11` — The P1–P8 hardening contract waits for an isolated, platform-qualified execution environment (2026-10-07, medium).
-- `deferred.md:21` — A7 multi-host validation — automated half green, manual GUI half never run.
-- `deferred.md:31` — Manual real-OpenCode validation
-- `deferred.md:34` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
+- `deferred.md:23` — A7 multi-host validation — automated half green, manual GUI half never run.
+- `deferred.md:33` — Manual real-OpenCode validation
+- `deferred.md:36` — Prose-heavy staleness narrowing — the cascade-cost measurement and the remaining prose artifacts stay deferred (2026-07-24, low).
 
 ### [`durable-traps.md`](backlog/durable-traps.md)
 
