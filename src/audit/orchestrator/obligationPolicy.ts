@@ -231,7 +231,12 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
         return awaitSubmission(lane, "a charter-extraction lane submission is pending");
       }
     }
-    return hostBoundary("a deep ceiling owes the host charter-extraction turn");
+    // The halt is the plan draw's: its deterministic arm is the omit executor,
+    // which writes an EMPTY register. The next-step fold extracts here, and when
+    // every lane's packet is unchanged it carries them all with no host turn.
+    return hostBoundary(
+      "a deep ceiling's charter extraction runs in the next-step fold (a lane whose packet is unchanged is carried, not re-asked)",
+    );
   },
 
   charter_comparison_current: async (bundle, inputs) => {

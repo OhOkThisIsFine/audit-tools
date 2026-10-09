@@ -265,6 +265,13 @@ export const CharterLaneGraphSchema = z
     kind: CharterLaneKindSchema,
     nodes: z.array(LaneGoalNodeSchema),
     edges: z.array(LaneGoalEdgeSchema),
+    /**
+     * The digest of the evidence packet this lane was written from
+     * (`charterExtractionInputRevision`). A later extraction carries the lane
+     * unchanged while its fresh packet has the same digest. Absent on a lane
+     * written before digests were recorded: such a lane is never carried.
+     */
+    packet_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   })
   .strict();
 export type CharterLaneGraph = z.infer<typeof CharterLaneGraphSchema>;

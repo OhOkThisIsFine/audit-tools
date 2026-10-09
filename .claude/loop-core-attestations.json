@@ -191,6 +191,26 @@
         "src/remediate/steps/nextStep.ts": "fca40e3e8b27e83b64ef9a992a1a11cc2558dfbe"
       }
     },
+    "2fd8f3fd2058e9bd": {
+      "reviewed_by": "agy-refuter-ad01283c,opus-review-afb5c9845dc6f6e1e",
+      "attester_class": "agent",
+      "checked": "charter-lane reuse: digest stamp equals binding revision; carry rule; all-carried merge writes coverage manifests (new red-green test); carried lanes re-grounded against current universe; plan draw halt kept (omit executor would empty the register); blindness and fold commit boundary unchanged",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "f74afee4c7710e7034e7aa7095f200e2a9a8e05b",
+        "ran_at": "2026-10-09T07:45:45.769Z"
+      },
+      "attested_at": "2026-10-09T07:45:51.726Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "eeba034f312e318ec25d2e56b654ccd01764732c",
+        "src/audit/cli/nextStepHelpers.ts": "37aa10d719fad86ba9f69855f78053e3152eab0c",
+        "src/audit/orchestrator/charterExtractionExecutor.ts": "64f4ec0b6754be53258c5b7374ea92a78bd4117b",
+        "src/audit/orchestrator/charterPackets.ts": "2249bfd404ecbd2c9ccd3e5385948b4e458ad493",
+        "src/audit/orchestrator/obligationPolicy.ts": "ca05369cc0ad9deeef81e2eaf9914f3092fccbac"
+      }
+    },
     "339be913c2e2c76d": {
       "reviewed_by": "agy-refuter-818ea54a,opus-rounds-4-5-6-a00ad870db1f974a0",
       "attester_class": "agent",
@@ -471,10 +491,10 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "339be913c2e2c76d"
+      "review": "2fd8f3fd2058e9bd"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "339be913c2e2c76d"
+      "review": "2fd8f3fd2058e9bd"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -519,7 +539,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/charterExtractionExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "2fd8f3fd2058e9bd"
     },
     "src/audit/orchestrator/charterFidelityExecutor.ts": {
       "baseline": "7b79934e86baf378"
@@ -531,7 +551,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/charterPackets.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "2fd8f3fd2058e9bd"
     },
     "src/audit/orchestrator/coverageElementBaseline.ts": {
       "baseline": "7b79934e86baf378"
@@ -633,7 +653,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/obligationPolicy.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "2fd8f3fd2058e9bd"
     },
     "src/audit/orchestrator/partitionTaskGraph.ts": {
       "baseline": "7b79934e86baf378"

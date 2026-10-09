@@ -289,10 +289,25 @@ export async function runCharterExtractionExecutor(
     (bundle.repo_manifest?.files ?? []).map((file) => file.path),
   );
   const validation_issues: string[] = [];
+  // Every lane records the digest of the packet it was written from. A CARRIED
+  // lane (its packet did not change since then) is the previous register's lane,
+  // assembled again like an authored one — its packet is unchanged, but the repo
+  // universe its scopes are grounded against may not be (a deleted or renamed
+  // file is dropped and named, never silently kept).
+  const toAssemble = [
+    ...submission.lanes,
+    ...(submission.carried ?? []).map((lane) => ({
+      kind: lane.kind,
+      packet_sha256: lane.packet_sha256,
+      nodes: lane.nodes.map(({ premise_height: _derived, ...node }) => node),
+      edges: lane.edges,
+    })),
+  ].sort((a, b) => kindIndex(a.kind) - kindIndex(b.kind));
   const lanes: CharterLaneGraph[] = [];
-  for (const lane of [...submission.lanes].sort((a, b) => kindIndex(a.kind) - kindIndex(b.kind))) {
-    const assembled = assembleLaneGraph(lane, { universe });
-    lanes.push(assembled.graph);
+  for (const lane of toAssemble) {
+    const { packet_sha256, ...dag } = lane;
+    const assembled = assembleLaneGraph(dag, { universe });
+    lanes.push({ ...assembled.graph, packet_sha256 });
     validation_issues.push(...assembled.validation_issues);
   }
 

@@ -213,13 +213,16 @@ describe("charter extraction per-kind lanes — ceiling-aware kinds + blind scop
   });
 });
 
+/** The digest a merged lane records for its packet (tool-stamped at the merge). */
+const PACKET_DIGEST = "0".repeat(64);
+
 /** A one-lane merged submission: the stated lane with the given nodes and edges. */
 function merged(
   nodes: CharterSubmission["nodes"],
   edges: CharterSubmission["edges"] = [],
   kind: CharterLaneKind = "stated",
 ): CharterExtractionMerged {
-  return { lanes: [{ kind, nodes, edges }] };
+  return { lanes: [{ kind, nodes, edges, packet_sha256: PACKET_DIGEST }] };
 }
 
 function node(
@@ -264,10 +267,10 @@ describe("runCharterExtractionExecutor — ingest path (lane DAGs + candidates o
   test("assembles each lane DAG, grounds scopes, proposes candidates, and defers the comparison", async () => {
     const submission: CharterExtractionMerged = {
       lanes: [
-        { kind: "stated", nodes: [node("s1")], edges: [] },
-        { kind: "revealed", nodes: [node("r1", { purpose: "optimizes for fast dispatch over coverage" })], edges: [] },
+        { kind: "stated", nodes: [node("s1")], edges: [], packet_sha256: PACKET_DIGEST },
+        { kind: "revealed", nodes: [node("r1", { purpose: "optimizes for fast dispatch over coverage" })], edges: [], packet_sha256: PACKET_DIGEST },
         // An invented file is grounded out of the scope; the node stays, provenance-only.
-        { kind: "structural", nodes: [node("x1", { files: ["ghost.ts"] })], edges: [] },
+        { kind: "structural", nodes: [node("x1", { files: ["ghost.ts"] })], edges: [], packet_sha256: PACKET_DIGEST },
       ],
     };
     const run = await runCharterExtractionExecutor(
@@ -279,6 +282,8 @@ describe("runCharterExtractionExecutor — ingest path (lane DAGs + candidates o
     expect(reg.status).toBeUndefined();
     // Canonical kind order, never arrival order.
     expect(reg.lanes.map((l) => l.kind)).toEqual(["stated", "structural", "revealed"]);
+    // Each lane records the digest of the packet it was written from.
+    expect(reg.lanes.map((l) => l.packet_sha256)).toEqual([PACKET_DIGEST, PACKET_DIGEST, PACKET_DIGEST]);
     const structural = reg.lanes.find((l) => l.kind === "structural")!;
     expect(structural.nodes).toHaveLength(1);
     expect(structural.nodes[0]!.files).toBeUndefined();
@@ -291,6 +296,28 @@ describe("runCharterExtractionExecutor — ingest path (lane DAGs + candidates o
     expect(reg.differences).toHaveLength(0);
     expect(reg.findings).toHaveLength(0);
     expect(reg.comparison_pending).toBe(true);
+  });
+
+  test("a CARRIED lane keeps its digest and is grounded again against the current repo universe", async () => {
+    const carriedDigest = "1".repeat(64);
+    const run = await runCharterExtractionExecutor(
+      bundleWith({ intent_checkpoint: checkpoint("deep") }),
+      {
+        lanes: [{ kind: "stated", nodes: [node("s1")], edges: [], packet_sha256: PACKET_DIGEST }],
+        // Written when `gone.ts` existed; the file has since been deleted.
+        carried: [{
+          kind: "revealed",
+          packet_sha256: carriedDigest,
+          nodes: [{ ...node("r1", { files: ["src/a.ts", "gone.ts"] }), premise_height: 0 }],
+          edges: [],
+        }],
+      },
+    );
+    requireCharterRegister(run);
+    const reg = run.updated.charter_register;
+    expect(reg.lanes.map((l) => [l.kind, l.packet_sha256])).toEqual([["stated", PACKET_DIGEST], ["revealed", carriedDigest]]);
+    expect(reg.lanes[1]!.nodes[0]!.files).toEqual(["src/a.ts"]);
+    expect(reg.validation_issues.join()).toContain("gone.ts");
   });
 
   test("a cycle refuses every edge among its nodes, with a named issue; the nodes stay", async () => {

@@ -29,6 +29,7 @@ import {
   readTrailingSubmissionRefusals,
   persistAnalyzerSettings,
   writeJsonFile,
+  writeTextFile,
   type ObligationDef,
   type ObligationOutcome,
 } from "audit-tools/shared";
@@ -163,11 +164,18 @@ import {
   type AuditHostIngestIssue,
 } from "../validation/ingestIssueCodes.js";
 import {
+  buildCharterPacketManifest,
+  carriedCharterLane,
+  materializeCharterPacket,
+  type MaterializedCharterPacket,
+} from "../orchestrator/charterPackets.js";
+import {
   CHARTER_EXTRACTION_MERGED_FILENAME,
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
   charterExtractionCoverageFilename,
   charterExtractionLane,
+  charterExtractionPacketFilename,
   closeDispatchedLaneOutcomes,
   laneSubmissionPath,
   laneSubmissionId,
@@ -2039,6 +2047,30 @@ export async function handleCriticalFlowFallbackBranch(
  *   - a `deep`/`deepest` ceiling with no submission yet → `return` the host step
  *     that renders the charter-extraction prompt.
  */
+/**
+ * Materialize one charter kind's evidence packet and its coverage manifest into
+ * the lane assets and return the packet's digest. The emitter calls it for every
+ * kind (each lane reads its packet), and so does the merge (the executor checks
+ * every lane's citations against its kind's manifest — a CARRIED lane's
+ * included — and folds every kind's coverage into the register). Idempotent:
+ * the packet derives from the bundle and the frozen snapshot.
+ */
+export async function writeCharterLaneAssets(params: {
+  sourceRoot: string;
+  artifactsDir: string;
+  bundle: ArtifactBundle;
+  kind: CharterKind;
+}): Promise<{ packetPath: string; packet: MaterializedCharterPacket; digest: string }> {
+  const packetPath = join(laneAssetsDir(params.artifactsDir), charterExtractionPacketFilename(params.kind));
+  const packet = await materializeCharterPacket({ root: params.sourceRoot, bundle: params.bundle, kind: params.kind });
+  await writeTextFile(packetPath, packet.markdown);
+  await writeJsonFile(
+    join(laneAssetsDir(params.artifactsDir), charterExtractionCoverageFilename(params.kind)),
+    buildCharterPacketManifest(params.kind, packet.excerpts, packet.coverage),
+  );
+  return { packetPath, packet, digest: hashContent(packet.markdown) };
+}
+
 export async function handleCharterExtractionBranch(
   params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "scopeIndexMemo">,
   bundle: ArtifactBundle,
@@ -2065,8 +2097,25 @@ export async function handleCharterExtractionBranch(
     (bundle.repo_manifest?.files ?? []).map((file) => file.path),
   );
   const laneValues = new Map<CharterKind, { value: CharterLaneSubmission; path: string }>();
+  // A kind whose packet did not change since the previous register's lane was
+  // written is CARRIED (the emitter asked no lane for it); every other kind is
+  // authored from a lane submission. The digest is the one each authored lane
+  // records.
+  const carried = new Map<CharterKind, NonNullable<ReturnType<typeof carriedCharterLane>>>();
+  const digests = new Map<CharterKind, string>();
+  for (const kind of kinds) {
+    const { digest } = await writeCharterLaneAssets({
+      sourceRoot: requireSourceRoot(params),
+      artifactsDir: params.artifactsDir,
+      bundle,
+      kind,
+    });
+    digests.set(kind, digest);
+    const reused = carriedCharterLane(bundle, kind, digest);
+    if (reused !== undefined) carried.set(kind, reused);  }
   let quarantinedAny = false;
   for (const kind of kinds) {
+    if (carried.has(kind)) continue;
     const lane = charterExtractionLane(kind);
     // Staged per lane; an INCOMPLETE set is restored to its bound paths at
     // commit (un-applied), which is exactly the K-of-N resume the design
@@ -2096,7 +2145,7 @@ export async function handleCharterExtractionBranch(
       );
     }
   }
-  if (!quarantinedAny && laneValues.size === kinds.length) {
+  if (!quarantinedAny && laneValues.size + carried.size === kinds.length) {
     // Complete + valid: tool-side merge (stable by lane order = canonical kind
     // order), then one executor ingest; unlink lane files only after apply.
     // The post-apply unlink is the standard consumed-submission lifecycle
@@ -2110,10 +2159,11 @@ export async function handleCharterExtractionBranch(
     // lane check itself (owner review of prompt 8, 2026-09-17).
     const merged: CharterExtractionMerged = {
       // `inputs` was checked at the gate; the merged lane carries the DAG only.
-      lanes: kinds.map((kind) => {
+      lanes: kinds.filter((kind) => !carried.has(kind)).map((kind) => {
         const { inputs: _declared, ...dag } = laneValues.get(kind)!.value;
-        return { kind, ...dag };
+        return { kind, packet_sha256: digests.get(kind)!, ...dag };
       }),
+      carried: [...carried.values()],
     };
     // The merged submission is TOOL-written, so it lives with the other lane
     // assets rather than under `submissions/` (which holds only what a host

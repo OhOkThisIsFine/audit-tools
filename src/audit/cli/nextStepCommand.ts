@@ -20,7 +20,6 @@ import {
   laneAssetsDir,
   hostScratchDir,
   renderFanoutExecutionLines,
-  writeTextFile,
   writeJsonFile,
   toPromptPathToken,
   AUDIT_FINDINGS_FILENAME,
@@ -36,9 +35,7 @@ import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
-  charterExtractionCoverageFilename,
   charterExtractionLane,
-  charterExtractionPacketFilename,
   laneSubmissionPath,
   mergeLaneShortfalls,
   recordExpectedLanes,
@@ -46,10 +43,7 @@ import {
   systemicChallengeLane,
   type LaneSubmissionShortfall,
 } from "./laneSubmissions.js";
-import {
-  buildCharterPacketManifest,
-  materializeCharterPacket,
-} from "../orchestrator/charterPackets.js";
+import { carriedCharterLane } from "../orchestrator/charterPackets.js";
 import {
   buildEdgeReasoningPrompt,
   edgeReasoningContentHash,
@@ -120,6 +114,7 @@ import {
   runDeterministicForNextStep,
   renderDesignReviewRejectionNotice,
   renderEdgeReasoningRejectionNotice,
+  writeCharterLaneAssets,
 } from "./nextStepHelpers.js";
 import type { NextStepResult } from "./nextStepHelpers.js";
 export {
@@ -978,33 +973,29 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
     // lane's evidence current.
     // Promise.all retains `kinds` order. The materializer derives the packet
     // read paths from that ordered lane list, never from IO completion order.
-    const laneSpecs = await Promise.all(
+    // A kind whose packet is unchanged since the previous register's lane was
+    // written is CARRIED by the merge (`carriedCharterLane`): no lane is asked
+    // to re-author it. Its packet and coverage are still written — the merge
+    // checks the carried lane's citations against them.
+    const laneResults = (await Promise.all(
       kinds.map(async (kind) => {
         const lane = charterExtractionLane(kind);
         const submissionPath = laneSubmissionPath(artifactsDir, lane);
-        const packetPath = join(
-          laneAssetsDir(artifactsDir),
-          charterExtractionPacketFilename(kind),
-        );
-        const packet = await materializeCharterPacket({
-          root: sourceRoot,
-          bundle: result.bundle,
-          kind,
-        });
-        await writeTextFile(packetPath, packet.markdown);
         // The manifest the lane reads, persisted for the ingest pass: coverage
         // folds into the register and the delivered line runs are what a
         // citation is checked against.
-        await writeJsonFile(
-          join(
-            laneAssetsDir(artifactsDir),
-            charterExtractionCoverageFilename(kind),
-          ),
-          buildCharterPacketManifest(kind, packet.excerpts, packet.coverage),
-        );
+        const { packetPath, packet, digest } = await writeCharterLaneAssets({
+          sourceRoot,
+          artifactsDir,
+          bundle: result.bundle,
+          kind,
+        });
+        if (carriedCharterLane(result.bundle, kind, digest) !== undefined) {
+          return undefined;
+        }
         return {
           id: lane,
-          semanticInputRevision: hashContent(packet.markdown),
+          semanticInputRevision: digest,
           fileCount: new Set(packet.excerpts.map(excerpt => excerpt.source_path)).size,
           ...SEMANTIC_REVIEW_DEMAND,
           contextPaths: [packetPath],
@@ -1017,7 +1008,9 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
           }),
         };
       }),
-    );
+    ));
+    const carriedKinds = kinds.filter((_, index) => laneResults[index] === undefined);
+    const laneSpecs = laneResults.filter((spec) => spec !== undefined);
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       sourceRoot,
@@ -1051,6 +1044,12 @@ const emitCharterExtraction = emissionRow<"charter_extraction">(
           })),
         }),
         "",
+        ...(carriedKinds.length > 0
+          ? [
+              `Carried from the previous extraction (their evidence packet is unchanged — no lane is asked to re-author them): ${carriedKinds.join(", ")}.`,
+              "",
+            ]
+          : []),
         ...(completedLanes.length > 0
           ? [
               `Already complete (results on disk — do NOT redo these lanes): ${completedLanes

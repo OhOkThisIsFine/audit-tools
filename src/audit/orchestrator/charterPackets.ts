@@ -21,6 +21,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   CharterKind,
+  CharterLaneGraph,
   CharterPacketCoverage,
   CharterPacketCoverageClass,
   CharterPacketManifest,
@@ -574,4 +575,21 @@ const OMISSION_PROSE: Record<OmissionReason, string> = {
 /** Re-read the exact channel-pure packet before consuming an in-flight answer. */
 export async function charterExtractionInputRevision(params: MaterializeCharterPacketParams): Promise<string> {
   return hashContent((await materializeCharterPacket(params)).markdown);
+}
+
+/**
+ * THE carry rule of a charter re-extraction, shared by the emitter (which asks
+ * no lane for a carried kind) and the merge (which fills the kind from here):
+ * the previous register's lane of `kind`, when it recorded the digest of the
+ * packet it was written from and that digest equals `freshDigest`. A lane's
+ * whole input is its packet, so an unchanged packet is an unchanged lane.
+ */
+export function carriedCharterLane(
+  bundle: Pick<ArtifactBundle, "charter_register">,
+  kind: CharterKind,
+  freshDigest: string,
+): (CharterLaneGraph & { packet_sha256: string }) | undefined {
+  const lane = bundle.charter_register?.lanes.find((candidate) => candidate.kind === kind);
+  if (lane?.packet_sha256 === undefined || lane.packet_sha256 !== freshDigest) return undefined;
+  return { ...lane, packet_sha256: lane.packet_sha256 };
 }

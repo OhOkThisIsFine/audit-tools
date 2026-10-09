@@ -108,9 +108,26 @@ export const CharterMergedLaneSchema = z
   .strict();
 export type CharterMergedLane = z.infer<typeof CharterMergedLaneSchema>;
 
-/** The TOOL-merged extraction submission: every lane's DAG, handed to the executor by path. */
+/** A lane authored this extraction, with the digest of its packet — tool-stamped like `kind`. */
+const CharterAuthoredLaneSchema = CharterMergedLaneSchema.extend({
+  packet_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
+
+/** A lane carried from the previous register: it is carried only BECAUSE its digest matched. */
+const CharterCarriedLaneSchema = CharterLaneGraphSchema.extend({
+  packet_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+}).strict();
+
+/**
+ * The TOOL-merged extraction submission, handed to the executor by path: the
+ * lanes authored this time, and the lanes CARRIED unchanged from the previous
+ * register because their packet did not change (`carriedCharterLane`).
+ */
 export const CharterExtractionMergedSchema = z
-  .object({ lanes: z.array(CharterMergedLaneSchema) })
+  .object({
+    lanes: z.array(CharterAuthoredLaneSchema),
+    carried: z.array(CharterCarriedLaneSchema).optional(),
+  })
   .strict();
 export type CharterExtractionMerged = z.infer<typeof CharterExtractionMergedSchema>;
 
