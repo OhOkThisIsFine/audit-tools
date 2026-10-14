@@ -115,9 +115,9 @@ export interface RemediationState {
    */
   applied_edit_surface?: string[];
   /**
-   * Repo-relative paths that were ALREADY dirty (changed vs HEAD, or untracked)
+   * Repo-relative paths that were ALREADY dirty (staged, unstaged, or untracked)
    * when this run's plan was created — captured once via `stagedAndUntracked`
-   * at the extracted-plan join site (src/remediate/steps/nextStep.ts), path-sorted,
+   * at the extracted-plan join site (src/remediate/steps/nextStep.ts), in Git order,
    * and never re-captured on a replan (re-capturing after edits landed would
    * wrongly classify the run's own hand-applied work as pre-existing dirt).
    *
@@ -130,10 +130,10 @@ export interface RemediationState {
    * landed commit proves attribution of the commit, not ownership of any
    * still-dirty pre-run content at that path.
    *
-   * Absent on states created before this field existed: treated as empty — no
-   * exclusions, preserving prior behavior for in-flight runs.
+   * Legacy absence remains readable for diagnostics, but cannot authorize work.
    */
   run_start_dirty?: string[];
+  run_start_dirty_encoding?: "git-z/v1";
   /**
    * Independent digest binding for the currently emitted host workload.
    * Cleared once that workload has no pending items. Production result
@@ -164,6 +164,14 @@ function validateState(value: unknown): string[] {
     return errors;
   }
   const obj = value as Record<string, unknown>;
+  const baseline = obj["run_start_dirty"];
+  const baselineValid = Array.isArray(baseline) && Array.from(baseline).every(path => typeof path === "string");
+  if (baseline !== undefined && !baselineValid) errors.push("run_start_dirty must be an array of strings");
+  if (obj["run_start_dirty_encoding"] !== undefined &&
+      (obj["run_start_dirty_encoding"] !== "git-z/v1" || !baselineValid)) {
+    errors.push("run_start_dirty_encoding must be git-z/v1 with an array-of-strings baseline");
+  }
+
   // The contract version, checked BEFORE anything is read off the state: a file
   // that positively claims another release's semantics must not have its fields
   // interpreted under this one's. ABSENT is admitted (see

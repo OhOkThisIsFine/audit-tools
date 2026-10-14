@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/acquisition-executor.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -7,11 +8,15 @@ import type {
 } from "audit-tools/shared";
 import {
   runAcquisitionEngine,
+  prepareAcquisition,
+  defaultBinaryFetcher,
   resolveBinaryCandidates,
 } from "audit-tools/shared";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import type {
   BinaryFetcher,
+  BinaryResolveOptions,
+  SpawnDeadline,
   BinaryCommandRunner,
 } from "audit-tools/shared";
 import {
@@ -30,6 +35,8 @@ import {
  * network or spawning a real process.
  */
 export interface ExternalAcquisitionAdvanceOptions {
+  deadline?: SpawnDeadline;
+  resolveExecutable?: BinaryResolveOptions["resolveExecutable"];
   /** Hermeticity gate: acquisition runs ONLY when true. Default off (empty marker). */
   enabled?: boolean;
   /** Injected network fetch for binary acquisition; defaults to a global-fetch adapter. */
@@ -56,17 +63,6 @@ export interface ExternalAcquisitionAdvanceOptions {
   arch?: string;
 }
 
-/** Global-`fetch`-backed binary fetcher: returns the URL's bytes or null on failure. */
-const defaultBinaryFetcher: BinaryFetcher = async (url) => {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    return new Uint8Array(await response.arrayBuffer());
-  } catch {
-    return null;
-  }
-};
-
 /**
  * Slice D — production wiring of the external-analyzer acquisition engine.
  *
@@ -75,7 +71,8 @@ const defaultBinaryFetcher: BinaryFetcher = async (url) => {
  * tool's normalized findings into `external_analyzer_results`. Writes the
  * provenance/staleness marker `external_analyzer_acquisition.json` either way.
  *
- * Never throws: the engine degrades every candidate to a status record, and the
+ * Runtime failures degrade to status records; registry/status invariant violations
+ * throw rather than silently concealing missing or duplicate producers. The
  * disabled path is a pure marker write. `external_analyzer_results.json` is listed
  * in `artifacts_written` only when a tool actually contributed findings, so an
  * unchanged results array never churns its downstreams.
@@ -104,12 +101,16 @@ export async function runExternalAnalyzerAcquisitionExecutor(
   }
 
   const fetcher = options.fetch ?? defaultBinaryFetcher;
-  const candidates = EXTERNAL_ANALYZER_CANDIDATES;
+  const prepared = prepareAcquisition(EXTERNAL_ANALYZER_CANDIDATES, root, options);
+  const candidates = prepared.candidates;
+  const engineOptions = prepared.options;
 
   const { resolvedBinaries, unresolvedStatuses } = await resolveBinaryCandidates(
     candidates,
     root,
     {
+      ...engineOptions,
+      resolveExecutable: options.resolveExecutable,
       fetch: fetcher,
       run: options.run,
       consentToken: options.consentToken,
@@ -121,12 +122,22 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     },
   );
 
-  const { results, statuses } = await runAcquisitionEngine(candidates, root, {
-    run: options.run,
-    resolvedBinaries,
-    consentToken: options.consentToken,
-    analyzers: options.analyzers,
-    analyzerConsent: options.analyzerConsent,
+  const runnable = candidates.filter(candidate => candidate.runner !== "binary" ||
+    Object.hasOwn(resolvedBinaries, candidate.id));
+  const { results, statuses } = await runAcquisitionEngine(runnable, root, {
+    ...engineOptions, resolvedBinaries,
+  });
+  const candidateIds = new Set(candidates.map(candidate => candidate.id));
+  const statusById = new Map<string, (typeof statuses)[number]>();
+  for (const status of [...unresolvedStatuses, ...statuses]) {
+    if (!candidateIds.has(status.tool)) throw new Error(`unregistered analyzer status producer: ${status.tool}`);
+    if (statusById.has(status.tool)) throw new Error(`duplicate analyzer status producer: ${status.tool}`);
+    statusById.set(status.tool, status);
+  }
+  const orderedStatuses = candidates.map(candidate => {
+    const status = statusById.get(candidate.id);
+    if (!status) throw new Error(`missing analyzer status producer: ${candidate.id}`);
+    return status;
   });
 
   let mergedResults = bundle.external_analyzer_results;
@@ -140,7 +151,7 @@ export async function runExternalAnalyzerAcquisitionExecutor(
     // resolveBinaryCandidates records a status for every binary that didn't
     // resolve; the engine records one per candidate it ran. Union = exactly one
     // status per candidate (report-skipped-never-silently).
-    tool_statuses: [...unresolvedStatuses, ...statuses],
+    tool_statuses: orderedStatuses,
   };
 
   const artifactsWritten = ["external_analyzer_acquisition.json"];

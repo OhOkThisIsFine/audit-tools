@@ -623,6 +623,7 @@ function makeImplementingState(): RemediationState {
       evidence: [`${path}:1 evidence`],
     }) as Finding;
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "implementing",
     plan: canonicalPlanFixture({
       plan_id: "PLAN-DISPATCH", findings: [finding("F-001", "src/a.ts")],

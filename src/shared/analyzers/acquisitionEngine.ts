@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/audit/analyzer-run-consent.test.ts
+// sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-pipx-contract.test.ts, tests/audit/analyzer-run-consent.test.ts
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -133,9 +133,9 @@ export interface ExternalAnalyzerCandidate {
    */
   peers?: readonly string[];
   /**
-   * The tool's executable name, when it differs from its package name (npx runner
-   * only, and only meaningful alongside {@link peers}). Defaults to the package
-   * name parsed off {@link spec}.
+   * The tool's executable name. Required explicitly for pipx: a distribution
+   * spec does not identify its application. For npx with {@link peers}, defaults
+   * to the package name parsed off {@link spec}; unused by other runners.
    */
   bin?: string;
   /** Safety profile indicating whether this tool is safe to run by default. */
@@ -248,7 +248,7 @@ function runnerPrefix(candidate: ExternalAnalyzerCandidate): string[] {
     case "npx": return peers && peers.length > 0
       ? ["npx", "-y", "-p", spec, ...peers.flatMap((p) => ["-p", p]), candidate.bin ?? npmPackageName(spec)]
       : ["npx", "-y", spec];
-    case "pipx": return ["pipx", "run", "--spec", spec];
+    case "pipx": return ["pipx", "run", "--spec", spec, candidate.bin!];
     case "cargo": return ["cargo", spec];
     case "bundle": return ["bundle", "exec", spec];
     // For `binary` the resolved executable path is supplied via
@@ -294,6 +294,8 @@ export interface AnalyzerConsentTokenGrant {
 }
 
 export interface AcquisitionEngineOptions {
+  /** Invocation-scoped detection/admission decisions, shared with budget counting. */
+  admissions?: ReadonlyMap<string, string | null>;
   /**
    * The caller's own remaining budget, as an ABSOLUTE instant. Folded into every
    * spawn this engine issues (runner probe, tool run, gitleaks/jscpd report
@@ -491,11 +493,20 @@ export async function runSafetyGate(
   if (!candidate.spec || candidate.spec.trim().length === 0) {
     return { ok: false, reason: `tool '${candidate.id}' has no pinned version spec` };
   }
+  // Validate before even the capability probe: pipx requires an explicit app
+  // operand, which cannot safely be guessed from its distribution spec.
+  if (candidate.runner === "pipx" && !candidate.bin?.trim()) {
+    return { ok: false, reason: `pipx tool '${candidate.id}' has no executable bin` };
+  }
+  const error = deadlineFailure(deadline);
+  if (error) return { ok: false, reason: error };
   const probe = await run(
     runnerProbeArgv(candidate.runner),
     root,
     resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
   );
+  const afterProbe = deadlineFailure(deadline);
+  if (afterProbe) return { ok: false, reason: afterProbe };
   if (probe.error || probe.status !== 0) {
     return {
       ok: false,
@@ -516,6 +527,41 @@ function settingFor(
   id: string,
 ): AnalyzerSetting {
   return analyzers?.[id] ?? "auto";
+}
+
+/** Snapshot admission once so fallback budgeting and execution cannot drift. */
+export function prepareAcquisition(
+  candidates: ExternalAnalyzerCandidate[],
+  root: string,
+  options: AcquisitionEngineOptions = {},
+): { candidates: ExternalAnalyzerCandidate[]; options: AcquisitionEngineOptions } {
+  const registered = registerExternalAnalyzers(candidates);
+  const admissions = new Map<string, string | null>();
+  for (const candidate of registered) {
+    admissions.set(candidate.id, admissionReason(candidate, root, options));
+  }
+  const admittedCount = [...admissions.values()].filter(reason => reason === null).length;
+  return {
+    candidates: registered,
+    options: {
+      ...options,
+      admissions,
+      deadline: options.deadline ?? { at: Date.now() + admittedCount * ANALYZER_CHILD_DEADLINE_MS },
+    },
+  };
+}
+
+function admissionReason(candidate: ExternalAnalyzerCandidate, root: string, options: AcquisitionEngineOptions): string | null {
+  if (options.admissions?.has(candidate.id)) return options.admissions.get(candidate.id)!;
+  if (!candidate.detect(root)) return "ecosystem not detected";
+  return admitSpawn(candidate, settingFor(options.analyzers, candidate.id), options.consentToken,
+    options.analyzerConsent?.[candidate.id]) ?? null;
+}
+
+function deadlineFailure(deadline: SpawnDeadline | undefined): string | null {
+  if (deadline === undefined) return null;
+  if (!Number.isFinite(deadline.at)) return "invalid_budget: acquisition deadline must be finite";
+  return Date.now() >= deadline.at ? "deadline_exceeded: acquisition budget exhausted" : null;
 }
 
 export interface AcquisitionOutcome {
@@ -555,18 +601,7 @@ export async function runExternalAnalyzer(
     options.run ??
     ((argv, cwd, timeoutMs) => runTrackedAsync(argv, { cwd, timeout: timeoutMs }));
   const log = options.log ?? (() => {});
-  const setting = settingFor(options.analyzers, candidate.id);
-
-  if (!candidate.detect(root)) {
-    return {
-      results: emptyResults(candidate.id),
-      status: { tool: candidate.id, resolved: false, status: "skipped", error: "ecosystem not detected" },
-    };
-  }
-
-  // Single spawn-admission chokepoint — consent gating before anything spawns.
-  const recordedDecision = options.analyzerConsent?.[candidate.id];
-  const denied = admitSpawn(candidate, setting, options.consentToken, recordedDecision);
+  const denied = admissionReason(candidate, root, options);
   if (denied) {
     log("[f5] %s spawn not admitted: %s", candidate.id, denied);
     return {
@@ -574,6 +609,16 @@ export async function runExternalAnalyzer(
       status: { tool: candidate.id, resolved: false, status: "skipped", error: denied },
     };
   }
+  // A duration calculator does not reject expired budgets. Admission does.
+  const deadline = options.deadline ?? { at: Date.now() + ANALYZER_CHILD_DEADLINE_MS };
+  const expiredOutcome = (): AcquisitionOutcome | undefined => {
+    const error = deadlineFailure(deadline);
+    return error ? { results: emptyResults(candidate.id), status: {
+      tool: candidate.id, resolved: false, status: "not_resolved", error,
+    } } : undefined;
+  };
+  const beforeProbe = expiredOutcome();
+  if (beforeProbe) return beforeProbe;
 
   // Resolve the argv prefix. A `binary` candidate is gated by binary-acquisition
   // (PATH probe / checksum-verified download) AHEAD of the engine, so it skips the
@@ -596,7 +641,7 @@ export async function runExternalAnalyzer(
     }
     prefix = [resolved];
   } else {
-    const gate = await runSafetyGate(candidate, run, root, options.deadline);
+    const gate = await runSafetyGate(candidate, run, root, deadline);
     if (!gate.ok) {
       log("[f5] %s safety gate failed: %s", candidate.id, gate.reason);
       return {
@@ -607,14 +652,18 @@ export async function runExternalAnalyzer(
     prefix = runnerPrefix(candidate);
   }
 
+  const beforeScan = expiredOutcome();
+  if (beforeScan) return beforeScan;
   const argv = candidate.buildArgv(prefix, root);
+  const afterArgv = expiredOutcome();
+  if (afterArgv) return afterArgv;
   const command = argv.join(" ");
   let result: RunTrackedResult;
   try {
     result = await run(
       argv,
       root,
-      resolveSpawnDeadline(options.deadline, ANALYZER_CHILD_DEADLINE_MS),
+      resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
     );
   } catch (error) {
     return {
@@ -629,6 +678,9 @@ export async function runExternalAnalyzer(
       },
     };
   }
+
+  const afterScan = expiredOutcome();
+  if (afterScan) return afterScan;
 
   if (result.error) {
     return {
@@ -800,7 +852,10 @@ export function registerExternalAnalyzers(
   candidates: ExternalAnalyzerCandidate[],
 ): ExternalAnalyzerCandidate[] {
   const accepted: ExternalAnalyzerCandidate[] = [];
+  const ids = new Set<string>();
   for (const candidate of candidates) {
+    if (ids.has(candidate.id)) throw new Error(`duplicate analyzer candidate id: ${candidate.id}`);
+    ids.add(candidate.id);
     if (OWNED_TOOL_IDS.has(candidate.id)) continue;
     accepted.push(candidate);
   }
@@ -838,9 +893,9 @@ export interface ResolvedBinaries {
 
 /**
  * Resolve (acquiring if absent) the executable for every `runner: "binary"`
- * candidate, ahead of the synchronous engine. This is where the async network
+ * candidate, ahead of the analyzer engine. This is where the async network
  * I/O + checksum gate lives. Owned tools and non-binary candidates are skipped.
- * Never throws; an unresolved binary yields a `not_resolved`/`skipped` status so
+ * Duplicate ids throw as registry invariant violations; an unresolved binary yields a status so
  * the caller can record the coverage gap (never silently dropped).
  */
 export async function resolveBinaryCandidates(
@@ -848,30 +903,20 @@ export async function resolveBinaryCandidates(
   root: string,
   options: AcquisitionEngineOptions & BinaryResolveOptions = {},
 ): Promise<ResolvedBinaries> {
+  const prepared = prepareAcquisition(candidates, root, options);
+  options = { ...options, ...prepared.options };
   const resolvedBinaries: Record<string, string> = {};
   const unresolvedStatuses: ExternalAnalyzerToolStatus[] = [];
-  for (const candidate of candidates) {
-    if (candidate.runner !== "binary" || !candidate.binary) continue;
-    if (OWNED_TOOL_IDS.has(candidate.id)) continue;
-    if (!candidate.detect(root)) {
-      unresolvedStatuses.push({
-        tool: candidate.id,
-        resolved: false,
-        status: "skipped",
-        error: "ecosystem not detected",
-      });
+  for (const candidate of prepared.candidates) {
+    if (candidate.runner !== "binary") continue;
+    const denied = admissionReason(candidate, root, options);
+    if (denied) {
+      unresolvedStatuses.push({ tool: candidate.id, resolved: false, status: "skipped", error: denied });
       continue;
     }
-    const setting = settingFor(options.analyzers, candidate.id);
-    const recordedDecision = options.analyzerConsent?.[candidate.id];
-    const denied = admitSpawn(candidate, setting, options.consentToken, recordedDecision);
-    if (denied) {
-      unresolvedStatuses.push({
-        tool: candidate.id,
-        resolved: false,
-        status: "skipped",
-        error: denied,
-      });
+    const error = deadlineFailure(options.deadline) ?? (!candidate.binary ? "binary candidate has no BinarySpec" : null);
+    if (error || !candidate.binary) {
+      unresolvedStatuses.push({ tool: candidate.id, resolved: false, status: "not_resolved", error: error! });
       continue;
     }
     const resolution = await resolveBinary(candidate.binary, options);
@@ -909,7 +954,9 @@ export async function runAcquisitionEngine(
   root: string,
   options: AcquisitionEngineOptions = {},
 ): Promise<RunAllOutcome> {
-  const registered = registerExternalAnalyzers(candidates);
+  const prepared = prepareAcquisition(candidates, root, options);
+  const registered = prepared.candidates;
+  options = prepared.options;
   const results: ExternalAnalyzerResults[] = [];
   const statuses: ExternalAnalyzerToolStatus[] = [];
   for (const candidate of registered) {

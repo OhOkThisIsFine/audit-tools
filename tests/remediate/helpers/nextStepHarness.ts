@@ -56,6 +56,8 @@ export function makePlanningState(
 ): RemediationState {
   return {
     status: "planning",
+    run_start_dirty: [],
+    run_start_dirty_encoding: "git-z/v1",
     plan: canonicalPlanFixture({
       plan_id: "PLAN-1",
       findings: [

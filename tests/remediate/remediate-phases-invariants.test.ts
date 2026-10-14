@@ -44,7 +44,8 @@ function planForUnits(units: ExecutionUnit[]) {
   })) });
 }
 function runtimeForUnits(units: ExecutionUnit[]): RemediationState {
-  return { contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing", plan: planForUnits(units),
+  return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing", plan: planForUnits(units),
     items: Object.fromEntries(units.map(unit => [unit.id, { unit_id: unit.id, status: "pending" }])),
   };
 }

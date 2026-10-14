@@ -1,3 +1,4 @@
+import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 import { DecisionApplicationReceiptSchema } from "../../state/decisionConsumption.js";
 import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
 import { AcceptedConformanceReviewSchema, type AcceptedConformanceReview } from "../../../shared/types/reviewIndependence.js";
@@ -187,6 +188,7 @@ const CURRENT_STATE_KEYS = new Set([
   "plan",
   "plan_coverage",
   "run_start_dirty",
+  "run_start_dirty_encoding",
   "started_at",
   "status",
   "step_count",
@@ -1300,6 +1302,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
 }): Promise<RemediationRequiredTestVerdicts | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
+  admitRemediationDirtyBaseline(state);
   const paths = resolveBoundaryPaths(params);
   await assertApprovedRuntimePlan(paths.artifactsDir, state);
   const verdicts = new MintedRequiredTestVerdicts();
@@ -1372,6 +1375,7 @@ export async function prepareRemediationHostHandoff(params: {
 }): Promise<PreparedRemediationHostHandoff | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
+  admitRemediationDirtyBaseline(state);
   const paths = resolveBoundaryPaths(params);
   const approved = await assertApprovedRuntimePlan(paths.artifactsDir, state);
   if (!isCommit(params.baselineCommit)) {
@@ -1562,6 +1566,7 @@ export async function ingestRemediationHostResults(params: {
 }): Promise<RemediationHostIngestSummary | UnsupportedRetiredRemediationState> {
   const state = parseCurrentState(params.state);
   if (!state) return "unsupported_retired_state";
+  admitRemediationDirtyBaseline(state);
   const paths = resolveBoundaryPaths(params);
   await assertApprovedRuntimePlan(paths.artifactsDir, state);
 
@@ -2075,7 +2080,7 @@ async function executeHostVerificationReruns(
           // has already corroborated and accepted (`landedFiles` starts from
           // `applied_edit_surface` and grows as this same ingest accepts).
           excusedPaths: new Set([
-            ...(state.run_start_dirty ?? []).map(normalizeRepoPath),
+            ...admitRemediationDirtyBaseline(state).map(normalizeRepoPath),
             ...[...acc.landedFiles].map(normalizeRepoPath),
           ]),
         });

@@ -57,6 +57,7 @@ test("mechanical path normalization precedes independent review and produces dis
   await approveExecutablePlanFixture(f);
   const source = (await readPlanSource(f.artifactsDir))!;
   const state: RemediationState = {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing",
     plan: canonicalPlanFixture({ ...canonical.plan, review_revision_sha256: canonical.revision_sha256,
       findings: source.findings, request: source.request, audit_read: source.audit_read ?? undefined }),

@@ -10,7 +10,8 @@ test("workload carries reviewed affected interfaces, requirements and counterexa
  const artifactsDir=join(root,".audit-tools","remediation");
  const example={id:"CE-retry",claim:"Retry is idempotent",reproduction_steps:["Retry the same request"],expected:"One effect",actual:"Two effects",requirement_ids:["REQ-U"],unit_ids:["U"]};
  const unit=canonicalUnitFixture("U",{affected_interfaces:[{name:"retry",description:"One effect for a repeated key"}],addresses_counterexample_ids:[example.id]});
- const state={contract_version:REMEDIATION_STATE_CONTRACT_VERSION,status:"implementing" as const,plan:canonicalPlanFixture({units:[unit],requirements:[{id:"REQ-U",description:"Retry safely",source_finding_ids:[],change_kind:"addition" as const,assertions:[{kind:"positive" as const,description:"One effect",scope_paths:["src/a.ts"]}]}],review_counterexamples:[example]}),items:{U:{unit_id:"U",status:"pending" as const}}};
+ // The fresh fixture root has no pre-existing dirty paths; admit that baseline explicitly.
+ const state={contract_version:REMEDIATION_STATE_CONTRACT_VERSION,run_start_dirty:[],run_start_dirty_encoding:"git-z/v1" as const,status:"implementing" as const,plan:canonicalPlanFixture({units:[unit],requirements:[{id:"REQ-U",description:"Retry safely",source_finding_ids:[],change_kind:"addition" as const,assertions:[{kind:"positive" as const,description:"One effect",scope_paths:["src/a.ts"]}]}],review_counterexamples:[example]}),items:{U:{unit_id:"U",status:"pending" as const}}};
  await writeApprovedPlanFixture(artifactsDir,state);
  const handoff=await prepareRemediationHostHandoff({root,artifactsDir,runId:state.plan.plan_id,baselineCommit:"a".repeat(40),state});
  if(typeof handoff==="string")throw new Error(handoff);

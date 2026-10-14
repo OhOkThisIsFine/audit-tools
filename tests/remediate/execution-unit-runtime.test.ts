@@ -13,7 +13,8 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 async function root(): Promise<string> { const value = await mkdtemp(join(tmpdir(), "execution-unit-runtime-")); roots.push(value); return value; }
 function state(): RemediationState {
   const units = [canonicalUnitFixture("UNIT-one"), canonicalUnitFixture("UNIT-two", { dependencies: ["UNIT-one"] })];
-  return { contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing",
+  return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "implementing",
     plan: canonicalPlanFixture({ units, requirements: units.map(unit => ({
       id: unit.requirement_ids[0]!, description: unit.description, source_finding_ids: [], change_kind: "structural", assertions: [],
     })), request: { id: "REQUEST-user", text: "Improve the API", source_paths: ["src/a.ts"] } }),

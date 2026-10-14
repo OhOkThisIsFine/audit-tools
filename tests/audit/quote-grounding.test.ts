@@ -1,4 +1,17 @@
-import { test, expect } from "vitest";
+import { test, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+let repoRoot: string;
+beforeEach(() => {
+  repoRoot = mkdtempSync(join(tmpdir(), "finding-grounding-"));
+  mkdirSync(join(repoRoot, "src"));
+  // Admission uses real topology; injected readers still own quote-test content.
+  for (const name of ["auth.ts", "a.ts", "b.ts", "c.ts", "missing.ts"])
+    writeFileSync(join(repoRoot, "src", name), "fixture");
+});
+afterEach(() => rmSync(repoRoot, { recursive: true, force: true }));
 import {
   normalizeForMatch,
   quoteMatches,
@@ -40,7 +53,7 @@ test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
 test("groundFinding: a matching quote grounds the finding", async () => {
   const reader = async () => "const secret = process.env.SECRET;\nreturn sign(secret);\n";
   const result = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 2, quoted_text: "return sign(secret);" }]),
     reader,
   );
@@ -53,7 +66,7 @@ test("groundFinding: matching is content-based, and the quote's real span replac
   const cited = finding([
     { path: "src/auth.ts", line_start: 999, line_end: 1000, quoted_text: "return ok;" },
   ]);
-  const result = await groundFinding("/repo", cited, reader);
+  const result = await groundFinding(repoRoot, cited, reader);
   expect(result.status).toBe("grounded");
   expect(cited.grounding).toEqual(result);
   expect(cited.affected_files?.[0]).toMatchObject({ line_start: 1, line_end: 1 });
@@ -65,7 +78,7 @@ test("groundFinding: a multi-line quote maps to the raw lines it spans, CRLF and
   const cited = finding([
     { path: "src/a.ts", quoted_text: "function foo() {\n  return bar();\n}" },
   ]);
-  await groundFinding("/repo", cited, reader);
+  await groundFinding(repoRoot, cited, reader);
   expect(cited.affected_files?.[0]).toMatchObject({ line_start: 3, line_end: 5 });
 });
 
@@ -76,7 +89,7 @@ test("groundFinding: a quote that occurs more than once names no location and do
     const cited = finding([
       { path: "src/a.ts", line_start: 2, line_end: 2, quoted_text },
     ]);
-    const result = await groundFinding("/repo", cited, reader);
+    const result = await groundFinding(repoRoot, cited, reader);
     expect(result.status).toBe("ungrounded");
     expect(result.reason ?? "").toMatch(/src\/a\.ts: quoted_text occurs 2 times/);
     expect(cited.affected_files?.[0]?.line_start).toBeUndefined();
@@ -92,7 +105,7 @@ test("groundFinding: entries without a locatable quote lose their supplied lines
     { path: "src/b.ts", line_start: 1, line_end: 1, quoted_text: "second();" },
     { path: "src/c.ts", line_start: 3, line_end: 4, no_quotable_span: "the guard is absent" },
   ]);
-  await groundFinding("/repo", cited, reader);
+  await groundFinding(repoRoot, cited, reader);
   const [a, b, c] = cited.affected_files ?? [];
   expect(a?.line_start).toBeUndefined();
   expect(b).toMatchObject({ line_start: 2, line_end: 2 });
@@ -103,7 +116,7 @@ test("groundFinding: entries without a locatable quote lose their supplied lines
 test("groundFinding: a quote not present on disk is ungrounded", async () => {
   const reader = async () => "export function login() {}\n";
   const result = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 1, quoted_text: "DROP TABLE users;" }]),
     reader,
   );
@@ -115,7 +128,7 @@ test("groundFinding: a quote not present on disk is ungrounded", async () => {
 test("groundFinding: a finding with no quoted_text is ungrounded", async () => {
   const reader = async () => "anything";
   const result = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/auth.ts", line_start: 1, line_end: 1 }]),
     reader,
   );
@@ -127,7 +140,7 @@ test("groundFinding: one matching span among several grounds the finding", async
   const reader: SourceReader = async (absPath) =>
     absPath.endsWith("b.ts") ? "the real code is here();" : "unrelated();";
   const result = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([
       { path: "src/a.ts", line_start: 1, line_end: 1, quoted_text: "missing();" },
       { path: "src/b.ts", line_start: 1, line_end: 1, quoted_text: "the real code is here();" },
@@ -142,7 +155,7 @@ test("groundFinding: an unreadable file yields an ungrounded reason", async () =
     throw new Error("ENOENT");
   };
   const result = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/missing.ts", line_start: 1, line_end: 1, quoted_text: "x();" }]),
     reader,
   );

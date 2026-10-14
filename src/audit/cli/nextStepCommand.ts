@@ -400,18 +400,21 @@ async function cmdNextStepBody(
     return;
   }
 
+  const timeoutMs = getTimeoutMs(argv);
+  const deadline = { at: Date.now() + timeoutMs };
   const result = await runDeterministicForNextStep({
     root,
     artifactsDir,
     selfCliPath: resolve(argv[1] ?? process.argv[1] ?? ""),
-    timeoutMs: getTimeoutMs(argv),
+    timeoutMs,
+    deadline,
     narrativeEnabled: true,
     analyzers: analyzerPolicy.analyzers,
     // Slice D: enable external-analyzer acquisition on the real CLI path (default-on;
     // session config can opt out). The executor builds its own global-`fetch`
     // adapter when no fetcher is injected. The unit/integration suite never reaches
     // here, so acquisition stays a hermetic no-op in tests.
-    externalAcquisition: buildExternalAcquisitionOptions(analyzerPolicy),
+    externalAcquisition: { ...buildExternalAcquisitionOptions(analyzerPolicy), deadline },
     autoFix: {
       ...(hasFlag(argv, "--auto-fix") ? { enabled: true } : {}),
       dryRun: hasFlag(argv, "--dry-run"),

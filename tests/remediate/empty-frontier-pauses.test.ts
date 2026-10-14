@@ -52,6 +52,7 @@ function stateWith(
   items: Record<string, RemediationItemState>,
 ): RemediationState {
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "implementing",
     plan: canonicalPlanFixture({
       plan_id: "PLAN-EF",

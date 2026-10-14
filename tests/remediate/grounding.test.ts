@@ -219,3 +219,17 @@ describe("groundExtractedFindings (WS1+WS2)", () => {
     expect(result.dropped.map((d) => d.finding.id)).toEqual(["F-ERR"]);
   });
 });
+
+
+describe("source-read containment through the remediation citation draw", () => {
+  it("refuses outside evidence while retaining valid repository evidence", async () => {
+    const outside = join(TEST_DIR, "..", "outside-grounding.ts");
+    await writeFile(outside, "outside();\n", "utf8");
+    try {
+      expect(evidenceCitesRealPath(TEST_DIR, "../outside-grounding.ts:1", new Set())).toBe(false);
+      expect(evidenceCitesRealPath(TEST_DIR, "src/real.ts:1", new Set())).toBe(true);
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+});

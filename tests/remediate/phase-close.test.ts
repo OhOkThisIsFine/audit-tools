@@ -108,7 +108,7 @@ afterEach(async () => {
 
 describe("runClosePhase", () => {
   it("throws when plan is missing", async () => {
-    const state: RemediationState = { status: "closing" };
+    const state: RemediationState = { status: "closing", run_start_dirty: [], run_start_dirty_encoding: "git-z/v1" };
     await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow(
       /missing plan/,
     );

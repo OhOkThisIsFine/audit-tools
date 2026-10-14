@@ -445,14 +445,20 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
     digest.update("\0");
   }
 
-  // The workflow cleanup changed only graphRoutes comments; emitted code is unchanged.
+  // The disposition tracked-path refactor changes this source closure, but graph.ts
+  // consumes only unchanged buildDispositionMap/isAuditExcludedStatus helpers.
+  // Path-set changes already invalidate via pathLookupHash; retain cache version v10.
+  // Bounded-reader admission/allocation also changes this conservative closure.
+  // Graph routes use only the unchanged pure comment masker, not its file reader;
+  // cached contributions still use supplied content, so retain cache version v10.
+  // The reader's sites-pinned declaration is comment-only; graph behavior is unchanged.
   expect(
     digest.digest("hex"),
     "An extractor feeding a cached per-file contribution changed. A prior cache " +
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("3caf286d59fae71eea85f250a5b9fc9d6d1389dec2a0305e8655374dede70e50");
+  ).toBe("c4754fa8a32918c96a8d9dff89abf135e34ed15ed3167282fb9e75c62f5bed73");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 

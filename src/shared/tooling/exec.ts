@@ -4,6 +4,9 @@
 // backslashed path in the body)
 import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 import { win32 } from "node:path";
+import { StringDecoder } from "node:string_decoder";
+
+export { resolveExecutableFile, type ExecutableLookupOptions } from "./resolveExecutable.js";
 
 // Single synchronous command runner shared by both orchestrators. Before
 // Phase 0 the remediator (`utils/commands.ts`) and the auditor
@@ -662,6 +665,12 @@ export async function runTrackedAsync(
     });
     let stdout = "";
     let stderr = "";
+    // Pipe data events can split a UTF-8 character. Keep decoding state separate
+    // for each stream; other encodings retain their existing per-chunk behavior.
+    const encoding = options.encoding ?? "utf8";
+    const isUtf8 = /^(?:utf8|utf-8)$/i.test(encoding);
+    const stdoutDecoder = isUtf8 ? new StringDecoder("utf8") : null;
+    const stderrDecoder = isUtf8 ? new StringDecoder("utf8") : null;
     // Bytes SEEN on each pipe, which is not the same as bytes kept: the counters
     // keep rising after MAX_CAPTURE stops appending. See `capture`.
     let stdoutBytes = 0;
@@ -729,6 +738,10 @@ export async function runTrackedAsync(
       settled = true;
       if (timer) clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      // Flush only at terminal settlement (including spawn errors), after the
+      // settled guard. Uncaptured chunks must never complete a pending sequence.
+      result.stdout += stdoutDecoder?.end() ?? "";
+      result.stderr += stderrDecoder?.end() ?? "";
       resolve(result);
     };
     /**
@@ -750,12 +763,17 @@ export async function runTrackedAsync(
      */
     const capture = (
       chunk: Buffer,
+      decoder: StringDecoder | null,
       append: (text: string) => void,
       seen: () => number,
       kept: () => number,
     ): void => {
+      // Whole-chunk admission uses emitted UTF-16 length, not raw bytes. UTF-8
+      // can hold at most three pending bytes, so corrected decoding can admit a
+      // chunk the old replacement-character decoding discarded. An admitted
+      // chunk (or terminal flush) can overshoot; this is not a strict output cap.
       if (kept() < MAX_CAPTURE) {
-        append(chunk.toString(options.encoding ?? "utf8"));
+        append(decoder ? decoder.write(chunk) : chunk.toString(encoding));
       }
       if (
         overflowLimit !== undefined &&
@@ -770,6 +788,7 @@ export async function runTrackedAsync(
       stdoutBytes += chunk.length;
       capture(
         chunk,
+        stdoutDecoder,
         (text) => {
           stdout += text;
         },
@@ -781,6 +800,7 @@ export async function runTrackedAsync(
       stderrBytes += chunk.length;
       capture(
         chunk,
+        stderrDecoder,
         (text) => {
           stderr += text;
         },

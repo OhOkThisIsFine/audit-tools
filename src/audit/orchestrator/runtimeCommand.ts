@@ -229,11 +229,21 @@ function commandEvidence(
  * OS; the taskkill spawn failing (absent, denied) falls back to SIGKILL rather
  * than leaving the child alive.
  */
-export function killRuntimeCommandTree(
-  child: { pid?: number; kill: (signal?: NodeJS.Signals) => boolean },
-  platform: NodeJS.Platform = process.platform,
-): void {
-  if (platform === "win32" && child.pid !== undefined) {
+// sites-pinned: tests/audit/runtime-command-bounded-wait.test.ts
+type RuntimeCommandChild = { pid?: number; kill: (signal?: NodeJS.Signals) => boolean };
+
+/** Injectable control boundary: synthetic unit identities never reach OS APIs. */
+export interface RuntimeCommandProcessControl {
+  terminateWindowsTree(child: RuntimeCommandChild): void;
+  signalChild(child: RuntimeCommandChild, signal: NodeJS.Signals): void;
+}
+
+const nativeProcessControl: RuntimeCommandProcessControl = {
+  terminateWindowsTree(child) {
+    if (child.pid === undefined) {
+      child.kill("SIGTERM");
+      return;
+    }
     const reaper = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
       stdio: "ignore",
       windowsHide: true,
@@ -241,9 +251,17 @@ export function killRuntimeCommandTree(
     reaper.on("error", () => {
       child.kill("SIGKILL");
     });
-    return;
-  }
-  child.kill("SIGTERM");
+  },
+  signalChild(child, signal) { child.kill(signal); },
+};
+
+export function killRuntimeCommandTree(
+  child: RuntimeCommandChild,
+  platform: NodeJS.Platform = process.platform,
+  control: RuntimeCommandProcessControl = nativeProcessControl,
+): void {
+  if (platform === "win32") control.terminateWindowsTree(child);
+  else control.signalChild(child, "SIGTERM");
 }
 
 export async function runCommand(

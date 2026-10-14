@@ -1,3 +1,5 @@
+import { DirtyPathDiscoveryError } from "audit-tools/shared";
+import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/final-gate-extraction-equivalence.test.ts, tests/remediate/final-acceptance-window.test.ts
 // ---------------------------------------------------------------------------
 // Tool-owned final completion gate (INV-RS-10)
@@ -573,18 +575,20 @@ export async function writeFinalGateRedRecord(
   failed: FinalGateCommandResult | undefined,
   attributionInput?: { root: string; state: RemediationGateState },
 ): Promise<string> {
+  if (attributionInput) admitRemediationDirtyBaseline(attributionInput.state);
   const path = finalGateRecordPath(artifactsDir);
   let attribution: GateRedAttribution | undefined;
   if (attributionInput && failed) {
-    // Never let the diagnostic take down the gate: attribution is derived from
-    // git and the filesystem, and a red gate on a broken tree is exactly when
-    // those can misbehave. A failure to attribute is "no verdict", not a throw
-    // that replaces the red record with a crash.
+    // Unrelated diagnostics remain best-effort. Historical authority and
+    // complete discovery are mandatory and their named refusals propagate.
     attribution = await attributeGateRed({
       root: attributionInput.root,
       state: attributionInput.state,
       output: `${failed.stdout_tail ?? ""}\n${failed.stderr_tail ?? ""}`,
-    }).catch(() => undefined);
+    }).catch((error: unknown) => {
+      if (error instanceof DirtyPathDiscoveryError || error instanceof RemediationDirtyBaselineError) throw error;
+      return undefined;
+    });
   }
   const record: FinalGateRedRecord = {
     schema_version: "remediate-code-final-gate/v1alpha1",

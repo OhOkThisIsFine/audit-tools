@@ -91,7 +91,8 @@ test("binary resolver's DEFAULT runner declares a deadline on every spawn", asyn
   spawnOptions.length = 0;
   const spec: BinarySpec = {
     binaryName: "gitleaks",
-    version: "9.9.9",
+    version: "1.0.0",
+    parseVersion: stdout => stdout === "1.0.0" ? stdout : null,
     versionProbeArgs: ["gitleaks", "version"],
     assetFor: () => "gitleaks_9.9.9_linux_x64.tar.gz",
     checksumsAsset: "gitleaks_9.9.9_checksums.txt",
@@ -99,7 +100,7 @@ test("binary resolver's DEFAULT runner declares a deadline on every spawn", asyn
   };
   // The mocked probe exits 0, so resolution stops at the PATH leg — exactly one
   // default-runner spawn, and no cache/network side effects.
-  const resolution = await resolveBinary(spec);
+  const resolution = await resolveBinary(spec, { resolveExecutable: () => "/inert/gitleaks" });
   expect(resolution.status).toBe("path");
   expectEverySpawnBounded();
 });

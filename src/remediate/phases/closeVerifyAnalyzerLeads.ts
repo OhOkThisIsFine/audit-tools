@@ -4,6 +4,9 @@ import {
   loadAnalyzerPolicy,
   runExternalAnalyzer,
   resolveBinaryCandidates,
+  prepareAcquisition,
+  registerExternalAnalyzers,
+  type SpawnDeadline,
   analyzerProvenanceKey,
   type AcquisitionRunner,
   type ExternalAnalyzerCandidate,
@@ -47,6 +50,7 @@ export interface AnalyzerLeadVerifyOutcome {
 
 /** Test-injectable seams; production callers pass none of these. */
 export interface AnalyzerLeadVerifyOverrides {
+  deadline?: SpawnDeadline;
   candidates?: ExternalAnalyzerCandidate[];
   run?: AcquisitionRunner;
   analyzerPolicy?: AnalyzerPolicy;
@@ -98,12 +102,14 @@ export async function verifyAnalyzerLeads(params: {
     else byAnalyzer.set(target.provenance.analyzer_id, [target]);
   }
 
-  const candidates = overrides?.candidates ?? EXTERNAL_ANALYZER_CANDIDATES;
-  const engineOptions = {
-    analyzers: analyzerPolicy.analyzers,
-    analyzerConsent: analyzerPolicy.analyzer_consent,
-    ...(overrides?.run ? { run: overrides.run } : {}),
-  };
+  const candidates = registerExternalAnalyzers(overrides?.candidates ?? EXTERNAL_ANALYZER_CANDIDATES);
+  const engineOptions = prepareAcquisition(
+    candidates.filter(candidate => byAnalyzer.has(candidate.id)), root, {
+      deadline: overrides?.deadline,
+      analyzers: analyzerPolicy.analyzers,
+      analyzerConsent: analyzerPolicy.analyzer_consent,
+      ...(overrides?.run ? { run: overrides.run } : {}),
+  }).options;
 
   const skipAll = (
     bucket: typeof targets,
@@ -121,17 +127,16 @@ export async function verifyAnalyzerLeads(params: {
       skipAll(bucket, analyzerId, "no registered candidate for this analyzer id");
       continue;
     }
-    // Binary-runner candidates resolve (PATH probe / checksum-gated download)
+    // Binary-runner candidates resolve offline (PATH probe / verified warm cache)
     // ahead of the async engine, exactly as the audit draw does.
     const resolved = await resolveBinaryCandidates([candidate], root, engineOptions);
-    const outcome = await runExternalAnalyzer(candidate, root, {
+    // Resolution owns binary failure. Do not ask the engine to produce a second status.
+    const unresolved = resolved.unresolvedStatuses[0];
+    const outcome = unresolved ? undefined : await runExternalAnalyzer(candidate, root, {
       ...engineOptions,
       resolvedBinaries: resolved.resolvedBinaries,
     });
-    const status =
-      candidate.runner === "binary" && resolved.unresolvedStatuses.length > 0
-        ? resolved.unresolvedStatuses[0]
-        : outcome.status;
+    const status = unresolved ?? outcome!.status;
     statuses.push(status);
 
     if (status.status !== "findings" && status.status !== "success") {
@@ -144,7 +149,7 @@ export async function verifyAnalyzerLeads(params: {
     }
 
     const firedKeys = new Set(
-      outcome.results.results
+      outcome!.results.results
         .map((result) => result.provenance)
         .filter((p): p is AnalyzerLeadProvenance => p !== undefined)
         .map(analyzerProvenanceKey),

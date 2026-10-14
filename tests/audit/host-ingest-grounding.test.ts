@@ -497,3 +497,30 @@ describe("contract:audit-batch-lane-recomputes-grounding:not-yet-satisfied", () 
     ).resolves.toBeUndefined();
   });
 });
+
+describe("audit batch source-read containment", () => {
+  it("revalidates outside evidence as unreadable and retains legitimate inside evidence", async () => {
+    const { stampToolComputedGrounding } = await import("../../src/audit/cli/auditStep.js");
+    const base = await mkdtemp(join(tmpdir(), "audit-grounding-containment-"));
+    cleanupRoots.push(base);
+    const root = join(base, "repo");
+    await mkdir(root);
+    await writeFile(join(base, "outside.ts"), "needle\n");
+    await writeFile(join(root, "inside.ts"), "needle\n");
+    const results = [{ findings: [
+      { grounding: { status: "grounded" }, affected_files: [
+        { path: "../outside.ts", quoted_text: "needle", line_start: 1, line_end: 1 },
+      ] },
+      { grounding: { status: "ungrounded" }, affected_files: [
+        { path: "inside.ts", quoted_text: "needle", line_start: 99, line_end: 99 },
+      ] },
+    ] }];
+    await stampToolComputedGrounding(root, results);
+    expect(results[0]!.findings[0]!.grounding).toEqual({
+      status: "ungrounded", reason: "../outside.ts: file could not be read on disk",
+    });
+    expect(results[0]!.findings[0]!.affected_files[0]!.line_start).toBeUndefined();
+    expect(results[0]!.findings[1]!.grounding).toEqual({ status: "grounded" });
+    expect(results[0]!.findings[1]!.affected_files[0]!.line_start).toBe(1);
+  });
+});

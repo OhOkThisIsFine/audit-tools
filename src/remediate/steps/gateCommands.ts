@@ -1,3 +1,4 @@
+import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts
 import { isFileMissingError } from "../../shared/io/json.js";
 import { hashContent } from "../../shared/hash.js";
@@ -104,6 +105,7 @@ export interface RemediationGateState {
   applied_edit_surface?: readonly string[];
   /** Paths dirty at run start — pre-existing dirt the run cannot own. */
   run_start_dirty?: readonly string[];
+  run_start_dirty_encoding?: "git-z/v1";
   /** Paths dirty relative to the run-start baseline (derived at the gate). */
   run_baseline_diff?: readonly string[];
 }
@@ -168,6 +170,7 @@ async function runTouchedPaths(
   root: string,
   state: RemediationGateState,
 ): Promise<string[]> {
+  admitRemediationDirtyBaseline(state);
   const paths = new Set<string>();
   for (const path of state.applied_edit_surface ?? []) {
     if (path.length > 0) paths.add(normalizeRepoPath(path));
@@ -192,18 +195,13 @@ async function runTouchedPaths(
  * closing commit), which is also what makes this the signal that separates
  * FOREIGN live-tree dirt from the run's own.
  *
- * Best-effort: a repo that cannot be enumerated yields no paths, and attribution
- * degrades to `unattributable` rather than guessing. Never throws — a gate must
- * not fail on the diagnostic it was deriving.
+ * Missing historical authority or incomplete live discovery refuses attribution.
+ * Neither can be converted into an empty run-owned surface.
  */
 async function currentRunDiff(root: string, state: RemediationGateState): Promise<string[]> {
-  let dirty: readonly string[];
-  try {
-    dirty = await stagedAndUntracked(root);
-  } catch {
-    return [];
-  }
-  const atRunStart = new Set((state.run_start_dirty ?? []).map(normalizeRepoPath));
+  const baseline = admitRemediationDirtyBaseline(state);
+  const dirty = await stagedAndUntracked(root);
+  const atRunStart = new Set(baseline.map(normalizeRepoPath));
   const paths = new Set<string>();
   for (const path of dirty) {
     const normalized = normalizeRepoPath(path);

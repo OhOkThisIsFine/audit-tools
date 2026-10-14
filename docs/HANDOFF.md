@@ -24,7 +24,9 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: nothing is pinned; choose from [`docs/backlog/`](backlog/). The owner discarded the paused
+Next: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
+[qualification record](reviews/audit-refactor-qualification-2026-10-14.md) for scope and remaining gates.
+No commit, publication or release acceptance is established. The owner discarded the paused
 2026-10-05 dogfood run (2026-10-09); a new dogfood run is the owner's call and would use 0.55.6.
 **Live owner decision:** none.
 

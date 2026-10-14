@@ -27,6 +27,7 @@ async function approvedClose() {
   const approved = (await readApprovedExecutionPlan(f.artifactsDir))!;
   expect(approved).toBeDefined();
   const state: RemediationState = {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
     status: "closing",
     plan: canonicalPlanFixture({ ...approved.canonical.plan, findings: approved.source.findings,
@@ -140,7 +141,8 @@ test("next-step pauses stale closing authority with a resumable repair prompt", 
   await harness.resetTestRepo();
   try {
     await harness.writeIntentCheckpoint();
-    const state: RemediationState = { status: "closing", plan: canonicalPlanFixture(), items: {},
+    const state: RemediationState = {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", status: "closing", plan: canonicalPlanFixture(), items: {},
       closing_plan: { action: "custom", pre_authorized: true,
         custom_command: [process.execPath, "-e", 'require("node:fs").writeFileSync("closed.txt", "closed")'] } };
     await writeApprovedPlanFixture(harness.ARTIFACTS_DIR, state);

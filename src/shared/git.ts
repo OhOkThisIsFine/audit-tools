@@ -10,8 +10,9 @@ import { AUDIT_TOOLS_DIRNAME } from "./io/auditToolsPaths.js";
 // Git helpers shared by both orchestrators. The remediator previously issued
 // `git` calls inline in close.ts and plan.ts; the auditor's Phase 3 delta mode
 // needs the same primitives. All run through the shared `runTrackedAsync` so
-// the one Windows-wrapping implementation applies, and all degrade to
-// empty/false when git is unavailable or the command fails (never throw).
+// the one Windows-wrapping implementation applies. Most helpers degrade to
+// empty/false when git is unavailable; dirty-path discovery instead distinguishes
+// an unknown tree from a clean one (audit returns null; remediation throws).
 // ASYNC twin, never `runTracked`: these helpers are fold-reachable (intake,
 // scope, structure executors run inside the artifact-tree lock's hold), and a
 // synchronous child blocks the event loop, which starves the held lock's
@@ -426,22 +427,128 @@ export async function gitRemotes(root: string): Promise<string[]> {
   return await gitLines(root, ["remote"]);
 }
 
+type GitDiscoveryFailure = { ok: false; reason: string };
+type GitPathListResult = { ok: true; paths: string[] } | GitDiscoveryFailure;
+type GitDiscoveryOptions = { timeout?: number; windowsHide?: boolean };
+
+/** A remediation authority check could not establish the complete dirty set. */
+export class DirtyPathDiscoveryError extends Error {
+  constructor(operation: string, reason: string) {
+    super(`Dirty path discovery failed (${operation}): ${reason}`);
+    this.name = "DirtyPathDiscoveryError";
+  }
+}
+
+/** Complete bounded output only; a failed child never contributes partial paths. */
+async function runGitDiscovery(
+  root: string,
+  args: readonly string[],
+  options: GitDiscoveryOptions = {},
+): Promise<{ ok: true; stdout: string } | GitDiscoveryFailure> {
+  const operation = `git ${args.join(" ")}`;
+  const timeout = options.timeout ?? TRACKED_CHILD_DEADLINE_MS;
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return { ok: false, reason: `${operation}: invalid discovery timeout` };
+  }
+  try {
+    const result = await runTrackedAsync(["git", ...args], {
+      cwd: root,
+      encoding: "utf8",
+      timeout,
+      maxBuffer: GIT_MAX_BUFFER,
+      ...(options.windowsHide === undefined ? {} : { windowsHide: options.windowsHide }),
+    });
+    if (result.error !== undefined) {
+      return { ok: false, reason: `${operation}: ${result.error.message}` };
+    }
+    if (result.status !== 0) {
+      return { ok: false, reason: `${operation}: exited with status ${String(result.status)}` };
+    }
+    return { ok: true, stdout: result.stdout };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `${operation}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/** Exact NUL records. No trimming, unquoting, normalization or partial success. */
+function parseGitNulRecords(stdout: string): GitPathListResult {
+  if (stdout.length === 0) return { ok: true, paths: [] };
+  if (!stdout.endsWith("\0")) return { ok: false, reason: "missing terminal NUL" };
+  const paths = stdout.slice(0, -1).split("\0");
+  if (paths.some((path) => path.length === 0)) {
+    return { ok: false, reason: "empty NUL record" };
+  }
+  return { ok: true, paths };
+}
+
 /**
- * NUL-separated path output of one git command, or `null` when the command
- * FAILED. Unlike `gitLines` this never degrades a failure to an empty list:
- * its one caller turns "no paths" into the claim "the tree was clean", and a
- * failed `git diff` must not be able to make that claim. `-z` keeps a path with
- * a space, a quote or a non-ASCII byte verbatim (no `core.quotepath` escaping).
+ * Internal shared query boundary for Git commands whose output is exclusively
+ * NUL-delimited paths. The caller owns argv and policy; this owns bounded async
+ * transport and complete parsing. A failure never becomes an empty/partial set.
  */
-async function gitPathsOrNull(root: string, args: string[]): Promise<string[] | null> {
-  const result = await runTrackedAsync(["git", ...args], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: TRACKED_CHILD_DEADLINE_MS,
-    maxBuffer: GIT_MAX_BUFFER,
-  });
-  if (result.status !== 0) return null;
-  return result.stdout.split("\0").filter((path) => path.length > 0);
+export async function readGitPathList(
+  root: string,
+  args: readonly string[],
+  options: GitDiscoveryOptions = {},
+): Promise<GitPathListResult> {
+  const result = await runGitDiscovery(root, args, options);
+  if (!result.ok) return result;
+  const parsed = parseGitNulRecords(result.stdout);
+  return parsed.ok ? parsed : { ok: false, reason: `git ${args.join(" ")}: ${parsed.reason}` };
+}
+
+/** Strip only one ordinary line ending from a Git control response. */
+function gitControlLine(stdout: string): string {
+  return stdout.replace(/\r?\n$/u, "");
+}
+
+async function admitGitWorkingTreeRoot(
+  root: string,
+): Promise<{ ok: true } | GitDiscoveryFailure> {
+  const inside = await runGitDiscovery(root, ["rev-parse", "--is-inside-work-tree"]);
+  if (!inside.ok) return inside;
+  if (gitControlLine(inside.stdout) !== "true") {
+    return { ok: false, reason: "git rev-parse --is-inside-work-tree: expected a working tree" };
+  }
+  const prefix = await runGitDiscovery(root, ["rev-parse", "--show-prefix"]);
+  if (!prefix.ok) return prefix;
+  if (gitControlLine(prefix.stdout) !== "") {
+    return { ok: false, reason: "git rev-parse --show-prefix: expected a top-level working-tree root" };
+  }
+  return { ok: true };
+}
+
+function gitCommitControl(stdout: string): string | null {
+  const commit = gitControlLine(stdout);
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(commit) ? commit : null;
+}
+
+/** The complete porcelain-v1 status grammar, including defensive R/C pairs. */
+function parseGitStatusPaths(stdout: string): GitPathListResult {
+  const parsed = parseGitNulRecords(stdout);
+  if (!parsed.ok) return parsed;
+  const paths = new Set<string>();
+  const unmerged = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
+  for (let index = 0; index < parsed.paths.length; index += 1) {
+    const record = parsed.paths[index];
+    const pair = record.slice(0, 2);
+    const ordinary = /^[ MTARC][ MTD]$/u.test(pair) && pair !== "  ";
+    const valid = ordinary || pair === "??" || pair === "D " ||
+      pair === " A" || pair === " R" || pair === " C" || unmerged.has(pair);
+    if (record.length < 4 || record[2] !== " " || !valid) {
+      return { ok: false, reason: `malformed porcelain-v1 record ${String(index + 1)}` };
+    }
+    paths.add(record.slice(3));
+    if (pair.includes("R") || pair.includes("C")) {
+      const source = parsed.paths[++index];
+      if (source === undefined) return { ok: false, reason: "missing rename/copy source path" };
+      if (pair.includes("R")) paths.add(source);
+    }
+  }
+  return { ok: true, paths: [...paths] };
 }
 
 /**
@@ -481,26 +588,27 @@ export async function readAuditReadState(
     excludePaths?: readonly string[];
   } = {},
 ): Promise<{ commit: string; dirty_paths: string[] } | null> {
-  const commit = await headCommit(root);
+  // Audit paths are relative to this root; never silently rebase a nested root.
+  if (!(await admitGitWorkingTreeRoot(root)).ok) return null;
+  const head = await runGitDiscovery(root, ["rev-parse", "HEAD"]);
+  if (!head.ok) return null;
+  const commit = gitCommitControl(head.stdout);
   if (commit === null) return null;
-  // Git names paths from the REPOSITORY root; an audit names them from `root`.
-  // The two agree only when `root` IS the repository root, so a nested root is
-  // answered "unknown" rather than with paths no cited location would match.
-  const prefix = await runTrackedAsync(["git", "rev-parse", "--show-prefix"], {
-    cwd: root,
-    encoding: "utf8",
-    timeout: TRACKED_CHILD_DEADLINE_MS,
-  });
-  if (prefix.status !== 0 || prefix.stdout.trim().length > 0) return null;
   const excluded = options.excludePaths ?? [];
   const dirty = await dirtyPathsAgainst(root, commit, excluded);
   if (dirty === null) return null;
-  if (prior && prior.commit !== commit && (await gitRefExists(root, prior.commit))) {
+  if (prior && prior.commit !== commit) {
+    // Prior equivalence is optional evidence. An unavailable ref or listing
+    // cannot establish it, but must not discard the valid current stamp.
+    const priorRef = await runGitDiscovery(root, [
+      "rev-parse", "--verify", "--quiet", `${prior.commit}^{commit}`,
+    ]);
     const sameAsPrior = (paths: readonly string[] | null): boolean =>
       paths !== null &&
       paths.length === prior.dirty_paths.length &&
       paths.every((path, index) => path === prior.dirty_paths[index]);
-    if (sameAsPrior(dirty) && sameAsPrior(await dirtyPathsAgainst(root, prior.commit, excluded))) {
+    if (priorRef.ok && gitCommitControl(priorRef.stdout) !== null &&
+      sameAsPrior(dirty) && sameAsPrior(await dirtyPathsAgainst(root, prior.commit, excluded))) {
       return { commit: prior.commit, dirty_paths: dirty };
     }
   }
@@ -520,48 +628,49 @@ async function dirtyPathsAgainst(
   // `--no-renames`: with rename detection (git's default) a moved file is
   // reported under its NEW path only, and the old path — whose blob at `ref` is
   // just as much "not what the audit read" — would be missing from the list.
-  const changed = await gitPathsOrNull(root, [
+  const changed = await readGitPathList(root, [
     "diff",
     "--name-only",
     "--no-renames",
     "-z",
     ref,
   ]);
-  if (changed === null) return null;
-  const untracked = await gitPathsOrNull(root, [
+  if (!changed.ok) return null;
+  const untracked = await readGitPathList(root, [
     "ls-files",
     "--others",
     "--exclude-standard",
     "-z",
   ]);
-  if (untracked === null) return null;
+  if (!untracked.ok) return null;
   // The tool's own state dir is never audit input, and in a repository that
   // does not ignore it every step rewrites files there — which would both bloat
   // the list and defeat the re-synthesis stability rule above.
   const ownState = `${AUDIT_TOOLS_DIRNAME}/`;
   const isExcluded = (path: string): boolean =>
     excluded.some((entry) => path === entry || path.startsWith(`${entry}/`));
-  return [...new Set([...changed, ...untracked])]
+  return [...new Set([...changed.paths, ...untracked.paths])]
     .filter((path) => !path.startsWith(ownState) && !isExcluded(path))
     .sort(compareCodeUnits);
 }
 
-/** Working-tree changes vs HEAD plus untracked (non-ignored) files. */
+/**
+ * Pre-existing index AND working-tree changes, plus individually listed
+ * nonignored untracked paths. Preserves exact spelling and discovery order.
+ * Unknown/non-top-level trees throw DirtyPathDiscoveryError rather than look clean.
+ */
 export async function stagedAndUntracked(root: string): Promise<string[]> {
-  const files = new Set<string>();
-  // `--no-renames`, as in `dirtyPathsAgainst`: rename detection reports a
-  // moved file under its NEW path only, but the old path is just as dirty — and
-  // a closing commit scoped to these paths would otherwise leave the old path's
-  // deletion staged and record the move as a copy.
-  for (const file of await gitLines(root, ["diff", "--name-only", "--no-renames", "HEAD"])) {
-    files.add(file);
+  const admitted = await admitGitWorkingTreeRoot(root);
+  if (!admitted.ok) throw new DirtyPathDiscoveryError("root admission", admitted.reason);
+  const args = [
+    "--no-optional-locks", "status", "--porcelain=v1", "-z",
+    "--untracked-files=all", "--ignore-submodules=none", "--no-renames",
+  ];
+  const status = await runGitDiscovery(root, args);
+  if (!status.ok) throw new DirtyPathDiscoveryError("status", status.reason);
+  const parsed = parseGitStatusPaths(status.stdout);
+  if (!parsed.ok) {
+    throw new DirtyPathDiscoveryError("status", `git ${args.join(" ")}: ${parsed.reason}`);
   }
-  for (const file of await gitLines(root, [
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-  ])) {
-    files.add(file);
-  }
-  return [...files];
+  return parsed.paths;
 }

@@ -7,7 +7,7 @@
  * (`ScopeIndexMemo`), so the drain spawns it once.
  *
  * Mechanism follows `one-lock-hold-per-next-step.test.ts`: a module mock of
- * `audit-tools/shared` wrapping the one `runTrackedAsync` the probe reaches for.
+ * `audit-tools/shared` wrapping the one `readRecursiveTrackedPaths` the probe reaches for.
  * The wrapper is COUNT-ONLY — it delegates to the real implementation, so the
  * fold still runs against a real git repo and the probe's answer is real.
  *
@@ -29,33 +29,14 @@ const counter = vi.hoisted(() => ({ gitLsFilesSpawns: 0 }));
 
 vi.mock("audit-tools/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("audit-tools/shared")>();
-  const wrapped = async (
-    command: readonly string[],
-    ...rest: unknown[]
-  ): Promise<unknown> => {
-    // Scoped to the INDEX PROBE's own spawn, by the argv AND the frame.
-    // `git ls-files --recurse-submodules` alone is not the probe's signature:
-    // the grounding corpus (`enumerateTrackedFilePaths`) and the disposition's
-    // untracked rule (`evaluateTrackedFiles`) issue the identical argv, and both
-    // run inside this fold. Counting the argv alone would report those two as
-    // extra "probes" and make the test demand a spawn count the fix cannot
-    // deliver — which is exactly the false RED it produced first.
-    if (
-      command[0] === "git" &&
-      command[1] === "ls-files" &&
-      String(new Error().stack).includes("scopeIndexBaseline")
-    ) {
+  const wrapped: typeof actual.readRecursiveTrackedPaths = async (...args) => {
+    // Count only scope calls; disposition and grounding enumerate independently.
+    if (String(new Error().stack).includes("scopeIndexBaseline")) {
       counter.gitLsFilesSpawns += 1;
     }
-    return (actual.runTrackedAsync as (...args: unknown[]) => Promise<unknown>)(
-      command,
-      ...rest,
-    );
+    return actual.readRecursiveTrackedPaths(...args);
   };
-  return {
-    ...actual,
-    runTrackedAsync: wrapped as typeof actual.runTrackedAsync,
-  };
+  return { ...actual, readRecursiveTrackedPaths: wrapped };
 });
 
 const { GATE_LANES, laneSubmissionPath } = await import(

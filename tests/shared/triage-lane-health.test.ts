@@ -16,9 +16,9 @@
 // RETURNS rather than throwing, and one shared bridge process serving
 // concurrent calls matched by JSON-RPC id. Importing the sweep module must
 // not start a sweep (the run is guarded behind direct invocation).
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -259,12 +259,74 @@ function fakeLane(overrides: Record<string, unknown> = {}) {
   });
 }
 
+// These local guards qualify only the injected preflight seam, not OS containment.
+function makeForbiddenSpawnRecorder() {
+  const calls: unknown[][] = [];
+  const forbidden = new Error("unexpected bridge spawn attempt");
+  const spawnImpl = (...args: unknown[]): never => {
+    calls.push(args);
+    throw forbidden;
+  };
+  return { calls, forbidden, spawnImpl };
+}
+
+function absentDispatchRepo(root: string, candidate?: string): string {
+  if (!root || !isAbsolute(root)) throw new Error("fixture root must be absolute");
+  const canonicalRoot = realpathSync(root);
+  if (!lstatSync(canonicalRoot).isDirectory()) throw new Error("fixture root must be a directory");
+  const absent = candidate ?? join(canonicalRoot, "absent-agent-dispatch");
+  if (!absent || !isAbsolute(absent) || absent.split(/[\\/]/).some(part => part === "." || part === "..") ||
+      normalize(absent) === canonicalRoot || dirname(normalize(absent)) !== canonicalRoot) {
+    throw new Error("dispatch override must be a direct child of the owned root");
+  }
+  try {
+    lstatSync(absent);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absent;
+    throw error;
+  }
+  throw new Error("dispatch override must remain absent");
+}
+
 describe("openDispatchLane: preflight", () => {
+  it("qualifies the throwing spawn recorder without starting a process", () => {
+    const recorder = makeForbiddenSpawnRecorder();
+    const args: string[] = [];
+    let caught: unknown;
+    try { recorder.spawnImpl("nonexecuting-sentinel-control", args); } catch (error) { caught = error; }
+    expect(caught).toBe(recorder.forbidden);
+    expect(recorder.calls).toEqual([["nonexecuting-sentinel-control", args]]);
+    expect(recorder.calls[0]?.[1]).toBe(args);
+  });
+
+  it("rejects unsafe override inputs without invoking the lane", () => {
+    const root = realpathSync(tmp());
+    expect(() => absentDispatchRepo("")).toThrow("fixture root must be absolute");
+    expect(() => absentDispatchRepo(root, "")).toThrow("direct child");
+    expect(() => absentDispatchRepo(root, root)).toThrow("direct child");
+    expect(() => absentDispatchRepo(root, join(root, "nested", "child"))).toThrow("direct child");
+    expect(() => absentDispatchRepo(root, `${root}/../escaped`)).toThrow("direct child");
+    expect(() => absentDispatchRepo(root, join(dirname(root), "outside"))).toThrow("direct child");
+    const existing = join(root, "existing");
+    writeFileSync(existing, "owned fixture");
+    expect(() => absentDispatchRepo(root, existing)).toThrow("must remain absent");
+  });
+
   it("fails loudly, before spawning anything, when the agent-dispatch checkout is missing", () => {
-    const missingRepo = tmp();
-    expect(() => openDispatchLane({ env: { AGENT_DISPATCH_REPO: missingRepo } })).toThrow(
-      /agent-dispatch checkout not found/,
+    const root = realpathSync(tmp());
+    const missingRepo = absentDispatchRepo(root);
+    const recorder = makeForbiddenSpawnRecorder();
+    let caught: unknown;
+    try {
+      openDispatchLane({ cwd: root, env: { AGENT_DISPATCH_REPO: missingRepo }, spawnImpl: recorder.spawnImpl });
+    } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(DispatchLaneError);
+    expect((caught as Error).message).toBe(
+      `agent-dispatch checkout not found: ${join(missingRepo, "src", "cli.ts")} does not exist. Set AGENT_DISPATCH_REPO to the checkout, or run \`node <repo>/src/cli.ts status\` once one is configured.`,
     );
+    expect(caught).not.toBe(recorder.forbidden);
+    expect(recorder.calls).toHaveLength(0);
+    expect(absentDispatchRepo(root, missingRepo)).toBe(missingRepo);
   });
 
   it("checks the exact Node floor agent-dispatch's package.json declares (>=22.18)", () => {

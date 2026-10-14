@@ -457,6 +457,7 @@ function makeBoundaryState(): RemediationState {
     dependencies: index ? ["F-000"] : [], phase_ordinal: index,
   }));
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "implementing",
     plan: canonicalPlanFixture({
       plan_id: "PLAN-GATE-OUTCOME",

@@ -1,3 +1,5 @@
+// sites-pinned: tests/shared/analyzer-candidates.test.ts, tests/shared/analyzer-pipx-contract.test.ts
+import { parseGitleaksVersion, parseOsvScannerVersion, parseHadolintVersion, parseActionlintVersion } from "./binaryVersions.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readdirSync } from "node:fs";
@@ -85,6 +87,7 @@ function gitleaksAsset(platform: NodeJS.Platform, arch: string): string | null {
 
 const GITLEAKS_BINARY: BinarySpec = {
   binaryName: "gitleaks",
+  parseVersion: parseGitleaksVersion,
   version: GITLEAKS_VERSION,
   versionProbeArgs: ["gitleaks", "version"],
   assetFor: gitleaksAsset,
@@ -209,6 +212,7 @@ const semgrepCandidate: ExternalAnalyzerCandidate = {
   id: "semgrep",
   runner: "pipx",
   spec: "semgrep==1.63.0",
+  bin: "semgrep",
   purpose: "security and correctness anti-patterns via community rule sets (pulls rules from the network)",
   safetyProfile: {
     config_execution: "inert-data",
@@ -587,6 +591,7 @@ function osvScannerAsset(platform: NodeJS.Platform, arch: string): string | null
 
 const OSV_SCANNER_BINARY: BinarySpec = {
   binaryName: "osv-scanner",
+  parseVersion: parseOsvScannerVersion,
   version: OSV_SCANNER_VERSION,
   versionProbeArgs: ["osv-scanner", "--version"],
   assetFor: osvScannerAsset,
@@ -760,6 +765,7 @@ function hadolintAsset(platform: NodeJS.Platform, arch: string): string | null {
 
 const HADOLINT_BINARY: BinarySpec = {
   binaryName: "hadolint",
+  parseVersion: parseHadolintVersion,
   version: HADOLINT_VERSION,
   versionProbeArgs: ["hadolint", "--version"],
   assetFor: hadolintAsset,
@@ -858,6 +864,7 @@ function actionlintAsset(platform: NodeJS.Platform, arch: string): string | null
 
 const ACTIONLINT_BINARY: BinarySpec = {
   binaryName: "actionlint",
+  parseVersion: parseActionlintVersion,
   version: ACTIONLINT_VERSION,
   versionProbeArgs: ["actionlint", "--version"],
   assetFor: actionlintAsset,
@@ -997,62 +1004,76 @@ const typeCoverageCandidate: ExternalAnalyzerCandidate = {
 /**
  * Parse a line of CSV, handling quoted fields that may contain commas.
  * CSV format: "NLOC,CCN,Token,PARAM,Length,Location,File,Function"
- * Quoted fields are surrounded by double quotes and internal quotes are doubled.
+ * Only the pinned single-line dialect is supported: quotes enclose whole fields
+ * and internal quotes are doubled. Other quote placement is rejected.
  */
 function parseCsvLine(line: string): string[] {
   const fields: string[] = [];
   let current = "";
   let inQuotes = false;
+  let closedQuote = false;
+  // A CR belongs to the row terminator, not a quoted-field suffix.
+  if (line.endsWith("\r")) line = line.slice(0, -1);
 
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
     const nextChar = line[i + 1];
 
+    // After a closing quote only a separator (or end of row) is valid.
+    if (closedQuote && char !== ",") return [];
     if (char === '"') {
+      if (!inQuotes && current.length > 0) return [];
       if (inQuotes && nextChar === '"') {
         // Escaped quote: add one quote and skip the next
         current += '"';
         i++;
       } else {
-        // Toggle quote state
         inQuotes = !inQuotes;
+        closedQuote = !inQuotes;
       }
     } else if (char === "," && !inQuotes) {
       // Field separator (only when not inside quotes)
       fields.push(current.trim());
       current = "";
+      closedQuote = false;
     } else {
       current += char;
     }
   }
 
+  // An unterminated quoted field is malformed, never a usable metric row.
+  if (inQuotes) return [];
   // Add the last field
   fields.push(current.trim());
   return fields;
 }
 
 /**
- * Parse lizard's CSV output (default: `lizard -l <languages> --csv <path>`).
- * CSV format: "NLOC,CCN,Token,PARAM,Length,Location,File,Function"
- * Degrades to `[]` on parse failure; reports lead findings for complexity overages.
+ * Parse pinned Lizard CSV, which is headerless unless verbose output is enabled.
+ * Preserve the eight-column legacy fixtures and the pinned eleven-column header;
+ * malformed rows are reported as degradation, never silently treated as clean.
  */
 function parseLizard(stdout: string): ExternalAnalyzerParseReport {
   if (!stdout || stdout.trim().length === 0) {
     return items([]);
   }
   const lines = stdout.trim().split("\n");
-  if (lines.length < 2) return items([]); // CSV header only, no data rows
   const parsed: ExternalAnalyzerParsedItem[] = [];
   // A row the CSV shape does not fit is COUNTED, not silently discarded: a schema
   // drift that drops every row must not be reportable as a clean scan.
   let droppedRows = 0;
-  // Skip the CSV header (line 0) and process data rows
-  for (let i = 1; i < lines.length; i++) {
+  const legacyHeader = ["nloc", "ccn", "token", "param", "length", "location", "file", "function"];
+  const pinnedHeader = [...legacyHeader, "long_name", "start", "end"];
+  // Default output starts with data. Skip only a recognized first-row header.
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
     // Parse CSV line, handling quoted fields with embedded commas
     const parts = parseCsvLine(line);
-    if (parts.length < 8) {
+    if (i === 0 && [legacyHeader, pinnedHeader].some((header) =>
+      parts.length === header.length && parts.every((caption, index) => caption.toLowerCase() === header[index]),
+    )) continue;
+    if (parts.length < 8 || ![parts[0], parts[1], parts[3]].every((value) => /^\d+$/.test(value))) {
       droppedRows += 1;
       continue;
     }
@@ -1090,6 +1111,7 @@ const lizardCandidate: ExternalAnalyzerCandidate = {
   id: "lizard",
   runner: "pipx",
   spec: "lizard==1.17.10",
+  bin: "lizard",
   purpose: "oversized/over-complex functions in non-JS/TS languages",
   safetyProfile: {
     config_execution: "none",
@@ -1106,8 +1128,7 @@ const lizardCandidate: ExternalAnalyzerCandidate = {
   // contains (JS/TS stay excluded — the in-tree metric owns them).
   buildArgv: (prefix, root) => [
     ...prefix,
-    "-l",
-    detectedLizardLanguages(root).join(","),
+    ...detectedLizardLanguages(root).flatMap((language) => ["-l", language]),
     "--csv",
     root,
   ],

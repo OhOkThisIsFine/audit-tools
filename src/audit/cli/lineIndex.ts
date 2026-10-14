@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/line-index-measurements.test.ts
 import { resolve } from "node:path";
 import { countLines } from "./args.js";
 import type { AuditTask, RepoManifest } from "../types.js";
@@ -44,63 +45,22 @@ export function isUnmeasuredLineCount(value: number | undefined): boolean {
   return value === undefined || Number.isNaN(value);
 }
 
-export async function buildLineIndex(
+/** Measure the adapter's exact sequence, including repeated manifest paths. */
+async function measureLinePaths(
   root: string,
-  repoManifest: RepoManifest,
+  preparedPaths: readonly string[],
 ): Promise<Record<string, number>> {
   const entries: Array<readonly [string, number]> = [];
   let failureCount = 0;
-  for (let i = 0; i < repoManifest.files.length; i += LINE_COUNT_BATCH_SIZE) {
-    const batch = repoManifest.files.slice(i, i + LINE_COUNT_BATCH_SIZE);
-    const results = await Promise.all(
-      batch.map(async (file) => {
-        try {
-          return [
-            file.path,
-            await countLines(resolve(root, file.path)),
-          ] as const;
-        } catch (err) {
-          // Distinguish file-not-found from other IO errors so callers are not
-          // misled into treating a missing file as an empty one (COR-c868f53d).
-          const kind = isFileMissingError(err) ? "file not found" : "IO error";
-          process.stderr.write(
-            `[lineIndex] ${kind} counting lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-          failureCount++;
-          // Unmeasured, not a silent 0 (CP-NODE-6) — see UNMEASURED_LINE_COUNT.
-          return [file.path, UNMEASURED_LINE_COUNT] as const;
-        }
-      }),
-    );
-    entries.push(...results);
-  }
-  if (failureCount > 0) {
-    process.stderr.write(
-      `[lineIndex] ${failureCount} of ${repoManifest.files.length} file(s) failed line counting; those entries are marked unmeasured.\n`,
-    );
-  }
-  // Keys are `file.path` VERBATIM (no transform) — the same field
-  // `initializeCoverageFromPlan` seeds `coverage.files[].path` from
-  // (src/audit/orchestrator/planning.ts), so a lookup against a coverage path
-  // always round-trips against this index's keys.
-  return Object.fromEntries(entries);
-}
-
-export async function buildLineIndexForPaths(
-  root: string,
-  paths: string[],
-): Promise<Record<string, number>> {
-  const uniquePaths = [...new Set(paths)].sort(compareCodeUnits);
-  const entries: Array<readonly [string, number]> = [];
-  let failureCount = 0;
-  const batchSize = LINE_COUNT_BATCH_SIZE;
-  for (let i = 0; i < uniquePaths.length; i += batchSize) {
-    const batch = uniquePaths.slice(i, i + batchSize);
+  for (let i = 0; i < preparedPaths.length; i += LINE_COUNT_BATCH_SIZE) {
+    const batch = preparedPaths.slice(i, i + LINE_COUNT_BATCH_SIZE);
     const results = await Promise.all(
       batch.map(async (path) => {
         try {
           return [path, await countLines(resolve(root, path))] as const;
         } catch (err) {
+          // Distinguish file-not-found from other IO errors so callers are not
+          // misled into treating a missing file as an empty one (COR-c868f53d).
           const kind = isFileMissingError(err) ? "file not found" : "IO error";
           process.stderr.write(
             `[lineIndex] ${kind} counting lines for '${path}': ${err instanceof Error ? err.message : String(err)}\n`,
@@ -115,12 +75,29 @@ export async function buildLineIndexForPaths(
   }
   if (failureCount > 0) {
     process.stderr.write(
-      `[lineIndex] ${failureCount} of ${uniquePaths.length} file(s) failed line counting; those entries are marked unmeasured.\n`,
+      `[lineIndex] ${failureCount} of ${preparedPaths.length} file(s) failed line counting; those entries are marked unmeasured.\n`,
     );
   }
-  // Keys are the input `paths` VERBATIM (no transform) — same round-trip
-  // guarantee as buildLineIndex above.
+  // Promise.all preserves input order: duplicate keys take their last input
+  // occurrence's value, independently of read completion order.
   return Object.fromEntries(entries);
+}
+
+export async function buildLineIndex(
+  root: string,
+  repoManifest: RepoManifest,
+): Promise<Record<string, number>> {
+  // Keep original order, multiplicity and raw path spelling. Coverage uses
+  // these same verbatim keys, including paths with redundant segments.
+  return measureLinePaths(root, repoManifest.files.map((file) => file.path));
+}
+
+export async function buildLineIndexForPaths(
+  root: string,
+  paths: string[],
+): Promise<Record<string, number>> {
+  // Only this adapter deduplicates and sorts; keys still retain raw spelling.
+  return measureLinePaths(root, [...new Set(paths)].sort(compareCodeUnits));
 }
 
 export async function addFileLineCountHints(
