@@ -1,3 +1,5 @@
+import { readGitPathList } from "audit-tools/shared";
+import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
 import { assertApprovedRuntimePlan, RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
 import { executionPlanContextIssues } from "../contractPipeline/executionPlan.js";
 import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
@@ -851,8 +853,8 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
  * which paths the commit changed; it does not prove the tool owns any
  * still-dirty pre-run content at those paths. Excluding source (1) paths too
  * prevents a merge attestation from sweeping the user's earlier WIP into a
- * later closing commit. A state without
- * `run_start_dirty` (pre-field) means no exclusions.
+ * later closing commit.
+ * Unmarked legacy `run_start_dirty` cannot authorize closing work.
  *
  * An empty surface is legitimate (e.g. a run that only produced
  * `resolved_no_change` / skipped items) and correctly yields an empty
@@ -867,7 +869,7 @@ const AUDIT_TOOLS_EXCLUDE_PATTERN = /^\.audit-tools\//;
 function resolveEditSurfaceManifest(state: RemediationState): string[] {
   const files = new Set<string>();
   const runStartDirtyKeys = new Set(
-    (state.run_start_dirty ?? []).map(normalizeRepoPath),
+    admitRemediationDirtyBaseline(state).map(normalizeRepoPath),
   );
   // Accepted source changes already live in their corroborated commits. A
   // later dirty version, even one restoring the original reviewed bytes, is
@@ -1069,6 +1071,7 @@ async function checkClosingPreview(
 ): Promise<
   { action: ClosingAction; custom_command?: string[]; files: string[]; commit_message: string; leftover_files?: string[] } | undefined
 > {
+  admitRemediationDirtyBaseline(state);
   const closingPlan = state.closing_plan!;
   if (closingPlan.pre_authorized === true) return undefined;
   if (!PREVIEW_ACTIONS.has(closingPlan.action)) return undefined;
@@ -1114,14 +1117,12 @@ async function commitClosingFiles(
   if (!foldCollision) {
     return run("git", ["commit", "-m", message, "--", ...files]);
   }
-  const listed = await runTrackedAsync(
-    ["git", "diff", "--cached", "--name-only", "--no-renames", "-z"],
-    { cwd: root, encoding: "utf8", windowsHide: true, timeout: CLOSING_CHILD_DEADLINE_MS },
+  const listed = await readGitPathList(root,
+    ["diff", "--cached", "--name-only", "--no-renames", "--ignore-submodules=none", "-z"],
+    { timeout: CLOSING_CHILD_DEADLINE_MS, windowsHide: true },
   );
   const own = new Set(files);
-  const foreign = listed.status === 0
-    ? String(listed.stdout).split("\0").filter((path) => path && !own.has(path))
-    : null;
+  const foreign = listed.ok ? listed.paths.filter(path => !own.has(path)) : null;
   if (foreign === null || foreign.length > 0) {
     commands.push({
       command: [],
@@ -1149,6 +1150,7 @@ export async function executeClosingAction(
   state: RemediationState,
   options: OrchestratorOptions,
 ): Promise<ClosingResult> {
+  admitRemediationDirtyBaseline(state);
   const action = state.closing_plan!.action;
   if (action === "none") {
     return {
@@ -2179,6 +2181,7 @@ export async function runClosePhase(
   options: OrchestratorOptions,
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
+  admitRemediationDirtyBaseline(state);
   console.log("Running Close Phase...");
 
   if (!state.plan || !state.items || !state.closing_plan) {

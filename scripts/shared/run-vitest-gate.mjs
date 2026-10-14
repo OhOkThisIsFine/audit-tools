@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/vitest-gate-false-red.test.ts
 // Single-sourced vitest GATE. Every local script and CI step that runs vitest
 // in a gate context (must actually fail the pipeline on a test failure) should
 // invoke this instead of `vitest run` / `npx vitest run` directly.
@@ -47,6 +48,7 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { constants as osConstants } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shardSuffix } from "./vitestShard.mjs";
@@ -90,10 +92,23 @@ const result = spawnSync(process.execPath, [vitestEntry, "run", ...vitestArgs], 
 const stderrText = result.stderr ?? "";
 if (stderrText) process.stderr.write(stderrText);
 
-const vitestExit = result.status ?? (result.error ? 1 : 0);
-if (result.error) {
-  console.error(`[vitest-gate] failed to spawn vitest: ${result.error.message}`);
+// Reporter forgiveness applies only to a normally exited child. A fresh green
+// ledger cannot certify a process killed after its reporter finished, and an
+// abnormal execution has no completed-run basis for isolated diagnostics.
+if (result.signal) {
+  const signalNumber = osConstants.signals[result.signal];
+  failClosed(
+    `vitest terminated by signal ${result.signal}.`,
+    typeof signalNumber === "number" ? 128 + signalNumber : 1,
+  );
 }
+if (result.error) {
+  failClosed(`vitest failed to execute: ${result.error.message}`);
+}
+if (typeof result.status !== "number") {
+  failClosed("vitest ended without an exit status or termination signal.");
+}
+const vitestExit = result.status;
 
 const ledgerName = `vitest${shardSuffix(vitestArgs)}`;
 const ledgerPath = resolve(profileDir, `${ledgerName}-latest.json`);
@@ -140,17 +155,17 @@ if (vitestExit !== 0) {
   // this path already read; that redundancy is free and keeps ONE success exit.
 }
 
-function failClosed(message) {
+function failClosed(message, exitCode = 1) {
   console.error(`[vitest-gate] ${message}`);
   console.error(
-    "[vitest-gate] this run's outcome could not be confirmed from the ledger — treating it as " +
-      "FAILED rather than trusting a possibly stale result.",
+    "[vitest-gate] normal vitest execution and this run's ledger outcome could not both be " +
+      "confirmed — treating it as FAILED.",
   );
   // Every exit this script owns states its attribution, so a caller never has
   // to infer one from silence. Here the verdict is always unattributable by
-  // construction: the ledger is what could not be trusted.
+  // construction: execution or ledger evidence could not certify this run.
   console.error(formatAttributionLine({ attributable: false, reason: message.trim() }));
-  process.exit(1);
+  process.exit(exitCode);
 }
 
 if (!existsSync(ledgerPath)) {

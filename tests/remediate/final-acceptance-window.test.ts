@@ -1,3 +1,6 @@
+import * as gitDiscovery from "../../src/shared/git.js";
+import { runCloseAcceptance } from "../../src/remediate/phases/closeAcceptance.js";
+import { finalGateRecordPath } from "../../src/remediate/steps/finalGate.js";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -9,11 +12,17 @@ import type { RemediationState } from "../../src/remediate/state/store.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 
+vi.mock("../../src/shared/git.js", async original => {
+  const actual = await original<typeof import("../../src/shared/git.js")>();
+  return { ...actual, stagedAndUntracked: vi.fn(actual.stagedAndUntracked) };
+});
+
 const harness = createNextStepHarness(".test-final-acceptance-window");
 const { REPO_DIR: root, ARTIFACTS_DIR: artifactsDir } = harness;
 
 function resolvedState(): RemediationState {
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "implementing",
     plan: {
       plan_id: "PLAN-WINDOW", objective: "Verify integrated changes", non_goals: [], findings: [],
@@ -46,8 +55,12 @@ async function prepare(state = resolvedState()) {
   return state;
 }
 
-beforeEach(async () => { await harness.resetTestRepo(); await counterRepo(); });
-afterEach(async () => { await harness.cleanupTestRepo(); });
+beforeEach(async () => {
+  const actual = await vi.importActual<typeof import("../../src/shared/git.js")>("../../src/shared/git.js");
+  vi.mocked(gitDiscovery.stagedAndUntracked).mockReset().mockImplementation(actual.stagedAndUntracked);
+  await harness.resetTestRepo(); await counterRepo();
+});
+afterEach(async () => { vi.restoreAllMocks(); await harness.cleanupTestRepo(); });
 
 describe("final acceptance execution window", () => {
   it("executes one planned operation for identical final-floor and combined-suite requirements", async () => {
@@ -189,5 +202,25 @@ describe("final acceptance execution window", () => {
     expect(verification.findings).toEqual([]);
     expect(verification.units).toHaveLength(2);
     expect(verification.overall_status).toBe("failed");
+  });
+});
+
+// This wrapper may discover the refusal only after an authorized suite ran.
+// It must stop, not publish a replacement red record or pretend that run undid IO.
+describe("close acceptance discovery refusal", () => {
+  it("valid-marked close acceptance propagates live discovery refusal", async () => {
+    const state = resolvedState();
+    delete state.plan!.test_command;
+    const refusal = new gitDiscovery.DirtyPathDiscoveryError("status", "synthetic discovery refusal");
+    vi.mocked(gitDiscovery.stagedAndUntracked).mockClear().mockRejectedValue(refusal);
+    const runner = vi.fn(() => ({ status: 1, stdout: "FAIL src/0.ts", stderr: "" }));
+    const runCombined = vi.fn();
+    await expect(runCloseAcceptance({ state, options: { root, artifactsDir, finalGateRunner: runner }, runCombined })).rejects.toBe(refusal);
+    expect(gitDiscovery.stagedAndUntracked).toHaveBeenCalledExactlyOnceWith(root);
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(runCombined).not.toHaveBeenCalled();
+    expect(existsSync(finalGateRecordPath(artifactsDir))).toBe(false);
+    expect(state.items!.U0!.status).toBe("resolved");
+    expect(state.items!.U1!.status).toBe("resolved");
   });
 });

@@ -27,6 +27,7 @@ const repoRoot = join(__dirname, "..", "..");
 
 const FOLD_REACHABLE_MODULES = [
   // Audit fold (artifact-tree lock):
+  "src/shared/gitTrackedPaths.ts", //          shared recursive corpus, both folds
   "src/shared/git.ts", //                       via intake/scope/structure
   "src/audit/extractors/disposition.ts", //     via intake/structure
   "src/shared/tooling/analyzerDeps.ts", //      via graph enrichment

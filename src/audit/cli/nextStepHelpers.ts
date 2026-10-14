@@ -1,3 +1,4 @@
+import type { SpawnDeadline } from "../../shared/tooling/exec.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/next-step-integrity-reintake.test.ts
@@ -120,6 +121,8 @@ import {
 } from "./foldTransaction.js";
 import {
   charterClarificationOmits,
+  charterComparisonOmits,
+  charterFidelityOmits,
   charterExtractionOmits,
   intentEquivalenceOmits,
   synthesisNarrativeOmits,
@@ -261,6 +264,8 @@ export type NextStepParams = {
   artifactsDir: string;
   selfCliPath: string;
   timeoutMs: number;
+  /** One absolute invocation budget; never reset at a fold dispatch. */
+  deadline?: SpawnDeadline;
   narrativeEnabled?: boolean;
   analyzers?: Record<string, AnalyzerSetting>;
   graphLlmEdgeReasoning?: boolean;
@@ -1735,15 +1740,12 @@ export async function handleDesignReviewBranch(
 
 // ── Tier C2: consolidated "omittable host gate" engine ─────────────────────────
 //
-// Five of the seven host-gate branch handlers below share ONE shape: poll a
-// single lane's bound submission; if present, apply it via runAuditStep and
-// `continue`; else, if a ceiling/flag says no host turn is owed this pass,
-// `run_omit` (so the deterministic omit executor satisfies the obligation);
-// else `return` the one host step this gate ever emits. `runOmittableGate`
-// below is the single parameterized driver for that shape; each handler is a
-// thin descriptor naming its filename, its apply side effect, and its
-// omission predicate — the actual judgment (which ceiling, which flag, which
-// step) still lives per-gate, just no longer copy-pasted 5×.
+// Single-lane host gates poll and validate a bound submission before deciding
+// whether to apply it, omit deterministically, or emit a host step. The driver
+// owns that lifecycle; each descriptor supplies only the lane, schema, apply
+// operation, and omission policy. Charter extraction shares the OUTER outcome
+// adapter only: its custom inner lifecycle checks omission before materializing
+// packets and consuming its per-kind lanes.
 //
 // graph_enrichment and design_review do NOT fit this shape and are
 // intentionally NOT routed through `runOmittableGate` — forcing them in would
@@ -1765,7 +1767,7 @@ export async function handleDesignReviewBranch(
 //     against one step kind. There is no `run_omit` branch at all — an
 //     unsatisfied pass always returns a host step, never an autonomous omit.
 
-/** The common action shape all five `runOmittableGate`-driven branches return. */
+/** The common action shape of omittable host-gate branches. */
 type OmittableGateAction<TStepKind extends string> =
   | {
       /** A submission was consumed + applied; keep folding on the carried bundle. */
@@ -1825,9 +1827,8 @@ interface OmittableGateDescriptor<TIncoming, TStepKind extends string> {
 
 /**
  * Drive one "poll the lane → apply+continue, else omit-or-return" gate — the
- * shape common to synthesis_narrative, charter_extraction,
- * charter_clarification, and systemic_challenge. See the section comment
- * above for the two gates that deviate and are not run through this engine.
+ * single-lane lifecycle. Charter extraction, graph enrichment, and design
+ * review retain their custom inner ordering and consumption policies.
  */
 async function runOmittableGate<TIncoming, TStepKind extends string>(
   descriptor: OmittableGateDescriptor<TIncoming, TStepKind>,
@@ -1932,11 +1933,8 @@ export async function handleSynthesisNarrativeBranch(
 }
 
 /**
- * Handle the `intent_equivalence_executor` polling block (DD-9). Deviates from
- * `runOmittableGate` in ONE way: the consumed verdict is SCHEMA-validated here
- * and a mis-shaped submission is QUARANTINED with a stderr diagnostic (the
- * quarantine-loudly property) instead of being handed to the executor to crash
- * on. Returns:
+ * Handle the `intent_equivalence_executor` polling block (DD-9), using the
+ * common consume-before-omit lifecycle and schema quarantine. Returns:
  *   - `continue`  → a valid verdict was consumed + committed; re-scan.
  *   - `run_omit`  → a deterministic arm owns the resolution (baseline stamp /
  *     gate-version-stale / structured delta) — run the executor, stay drainable.
@@ -1949,45 +1947,30 @@ export async function handleIntentEquivalenceBranch(
   tx: FoldTransaction,
 ): Promise<IntentEquivalenceBranchResult> {
   const lane = GATE_LANES.intent_equivalence;
-  const incoming = await tryConsumeSubmission<unknown>(params.artifactsDir, lane, tx);
-  if (incoming.status === "malformed") {
-    await quarantineMisshapedSubmission(
-      params.artifactsDir,
-      incoming.path,
+  return runOmittableGate<unknown, "intent_equivalence">(
+    {
+      kind: "intent_equivalence",
       lane,
-      incoming.reason,
-    );
-    // Fall through: no valid submission — re-emit or deterministically resolve.
-  } else if (incoming.status === "ok") {
-    const parsed = LANE_SUBMISSION_SCHEMAS[lane]!.safeParse(incoming.value);
-    if (parsed.success) {
-      const applied = await runAuditStepUnlocked(
-        {
-          root: params.root,
-          sourceRoot: requireSourceRoot(params),
-          artifactsDir: params.artifactsDir,
-          preferredExecutor: "intent_equivalence_executor",
-          intentEquivalenceVerdictPath: incoming.path,
-          scopeIndexMemo: params.scopeIndexMemo,
-        },
-        bundle,
-      );
-      markSubmissionApplied(tx, incoming.path);
-      return { action: "continue", bundle: applied.updated_bundle };
-    }
-    await quarantineMisshapedSubmission(
-      params.artifactsDir,
-      incoming.path,
-      lane,
-      parsed.error,
-    );
-    // Fall through: no valid submission — re-emit or deterministically resolve.
-  }
-  // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
-  if (intentEquivalenceOmits(bundle)) {
-    return { action: "run_omit" };
-  }
-  return { action: "return", result: { kind: "intent_equivalence", state, bundle } };
+      schema: LANE_SUBMISSION_SCHEMAS[lane]!,
+      apply: (_value, path, p, foldBundle) =>
+        runAuditStepUnlocked(
+          {
+            root: p.root,
+            sourceRoot: requireSourceRoot(p),
+            artifactsDir: p.artifactsDir,
+            preferredExecutor: "intent_equivalence_executor",
+            intentEquivalenceVerdictPath: path,
+            scopeIndexMemo: p.scopeIndexMemo,
+          },
+          foldBundle,
+        ),
+      shouldOmit: intentEquivalenceOmits,
+    },
+    params,
+    bundle,
+    state,
+    tx,
+  );
 }
 
 /**
@@ -2252,7 +2235,7 @@ export async function handleCharterComparisonBranch(
           },
           foldBundle,
         ),
-      shouldOmit: (b) => !(b.charter_register?.comparison_pending === true),
+      shouldOmit: charterComparisonOmits,
     },
     params,
     bundle,
@@ -2289,7 +2272,7 @@ export async function handleCharterFidelityBranch(
           },
           foldBundle,
         ),
-      shouldOmit: (b) => !(b.charter_register?.fidelity_pending === true),
+      shouldOmit: charterFidelityOmits,
     },
     params,
     bundle,
@@ -2996,6 +2979,38 @@ async function runDeterministicExecutor(
   return { kind: "transition", state: result.updated_bundle };
 }
 
+/** Adapt only the common outer outcome; handlers retain their lane lifecycle. */
+function omittableObligation(
+  handler: (
+    params: NextStepParams,
+    bundle: ArtifactBundle,
+    state: AuditState,
+    tx: FoldTransaction,
+  ) => Promise<
+    | CriticalFlowFallbackBranchResult
+    | IntentEquivalenceBranchResult
+    | CharterExtractionBranchResult
+    | CharterComparisonBranchResult
+    | CharterFidelityBranchResult
+    | CharterClarificationBranchResult
+    | SystemicChallengeBranchResult
+    | SynthesisNarrativeBranchResult
+  >,
+): AuditObligationDef["execute"] {
+  return async (bundle, ctx): Promise<AuditOutcome> => {
+    const state = deriveAuditState(bundle, { emitStaleness: false });
+    const branch = await handler(ctx.params, bundle, state, ctx.tx);
+    switch (branch.action) {
+      case "return":
+        return { kind: "emit", step: branch.result, state: bundle };
+      case "continue":
+        return { kind: "transition", state: branch.bundle };
+      case "run_omit":
+        return runDeterministicExecutor(bundle, ctx);
+    }
+  };
+}
+
 /**
  * Build the audit obligation definitions in `PRIORITY` order. Each `execute`
  * relocates the corresponding arm of the hand-rolled `for` loop:
@@ -3048,22 +3063,7 @@ export function buildAuditObligations(
     // confidence bar, apply the host submission against the carried bundle or
     // emit the host step. No autonomous omit — the host is always available to
     // author the enrichment.
-    critical_flow_fallback_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCriticalFlowFallbackBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    critical_flow_fallback_current: omittableObligation(handleCriticalFlowFallbackBranch),
     // Graph enrichment: poll the analyzer-decision / edge-reasoning lane
     // artifacts first (emit a host step when one is needed), otherwise run the
     // deterministic enrichment executor.
@@ -3099,66 +3099,16 @@ export function buildAuditObligations(
     // DD-9 intent-equivalence gate: consume a judge verdict (validated +
     // quarantined-loudly), resolve the deterministic arms in-fold, or emit the
     // bounded prose-equivalence judge step.
-    intent_equivalence_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleIntentEquivalenceBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    intent_equivalence_current: omittableObligation(handleIntentEquivalenceBranch),
     // Charter extraction (Phase C): consume the lane submissions (ingest+gate),
     // omit at a shallow ceiling, or emit the host charter-extraction step.
-    charter_extraction_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCharterExtractionBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    charter_extraction_current: omittableObligation(handleCharterExtractionBranch),
     // Charter comparison (steps 2–3): consume the comparison submission, settle
     // deterministically when the register is not comparison_pending, or emit the
     // comparison reader's host step.
-    charter_comparison_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCharterComparisonBranch(ctx.params, bundle, state, ctx.tx);
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    charter_comparison_current: omittableObligation(handleCharterComparisonBranch),
     // Charter fidelity (step 4): the separate lane's verdicts, or the settle.
-    charter_fidelity_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCharterFidelityBranch(ctx.params, bundle, state, ctx.tx);
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    charter_fidelity_current: omittableObligation(handleCharterFidelityBranch),
     // The two design-review passes share one submission-poll handler (it
     // resolves which pass remains).
     design_review_contract_completed: (bundle, ctx) =>
@@ -3166,64 +3116,16 @@ export function buildAuditObligations(
     design_review_conceptual_completed: (bundle, ctx) =>
       runDesignReviewObligation(bundle, ctx),
     // Charter clarification (Phase D triangulation loop).
-    charter_clarification_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleCharterClarificationBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    charter_clarification_current: omittableObligation(handleCharterClarificationBranch),
     // Systemic challenge (Phase E loop-until-dry).
-    systemic_challenge_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleSystemicChallengeBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      return { kind: "transition", state: branch.bundle };
-    },
+    systemic_challenge_current: omittableObligation(handleSystemicChallengeBranch),
     // The audit-task dispatch obligation maps to the host-delegation
     // semantic_review_executor (no deterministic runner) → host review.
     audit_tasks_completed: (bundle, ctx) => runHostDelegationObligation(bundle, ctx),
     // Synthesis narrative: consume the narrative lane; emit the host step when
     // narrative is enabled and not yet supplied, otherwise the deterministic
     // omit runs (fold on).
-    synthesis_narrative_current: async (bundle, ctx): Promise<AuditOutcome> => {
-      const state = deriveAuditState(bundle, { emitStaleness: false });
-      const branch = await handleSynthesisNarrativeBranch(
-        ctx.params,
-        bundle,
-        state,
-        ctx.tx,
-      );
-      if (branch.action === "return") {
-        return { kind: "emit", step: branch.result, state: bundle };
-      }
-      if (branch.action === "run_omit") {
-        // Narrative disabled: run the deterministic omit executor so the
-        // status:omitted marker is written and the obligation is satisfied.
-        return runDeterministicExecutor(bundle, ctx);
-      }
-      // continue: a narrative submission was consumed + applied — re-scan.
-      return { kind: "transition", state: branch.bundle };
-    },
+    synthesis_narrative_current: omittableObligation(handleSynthesisNarrativeBranch),
   };
 
   // The registry's membership and order DERIVE from PRIORITY — never a second
@@ -3584,6 +3486,14 @@ function foldHeartbeatRecord(obligation: string, durationMs: number): void {
 export async function runDeterministicForNextStep(
   params: NextStepParams,
 ): Promise<NextStepResult & { readonly sourceRoot: string }> {
+  // Only explicit deadlines survive across calls. A synthesized budget belongs to
+  // this invocation, even when the caller reuses its original options object.
+  const deadline = params.deadline ?? params.externalAcquisition?.deadline ?? { at: Date.now() + params.timeoutMs };
+  params = {
+    ...params,
+    deadline,
+    ...(params.externalAcquisition ? { externalAcquisition: { ...params.externalAcquisition, deadline } } : {}),
+  };
   // The heartbeat wraps the WHOLE call, throw path included: a drain that dies
   // halfway is exactly when a caller most needs to know how far it got, and the
   // interval beat has no other owner on this path (the fold drives the shared

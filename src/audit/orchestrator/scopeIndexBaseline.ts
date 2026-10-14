@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/recursive-tracked-adapters.test.ts, tests/audit/scope-index-probe-per-fold.test.ts
 /**
  * The live git-index probe behind `repo_manifest.json`'s `scope_index_key`.
  *
@@ -34,22 +35,12 @@
  * leaves unset: the manifest then carries no index claim at all, and the
  * pre-existing content-only behaviour is preserved verbatim.
  *
- * RECURSION IS PART OF THE ATOMIC PAIR, not a tuning knob. The rule this probe
- * tracks (`buildFileDisposition`'s untracked classification) reads the index
- * with `--recurse-submodules`, and so does the citation-grounding corpus
- * (`enumerateTrackedFilePaths`) — the flag is ONE decision shared by all three,
- * because "tracked" must mean one thing everywhere or a finding grounds against
- * a file the disposition excluded. A probe without the flag returns a stable,
- * plausible key that simply cannot see a move INSIDE a submodule: the gitlink
- * line is unchanged, the parent's own entries are unchanged, so
- * `scope_index_key` holds still while the recursive tracked set moves — and the
- * stale `file_disposition.json` this probe exists to catch is carried forward
- * silently, for exactly the repos that have first-party submodules.
+ * Recursive enumeration is owned by readRecursiveTrackedPaths, shared with
+ * disposition and grounding, so an index-only submodule move is observable.
  */
 import {
   hashContent,
-  runTrackedAsync,
-  TRACKED_CHILD_DEADLINE_MS,
+  readRecursiveTrackedPaths,
   normalizeRepoPath,
 } from "audit-tools/shared";
 import type { RepoManifest } from "../types.js";
@@ -70,25 +61,10 @@ export async function probeScopeIndexKey(
   candidatePaths: readonly string[],
 ): Promise<string | null> {
   if (candidatePaths.length === 0) return null;
-  let result;
-  try {
-    result = await runTrackedAsync(["git", "ls-files", "-z", "--recurse-submodules"], {
-      cwd: root,
-      encoding: "utf8",
-      maxBuffer: 256 * 1024 * 1024,
-      timeout: TRACKED_CHILD_DEADLINE_MS,
-    });
-  } catch {
-    return null;
-  }
-  if (result.error || result.status !== 0) return null;
+  const result = await readRecursiveTrackedPaths(root);
+  if (!result.ok) return null;
 
-  const tracked = new Set(
-    (result.stdout ?? "")
-      .split("\0")
-      .filter((path) => path.length > 0)
-      .map(normalizeRepoPath),
-  );
+  const tracked = new Set(result.paths.map(normalizeRepoPath));
   const trackedCandidates = candidatePaths
     .map((path) => normalizeRepoPath(toPosixPath(path)))
     .filter((path) => tracked.has(path))

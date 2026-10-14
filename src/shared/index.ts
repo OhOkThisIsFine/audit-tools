@@ -864,6 +864,8 @@ export {
   readAuditReadState,
   gitRemotes,
   stagedAndUntracked,
+  DirtyPathDiscoveryError,
+  readGitPathList,
   mineGitHistory,
 } from "./git.js";
 export type {
@@ -1352,6 +1354,7 @@ export {
   runExternalAnalyzer,
   registerExternalAnalyzers,
   runAcquisitionEngine,
+  prepareAcquisition,
   resolveBinaryCandidates,
   detectNodeEcosystem,
   detectPythonEcosystem,
@@ -1441,3 +1444,7 @@ export { ReviewSubmissionEnvelopeSchema, parseReviewSubmissionEnvelope } from ".
 export type { ReviewSubmissionEnvelope, ReviewSubmissionParseResult, ReviewSubmissionFailureCode } from "./types/reviewIndependence.js";
 export { ContractReviewProvenanceSchema, ContractReviewOutcomeSchema, AcceptedConformanceReviewSchema } from "./types/reviewIndependence.js";
 export type { ContractReviewProvenance, ContractReviewDeclaration, ContractReviewOutcome, AcceptedConformanceReview } from "./types/reviewIndependence.js";
+
+export { readRecursiveTrackedPaths } from "./gitTrackedPaths.js";
+
+export { defaultBinaryFetcher } from "./analyzers/binaryFetcher.js";

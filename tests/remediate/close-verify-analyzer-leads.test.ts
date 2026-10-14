@@ -1,5 +1,6 @@
 import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as acquisitionEngine from "../../src/shared/analyzers/acquisitionEngine.js";
 import { runClosePhase } from "../../src/remediate/phases/close.js";
 import { verifyAnalyzerLeads } from "../../src/remediate/phases/closeVerifyAnalyzerLeads.js";
 import { readFile, rm, mkdir } from "node:fs/promises";
@@ -284,5 +285,63 @@ describe("shared-unit analyzer outcomes", () => {
     const outcome=await verifyAnalyzerLeads({state,root:REPO_DIR,overrides:{candidates:[fakeCandidate()],run:fakeRun}});
     expect(outcome.ran).toBe(false);
     expect(state.items!.F1.status).toBe("resolved");
+  });
+});
+
+describe("verifyAnalyzerLeads acquisition boundaries", () => {
+  it("expired close verification skips findings and never marks a failed rerun verified", async () => {
+    let calls = 0;
+    const outcome = await verifyAnalyzerLeads({
+      state: makeState(provenanceFor(FLAGGED_SOURCE)), root: REPO_DIR,
+      overrides: { candidates: [fakeCandidate()], deadline: { at: 0 }, run: async (argv, cwd, timeout) => {
+        calls++; return fakeRun(argv, cwd, timeout);
+      } },
+    });
+    expect(calls).toBe(0);
+    expect(outcome.statuses).toHaveLength(1);
+    expect(outcome.verdicts.F1.status).toBe("skipped");
+    expect(outcome.statuses[0].error).toContain("deadline_exceeded");
+  });
+
+  it("close verification preserves a missing BinarySpec failure without invoking the engine", async () => {
+    let calls = 0;
+    const outcome = await verifyAnalyzerLeads({
+      state: makeState(provenanceFor(FLAGGED_SOURCE)), root: REPO_DIR,
+      overrides: { candidates: [{ ...fakeCandidate(), runner: "binary" }], run: async (argv, cwd, timeout) => {
+        calls++; return fakeRun(argv, cwd, timeout);
+      } },
+    });
+    expect(calls).toBe(0);
+    expect(outcome.statuses).toHaveLength(1);
+    expect(outcome.statuses[0].error).toContain("BinarySpec");
+    expect(outcome.verdicts.F1.status).toBe("skipped");
+  });
+
+  it("close verification budgets only target admission, detects once, and supplies no fetcher", async () => {
+    const shared = await import("audit-tools/shared");
+    const { vi } = await import("vitest");
+    let time = 1000;
+    let detections = 0;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => time);
+    const realResolve = acquisitionEngine.resolveBinaryCandidates;
+    const resolver = vi.spyOn(acquisitionEngine, "resolveBinaryCandidates").mockImplementation(async (candidates, root, options) => {
+      expect(options?.deadline?.at).toBe(1000 + shared.ANALYZER_CHILD_DEADLINE_MS);
+      expect(options?.fetch).toBeUndefined();
+      return realResolve(candidates, root, options);
+    });
+    const timeouts: Array<number | undefined> = [];
+    try {
+      await verifyAnalyzerLeads({
+        state: makeState(provenanceFor(FLAGGED_SOURCE)), root: REPO_DIR,
+        overrides: { candidates: [
+          { ...fakeCandidate(), detect: () => ++detections === 1 },
+          { ...fakeCandidate(), id: "unrelated", detect: () => { throw new Error("unrelated candidate detected"); } },
+        ], run: async (argv, cwd, timeout) => {
+          timeouts.push(timeout); time += 10; return fakeRun(argv, cwd, timeout);
+        } },
+      });
+      expect(detections).toBe(1);
+      expect(timeouts).toEqual([shared.ANALYZER_CHILD_DEADLINE_MS, shared.ANALYZER_CHILD_DEADLINE_MS - 10]);
+    } finally { resolver.mockRestore(); now.mockRestore(); }
   });
 });

@@ -3,7 +3,20 @@
  * with emphasis on INV-GND-02: grounding is a TOTAL function — a finding with no
  * grounding verdict (undefined/absent) is treated as ungrounded → verify.
  */
-import { test, expect } from "vitest";
+import { test, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+let repoRoot: string;
+beforeEach(() => {
+  repoRoot = mkdtempSync(join(tmpdir(), "finding-grounding-"));
+  mkdirSync(join(repoRoot, "src"));
+  // Admission uses real topology; injected readers still own quote-test content.
+  for (const name of ["auth.ts", "a.ts", "b.ts", "c.ts", "missing.ts"])
+    writeFileSync(join(repoRoot, "src", name), "fixture");
+});
+afterEach(() => rmSync(repoRoot, { recursive: true, force: true }));
 import {
   normalizeForMatch,
   normalizeRepoPath,
@@ -52,14 +65,14 @@ test("quoteMatches is whitespace/CRLF-insensitive and content-based", () => {
 test("groundFinding grounds a matching quote and flags an absent one", async () => {
   const reader: SourceReader = async () => "const secret = process.env.SECRET;\nreturn sign(secret);\n";
   const ok = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/auth.ts", quoted_text: "return sign(secret);" }]),
     reader,
   );
   expect(ok.status).toBe("grounded");
 
   const bad = await groundFinding(
-    "/repo",
+    repoRoot,
     finding([{ path: "src/auth.ts", quoted_text: "DROP TABLE users;" }]),
     reader,
   );

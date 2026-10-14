@@ -32,8 +32,9 @@
  * confident wrong one. The verdict enum has no repair state, so the exclusion is
  * by construction rather than by intent.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { lstatSync, readFileSync, statSync } from "node:fs";
+import { relative, resolve, sep, win32 } from "node:path";
+import { resolveContainedSourcePath } from "../io/sourcePath.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import {
   isBareBasename,
@@ -41,7 +42,7 @@ import {
   resolveBasenameToTrackedPath,
 } from "./findingGrounding.js";
 
-/** Reads a source file's text synchronously; injectable so the core is testable without fs. */
+/** Reads an admitted source file synchronously; injectable independently of path admission. */
 export type SyncSourceReader = (absolutePath: string) => string;
 
 const defaultSyncSourceReader: SyncSourceReader = (absolutePath) =>
@@ -302,17 +303,25 @@ function resolveCitedPath(
   corpus: ReadonlySet<string>,
 ): ResolvedCitedPath | undefined {
   const trimmed = citedPath.trim();
-  const direct = isAbsolute(trimmed) ? trimmed : join(root, trimmed);
-  if (existsSync(direct)) {
-    return { absolutePath: direct, repoRelativePath: trimmed.replace(/\\/g, "/") };
-  }
-  if (isBareBasename(trimmed)) {
+  const direct = resolveContainedSourcePath(root, trimmed);
+  const admitted = (absolutePath: string): ResolvedCitedPath => ({
+    absolutePath,
+    repoRelativePath: relative(resolve(root), absolutePath).split(sep).join("/"),
+  });
+  if (direct !== undefined) return admitted(direct);
+  if (isBareBasename(trimmed) && win32.parse(trimmed).root === "") {
+    // Only a missing basename may fall back. An existing rejected file/link
+    // cannot be rehabilitated through a different tracked file of the same name.
+    try {
+      lstatSync(resolve(root, trimmed));
+      return undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+    }
     const tracked = resolveBasenameToTrackedPath(trimmed, corpus);
     if (tracked) {
-      const resolved = isAbsolute(tracked) ? tracked : join(root, tracked);
-      if (existsSync(resolved)) {
-        return { absolutePath: resolved, repoRelativePath: tracked };
-      }
+      const resolved = resolveContainedSourcePath(root, tracked);
+      if (resolved !== undefined) return admitted(resolved);
     }
   }
   return undefined;

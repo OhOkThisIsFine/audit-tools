@@ -39,6 +39,7 @@ function paused(id: string): RemediationItemState {
 
 function twoPausedState(): RemediationState {
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "waiting_for_clarification",
     plan: canonicalPlanFixture({
       plan_id: "PLAN-CR",

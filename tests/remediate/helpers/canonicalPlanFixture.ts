@@ -77,7 +77,7 @@ export async function writeApprovedPlanFixture(artifactsDir: string, state: Reme
   });
 }
 
-/** Historical fixture projection. Real production code has no legacy-shape adapter. */
+/** Historical fixture projection into an explicitly authorized test run, never a persisted-state migration. */
 export function canonicalStateFromLegacyFixture(value: {
   status: RemediationState["status"];
   plan?: { plan_id: string; findings: Finding[]; blocks: Array<{
@@ -87,7 +87,7 @@ export function canonicalStateFromLegacyFixture(value: {
   items?: Record<string, { finding_id: string; block_id: string; status: RemediationItemState["status"]; [key: string]: unknown }>;
   [key: string]: unknown;
 }): RemediationState {
-  if (!value.plan) return { ...value, contract_version: REMEDIATION_STATE_CONTRACT_VERSION } as RemediationState;
+  if (!value.plan) return { run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", ...value, contract_version: REMEDIATION_STATE_CONTRACT_VERSION } as RemediationState;
   const { blocks, block_strategy: _retiredStrategy, ...oldPlan } = value.plan;
   const units = blocks.map(block => canonicalUnitFixture(block.block_id, {
     title: block.items.map(id => oldPlan.findings.find(finding => finding.id === id)?.title ?? id).join("; ") || block.block_id,
@@ -109,7 +109,7 @@ export function canonicalStateFromLegacyFixture(value: {
     const { finding_id: _finding, block_id: _block, ...item } = historical[0] ?? { status: "pending", finding_id: "", block_id: "" };
     items[unit.id] = { ...item, status: item.status, unit_id: unit.id };
   }
-  return { ...value, contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
+  return { run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", ...value, contract_version: REMEDIATION_STATE_CONTRACT_VERSION,
     plan: canonicalPlanFixture({ ...oldPlan, requirements, units }), items,
   } as RemediationState;
 }

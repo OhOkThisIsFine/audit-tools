@@ -9,16 +9,26 @@ import type {
   BinarySpec,
   BinaryFetcher,
   BinaryCommandRunner,
+  BinaryResolveOptions,
 } from "../../src/shared/analyzers/binaryAcquisition.js";
 import type { ExternalAnalyzerCandidate } from "../../src/shared/analyzers/acquisitionEngine.js";
 import type { RunTrackedResult } from "audit-tools/shared";
 
-const { resolveBinary, expectedSha256For } = await import(
+const { resolveBinary: resolveBinaryActual, expectedSha256For } = await import(
   "../../src/shared/analyzers/binaryAcquisition.js"
 );
-const { resolveBinaryCandidates, runExternalAnalyzer } = await import(
+const { resolveBinaryCandidates: resolveBinaryCandidatesActual, runExternalAnalyzer } = await import(
   "../../src/shared/analyzers/acquisitionEngine.js"
 );
+
+// Existing scenarios default to explicit absence; success fixtures override it.
+const resolveBinary = (spec: BinarySpec, options: BinaryResolveOptions = {}) =>
+  resolveBinaryActual(spec, { resolveExecutable: () => null, ...options });
+
+const resolveBinaryCandidates = (
+  candidates: ExternalAnalyzerCandidate[], root: string,
+  options: Parameters<typeof resolveBinaryCandidatesActual>[2] = {},
+) => resolveBinaryCandidatesActual(candidates, root, { resolveExecutable: () => null, ...options });
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
@@ -28,6 +38,7 @@ function makeSpec(overrides: Partial<BinarySpec> = {}): BinarySpec {
     binaryName: "gitleaks",
     version: "9.9.9",
     versionProbeArgs: ["gitleaks", "version"],
+    parseVersion: text => /^\d+\.\d+\.\d+\n?$/.test(text) ? text.trim() : null,
     assetFor: (platform) =>
       platform === "win32"
         ? "gitleaks_9.9.9_windows_x64.zip"
@@ -76,7 +87,7 @@ function pathRunner(): BinaryCommandRunner {
   // PATH probe succeeds.
   return async (argv: string[]): Promise<RunTrackedResult> => ({
     status: 0,
-    stdout: "gitleaks 8.x",
+    stdout: "9.9.9\n",
     stderr: "",
     argv,
     duration_ms: 1,
@@ -112,6 +123,7 @@ test("D-1: the DEFAULT cache root honours AUDIT_TOOLS_BINARY_CACHE", async () =>
   process.env.AUDIT_TOOLS_BINARY_CACHE = ownRoot;
   try {
     const res = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher(),
       platform: "linux",
@@ -139,17 +151,19 @@ test("expectedSha256For parses the matching asset line, ignores others", () => {
 test("resolveBinary returns PATH when the tool is already installed", async () => {
   const res = await resolveBinary(makeSpec(), {
     run: pathRunner(),
+      resolveExecutable: () => "/inert/bin/gitleaks",
     platform: "linux",
     arch: "x64",
   });
   expect(res.status).toBe("path");
-  expect(res.command).toBe("gitleaks");
+  expect(res.command).toBe("/inert/bin/gitleaks");
 });
 
 test("resolveBinary downloads + checksum-verifies + extracts when absent", async () => {
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
   try {
     const res = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher(),
       cacheDir,
@@ -167,6 +181,7 @@ test("resolveBinary refuses to extract/execute on a checksum mismatch", async ()
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
   try {
     const res = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       // Serve a digest that does NOT match the asset bytes.
       fetch: fetcher({ digest: "0".repeat(64) }),
@@ -184,7 +199,8 @@ test("resolveBinary refuses to extract/execute on a checksum mismatch", async ()
 
 test("resolveBinary degrades to unavailable with no fetcher (offline) and no PATH", async () => {
   const res = await resolveBinary(makeSpec(), {
-    run: offlineRunnerExtractingTo("gitleaks"),
+    resolveExecutable: () => null,
+      run: offlineRunnerExtractingTo("gitleaks"),
     platform: "linux",
     arch: "x64",
   });
@@ -269,7 +285,8 @@ test("resolveBinary(archived:false) still refuses a checksum mismatch", async ()
 
 test("resolveBinary returns unavailable when the os/arch has no asset", async () => {
   const res = await resolveBinary(makeSpec({ assetFor: () => null }), {
-    run: offlineRunnerExtractingTo("gitleaks"),
+    resolveExecutable: () => null,
+      run: offlineRunnerExtractingTo("gitleaks"),
     fetch: fetcher(),
     platform: "sunos",
     arch: "mips",
@@ -300,12 +317,14 @@ test("resolveBinaryCandidates resolves a present tool and records gaps for absen
   try {
     const present = await resolveBinaryCandidates([binaryCandidate()], dir, {
       run: pathRunner(),
+      resolveExecutable: () => "/inert/bin/gitleaks",
     });
-    expect(present.resolvedBinaries.gitleaks).toBe("gitleaks");
+    expect(present.resolvedBinaries.gitleaks).toBe("/inert/bin/gitleaks");
     expect(present.unresolvedStatuses.length).toBe(0);
 
     // Offline + no fetcher ⇒ not_resolved status, no silent drop.
     const absent = await resolveBinaryCandidates([binaryCandidate()], dir, {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
     });
     expect(Object.keys(absent.resolvedBinaries).length).toBe(0);
@@ -362,6 +381,7 @@ test("inv-5: a re-resolution of a legitimately downloaded binary IS a verified c
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
   try {
     const options = {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher(),
       cacheDir,
@@ -390,6 +410,7 @@ test("inv-5 / fail-4: bytes PRE-PLANTED at the predictable cache path are never 
 
     const res = await resolveBinary(makeSpec(), {
       // No fetcher: if the planted file were trusted this would return `cached`.
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       cacheDir,
       platform: "linux",
@@ -400,8 +421,8 @@ test("inv-5 / fail-4: bytes PRE-PLANTED at the predictable cache path are never 
     expect(res.reason).toBe("offline");
     expect(
       existsSync(join(versionDir, "gitleaks")),
-      "the unverifiable cache entry is purged, not left to be picked up next time",
-    ).toBe(false);
+      "legacy entries remain untouched and cannot become v2 cache hits",
+    ).toBe(true);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -446,6 +467,7 @@ test("inv-6: a FAILED extraction leaves nothing a later resolution can take as a
 
     // The second resolution must NOT report `cached` off the half-written bytes.
     const second = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       cacheDir,
       platform: "linux",
@@ -466,6 +488,7 @@ test("inv-9: resolveBinary carries a discriminated reason; offline and checksum 
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-"));
   try {
     const mismatch = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher({ digest: "0".repeat(64) }),
       cacheDir,
@@ -473,6 +496,7 @@ test("inv-9: resolveBinary carries a discriminated reason; offline and checksum 
       arch: "x64",
     });
     const offline = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       cacheDir,
       platform: "linux",
@@ -493,6 +517,7 @@ test("inv-9: a checksum mismatch surfaces as its OWN ExternalAnalyzerToolStatus 
   const dir = await mkdtemp(join(tmpdir(), "binc-"));
   try {
     const tampered = await resolveBinaryCandidates([binaryCandidate()], dir, {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher({ digest: "0".repeat(64) }),
       cacheDir: join(dir, "cache"),
@@ -504,6 +529,7 @@ test("inv-9: a checksum mismatch surfaces as its OWN ExternalAnalyzerToolStatus 
 
     // The offline run stays `not_resolved` — the two records are not interchangeable.
     const offline = await resolveBinaryCandidates([binaryCandidate()], dir, {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       cacheDir: join(dir, "cache-2"),
       platform: "linux",
@@ -529,6 +555,7 @@ test("inv-4: a consent-denied binary candidate fetches NOTHING (no download, not
     };
     // Denied two ways: an undecided non-default tool, and a recorded decline.
     const undecided = await resolveBinaryCandidates([binaryCandidate({ defaultRun: false })], dir, {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: countingFetch,
       cacheDir: join(dir, "cache"),
@@ -538,6 +565,7 @@ test("inv-4: a consent-denied binary candidate fetches NOTHING (no download, not
     expect(undecided.unresolvedStatuses[0].status).toBe("skipped");
 
     const declined = await resolveBinaryCandidates([binaryCandidate({ defaultRun: true })], dir, {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: countingFetch,
       analyzerConsent: { gitleaks: "declined" },
@@ -707,6 +735,7 @@ test("RV-2: the DEFAULT cache root is per-user — a self-consistent plant elsew
       // No `cacheDir` argument: resolution takes the DEFAULT root, which the override
       // pins to a private dir. Were the default still the shared location the plant
       // sits in, this self-consistent pair would resolve as `cached` and be spawned.
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       platform: "linux",
       arch: "x64",
@@ -742,6 +771,7 @@ test("RV-2 / D-4: a resolution that caches NOTHING creates no cache directory", 
     process.env.AUDIT_TOOLS_BINARY_CACHE = onPath;
     const res = await resolveBinary(makeSpec(), {
       run: pathRunner(),
+      resolveExecutable: () => "/inert/bin/gitleaks",
       platform: "linux",
       arch: "x64",
     });
@@ -752,6 +782,7 @@ test("RV-2 / D-4: a resolution that caches NOTHING creates no cache directory", 
     const offline = join(parent, "offline-branch");
     process.env.AUDIT_TOOLS_BINARY_CACHE = offline;
     const degraded = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       platform: "linux",
       arch: "x64",
@@ -775,6 +806,7 @@ test("RV-2: the integrity layer still catches drift inside a trusted cache root"
   const cacheDir = await mkdtemp(join(tmpdir(), "bincache-trusted-"));
   try {
     const downloaded = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       fetch: fetcher(),
       cacheDir,
@@ -785,6 +817,7 @@ test("RV-2: the integrity layer still catches drift inside a trusted cache root"
     writeFileSync(downloaded.command!, "#!/bin/sh\ndrifted\n");
 
     const after = await resolveBinary(makeSpec(), {
+      resolveExecutable: () => null,
       run: offlineRunnerExtractingTo("gitleaks"),
       cacheDir,
       platform: "linux",
@@ -793,7 +826,7 @@ test("RV-2: the integrity layer still catches drift inside a trusted cache root"
     expect(after.status, "bytes that no longer match the recorded digest are refused").toBe(
       "unavailable",
     );
-    expect(existsSync(downloaded.command!), "and the drifted entry is purged").toBe(false);
+    expect(existsSync(downloaded.command!), "offline verification leaves invalid final state untouched").toBe(true);
   } finally {
     await rm(cacheDir, { recursive: true, force: true });
   }
@@ -842,7 +875,8 @@ test("a tool with no asset for this platform stays not_resolved", async () => {
       [binaryCandidate({ defaultRun: true, binary: makeSpec({ assetFor: () => null }) })],
       dir,
       {
-        run: offlineRunnerExtractingTo("gitleaks"),
+        resolveExecutable: () => null,
+      run: offlineRunnerExtractingTo("gitleaks"),
         fetch: fetcher(),
         cacheDir: join(dir, "cache"),
         platform: "aix" as NodeJS.Platform,

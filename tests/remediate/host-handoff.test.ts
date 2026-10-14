@@ -307,6 +307,7 @@ function currentState(): CurrentState {
     block("block-phase-1", "finding-d", "src/d.ts", { dependencies: ["block-a", "block-b", "block-dependent"] }),
   ];
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     contract_version: CURRENT_STATE_VERSION,
     status: "implementing",
     plan: canonicalPlanFixture({
@@ -2068,7 +2069,7 @@ describe("reviewed implementation context survives the real handoff", () => {
       review_counterexamples: [counterexample],
       ...(!seeded ? { request: { id: "request-1", text: "Repair concurrent refresh", source_paths: [] } } : {}),
     });
-    const state: CurrentState = { contract_version: CURRENT_STATE_VERSION, status: "implementing", plan, items: { N1: { unit_id: "N1", status: "pending" } } };
+    const state: CurrentState = { run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", contract_version: CURRENT_STATE_VERSION, status: "implementing", plan, items: { N1: { unit_id: "N1", status: "pending" } } };
     await writeApprovedPlanFixture(artifactsDir, state, root);
     const handoff = requirePrepared(await (await loadBoundary()).prepareRemediationHostHandoff({ root, artifactsDir, runId: FIXTURE_RUN_ID, baselineCommit, state }));
     const text = handoff.workload.work_items[0]!.prompt.text;

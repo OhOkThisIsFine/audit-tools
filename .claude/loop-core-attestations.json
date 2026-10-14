@@ -260,23 +260,6 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
-    "39569921506004b0": {
-      "reviewed_by": "w3_design_review",
-      "attester_class": "agent",
-      "checked": "Independent concrete-base W3 review verified atomic decision receipt commit before cleanup; startup reconciliation before conformance reopening and dispatch; exact file-instance replacement protection, whole-file validation, partial clarification and scope retention; durable owner halt recovery with historical conformance; retry preserves accepted W5 landing facts. Root source_refutation independently confirmed exact endpoint; fresh no-argv full suite green on staged source.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "d5980fbaa953ecac3a6a5e3dc0ce6809bedd7cb5",
-        "ran_at": "2026-10-05T22:49:18.611Z"
-      },
-      "attested_at": "2026-10-05T22:49:30.437Z",
-      "vouches": {
-        "src/remediate/steps/dispatch/hostHandoff.ts": "8be479d44148e79dee8639d55c4e1c378c4a8715",
-        "src/remediate/steps/nextStep.ts": "b83eb1b0c659e3f85eafca035eb3e75e8d5b3730"
-      }
-    },
     "3e0aee473b384f14": {
       "reviewed_by": "opus-subagent-w6-review,opus-subagent-w6-delta-review",
       "attester_class": "agent",
@@ -347,6 +330,33 @@
         "src/remediate/steps/contractPipeline.ts": "8435f8fba5321c12f1293e66d8844e81a1492faa",
         "src/remediate/steps/nextStep.ts": "2ec1717bec6877db9d256c14afc5673336486dd3",
         "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
+      }
+    },
+    "92a14c6e9e3ff056": {
+      "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
+      "attester_class": "agent",
+      "checked": "Fresh task-5 source review traced historical-baseline admission before locked reconciliation and direct host verification, failed/NUL Git discovery refusal, shared acquisition deadlines and single status ownership, consume-before-omit staging and carried outcomes, first-owner packet semantics, exact-member conflict coalescing and legacy handoff retention, and recursive index probe behavior. Concrete regression assertions were inspected; no reviewer-run tests or mutations are claimed. Twelve reviewed staged loop-core blobs remain unchanged. Receipt audit-fresh-loop-core-review.txt SHA256928c9f50818bf1b8f172b374fc586aea0c415e97d302b383dfb1dc885d12f0f0. Independent task-5 relocation review also checked exact exports, emitted statements and dependency order while restoring the existing orphan scanner edge; receipt audit-orphan-export-relocation-review.txt SHA2563116b28edefe2a67c66049df71fce5f0b30ae27a08b61549a510ac41aaf55760.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "0a62d58c0c7c48f29d09920bc79e5dd649648db6",
+        "ran_at": "2026-10-14T19:00:43.286Z"
+      },
+      "attested_at": "2026-10-14T19:02:56.300Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "6e65cfb648d515cf97223b9abd0a3b52acef5b5a",
+        "src/audit/cli/nextStepHelpers.ts": "3702c75d5b9c460b0f981f210c18b3cd7c6fe53f",
+        "src/audit/orchestrator/acquisitionExecutor.ts": "101b7c8056f3e6041a206dd667107ec985ae5174",
+        "src/audit/orchestrator/reviewPacketSizing.ts": "75efb00fc67eba9e5ef591cf044bebe01970b27b",
+        "src/audit/orchestrator/reviewPackets.ts": "8644195242b6f8d9d3098bd830fd94a93cf3589c",
+        "src/audit/orchestrator/runtimeCommand.ts": "161e189cde3fabe5a2a62a90b54e5a7d9eef12a3",
+        "src/audit/orchestrator/scopeIndexBaseline.ts": "f6c5a3e8fe9e326bbf29fc5663b2d2a4a56bbe41",
+        "src/audit/orchestrator/selectiveDeepening/conflict.ts": "65cb0e3a8a2fc1b97c918e93b29c92e901384f64",
+        "src/audit/orchestrator/selectiveDeepening/index.ts": "af679448b988be2b4988187a8c939d2d286218b8",
+        "src/remediate/steps/dispatch/hostCorroboration.ts": "186399ba8fc976952f3aaeb2bfffc3be5ba00566",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "db0674ae8c063a91c0978e7c168cb9020f9b3536",
+        "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
       }
     },
     "94fc63e054149869": {
@@ -491,10 +501,10 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "2fd8f3fd2058e9bd"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "2fd8f3fd2058e9bd"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -512,7 +522,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
       "review": "9bc59db653647a3a"
@@ -701,13 +711,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/reviewPacketSizing.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/reviewPackets.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/runtimeCommand.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/runtimeValidation.ts": {
       "baseline": "7b79934e86baf378"
@@ -719,10 +729,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": {
       "baseline": "7b79934e86baf378"
@@ -731,7 +741,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/selectiveDeepening/index.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": {
       "baseline": "7b79934e86baf378"
@@ -830,10 +840,10 @@
       "review": "beb774a606887b42"
     },
     "src/remediate/steps/dispatch/hostCorroboration.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "39569921506004b0"
+      "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "beb774a606887b42"
@@ -842,7 +852,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "d7acd796ff113751"
+      "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"

@@ -1,3 +1,5 @@
+import * as gitDiscovery from "../../src/shared/git.js";
+import * as stepWriter from "../../src/remediate/steps/stepWriter.js";
 // A RED tool-owned gate PAUSES the run — it never mutates it.
 //
 // The predecessor did the opposite: on an unattributable whole-repo red it
@@ -11,7 +13,7 @@
 // phase moves, nothing is written to state.json at all — so a repeat next-step
 // re-runs the gate and continues the moment the suite is green.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -28,6 +30,11 @@ import { worktreeContentId } from "../../src/remediate/steps/gateCommands.js";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
 import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { execSyncHidden } from "../helpers/spawn.mjs";
+
+vi.mock("../../src/shared/git.js", async original => {
+  const actual = await original<typeof import("../../src/shared/git.js")>();
+  return { ...actual, stagedAndUntracked: vi.fn(actual.stagedAndUntracked) };
+});
 
 const harness = createNextStepHarness(".test-final-gate-red-pause");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, acknowledgeResume, writeIntentCheckpoint } =
@@ -73,6 +80,7 @@ async function makeRepoLookLikeAuditTools(): Promise<void> {
  */
 function makeBoundaryState(): RemediationState {
   return {
+    run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
     status: "implementing",
     plan: {
       plan_id: "PLAN-GATE",
@@ -164,9 +172,12 @@ const failingRunner = () => ({
 });
 
 beforeEach(async () => {
+  const actual = await vi.importActual<typeof import("../../src/shared/git.js")>("../../src/shared/git.js");
+  vi.mocked(gitDiscovery.stagedAndUntracked).mockReset().mockImplementation(actual.stagedAndUntracked);
   await harness.resetTestRepo();
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await harness.cleanupTestRepo();
 });
 
@@ -940,5 +951,33 @@ describe("arbitrary repository phase-boundary gates", () => {
     expect(calls).toEqual([["node", "test suite.mjs"]]);
     expect(recovered.step_kind).not.toBe("final_gate_red");
     expect((await new StateStore(ARTIFACTS_DIR).loadState())?.plan?.test_command).toBe('node "test suite.mjs"');
+  });
+});
+
+// A valid historical baseline does not permit a failed live discovery to become
+// a normal red-pause/environment verdict, whether the suite just ran or is cached.
+describe("named discovery refusal crosses the phase-boundary wrapper", () => {
+  it.each([false, true])("preserves refusal through a cached=%s gate", async cached => {
+    await establishBoundaryRun();
+    if (cached) {
+      expect((await decideNextStep({ root: REPO_DIR, finalGateRunner: failingRunner })).step_kind).toBe("final_gate_red");
+    }
+    const recordPath = join(ARTIFACTS_DIR, "final-gate.json");
+    const beforeRecord = existsSync(recordPath) ? await readFile(recordPath, "utf8") : undefined;
+    const refusal = new gitDiscovery.DirtyPathDiscoveryError("status", "synthetic discovery refusal");
+    vi.mocked(gitDiscovery.stagedAndUntracked).mockClear().mockRejectedValue(refusal);
+    const runner = vi.fn(failingRunner);
+    const emitted = vi.spyOn(stepWriter, "writeCurrentStep");
+    await expect(decideNextStep({ root: REPO_DIR, finalGateRunner: runner })).rejects.toBe(refusal);
+    expect(gitDiscovery.stagedAndUntracked).toHaveBeenCalledExactlyOnceWith(REPO_DIR);
+    expect(runner).toHaveBeenCalledTimes(cached ? 0 : 1);
+    expect(emitted.mock.calls.some(([input]) => input.stepKind === "final_gate_red")).toBe(false);
+    if (beforeRecord === undefined) expect(existsSync(recordPath)).toBe(false);
+    else expect(await readFile(recordPath, "utf8")).toBe(beforeRecord);
+    const persisted = await new StateStore(ARTIFACTS_DIR).loadState();
+    expect(persisted?.status).toBe("implementing");
+    expect(persisted?.items?.["F-000"]?.status).toBe("resolved");
+    expect(persisted?.items?.["F-001"]?.status).toBe("pending");
+    expect(persisted?.run_start_dirty_encoding).toBe("git-z/v1");
   });
 });

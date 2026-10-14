@@ -260,6 +260,7 @@ export async function fixture(options: {
     // untracked probe leg sees the fixture the way it sees a real repo — the
     // alternative would be to let the fixture's scaffolding read as this host's
     // edit, which is a false red manufactured by the harness.
+    run_start_dirty_encoding: "git-z/v1",
     run_start_dirty: [
       COUNTER_SCRIPT,
       ".counter",

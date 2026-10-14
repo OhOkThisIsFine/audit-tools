@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/selective-deepening-conflicts.test.ts, tests/audit/selective-deepening-handoff.test.ts
 import type { AuditTask } from "../../types.js";
 import {
   type BuildSelectiveDeepeningTaskOptions,
@@ -7,7 +8,7 @@ import {
   priorityRank,
 } from "./shared.js";
 import { buildFindingFollowupTask, findingContexts } from "./findingFollowup.js";
-import { buildConflictFollowupTask, conflictGroups } from "./conflict.js";
+import { buildConflictFollowupTask, coalescedConflictGroups } from "./conflict.js";
 import {
   buildHighRiskCleanFollowupTask,
   isHighRiskCleanResult,
@@ -90,13 +91,11 @@ export function buildSelectiveDeepeningTasks(
   strategyContributions["finding_followup"] = created.length - beforeFindingFollowup;
 
   let beforeConflict = created.length;
-  for (const [key, group] of [...conflictGroups(contexts).entries()].sort(
-    ([a], [b]) => compareCodeUnits(a, b),
-  )) {
+  for (const group of coalescedConflictGroups(contexts, options.lineIndex)) {
     pushIfNew(
       buildConflictFollowupTask({
-        contexts: group,
-        conflictKey: key,
+        contexts: group.contexts,
+        conflictKeys: group.conflictKeys,
         lineIndex: options.lineIndex,
       }),
     );

@@ -1,0 +1,11 @@
+{
+  "upstream_commit": "bb8aa4d200a2935b07e6d2bf1e6072b449bc5ae3",
+  "printer_source": "https://github.com/terryyin/lizard/blob/bb8aa4d200a2935b07e6d2bf1e6072b449bc5ae3/lizard_ext/csvoutput.py",
+  "printer_blob": "5fe7ce1f6c4bf82bc3fde2b5aa1c79edd084befa",
+  "provenance": "Contract fixture following csv_output's pinned eleven-field formatter, not a live analyzer capture. Header is emitted only with options.verbose.",
+  "header": "NLOC,CCN,token,PARAM,length,location,file,function,long_name,start,end",
+  "rows": [
+    "250,25,1200,8,300,\"complex_func@20-319@src/utils.py\",\"src/utils.py\",\"complex_func\",\"complex_func( x , y , z )\",20,319",
+    "220,15,1100,6,240,\"process@1-240@src/main.rs\",\"src/main.rs\",\"process\",\"process( a , b , c , d , e , f )\",1,240"
+  ]
+}

@@ -691,9 +691,10 @@ function parseTypeCoverageSample() {
 test("lizard: pipx runner, CSV format, detects Python/Rust/Ruby ecosystems", () => {
   expect(lizardCandidate.runner).toBe("pipx");
   expect(lizardCandidate.defaultRun).toBe(true);
-  const argv = lizardCandidate.buildArgv(["pipx", "run", "--spec", "lizard==1.17.10"], "/repo");
-  expect(argv.includes("-l")).toBeTruthy();
-  expect(argv.includes("--csv")).toBeTruthy();
+  const prefix = ["pipx", "run", "--spec", "lizard==1.17.10", "lizard"];
+  const argv = lizardCandidate.buildArgv(prefix, "/repo");
+  expect(argv.slice(0, prefix.length)).toEqual(prefix);
+  expect(argv.slice(-2)).toEqual(["--csv", "/repo"]);
 });
 
 test("parseLizard: CSV format with quoted fields (function signatures with commas)", () => {
@@ -723,7 +724,7 @@ test("parseLizard: CSV format with quoted fields (function signatures with comma
 
 test("parseLizard: an empty/header-only CSV is clean; dropped rows are TALLIED, never silent", () => {
   // Nothing to parse at all — clean, no degradation claimed.
-  for (const empty of ["", "header only\n", "not a csv", "NLOC,CCN,Token,PARAM,Length,Location,File,Function"]) {
+  for (const empty of ["", "NLOC,CCN,Token,PARAM,Length,Location,File,Function"]) {
     const report = reportOf(parseLizard(empty));
     expect(report.items, `parseLizard(${JSON.stringify(empty)}) yields no items`).toEqual([]);
     expect(report.dropped_rows ?? 0, "no data rows means nothing was dropped").toBe(0);

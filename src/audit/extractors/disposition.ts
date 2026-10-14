@@ -1,5 +1,7 @@
+// sites-pinned: tests/audit/recursive-tracked-adapters.test.ts, tests/audit/submodule-tracked-corpus.test.ts
 import type { RepoManifest } from "../types.js";
 import {
+  readRecursiveTrackedPaths,
   normalizeRepoPath,
   toPosixPath,
   runTrackedAsync,
@@ -274,40 +276,22 @@ type TrackedFilesEvaluation =
   | { ok: true; tracked: Set<string> }
   | { ok: false; reason: string };
 
-/**
- * Enumerates the repository's tracked paths through ONE batched
- * `git ls-files -z --recurse-submodules` invocation (never per-file). Output
- * paths are repo-root (cwd)-relative posix, matching the manifest's normalized
- * candidate paths. Anything other than exit 0 (git absent, not a work tree) =
- * clean fallback — the caller skips the untracked rule. Never throws.
- *
- * `--recurse-submodules` is REQUIRED, and it is one half of an ATOMIC pair: the
- * other half is the same flag on {@link enumerateTrackedFilePaths} in
- * `src/shared/validation/findingGrounding.ts`, the ONE git enumeration behind
- * both grounding corpora. Without it, a parent `ls-files` lists only the gitlink
- * for a first-party submodule, so every file inside one classified as absent
- * from the index — i.e. excluded as `untracked` — while the citation-grounding
- * gate (once it recursed) would have accepted a citation naming it. The two
- * rules must agree about what "tracked" means or a finding grounds against a
- * file the disposition excluded from scope. Never change one without the other;
- * `tests/audit/submodule-tracked-corpus.test.ts` builds a real submodule and
- * pins BOTH halves (each reverts red on its own).
- */
+/** Domain diagnostics over the shared recursive index authority. */
 async function evaluateTrackedFiles(
   root: string,
-  spawn: GitSpawn,
+  spawn: GitSpawn | undefined,
 ): Promise<TrackedFilesEvaluation> {
-  let result: GitSpawnResult;
-  try {
-    result = await spawn("git", ["ls-files", "-z", "--recurse-submodules"], {
-      cwd: root,
-      maxBuffer: 256 * 1024 * 1024,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  const result = await readRecursiveTrackedPaths(root, {
+    runner: spawn
+      ? ([command, ...args], { cwd, maxBuffer }) => spawn(command, args, { cwd, maxBuffer })
+      : undefined,
+  });
+  if (result.ok) return { ok: true, tracked: new Set(result.paths) };
+  if (result.kind === "thrown") {
+    const message = result.cause instanceof Error ? result.cause.message : String(result.cause);
     return { ok: false, reason: `git ls-files spawn failed: ${message}` };
   }
-  if (result.error) {
+  if (result.kind === "error") {
     const code = (result.error as NodeJS.ErrnoException).code;
     return {
       ok: false,
@@ -317,15 +301,7 @@ async function evaluateTrackedFiles(
           : `git ls-files failed to start: ${result.error.message}`,
     };
   }
-  if (result.status === 0) {
-    return {
-      ok: true,
-      tracked: new Set(
-        (result.stdout ?? "").split("\0").filter((path) => path.length > 0),
-      ),
-    };
-  }
-  const stderrFirstLine = (result.stderr ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
+  const stderrFirstLine = result.stderr.trim().split(/\r?\n/, 1)[0] ?? "";
   return {
     ok: false,
     reason:
@@ -460,7 +436,7 @@ async function applyVcsIgnoreRule(
 async function applyUntrackedRule(
   items: FileDispositionItem[],
   root: string,
-  spawn: GitSpawn,
+  spawn: GitSpawn | undefined,
 ): Promise<{ files: FileDispositionItem[]; summary: ScopeRuleSummary }> {
   const evaluation = await evaluateTrackedFiles(root, spawn);
 
@@ -551,7 +527,7 @@ export async function buildFileDisposition(
   const untrackedStage = await applyUntrackedRule(
     vcsStage.files,
     options.root,
-    options.lsFilesSpawn ?? defaultGitSpawn,
+    options.lsFilesSpawn,
   );
   return {
     files: untrackedStage.files,

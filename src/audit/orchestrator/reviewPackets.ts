@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-packets.test.ts
 import type { AuditTask } from "../types.js";
 import type {
   AuditPlanMetrics,
@@ -90,9 +91,13 @@ export function buildPacket(
   if (tasks.length === 0) {
     throw new Error("Cannot materialize an empty review-packet component.");
   }
-  const filePaths = [
-    ...new Set(tasks.flatMap((task) => task.file_paths)),
-  ].sort(compareCodeUnits);
+  const firstOwnerByPath = new Map<string, AuditTask>();
+  for (const task of tasks) {
+    for (const path of task.file_paths) {
+      if (!firstOwnerByPath.has(path)) firstOwnerByPath.set(path, task);
+    }
+  }
+  const filePaths = [...firstOwnerByPath.keys()].sort(compareCodeUnits);
   const graphContext = buildPacketGraphContext(
     filePaths,
     graphEdges,
@@ -100,7 +105,7 @@ export function buildPacket(
   );
   const fileLineCounts = Object.fromEntries(
     filePaths.map((path) => {
-      const owner = tasks.find((task) => task.file_paths.includes(path));
+      const owner = firstOwnerByPath.get(path);
       return [path, owner ? lineCountForPath(path, { task: owner, lineIndex }) : 0];
     }),
   );
@@ -159,7 +164,7 @@ export function buildPacket(
     rationale: `${baseRationale}${graphRationale}`,
     estimated_tokens:
       ESTIMATED_PACKET_PROMPT_TOKENS +
-      fileGroupContentTokens(filePaths, tasks, sizeIndex, lineIndex),
+      fileGroupContentTokens(filePaths, firstOwnerByPath, sizeIndex, lineIndex),
   };
 }
 

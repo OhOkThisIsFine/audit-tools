@@ -400,6 +400,7 @@ describe("product completion preserves development diagnostics without requiring
       // needs no host-run test to go green. (Same fixture, and same greenness,
       // as `completeRunAndDeleteState` in outcomes-roundtrip.test.ts.)
       const state = {
+        run_start_dirty: [], run_start_dirty_encoding: "git-z/v1",
         status: "closing",
         plan: {
           plan_id: planId,

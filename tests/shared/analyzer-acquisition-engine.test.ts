@@ -397,6 +397,7 @@ test("F5 inv-4: report-skipped-never-silently — exactly one status per in-scop
       id,
       defaultRun,
       runner,
+      bin: id,
       buildArgv: (prefix: string[], root: string) => [...prefix, '--id', id, root],
     });
   const scoped = [
@@ -542,7 +543,7 @@ test("F5 inv-5 [CP-NODE-62]: no probed runners => every candidate degrades to sk
   // privilege; all are subject to the same runtime probe.
   const candidates = [
     candidate({ id: 'eslint', runner: 'npx', defaultRun: true, detect: () => true }),
-    candidate({ id: 'ruff', runner: 'pipx', defaultRun: true, detect: () => true }),
+    candidate({ id: 'ruff', runner: 'pipx', bin: 'ruff', defaultRun: true, detect: () => true }),
     candidate({ id: 'clippy', runner: 'cargo', defaultRun: true, detect: () => true }),
     candidate({ id: 'rubocop', runner: 'bundle', defaultRun: false, detect: () => true }), // no grant => skipped
   ];
@@ -855,4 +856,76 @@ test("npx runner: the bin name derives from the package name, scope included, un
   expect(declared.slice(0, 7)).toEqual([
     "npx", "-y", "-p", "tool-pkg@1.2.3", "-p", "typescript@5.9.3", "tool",
   ]);
+});
+
+// Admission and budgeting share a snapshot: a changing detector cannot inflate
+// the budget and then silently choose a different execution set.
+test("acquisition fallback counts actual admitted candidates and detects once", async () => {
+  const { prepareAcquisition, ANALYZER_CHILD_DEADLINE_MS, resolveBinaryCandidates } = await import("../../src/shared/analyzers/acquisitionEngine.js");
+  const { vi } = await import("vitest");
+  const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+  try {
+    let detections = 0;
+    const admitted = candidate({ id: "admitted", defaultRun: true, detect: () => ++detections === 1 });
+    const denied = candidate({ id: "denied", defaultRun: true });
+    const absent = candidate({ id: "absent", defaultRun: true, detect: () => false });
+    const prepared = prepareAcquisition([admitted, denied, absent], "/repo", {
+      analyzerConsent: { denied: "declined" }, run: fakeRunner(),
+    });
+    expect(prepared.options.deadline?.at).toBe(1000 + ANALYZER_CHILD_DEADLINE_MS);
+    await resolveBinaryCandidates(prepared.candidates, "/repo", prepared.options);
+    const outcome = await runAcquisitionEngine(prepared.candidates, "/repo", prepared.options);
+    expect(detections).toBe(1);
+    expect(outcome.statuses.map(status => status.status)).toEqual(["success", "skipped", "skipped"]);
+  } finally { now.mockRestore(); }
+});
+
+test("expired and invalid budgets refuse even injected runner calls", async () => {
+  for (const at of [0, NaN, Infinity]) {
+    let calls = 0;
+    const outcome = await runExternalAnalyzer(candidate({ defaultRun: true }), "/repo", {
+      deadline: { at }, run: async argv => { calls++; return fakeRunner()(argv); },
+    });
+    expect(calls).toBe(0);
+    expect(outcome.status.status).toBe("not_resolved");
+    expect(outcome.status.error).toContain(Number.isFinite(at) ? "deadline_exceeded" : "invalid_budget");
+  }
+});
+
+test("probe consuming invocation budget cannot admit a scan", async () => {
+  const { vi } = await import("vitest");
+  let time = 100;
+  const now = vi.spyOn(Date, "now").mockImplementation(() => time);
+  try {
+    const calls: string[][] = [];
+    const outcome = await runExternalAnalyzer(candidate({ defaultRun: true }), "/repo", {
+      deadline: { at: 200 }, run: async argv => {
+        calls.push(argv); time = 200;
+        return { status: 0, stdout: "", stderr: "", argv, duration_ms: 100 };
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("--version");
+    expect(outcome.status.status).toBe("not_resolved");
+    expect(outcome.status.error).toContain("deadline_exceeded");
+  } finally { now.mockRestore(); }
+});
+
+test("resolved binary cannot scan after shared deadline", async () => {
+  let calls = 0;
+  const outcome = await runExternalAnalyzer(candidate({ id: "binary", runner: "binary", defaultRun: true }), "/repo", {
+    deadline: { at: 0 }, resolvedBinaries: { binary: "/absolute/binary" },
+    run: async argv => { calls++; return fakeRunner()(argv); },
+  });
+  expect(calls).toBe(0);
+  expect(outcome.status.status).toBe("not_resolved");
+});
+
+test("binary without a spec receives one explicit failure and duplicate ids are rejected", async () => {
+  const { resolveBinaryCandidates } = await import("../../src/shared/analyzers/acquisitionEngine.js");
+  const missing = candidate({ id: "missing", runner: "binary", defaultRun: true });
+  const resolution = await resolveBinaryCandidates([missing], "/repo");
+  expect(resolution.unresolvedStatuses).toEqual([{ tool: "missing", resolved: false, status: "not_resolved", error: "binary candidate has no BinarySpec" }]);
+  expect(() => registerExternalAnalyzers([missing, missing])).toThrow("duplicate analyzer candidate id");
+  await expect(resolveBinaryCandidates([missing, missing], "/repo")).rejects.toThrow("duplicate analyzer candidate id");
 });

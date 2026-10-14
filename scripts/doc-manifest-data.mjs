@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/doc-manifest-gate.test.ts
 // The canonical doc manifest, HELD AS DATA.
 //
 // WHY DATA AND NOT PROSE. The manifest used to be readable only as markdown, and
@@ -149,6 +150,7 @@ export const DOC_MANIFEST = [
     type: "excluded",
     files: [
       ["docs/doc-review-guidelines.md", "this spec — excluded from its own review"],
+      ["docs/reviews/audit-final-refactor-plan.md", "finalized bounded refactor execution plan; qualification remains separately gated"],
       [
         "docs/reviews/*-<date>.md",
         "dated review / plan / diagnosis / dogfood records — excluded BY CONSTRUCTION. Each is a one-off record of what was decided on a day, never a timeless concept; the durable outcome lives in `spec/`, the backlog, or project memory. This pattern replaced a 21.5k-character exhaustive list that grew every lap",

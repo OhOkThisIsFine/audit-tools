@@ -1,5 +1,7 @@
+import { DirtyPathDiscoveryError, readGitPathList, stagedAndUntracked } from "audit-tools/shared";
+import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
-import { AUDIT_TOOLS_DIRNAME, compareCodeUnits, isGitRepo, normalizeRepoPath, repoRelativePath, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS, type IngestionCheckId } from "audit-tools/shared";
+import { AUDIT_TOOLS_DIRNAME, compareCodeUnits, normalizeRepoPath, repoRelativePath, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS, type IngestionCheckId } from "audit-tools/shared";
 import type { CurrentRemediationHostState, RemediationHostWorkItem, RemediationHostResult, RemediationHostIngestIssue } from "./hostContracts.js";
 import type { RemediationRequiredTestVerdicts } from "./requiredTests.js";
 import { rerunRequiredTests, requiredTestIssue } from "./requiredTests.js";
@@ -46,11 +48,15 @@ type CorroboratedHostResult =
 // (INV-SSF), so the held lock's mtime heartbeat keeps beating through each
 // probe and a git that never answers cannot hang the ingest.
 async function gitCommitExists(root: string, commit: string): Promise<boolean> {
-  const result = await runTrackedAsync(
-    ["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
-  );
-  return !result.error && result.status === 0;
+  try {
+    const result = await runTrackedAsync(
+      ["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`],
+      { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS, maxBuffer: 64 * 1024 * 1024 },
+    );
+    return !result.error && result.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 // INV-WTS-3 (landed-node ancestry): a landed node's commit must be an ancestor
@@ -134,82 +140,33 @@ async function gitChangedFilesOfCommit(
   root: string,
   commit: string,
 ): Promise<readonly string[] | null> {
-  const result = await runTrackedAsync(
-    [
-      "git",
-      "diff-tree",
-      "--root",
-      "--no-commit-id",
-      "--name-only",
-      "-r",
-      "-z",
-      commit,
-    ],
-    { cwd: root, encoding: "utf8", timeout: TRACKED_CHILD_DEADLINE_MS },
+  const result = await readGitPathList(root,
+    ["diff-tree", "--root", "--no-commit-id", "--name-only", "--no-renames", "--ignore-submodules=none", "-r", "-z", commit],
   );
-  if (result.error || result.status !== 0) return null;
-  return [...new Set(result.stdout.split("\0").filter(Boolean))].sort(
-    compareCodeUnits,
-  );
+  return result.ok ? [...new Set(result.paths)].sort(compareCodeUnits) : null;
 }
 
 /**
- * Every repo-relative path the tree shows as touched since `baseline` — the
- * commits baseline→HEAD, the working tree's own deviation from HEAD (staged and
- * unstaged alike), and the untracked files git considers repository content.
- *
- * All three legs are needed to falsify a no-change claim, and they enumerate the
- * three ways a host can have edited: committed (leg 1), edited a TRACKED file
- * and left it uncommitted (leg 2), and CREATED a file (leg 3). A new `src/*.ts`
- * is a real edit and the most natural shape a remediation takes; without leg 3
- * the cheapest way to smuggle one past a no-change claim was simply never to
- * `git add` it. `null` means git could not answer, which callers must treat as
- * "cannot corroborate" rather than as "nothing changed".
- *
- * The untracked leg honours `--exclude-standard`, so it enumerates only what git
- * itself treats as content — a repo's `.gitignore`d build and coverage output is
- * already invisible to it. Two exemptions cover the remainder, both ground
- * truth rather than the host's word:
- *
- *  - THIS TOOL'S OWN ARTIFACT TREE ({@link AUDIT_TOOLS_DIRNAME}) is subtracted
- *    here, explicitly. In a real repository the tool writes a managed
- *    `.gitignore` block covering it, so it never reaches this probe at all; the
- *    explicit subtraction is what makes that independent of whether the block
- *    has been written yet, so a bare root (a fixture, a first run) cannot
- *    manufacture a false refusal out of the tool's own workload, prompt and
- *    result documents.
- *  - PRE-EXISTING untracked strays are excused by the caller's `excusedPaths`,
- *    for free: `run_start_dirty` is captured from `stagedAndUntracked` before
- *    any remediation edit exists, so it already enumerates untracked files.
- *    What survives both is an untracked file that appeared DURING the run — the
- *    only untracked class that can be this host's edit.
+ * Complete committed movement plus live staged/unstaged/untracked superproject
+ * paths. Explicit submodule visibility prevents local ignore policy hiding a
+ * gitlink; it does not grant recursive ownership beneath that gitlink.
+ * Tool artifacts are excluded. Historical exemptions belong to the admitted
+ * caller's excused set; a failed query is never evidence of no change.
  */
 async function gitChangedFilesSince(
   root: string,
   baseline: string,
-): Promise<readonly string[] | null> {
-  const files = new Set<string>();
-  for (const args of [
-    // baseline → HEAD: what the host committed.
-    ["diff", "--name-only", "-z", baseline, "HEAD"],
-    // HEAD → working tree: what the host edited and did not commit.
-    ["diff", "--name-only", "-z", "HEAD"],
-    // Never added: what the host CREATED. `--exclude-standard` keeps git's own
-    // ignore rules authoritative.
-    ["ls-files", "--others", "--exclude-standard", "-z"],
-  ]) {
-    const probe = await runTrackedAsync(["git", ...args], {
-      cwd: root,
-      encoding: "utf8",
-      timeout: TRACKED_CHILD_DEADLINE_MS,
-    });
-    if (probe.error || probe.status !== 0) return null;
-    for (const file of probe.stdout.split("\0").filter(Boolean)) {
-      if (isAuditToolsArtifactPath(file)) continue;
-      files.add(file);
-    }
+): Promise<readonly string[]> {
+  const live = await stagedAndUntracked(root);
+  if (!(await gitCommitExists(root, baseline))) {
+    throw new DirtyPathDiscoveryError("no-change baseline", "baseline_commit does not resolve to a real commit");
   }
-  return [...files].sort(compareCodeUnits);
+  const committed = await readGitPathList(root,
+    ["diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", baseline, "HEAD"],
+  );
+  if (!committed.ok) throw new DirtyPathDiscoveryError("no-change committed paths", committed.reason);
+  return [...new Set([...committed.paths, ...live])]
+    .filter(path => !isAuditToolsArtifactPath(path)).sort(compareCodeUnits);
 }
 
 /** Whether a repo-relative path lives inside this tool's own artifact tree. */
@@ -264,25 +221,16 @@ export async function corroborateNoChangeClaim(params: {
     }
 > {
   const { root, workItem, excusedPaths } = params;
-  if (!(await isGitRepo(root))) return { ok: true };
-  const baseline = workItem.baseline_commit;
-  if (!(await gitCommitExists(root, baseline))) {
+  let changed: readonly string[];
+  try {
+    changed = await gitChangedFilesSince(root, workItem.baseline_commit);
+  } catch (error) {
+    if (!(error instanceof DirtyPathDiscoveryError)) throw error;
     return {
       ok: false,
       code: "commit_missing",
       check: "no_change_corroboration",
-      message:
-        "resolved_no_change cannot be corroborated: baseline_commit does not resolve to a real commit",
-    };
-  }
-  const changed = await gitChangedFilesSince(root, baseline);
-  if (changed === null) {
-    return {
-      ok: false,
-      code: "commit_missing",
-      check: "no_change_corroboration",
-      message:
-        "resolved_no_change cannot be corroborated: git could not enumerate the changes since the workload baseline",
+      message: `resolved_no_change cannot be corroborated: Git could not completely enumerate changes: ${error.message}`,
     };
   }
   const violating = changed.filter(
@@ -321,6 +269,7 @@ export async function corroborateHostResult(params: {
   readonly recovery: boolean;
 }): Promise<CorroboratedHostResult> {
   const { root, state, workItem, result, verdicts } = params;
+  const admittedBaseline = admitRemediationDirtyBaseline(state);
   const baseline = workItem.baseline_commit;
   const landed = result.landed_commit;
   let usedRecovery = false;
@@ -424,7 +373,7 @@ export async function corroborateHostResult(params: {
     };
   }
   const runStartDirty = new Set(
-    (state.run_start_dirty ?? []).map(normalizeRepoPath),
+    admittedBaseline.map(normalizeRepoPath),
   );
   const dirtyOverlap = actualFiles.filter((path) =>
     runStartDirty.has(normalizeRepoPath(path)),

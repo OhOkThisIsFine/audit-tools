@@ -1,3 +1,4 @@
+import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/final-acceptance-window.test.ts
 import { parseCommandString, type RunLogger } from "audit-tools/shared";
 import type { RemediationState } from "../state/store.js";
@@ -47,6 +48,7 @@ export async function runCloseAcceptance(params: {
   runLogger?: RunLogger;
 }): Promise<{ gate?: ToolOwnedFinalGateResult; combinedTest?: CombinedTestResult }> {
   const { state, options, runCombined, runLogger } = params;
+  admitRemediationDirtyBaseline(state);
   const scope = "all-terminal final gate";
   const disabledReason = finalGateDisabledReason(options) ??
     (Object.values(state.items ?? {}).some(item => isVerifiedCompleteStatus(item.status))

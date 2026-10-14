@@ -48,7 +48,7 @@ test("git helpers degrade to empty results outside a repo", async () => {
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-git-"));
   try {
     expect(await changedFiles(dir, "HEAD")).toEqual([]);
-    expect(await stagedAndUntracked(dir)).toEqual([]);
+    await expect(stagedAndUntracked(dir)).rejects.toThrow("Dirty path discovery failed");
     const commits = await fileCommits(dir, "anything.ts");
     expect(commits instanceof Set).toBeTruthy();
     expect(commits.size).toBe(0);

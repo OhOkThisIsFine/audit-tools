@@ -22,8 +22,8 @@
  * E3 + P7).
  */
 import { readFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
-import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../tooling/exec.js";
+import { resolveContainedSourcePath } from "../io/sourcePath.js";
+import { readRecursiveTrackedPaths } from "../gitTrackedPaths.js";
 import type { Finding, FindingGrounding } from "../types/finding.js";
 
 /** Normalize text for content-matching: drop CR, collapse whitespace, trim. */
@@ -124,28 +124,10 @@ export async function enumerateTrackedFilePaths(
   root: string,
 ): Promise<Set<string>> {
   const known = new Set<string>();
-  // `--recurse-submodules` is REQUIRED, and it is one half of an ATOMIC pair:
-  // the other half is the same flag on the audit disposition's
-  // `evaluateTrackedFiles`, which decides what enters the auditable SCOPE. Both
-  // sides read "tracked" using the same recursive git enumeration, so the two
-  // rules must agree — a parent-only listing returns just the gitlink for a
-  // first-party submodule, and a citation naming a file inside one would then
-  // fail to ground while it sat in scope, or vice versa. Never change one
-  // without the other; `tests/audit/submodule-tracked-corpus.test.ts` builds a
-  // real submodule and pins BOTH halves (each reverts red on its own).
-  const result = await runTrackedAsync(
-    ["git", "ls-files", "-z", "--recurse-submodules"],
-    {
-      cwd: root,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      timeout: TRACKED_CHILD_DEADLINE_MS,
-    },
-  );
-  if (result.error || result.status !== 0) return known;
-  for (const entry of result.stdout.split("\0")) {
-    const path = entry.replace(/\\/g, "/");
-    if (path.length > 0) known.add(path);
+  const result = await readRecursiveTrackedPaths(root);
+  if (!result.ok) return known;
+  for (const entry of result.paths) {
+    known.add(entry.replace(/\\/g, "/"));
   }
   return known;
 }
@@ -210,7 +192,7 @@ export function quoteMatches(fileContent: string, quotedText: string): boolean {
   return locateQuote(fileContent, quotedText).length > 0;
 }
 
-/** Reads a source file's text; injectable so the verifier is testable without fs. */
+/** Reads an admitted source file's text; injectable independently of path admission. */
 export type SourceReader = (absolutePath: string) => Promise<string>;
 
 const defaultSourceReader: SourceReader = (absolutePath) =>
@@ -276,7 +258,11 @@ export async function groundFinding(
       continue;
     }
     quotedCount += 1;
-    const absolutePath = isAbsolute(loc.path) ? loc.path : join(repoRoot, loc.path);
+    const absolutePath = resolveContainedSourcePath(repoRoot, loc.path);
+    if (absolutePath === undefined) {
+      misses.push(`${loc.path}: file could not be read on disk`);
+      continue;
+    }
     let content: string;
     try {
       content = await readSource(absolutePath);

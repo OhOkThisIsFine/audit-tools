@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-packet-sizing.test.ts, tests/audit/review-packets.test.ts
 import type { AuditTask } from "../types.js";
 import {
   estimateTokensFromBytes,
@@ -62,19 +63,19 @@ export function taskContentTokens(
 }
 
 /**
- * Estimated content tokens across a set of file paths, resolving an owning task
- * per path so the line fallback can read its `file_line_counts`. Shared files
- * are counted once.
+ * Estimated content tokens across file paths using their first owning tasks
+ * for the line fallback. Each iterable occurrence contributes; packet callers
+ * provide unique paths so shared files are counted once.
  */
 export function fileGroupContentTokens(
   filePaths: Iterable<string>,
-  tasks: AuditTask[],
+  firstOwnerByPath: ReadonlyMap<string, AuditTask>,
   sizeIndex?: Record<string, number>,
   lineIndex?: Record<string, number>,
 ): number {
   let total = 0;
   for (const path of filePaths) {
-    const owner = tasks.find((task) => task.file_paths.includes(path));
+    const owner = firstOwnerByPath.get(path);
     total += pathContentTokens(owner, path, sizeIndex, lineIndex);
   }
   return total;

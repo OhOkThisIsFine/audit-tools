@@ -33,6 +33,7 @@ import { mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSyncHidden as execFileSync } from "../helpers/spawn.mjs";
 
 import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
@@ -117,7 +118,8 @@ function runtimeStateFixture(value: Record<string, unknown>): RemediationState {
     }
     return [id, { ...item, ...(original.finding_id || original.unit_id ? { unit_id: id } : {}) }];
   }));
-  return { ...value, items, ...(Object.keys(sources).length ? { source_verifications: sources } : {}) } as RemediationState;
+  const state = { ...value, items, ...(Object.keys(sources).length ? { source_verifications: sources } : {}) } as RemediationState;
+  return { run_start_dirty: [], run_start_dirty_encoding: "git-z/v1", ...state };
 }
 
 /** A minimal fake RunLogger — `event()` records into `events`; cast because RunLogger has private fields and is not otherwise structurally assignable. */
@@ -1059,6 +1061,8 @@ describe("OBL-item-status-partition-and-close-inv-6: real path-key join, never a
 describe("OBL-item-status-partition-and-close-inv-7: every early return emits a runLogger event, not console-only", () => {
   it("POSITIVE: the preview-pause early return emits a runLogger event", async () => {
     const { root, artifactsDir } = await makeCloseDirs("isc-inv7-preview");
+    // This positive preview fixture must satisfy real dirty-path root admission.
+    execFileSync("git", ["init", "-q"], { cwd: root });
     const state = runtimeStateFixture({
       status: "closing",
       plan: planFixture({ plan_id: "PLAN-P1", findings: [], blocks: [], project_type: "unknown", candidate_closing_actions: ["commit"] }),

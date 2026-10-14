@@ -54,3 +54,5 @@
   remain pending rather than being rebound heuristically. **Still open:** confirmation on a real run
   that every `deepening:*` task converges in bounded rounds and the audit reaches synthesis without
   `force-synthesis`.
+
+- **Bounded audit refactors still require implementation and exact-tree qualification.** Follow the [finalized plan](../reviews/audit-final-refactor-plan.md) and [qualification record](../reviews/audit-refactor-qualification-2026-10-14.md); source review alone does not close the accepted defects or authorize release.

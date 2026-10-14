@@ -1,3 +1,4 @@
+import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
 import { readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
 import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
 import { reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
@@ -681,11 +682,12 @@ async function forceReplanFromExistingIntake(
   root: string, artifactsDir: string, previous: RemediationState,
   runLogger: RunLogger,
 ): Promise<RemediationState | { kind: "blocked"; reason: string; archivePath?: string } | {kind:"planning_step";step:RemediationStep} | null> {
+  admitRemediationDirtyBaseline(previous);
   const step=await buildNextContractPipelineStep({root,artifactsDir,runId:requireStateRunId(previous),forceRevision:false});
   if(step)return {kind:"planning_step",step};
   const approved = await readApprovedExecutionPlan(artifactsDir);
   if (!approved) return { kind: "blocked", reason: "Revise and independently approve the current executable plan before replanning. Accepted execution history is preserved." };
-  const activated = await activateApprovedPlan(root, artifactsDir, previous, approved, runLogger);
+  const activated = await activateApprovedPlan(root, artifactsDir, previous, approved, runLogger, "existing_run");
   if (activated.kind === "blocked") return activated;
   // Activation already carries unchanged history and applies CURRENT owner
   // decisions. Reapplying old items here would undo a newly declined unit.
@@ -1013,7 +1015,10 @@ async function emitPlanRevisionBlockedStep(root:string,artifactsDir:string,block
 async function activateApprovedPlan(
   root: string, artifactsDir: string, existing: RemediationState,
   _input: unknown, _runLogger: RunLogger,
+  origin: "new_pre_edit_run" | "existing_run",
 ): Promise<PlanActivationOutcome> {
+  if (origin === "existing_run") admitRemediationDirtyBaseline(existing);
+  else if ("run_start_dirty" in existing || "run_start_dirty_encoding" in existing) throw new RemediationDirtyBaselineError();
   const approved = await readApprovedExecutionPlan(artifactsDir);
   if (!approved) return { kind: "blocked", reason: "No current independently approved executable plan exists. Re-run planning; unreviewed projections cannot dispatch." };
   const facts = (await readProjectFacts(artifactsDir)) ?? neutralProjectFacts();
@@ -1032,7 +1037,9 @@ async function activateApprovedPlan(
     ...(facts.commands.e2e ? { e2e_command: renderPromptCommand(facts.commands.e2e), e2e_command_source: "project_facts" as const } : {}),
   };
   plan = await applyCheckpointIntentOrdering(artifactsDir, plan);
-  if (!existing.run_start_dirty) existing = { ...existing, run_start_dirty: [...await stagedAndUntracked(root)].sort() };
+  if (origin === "new_pre_edit_run") {
+    existing = { ...existing, run_start_dirty: [...await stagedAndUntracked(root)], run_start_dirty_encoding: "git-z/v1" };
+  }
   const filter = await readOptionalJsonFile<PersistedReviewFilterDispositions>(reviewFilterDispositionsPath(artifactsDir));
   // Through the schema-checked reader: with zero survivors the review gate never
   // rewrites a stale-schema record, so a raw read let its declines into the
@@ -1404,6 +1411,7 @@ async function handleReadyIntakeContractPipeline(
   artifactsDir: string,
   options: NextStepOptions,
   runLogger: RunLogger,
+  origin: "new_pre_edit_run",
 ): Promise<RemediationStep | RemediationState | null> {
   // Resume the tool-owned plan without reconstructing completed intake.
   const earlyExtractedPlan = await readApprovedExecutionPlan(artifactsDir);
@@ -1414,6 +1422,7 @@ async function handleReadyIntakeContractPipeline(
       { status: "pending" },
       earlyExtractedPlan,
       runLogger,
+      origin,
     );
     return outcome.kind === "blocked"
       ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
@@ -1427,7 +1436,7 @@ async function handleReadyIntakeContractPipeline(
     if (step) return step;
     const approved = await readApprovedExecutionPlan(artifactsDir);
     if (!approved) return null;
-    const outcome = await activateApprovedPlan(root, artifactsDir, { status: "pending" }, approved, runLogger);
+    const outcome = await activateApprovedPlan(root, artifactsDir, { status: "pending" }, approved, runLogger, origin);
     return outcome.kind === "blocked"
       ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
       : outcome.state;
@@ -1611,6 +1620,7 @@ async function handleReadyIntakeContractPipeline(
     { status: "pending" },
     extractedPlan,
     runLogger,
+    origin,
   );
   return outcome.kind === "blocked"
     ? emitPlanRevisionBlockedStep(root, artifactsDir, outcome)
@@ -1622,6 +1632,7 @@ async function handlePendingIntake(
   artifactsDir: string,
   options: NextStepOptions,
   runLogger: RunLogger,
+  origin: "new_pre_edit_run",
 ): Promise<RemediationStep | RemediationState | null> {
   // Existing source ownership survives pending review and approval invalidation.
   // The earlier confirm_intent obligation still guards this continuation.
@@ -1631,6 +1642,7 @@ async function handlePendingIntake(
       artifactsDir,
       options,
       runLogger,
+      origin,
     );
   }
 
@@ -1656,6 +1668,7 @@ async function handlePendingIntake(
     artifactsDir,
     options,
     runLogger,
+    origin,
   );
 }
 
@@ -2165,6 +2178,7 @@ async function emitFinalGateRedStep(ctx: {
   recordedPath?: string;
 }): Promise<RemediateOutcome> {
   const { root, artifactsDir, state, scope, gate, runLogger } = ctx;
+  admitRemediationDirtyBaseline(state);
   const failed = gate.results.find((r) => !r.passed);
   const recordPath = ctx.recordedPath ?? await writeFinalGateRedRecord(artifactsDir, scope, failed, {
     root,
@@ -2300,6 +2314,7 @@ async function runPhaseBoundaryGate(ctx: {
   runLogger: RunLogger;
 }): Promise<RemediateOutcome | null> {
   const { root, artifactsDir, state, options, runLogger } = ctx;
+  admitRemediationDirtyBaseline(state);
   // Whether a gate is DUE is decided BEFORE whether it is suppressed. The old
   // order asked the suppression first and returned, so a disabled run could not
   // tell "no gate was due this pass" from "a gate was due and skipped" — and the
@@ -3406,6 +3421,7 @@ Then run:
           c.artifactsDir,
           c.options,
           c.runLogger,
+          "new_pre_edit_run",
         );
         if (outcome && "step_kind" in outcome) {
           return { kind: "emit", step: outcome };
@@ -3718,6 +3734,18 @@ async function advanceUnderPhaseLock(deps: {
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
+  const reportOnlyRequest = state?.status === "complete" &&
+    options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
+    options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
+    options.guidanceFileSupplied !== true && options.forceReplan !== true && options.planOnly !== true && options.finalizeClosing !== true;
+  // Only a potential complete/report-only request may inspect plan freshness
+  // before baseline admission. No authority write can precede this fence.
+  if (state && !reportOnlyRequest) admitRemediationDirtyBaseline(state);
+  const currentCanonical = state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
+  const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
+  const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
+  if (reportOnlyRequest && !pendingPlanSubmission && !revisionMismatch) return handleComplete(root, artifactsDir, state);
+  if (state && reportOnlyRequest) admitRemediationDirtyBaseline(state);
   if (state) await store.reconcileDecisionApplications(state);
   let control = await store.loadOperatorLifecycle();
   if (control && control.mode !== "active") {
@@ -3768,8 +3796,7 @@ async function advanceUnderPhaseLock(deps: {
   // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
   // runs once per host call (the engine folds planning → implementing → … through
   // transitions, never a recursive decideNextStepLoop), so this fires at most once.
-  const currentCanonical=state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
-  if (state != null && (options.forceReplan || existsSync(executionPlanPaths(artifactsDir).submission) || (currentCanonical && currentCanonical.revision_sha256!==state.plan?.review_revision_sha256))) {
+  if (state != null && (options.forceReplan || pendingPlanSubmission || revisionMismatch)) {
     await countStep(state);
     const replanOutcome = await forceReplanFromExistingIntake(
       root,
