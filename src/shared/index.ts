@@ -853,11 +853,13 @@ export {
   installToCache,
 } from "./tooling/analyzerDeps.js";
 
+// sites-pinned: tests/audit/scope.test.ts, tests/shared/audit-read-state.test.ts
 // Git helpers
 export {
   isGitRepo,
   gitRefExists,
   changedFiles,
+  readChangedFiles,
   fileCommits,
   fileContentAtRef,
   headCommit,

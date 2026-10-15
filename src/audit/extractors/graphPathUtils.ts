@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-path-utils.test.ts, tests/audit/graph-manifest-edges.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { normalizeGraphPath } from "audit-tools/shared";
@@ -44,6 +45,26 @@ const RUNTIME_SOURCE_EXTENSION_ALIASES: Record<string, readonly string[]> = {
 
 export function graphLookupKey(path: string): string {
   return normalizeGraphPath(path).toLowerCase();
+}
+
+/** Construct a manifest-local graph target; callers own probing and admission. */
+export function resolveManifestRelativeTarget(
+  fromPath: string,
+  specifier: string,
+): string | undefined {
+  const normalizedSpecifier = normalizeGraphPath(specifier);
+  if (
+    normalizedSpecifier.length === 0 ||
+    normalizedSpecifier.startsWith("/") ||
+    /^[a-z][a-z0-9+.-]*:/i.test(normalizedSpecifier)
+  ) {
+    return undefined;
+  }
+
+  const baseDir = posix.dirname(normalizeGraphPath(fromPath));
+  return baseDir === "."
+    ? normalizedSpecifier
+    : posix.join(baseDir, normalizedSpecifier);
 }
 
 export function resolveCandidate(

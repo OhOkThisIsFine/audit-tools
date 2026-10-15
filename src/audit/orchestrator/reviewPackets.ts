@@ -19,7 +19,12 @@ import {
   fileGroupContentTokens,
   estimateTaskGroupTokens,
 } from "./reviewPacketSizing.js";
-import { buildPacketGraphContext } from "./reviewPacketGraphContext.js";
+import {
+  buildPacketGraphContext,
+  buildPacketGraphContextFromIndex,
+  createPacketGraphContextIndex,
+  type PacketGraphContextIndex,
+} from "./reviewPacketGraphContext.js";
 import { sanitizeSegment } from "./selectiveDeepening/shared.js";
 import {
   buildTaskCoherencePartition,
@@ -86,6 +91,7 @@ export function buildPacket(
   sizeIndex?: Record<string, number>,
   graphEdges: GraphEdge[] = [],
   graphBundle?: GraphBundle,
+  graphContextIndex?: PacketGraphContextIndex,
 ): ReviewPacket {
   const tasks = canonicalTasks(inputTasks);
   if (tasks.length === 0) {
@@ -98,11 +104,9 @@ export function buildPacket(
     }
   }
   const filePaths = [...firstOwnerByPath.keys()].sort(compareCodeUnits);
-  const graphContext = buildPacketGraphContext(
-    filePaths,
-    graphEdges,
-    graphBundle,
-  );
+  const graphContext = graphContextIndex
+    ? buildPacketGraphContextFromIndex(filePaths, graphContextIndex)
+    : buildPacketGraphContext(filePaths, graphEdges, graphBundle);
   const fileLineCounts = Object.fromEntries(
     filePaths.map((path) => {
       const owner = firstOwnerByPath.get(path);
@@ -175,6 +179,10 @@ function planningDataFromProjection(
 ): ReviewPacketPlanningData {
   const taskById = new Map(tasks.map((task) => [task.task_id, task]));
   const graphEdges = collectGraphEdges(options.graphBundle);
+  const graphContextIndex = createPacketGraphContextIndex(
+    graphEdges,
+    options.graphBundle,
+  );
   const projection = buildTaskCoherencePartition(graph);
   const groups = new Map<string, AuditTask[]>();
   const packets: ReviewPacket[] = [];
@@ -197,6 +205,7 @@ function planningDataFromProjection(
         index,
         graphEdges,
         options,
+        graphContextIndex,
       ),
     );
   }
@@ -215,6 +224,7 @@ function materializeProjectedPacket(
   index: number,
   graphEdges: GraphEdge[],
   options: BuildReviewPacketOptions,
+  graphContextIndex: PacketGraphContextIndex,
 ): ReviewPacket {
   return {
     ...buildPacket(
@@ -224,6 +234,7 @@ function materializeProjectedPacket(
       options.sizeIndex,
       graphEdges,
       options.graphBundle,
+      graphContextIndex,
     ),
     risk_score: component.risk_score,
   };

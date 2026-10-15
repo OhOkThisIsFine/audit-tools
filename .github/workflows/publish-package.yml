@@ -33,7 +33,42 @@ env:
   RELEASE_NODE_VERSION: "22.14.0"
   NPM_CONFIG_LOGLEVEL: notice
 
+permissions:
+  contents: read
+
 jobs:
+  # Capture one immutable source before qualification; metadata is not ancestry.
+  validate-source:
+    if: |
+      (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Checkout captured event commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+      - name: Validate release source
+        id: source
+        shell: bash
+        env:
+          RELEASE_EVENT_SHA: ${{ github.sha }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          node scripts/shared/verify-release-source.mjs
+
   # The release gate is split into two parallel job classes so the publish path
   # is bounded by the SLOWEST gate job rather than the SUM of every step:
   #   - `gate`  : the cheap deterministic chain (check, deadcode, doc-manifest,
@@ -44,6 +79,7 @@ jobs:
   # `publish` needs both, so a failure in any shard or the cheap chain blocks the
   # upload exactly as the former monolithic `verify:release` step did.
   gate:
+    needs: [validate-source]
     if: |
       (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
       (github.event_name == 'workflow_dispatch')
@@ -52,6 +88,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+        with:
+          ref: ${{ needs.validate-source.outputs.commit }}
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -72,6 +111,7 @@ jobs:
           npm run verify:checks
 
   test:
+    needs: [validate-source]
     if: |
       (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
       (github.event_name == 'workflow_dispatch')
@@ -87,6 +127,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
         with:
+          ref: ${{ needs.validate-source.outputs.commit }}
           fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -126,7 +167,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    needs: [gate, test]
+    needs: [validate-source, gate, test]
     # Single package `audit-tools`: release tags are plain `vX.Y.Z`.
     if: |
       (github.event_name == 'release' && startsWith(github.ref_name, 'v')) ||
@@ -137,31 +178,29 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Gate release to default branch
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
-        timeout-minutes: 1
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TARGET="${{ github.ref_name }}"
-          else
-            TARGET="${{ github.event.release.target_commitish }}"
-          fi
-          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
-          if [[ "$TARGET" != "$DEFAULT_BRANCH" ]]; then
-            echo "::error::Live publish must run from the default branch ('${DEFAULT_BRANCH}'), but this run targets '${TARGET}'. Publish aborted. (Re-run workflow_dispatch with dry_run=true to validate from a non-default branch.)"
-            exit 1
-          fi
-          echo "Publish targets '${TARGET}' — branch gate passed."
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
+        with:
+          ref: ${{ needs.validate-source.outputs.commit }}
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
           cache: npm
           registry-url: https://registry.npmjs.org
+      - name: Recheck verified release source
+        shell: bash
+        env:
+          RELEASE_EVENT_SHA: ${{ github.sha }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+          RELEASE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          VERIFIED_RELEASE_SHA: ${{ needs.validate-source.outputs.commit }}
+        run: |
+          node scripts/shared/verify-release-source.mjs
       - name: Validate package-lock.json
         timeout-minutes: 2
         shell: bash

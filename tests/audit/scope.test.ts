@@ -1,6 +1,7 @@
-import { test, expect } from "vitest";
+import { test, expect, vi, afterEach } from "vitest";
+import * as exec from "../../src/shared/tooling/exec.js";
 import { execFileSyncHidden as execFileSync, spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -759,4 +760,84 @@ test("disposition: tracked files whose on-disk case drifted from the index are N
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+afterEach(() => vi.restoreAllMocks());
+
+for (const quotePath of [true, false]) {
+  test(`resolveAuditScope retains pending coverage for exact Git paths (quotePath=${quotePath})`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "audit-delta-paths-"));
+    const changed = ["ordinary.ts", "é雪😀.ts", "with space.ts",
+      ...(process.platform === "win32" ? [] : ['quote".ts', "line\nbreak.ts"])];
+    const included = [...changed, "renamed.ts", "unchanged.ts", "untracked.ts"];
+    const bundle: ArtifactBundle = { repo_manifest: manifest(included) };
+    try {
+      git(root, "init", "-q");
+      git(root, "config", "user.email", "test@example.com");
+      git(root, "config", "user.name", "Test");
+      git(root, "config", "commit.gpgsign", "false");
+      git(root, "config", "core.quotePath", String(quotePath));
+      for (const path of [...changed, "old.ts", "deleted.ts", "unchanged.ts"]) {
+        await writeFile(join(root, path), `original ${path}\n`);
+      }
+      git(root, "add", "-A");
+      git(root, "commit", "-qm", "baseline");
+      expect(await resolveAuditScope({ root, since: "HEAD", bundle })).toMatchObject({ mode: "delta", seed_files: [] });
+      await writeFile(join(root, "untracked.ts"), "untracked\n");
+      expect(await resolveAuditScope({ root, since: "HEAD", bundle })).toMatchObject({ mode: "delta", seed_files: [] });
+      await writeFile(join(root, changed[0]!), "committed change\n");
+      git(root, "commit", "-qam", "committed delta");
+      git(root, "mv", "old.ts", "renamed.ts");
+      await rm(join(root, "deleted.ts"));
+      for (const path of changed.slice(1)) await writeFile(join(root, path), "changed\n");
+      git(root, "add", "--", changed[1]!);
+      const scope = await resolveAuditScope({ root, since: "HEAD~1", bundle });
+      expect(scope.mode).toBe("delta");
+      expect(scope.seed_files).toEqual([...changed, "renamed.ts"].sort());
+      const fresh = coverage(included);
+      applyScopeToCoverage(fresh, scope, coverage(included, { status: "complete" }));
+      for (const file of fresh.files) {
+        expect(file.audit_status).toBe(scope.seed_files.includes(file.path) ? "pending" : "complete");
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+const deltaFailures: Array<[string, () => Partial<exec.RunTrackedResult>]> = [
+  ["nonzero", () => ({ status: 1 })],
+  ["spawn error", () => ({ error: new Error("spawn failed") })],
+  ["long error", () => ({ error: new Error("x".repeat(2000)) })],
+  ["throw", () => { throw new Error("runner threw"); }],
+  ["timeout", () => ({ error: Object.assign(new Error("deadline"), { code: "ETIMEDOUT" }) })],
+  ["overflow", () => ({ error: Object.assign(new Error("overflow"), { code: "ENOBUFS" }) })],
+  ["empty interior", () => ({ stdout: "partial\0\0" })],
+  ["unterminated", () => ({ stdout: "partial\0tail" })],
+];
+for (const [label, fail] of deltaFailures) {
+  test(`resolveAuditScope uses full audit after valid ref when delta discovery fails: ${label}`, async () => {
+    const spy = vi.spyOn(exec, "runTrackedAsync").mockImplementation(async (argv) => ({
+      argv, duration_ms: 0, status: 0, stderr: "",
+      stdout: argv[2] === "--is-inside-work-tree" ? "true\n" : "a".repeat(40),
+      ...(argv[1] === "diff" ? { stdout: "partial\0", ...fail() } : {}),
+    }));
+    const scope = await resolveAuditScope({ root: "synthetic-root", since: "HEAD", bundle: {}, budget: { max_files: 7 } });
+    expect(scope).toMatchObject({ mode: "full", budget: { max_files: 7 } });
+    expect(scope.dropped_note).toMatch(/delta.*could not be established.*full audit/i);
+    expect(scope.dropped_note!.length).toBeLessThan(600);
+    const fresh = coverage(["partial", "other.ts"]);
+    expect(applyScopeToCoverage(fresh, scope, coverage(["partial", "other.ts"], { status: "complete" }))).toBe(fresh);
+    expect(fresh.files.every(file => file.audit_status === "pending")).toBe(true);
+    expect(spy.mock.calls.filter(([argv]) => argv[1] === "diff")).toHaveLength(1);
+  });
+}
+
+
+test("scope uses structured delta discovery rather than the compatibility adapter", async () => {
+  const source = await readFile(new URL("../../src/audit/orchestrator/scope.ts", import.meta.url), "utf8");
+  expect(source).toMatch(/import \{[^}]*\breadChangedFiles\b[^}]*\} from "audit-tools\/shared"/u);
+  expect(source).toMatch(/await readChangedFiles\(input\.root, since\)/u);
+  expect(source).not.toMatch(/\bchangedFiles\b/u);
 });

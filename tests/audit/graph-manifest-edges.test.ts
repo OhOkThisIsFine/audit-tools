@@ -1,4 +1,6 @@
 import { test, expect } from "vitest";
+import { extractPackageEntrypointEdges, extractPackageScriptEdges, resolvePackageEntrypoint } from "../../src/audit/extractors/graphManifestEdges/packageJson.js";
+import { extractTypescriptProjectReferenceEdges } from "../../src/audit/extractors/graphManifestEdges/typescript.js";
 
 const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
   await import("../../src/audit/extractors/graphManifestEdges/jsonc.js");
@@ -23,6 +25,83 @@ function parseYamlSafe(content: string): unknown;
 function parseYamlSafe(content: string): unknown {
   return parseYamlSafeRaw(content);
 }
+
+test.each([
+  ["package.json", "", "."],
+  ["package.json", ".", "."],
+  ["Nested/package.json", "", "Nested"],
+  ["Nested/package.json", "..", "."],
+  ["Nested/package.json", "../../Outside", "../Outside"],
+  ["Nested/package.json", "Child/", "Nested/Child/"],
+  ["Nested/package.json", " Child ", "Nested/ Child "],
+  ["Nested\\package.json", ".\\Child", "Nested/Child"],
+  ["package.json", "./Child", "Child"],
+])("manifest target spelling remains unchanged: %s + %s", (from, specifier, target) => {
+  const lookup = new Map([[target.toLowerCase(), "OriginalCase/Result.ts"]]);
+  expect(resolvePackageEntrypoint(from, specifier, lookup)).toBe("OriginalCase/Result.ts");
+});
+
+test("manifest-relative adapters preserve complete edges, spelling, order and duplicate references", () => {
+  const cases = [
+    { file: "package.json", extract: extractPackageEntrypointEdges, kind: "package-entrypoint-link", confidence: 0.9,
+      content: (s: string[]) => JSON.stringify({ exports: s }),
+      reason: (s: string, _t: string, i: number) => `Package manifest field 'exports.${i}' points to '${s}'.` },
+    { file: "tsconfig.json", extract: extractTypescriptProjectReferenceEdges, kind: "typescript-project-reference-link", confidence: 0.87,
+      content: (s: string[]) => JSON.stringify({ references: s.map(path => ({ path })) }),
+      reason: (s: string, t: string) => `TypeScript project reference '${s}' resolves to '${t}'.` },
+    { file: "go.mod", extract: extractGoWorkspaceModuleEdges, kind: "go-workspace-module-link", confidence: 0.87,
+      content: (s: string[]) => `use (\n${s.map(value => JSON.stringify(value)).join("\n")}\n)`,
+      reason: (s: string, t: string) => `Go workspace use directive '${s}' resolves to module '${t}'.` },
+    { file: "pom.xml", extract: extractMavenModuleEdges, kind: "maven-module-link", confidence: 0.87,
+      content: (s: string[]) => `<modules>${s.map(value => `<module>${value}</module>`).join("")}</modules>`,
+      reason: (s: string, t: string) => `Maven module '${s}' resolves to module manifest '${t}'.` },
+  ];
+  for (const adapter of cases) {
+    for (const base of ["", "Nested/"]) {
+      const from = `${base}${adapter.file === "go.mod" ? "go.work" : adapter.file}`;
+      const paths = [`${base}Child/${adapter.file}`, `Sibling/${adapter.file}`];
+      const specifiers = [`Child/${adapter.file}`, `./Child/${adapter.file}`, `Child\\${adapter.file}`, `${base ? "../" : ""}Sibling/${adapter.file}`, `Child/${adapter.file}`];
+      const targets = [paths[0]!, paths[0]!, paths[0]!, paths[1]!, paths[0]!];
+      const lookup = new Map(paths.map(path => [path.toLowerCase(), path]));
+      expect(adapter.extract(from, adapter.content(specifiers), lookup)).toEqual(specifiers.map((specifier, i) => ({
+        from, to: targets[i], kind: adapter.kind, confidence: adapter.confidence,
+        direction: "directed", reason: adapter.reason(specifier, targets[i]!, i),
+      })));
+      // These lookup entries make an accidentally removed admission guard observable.
+      for (const invalid of ["/absolute", "C:/drive", "C:drive", "https://host/x", "ScHeMe+v.1:x", "\\\\server\\share"]) {
+        const normalized = invalid.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+        const target = `${base}${normalized}/${adapter.file}`;
+        const guardLookup = new Map([[`${base}${normalized}`.toLowerCase(), target], [target.toLowerCase(), target]]);
+        expect(adapter.extract(from, adapter.content([invalid]), guardLookup)).toEqual([]);
+      }
+      expect(adapter.extract(from, adapter.content(["missing"]), lookup)).toEqual([]);
+    }
+  }
+});
+
+test("manifest adapters retain distinct direct, extension and fallback probing", () => {
+  const lookup = new Map([
+    ["pkg/tsconfig.build.json", "Pkg/tsconfig.build.json"],
+    ["pkg/tsconfig.build.json/tsconfig.json", "Pkg/fallback/tsconfig.json"],
+    ["pkg/wrong", "Pkg/wrong.ts"], ["pkg/wrong/tsconfig.json", "Pkg/wrong/tsconfig.json"],
+    ["pkg/go.mod", "Pkg/go.mod"], ["pkg/go.mod/go.mod", "Pkg/fallback/go.mod"],
+    ["pkg/wrong/go.mod", "Pkg/wrong/go.mod"],
+    ["pkg/pom.xml", "Pkg/pom.xml"], ["pkg/pom.xml/pom.xml", "Pkg/fallback/pom.xml"],
+    ["pkg/wrong/pom.xml", "Pkg/wrong/pom.xml"],
+    ["pkg/extension.ts", "Pkg/extension.ts"], ["pkg/index/index.ts", "Pkg/index/index.ts"],
+    ["../outside/pom.xml", "../outside/pom.xml"],
+  ]);
+  const ts = extractTypescriptProjectReferenceEdges("Pkg/tsconfig.json", JSON.stringify({ references: [{ path: "tsconfig.build" }, { path: "wrong" }] }), lookup);
+  expect(ts.map(edge => edge.to)).toEqual(["Pkg/tsconfig.build.json", "Pkg/wrong/tsconfig.json"]);
+  expect(extractGoWorkspaceModuleEdges("Pkg/go.work", "use (\ngo.mod\nwrong\nextension\nindex\n)", lookup).map(edge => edge.to)).toEqual(["Pkg/go.mod", "Pkg/wrong/go.mod"]);
+  expect(extractMavenModuleEdges("Pkg/parent/pom.xml", "<modules><module>../pom.xml</module><module>../wrong</module><module>../extension</module><module>../index</module><module>../../../outside</module></modules>", lookup).map(edge => edge.to)).toEqual(["Pkg/pom.xml", "Pkg/wrong/pom.xml"]);
+  expect(extractMavenModuleEdges("Pkg/pom.xml", "<modules><module>.</module><module>pom.xml</module></modules>", lookup)).toEqual([]);
+  expect(extractPackageEntrypointEdges("Pkg/package.json", JSON.stringify({ exports: ["extension", "index"] }), lookup).map(edge => edge.to)).toEqual(["Pkg/extension.ts", "Pkg/index/index.ts"]);
+  expect(extractPackageScriptEdges("Pkg/package.json", JSON.stringify({ scripts: { check: "node ./extension.js && node ./extension.js" } }), lookup)).toEqual([0, 1].map(() => ({
+    from: "Pkg/package.json", to: "Pkg/extension.ts", kind: "package-script-link", confidence: 0.88, direction: "directed",
+    reason: "Package script 'check' references './extension.js'.",
+  })));
+});
 
 // ── JSONC parser ─────────────────────────────────────────────────────────────
 

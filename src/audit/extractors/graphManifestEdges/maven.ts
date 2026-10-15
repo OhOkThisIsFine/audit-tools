@@ -1,6 +1,7 @@
+// sites-pinned: tests/audit/graph-manifest-edges.test.ts, tests/audit/graph-edge-cache.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
-import { graphEdge, normalizeGraphPath, isMavenPomPath } from "../graphPathUtils.js";
+import { graphEdge, normalizeGraphPath, resolveManifestRelativeTarget, isMavenPomPath } from "../graphPathUtils.js";
 
 export const MAVEN_MODULE_EDGE_CONFIDENCE = 0.87;
 
@@ -43,20 +44,8 @@ function resolveMavenModuleReference(
   specifier: string,
   pathLookup: Map<string, string>,
 ): string | undefined {
-  const normalizedSpecifier = normalizeGraphPath(specifier);
-  if (
-    normalizedSpecifier.length === 0 ||
-    normalizedSpecifier.startsWith("/") ||
-    /^[a-z][a-z0-9+.-]*:/i.test(normalizedSpecifier)
-  ) {
-    return undefined;
-  }
-
-  const manifestDir = posix.dirname(normalizeGraphPath(fromPath));
-  const target =
-    manifestDir === "."
-      ? normalizedSpecifier
-      : posix.join(manifestDir, normalizedSpecifier);
+  const target = resolveManifestRelativeTarget(fromPath, specifier);
+  if (target === undefined) return undefined;
   const normalizedTarget = normalizeGraphPath(target);
   if (normalizedTarget === ".." || normalizedTarget.startsWith("../")) {
     return undefined;

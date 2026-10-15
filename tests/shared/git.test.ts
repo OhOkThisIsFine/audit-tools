@@ -1,11 +1,10 @@
 import { test, expect } from "vitest";
 import { execFileSyncHidden as execFileSync } from "../helpers/spawn.mjs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-import { isGitRepo, gitRefExists, changedFiles, fileCommits, stagedAndUntracked } from "../../src/shared/git.js";
+import { isGitRepo, gitRefExists, readChangedFiles, changedFiles, fileCommits, stagedAndUntracked } from "../../src/shared/git.js";
 
 // Build a throwaway git repo with one commit. Mirrors the mkdtemp/rm +
 // execFileSync('git', ...) helper pattern from
@@ -30,12 +29,8 @@ async function withTempRepo<T>(
   }
 }
 
-const here = dirname(fileURLToPath(import.meta.url));
-// tests/shared -> repo root is two levels up and holds .git.
-const repoRoot = join(here, "..", "..");
-
-test("isGitRepo: true inside the repo, false in a fresh temp dir", async () => {
-  expect(await isGitRepo(repoRoot)).toBe(true);
+test("isGitRepo: true inside a repo, false in a fresh temp dir", async () => {
+  await withTempRepo(async root => { expect(await isGitRepo(root)).toBe(true); });
   const dir = await mkdtemp(join(tmpdir(), "audit-tools-git-"));
   try {
     expect(await isGitRepo(dir)).toBe(false);
@@ -91,5 +86,47 @@ test("changedFiles/fileCommits/stagedAndUntracked report real changes inside a t
     // A newly written, never-added file is reported by stagedAndUntracked.
     await writeFile(join(repoRoot, "fresh.ts"), "export const b = 3;\n", "utf8");
     expect((await stagedAndUntracked(repoRoot)).includes("fresh.ts")).toBeTruthy();
+  });
+});
+
+// Unicode and spaces run on Windows too; quote/newline/trailing-space names
+// require POSIX filename capabilities. This characterizes transport, not graph keys.
+for (const quotePath of [true, false]) {
+  test(`changedFiles preserves exact paths with core.quotePath=${quotePath}`, async () => {
+    await withTempRepo(async (root, git) => {
+      git("config", "core.quotePath", String(quotePath));
+      const paths = ["ordinary.ts", "é雪😀.ts", "with space.ts", " leading.ts",
+        ...(process.platform === "win32" ? [] : ['quote".ts', "line\nbreak.ts", "trailing.ts "])];
+      for (const path of paths) await writeFile(join(root, path), "before\n");
+      git("add", "-A");
+      git("commit", "-qm", "paths");
+      for (const path of paths) await writeFile(join(root, path), "after\n");
+      const compatible: Promise<string[]> = changedFiles(root, "HEAD");
+      expect((await compatible).sort()).toEqual([...paths].sort());
+    });
+  });
+}
+
+
+test("delta discovery refuses Git output options without creating a file", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "tracked.ts"), "dirty\n");
+    const output = join(root, "probe-output");
+    const since = `--output=${output}`;
+    expect(await readChangedFiles(root, since)).toMatchObject({ ok: false });
+    expect(await changedFiles(root, since)).toEqual([]);
+    await expect(access(output)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+
+test("structured delta discovery preserves valid commit-range arguments", async () => {
+  await withTempRepo(async (root, git) => {
+    await writeFile(join(root, "tracked.ts"), "second\n");
+    git("commit", "-qam", "second");
+    for (const since of ["HEAD~1", "HEAD~1..HEAD", "HEAD~1...HEAD"]) {
+      expect(await readChangedFiles(root, since)).toEqual({ ok: true, paths: ["tracked.ts"] });
+      expect(await changedFiles(root, since)).toEqual(["tracked.ts"]);
+    }
   });
 });

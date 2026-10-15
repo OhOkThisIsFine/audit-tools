@@ -43,6 +43,8 @@ function fakeGitHub({
   failCheckRunPolls = 0,
   alreadyLanded = false,
   refuseFastForward = false,
+  forbidStatuses = false,
+  failStatusPolls = 0,
 }: {
   checkRuns: unknown[][];
   statuses?: unknown[][];
@@ -52,12 +54,15 @@ function fakeGitHub({
   failCheckRunPolls?: number;
   alreadyLanded?: boolean;
   refuseFastForward?: boolean;
+  forbidStatuses?: boolean;
+  failStatusPolls?: number;
 }) {
   const calls: Call[] = [];
   let checkPoll = 0;
   let statusPoll = 0;
   let prPoll = 0;
   let failures = failCheckRunPolls;
+  let statusFailures = failStatusPolls;
   const pick = <T,>(list: T[], index: number) => list[Math.min(index, list.length - 1)];
   const answer = (command: string, args: string[]): Answer => {
     calls.push({ command, args });
@@ -79,7 +84,14 @@ function fakeGitHub({
       }
       return ok({ check_runs: pick(checkRuns, checkPoll++) });
     }
-    if (command === "gh" && joined.endsWith("/status")) return ok({ statuses: pick(statuses, statusPoll++) });
+    if (command === "gh" && joined.endsWith("/status")) {
+      if (forbidStatuses) throw new Error("unusable commit-status endpoint was invoked");
+      if (statusFailures > 0) {
+        statusFailures -= 1;
+        return { status: 1, stdout: "", stderr: "gh: HTTP 502 Bad Gateway" };
+      }
+      return ok({ statuses: pick(statuses, statusPoll++) });
+    }
     return ok("");
   };
   const pushedTo = (ref: string) =>
@@ -88,7 +100,7 @@ function fakeGitHub({
   return { calls, answer, pushedTo, deleted };
 }
 
-function land(fake: ReturnType<typeof fakeGitHub>["answer"], { waitMs = 60_000, sha = SHA } = {}) {
+function land(fake: ReturnType<typeof fakeGitHub>["answer"], { waitMs = 60_000, sha = SHA, pollMs = 1_000 } = {}) {
   let clock = 0;
   return landThroughPullRequest({
     cwd: ".",
@@ -100,7 +112,7 @@ function land(fake: ReturnType<typeof fakeGitHub>["answer"], { waitMs = 60_000, 
     title: "release: v1.2.3",
     body: "bump",
     waitMs,
-    pollMs: 1_000,
+    pollMs,
     runCommand: fake,
     sleep: async (ms: number) => {
       clock += ms;
@@ -168,6 +180,93 @@ describe("required statuses and their verdict", () => {
 });
 
 describe("landThroughPullRequest", () => {
+  const statusCalls = (github: ReturnType<typeof fakeGitHub>) =>
+    github.calls.filter((call) => call.command === "gh" && call.args.at(-1)?.endsWith("/status"));
+  const checkCalls = (github: ReturnType<typeof fakeGitHub>) =>
+    github.calls.filter((call) => call.command === "gh" && call.args.at(-1)?.includes("/check-runs"));
+
+  it.each([
+    { name: "green", runs: [run("checks", "completed", "success")], error: null },
+    { name: "red", runs: [run("checks", "completed", "failure")], error: /checks \(failure\)/ },
+    { name: "pending", runs: [run("checks", "in_progress", null)], error: /did not conclude/ },
+    { name: "missing", runs: [], error: /No run of checks was ever listed/ },
+    { name: "wrong app", runs: [run("checks", "completed", "success", 1, APP + 1)], error: /No run of checks was ever listed/ },
+  ])("never queries unusable statuses for app-pinned $name checks", async ({ runs, error }) => {
+    const github = fakeGitHub({ checkRuns: [runs], forbidStatuses: true });
+    const landing = land(github.answer, { waitMs: 2_000 });
+    if (error) await expect(landing).rejects.toThrow(error);
+    else await landing;
+    expect(statusCalls(github)).toHaveLength(0);
+    expect(checkCalls(github).length).toBeGreaterThan(0);
+    expect(github.pushedTo("main")).toBe(error === null);
+  });
+
+  it("keeps every check-run observation across a 30-minute app-pinned pending wait", async () => {
+    const github = fakeGitHub({ checkRuns: [[run("checks", "queued", null)]], forbidStatuses: true });
+    await expect(land(github.answer, { waitMs: 30 * 60_000, pollMs: 5_000 })).rejects.toThrow(/did not conclude/);
+    expect(checkCalls(github)).toHaveLength(361);
+    expect(statusCalls(github)).toHaveLength(0);
+    expect(github.pushedTo("main")).toBe(false);
+    expect(checkCalls(github).every((call) => call.args[1] === `repos/o/r/commits/${SHA}/check-runs?per_page=100`)).toBe(true);
+  });
+
+  it.each([
+    { name: "legacy contexts", protection: { contexts: ["ci/legacy"] }, runs: [] },
+    { name: "explicitly unpinned", protection: { checks: [{ context: "ci/legacy", app_id: null }] }, runs: [] },
+    { name: "mixed", protection: { checks: [{ context: "checks", app_id: APP }], contexts: ["ci/legacy"] }, runs: [run("checks", "completed", "success")] },
+  ])("still polls statuses for $name requirements", async ({ protection, runs }) => {
+    const github = fakeGitHub({
+      protection: ok(protection), checkRuns: [runs],
+      statuses: [[{ context: "ci/legacy", state: "pending" }], [{ context: "ci/legacy", state: "success" }]],
+    });
+    await land(github.answer);
+    expect(statusCalls(github)).toHaveLength(2);
+    expect(checkCalls(github)).toHaveLength(2);
+    expect(statusCalls(github).every((call) => call.args[1] === `repos/o/r/commits/${SHA}/status`)).toBe(true);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it("keeps the legacy status fallback on later polls after a matching check run disappears", async () => {
+    const github = fakeGitHub({
+      protection: ok({ contexts: ["ci/legacy"] }),
+      checkRuns: [[run("ci/legacy", "in_progress", null)], []],
+      statuses: [[{ context: "ci/legacy", state: "success" }]],
+    });
+    await land(github.answer);
+    expect(statusCalls(github)).toHaveLength(2);
+    expect(checkCalls(github)).toHaveLength(2);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it("retries needed status queries and refuses a red legacy status", async () => {
+    const github = fakeGitHub({
+      protection: ok({ contexts: ["ci/legacy"] }), checkRuns: [[]], failStatusPolls: 3,
+      statuses: [[{ context: "ci/legacy", state: "error" }]],
+    });
+    await expect(land(github.answer)).rejects.toThrow(/ci\/legacy \(error\)/);
+    expect(statusCalls(github)).toHaveLength(4);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it.each(["check-run", "commit-status"])("retains the consecutive failure bound for needed %s queries", async (endpoint) => {
+    const github = fakeGitHub({
+      protection: ok({ contexts: ["ci/legacy"] }), checkRuns: [[]],
+      failCheckRunPolls: endpoint === "check-run" ? 10 : 0,
+      failStatusPolls: endpoint === "commit-status" ? 10 : 0,
+    });
+    await expect(land(github.answer)).rejects.toThrow(`${endpoint} query failed 10 times in a row`);
+    expect(endpoint === "check-run" ? checkCalls(github) : statusCalls(github)).toHaveLength(10);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it("skips statuses but retains check-run polling with no requirements", async () => {
+    const github = fakeGitHub({ protection: ok({ checks: [], contexts: [] }), checkRuns: [[]], forbidStatuses: true });
+    await land(github.answer);
+    expect(statusCalls(github)).toHaveLength(0);
+    expect(checkCalls(github)).toHaveLength(1);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
   it("fast-forwards the default branch to the judged sha only after the required checks turn green", async () => {
     const github = fakeGitHub({ checkRuns: [[], [run("checks", "in_progress", null)], [run("checks", "completed", "success")]] });
     const { prUrl } = await land(github.answer);

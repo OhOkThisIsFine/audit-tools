@@ -1,7 +1,8 @@
+// sites-pinned: tests/audit/graph-manifest-edges.test.ts, tests/audit/graph-edge-cache.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { scanStringAware } from "audit-tools/shared";
-import { graphEdge, normalizeGraphPath, isGoModuleManifestPath, isGoWorkspaceManifestPath } from "../graphPathUtils.js";
+import { graphEdge, resolveManifestRelativeTarget, isGoModuleManifestPath, isGoWorkspaceManifestPath } from "../graphPathUtils.js";
 
 export const GO_WORKSPACE_MODULE_EDGE_CONFIDENCE = 0.87;
 
@@ -147,20 +148,8 @@ function resolveGoWorkspaceModuleReference(
   specifier: string,
   pathLookup: Map<string, string>,
 ): string | undefined {
-  const normalizedSpecifier = normalizeGraphPath(specifier);
-  if (
-    normalizedSpecifier.length === 0 ||
-    normalizedSpecifier.startsWith("/") ||
-    /^[a-z][a-z0-9+.-]*:/i.test(normalizedSpecifier)
-  ) {
-    return undefined;
-  }
-
-  const workspaceDir = posix.dirname(normalizeGraphPath(fromPath));
-  const target =
-    workspaceDir === "."
-      ? normalizedSpecifier
-      : posix.join(workspaceDir, normalizedSpecifier);
+  const target = resolveManifestRelativeTarget(fromPath, specifier);
+  if (target === undefined) return undefined;
   const direct = pathLookup.get(target.toLowerCase());
   if (direct && isGoModuleManifestPath(direct)) {
     return direct;

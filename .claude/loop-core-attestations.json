@@ -299,6 +299,25 @@
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
       }
     },
+    "6cd8a9eb36e60d5d": {
+      "reviewed_by": "/root/final_candidate_review",
+      "attester_class": "agent",
+      "checked": "Independent non-author checked lossless NUL Git scope and failure fallback, immutable release SHA ancestry, pinned-app versus legacy status polling, caller-specific manifest admission, duplicate/stable call-local graph context and obligation precedence/reload/stops against full-history retirement evidence and existing defect/equivalence tests. Independently recomputed 33-module comment-only cache pin d7e12ddef12a8fd980c550437bbceb3cfce4ac487e1301e58f1d3cc98aef5489; no blocking finding. Native complete suite7813 passed,0failed,35skipped on reviewed tree4a66064df9695a9971fb614f9256c5078e052714.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "4a66064df9695a9971fb614f9256c5078e052714",
+        "ran_at": "2026-10-15T16:24:24.152Z"
+      },
+      "attested_at": "2026-10-15T16:24:40.691Z",
+      "vouches": {
+        "src/audit/orchestrator/reviewPacketGraphContext.ts": "860338cb48f8538383074155453ef0e735a9012f",
+        "src/audit/orchestrator/reviewPackets.ts": "1afdfa907b784e3691c95f9ecee589901a108735",
+        "src/audit/orchestrator/scope.ts": "2854a884dc6489a08c29444fbfd6de061cd342d6",
+        "src/remediate/steps/nextStep.ts": "ff51f23d56ce740f2336376719461bc1dfe55984"
+      }
+    },
     "7ecf68a7852f3ff3": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -699,7 +718,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/reviewPacketGraphContext.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "6cd8a9eb36e60d5d"
     },
     "src/audit/orchestrator/reviewPacketGraphEdges.ts": {
       "baseline": "7b79934e86baf378"
@@ -714,7 +733,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/reviewPackets.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "6cd8a9eb36e60d5d"
     },
     "src/audit/orchestrator/runtimeCommand.ts": {
       "review": "92a14c6e9e3ff056"
@@ -726,7 +745,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/scope.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "6cd8a9eb36e60d5d"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
       "review": "92a14c6e9e3ff056"
@@ -852,7 +871,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "6cd8a9eb36e60d5d"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"

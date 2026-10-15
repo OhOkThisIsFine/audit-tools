@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-packet-graph-context.test.ts, tests/audit/review-packets.test.ts
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 import { isRecord, compareCodeUnits } from "audit-tools/shared";
 import type {
@@ -33,34 +34,83 @@ function reviewPacketGraphEdge(edge: GraphEdge): ReviewPacketGraphEdge {
   return result;
 }
 
-function packetEntrypoints(
-  filePaths: string[],
+/** Immutable-input, synchronous-call-local incidence index; never persisted. */
+export interface PacketGraphContextIndex {
+  readonly graphEdges: readonly GraphEdge[];
+  readonly edgeOrdinalsByPath: ReadonlyMap<string, readonly number[]>;
+  readonly routesByHandler: ReadonlyMap<
+    string,
+    readonly { ordinal: number; route: Record<string, unknown> }[]
+  >;
+}
+
+export function createPacketGraphContextIndex(
+  graphEdges: GraphEdge[],
   graphBundle?: GraphBundle,
-): string[] {
-  const fileSet = new Set(filePaths.map(normalizeGraphPath));
+): PacketGraphContextIndex {
+  const edgeOrdinalsByPath = new Map<string, number[]>();
+  graphEdges.forEach((edge, ordinal) => {
+    // A self-edge (including aliased endpoints) has only one incidence entry.
+    const endpoints = new Set([
+      normalizeGraphPath(edge.from),
+      normalizeGraphPath(edge.to),
+    ]);
+    for (const path of endpoints) {
+      const ordinals = edgeOrdinalsByPath.get(path) ?? [];
+      ordinals.push(ordinal);
+      edgeOrdinalsByPath.set(path, ordinals);
+    }
+  });
+  const routesByHandler = new Map<
+    string,
+    { ordinal: number; route: Record<string, unknown> }[]
+  >();
   const routes = Array.isArray(graphBundle?.graphs.routes)
     ? graphBundle.graphs.routes
     : [];
-
-  return routes
-    .filter(
-      (route) =>
-        isRecord(route) &&
-        typeof route.handler === "string" &&
-        typeof route.path === "string" &&
-        fileSet.has(normalizeGraphPath(route.handler)),
-    )
-    .map((route) => {
-      const method = typeof route.method === "string" ? `${route.method} ` : "";
-      return `${method}${route.path} -> ${route.handler}`;
-    })
-    .sort((a, b) => compareCodeUnits(a, b));
+  routes.forEach((route, ordinal) => {
+    if (
+      !isRecord(route) ||
+      typeof route.handler !== "string" ||
+      typeof route.path !== "string"
+    ) return;
+    const handler = normalizeGraphPath(route.handler);
+    const occurrences = routesByHandler.get(handler) ?? [];
+    occurrences.push({ ordinal, route });
+    routesByHandler.set(handler, occurrences);
+  });
+  return { graphEdges, edgeOrdinalsByPath, routesByHandler };
 }
 
+function packetEntrypoints(
+  fileSet: ReadonlySet<string>,
+  index: PacketGraphContextIndex,
+): string[] {
+  const entrypoints: string[] = [];
+  for (const path of fileSet) {
+    for (const { route } of index.routesByHandler.get(path) ?? []) {
+      const method = typeof route.method === "string" ? `${route.method} ` : "";
+      entrypoints.push(`${method}${route.path} -> ${route.handler}`);
+    }
+  }
+  return entrypoints.sort((a, b) => compareCodeUnits(a, b));
+}
+
+/** Direct-call seam; planning shares one index across its packet materializations. */
 export function buildPacketGraphContext(
   filePaths: string[],
   graphEdges: GraphEdge[],
   graphBundle?: GraphBundle,
+) {
+  return buildPacketGraphContextFromIndex(
+    filePaths,
+    createPacketGraphContextIndex(graphEdges, graphBundle),
+  );
+}
+
+export function buildPacketGraphContextFromIndex(
+  filePaths: string[],
+  index: PacketGraphContextIndex,
 ): {
   keyEdges: ReviewPacketGraphEdge[];
   boundaryFiles: string[];
@@ -72,7 +122,16 @@ export function buildPacketGraphContext(
   const boundaryFiles = new Set<string>();
   let boundaryEdgeCount = 0;
 
-  for (const edge of graphEdges) {
+  const incidentOrdinals = new Set<number>();
+  for (const path of fileSet) {
+    for (const ordinal of index.edgeOrdinalsByPath.get(path) ?? []) {
+      incidentOrdinals.add(ordinal);
+    }
+  }
+  // Restore source order before the stable comparator sort: reason is not a key.
+  // Ordinals dedupe selection, never distinct equal-valued edge occurrences.
+  for (const ordinal of [...incidentOrdinals].sort((a, b) => a - b)) {
+    const edge = index.graphEdges[ordinal]!;
     if (!isConcreteGraphEdge(edge)) {
       continue;
     }
@@ -111,7 +170,7 @@ export function buildPacketGraphContext(
     boundaryFiles: [...boundaryFiles]
       .sort((a, b) => compareCodeUnits(a, b))
       .slice(0, MAX_PACKET_BOUNDARY_FILES),
-    entrypoints: packetEntrypoints(filePaths, graphBundle),
+    entrypoints: packetEntrypoints(fileSet, index),
     quality: {
       cohesion_score: roundQuality(cohesionScore),
       internal_edge_count: internalEdges.length,

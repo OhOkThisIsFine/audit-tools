@@ -452,13 +452,16 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
   // Graph routes use only the unchanged pure comment masker, not its file reader;
   // cached contributions still use supplied content, so retain cache version v10.
   // The reader's sites-pinned declaration is comment-only; graph behavior is unchanged.
+  // Manifest-relative target extraction preserves all four adapters' graph output;
+  // only ownership of the existing pure prefix moved, so retain cache version v10.
+  // Adapter/path-utils test-site declarations also change only comments in this closure.
   expect(
     digest.digest("hex"),
     "An extractor feeding a cached per-file contribution changed. A prior cache " +
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("c4754fa8a32918c96a8d9dff89abf135e34ed15ed3167282fb9e75c62f5bed73");
+  ).toBe("d7e12ddef12a8fd980c550437bbceb3cfce4ac487e1301e58f1d3cc98aef5489");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 
