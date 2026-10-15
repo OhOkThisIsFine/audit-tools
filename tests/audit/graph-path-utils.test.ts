@@ -1,9 +1,11 @@
+import { posix } from "node:path";
 import { test, expect } from "vitest";
 
 const {
   normalizeGraphPath,
   graphLookupKey,
   resolveCandidate,
+  resolveManifestRelativeTarget,
   resolveSpecifier,
   resolveReferenceLiteral,
   isPackageManifestPath,
@@ -159,4 +161,47 @@ test("resolveReferenceLiteral handles relative, repo-rooted, and bare literals",
 
   // bare name with no slash → undefined
   expect(resolveReferenceLiteral("src/a/foo.ts", "README", new Map())).toBe(undefined);
+});
+
+test.each([
+  ["package.json", "", "."],
+  ["package.json", ".", "."],
+  ["package.json", "Child/", "Child/"],
+  ["Nested/package.json", "", "Nested"],
+  ["Nested/package.json", "..", "."],
+  ["Nested/package.json", "../../Outside", "../Outside"],
+  ["Nested/package.json", "Child/", "Nested/Child/"],
+  ["Nested/package.json", " Child ", "Nested/ Child "],
+  ["Nested\\package.json", ".\\Child", "Nested/Child"],
+  ["package.json", "./Child", "Child"],
+  ["Nested/package.json", "/absolute", undefined],
+  ["Nested/package.json", "C:/drive", undefined],
+  ["Nested/package.json", "C:drive", undefined],
+  ["Nested/package.json", "\\\\server\\share", undefined],
+  ["Nested/package.json", "ScHeMe+v.1:target", undefined],
+])("resolveManifestRelativeTarget keeps graph spelling: %s + %s", (from, specifier, expected) => {
+  expect(resolveManifestRelativeTarget(from!, specifier!)).toBe(expected);
+});
+
+test("manifest target extraction agrees with the prior prefix over a deterministic cross-product", () => {
+  // Frozen pre-extraction contract from a4cf53d; this oracle intentionally has
+  // no map probes, parser policy or filesystem authority.
+  function priorTarget(from: string, specifier: string): string | undefined {
+    const normalized = normalizeGraphPath(specifier);
+    if (normalized.length === 0 || normalized.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(normalized)) return undefined;
+    const directory = posix.dirname(normalizeGraphPath(from));
+    return directory === "." ? normalized : posix.join(directory, normalized);
+  }
+  const parts = ["", ".", "..", "Child", "Mixed.Case", "雪", " space ", "a:b", "C:", "/abs", "\\\\host", "https:"];
+  const manifests = ["package.json", "Nested/tsconfig.json", "a/b/go.work", "A\\B\\pom.xml", "./manifest", "../manifest"];
+  for (const from of manifests) {
+    for (const left of parts) {
+      for (const right of parts) {
+        for (const separator of ["/", "\\"]) {
+          const specifier = `${left}${separator}${right}`;
+          expect(resolveManifestRelativeTarget(from, specifier), `${from}: ${specifier}`).toBe(priorTarget(from, specifier));
+        }
+      }
+    }
+  }
 });

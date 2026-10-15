@@ -3127,20 +3127,7 @@ function requireState(state: RemediationState | null): RemediationState {
   return state;
 }
 
-/**
- * Priority order for the pre-intake obligations — mirrors the original cascade's
- * top-down guard order exactly so selection cannot drift.
- */
-export const PRE_INTAKE_PRIORITY: readonly string[] = [
-  "input_conflict",
-  "confirm_resume",
-  "confirm_intent",
-  "interpret_intent",
-  "complete_redelivery",
-  "complete",
-  "pending_intake",
-];
-
+// sites-pinned: tests/remediate/obligation-priority-coverage.test.ts
 /**
  * The linear pre-intake gates as declarative obligations (A3 slice 1). Built per
  * call so each `derive` can close over `ctx` paths + the pre-read `snapshot` and
@@ -3434,24 +3421,6 @@ Then run:
     },
   ];
 }
-
-/**
- * Priority order for the main (post-intake) obligations — mirrors the original
- * cascade tail's guard order exactly so selection cannot drift.
- */
-export const MAIN_PRIORITY: readonly string[] = [
-  "operator_plan_only",
-  "waiting_for_clarification",
-  "waiting_for_triage",
-  "planning_documentable",
-  "deferred_clarification",
-  "implementing",
-  "triage",
-  "planning_zero",
-  "all_terminal",
-  "closing",
-  "unhandled",
-];
 
 /**
  * The post-intake cascade tail as declarative obligations (A3 slice 2). Runs on a
@@ -3867,7 +3836,7 @@ async function advanceUnderPhaseLock(deps: {
   // The linear pre-intake gates run as obligations through the shared advance
   // loop. An emit returns to the host; a transition re-scans within this call;
   // exhausting them (step === null) means the run is past intake and falls
-  // through to the post-intake `advance` (MAIN_PRIORITY) below.
+  // through to the post-intake `advance` below.
   const ctx: RemediateCtx = {
     root,
     artifactsDir,
@@ -3877,21 +3846,22 @@ async function advanceUnderPhaseLock(deps: {
     inputResolution,
     countStep,
   };
+  const preIntakeObligations = buildPreIntakeObligations(ctx, {
+    existingCheckpoint,
+    rejectedCheckpointFields: checkpointRead?.rejected ?? [],
+    resumeAck,
+    entryState: state,
+    suppliedInputUnchanged,
+    sourceAlreadyBound: boundSource !== undefined,
+    inputSelectionChanged,
+    selectionAlreadyBound: recordedSelection !== undefined,
+    selectedSourceChanged,
+    guidanceFileSupplied: Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined),
+  });
   const preIntake = await advance(
     {
-      priority: PRE_INTAKE_PRIORITY,
-      obligations: buildPreIntakeObligations(ctx, {
-        existingCheckpoint,
-        rejectedCheckpointFields: checkpointRead?.rejected ?? [],
-        resumeAck,
-        entryState: state,
-        suppliedInputUnchanged,
-        sourceAlreadyBound: boundSource !== undefined,
-        inputSelectionChanged,
-        selectionAlreadyBound: recordedSelection !== undefined,
-        selectedSourceChanged,
-        guidanceFileSupplied: Boolean(options.guidanceFileSupplied || options.guidanceFile || options.guidanceText !== undefined),
-      }),
+      priority: preIntakeObligations.map(def => def.id),
+      obligations: preIntakeObligations,
     },
     state,
     ctx,
@@ -3924,8 +3894,9 @@ async function advanceUnderPhaseLock(deps: {
   // store without returning the persisted value, so the main fold reads from disk
   // exactly as it did when it owned its own lock acquisition.
   const advanceState = (await store.loadState()) ?? state;
+  const mainObligations = buildMainObligations(ctx);
   const main = await advance(
-    { priority: MAIN_PRIORITY, obligations: buildMainObligations(ctx) },
+    { priority: mainObligations.map(def => def.id), obligations: mainObligations },
     advanceState,
     ctx,
   );

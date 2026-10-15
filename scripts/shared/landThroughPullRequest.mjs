@@ -241,12 +241,15 @@ export async function landThroughPullRequest({
     );
   }
 
+  const needsCommitStatuses = required.some((check) => check.appId === null);
   const start = now();
   let announced = false;
   for (;;) {
     const runs = await poll(["api", `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`], "the check-run query");
-    const combined = await poll(["api", `repos/${repoSlug}/commits/${sha}/status`], "the commit-status query");
-    const verdict = evaluateRequiredChecks(runs?.check_runs, combined?.statuses, required);
+    const statuses = needsCommitStatuses
+      ? (await poll(["api", `repos/${repoSlug}/commits/${sha}/status`], "the commit-status query"))?.statuses
+      : [];
+    const verdict = evaluateRequiredChecks(runs?.check_runs, statuses, required);
     if (verdict.state === "green") break;
     if (verdict.state === "red") {
       throw new Error(

@@ -396,7 +396,7 @@ test("pre-tag suite exercises the exact publish runtime, not only its floating m
   expect(releaseVersion).toMatch(/^\d+\.\d+\.\d+$/);
   expect(suite.jobs["orchestration-tests"].strategy.matrix.node,
     "the pre-tag suite must exercise the publish pin exactly").toContain(releaseVersion);
-  for (const jobName of ["gate", "test", "publish"]) {
+  for (const jobName of ["validate-source", "gate", "test", "publish"]) {
     const setup = publish.jobs[jobName].steps.find((step: { uses?: string }) =>
       step.uses?.startsWith("actions/setup-node@"));
     expect(setup?.with?.["node-version"]).toBe("${{ env.RELEASE_NODE_VERSION }}");

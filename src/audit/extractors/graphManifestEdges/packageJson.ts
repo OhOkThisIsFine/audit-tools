@@ -1,6 +1,6 @@
-import { posix } from "node:path";
+// sites-pinned: tests/audit/graph-manifest-edges.test.ts, tests/audit/graph-edge-cache.test.ts
 import type { GraphEdge } from "audit-tools/shared";
-import { graphEdge, normalizeGraphPath, resolveCandidate, isPackageManifestPath } from "../graphPathUtils.js";
+import { graphEdge, resolveManifestRelativeTarget, resolveCandidate, isPackageManifestPath } from "../graphPathUtils.js";
 import {
   WorkspacePattern,
   collectWorkspacePatternValues,
@@ -71,21 +71,9 @@ export function resolvePackageEntrypoint(
   specifier: string,
   pathLookup: Map<string, string>,
 ): string | undefined {
-  const normalizedSpecifier = normalizeGraphPath(specifier);
-  if (
-    normalizedSpecifier.length === 0 ||
-    normalizedSpecifier.startsWith("/") ||
-    /^[a-z][a-z0-9+.-]*:/i.test(normalizedSpecifier)
-  ) {
-    return undefined;
-  }
-
-  const packageDir = posix.dirname(normalizeGraphPath(packagePath));
-  const packageRelative =
-    packageDir === "."
-      ? normalizedSpecifier
-      : posix.join(packageDir, normalizedSpecifier);
-  return resolveCandidate(packageRelative, pathLookup);
+  const target = resolveManifestRelativeTarget(packagePath, specifier);
+  if (target === undefined) return undefined;
+  return resolveCandidate(target, pathLookup);
 }
 
 export function extractPackageEntrypointEdges(

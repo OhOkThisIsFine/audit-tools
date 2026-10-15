@@ -8,6 +8,8 @@ import {
   DirtyPathDiscoveryError,
   readAuditReadState,
   readGitPathList,
+  readChangedFiles,
+  changedFiles,
   stagedAndUntracked,
 } from "../../src/shared/git.js";
 
@@ -95,7 +97,42 @@ describe("bounded Git path transport", () => {
     })],
   ];
 
+  it.each(["--output=probe-output", "--stat", "-R", "-"])("rejects option-like delta refs before spawning: %s", async (since) => {
+    const spy = mockGit();
+    expect(await readChangedFiles(ROOT, since)).toMatchObject({ ok: false, reason: expect.stringContaining("option") });
+    expect(await changedFiles(ROOT, since)).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("delta discovery is one bounded NUL query and keeps empty success distinct", async () => {
+    const paths = ["ordinary.ts", "é雪😀.ts", 'quote".ts', "line\nbreak.ts", " padded "];
+    const spy = mockGit(() => result(`${paths.join("\0")}\0`));
+    expect(await readChangedFiles(ROOT, "HEAD")).toEqual({ ok: true, paths });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(["git", "diff", "--name-only", "-z", "HEAD", "--"], {
+      cwd: ROOT, encoding: "utf8", timeout: exec.TRACKED_CHILD_DEADLINE_MS,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const compatible: Promise<string[]> = changedFiles(ROOT, "HEAD");
+    expect(await compatible).toEqual(paths);
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockResolvedValue(result(""));
+    expect(await readChangedFiles(ROOT, "HEAD")).toEqual({ ok: true, paths: [] });
+    for (const stdout of ["partial\0\0", "partial\0tail"]) {
+      spy.mockResolvedValue(result(stdout));
+      expect(await readChangedFiles(ROOT, "HEAD")).toMatchObject({ ok: false });
+      expect(await changedFiles(ROOT, "HEAD")).toEqual([]);
+    }
+  });
+
   for (const [failure, fail] of failures) {
+    it(`delta discovery distinguishes unknown while compatibility returns empty: ${failure}`, async () => {
+      mockGit(() => fail());
+      const answer = await readChangedFiles(ROOT, "HEAD");
+      expect(answer).toMatchObject({ ok: false, reason: expect.stringContaining("git diff") });
+      expect(answer).not.toHaveProperty("paths");
+      expect(await changedFiles(ROOT, "HEAD")).toEqual([]);
+    });
     for (const [operation, args] of [
       ["working-tree probe", INSIDE], ["prefix probe", PREFIX], ["HEAD probe", CURRENT],
       ["audit diff", DIFF], ["audit untracked", UNTRACKED],

@@ -1,4 +1,5 @@
-import { changedFiles, gitRefExists, isGitRepo, pathMatchesPrefix, compareCodeUnits } from "audit-tools/shared";
+// sites-pinned: tests/audit/scope.test.ts
+import { readChangedFiles, gitRefExists, isGitRepo, pathMatchesPrefix, compareCodeUnits } from "audit-tools/shared";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { CoverageMatrix } from "../types.js";
@@ -244,6 +245,14 @@ export async function resolveAuditScope(
     );
   }
 
+  const changed = await readChangedFiles(input.root, since);
+  if (!changed.ok) {
+    return fullAuditScope(
+      input.budget,
+      `The delta could not be established, so a full audit is used: ${changed.reason.slice(0, 512)}`,
+    );
+  }
+
   const dispositionMap = buildDispositionMap(input.bundle.file_disposition);
   const includedFiles = input.bundle.repo_manifest
     ? [
@@ -255,7 +264,7 @@ export async function resolveAuditScope(
 
   return computeAuditScope({
     since,
-    changed: await changedFiles(input.root, since),
+    changed: changed.paths,
     includedFiles,
     graphBundle: input.bundle.graph_bundle,
     budget: input.budget,

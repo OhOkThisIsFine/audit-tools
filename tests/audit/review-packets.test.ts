@@ -171,3 +171,36 @@ test("equal task IDs keep incoming owner order and first-owner missing counts ne
   const zero = packetFixtureTask("same", ["p"], { file_line_counts: { p: 0 } });
   expect(buildPacket([zero, present], 0, { p: 3 }).estimated_tokens).toBe(900);
 });
+
+test("packet graph context is rebuilt from current inputs on every planning call", () => {
+  const tasks = [task("a", "src/a.ts")];
+  const graphBundle = {
+    graphs: {
+      imports: [{ from: "src/a.ts", to: "outside.ts", kind: "imports" }],
+      routes: [{ handler: "src/a.ts", path: "/before", method: "GET" }],
+    },
+  };
+  const before = buildReviewPacketPlanningData(tasks, { graphBundle });
+  graphBundle.graphs.imports[0]!.to = "new-outside.ts";
+  graphBundle.graphs.routes[0]!.path = "/after";
+  const after = buildReviewPacketPlanningData(tasks, { graphBundle });
+  expect(before.packets[0]!.entrypoints).toEqual(["GET /before -> src/a.ts"]);
+  expect(after.packets[0]!.entrypoints).toEqual(["GET /after -> src/a.ts"]);
+  expect(before.packets[0]!.boundary_files).toEqual(["outside.ts"]);
+  expect(after.packets[0]!.boundary_files).toEqual(["new-outside.ts"]);
+  expect(after.packets[0]).toMatchObject(buildPacket(tasks, 0, undefined, undefined, after.graphEdges, graphBundle));
+});
+
+test("sparse packet planning visits source routes once per call", () => {
+  const tasks = Array.from({ length: 500 }, (_, i) => task(`task-${i}`, `p${i}/file.ts`));
+  let routeReads = 0;
+  const routes = new Proxy(tasks.map(item => ({ handler: item.file_paths[0]!, path: "/route" })), {
+    get(target, key, receiver) {
+      if (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)) routeReads += 1;
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  const planning = buildReviewPacketPlanningData(tasks, { graphBundle: { graphs: { routes } } });
+  expect(planning.packets).toHaveLength(500);
+  expect(routeReads).toBe(500);
+});

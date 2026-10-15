@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts
+// sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts, tests/shared/git.test.ts, tests/shared/git-dirty-paths.test.ts, tests/audit/scope.test.ts
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,7 +55,8 @@ export async function isGitRepo(root: string): Promise<boolean> {
 /**
  * True when `ref` resolves to a commit in `root`. Lets callers distinguish a
  * mistyped/unknown `--since` ref (fall back to a full audit) from a valid ref
- * with no changes (`changedFiles` returns `[]` in both cases otherwise).
+ * with no changes. `changedFiles` collapses discovery failures to `[]`;
+ * `readChangedFiles` distinguishes those failures even after a valid ref probe.
  */
 export async function gitRefExists(root: string, ref: string): Promise<boolean> {
   const result = await runTrackedAsync(
@@ -172,13 +173,31 @@ export async function fileContentAtRef(
 
 /**
  * Files differing between `since` (a ref/SHA) and the current working tree —
- * committed, staged, and unstaged. Backs the auditor's `--since` delta mode.
+ * committed, staged, and unstaged. Exact paths or an explicit discovery failure.
+ * Backs the auditor's `--since` delta mode; untracked-only files are not included.
+ */
+export async function readChangedFiles(
+  root: string,
+  since: string,
+): Promise<GitPathListResult> {
+  // The trailing separator protects paths, not a ref parsed as a Git option.
+  if (since.startsWith("-")) {
+    return { ok: false, reason: "Delta ref must not be a Git option" };
+  }
+  return readGitPathList(root, ["diff", "--name-only", "-z", since, "--"]);
+}
+
+/**
+ * Compatibility array API: exact paths on success, empty on discovery failure.
+ * Cannot distinguish clean from unknown; never use this adapter to establish
+ * audit scope or clean-tree authority. Use `readChangedFiles` instead.
  */
 export async function changedFiles(
   root: string,
   since: string,
 ): Promise<string[]> {
-  return gitLines(root, ["diff", "--name-only", since]);
+  const result = await readChangedFiles(root, since);
+  return result.ok ? result.paths : [];
 }
 
 /** The set of commit SHAs that have touched `path`, newest first. */
