@@ -57,8 +57,8 @@ vi.mock("node:child_process", () => ({
     else if (cmd.startsWith("gh pr list ")) stdout = "[]";
     else if (cmd.startsWith("gh pr create ")) stdout = "https://github.com/test/repo/pull/9";
     else if (cmd.endsWith("protection/required_status_checks")) stdout = JSON.stringify({ checks: [{ context: "checks", app_id: 15368 }] });
-    else if (cmd.includes("/check-runs?")) stdout = JSON.stringify({ check_runs: [{ id: 1, name: "checks", status: "completed", conclusion: "success", app: { id: 15368 } }] });
-    else if (cmd.endsWith(`commits/${fixture.head}/status`)) stdout = JSON.stringify({ statuses: [] });
+    else if (cmd === `gh api repos/test/repo/commits/${fixture.head}/check-runs?per_page=100 --paginate --slurp`) stdout = JSON.stringify([{ total_count: 1, check_runs: [{ id: 1, name: "checks", status: "completed", conclusion: "success", app: { id: 15368 } }] }]);
+    else if (cmd === `gh api repos/test/repo/commits/${fixture.head}/status?per_page=100 --paginate --slurp`) stdout = JSON.stringify([{ sha: fixture.head, total_count: 0, statuses: [] }]);
     else if (cmd.startsWith("gh pr view ")) stdout = JSON.stringify({ state: "MERGED" });
     else if (cmd.startsWith("gh release view ")) return { status: 1, stdout: "", stderr: "release not found" };
     else if (cmd.startsWith("gh release create ")) stdout = "";
@@ -140,6 +140,8 @@ test("main resumes an unfinished landing: the recorded bump commit lands, then t
   fixture.journal.phases = { "bump+tag": {} };
   await main();
   const sha = fixture.head;
+  expect(fixture.calls.filter((cmd) => cmd === `gh api repos/test/repo/commits/${sha}/check-runs?per_page=100 --paginate --slurp`)).toHaveLength(1);
+  expect(fixture.calls.filter((cmd) => cmd.startsWith(`gh api repos/test/repo/commits/${sha}/status`))).toHaveLength(0);
   const landMain = fixture.calls.indexOf(`git push origin ${sha}:refs/heads/main`);
   const tagPush = fixture.calls.indexOf("git push origin v0.52.1");
   expect(fixture.calls).toContain(`git push origin ${sha}:refs/heads/release/v0.52.1`);

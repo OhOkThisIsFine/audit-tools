@@ -45,8 +45,12 @@ function fakeGitHub({
   refuseFastForward = false,
   forbidStatuses = false,
   failStatusPolls = 0,
+  checkAnswers,
+  statusAnswers,
 }: {
   checkRuns: unknown[][];
+  checkAnswers?: Answer[];
+  statusAnswers?: Answer[];
   statuses?: unknown[][];
   protection?: Answer;
   openPr?: boolean;
@@ -82,15 +86,19 @@ function fakeGitHub({
         failures -= 1;
         return { status: 1, stdout: "", stderr: "gh: HTTP 502 Bad Gateway" };
       }
-      return ok({ check_runs: pick(checkRuns, checkPoll++) });
+      if (checkAnswers) return pick(checkAnswers, checkPoll++);
+      const rows = pick(checkRuns, checkPoll++);
+      return ok([{ total_count: rows.length, check_runs: rows }]);
     }
-    if (command === "gh" && joined.endsWith("/status")) {
+    if (command === "gh" && joined.includes("/status?per_page=100")) {
       if (forbidStatuses) throw new Error("unusable commit-status endpoint was invoked");
       if (statusFailures > 0) {
         statusFailures -= 1;
         return { status: 1, stdout: "", stderr: "gh: HTTP 502 Bad Gateway" };
       }
-      return ok({ statuses: pick(statuses, statusPoll++) });
+      if (statusAnswers) return pick(statusAnswers, statusPoll++);
+      const rows = pick(statuses, statusPoll++);
+      return ok([{ sha: SHA, total_count: rows.length, statuses: rows }]);
     }
     return ok("");
   };
@@ -181,9 +189,9 @@ describe("required statuses and their verdict", () => {
 
 describe("landThroughPullRequest", () => {
   const statusCalls = (github: ReturnType<typeof fakeGitHub>) =>
-    github.calls.filter((call) => call.command === "gh" && call.args.at(-1)?.endsWith("/status"));
+    github.calls.filter((call) => call.command === "gh" && call.args[1]?.includes("/status?per_page=100"));
   const checkCalls = (github: ReturnType<typeof fakeGitHub>) =>
-    github.calls.filter((call) => call.command === "gh" && call.args.at(-1)?.includes("/check-runs"));
+    github.calls.filter((call) => call.command === "gh" && call.args[1]?.includes("/check-runs"));
 
   it.each([
     { name: "green", runs: [run("checks", "completed", "success")], error: null },
@@ -222,7 +230,7 @@ describe("landThroughPullRequest", () => {
     await land(github.answer);
     expect(statusCalls(github)).toHaveLength(2);
     expect(checkCalls(github)).toHaveLength(2);
-    expect(statusCalls(github).every((call) => call.args[1] === `repos/o/r/commits/${SHA}/status`)).toBe(true);
+    expect(statusCalls(github).every((call) => call.args[1] === `repos/o/r/commits/${SHA}/status?per_page=100`)).toBe(true);
     expect(github.pushedTo("main")).toBe(true);
   });
 
@@ -254,7 +262,7 @@ describe("landThroughPullRequest", () => {
       failCheckRunPolls: endpoint === "check-run" ? 10 : 0,
       failStatusPolls: endpoint === "commit-status" ? 10 : 0,
     });
-    await expect(land(github.answer)).rejects.toThrow(`${endpoint} query failed 10 times in a row`);
+    await expect(land(github.answer)).rejects.toThrow(/collection[\s\S]*failed 10 times in a row/);
     expect(endpoint === "check-run" ? checkCalls(github) : statusCalls(github)).toHaveLength(10);
     expect(github.pushedTo("main")).toBe(false);
   });
@@ -272,7 +280,7 @@ describe("landThroughPullRequest", () => {
     const { prUrl } = await land(github.answer);
     expect(prUrl).toBe(PR);
     const mainPush = github.calls.findIndex((c) => c.args.includes(`${SHA}:refs/heads/main`));
-    const lastPoll = github.calls.map((c) => c.args.join(" ")).lastIndexOf(`api repos/o/r/commits/${SHA}/check-runs?per_page=100`);
+    const lastPoll = github.calls.map((c) => c.args.join(" ")).lastIndexOf(`api repos/o/r/commits/${SHA}/check-runs?per_page=100 --paginate --slurp`);
     expect(github.pushedTo("release/v1.2.3")).toBe(true);
     expect(github.calls.some((c) => c.args.slice(0, 2).join(" ") === "pr create")).toBe(true);
     expect(github.calls.find((c) => c.args.slice(0, 2).join(" ") === "pr list")?.args).toContain("--base");
@@ -347,6 +355,226 @@ describe("landThroughPullRequest", () => {
     }
   });
 
+});
+
+describe("complete paginated evidence", () => {
+  const pages = (field: "check_runs" | "statuses", chunks: unknown[][]) => chunks.map((rows) => ({
+    total_count: chunks.reduce((n, chunk) => n + chunk.length, 0), [field]: rows,
+    ...(field === "statuses" ? { sha: SHA } : {}),
+  }));
+  const checkCalls = (github: ReturnType<typeof fakeGitHub>) => github.calls.filter((c) => c.args[1]?.includes("/check-runs"));
+  const noise = (n: number) => Array.from({ length: n }, (_, i) => run(`other-${i}`, "completed", "success", 1000 + i));
+  const green = run("checks", "completed", "success");
+  const partial: Answer = { status: 1, stdout: JSON.stringify(pages("check_runs", [[green]])), stderr: "later page failed" };
+
+  it("requests every page and lands a required check beyond 100 unrelated runs", async () => {
+    const firstPage = noise(100);
+    const envelopes = pages("check_runs", [firstPage, [green]]);
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(envelopes)] });
+    const transport = (command: string, args: string[]): Answer => {
+      const answer = github.answer(command, args);
+      // Baseline receives its original object response, with only page one.
+      // The red proves missing evidence, rather than changed envelope syntax.
+      if (command === "gh" && args[1]?.includes("/check-runs") &&
+          (!args.includes("--paginate") || !args.includes("--slurp"))) {
+        return ok({ total_count: 101, check_runs: firstPage });
+      }
+      return answer;
+    };
+    await land(transport, { waitMs: 0 });
+    expect(checkCalls(github)[0]?.args).toEqual(["api", `repos/o/r/commits/${SHA}/check-runs?per_page=100`, "--paginate", "--slurp"]);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it("collects a required legacy context beyond 100 statuses", async () => {
+    const github = fakeGitHub({ checkRuns: [[]], protection: ok({ contexts: ["ci/legacy"] }), statusAnswers: [ok(pages("statuses", [
+      Array.from({ length: 100 }, (_, i) => ({ context: `other-${i}`, state: "success" })), [{ context: "ci/legacy", state: "success" }],
+    ]))] });
+    await land(github.answer);
+    expect(github.calls.find((c) => c.args[1]?.includes("/status?"))?.args).toEqual(["api", `repos/o/r/commits/${SHA}/status?per_page=100`, "--paginate", "--slurp"]);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  // The oracle deliberately flattens fixture pages itself; it does not use the
+  // production collector. Vary placement, boundaries, app identity and reruns.
+  for (const size of [0, 99, 100, 101]) {
+    for (const reverse of [false, true]) {
+      for (const outcome of ["success", "failure", null]) {
+        it(`matches the all-page oracle at ${size}, reverse=${reverse}, outcome=${outcome}`, async () => {
+          const newer = run("checks", outcome === null ? "in_progress" : "completed", outcome, 3);
+          const chunks = [[...noise(size), green], [newer, run("checks", "completed", "success", 999, APP + 1)]];
+          if (reverse) chunks.reverse();
+          const expected = evaluateRequiredChecks(chunks.flat(), [], CHECKS).state;
+          const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", chunks))], forbidStatuses: true });
+          if (expected === "green") await land(github.answer, { waitMs: 0 });
+          else await expect(land(github.answer, { waitMs: 0 })).rejects.toThrow(expected === "red" ? /checks \(failure\)/ : /did not conclude/);
+          expect(github.pushedTo("main")).toBe(expected === "green");
+        });
+      }
+    }
+  }
+
+  it.each([false, true])("accepts newer success over older failure across pages, reversed=%s", async (reverse) => {
+    const chunks = [[run("checks", "completed", "failure", 1)], [run("checks", "completed", "success", 2)]];
+    if (reverse) chunks.reverse();
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", chunks))] });
+    expect(evaluateRequiredChecks(chunks.flat(), [], CHECKS).state).toBe("green");
+    await land(github.answer);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it("keeps a valid pinned page-two result despite a higher-ID wrong-app failure", async () => {
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", [[run("checks", "completed", "failure", 99, APP + 1)], [green]]))] });
+    await land(github.answer);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it.each(["success", "failure", null])("preserves an unpinned check with a valid null app: %s", async (conclusion) => {
+    const check = { ...run("checks", conclusion === null ? "in_progress" : "completed", conclusion), app: null };
+    const github = fakeGitHub({ checkRuns: [[check]], statuses: [[{ context: "checks", state: "success" }]],
+      protection: ok({ contexts: ["checks"] }) });
+    if (conclusion === "success") await land(github.answer, { waitMs: 0 });
+    else await expect(land(github.answer, { waitMs: 0 })).rejects.toThrow(conclusion === "failure" ? /checks \(failure\)/ : /did not conclude/);
+    expect(github.pushedTo("main")).toBe(conclusion === "success");
+  });
+
+  it("a valid null app on an unrelated check does not block pinned evidence", async () => {
+    const unrelated = { ...run("unrelated", "completed", "success", 2), app: null };
+    const github = fakeGitHub({ checkRuns: [[unrelated, green]], forbidStatuses: true });
+    await land(github.answer, { waitMs: 0 });
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it("a valid null app cannot satisfy a pinned requirement or trigger status queries", async () => {
+    const github = fakeGitHub({ checkRuns: [[{ ...green, app: null }]], forbidStatuses: true });
+    await expect(land(github.answer, { waitMs: 0 })).rejects.toThrow(/did not conclude/);
+    expect(github.calls.filter((call) => call.args[1]?.includes("/status?"))).toHaveLength(0);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it("gives a page-two check precedence over green legacy status with mixed requirements", async () => {
+    const checks = [[green], [run("ci/legacy", "completed", "failure", 2)]];
+    const statuses = [[{ context: "ci/legacy", state: "success" }]];
+    const required = [...CHECKS, ...LEGACY];
+    expect(evaluateRequiredChecks(checks.flat(), statuses.flat(), required).state).toBe("red");
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", checks))], statuses,
+      protection: ok({ checks: [{ context: "checks", app_id: APP }], contexts: ["ci/legacy"] }) });
+    await expect(land(github.answer)).rejects.toThrow(/ci\/legacy \(failure\)/);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  for (const size of [99, 100, 101]) {
+    for (const reverse of [false, true]) {
+      for (const state of ["success", "failure", "pending"]) {
+        it(`matches mixed legacy fallback oracle at ${size}, reverse=${reverse}, state=${state}`, async () => {
+          const checkPages = [[green, run("checks", "completed", "failure", 99, APP + 1)]];
+          const statusPages = [
+            Array.from({ length: size }, (_, i) => ({ context: `other-${i}`, state: "success" })),
+            [{ context: "ci/legacy", state }],
+          ];
+          if (reverse) statusPages.reverse();
+          const expected = evaluateRequiredChecks(checkPages.flat(), statusPages.flat(), [...CHECKS, ...LEGACY]).state;
+          const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", checkPages))],
+            statusAnswers: [ok(pages("statuses", statusPages))],
+            protection: ok({ checks: [{ context: "checks", app_id: APP }], contexts: ["ci/legacy"] }) });
+          if (expected === "green") await land(github.answer, { waitMs: 0 });
+          else await expect(land(github.answer, { waitMs: 0 })).rejects.toThrow(expected === "red" ? /ci\/legacy \(failure\)/ : /did not conclude/);
+          expect(checkCalls(github)).toHaveLength(1);
+          expect(github.calls.filter((call) => call.args[1]?.includes("/status?"))).toHaveLength(1);
+          expect(github.pushedTo("main")).toBe(expected === "green");
+        });
+      }
+    }
+  }
+
+  it.each(["success", "failure"])("uses legacy %s when its matching check disappears in a later complete round", async (state) => {
+    const github = fakeGitHub({
+      protection: ok({ checks: [{ context: "checks", app_id: APP }, { context: "other", app_id: APP }], contexts: ["ci/legacy"] }),
+      checkRuns: [
+        [green, run("ci/legacy", "completed", "success", 2), run("other", "in_progress", null, 3)],
+        [green, run("other", "completed", "success", 4)],
+      ],
+      statuses: [[{ context: "ci/legacy", state: "failure" }], [{ context: "ci/legacy", state }]],
+    });
+    if (state === "success") await land(github.answer);
+    else await expect(land(github.answer)).rejects.toThrow(/ci\/legacy \(failure\)/);
+    expect(checkCalls(github)).toHaveLength(2);
+    expect(github.calls.filter((call) => call.args[1]?.includes("/status?"))).toHaveLength(2);
+    expect(github.pushedTo("main")).toBe(state === "success");
+  });
+
+  it("discards failed partial stdout, retries the collection and can recover", async () => {
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [partial, ok(pages("check_runs", [[green]]))] });
+    await land(github.answer);
+    expect(checkCalls(github)).toHaveLength(2);
+    expect(github.pushedTo("main")).toBe(true);
+  });
+
+  it.each(["checks", "statuses"])("bounds whole-round failures and preserves backoff for %s", async (endpoint) => {
+    const github = fakeGitHub({ checkRuns: [[green]],
+      ...(endpoint === "checks" ? { checkAnswers: [partial] } : { protection: ok({ contexts: ["checks"] }), statusAnswers: [partial] }) });
+    const sleeps: number[] = [];
+    await expect(landThroughPullRequest({ cwd: ".", repoSlug: "o/r", remote: "origin", sha: SHA, branch: "land/test", defaultBranch: "main", title: "test", body: "test", waitMs: 60_000, pollMs: 1000,
+      runCommand: (command: string, args: string[]) => {
+        if (checkCalls(github).length > 10) throw new Error("test: collection budget exceeded");
+        return github.answer(command, args);
+      }, sleep: async (ms: number) => { sleeps.push(ms); }, now: () => 0, log: () => {},
+    })).rejects.toThrow(/failed 10 times in a row/);
+    expect(checkCalls(github)).toHaveLength(10);
+    expect(sleeps).toEqual([5000, 10000, 15000, 20000, 25000, 30000, 30000, 30000, 30000]);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it("restarts checks after failed statuses and observes the newer failure", async () => {
+    const github = fakeGitHub({ checkRuns: [[green], [run("checks", "completed", "failure", 2)]],
+      protection: ok({ contexts: ["checks"] }), statusAnswers: [partial, ok(pages("statuses", [[]]))] });
+    await expect(land(github.answer)).rejects.toThrow(/checks \(failure\)/);
+    expect(checkCalls(github)).toHaveLength(2);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it.each(["disappears", "fails"])("does not retain a prior green when it %s while another context was pending", async (change) => {
+    const done = run("other", "completed", "success", 4);
+    const github = fakeGitHub({ protection: ok({ checks: [{ context: "checks", app_id: APP }, { context: "other", app_id: APP }] }),
+      checkRuns: [[green, run("other", "in_progress", null, 2)], change === "fails" ? [run("checks", "completed", "failure", 3), done] : [done]] });
+    await expect(land(github.answer, { waitMs: 1000 })).rejects.toThrow(change === "fails" ? /checks \(failure\)/ : /did not conclude/);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  const malformed: [string, unknown][] = [
+    ["truncated JSON", "[{"], ["null", null], ["empty outer", []], ["absent arrays", [{ total_count: 0 }]],
+    ["larger total", [{ total_count: 2, check_runs: [green] }]], ["smaller total", [{ total_count: 0, check_runs: [green] }]],
+    ["negative total", [{ total_count: -1, check_runs: [] }]], ["fractional total", [{ total_count: 0.5, check_runs: [] }]],
+    ["duplicate pages", [{ total_count: 2, check_runs: [green] }, { total_count: 2, check_runs: [green] }]],
+    ["changing totals", [{ total_count: 1, check_runs: [green] }, { total_count: 2, check_runs: [] }]],
+    ["malformed later array", [{ total_count: 1, check_runs: [green] }, { total_count: 1, check_runs: null }]],
+    ["malformed later record", [{ total_count: 2, check_runs: [green] }, { total_count: 2, check_runs: [null] }]],
+    ["missing run identity", [{ total_count: 1, check_runs: [{ ...green, id: undefined }] }]],
+    ["missing app identity", [{ total_count: 1, check_runs: [{ ...green, app: undefined }] }]],
+    ["missing conclusion", [{ total_count: 1, check_runs: [{ ...green, conclusion: null }] }]],
+  ];
+  it.each(malformed)("refuses %s without touching main", async (_name, value) => {
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(value)] });
+    await expect(land(github.answer)).rejects.toThrow(/collection[\s\S]*failed 10 times in a row[\s\S]*pull\/7/);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it.each([
+    [{ total_count: 0, sha: "d".repeat(40), statuses: [] }],
+    [{ total_count: 1, sha: SHA, statuses: [{ context: "checks" }] }],
+    [{ total_count: 2, sha: SHA, statuses: [{ context: "checks", state: "success" }] }, { total_count: 2, sha: SHA, statuses: [{ context: "checks", state: "failure" }] }],
+  ])("refuses malformed or conflicting status collections", async (...envelopes) => {
+    const github = fakeGitHub({ checkRuns: [[green]], protection: ok({ contexts: ["checks"] }), statusAnswers: [ok(envelopes)] });
+    await expect(land(github.answer)).rejects.toThrow(/failed 10 times in a row/);
+    expect(github.pushedTo("main")).toBe(false);
+  });
+
+  it.each([0, 100])("accepts a complete terminal collection of %s records", async (size) => {
+    const github = fakeGitHub({ checkRuns: [], checkAnswers: [ok(pages("check_runs", [noise(size)]))], protection: ok({ contexts: [] }) });
+    await land(github.answer);
+    expect(checkCalls(github)).toHaveLength(1);
+    expect(github.pushedTo("main")).toBe(true);
+  });
 });
 
 describe("deleteLandingBranch", () => {

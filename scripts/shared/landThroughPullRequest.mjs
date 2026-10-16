@@ -126,6 +126,53 @@ export function evaluateRequiredChecks(checkRuns, statuses, required) {
   return { state: pending.length > 0 ? "pending" : "green", failed, pending, unlisted };
 }
 
+/**
+ * Decode one complete `gh api --paginate --slurp` collection. A changing
+ * collection is inconclusive, never a partial snapshot with landing authority.
+ * @param {string} stdout
+ * @param {"check_runs" | "statuses"} field
+ * @param {string} sha
+ * @returns {any[]}
+ */
+function collectedPages(stdout, field, sha) {
+  const pages = JSON.parse(stdout);
+  if (!Array.isArray(pages) || pages.length === 0) throw new Error("missing page envelope");
+  const rows = [];
+  const identities = new Set();
+  let total;
+  for (const page of pages) {
+    if (!page || typeof page !== "object" || !Array.isArray(page[field]) ||
+        !Number.isSafeInteger(page.total_count) || page.total_count < 0) {
+      throw new Error(`malformed ${field} page`);
+    }
+    if (total !== undefined && page.total_count !== total) throw new Error("changing collection total");
+    total = page.total_count;
+    if (field === "statuses" && page.sha !== sha) throw new Error("wrong commit-status SHA");
+    for (const row of page[field]) {
+      if (!row || typeof row !== "object") throw new Error(`malformed ${field} record`);
+      if (field === "check_runs") {
+        if (!Number.isSafeInteger(row.id) || row.id <= 0 || typeof row.name !== "string" || !row.name ||
+            (row.app !== null && (!Number.isSafeInteger(row.app?.id) || row.app.id <= 0)) ||
+            typeof row.status !== "string" || !row.status ||
+            (row.status === "completed" ? typeof row.conclusion !== "string" || !row.conclusion :
+              row.conclusion !== null && typeof row.conclusion !== "string")) {
+          throw new Error("malformed check-run record");
+        }
+      } else if (typeof row.context !== "string" || !row.context ||
+                 !["success", "pending", "failure", "error"].includes(row.state)) {
+        throw new Error("malformed commit-status record");
+      }
+      // Combined status returns the latest status per context, not its history.
+      const identity = field === "check_runs" ? row.id : row.context;
+      if (identities.has(identity)) throw new Error(`duplicate ${field} identity`);
+      identities.add(identity);
+      rows.push(row);
+    }
+  }
+  if (rows.length !== total) throw new Error("incomplete collection: total does not match records");
+  return rows;
+}
+
 /** @param {string} command @param {string[]} args @param {string} cwd */
 function defaultRunCommand(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true, shell: false });
@@ -174,24 +221,6 @@ export async function landThroughPullRequest({
       throw new Error(`land: ${what} failed — \`${command} ${args.join(" ")}\`: ${result.stderr.trim() || result.stdout.trim()}`);
     }
     return result.stdout.trim();
-  };
-  /** A poll that tolerates transient GitHub faults within the consecutive-failure budget. */
-  let consecutiveFailures = 0;
-  const poll = async (args, what) => {
-    for (;;) {
-      const result = runCommand("gh", args, cwd);
-      if (result.status === 0) {
-        consecutiveFailures = 0;
-        return JSON.parse(result.stdout || "null");
-      }
-      consecutiveFailures += 1;
-      const message = result.stderr.trim() || result.stdout.trim();
-      if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
-        throw new Error(`land: ${what} failed ${consecutiveFailures} times in a row: ${message}`);
-      }
-      log(`[land] ${what} failed (${consecutiveFailures}/${MAX_CONSECUTIVE_POLL_FAILURES} consecutive), retrying: ${message}`);
-      await sleep(pollFailureBackoffMs(consecutiveFailures));
-    }
   };
 
   // Already landed (a retry after the fast-forward succeeded and a later step
@@ -244,12 +273,36 @@ export async function landThroughPullRequest({
   const needsCommitStatuses = required.some((check) => check.appId === null);
   const start = now();
   let announced = false;
+  let consecutiveFailures = 0;
+  const collect = (endpoint, field) => {
+    const result = runCommand("gh", ["api", `repos/${repoSlug}/commits/${sha}/${endpoint}?per_page=100`, "--paginate", "--slurp"], cwd);
+    try {
+      if (result.status !== 0) throw new Error(result.stderr.trim() || result.stdout.trim());
+      return collectedPages(result.stdout, field, sha);
+    } catch (error) {
+      throw new Error(`the ${endpoint} collection: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   for (;;) {
-    const runs = await poll(["api", `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`], "the check-run query");
-    const statuses = needsCommitStatuses
-      ? (await poll(["api", `repos/${repoSlug}/commits/${sha}/status`], "the commit-status query"))?.statuses
-      : [];
-    const verdict = evaluateRequiredChecks(runs?.check_runs, statuses, required);
+    let runs;
+    let statuses;
+    try {
+      runs = collect("check-runs", "check_runs");
+      statuses = needsCommitStatuses ? collect("status", "statuses") : [];
+      // Only a complete round resets the budget. A failed second endpoint
+      // discards the first too, so a new rerun is observed on the next attempt.
+      consecutiveFailures = 0;
+    } catch (error) {
+      consecutiveFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+        throw new Error(`land: ${message} failed ${consecutiveFailures} times in a row. Nothing reached ${defaultBranch}: ${prUrl}`);
+      }
+      log(`[land] ${message} failed (${consecutiveFailures}/${MAX_CONSECUTIVE_POLL_FAILURES} consecutive), retrying: ${prUrl}`);
+      await sleep(pollFailureBackoffMs(consecutiveFailures));
+      continue;
+    }
+    const verdict = evaluateRequiredChecks(runs, statuses, required);
     if (verdict.state === "green") break;
     if (verdict.state === "red") {
       throw new Error(
