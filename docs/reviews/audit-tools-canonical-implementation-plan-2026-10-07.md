@@ -159,7 +159,7 @@ Do not ask the owner to resolve algorithm choices below. Ask only for missing au
 
 Keep the suite guard and existing per-worker state/cache redirects in [tests/helpers/state-dir-setup.mjs](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/tests/helpers/state-dir-setup.mjs#L17-L37) and [vitest.config.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/vitest.config.ts#L25-L35). Do not rebuild dist under a running suite.
 
-Before any affected Windows baseline, apply P6.0's nonexecuting unit-test repair: the pinned fake PID 4242 test can reach real taskkill. Do not execute that original test merely to obtain a pre-change baseline. Record this necessary harness-only deviation and preserve the other baseline legs.
+For the historical pinned baseline, apply P6.0's nonexecuting unit-test repair before an affected Windows run. **Current-main reconciliation (16 October):** `e65c990c` already landed the PID-free injected process-control seam and externally observed early-exit fixture. Main `bfa8cb3665972abf02292e66cdc7d5076fab24c4` retains that repair; preserve it rather than replaying the historical patch. Never execute the unsafe original to obtain a baseline.
 
 For real CLI, packaging and linked smoke checks:
 - Allocate private HOME, USERPROFILE, npm prefix/cache/userconfig/globalconfig and test state/analyzer/binary caches. Strip unrelated credential and Git redirection variables; supply synthetic credentials only.
@@ -188,6 +188,8 @@ These are reviewable packages, not permission to land an incomplete replacement 
 **Grade: mechanically specified in this revision; independent exact-hash source recheck approved; runtime/lockfile acceptance execution-gated.**
 
 ### Source and chosen edit
+
+**Current-main reconciliation (16 October):** the six Oct15 refactor units are already merged in `bfa8cb3665972abf02292e66cdc7d5076fab24c4`; they are not part of this P0 change. The parser dependency still resolves to 1.6.1 there. P0 raises only its declared minimum and lock resolution, adds watchdog-bounded advisory regressions and exact adapter/prototype compatibility checks, and preserves the existing P6.0 safety seam. GHSA-r4xh-jqrq-34v2 is **moderate**, distinct from the high-severity EOF-comment advisory. Qualification must use current source and the installed lower-bound fixture below, not old patch bytes. The artifact-write and snapshot work remains held.
 
 The [package manifest](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/package.json) declares production smol-toml ^1.6.1. The lock resolves 1.6.1. [parseTomlSafe, toml.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/extractors/graphManifestEdges/toml.ts#L17-L25) invokes it synchronously; Cargo and pyproject consume it at cargo.ts and pyproject.ts.
 
@@ -682,6 +684,8 @@ Declare/export `CommandExecutionRequest`, `ExecutionContext`, `ExecutionBudget`,
 Use `createExecutionBudget({deadlineAt?,timeoutMs,clock})` only at an explicit outer caller; use the same instance below it. Use `composeExecutionSignals(signals)` returning `{signal,dispose}` once per outer context. Unit tests inject the clock/low-level adapter; absence of a context is a type/runtime rejection, not a fallback to a silently fresh budget. Preserve argv/env/input byte policy in the request passed to every injected callback.
 
 ### P6.0 First prerequisite: make the inherited baseline safe
+
+**Status on current main:** this bounded prerequisite landed in `e65c990c` and is present in `bfa8cb3665972abf02292e66cdc7d5076fab24c4`. The following describes the historical unsafe baseline and its remedy, not a request to modify the current seam again.
 
 Before running any affected Windows baseline, repair the test itself. [runtime-command-bounded-wait.test.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/tests/audit/runtime-command-bounded-wait.test.ts#L99-L124) passes fabricated PID 4242 into a real taskkill branch in [runtimeCommand.ts](https://github.com/OhOkThisIsFine/audit-tools/blob/2f268f019523d87ba02d8ac6821224d468ca2182/src/audit/orchestrator/runtimeCommand.ts#L232-L245). HOME/cache isolation does not protect that PID’s owner.
 

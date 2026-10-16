@@ -316,6 +316,37 @@ test("toml extractors degrade to [] on malformed TOML (never throw)", () => {
   expect(extractPyprojectTestpathLinks("pyproject.toml", "not [valid toml = =", new Map())).toEqual([]);
 });
 
+const edgeTuples = (edges: import("audit-tools/shared").GraphEdge[]) =>
+  edges.map(({ from, to, kind, direction, confidence }) => [from, to, kind, direction, confidence]).sort();
+
+test.each([
+  'workspace.members = ["crates/*"]\nworkspace.exclude = ["crates/y"]',
+  'workspace = { members = ["crates/*"], exclude = ["crates/y"] }',
+  '["workspace"]\n"members" = ["crates/*"]\n"exclude" = ["crates/y"]',
+  '[workspace]\nmembers = [\n """crates/*""",\n]\nexclude = [\n \'\'\'crates/y\'\'\',\n]',
+])("Cargo syntax parity retains exact member/exclusion tuples: %s", (content) => {
+  const lookup = new Map(["crates/z/Cargo.toml", "crates/y/Cargo.toml", "crates/x/Cargo.toml", "Cargo.toml", "other/Cargo.toml"].map(path => [path.toLowerCase(), path]));
+  expect(edgeTuples(extractCargoWorkspaceMemberEdges("Cargo.toml", content, lookup))).toEqual([
+    ["Cargo.toml", "crates/x/Cargo.toml", "cargo-workspace-member-link", "directed", 0.87],
+    ["Cargo.toml", "crates/z/Cargo.toml", "cargo-workspace-member-link", "directed", 0.87],
+  ]);
+});
+
+test.each([
+  '[tool.pytest.ini_options]\ntestpaths = ["tests"]',
+  '[tool.pytest.ini_options]\ntestpaths = "tests"',
+  'tool.pytest.ini_options.testpaths = ["tests"]',
+  'tool.pytest.ini_options.testpaths = "tests"',
+  'tool = { pytest = { ini_options = { testpaths = ["tests"] } } }',
+  'tool = { pytest = { ini_options = { testpaths = "tests" } } }',
+  '["tool"."pytest"."ini_options"]\n"testpaths" = [\n """tests""",\n]',
+])("pyproject syntax parity retains exact testpath tuples: %s", (content) => {
+  const lookup = new Map([["tests/conftest.py", "tests/conftest.py"], ["other/conftest.py", "other/conftest.py"]]);
+  expect(edgeTuples(extractPyprojectTestpathLinks("pyproject.toml", content, lookup))).toEqual([
+    ["pyproject.toml", "tests/conftest.py", "pyproject-testpaths-link", "directed", 0.85],
+  ]);
+});
+
 // stripGoLineComment regressions
 test("stripGoLineComment (via scanStringAware) — // outside a string truncates the line", () => {
   const result = stripGoLineComment('x := 1 // comment');
