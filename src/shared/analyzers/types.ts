@@ -241,10 +241,13 @@ export interface ExternalAnalyzerParsedItem {
  * nothing" from "the payload was unparseable" or "half the rows were malformed", and
  * that ambiguity is what makes a broken analyzer read as a clean scan downstream.
  */
+// sites-pinned: tests/shared/analyzer-candidates.test.ts
 export interface ExternalAnalyzerParseReport {
   items: ExternalAnalyzerParsedItem[];
   /** The payload could not be parsed at all (bad JSON/CSV, or the wrong top-level shape). */
   parse_failed?: boolean;
+  /** Upstream explicitly reported a failed measurement, possibly with recoverable items. */
+  measurement_failed?: boolean;
   /** Rows recognised but unusable — counted, never silently dropped. */
   dropped_rows?: number;
   /** Human-readable cause, carried onto the status record. */
@@ -275,6 +278,7 @@ export function readParseOutcome(
   }
   return {
     items: outcome.items,
+    ...(outcome.measurement_failed !== undefined ? { measurement_failed: outcome.measurement_failed } : {}),
     ...(outcome.parse_failed !== undefined ? { parse_failed: outcome.parse_failed } : {}),
     ...(outcome.dropped_rows !== undefined ? { dropped_rows: outcome.dropped_rows } : {}),
     ...(outcome.note !== undefined ? { note: outcome.note } : {}),

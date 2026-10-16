@@ -171,6 +171,10 @@ export const DOC_MANIFEST = [
         "tests/audit/fixtures/simple-app/README.md",
         "test-fixture content — a sample-app README, its own concern, not a project doc",
       ],
+      [
+        "tests/fixtures/type-coverage-2.29.7/README.md",
+        "test-fixture provenance and reproduction instructions for the pinned analyzer contract",
+      ],
     ],
     check: "—",
     autoApply: "—",

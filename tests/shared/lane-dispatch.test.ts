@@ -404,3 +404,58 @@ describe("dispatchBoundedItems", () => {
     expect(warns).toHaveLength(1);
   });
 });
+
+
+describe("pending-only preflight", () => {
+  for (const items of [[], [{ id: "a" }]]) {
+    it(`finishes and revives retained records without preflight for ${items.length} current items`, async () => {
+      const out = join(tmp(), "noop.jsonl");
+      writeFileSync(out, JSON.stringify({ id: "a", stale: true }) + "\n");
+      const preflight = vi.fn(async () => { throw new Error("must not open"); });
+      const callLane = vi.fn(async () => ({ raw: "" }));
+      const reviveRecord = vi.fn((rec: any) => ({ ...rec, stale: false }));
+      const { stamp, records } = await dispatchBoundedItems({
+        items, outPath: out, preflight, callLane, reviveRecord,
+        buildRecord: (item: any) => item,
+        stampInit: { revived: 0 }, stampExtra: (s: any) => { s.revived++; },
+      });
+      expect(preflight).not.toHaveBeenCalled();
+      expect(callLane).not.toHaveBeenCalled();
+      expect(reviveRecord).toHaveBeenCalledTimes(1);
+      expect(readRows(out)).toEqual([{ id: "a", stale: false }]);
+      expect(records).toEqual([]);
+      expect(stamp).toMatchObject({ prior_classified: items.length, classified_total: items.length,
+        attempted: 0, aborted: null, revived: items.length, finished_at: expect.any(String) });
+      expect(JSON.parse(readFileSync(coverageStampPath(out), "utf8"))).toEqual(stamp);
+    });
+  }
+
+  it("partial resume preflights once after revival and dispatches only pending rows", async () => {
+    const out = join(tmp(), "partial.jsonl");
+    writeFileSync(out, '{"id":"a"}\n');
+    const events: string[] = [];
+    const { stamp } = await dispatchBoundedItems({
+      items: [{ id: "a" }, { id: "b" }], outPath: out,
+      reviveRecord: (rec: any) => { events.push("revive"); return rec; },
+      preflight: async () => { events.push("preflight"); },
+      callLane: async (item: any) => { events.push(item.id); return { raw: "" }; },
+      buildRecord: (item: any) => item,
+    });
+    expect(events).toEqual(["revive", "preflight", "b"]);
+    expect(stamp).toMatchObject({ prior_classified: 1, attempted: 1, classified_total: 2 });
+  });
+
+  it("invalid revival preserves durable bytes and never preflights", async () => {
+    const out = join(tmp(), "invalid.jsonl");
+    const original = '{"id":"a"}\n{"id":"b"}\n';
+    writeFileSync(out, original);
+    const preflight = vi.fn(async () => {});
+    await expect(dispatchBoundedItems({
+      items: [{ id: "a" }, { id: "b" }], outPath: out, preflight,
+      reviveRecord: (rec: any) => rec.id === "b" ? null : { ...rec, changed: true },
+      callLane: async () => ({ raw: "" }), buildRecord: (item: any) => item,
+    })).rejects.toThrow("reviveRecord rejected");
+    expect(readFileSync(out, "utf8")).toBe(original);
+    expect(preflight).not.toHaveBeenCalled();
+  });
+});

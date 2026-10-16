@@ -1,0 +1,28 @@
+{
+  "succeeded": true,
+  "details": [
+    {
+      "character": 13,
+      "filePath": "index.ts",
+      "line": 0,
+      "text": "first"
+    },
+    {
+      "character": 42,
+      "filePath": "index.ts",
+      "line": 0,
+      "text": "second"
+    },
+    {
+      "character": 56,
+      "filePath": "index.ts",
+      "line": 0,
+      "text": "first"
+    }
+  ],
+  "atLeastFailed": false,
+  "correctCount": 0,
+  "percent": 0,
+  "percentString": "0.00",
+  "totalCount": 3
+}

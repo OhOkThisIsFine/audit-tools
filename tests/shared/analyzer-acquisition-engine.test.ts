@@ -837,8 +837,12 @@ test("npx runner: peers are installed ALONGSIDE the tool via `-p`, and the bin i
     "-p",
     "typescript@5.9.3",
     "type-coverage",
-    "--json",
+    "--json-output",
     "--detail",
+    "--no-update",
+    "--no-update-if-higher",
+    "--no-history-file",
+    "--no-cache",
   ]);
 });
 

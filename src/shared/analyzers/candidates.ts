@@ -95,11 +95,6 @@ const GITLEAKS_BINARY: BinarySpec = {
   releaseUrlForAsset: (asset) => `${GITLEAKS_RELEASE_BASE}/${asset}`,
 };
 
-/** Deterministic per-process report path for gitleaks' JSON output. */
-function gitleaksReportPath(): string {
-  return join(tmpdir(), `audit-tools-gitleaks-${process.pid}.json`);
-}
-
 /**
  * Parse gitleaks' default JSON report (array of findings, PascalCase fields) into
  * the engine's generic item shape. The raw secret value is NEVER carried through
@@ -108,7 +103,7 @@ function gitleaksReportPath(): string {
 function parseGitleaks(report: string): ExternalAnalyzerParseReport {
   let findings: unknown;
   try {
-    findings = JSON.parse(report || "[]");
+    findings = JSON.parse(report);
   } catch {
     return parseFailure("gitleaks", "report is not valid JSON");
   }
@@ -160,19 +155,24 @@ const gitleaksCandidate: ExternalAnalyzerCandidate = {
   defaultRun: true,
   // Secrets can hide in any repo regardless of ecosystem — always applicable.
   detect: () => true,
-  reportFile: () => gitleaksReportPath(),
-  buildArgv: (prefix, root) => [
+  managedReport: true,
+  // Direct callers must supply an invocation-owned path; no shared temp fallback.
+  buildArgv: (prefix, root, context) => {
+    if (!context?.reportPath) throw new Error("gitleaks requires an invocation-owned report path");
+    return [
     ...prefix,
     "dir",
     root,
     "--report-format",
     "json",
     "--report-path",
-    gitleaksReportPath(),
+    context.reportPath,
+    "--redact=100",
     "--no-banner",
     "--exit-code",
     "0",
-  ],
+    ];
+  },
   parse: parseGitleaks,
 };
 
@@ -933,12 +933,7 @@ const actionlintCandidate: ExternalAnalyzerCandidate = {
 // ---------------------------------------------------------------------------
 // type-coverage — TypeScript type-coverage ratio reporter via npx (read-only).
 // ---------------------------------------------------------------------------
-/**
- * Parse type-coverage's `--json --detail` stdout — grounded against
- * type-coverage's JSON shape: `{ percentage, total, correct, anys: [{ file,
- * line, character, text }] }`. Each `anys` entry is one implicit/explicit `any`
- * site; degrades to `[]` on empty/malformed input or a missing `anys` array.
- */
+/** Parse pinned type-coverage's --json-output --detail (zero-based locations). */
 function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
   let payload: unknown;
   try {
@@ -946,27 +941,45 @@ function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
   } catch {
     return parseFailure("type-coverage", "output is not valid JSON");
   }
-  if (!isRecord(payload) || !Array.isArray(payload.anys)) {
-    return parseFailure("type-coverage", "output has no `anys` array");
+  const failure = isRecord(payload) && typeof payload.error === "string"
+    ? `measurement failed: ${payload.error.slice(0, 200)}`
+    : "measurement did not succeed";
+  if (!isRecord(payload) || !Array.isArray(payload.details)) {
+    if (isRecord(payload) && payload.succeeded === false) {
+      return { items: [], measurement_failed: true, note: `type-coverage: ${failure}` };
+    }
+    return parseFailure("type-coverage", "output has no `details` array");
   }
-  const anys = payload.anys as Record<string, unknown>[];
-  return items(anys
-    .filter((a): a is Record<string, unknown> => Boolean(a) && typeof a === "object")
-    .map((a) => {
-      const file = typeof a.file === "string" ? a.file : "";
-      const line = typeof a.line === "number" ? a.line : undefined;
-      const text = typeof a.text === "string" && a.text.length > 0 ? a.text : "untyped value";
-      return {
-        id: `type-coverage:${file}:${line ?? 0}`,
-        category: "maintainability",
-        severity: "low",
-        path: file,
-        line_start: line,
-        summary: `type-coverage: '${text}' has an implicit/explicit any — add an explicit type.`,
-        rule: "type-coverage-any",
-      };
-    })
-    .filter((item) => item.path.length > 0));
+  const parsed: ExternalAnalyzerParsedItem[] = [];
+  let dropped = 0;
+  for (const detail of payload.details) {
+    if (!isRecord(detail) || typeof detail.filePath !== "string" || !detail.filePath.trim()
+      || !Number.isSafeInteger(detail.line) || (detail.line as number) < 0
+      || (detail.line as number) >= Number.MAX_SAFE_INTEGER
+      || !Number.isSafeInteger(detail.character) || (detail.character as number) < 0) {
+      dropped += 1;
+      continue;
+    }
+    const line = (detail.line as number) + 1;
+    const text = typeof detail.text === "string" && detail.text.length > 0 ? detail.text : "untyped value";
+    parsed.push({
+      id: `type-coverage:${detail.filePath}:${line}:${detail.character}`,
+      category: "maintainability",
+      severity: "low",
+      path: detail.filePath,
+      line_start: line,
+      summary: `type-coverage: '${text}' has an implicit/explicit any — add an explicit type.`,
+      rule: "type-coverage-any",
+    });
+  }
+  return {
+    items: parsed,
+    ...(dropped > 0 ? { dropped_rows: dropped } : {}),
+    ...(payload.succeeded === false ? {
+      measurement_failed: true,
+      note: `type-coverage: ${failure}`,
+    } : {}),
+  };
 }
 
 const typeCoverageCandidate: ExternalAnalyzerCandidate = {
@@ -992,9 +1005,12 @@ const typeCoverageCandidate: ExternalAnalyzerCandidate = {
   // Reads tsconfig (inert-data) but does not execute code.
   defaultRun: true,
   detect: (root) => detectNodeEcosystem(root),
-  // Read-only. `--json --detail` prints per-`any` sites as JSON on stdout; run
-  // with cwd=root so it resolves the project tsconfig itself.
-  buildArgv: (prefix) => [...prefix, "--json", "--detail"],
+  // Override package.json write settings with boolean false (minimist --no-*).
+  // Preserve project thresholds/strictness; run with cwd=root for tsconfig discovery.
+  buildArgv: (prefix) => [
+    ...prefix, "--json-output", "--detail", "--no-update", "--no-update-if-higher",
+    "--no-history-file", "--no-cache",
+  ],
   parse: parseTypeCoverage,
 };
 

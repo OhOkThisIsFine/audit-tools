@@ -85,7 +85,7 @@ export class LanePreflightError extends Error {
  *   row on resume load; the rewritten file carries the revived shape (running
  *   the sweep IS the presentation event for its records).
  * @param {() => Promise<void>} [opts.preflight] one cheap call before the
- *   sweep, SINGLE attempt: a dead lane must fail loudly at item 0 — aborted
+ *   pending sweep, SINGLE attempt: a dead lane must fail loudly at item 0 — aborted
  *   stamp written, LanePreflightError thrown, callLane never invoked.
  * @param {number} [opts.concurrency]
  * @param {(item: any) => string} [opts.itemLogPath] per-item log redirect:
@@ -191,11 +191,12 @@ export async function dispatchBoundedItems({
   if (stampExtra) for (const rec of currentKept) stampExtra(stamp, rec);
   stampSafe(stamp);
 
+  // Revival and stamps still run on a no-op; only pending work needs a lane.
   // Preflight is a SINGLE health-check attempt, outside the item retry budget.
   // Failover remains the lane's job. A dead lane must
   // fail loudly at item 0, with the lane's own message, not silently at
   // item 154.
-  if (preflight) {
+  if (queue.length > 0 && preflight) {
     try {
       await preflight();
     } catch (err) {

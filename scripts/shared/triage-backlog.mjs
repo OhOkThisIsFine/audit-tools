@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// sites-pinned: tests/shared/triage-unearned-shipped-verdict.test.ts, tests/shared/triage-record-shape.test.ts
+// sites-pinned: tests/shared/triage-unearned-shipped-verdict.test.ts, tests/shared/triage-record-shape.test.ts, tests/shared/triage-lane-lifecycle.test.ts
 //   The unearned-shipped downgrade (P65) and the verdict vocabulary are pinned there.
 // Mechanically triage every backlog entry through the offload lane — one entry,
 // one call.
@@ -104,7 +104,6 @@ import {
   coverageStampPath,
   dispatchBoundedItems,
   LanePreflightError,
-  writeCoverageStamp,
 } from './lane-dispatch.mjs';
 import { openDispatchLane } from './mcp-dispatch-lane.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
@@ -476,8 +475,8 @@ export function triageRecordCallbacks({ root = ROOT } = {}) {
   };
 }
 
-function chunk(file) {
-  const text = fs.readFileSync(join(ROOT, 'docs', 'backlog', file), 'utf8');
+function chunk(file, root) {
+  const text = fs.readFileSync(join(root, 'docs', 'backlog', file), 'utf8');
   const lines = text.split(/\r?\n/);
   const entries = [];
   let cur = null;
@@ -493,8 +492,6 @@ function chunk(file) {
     return { id: `${file.replace('.md', '')}#${hash}`, file, text };
   });
 }
-
-const entries = [...chunk('open-bugs.md'), ...chunk('forward-tracks.md'), ...chunk('deferred.md')];
 
 const SCHEMA = {
   type: 'object',
@@ -644,48 +641,23 @@ function triageTask(e) {
 // recovered 20 of 22, under the retired llm-relay transport) was the
 // OPERATOR's to remember, and a single-pass stamp reporting 74/96 reads as
 // the ceiling rather than as a partial sweep.
-async function main() {
-  const stampPath = coverageStampPath(OUT);
-  let lane;
-  try {
-    lane = openDispatchLane({ size: CONCURRENCY, cwd: ROOT });
-  } catch (err) {
-    // openDispatchLane() itself can throw a DispatchLaneError SYNCHRONOUSLY —
-    // a missing agent-dispatch checkout, too old a Node — before
-    // dispatchBoundedItems' own preflight machinery below ever runs. Give it
-    // the SAME aborted-stamp-plus-remedy treatment as a dispatch-based
-    // preflight failure, rather than letting it escape as an uncaught stack
-    // with no stamp written at all.
-    const aborted = `preflight failed: ${String(/** @type {any} */ (err).message || err)}`;
-    writeCoverageStamp(stampPath, {
-      model: 'agent-dispatch dispatch',
-      started_at: new Date().toISOString(),
-      finished_at: null,
-      aborted,
-      total_entries: entries.length,
-      prior_classified: 0,
-      attempted: 0,
-      classified: 0,
-      classified_total: 0,
-      errored: 0,
-      retried: 0,
-      ...TRIAGE_STAMP_INIT,
-      lanes: {},
-    });
-    process.stderr.write(
-      `${aborted}\nThe lane is DEAD, not slow — nothing was attempted. ` +
-        `Check the agent-dispatch worker (\`node C:/Code/agent-dispatch/src/cli.ts status\`) and re-run.\n`,
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+/** Import-safe sweep entry; the opener is injectable for offline lifecycle tests. */
+export async function main({
+  root = ROOT,
+  outPath = OUT,
+  entries = ['open-bugs.md', 'forward-tracks.md', 'deferred.md'].flatMap((file) => chunk(file, root)),
+  concurrency = CONCURRENCY,
+  openLane = openDispatchLane,
+} = {}) {
+  const stampPath = coverageStampPath(outPath);
+  /** @type {{ lane?: ReturnType<typeof openDispatchLane> }} */
+  const opened = {};
   let stamp;
   try {
     ({ stamp } = await dispatchBoundedItems({
       items: entries,
-      outPath: OUT,
-      concurrency: CONCURRENCY,
+      outPath,
+      concurrency,
       stampSeed: { model: 'agent-dispatch dispatch' },
       // Counted so "the sweep covered 61 entries" cannot hide how many of those
       // verdicts rest on no premise check. The full class list is declared
@@ -705,12 +677,16 @@ async function main() {
       // whose quoted code vanished since the last run must read as
       // unconfirmed now, not carry last week's stamp.
       preflight: async () => {
+        // Open only after retained rows have been revived and pending work is
+        // known. Synchronous open failures now share the driver's abort stamp,
+        // preserving its accurate revived counters and the remedy below.
+        opened.lane = openLane({ size: concurrency, cwd: root });
         // 2 min: carried over unchanged from the retired llm-relay lane's
         // preflight ceiling — a labelled existing value, not a number this
         // port picked. `maxTokens`/`schema` are dropped here, not passed as
         // ignored dead arguments: mcp-dispatch-lane.mjs's `dispatch()` has no
         // opencode_fire equivalent for either (see that module's header).
-        const r = await lane.dispatch('Reply with the single word: ok', {
+        const r = await opened.lane.dispatch('Reply with the single word: ok', {
           timeoutMs: 2 * 60 * 1000,
         });
         if (r.status !== 'completed') {
@@ -718,10 +694,11 @@ async function main() {
         }
       },
       callLane: async (e) => {
+        if (!opened.lane) throw new Error('dispatch lane was not opened by preflight');
         // `schema`/`maxTokens` dropped for the same reason as the preflight
         // call above — opencode_fire has no equivalent field for either; the
         // schema already travels inline in `triageTask(e)`'s prompt text.
-        const r = await lane.dispatch(triageTask(e), {
+        const r = await opened.lane.dispatch(triageTask(e), {
           timeoutMs: ENTRY_TIMEOUT_MS,
         });
         // A terminal failure is returned, not thrown, so the driver records
@@ -729,7 +706,7 @@ async function main() {
         // near-zero = dialect death, large-but-truncated = a cap to raise).
         return { raw: r.raw, finishReason: r.status, lane: r.lane, error: r.error };
       },
-      ...triageRecordCallbacks(),
+      ...triageRecordCallbacks({ root }),
       onProgress: (e, rec) => {
         process.stderr.write(
           `${e.id} -> ${rec.verdict ? `${rec.verdict} [premise: ${rec.premise}] via ${rec.lane}` : 'ERR:' + rec.error}\n`,
@@ -747,7 +724,7 @@ async function main() {
     }
     throw err;
   } finally {
-    await lane.close();
+    if (opened.lane) await opened.lane.close();
   }
 
   process.stderr.write(

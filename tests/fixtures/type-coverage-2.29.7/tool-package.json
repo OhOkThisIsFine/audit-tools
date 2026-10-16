@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "type-coverage": "^2.29.7",
+    "typescript": "^5.9.3"
+  },
+  "_npx": {
+    "packages": [
+      "type-coverage@2.29.7",
+      "typescript@5.9.3"
+    ]
+  }
+}

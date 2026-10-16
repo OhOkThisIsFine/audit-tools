@@ -1,6 +1,6 @@
 import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
 import { test, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -59,8 +59,9 @@ test("gitleaks is the default-on member; semgrep + eslint are consent-gated", ()
 
 test("gitleaks always applies (secrets are ecosystem-agnostic) and reports to a file", () => {
   expect(gitleaksCandidate.detect("/any/repo")).toBe(true);
-  expect(typeof gitleaksCandidate.reportFile?.("/repo")).toBe("string");
-  const argv = gitleaksCandidate.buildArgv(["/cache/gitleaks"], "/repo");
+  expect(gitleaksCandidate.managedReport).toBe(true);
+  expect(gitleaksCandidate.reportFile).toBeUndefined();
+  const argv = gitleaksCandidate.buildArgv(["/cache/gitleaks"], "/repo", { reportPath: "/private/report.json" });
   expect(argv[0]).toBe("/cache/gitleaks");
   expect(argv.includes("dir")).toBeTruthy();
   expect(argv.includes("--report-format") && argv.includes("json")).toBeTruthy();
@@ -92,9 +93,10 @@ test("parseGitleaks maps findings and NEVER carries the raw secret", () => {
   expect(serialized, "raw match must never appear").not.toMatch(/key = AKIA/);
 });
 
-test("parseGitleaks yields no items on an empty report and REPORTS a malformed one", () => {
-  // An empty report is a legitimately clean scan: no items, no degradation claimed.
-  expect(reportOf(parseGitleaks(""))).toEqual({ items: [] });
+test("parseGitleaks accepts an empty array and rejects empty or malformed reports", () => {
+  // Only an explicit empty JSON array affirms a clean scan.
+  expect(reportOf(parseGitleaks("[]"))).toEqual({ items: [] });
+  expect(reportOf(parseGitleaks(""))).toMatchObject({ items: [], parse_failed: true });
   // Malformed / wrong-shape payloads are affirmed as parse failures, never as clean.
   for (const bad of ["not json", "{}"]) {
     const report = reportOf(parseGitleaks(bad));
@@ -648,43 +650,51 @@ function parseActionlintSample() {
   );
 }
 
-// type-coverage — npx runner, --json, per-any items.
-test("type-coverage: npx runner, --json argv, detects Node", () => {
+// type-coverage — pinned read-only JSON contract.
+test("type-coverage: npx runner, read-only JSON argv, detects Node", () => {
   expect(typeCoverageCandidate.runner).toBe("npx");
   const argv = typeCoverageCandidate.buildArgv(
     ["npx", "-y", "-p", "type-coverage@2.29.7", "-p", "typescript@5.9.3", "type-coverage"],
     "/repo",
   );
-  expect(argv.includes("--json")).toBeTruthy();
+  expect(argv.slice(7)).toEqual(["--json-output", "--detail", "--no-update", "--no-update-if-higher", "--no-history-file", "--no-cache"]);
   expect(typeCoverageCandidate.detect("/repo")).toBe(false);
 });
 
-test("parseTypeCoverage maps anys[] sites; degrades to empty", () => {
-  const report = JSON.stringify({
-    percentage: 95.5,
-    total: 1000,
-    correct: 955,
-    anys: [
-      { file: "src/a.ts", line: 4, character: 10, text: "foo" },
-      { file: "src/b.ts", line: 8, character: 2, text: "bar" },
-    ],
-  });
+const typeCoverageFixture = async (name: string) => readFile(
+  new URL(`../fixtures/type-coverage-2.29.7/${name}.json`, import.meta.url), "utf8",
+);
+
+test("parseTypeCoverage maps real pinned details, including distinct sites on line one", async () => {
+  const report = await typeCoverageFixture("any");
   const items = itemsOf(parseTypeCoverage(report));
-  expect(items.length).toBe(2);
-  expect(items[0].path).toBe("src/a.ts");
-  expect(items[0].line_start).toBe(4);
+  expect(items).toHaveLength(3);
+  expect(items[0].path).toBe("index.ts");
+  expect(items.every((item) => item.line_start === 1)).toBe(true);
+  expect(new Set(items.map((item) => item.id)).size).toBe(3);
   expect(items[0].rule).toBe("type-coverage-any");
-  expect(items[0].category).toBe("maintainability");
-  expect(items[0].summary).toMatch(/foo/);
+  expect(items[0].summary).toMatch(/first/);
+  expect(reportOf(parseTypeCoverage(await typeCoverageFixture("clean")))).toEqual({ items: [] });
+  expect(reportOf(parseTypeCoverage(await typeCoverageFixture("error"))).note).toContain("paramter");
+  expect(reportOf(parseTypeCoverage(await typeCoverageFixture("error"))).measurement_failed).toBe(true);
   for (const bad of ["", "not json", "{}"]) {
-    const report = reportOf(parseTypeCoverage(bad));
-    expect(report.items).toEqual([]);
-    expect(report.parse_failed, `parseTypeCoverage(${JSON.stringify(bad)}) must report the failure`).toBe(true);
+    expect(reportOf(parseTypeCoverage(bad)).parse_failed).toBe(true);
   }
 });
 
+test("parseTypeCoverage counts every malformed detail instead of laundering an empty scan", () => {
+  const valid = { filePath: "a.ts", line: 0, character: 0, text: "value" };
+  const bad = [null, [], {}, { ...valid, filePath: " " }, { ...valid, line: -1 },
+    { ...valid, line: 0.5 }, { ...valid, line: Number.MAX_SAFE_INTEGER },
+    { ...valid, character: -1 }, { ...valid, character: "0" }];
+  const report = reportOf(parseTypeCoverage(JSON.stringify({ details: [...bad, valid] })));
+  expect(report.dropped_rows).toBe(bad.length);
+  expect(report.items).toHaveLength(1);
+  expect(reportOf(parseTypeCoverage(JSON.stringify({ details: bad }))).dropped_rows).toBe(bad.length);
+});
+
 function parseTypeCoverageSample() {
-  return parseTypeCoverage(JSON.stringify({ anys: [{ file: "src/x.ts", line: 1, text: "z" }] }));
+  return parseTypeCoverage(JSON.stringify({ details: [{ filePath: "src/x.ts", line: 0, character: 0, text: "z" }] }));
 }
 
 // lizard — complexity metrics via pipx runner.
@@ -1384,4 +1394,56 @@ test("RV-5: every CONSENT-channel reason names consent; the settings-channel one
     ANALYZER_DENIAL_REASONS.setting_skip,
     "setting=skip comes from the settings channel and must not claim to be a consent decision",
   ).not.toMatch(/consent/i);
+});
+
+
+
+test("type-coverage engine keeps absolute paths, site identity and degradation visible", async () => {
+  const root = await mkdtemp(join(tmpdir(), "type-coverage-engine-"));
+  try {
+    await writeFile(join(root, "package.json"), "{}\n");
+    await writeFile(join(root, "index.ts"), "export const first: any = 1; export const second: any = first;\n");
+    const payload = JSON.parse(await typeCoverageFixture("any"));
+    for (const detail of payload.details) detail.filePath = join(root, detail.filePath);
+    for (const exit of [0, 1]) {
+      const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+        run: scriptedRunner(() => ({ status: exit, stdout: JSON.stringify(payload), stderr: "" })),
+      });
+      expect(outcome.status.status).toBe("findings");
+      expect(outcome.status.exit_code).toBe(exit);
+      expect(new Set(outcome.results.results.map((item) => item.id)).size).toBe(3);
+      expect(outcome.results.results.every((item) => item.path === "index.ts" && item.line_start === 1)).toBe(true);
+      expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(exit !== 0);
+    }
+    for (const details of [[...payload.details, null], [null]]) {
+      const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+        run: scriptedRunner(() => ({ status: 0, stdout: JSON.stringify({ details }), stderr: "" })),
+      });
+      expect(outcome.status.dropped_rows).toBe(1);
+      expect(outcome.status.status).toBe(details.length > 1 ? "findings" : "parse_error");
+      expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
+    }
+    for (const details of [payload.details, [...payload.details, null], []]) {
+      const stdout = JSON.stringify({ succeeded: false, details, error: "threshold unmet" });
+      const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+        run: scriptedRunner(() => ({ status: 0, stdout, stderr: "" })),
+      });
+      expect(outcome.status.status).toBe("failed");
+      expect(outcome.status.exit_code).toBe(0);
+      expect(outcome.results.results).toHaveLength(details.length ? 3 : 0);
+      expect(outcome.status.error).toContain("threshold unmet");
+      expect(outcome.status.dropped_rows ?? 0).toBe(details.includes(null) ? 1 : 0);
+      expect(isDegradedExternalAnalyzerStatus(outcome.status)).toBe(true);
+    }
+    const error = await typeCoverageFixture("error");
+    for (const exit of [0, 1]) {
+      const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+        run: scriptedRunner(() => ({ status: exit, stdout: error, stderr: "" })),
+      });
+      expect(outcome.status.status).toBe("failed");
+      expect(outcome.status.output_snippet).toContain("paramter");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -1,6 +1,7 @@
 // sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-pipx-contract.test.ts, tests/audit/analyzer-run-consent.test.ts
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   resolveSpawnDeadline,
   runTrackedAsync,
@@ -112,6 +113,11 @@ export interface AnalyzerSafetyProfile {
  * small value-curated set that may run without a consent token; everything else
  * is gated on the per-run consent token at the spawn chokepoint.
  */
+export interface AnalyzerInvocationContext {
+  /** Allocated once by the engine, inside this invocation's private directory. */
+  readonly reportPath?: string;
+}
+
 export interface ExternalAnalyzerCandidate {
   /** Stable id; also the `analyzers.<id>` session-config key. */
   id: string;
@@ -151,7 +157,9 @@ export interface ExternalAnalyzerCandidate {
    * Build the read-only argv for the tool given the resolved runner argv prefix
    * and repo root. MUST NOT request fixes/writes — acquisition is observe-only.
    */
-  buildArgv(runnerPrefix: string[], root: string): string[];
+  buildArgv(runnerPrefix: string[], root: string, context?: AnalyzerInvocationContext): string[];
+  /** Private, engine-owned file report. Raw output/error snippets are withheld. */
+  managedReport?: boolean;
   /**
    * Parse the tool's stdout into the generic item shape consumed by
    * `normalizeGenericExternalResults`. NEVER throws — but a degradation must be
@@ -163,8 +171,9 @@ export interface ExternalAnalyzerCandidate {
   /**
    * For tools that ONLY report to a file (e.g. gitleaks) rather than stdout: the
    * report path the tool was told to write (must match `buildArgv`). When set, the
-   * engine reads this file (degrade-to-"" if absent) and passes its contents to
-   * `parse` instead of stdout, then best-effort removes it. Omit for stdout tools.
+   * engine reads this file and passes its contents to `parse` instead of stdout.
+   * Missing/unreadable reports fail; the legacy file is best-effort removed.
+   * Prefer managedReport for private, invocation-owned resources. Omit for stdout tools.
    */
   reportFile?(root: string): string;
   /** Whether this ecosystem is present (marker file detection). */
@@ -654,193 +663,242 @@ export async function runExternalAnalyzer(
 
   const beforeScan = expiredOutcome();
   if (beforeScan) return beforeScan;
-  const argv = candidate.buildArgv(prefix, root);
-  const afterArgv = expiredOutcome();
-  if (afterArgv) return afterArgv;
-  const command = argv.join(" ");
-  let result: RunTrackedResult;
-  try {
-    result = await run(
-      argv,
-      root,
-      resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
-    );
-  } catch (error) {
-    return {
-      results: emptyResults(candidate.id),
-      status: {
-        tool: candidate.id,
-        command,
-        resolved: true,
-        status: "spawn_error",
-        error: error instanceof Error ? error.message : String(error),
-        duration_ms: 0,
-      },
-    };
-  }
-
-  const afterScan = expiredOutcome();
-  if (afterScan) return afterScan;
-
-  if (result.error) {
-    return {
-      results: emptyResults(candidate.id),
-      status: {
-        tool: candidate.id,
-        command,
-        resolved: true,
-        status: "spawn_error",
-        exit_code: result.status,
-        error: result.error.message,
-        duration_ms: result.duration_ms,
-      },
-    };
-  }
-
-  // Tools that report to a file (gitleaks) are read from there; stdout tools use
-  // stdout. The report file is best-effort removed after parsing.
-  let parseInput = result.stdout;
-  if (candidate.reportFile) {
-    const reportPath = candidate.reportFile(root);
-    try {
-      parseInput = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-    } catch {
-      parseInput = "";
+  let ownedDirectory: string | undefined;
+  let reportPath: string | undefined;
+  let outcome: AcquisitionOutcome | undefined;
+  let legacyReportResolved = false;
+  const resolveLegacyReport = (): void => {
+    if (!candidate.managedReport && !legacyReportResolved) {
+      legacyReportResolved = true;
+      reportPath = candidate.reportFile?.(root);
     }
-    try {
-      if (existsSync(reportPath)) rmSync(reportPath, { force: true });
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  const stderrText = typeof result.stderr === "string" ? result.stderr : "";
-  const stderrSnippet =
-    stderrText.trim().length > 0 ? { stderr_snippet: stderrText.slice(0, 500) } : {};
-
-  let parsed: ReturnType<typeof readParseOutcome>;
+  };
   try {
-    parsed = readParseOutcome(candidate.parse(parseInput));
-  } catch (error) {
-    return {
-      results: emptyResults(candidate.id),
-      status: {
-        tool: candidate.id,
-        command,
-        resolved: true,
-        status: "parse_error",
+    if (candidate.managedReport) {
+      // mkdtemp creates an exclusive directory; never alter the process umask.
+      // Windows uses the temp location's inherited ACL; POSIX mode is verified.
+      ownedDirectory = mkdtempSync(join(tmpdir(), "audit-tools-report-"));
+      if (process.platform !== "win32") {
+        chmodSync(ownedDirectory, 0o700);
+        if ((statSync(ownedDirectory).mode & 0o777) !== 0o700) {
+          throw new Error("private report directory unavailable");
+        }
+      }
+      reportPath = join(ownedDirectory, "report.json");
+    }
+    const context: AnalyzerInvocationContext = { reportPath };
+    const invoke = async (): Promise<AcquisitionOutcome> => {
+      const argv = candidate.buildArgv(prefix, root, context);
+      const afterArgv = expiredOutcome();
+      if (afterArgv) return afterArgv;
+      const command = argv.join(" ");
+      let result: RunTrackedResult;
+      try {
+        result = await run(
+          argv,
+          root,
+          resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
+        );
+      } catch (error) {
+        return {
+          results: emptyResults(candidate.id),
+          status: {
+            tool: candidate.id,
+            command,
+            resolved: true,
+            status: "spawn_error",
+            error: candidate.managedReport ? "analyzer operation failed (private report)" : error instanceof Error ? error.message : String(error),
+            duration_ms: 0,
+          },
+        };
+      }
+
+      const afterScan = expiredOutcome();
+      if (afterScan) return afterScan;
+
+      if (result.error) {
+        return {
+          results: emptyResults(candidate.id),
+          status: {
+            tool: candidate.id,
+            command,
+            resolved: true,
+            status: "spawn_error",
+            exit_code: result.status,
+            error: candidate.managedReport ? "analyzer execution failed (private report)" : result.error.message,
+            duration_ms: result.duration_ms,
+          },
+        };
+      }
+
+      // Legacy callbacks historically run after the runner, and may depend on
+      // builder/runner state. Resolve once here (or in finally on an early exit).
+      resolveLegacyReport();
+      let parseInput = result.stdout;
+      if (reportPath) {
+        try {
+          parseInput = readFileSync(reportPath, "utf8");
+        } catch {
+          return { results: emptyResults(candidate.id), status: {
+            tool: candidate.id, command, resolved: true, status: "parse_error",
+            error: "expected analyzer report is missing or unreadable",
+            exit_code: result.status, duration_ms: result.duration_ms,
+          } };
+        }
+      }
+
+      const stderrText = typeof result.stderr === "string" ? result.stderr : "";
+      const stderrSnippet =
+        !candidate.managedReport && stderrText.trim().length > 0 ? { stderr_snippet: stderrText.slice(0, 500) } : {};
+
+      let parsed: ReturnType<typeof readParseOutcome>;
+      try {
+        parsed = readParseOutcome(candidate.parse(parseInput));
+      } catch (error) {
+        return {
+          results: emptyResults(candidate.id),
+          status: {
+            tool: candidate.id,
+            command,
+            resolved: true,
+            status: "parse_error",
+            exit_code: result.status,
+            error: candidate.managedReport ? "analyzer operation failed (private report)" : error instanceof Error ? error.message : String(error),
+            ...(candidate.managedReport ? {} : { output_snippet: result.stdout.slice(0, 200) }),
+            ...stderrSnippet,
+            duration_ms: result.duration_ms,
+          },
+        };
+      }
+      const items: ExternalAnalyzerParsedItem[] = parsed.items;
+
+      // readSource: content-anchored lead provenance (item C). Paths are normalized to
+      // repo-relative FIRST (an absolute-path emitter would otherwise make `join(root,
+      // path)` name nothing, silently dropping provenance); a read that still fails is
+      // COUNTED onto the status, so a broken read seam is distinguishable from an item
+      // that legitimately carries no anchor.
+      let sourceReadFailures = 0;
+      let normalizerDroppedItems = 0;
+      const normalized = normalizeGenericExternalResults(candidate.id, items, {
+        repoRoot: root,
+        readSource: (path) => {
+          try {
+            return readFileSync(join(root, path), "utf8");
+          } catch {
+            return undefined;
+          }
+        },
+        onDiagnostics: (diagnostics) => {
+          sourceReadFailures = diagnostics.source_read_failures;
+          normalizerDroppedItems = diagnostics.dropped_items;
+        },
+      });
+      const edges = normalizeGenericExternalEdges(items);
+      if (edges.length > 0) normalized.graph_edges = edges;
+
+      // Rows the PARSER could not use plus items the NORMALIZER discarded (missing path
+      // or summary) are the same question to a consumer — "how much did this run fail to
+      // report?" — so they land on one field. Counting only the parser's half left a run
+      // whose every item was dropped at normalization reading as a clean scan.
+      const droppedRows = (parsed.dropped_rows ?? 0) + normalizerDroppedItems;
+      const degradationFields = {
         exit_code: result.status,
-        error: error instanceof Error ? error.message : String(error),
-        output_snippet: result.stdout.slice(0, 200),
+        ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
+        ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
         ...stderrSnippet,
         duration_ms: result.duration_ms,
-      },
-    };
-  }
-  const items: ExternalAnalyzerParsedItem[] = parsed.items;
+      };
 
-  // readSource: content-anchored lead provenance (item C). Paths are normalized to
-  // repo-relative FIRST (an absolute-path emitter would otherwise make `join(root,
-  // path)` name nothing, silently dropping provenance); a read that still fails is
-  // COUNTED onto the status, so a broken read seam is distinguishable from an item
-  // that legitimately carries no anchor.
-  let sourceReadFailures = 0;
-  let normalizerDroppedItems = 0;
-  const normalized = normalizeGenericExternalResults(candidate.id, items, {
-    repoRoot: root,
-    readSource: (path) => {
-      try {
-        return readFileSync(join(root, path), "utf8");
-      } catch {
-        return undefined;
+      // AFFIRMATION, never a success-shaped empty. Zero items is only "success" when the
+      // run itself was clean: the tool exited 0, said nothing on stderr it did not also
+      // say on stdout, parsed, and dropped nothing. Every other zero-item outcome names
+      // its cause — the exit code and stderr are in hand right here, which is exactly
+      // why leaving them unconsulted made a broken analyzer read as a clean repo.
+      // Explicit upstream failure can be reported even with exit code zero.
+      if (normalized.results.length === 0 && !parsed.measurement_failed) {
+        // A NULL exit status means the child never exited on its own — it was killed by a
+        // signal (SIGKILL/OOM). `RunTrackedResult` carries no signal field, so null is the
+        // only trace of it, and it is emphatically not "exited cleanly". Treating it as
+        // clean also made the classification OS-divergent: win32 surfaces the same kill as
+        // a non-zero status, so the identical event would have been failed there and
+        // success on POSIX.
+        const exitMissing = result.status === null || result.status === undefined;
+        const exitedNonZero = exitMissing || result.status !== 0;
+        const stderrOnly =
+          !exitedNonZero && stderrText.trim().length > 0 && parseInput.trim().length === 0;
+        if (exitedNonZero || stderrOnly) {
+          return {
+            results: emptyResults(candidate.id),
+            status: {
+              tool: candidate.id,
+              command,
+              resolved: true,
+              status: "failed",
+              error: exitMissing
+                ? "analyzer terminated without an exit status (killed by a signal) and produced no parsable findings"
+                : exitedNonZero
+                  ? `analyzer exited ${result.status} with no parsable findings`
+                  : "analyzer produced no output other than stderr",
+              ...(candidate.managedReport ? {} : { output_snippet: result.stdout.slice(0, 200) }),
+              ...degradationFields,
+            },
+          };
+        }
+        if (parsed.parse_failed || droppedRows > 0) {
+          return {
+            results: emptyResults(candidate.id),
+            status: {
+              tool: candidate.id,
+              command,
+              resolved: true,
+              status: "parse_error",
+              error:
+                (candidate.managedReport ? undefined : parsed.note) ??
+                (parsed.parse_failed
+                  ? "analyzer output could not be parsed"
+                  : `analyzer output parsed with ${droppedRows} unusable row(s)`),
+              ...(candidate.managedReport ? {} : { output_snippet: parseInput.slice(0, 200) }),
+              ...degradationFields,
+            },
+          };
+        }
       }
-    },
-    onDiagnostics: (diagnostics) => {
-      sourceReadFailures = diagnostics.source_read_failures;
-      normalizerDroppedItems = diagnostics.dropped_items;
-    },
-  });
-  const edges = normalizeGenericExternalEdges(items);
-  if (edges.length > 0) normalized.graph_edges = edges;
 
-  // Rows the PARSER could not use plus items the NORMALIZER discarded (missing path
-  // or summary) are the same question to a consumer — "how much did this run fail to
-  // report?" — so they land on one field. Counting only the parser's half left a run
-  // whose every item was dropped at normalization reading as a clean scan.
-  const droppedRows = (parsed.dropped_rows ?? 0) + normalizerDroppedItems;
-  const degradationFields = {
-    exit_code: result.status,
-    ...(droppedRows > 0 ? { dropped_rows: droppedRows } : {}),
-    ...(sourceReadFailures > 0 ? { source_read_failures: sourceReadFailures } : {}),
-    ...stderrSnippet,
-    duration_ms: result.duration_ms,
-  };
-
-  // AFFIRMATION, never a success-shaped empty. Zero items is only "success" when the
-  // run itself was clean: the tool exited 0, said nothing on stderr it did not also
-  // say on stdout, parsed, and dropped nothing. Every other zero-item outcome names
-  // its cause — the exit code and stderr are in hand right here, which is exactly
-  // why leaving them unconsulted made a broken analyzer read as a clean repo.
-  if (normalized.results.length === 0) {
-    // A NULL exit status means the child never exited on its own — it was killed by a
-    // signal (SIGKILL/OOM). `RunTrackedResult` carries no signal field, so null is the
-    // only trace of it, and it is emphatically not "exited cleanly". Treating it as
-    // clean also made the classification OS-divergent: win32 surfaces the same kill as
-    // a non-zero status, so the identical event would have been failed there and
-    // success on POSIX.
-    const exitMissing = result.status === null || result.status === undefined;
-    const exitedNonZero = exitMissing || result.status !== 0;
-    const stderrOnly =
-      !exitedNonZero && stderrText.trim().length > 0 && parseInput.trim().length === 0;
-    if (exitedNonZero || stderrOnly) {
       return {
-        results: emptyResults(candidate.id),
+        results: normalized,
         status: {
           tool: candidate.id,
           command,
           resolved: true,
-          status: "failed",
-          error: exitMissing
-            ? "analyzer terminated without an exit status (killed by a signal) and produced no parsable findings"
-            : exitedNonZero
-              ? `analyzer exited ${result.status} with no parsable findings`
-              : "analyzer produced no output other than stderr",
-          output_snippet: result.stdout.slice(0, 200),
+          status: parsed.measurement_failed ? "failed" : normalized.results.length > 0 ? "findings" : "success",
+          ...(parsed.measurement_failed && !candidate.managedReport ? { output_snippet: parseInput.slice(0, 200) } : {}),
+          ...(parsed.note !== undefined ? { error: candidate.managedReport
+            ? "analyzer reported degraded output (private report)" : parsed.note } : {}),
           ...degradationFields,
         },
       };
-    }
-    if (parsed.parse_failed || droppedRows > 0) {
-      return {
-        results: emptyResults(candidate.id),
-        status: {
-          tool: candidate.id,
-          command,
-          resolved: true,
-          status: "parse_error",
-          error:
-            parsed.note ??
-            (parsed.parse_failed
-              ? "analyzer output could not be parsed"
-              : `analyzer output parsed with ${droppedRows} unusable row(s)`),
-          output_snippet: parseInput.slice(0, 200),
-          ...degradationFields,
-        },
-      };
+    };
+    outcome = await invoke();
+  } catch (error) {
+    outcome = { results: emptyResults(candidate.id), status: {
+      tool: candidate.id, resolved: true, status: "spawn_error",
+      error: candidate.managedReport ? "analyzer operation failed (private report)"
+        : error instanceof Error ? error.message : String(error),
+    } };
+  } finally {
+    try {
+      resolveLegacyReport();
+      if (ownedDirectory) rmSync(ownedDirectory, { recursive: true, force: true });
+      else if (reportPath) rmSync(reportPath, { force: true });
+    } catch {
+      // Do not replace the original diagnostic or expose filesystem error text.
+      if (outcome) {
+        outcome.status.error = [outcome.status.error, "analyzer report cleanup failed"].filter(Boolean).join("; ");
+        if (outcome.status.status === "success") outcome.status.status = "failed";
+      }
     }
   }
-
-  return {
-    results: normalized,
-    status: {
-      tool: candidate.id,
-      command,
-      resolved: true,
-      status: normalized.results.length > 0 ? "findings" : "success",
-      ...(parsed.note !== undefined ? { error: parsed.note } : {}),
-      ...degradationFields,
-    },
-  };
+  return outcome!;
 }
 
 /**
