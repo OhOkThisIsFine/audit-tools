@@ -1,15 +1,14 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+// sites-pinned: tests/audit/tree-sitter-analyzers.test.ts, tests/audit/tree-sitter-batch.test.ts
 import type { GraphEdge } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath } from "../graphPathUtils.js";
 import type { AnalyzerContext, AnalyzerOutput, LanguageAnalyzer } from "./types.js";
-import { getTreeSitterParser, type TsNode } from "./treeSitter.js";
+import type { TsNode } from "./treeSitter.js";
+import { analyzeTreeSitterFiles } from "./treeSitterBatch.js";
 import { resolveResourceUrl } from "./resourceUrl.js";
 
 // Above the regex floor's html-resource-link so the merge prefers the parsed
 // edge for the same (from, to).
 const HTML_RESOURCE_EDGE_CONFIDENCE = 0.96;
-const MAX_HTML_SOURCE_BYTES = 512 * 1024;
 const HTML_EXTENSIONS = [".html", ".htm"] as const;
 
 // tag → the attribute carrying its resource reference. Single-sourced here and
@@ -71,33 +70,9 @@ async function analyze(
   files: string[],
   context: AnalyzerContext,
 ): Promise<AnalyzerOutput> {
-  if (files.length === 0) return { edges: [] };
-  const parser = await getTreeSitterParser("html", context.dependencyPath);
-  if (!parser) return { edges: [] };
-
-  const root = resolve(context.root);
-  const edges: GraphEdge[] = [];
-  for (const file of files) {
-    let content: string;
-    try {
-      content = await readFile(resolve(root, file), "utf8");
-    } catch {
-      continue;
-    }
-    if (content.length > MAX_HTML_SOURCE_BYTES) continue;
-    try {
-      const tree = parser.parse(content);
-      collectFileEdges(
-        normalizeGraphPath(file),
-        tree.rootNode,
-        context.pathLookup,
-        edges,
-      );
-    } catch (e) {
-      process.stderr.write(`[audit-code] html-analyzer: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
-    }
-  }
-  return { edges };
+  return analyzeTreeSitterFiles(
+    files, context, "html", "html-analyzer", collectFileEdges,
+  );
 }
 
 export const htmlAnalyzer: LanguageAnalyzer = {

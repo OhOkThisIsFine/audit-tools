@@ -455,13 +455,17 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
   // Manifest-relative target extraction preserves all four adapters' graph output;
   // only ownership of the existing pure prefix moved, so retain cache version v10.
   // Adapter/path-utils test-site declarations also change only comments in this closure.
+  // Shared analyzer batch lifecycle changes this conservative closure through html.ts;
+  // the cached floor consumes its unchanged HTML_RESOURCE_ATTRIBUTE only, so retain v10.
+  // Build-local path indexes preserve resolver and schema outputs (including ambiguity);
+  // only repeated scans moved into an immutable snapshot, so retain cache version v10.
   expect(
     digest.digest("hex"),
     "An extractor feeding a cached per-file contribution changed. A prior cache " +
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("d7e12ddef12a8fd980c550437bbceb3cfce4ac487e1301e58f1d3cc98aef5489");
+  ).toBe("d4d396054265d1da5cc2c26eeb2b8bab96983de80d07b4aa712f6dd1efc291b3");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 

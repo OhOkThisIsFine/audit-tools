@@ -8,20 +8,21 @@ import { test, expect, vi, beforeEach } from "vitest";
 // static imports elsewhere (release-run-selector.test.ts, release-branch-gate.test.ts)
 // stay real-spawn-free because they never touch this file's module registry.
 
-type SpawnCall = { command: string; args: string[] };
+type SpawnOptions = { timeout?: number; killSignal?: string };
+type SpawnCall = { command: string; args: string[]; options: SpawnOptions };
 type SpawnSyncResult = { error?: Error; status: number | null; stdout: string; stderr: string };
 
 const spawnCalls: SpawnCall[] = [];
-let spawnSyncHandler: (command: string, args: string[]) => SpawnSyncResult = () => ({
+let spawnSyncHandler: (command: string, args: string[], options: SpawnOptions) => SpawnSyncResult = () => ({
   status: 0,
   stdout: "",
   stderr: "",
 });
 
 vi.mock("node:child_process", () => ({
-  spawnSync: (command: string, args: string[]) => {
-    spawnCalls.push({ command, args });
-    return spawnSyncHandler(command, args);
+  spawnSync: (command: string, args: string[], options: SpawnOptions) => {
+    spawnCalls.push({ command, args, options });
+    return spawnSyncHandler(command, args, options);
   },
 }));
 
@@ -501,7 +502,7 @@ test("watchdog: no publish run detected within the window aborts with a trigger-
     const pushedAt = Date.now();
     spawnSyncHandler = (command, args) => {
       if (command === "gh" && args[0] === "workflow") return textResult("");
-      if (command === "gh" && args[0] === "api") return jsonResult({ workflow_runs: [] });
+      if (command === "gh" && args[0] === "api") return jsonResult({ total_count: 0, workflow_runs: [] });
       // Any other call (e.g. `gh workflow run ...`, a manual dispatch) must never happen.
       throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
     };
@@ -530,8 +531,9 @@ test("watchdog: a publish run detected within the window resolves with the match
       if (command === "gh" && args[0] === "workflow") return textResult("");
       if (command === "gh" && args[0] === "api") {
         apiCalls += 1;
-        if (apiCalls < 3) return jsonResult({ workflow_runs: [] });
+        if (apiCalls < 3) return jsonResult({ total_count: 0, workflow_runs: [] });
         return jsonResult({
+          total_count: 1,
           workflow_runs: [
             {
               id: 42,
@@ -580,7 +582,7 @@ test("watchdog: the default detection window outlasts a GitHub release-event del
     try {
       spawnSyncHandler = (command, args) => {
         if (command === "gh" && args[0] === "workflow") return textResult("");
-        if (command === "gh" && args[0] === "api") return jsonResult({ workflow_runs: [] });
+        if (command === "gh" && args[0] === "api") return jsonResult({ total_count: 0, workflow_runs: [] });
         throw new Error(`unexpected spawnSync(${command}, ${JSON.stringify(args)})`);
       };
       let settled = false;
@@ -619,6 +621,227 @@ test("watchdog: the default detection window outlasts a GitHub release-event del
       logSpy.mockRestore();
     }
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Paginated discovery must finish before either SHA or timestamp selection.
+const discoveryTag = "v9.9.9";
+const discoverySha = "f".repeat(40);
+function discoveryRow(id: number, headSha = "other", createdAt = 1_000) {
+  return {
+    id, run_number: id, head_branch: discoveryTag, display_title: discoveryTag,
+    head_sha: headSha, created_at: new Date(createdAt).toISOString(),
+  };
+}
+const firstDiscoveryPage = () => Array.from({ length: 100 }, (_, index) => discoveryRow(index + 1));
+function serveDiscoveryPages(handler: (page: number) => unknown) {
+  spawnSyncHandler = (command, args) => {
+    if (command === "gh" && args[0] === "workflow") return textResult("");
+    expect(command).toBe("gh");
+    expect(args[0]).toBe("api");
+    const page = Number(new URL(`https://api.github.com/${args[1]}`).searchParams.get("page") ?? "1");
+    return jsonResult(handler(page));
+  };
+}
+function discover(timeout = 20_000) {
+  return waitForReleaseRun("o/r", discoveryTag, {
+    headSha: discoverySha, tagPushedAtMs: 0, detectionTimeoutMs: timeout,
+  });
+}
+
+test.each([false, true])("discovery: later-page exact SHA beats page-one %s exact match", async (earlyExact) => {
+  const first = firstDiscoveryPage();
+  if (earlyExact) first[0] = discoveryRow(1, discoverySha);
+  serveDiscoveryPages((page) => ({
+    total_count: 101,
+    workflow_runs: page === 1 ? first : [discoveryRow(101, discoverySha, 2_000)],
+  }));
+  expect((await discover()).id).toBe(101);
+  const pages = spawnCalls.filter((call) => call.args[0] === "api");
+  expect(pages).toHaveLength(2);
+  expect(pages.every((call) => call.args[1].includes("event=release&per_page=100&page="))).toBe(true);
+});
+
+test("discovery: full traversal permits timestamp fallback only after checking all pages", async () => {
+  serveDiscoveryPages((page) => ({
+    total_count: 101,
+    workflow_runs: page === 1 ? firstDiscoveryPage() : [discoveryRow(101, "other", 2_000)],
+  }));
+  expect((await discover()).id).toBe(101);
+});
+
+test.each([
+  "page failure", "repeated page", "duplicate IDs", "short page", "missing total",
+  "bad array", "bad row", "ceiling", "over ceiling",
+])("discovery: %s never returns a partial candidate", async (failure) => {
+  vi.useFakeTimers();
+  try {
+    serveDiscoveryPages((page) => {
+      const total = failure === "ceiling" ? 1000 : failure === "over ceiling" ? 1001 : 101;
+      if (page === 1) return { total_count: total, workflow_runs: firstDiscoveryPage() };
+      if (failure === "page failure") throw new Error("page two unavailable");
+      if (failure === "repeated page") return { total_count: total, workflow_runs: firstDiscoveryPage() };
+      if (failure === "duplicate IDs") return { total_count: total, workflow_runs: [discoveryRow(1)] };
+      if (failure === "short page") return { total_count: total, workflow_runs: [] };
+      if (failure === "missing total") return { workflow_runs: [discoveryRow(101)] };
+      if (failure === "bad array") return { total_count: total, workflow_runs: null };
+      return { total_count: total, workflow_runs: [null] };
+    });
+    const assertion = expect(discover(1_000)).rejects.toThrow(/complete listing/);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(spawnCalls.filter((call) => call.args[0] === "api")).toHaveLength(
+      failure.includes("ceiling") ? 1 : 2,
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("discovery: changing totals discard all pages and retry from page one under the same deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    let traversal = 0;
+    serveDiscoveryPages((page) => {
+      if (page === 1) traversal += 1;
+      if (traversal === 1) {
+        return { total_count: page === 1 ? 101 : 102, workflow_runs: page === 1 ? firstDiscoveryPage() : [discoveryRow(101)] };
+      }
+      return { total_count: 1, workflow_runs: [discoveryRow(999, discoverySha)] };
+    });
+    const promise = discover();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await promise).id).toBe(999);
+    const apiCalls = spawnCalls.filter((call) => call.args[0] === "api");
+    expect(apiCalls.map((call) => call.args[1].match(/page=(\d+)$/)?.[1])).toEqual(["1", "2", "1"]);
+    expect(apiCalls[2].options.timeout).toBeLessThan(apiCalls[0].options.timeout!);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("discovery: inspection, each page and retry use only remaining subprocess time", async () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(0);
+    spawnSyncHandler = (_command, args) => {
+      if (args[0] === "workflow") {
+        vi.setSystemTime(250);
+        return textResult("");
+      }
+      if (args[1].endsWith("page=1")) {
+        vi.setSystemTime(700);
+        return jsonResult({ total_count: 101, workflow_runs: firstDiscoveryPage() });
+      }
+      vi.setSystemTime(1_000);
+      return jsonResult({ total_count: 101, workflow_runs: [discoveryRow(101, discoverySha)] });
+    };
+    await expect(discover(1_000)).rejects.toThrow(/deadline exhausted/);
+    expect(spawnCalls.map((call) => call.options.timeout)).toEqual([1_000, 750, 300]);
+    expect(spawnCalls.every((call) => call.options.killSignal === "SIGKILL")).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each([false, true])("discovery: clips %s failure backoff or normal sleep to the original deadline", async (failure) => {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now();
+    serveDiscoveryPages(() => {
+      if (failure) throw new Error("network timeout");
+      return { total_count: 0, workflow_runs: [] };
+    });
+    const assertion = expect(discover(37)).rejects.toThrow(failure ? /complete listing/ : /did not trigger/);
+    await vi.advanceTimersByTimeAsync(37);
+    await assertion;
+    expect(Date.now() - startedAt).toBe(37);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(spawnCalls).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("discovery: workflow inspection cannot consume a fresh deadline before the first page", async () => {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now();
+    spawnSyncHandler = () => {
+      vi.setSystemTime(startedAt + 100);
+      return textResult("");
+    };
+    await expect(discover(100)).rejects.toThrow(/deadline exhausted/);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].options.timeout).toBe(100);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("discovery: overlapping pages are deduplicated and cannot masquerade as a complete total", async () => {
+  vi.useFakeTimers();
+  try {
+    serveDiscoveryPages((page) => ({
+      total_count: 102,
+      workflow_runs: page === 1 ? firstDiscoveryPage() : [discoveryRow(100), discoveryRow(101, discoverySha)],
+    }));
+    const assertion = expect(discover(100)).rejects.toThrow(/duplicate IDs/);
+    await vi.advanceTimersByTimeAsync(100);
+    await assertion;
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("discovery: continually changing totals cannot renew the original deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now();
+    serveDiscoveryPages((page) => ({
+      total_count: page === 1 ? 101 : 102,
+      workflow_runs: page === 1 ? firstDiscoveryPage() : [discoveryRow(101, discoverySha)],
+    }));
+    const assertion = expect(discover(5_037)).rejects.toThrow(/total_count changed/);
+    await vi.advanceTimersByTimeAsync(5_037);
+    await assertion;
+    expect(Date.now() - startedAt).toBe(5_037);
+    expect(spawnCalls.filter((call) => call.args[0] === "api")).toHaveLength(4);
+    expect(spawnCalls.at(-1)?.options.timeout).toBe(37);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.each(["selection", "success logging"])("discovery: deadline expiry during %s cannot return a candidate", async (stage) => {
+  vi.useFakeTimers();
+  const startedAt = Date.now();
+  const parseDate = Date.parse;
+  let dateParses = 0;
+  const parseSpy = vi.spyOn(Date, "parse").mockImplementation((value) => {
+    dateParses += 1;
+    // The first two parses validate the two rows; the next belongs to sorting.
+    if (stage === "selection" && dateParses === 3) vi.setSystemTime(startedAt + 100);
+    return parseDate(value);
+  });
+  const logSpy = vi.spyOn(console, "log").mockImplementation((message) => {
+    if (stage === "success logging" && String(message).includes("found after")) {
+      vi.setSystemTime(startedAt + 100);
+    }
+  });
+  try {
+    serveDiscoveryPages(() => ({
+      total_count: 2,
+      workflow_runs: [discoveryRow(1, discoverySha), discoveryRow(2, discoverySha, 2_000)],
+    }));
+    await expect(discover(100)).rejects.toThrow(/deadline exhausted/);
+    expect(spawnCalls).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    parseSpy.mockRestore();
+    logSpy.mockRestore();
     vi.useRealTimers();
   }
 });

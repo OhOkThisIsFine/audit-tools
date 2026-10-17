@@ -351,6 +351,88 @@ function expectAcyclic(blocks: readonly UnknownRecord[]): void {
 }
 
 describe(RED_SIGNATURE, () => {
+
+  it("preserves normalized arrays and trace bytes across duplicate and input ordering", async () => {
+    const core = await loadCore();
+    const items = [
+      { id: "b", file_paths: ["src\\x.ts", "src/x.ts", "README"], unit_ids: ["u2", "u1", "u2"], tags: ["z", "a", "z"], critical_flow_ids: ["f2", "f1", "f2"] },
+      { id: "a", file_paths: ["src/x.ts"], unit_ids: ["u1"], tags: ["a"], critical_flow_ids: [] },
+      { id: "c", file_paths: [], unit_ids: [], tags: [] },
+    ];
+    const reversed = [...items].reverse().map((item) => ({
+      ...item,
+      file_paths: [...item.file_paths].reverse(),
+      unit_ids: [...item.unit_ids].reverse(),
+      tags: [...item.tags].reverse(),
+      ...(item.critical_flow_ids === undefined ? {} : { critical_flow_ids: [...item.critical_flow_ids].reverse() }),
+    }));
+    const before = JSON.stringify(items);
+    for (const policy of [core.TASK_DRAW_COHERENCE_POLICY, core.FINDINGS_DRAW_COHERENCE_POLICY]) {
+      const trace = core.buildContentCoherenceTrace({ items }, policy);
+      expect(trace).toEqual({
+        normalized_items: [
+          { id: "a", file_paths: ["src/x.ts"], unit_ids: ["u1"], tags: ["a"], critical_flow_ids: [] },
+          { id: "b", file_paths: ["README", "src/x.ts"], unit_ids: ["u1", "u2"], tags: ["a", "z"], critical_flow_ids: ["f1", "f2"] },
+          { id: "c", file_paths: [], unit_ids: [], tags: [] },
+        ],
+        components: [["a", "b"], ["c"]],
+      });
+      expect(JSON.stringify(core.buildContentCoherenceTrace({ items: reversed }, policy))).toBe(JSON.stringify(trace));
+    }
+    expect(JSON.stringify(items)).toBe(before);
+  });
+
+  it("keeps empty directories as evidence and empty file lists distinct from root files", async () => {
+    const core = await loadCore();
+    // Root-level and explicitly nested paths retain the same grouping. Empty
+    // file lists remain different from a file whose normalized path is empty.
+    const items = Array.from({ length: 9 }, (_, index) => ({
+      id: String(index),
+      file_paths: [`root${Math.floor(index / 3)}.ts`],
+      unit_ids: [],
+      tags: ["lens"],
+    }));
+    const relative = core.buildContentCoherenceTrace({ items }, core.FINDINGS_DRAW_COHERENCE_POLICY);
+    const explicit = core.buildContentCoherenceTrace({ items: items.map((item) => ({ ...item, file_paths: item.file_paths.map((path) => `dir/${path}`) })) }, core.FINDINGS_DRAW_COHERENCE_POLICY);
+    expect(relative.components).toEqual([["0", "1", "2"], ["3", "4", "5"], ["6", "7", "8"]]);
+    expect(relative.components).toEqual(explicit.components);
+    const empty = core.buildContentCoherenceTrace({ items: [
+      { id: "a", file_paths: [], unit_ids: [], tags: [] },
+      { id: "b", file_paths: [""], unit_ids: [], tags: [] },
+      { id: "c", file_paths: [""], unit_ids: [], tags: [] },
+    ] }, core.TASK_DRAW_COHERENCE_POLICY);
+    expect(empty.components).toEqual([["a"], ["b", "c"]]);
+  });
+
+  it("treats absent and empty critical flows alike without retaining indexes between calls", async () => {
+    const core = await loadCore();
+    const items = [
+      { id: "a", file_paths: [], unit_ids: [], tags: [] },
+      { id: "b", file_paths: [], unit_ids: [], tags: [], critical_flow_ids: [] },
+    ];
+    const first = core.buildContentCoherenceTrace({ items }, core.TASK_DRAW_COHERENCE_POLICY);
+    expect(first.components).toEqual([["a"], ["b"]]);
+    expect(core.buildContentCoherenceTrace({ items: items.map((item) => ({ ...item, critical_flow_ids: ["flow", "flow"] })) }, core.TASK_DRAW_COHERENCE_POLICY).components).toEqual([["a", "b"]]);
+    expect(core.buildContentCoherenceTrace({ items }, core.TASK_DRAW_COHERENCE_POLICY)).toEqual(first);
+  });
+
+  it("preserves item and relationship first-error validation order", async () => {
+    const core = await loadCore();
+    const valid = { id: "a", file_paths: ["root.ts"], unit_ids: [], tags: [] };
+    const cases: Array<[UnknownRecord, string]> = [
+      [{ items: [{ ...valid, annotations: { risk: NaN }, file_paths: null }], relationships: null }, "Content-coherence item 'a' annotation 'risk' must be finite."],
+      [{ items: [{ ...valid, file_paths: [1], unit_ids: null }], relationships: null }, "Content-coherence item 'a' file_paths[0] must be a string."],
+      [{ items: [{ ...valid, critical_flow_ids: null }], relationships: null }, "Content-coherence item 'a' critical_flow_ids must be an array."],
+      [{ items: [valid, { ...valid, file_paths: null }], relationships: null }, "Duplicate content-coherence item id 'a'."],
+      [{ items: [valid], relationships: null }, "Content-coherence relationships must be an array."],
+      [{ items: [valid], relationships: [{ left: "missing", right: "a", kind: "unknown" }] }, "Content-coherence relationship has invalid endpoint 'missing'/'a'."],
+      [{ items: [valid], relationships: [{ left: "a", right: "a", kind: "unknown" }] }, "Content-coherence relationship cannot self-reference 'a'."],
+    ];
+    for (const [input, message] of cases) {
+      expect(() => core.buildContentCoherenceTrace(input, core.TASK_DRAW_COHERENCE_POLICY)).toThrowError(message);
+    }
+  });
+
   it("produces the exact six-class golden topology and canonical trace", async () => {
     const core = await loadCore();
     expect(core.CONTENT_COHERENCE_SCORES).toEqual({

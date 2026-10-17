@@ -117,6 +117,7 @@ function run(command, args, options = {}) {
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     windowsHide: true,
+    ...(options.timeoutMs == null ? {} : { timeout: options.timeoutMs, killSignal: "SIGKILL" }),
   });
   if (result.error) {
     throw result.error;
@@ -132,8 +133,8 @@ function run(command, args, options = {}) {
   return result;
 }
 
-function runJson(command, args) {
-  const result = run(command, args, { capture: true });
+function runJson(command, args, options = {}) {
+  const result = run(command, args, { ...options, capture: true });
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
@@ -594,20 +595,75 @@ export function selectReleaseRun(runs, { tag, tagPushedAtMs, headSha } = {}) {
   return [...fresh].sort(newerFirst)[0];
 }
 
-// Watchdog wrapper: `detectionTimeoutMs` defaults to the 60s tag-trigger window
-// (requirement 2), not releaseRunTimeoutMs — this function only detects that the
-// run exists; waitForRunCompletion (unchanged) does the 10-minute completion
-// watch once a run is found. Tests override detectionTimeoutMs to avoid a real
-// 60s wait.
+// One deadline covers workflow inspection, every page, retries and sleeps.
+// No candidate is selected until the complete traversal has been validated.
+function discoveryRemainingMs(deadline) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Release-run discovery deadline exhausted.");
+  return remaining;
+}
+
+function fetchReleaseRuns(repoSlug, deadline) {
+  const runsById = new Map();
+  let total;
+  for (let page = 1; ; page += 1) {
+    const response = runJson("gh", [
+      "api",
+      `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=100&page=${page}`,
+    ], { timeoutMs: discoveryRemainingMs(deadline) });
+    discoveryRemainingMs(deadline);
+    if (!Number.isSafeInteger(response?.total_count) || response.total_count < 0 ||
+        !Array.isArray(response.workflow_runs) || response.workflow_runs.length > 100) {
+      throw new Error("Release-run completeness: malformed pagination response.");
+    }
+    // GitHub caps event-filtered searches at 1,000. At the ceiling we cannot
+    // prove that the server has not truncated the matching set.
+    if (response.total_count >= 1_000) {
+      throw new Error("Release-run completeness: event-filtered search reached GitHub's 1,000-run ceiling.");
+    }
+    if (total == null) total = response.total_count;
+    if (response.total_count !== total) {
+      throw new Error("Release-run completeness: total_count changed during pagination; restart the traversal.");
+    }
+    const rows = response.workflow_runs;
+    const previousSize = runsById.size;
+    for (const row of rows) {
+      if (!row || !Number.isSafeInteger(row.id) || row.id <= 0 ||
+          !Number.isSafeInteger(row.run_number) || row.run_number < 0 ||
+          typeof row.created_at !== "string" || !Number.isFinite(Date.parse(row.created_at))) {
+        throw new Error("Release-run completeness: malformed workflow run.");
+      }
+      runsById.set(row.id, row);
+    }
+    if (rows.length > 0 && runsById.size === previousSize) {
+      throw new Error("Release-run completeness: repeated page made no progress.");
+    }
+    if (rows.length !== Math.min(100, total - (page - 1) * 100)) {
+      throw new Error("Release-run completeness: incomplete page.");
+    }
+    if (page * 100 >= total) {
+      if (runsById.size !== total) {
+        throw new Error("Release-run completeness: duplicate IDs left an incomplete traversal.");
+      }
+      return [...runsById.values()];
+    }
+  }
+}
+
+// Detection defaults to 30 minutes; the separate, unchanged completion watch
+// gets its own 10-minute window only after a run has been found.
 /** @param {string} repoSlug @param {string} tag @param {{tagPushedAtMs?: number, headSha?: string|null, detectionTimeoutMs?: number}} [options] */
 export async function waitForReleaseRun(
   repoSlug,
   tag,
   { tagPushedAtMs, headSha, detectionTimeoutMs = tagTriggerTimeoutMs } = {},
 ) {
-  run("gh", ["workflow", "view", "publish-package.yml"]);
-  const deadline = Date.now() + detectionTimeoutMs;
   const startedAt = Date.now();
+  const deadline = startedAt + detectionTimeoutMs;
+  run("gh", ["workflow", "view", "publish-package.yml"], {
+    timeoutMs: discoveryRemainingMs(deadline),
+  });
+  discoveryRemainingMs(deadline);
   // Said ONCE, up front, and repeated in every heartbeat below: the tag and the
   // GitHub Release already exist, so the only wrong move is a second one. For
   // v0.49.0 the `release` event took ~13 minutes to deliver; the operator, seeing
@@ -624,17 +680,17 @@ export async function waitForReleaseRun(
   let attempt = 0;
   let lastLoggedStatusKey = null;
   let consecutivePollFailures = 0;
+  let lastDiscoveryError = null;
   while (Date.now() < deadline) {
     attempt += 1;
-    let response;
+    let runs;
     try {
-      response = runJson("gh", [
-        "api",
-        `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=20`,
-      ]);
+      runs = fetchReleaseRuns(repoSlug, deadline);
     } catch (error) {
       consecutivePollFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
+      lastDiscoveryError = message;
+      if (Date.now() >= deadline) break;
       console.log(
         `[release] poll ${attempt} detecting publish run for ${tag} failed transiently ` +
           `(${consecutivePollFailures}/${MAX_CONSECUTIVE_POLL_FAILURES} consecutive): ${message}`,
@@ -647,20 +703,24 @@ export async function waitForReleaseRun(
             `gh run list --workflow publish-package.yml, or https://github.com/${repoSlug}/actions.`,
         );
       }
-      await sleep(pollFailureBackoffMs(consecutivePollFailures));
+      await sleep(Math.min(pollFailureBackoffMs(consecutivePollFailures), discoveryRemainingMs(deadline)));
       continue;
     }
     consecutivePollFailures = 0;
-    const match = selectReleaseRun(response.workflow_runs, {
+    lastDiscoveryError = null;
+    discoveryRemainingMs(deadline);
+    const match = selectReleaseRun(runs, {
       tag,
       tagPushedAtMs,
       headSha,
     });
+    discoveryRemainingMs(deadline);
     if (match) {
       const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       console.log(
         `[release] publish run for ${tag} found after ${elapsedSec}s (${attempt} ${attempt === 1 ? "attempt" : "attempts"}).`,
       );
+      discoveryRemainingMs(deadline);
       return match;
     }
     const statusKey = "pending";
@@ -670,7 +730,10 @@ export async function waitForReleaseRun(
       );
       lastLoggedStatusKey = statusKey;
     }
-    await sleep(pollIntervalMs);
+    await sleep(Math.min(pollIntervalMs, discoveryRemainingMs(deadline)));
+  }
+  if (lastDiscoveryError) {
+    throw new Error(`Release-run discovery timed out without a complete listing: ${lastDiscoveryError}`);
   }
   const pushedAtIso =
     typeof tagPushedAtMs === "number" && Number.isFinite(tagPushedAtMs)

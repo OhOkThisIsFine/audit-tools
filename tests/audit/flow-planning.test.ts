@@ -43,7 +43,7 @@ test("flow planning admits every canonical lens in the registry, and schedules n
     fallback_required: false,
   };
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
   const scheduledLenses = new Set(blocks.map((b) => b.lens));
 
   for (const lens of FLOW_LENSES) {
@@ -90,7 +90,7 @@ test("claimFlowReviewBlocks schedules blocks for every declared concern lens on 
     fallback_required: false,
   };
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
   const scheduledLenses = new Set(blocks.map((b) => b.lens));
 
   for (const lens of concerns) {
@@ -105,8 +105,8 @@ test("claimFlowReviewBlocks schedules blocks for every declared concern lens on 
   expect(diIdx < obsIdx, `data_integrity (${diIdx}) should rank before observability (${obsIdx})`).toBeTruthy();
 });
 
-test("returns empty array when criticalFlows has no flows", () => {
-  const blocks = claimFlowReviewBlocks(
+test("returns empty blocks when criticalFlows has no flows", () => {
+  const { blocks } = claimFlowReviewBlocks(
     { flows: [], fallback_required: false },
     new Map<string, Set<string>>(),
     new Set<string>(),
@@ -133,10 +133,10 @@ test("returns a block with matching file_paths, flow_id, and lens", () => {
 
   const result = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
-  expect(result.length).toBe(1);
-  expect(result[0].flow_id).toBe("flow-1");
-  expect(result[0].lens).toBe("security");
-  expect(result[0].file_paths).toEqual(["src/a.ts"]);
+  expect(result.blocks.length).toBe(1);
+  expect(result.blocks[0].flow_id).toBe("flow-1");
+  expect(result.blocks[0].lens).toBe("security");
+  expect(result.blocks[0].file_paths).toEqual(["src/a.ts"]);
   // The claim is reported on the RETURNED contract, not written back into the
   // caller's set (see the no-mutation test below).
   expect(result.assigned.has("security:src/a.ts"), "returned claim contract should carry security:src/a.ts").toBeTruthy();
@@ -160,7 +160,7 @@ test("filters out paths not present in pendingByLens for the lens", () => {
   // Only src/a.ts is pending for security
   const pendingByLens = new Map<string, Set<string>>([["security", new Set(["src/a.ts"])]]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   expect(blocks.length).toBe(1);
   expect(blocks[0].file_paths).toEqual(["src/a.ts"]);
@@ -183,7 +183,7 @@ test("skips flows whose lens has no pending paths", () => {
   // No entry for security in pendingByLens
   const pendingByLens = new Map<string, Set<string>>();
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   expect(blocks).toEqual([]);
 });
@@ -207,7 +207,7 @@ test("skips flow when pendingByLens entry exists but no flow path is pending", (
   // pendingByLens has a security entry, but it contains completely different paths.
   const pendingByLens = new Map<string, Set<string>>([["security", new Set(["src/a.ts", "src/b.ts"])]]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   expect(blocks, "flow with zero matching paths after filtering must be skipped").toEqual([]);
 });
@@ -236,7 +236,7 @@ test("ignores concerns that are not in the DEFAULT_FLOW_LENS_PRIORITY list", () 
     ["security", new Set(["src/a.ts"])],
   ]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   // Only security block should be returned; unknown_concern is filtered
   expect(blocks.length).toBe(1);
@@ -269,7 +269,7 @@ test("sorts candidates by file_paths count descending before deduplication", () 
     ["security", new Set(["src/a.ts", "src/b.ts", "src/c.ts"])],
   ]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   // flow-A has 2 paths; flow-B has 1; flow-A should come first
   expect(blocks[0].flow_id).toBe("flow-A");
@@ -302,7 +302,7 @@ test("breaks file_paths count ties by lens priority (security beats reliability)
     ["reliability", new Set(["src/a.ts", "src/b.ts"])],
   ]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   // Both have 2 file_paths; security has higher priority than reliability
   expect(blocks[0].lens).toBe("security");
@@ -334,7 +334,7 @@ test("breaks lens+size ties by flow_id alphabetical order", () => {
     ["security", new Set(["src/a.ts", "src/b.ts"])],
   ]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   // Same lens and same number of pending paths (1 each); alpha < beta alphabetically
   expect(blocks[0].flow_id).toBe("flow-alpha");
@@ -359,7 +359,7 @@ test("deduplicates: paths already in assigned are excluded from returned blocks"
   ]);
   const assigned = new Set<string>(["security:src/a.ts"]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
   expect(blocks.length).toBe(1);
   expect(blocks[0].file_paths).toEqual(["src/b.ts"]);
@@ -384,7 +384,7 @@ test("drops candidate entirely when all its paths are already assigned", () => {
   ]);
   const assigned = new Set<string>(["security:src/a.ts"]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, assigned);
 
   expect(blocks).toEqual([]);
 });
@@ -453,10 +453,64 @@ test("a single flow with multiple matching lenses produces one block per lens", 
     ["reliability", new Set(["src/a.ts"])],
   ]);
 
-  const blocks = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
+  const { blocks } = claimFlowReviewBlocks(criticalFlows, pendingByLens, new Set<string>());
 
   expect(blocks.length).toBe(2);
   // security has higher priority and should appear first
   expect(blocks[0].lens).toBe("security");
   expect(blocks[1].lens).toBe("reliability");
+});
+
+
+test("returns a plain result with detached collections even when no blocks are claimed", () => {
+  const pending = new Map([["security", new Set(["src/a.ts"])], ["tests", new Set<string>()]]);
+  const assigned = new Set(["security:src/a.ts"]);
+  const result = claimFlowReviewBlocks({ flows: [], fallback_required: false }, pending, assigned);
+  expect(Array.isArray(result)).toBe(false);
+  expect(Object.keys(result)).toEqual(["blocks", "pending", "assigned"]);
+  expect(result.blocks).toEqual([]);
+  expect(result.pending).toEqual(pending);
+  expect(result.assigned).toEqual(assigned);
+  expect(result.pending).not.toBe(pending);
+  expect(result.assigned).not.toBe(assigned);
+  for (const [lens, paths] of pending) expect(result.pending.get(lens)).not.toBe(paths);
+  pending.get("security")!.clear();
+  pending.get("tests")!.add("src/later.ts");
+  assigned.clear();
+  expect([...result.pending.get("security")!]).toEqual(["src/a.ts"]);
+  expect([...result.pending.get("tests")!]).toEqual([]);
+  expect([...result.assigned]).toEqual(["security:src/a.ts"]);
+});
+
+test("overlapping flows retain ordered ownership without mutating or aliasing input paths", () => {
+  const flows: CriticalFlowManifest = {
+    flows: [
+      { id: "z-small", name: "Small", paths: ["src/b.ts", "src/c.ts"], entrypoints: [], concerns: ["security"], confidence: "high" },
+      { id: "a-large", name: "Large", paths: ["src/c.ts", "src/a.ts", "src/b.ts", "src/a.ts"], entrypoints: [], concerns: ["reliability", "security"], confidence: "high" },
+    ],
+    fallback_required: false,
+  };
+  const original = structuredClone(flows);
+  for (const flow of flows.flows) {
+    Object.freeze(flow.paths);
+    Object.freeze(flow.concerns);
+    Object.freeze(flow);
+  }
+  Object.freeze(flows.flows);
+  Object.freeze(flows);
+  const pending = new Map(["security", "reliability"].map((lens) => [lens, new Set(["src/a.ts", "src/b.ts", "src/c.ts", "src/rest.ts"])]));
+  const assigned = new Set(["security:src/a.ts"]);
+  const result = claimFlowReviewBlocks(flows, pending, assigned);
+  expect(result.blocks).toEqual([
+    { flow_id: "a-large", lens: "security", file_paths: ["src/b.ts", "src/c.ts"] },
+    { flow_id: "a-large", lens: "reliability", file_paths: ["src/a.ts", "src/b.ts", "src/c.ts"] },
+  ]);
+  expect(flows).toEqual(original);
+  expect([...assigned]).toEqual(["security:src/a.ts"]);
+  expect([...pending.get("security")!]).toEqual(["src/a.ts", "src/b.ts", "src/c.ts", "src/rest.ts"]);
+  expect([...result.pending.get("security")!]).toEqual(["src/a.ts", "src/rest.ts"]);
+  expect([...result.pending.get("reliability")!]).toEqual(["src/rest.ts"]);
+  for (const block of result.blocks) {
+    expect(flows.flows.every((flow) => flow.paths !== block.file_paths)).toBe(true);
+  }
 });

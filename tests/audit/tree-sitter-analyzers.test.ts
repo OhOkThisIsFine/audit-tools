@@ -1,8 +1,10 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import * as treeSitter from "../../src/audit/extractors/analyzers/treeSitter.js";
+import type { TsNode } from "../../src/audit/extractors/analyzers/treeSitter.js";
 import type { GraphEdge } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AnalyzerContext, LanguageAnalyzer } from "../../src/audit/extractors/analyzers/types.js";
@@ -210,74 +212,63 @@ test("graph-enrichment executor routes py-import into the imports bucket and sup
   expect(imports[0].kind).toBe("py-import");
 });
 
-// ── Parse-failure stderr warnings (OBS-f29f1d27) ─────────────────────────────
-// These tests verify the warning is emitted by calling the analyzer's analyze()
-// directly with a fake parser injected via a thin wrapper — we bypass
-// getTreeSitterParser by constructing an AnalyzerContext-equivalent and passing
-// a fake parser that throws on one file.
-
-/** Capture and restore process.stderr.write for a single async body. */
-async function withCapturedStderr<T>(fn: () => Promise<T> | T): Promise<{ result: T; lines: string[] }> {
-  const original = process.stderr.write.bind(process.stderr);
-  const lines: string[] = [];
-  process.stderr.write = (chunk) => {
-    lines.push(String(chunk));
-    return true;
+// Deterministic parser/collector failures, independent of optional WASM availability.
+function fakeNode(text = "", descendants: Record<string, TsNode[]> = {}): TsNode {
+  return {
+    type: "identifier", text, namedChildren: [],
+    childForFieldName: () => null,
+    descendantsOfType: (types) => (Array.isArray(types) ? types : [types])
+      .flatMap((type) => descendants[type] ?? []),
   };
-  try {
-    return { result: await fn(), lines };
-  } finally {
-    process.stderr.write = original;
-  }
 }
 
-test("css-analyzer emits stderr warning on parse failure and still returns edges", async () => {
-  __resetTreeSitterForTests();
-  // We can't inject a fake parser into the module without patching the module
-  // cache, so instead we verify the warning path by writing a CSS file whose
-  // content will succeed, and separately verify the stderr message format for
-  // the catch path by checking the error-handler string pattern is consistent
-  // with the module source (integration-style). For a lightweight unit check
-  // we directly verify the catch clause emits to stderr.
-  //
-  // The test wraps the catch clause indirectly: the analyzer itself calls
-  // parser.parse(); if tree-sitter is absent (getTreeSitterParser returns null)
-  // the function returns early before the catch — so we build a minimal fake
-  // context with a deliberately broken pathLookup that causes collectFileEdges
-  // to throw (by not having a matching path) and verify that at worst the
-  // analyzer returns { edges: [] } without throwing to the caller.
-  await withRepo({ "ok.css": ".x { color: red; }" }, async ({ paths, context }) => {
-    // On a machine without web-tree-sitter, analyze returns early.
-    // On a machine with it, it succeeds. Either way, no throw to caller.
-    const { result } = await withCapturedStderr(() =>
-      cssAnalyzer.analyze(paths.filter((p) => p.endsWith(".css")), context),
-    );
-    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
-  });
-  __resetTreeSitterForTests();
-});
+const warningCases = [
+  { analyzer: cssAnalyzer, extension: "css", kind: "css-import", root: () =>
+    fakeNode("", { import_statement: [fakeNode("", { string_value: [fakeNode('"target.css"')] })] }) },
+  { analyzer: htmlAnalyzer, extension: "html", kind: "html-resource", root: () =>
+    fakeNode("", { start_tag: [fakeNode("", {
+      tag_name: [fakeNode("script")], attribute: [fakeNode("", {
+        attribute_name: [fakeNode("src")], attribute_value: [fakeNode("target.html")],
+      })],
+    })] }) },
+  { analyzer: pythonAnalyzer, extension: "py", kind: "py-import", root: () => {
+    const statement = fakeNode();
+    statement.childForFieldName = () => fakeNode("target");
+    return fakeNode("", { import_statement: [statement] });
+  } },
+];
 
-test("python-analyzer emits stderr warning on parse failure and still returns edges", async () => {
-  __resetTreeSitterForTests();
-  await withRepo({ "ok.py": "import os\n" }, async ({ paths, context }) => {
-    const { result } = await withCapturedStderr(() =>
-      pythonAnalyzer.analyze(paths.filter((p) => p.endsWith(".py")), context),
-    );
-    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
-  });
-  __resetTreeSitterForTests();
-});
-
-test("html-analyzer emits stderr warning on parse failure and still returns edges", async () => {
-  __resetTreeSitterForTests();
-  await withRepo({ "ok.html": "<html><body></body></html>" }, async ({ paths, context }) => {
-    const { result } = await withCapturedStderr(() =>
-      htmlAnalyzer.analyze(paths.filter((p) => p.endsWith(".html")), context),
-    );
-    expect(Array.isArray(result.edges), "edges is always an array").toBeTruthy();
-  });
-  __resetTreeSitterForTests();
-});
+for (const { analyzer, extension, kind, root } of warningCases) {
+  for (const failure of ["parse", "collector"] as const) {
+    test(`${analyzer.id}-analyzer warns on ${failure} failure and continues`, async () => {
+      const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+      const parser = { setLanguage: vi.fn(), parse: vi.fn((content: string) => {
+        if (content === "broken") {
+          if (failure === "parse") throw new Error("forced parse failure");
+          const node = fakeNode();
+          node.descendantsOfType = () => { throw new Error("forced collector failure"); };
+          return { rootNode: node };
+        }
+        return { rootNode: root() };
+      }) };
+      const loader = vi.spyOn(treeSitter, "getTreeSitterParser").mockResolvedValue(parser);
+      try {
+        await withRepo({ [`bad.${extension}`]: "broken", [`later.${extension}`]: "ok", [`target.${extension}`]: "" },
+          async ({ context }) => {
+            const output = await analyzer.analyze([`bad.${extension}`, `later.${extension}`], context);
+            expect(output.edges).toHaveLength(1);
+            expect(hasEdge(output.edges, `later.${extension}`, `target.${extension}`, kind)).toBe(true);
+            expect(stderr.mock.calls).toEqual([[`[audit-code] ${analyzer.id}-analyzer: parse failed for 'bad.${extension}': forced ${failure} failure\n`]]);
+            expect(loader).toHaveBeenCalledExactlyOnceWith(analyzer.id, undefined);
+            expect(parser.parse.mock.calls).toEqual([["broken"], ["ok"]]);
+          });
+      } finally {
+        loader.mockRestore();
+        stderr.mockRestore();
+      }
+    });
+  }
+}
 
 test("tree-sitter analyzer omits and keeps the floor when web-tree-sitter is absent", async () => {
   __resetTreeSitterForTests();

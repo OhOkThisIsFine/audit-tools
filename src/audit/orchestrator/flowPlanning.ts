@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/flow-planning.test.ts
 import type { Lens } from "../types.js";
 import { LENS_REGISTRY, isLens } from "../types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
@@ -67,32 +68,15 @@ export interface FlowReviewBlock {
  * path removed. These are the ONLY channel — the call writes nothing back
  * through its arguments (see {@link claimFlowReviewBlocks}), so a caller cannot
  * read claim state it never asked for and the two channels cannot drift.
- *
- * The contract rides ON the returned array as non-enumerable properties, so
- * every consumer that iterates the result as `FlowReviewBlock[]` is unchanged.
  */
-export interface FlowClaimContract {
+export interface FlowClaimResult {
   readonly blocks: readonly FlowReviewBlock[];
   readonly pending: ReadonlyMap<string, ReadonlySet<string>>;
   readonly assigned: ReadonlySet<string>;
 }
 
-export type FlowClaimResult = FlowReviewBlock[] & FlowClaimContract;
-
 function lensPathKey(lens: string, path: string): string {
   return `${lens}:${path}`;
-}
-
-function attachClaimContract(
-  blocks: FlowReviewBlock[],
-  pending: ReadonlyMap<string, ReadonlySet<string>>,
-  assigned: ReadonlySet<string>,
-): FlowClaimResult {
-  return Object.defineProperties(blocks, {
-    blocks: { value: blocks, enumerable: false },
-    pending: { value: pending, enumerable: false },
-    assigned: { value: assigned, enumerable: false },
-  }) as FlowClaimResult;
 }
 
 /**
@@ -108,7 +92,7 @@ function attachClaimContract(
  * repo path once at its own boundary, rather than assuming it upstream.
  *
  * NO WRITE-BACK: the post-claim state is reported ONLY on the returned
- * {@link FlowClaimContract}. The parameters are `Readonly` collections so
+ * {@link FlowClaimResult}. The parameters are `Readonly` collections so
  * reintroducing an in-place mutation is a compile error, not a convention —
  * the by-reference channel this used to ALSO write through was a second,
  * invisible return value that a caller had to know to look for.
@@ -181,5 +165,5 @@ export function claimFlowReviewBlocks(
     });
   }
 
-  return attachClaimContract(blocks, remainingPending, claimedKeys);
+  return { blocks, pending: remainingPending, assigned: claimedKeys };
 }

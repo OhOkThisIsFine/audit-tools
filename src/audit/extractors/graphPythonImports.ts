@@ -1,3 +1,4 @@
+import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 // sites-pinned: tests/audit/graph-python-imports.test.ts, tests/audit/python-logical-lines.test.ts, tests/audit/scanner-linear-boundaries.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
@@ -15,7 +16,6 @@ const PYTHON_SCAN_OPTIONS = {
 } as const;
 
 const PYTHON_SOURCE_EXTENSIONS = [".py", ".pyi"] as const;
-const PYTHON_PACKAGE_INDEX_FILES = ["__init__.py", "__init__.pyi"] as const;
 const IMPORT_EDGE_CONFIDENCE = 0.95;
 
 export function isPythonSourcePath(path: string): boolean {
@@ -198,27 +198,6 @@ function resolvePythonPathCandidate(
   return resolveCandidate(normalized, pathLookup);
 }
 
-function pythonPathMatchesModule(path: string, modulePath: string): boolean {
-  const normalizedPath = normalizeGraphPath(path).toLowerCase();
-  const normalizedModulePath = normalizeGraphPath(modulePath).toLowerCase();
-  return (
-    PYTHON_SOURCE_EXTENSIONS.some((extension) => {
-      const moduleFile = `${normalizedModulePath}${extension}`;
-      return (
-        normalizedPath === moduleFile ||
-        normalizedPath.endsWith(`/${moduleFile}`)
-      );
-    }) ||
-    PYTHON_PACKAGE_INDEX_FILES.some((indexFile) => {
-      const packageFile = posix.join(normalizedModulePath, indexFile);
-      return (
-        normalizedPath === packageFile ||
-        normalizedPath.endsWith(`/${packageFile}`)
-      );
-    })
-  );
-}
-
 function commonDirectoryPrefixLength(left: string, right: string): number {
   const leftParts = normalizeGraphPath(left).split("/").filter(Boolean);
   const rightParts = normalizeGraphPath(right).split("/").filter(Boolean);
@@ -237,6 +216,7 @@ function resolvePythonAbsoluteModuleSpecifier(
   fromPath: string,
   specifier: string,
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): string | undefined {
   const modulePath = pythonModulePath(specifier);
   const direct = resolvePythonPathCandidate(modulePath, pathLookup);
@@ -244,10 +224,7 @@ function resolvePythonAbsoluteModuleSpecifier(
     return direct;
   }
 
-  const matches = [...new Set(pathLookup.values())].filter(
-    (path) =>
-      isPythonSourcePath(path) && pythonPathMatchesModule(path, modulePath),
-  );
+  const matches = (pathIndex ?? buildGraphPathIndex(pathLookup)).pythonModuleMatches(modulePath);
   if (matches.length === 1) {
     return matches[0];
   }
@@ -307,12 +284,13 @@ export function resolvePythonModuleSpecifier(
   fromPath: string,
   specifier: string,
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): string | undefined {
   if (isPythonRelativeModuleSpecifier(specifier)) {
     return resolvePythonRelativeModuleSpecifier(fromPath, specifier, pathLookup);
   }
   if (isPythonAbsoluteModuleSpecifier(specifier)) {
-    return resolvePythonAbsoluteModuleSpecifier(fromPath, specifier, pathLookup);
+    return resolvePythonAbsoluteModuleSpecifier(fromPath, specifier, pathLookup, pathIndex);
   }
   return undefined;
 }
@@ -356,11 +334,12 @@ export function resolvePythonImportTarget(
   fromPath: string,
   specifier: string,
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): string | undefined {
   if (!isPythonAbsoluteModuleSpecifier(specifier)) {
     return undefined;
   }
-  return resolvePythonModuleSpecifier(fromPath, specifier, pathLookup);
+  return resolvePythonModuleSpecifier(fromPath, specifier, pathLookup, pathIndex);
 }
 
 /**
@@ -373,16 +352,18 @@ export function resolvePythonFromImportTargets(
   moduleSpecifier: string,
   importedNames: string[],
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): Array<{ specifier: string; target: string }> {
   if (!isPythonModuleSpecifier(moduleSpecifier)) {
     return [];
   }
+  pathIndex ??= buildGraphPathIndex(pathLookup);
   const submoduleTargets = importedNames
     .filter((name) => name !== "*" && isPythonIdentifier(name))
     .map((name) => appendPythonImportedSpecifier(moduleSpecifier, name))
     .map((specifier) => ({
       specifier,
-      target: resolvePythonModuleSpecifier(fromPath, specifier, pathLookup),
+      target: resolvePythonModuleSpecifier(fromPath, specifier, pathLookup, pathIndex),
     }))
     .filter(
       (item): item is { specifier: string; target: string } =>
@@ -395,6 +376,7 @@ export function resolvePythonFromImportTargets(
     fromPath,
     moduleSpecifier,
     pathLookup,
+    pathIndex,
   );
   return moduleTarget && moduleTarget !== fromPath
     ? [{ specifier: moduleSpecifier, target: moduleTarget }]
@@ -405,11 +387,13 @@ export function extractPythonImportEdges(
   fromPath: string,
   content: string,
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): GraphEdge[] {
   if (!isPythonSourcePath(fromPath)) {
     return [];
   }
 
+  pathIndex ??= buildGraphPathIndex(pathLookup);
   const edges: GraphEdge[] = [];
   for (const line of pythonLogicalLines(content)) {
     const importMatch = /^import\s+(.+)$/i.exec(line);
@@ -422,7 +406,7 @@ export function extractPythonImportEdges(
         addPythonImportEdge(
           edges,
           fromPath,
-          resolvePythonModuleSpecifier(fromPath, specifier, pathLookup),
+          resolvePythonModuleSpecifier(fromPath, specifier, pathLookup, pathIndex),
           "python-import",
           specifier,
         );
@@ -442,6 +426,7 @@ export function extractPythonImportEdges(
       moduleSpecifier,
       rawNames,
       pathLookup,
+      pathIndex,
     )) {
       addPythonImportEdge(edges, fromPath, target, "python-from-import", specifier);
     }

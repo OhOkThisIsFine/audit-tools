@@ -378,24 +378,6 @@
         "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
       }
     },
-    "94fc63e054149869": {
-      "reviewed_by": "opus-subagent-dc2-review,agy-gemini-dc2-design-check",
-      "attester_class": "agent",
-      "checked": "eviction scope limited to pending task-known entries; eviction before binding reads (stale path); one issue per evicted item; re-acceptance in same ingest; fold passes pending set; submission-ledger state after eviction; red-green inversion of each half",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "0e71f999c3c40fc66df01914c074f057006e2791",
-        "ran_at": "2026-10-07T04:49:23.824Z"
-      },
-      "attested_at": "2026-10-07T04:49:28.968Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "a95aea013425259ae8b139bdedbc19f91538ea9e",
-        "src/audit/cli/nextStepHelpers.ts": "b04c770f82719738d49c582137d8311f0bc81a59",
-        "src/audit/orchestrator/taskBuilder.ts": "09de1618ed18d7966c76ef3dbdc4829f21cdf5e8"
-      }
-    },
     "9bc59db653647a3a": {
       "reviewed_by": "claude-opus-5-5-reviewer",
       "attester_class": "agent",
@@ -454,6 +436,23 @@
         "src/shared/engine/obligationEngine.ts": "cbd4d1d26ee2d82b1f13fe788f4a51351814c98d",
         "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
+      }
+    },
+    "c50e7ede07ea40a4": {
+      "reviewed_by": "/root/chat_batch_final_candidate_review",
+      "attester_class": "agent",
+      "checked": "Independent /root/chat_batch_final_candidate_review inspected exact 29-file source tree 8f483b66033e5bffabdee806871dcbaee993c626 and all seven approved patch hashes. Actively checked flow-claim ownership regressions: eligibleByLens still supplies claims, pendingByLens still filters the scheduling frontier independently, assigned retains eligible ownership, and taskBuilder consumes plain result.blocks; stable task IDs, partial completion, and detached collections covered. Also checked release pagination truncation/deadline reset, coherence trace/error order, resolver ambiguity/schema/cache-v10 parity, Python fifth collector argument and prepareBatch admission boundary, and wrapper packaging/IO error order. Native old-API baseline observed plain-result/allocation/scan/pagination reds; post-fix focused and full-suite evidence preserved. Full source review: audit-batch-final-source-review.json; native differential 600 traces and 1024 graph subsets: audit-batch-differential-result.json.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "8f483b66033e5bffabdee806871dcbaee993c626",
+        "ran_at": "2026-10-17T03:46:33.337Z"
+      },
+      "attested_at": "2026-10-17T03:47:13.061Z",
+      "vouches": {
+        "src/audit/orchestrator/flowPlanning.ts": "1eb2539ffbd059e1628097d9aadb3893681d63d9",
+        "src/audit/orchestrator/taskBuilder.ts": "afc16a8824f8b8df4bc4473c2eb202d1a70ce5d8"
       }
     },
     "d7acd796ff113751": {
@@ -625,7 +624,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/flowPlanning.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "c50e7ede07ea40a4"
     },
     "src/audit/orchestrator/flowRequeue.ts": {
       "baseline": "7b79934e86baf378"
@@ -796,7 +795,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/taskBuilder.ts": {
-      "review": "94fc63e054149869"
+      "review": "c50e7ede07ea40a4"
     },
     "src/audit/orchestrator/trivialAudit.ts": {
       "baseline": "7b79934e86baf378"

@@ -1,3 +1,4 @@
+import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 // sites-pinned: tests/audit/graph-edge-cache.test.ts, tests/audit/graph-framework-routes.test.ts
 import { pythonRouterIdentities } from "./graphRouteSources.js";
 import { readFile } from "node:fs/promises";
@@ -667,10 +668,11 @@ function extractContentEdgesForFile(
   pathLookup: Map<string, string>,
   acc: GraphEdgeAccumulator,
   fileRoutes: RouteEdge[],
-  routers?: ReadonlySet<string>,
+  routers: ReadonlySet<string> | undefined,
+  pathIndex: GraphPathIndex,
 ): void {
   acc.imports.push(...extractImportEdges(filePath, content, pathLookup));
-  acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup));
+  acc.imports.push(...extractPythonImportEdges(filePath, content, pathLookup, pathIndex));
   acc.references.push(...extractReferenceEdges(filePath, content, pathLookup));
   acc.references.push(
     ...extractJsonSchemaReferenceEdges(filePath, content, pathLookup),
@@ -709,7 +711,7 @@ function extractContentEdgesForFile(
     ...extractYamlPathReferenceEdges(filePath, content, pathLookup),
   );
   acc.references.push(
-    ...extractSchemaContractTestEdges(filePath, content, pathLookup),
+    ...extractSchemaContractTestEdges(filePath, content, pathLookup, pathIndex),
   );
   const registeredRoutes = extractRegisteredRouteEvidence(
     filePath,
@@ -738,7 +740,8 @@ function extractPerFileContribution(
   filePath: string,
   content: string | undefined,
   pathLookup: Map<string, string>,
-  routers?: ReadonlySet<string>,
+  routers: ReadonlySet<string> | undefined,
+  pathIndex: GraphPathIndex,
 ): PerFileGraphContribution {
   const local: GraphEdgeAccumulator = {
     imports: [],
@@ -752,7 +755,7 @@ function extractPerFileContribution(
   const fileRoutes: RouteEdge[] = [];
   let metrics: NodeMetrics[string] | undefined;
   if (hasExtractableContent(content)) {
-    extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes, routers);
+    extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes, routers, pathIndex);
     metrics = computeNodeMetricsForFile(filePath, content);
   }
   fileRoutes.push(...extractConventionalRouteEvidence(filePath, content));
@@ -1003,6 +1006,7 @@ export function buildGraphBundle(
   };
   const dispositionMap = buildDispositionMap(disposition);
   const pathLookup = buildPathLookup(repoManifest, dispositionMap);
+  const pathIndex = buildGraphPathIndex(pathLookup);
 
   // The ONLY compute site for per-node structural metrics. Populated only for
   // included files whose source is available; non-js/ts files yield no entry
@@ -1022,7 +1026,7 @@ export function buildGraphBundle(
       ? options.priorEdgeCache.entries
       : undefined;
   const freshEntries: Record<string, GraphEdgeCacheEntry> = {};
-  const routerIdentities = pythonRouterIdentities(options.fileContents ?? {}, pathLookup);
+  const routerIdentities = pythonRouterIdentities(options.fileContents ?? {}, pathLookup, pathIndex);
 
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
@@ -1048,7 +1052,7 @@ export function buildGraphBundle(
     const contribution =
       cacheKey !== undefined && isReusableCacheEntry(cached, cacheKey)
         ? cached!.contribution
-        : extractPerFileContribution(file.path, content, pathLookup, routers);
+        : extractPerFileContribution(file.path, content, pathLookup, routers, pathIndex);
 
     acc.imports.push(...contribution.imports);
     acc.calls.push(...contribution.calls);

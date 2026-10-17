@@ -175,3 +175,14 @@ test("different-tag runs are never selected even when fresh", () => {
   });
   expect(selected).toBe(null);
 });
+
+test("exact-SHA ties prefer run_number then id, independently of input order", () => {
+  const runs = [
+    { id: 9, run_number: 1 },
+    { id: 2, run_number: 2 },
+    { id: 3, run_number: 2 },
+  ].map((row) => ({ ...row, head_branch: TAG, head_sha: "sha", created_at: iso(1_000) }));
+  for (const order of [runs, [...runs].reverse()]) {
+    expect(selectReleaseRun(order, { tag: TAG, headSha: "sha" })?.id).toBe(3);
+  }
+});

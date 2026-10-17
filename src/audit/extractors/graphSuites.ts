@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/graph-path-index.test.ts, tests/audit/graph-heuristic-edges.test.ts
+import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
@@ -131,6 +133,7 @@ export function extractSchemaContractTestEdges(
   fromPath: string,
   content: string,
   pathLookup: Map<string, string>,
+  pathIndex?: GraphPathIndex,
 ): GraphEdge[] {
   if (
     !isTestPath(normalizeExtractorPath(fromPath)) ||
@@ -158,14 +161,9 @@ export function extractSchemaContractTestEdges(
     return [];
   }
 
-  const targets = [...new Set(pathLookup.values())]
-    .filter((path) => {
-      const normalized = normalizeGraphPath(path);
-      return (
-        isJsonSchemaPath(normalized) &&
-        literalBasenames.has(posix.basename(normalized).toLowerCase())
-      );
-    })
+  const index = pathIndex ?? buildGraphPathIndex(pathLookup);
+  const targets = [...literalBasenames]
+    .flatMap((basename) => [...index.schemaBasenameMatches(basename)])
     .sort((a, b) => compareCodeUnits(a, b));
   if (targets.length > MAX_BOUNDED_SUITE_EDGE_FILES) {
     return [];

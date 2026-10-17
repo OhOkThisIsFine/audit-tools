@@ -292,7 +292,9 @@ test("an unmeasured file does not poison the line budget or masquerade as a tiny
 test("flow-claimed paths are excluded from the remainder pass via the RETURNED claim contract, not by-reference mutation", () => {
   // claimFlowReviewBlocks no longer writes back into the caller's `assigned`
   // set or `pendingByLens` map (both are ReadonlySet/ReadonlyMap parameters);
-  // buildChunkedAuditTasks must consume `result.assigned` / `result.pending`.
+  // buildChunkedAuditTasks consumes `result.assigned` for ownership, while
+  // filtering claimed blocks and remainder work against its independent pending
+  // map. The claim runs over eligible paths, including completed ones.
   // Reading the pre-claim arguments instead re-emits every flow-claimed path as
   // a remainder task — an observable DOUBLE CLAIM of the same lens:path.
   const coverage = makeCoverage([
@@ -340,4 +342,42 @@ test("flow-claimed paths are excluded from the remainder pass via the RETURNED c
     (unclaimedTasks[0].tags ?? []).includes("critical_flow"),
     "the remainder task must not be tagged as a flow claim",
   ).toBe(false);
+});
+
+
+test("overlapping flow tasks keep their full ordered contract through partial completion", () => {
+  const paths = ["src/a.ts", "src/b.ts", "src/c.ts", "src/rest.ts"];
+  const lenses = ["security", "reliability"];
+  const critical_flows: CriticalFlowManifest = {
+    flows: [
+      { id: "z-large", name: "Large", paths: paths.slice(0, 3), entrypoints: [], concerns: lenses, confidence: "high" },
+      { id: "a-small", name: "Small", paths: paths.slice(1, 3), entrypoints: [], concerns: lenses, confidence: "high" },
+    ],
+    fallback_required: false,
+  };
+  const lineIndex = Object.fromEntries(paths.map((path) => [path, 80]));
+  const options = { critical_flows, max_task_files: 1 };
+  const coverage = makeCoverage(paths.map((path) => pendingFile(path, lenses)));
+  const before = buildChunkedAuditTasks(coverage, lineIndex, options);
+  const partial = structuredClone(coverage);
+  partial.files[0].completed_lenses = [...lenses];
+  partial.files[1].completed_lenses = ["security"];
+  const after = buildChunkedAuditTasks(partial, lineIndex, options);
+  expect(after).toEqual(before.filter((task) =>
+    task.file_paths[0] !== paths[0] && !(task.file_paths[0] === paths[1] && task.lens === "security"),
+  ).map((task) => task.lens === "security" && task.file_paths[0] === paths[2]
+    ? {
+      ...task,
+      // The last pending path is now an unsplit block; only these chunk-level
+      // facts change. Its ownership and content-derived task ID stay intact.
+      rationale: "Audit critical flow z-large (1 file) under the security lens.",
+      tags: task.tags?.filter((tag) => tag !== "line_budget_split"),
+    }
+    : task,
+  ));
+  expect(after.filter((task) => task.file_paths[0] === paths[2]).every((task) => task.unit_id === "flow:z-large")).toBe(true);
+  const finished = structuredClone(coverage);
+  for (const file of finished.files) file.completed_lenses = [...lenses];
+  expect(buildChunkedAuditTasks(finished, lineIndex, options)).toEqual([]);
+  expect(coverage.files.every((file) => file.completed_lenses.length === 0)).toBe(true);
 });

@@ -1,3 +1,4 @@
+import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 // sites-pinned: tests/audit/graph-framework-routes.test.ts, tests/audit/graph-edge-cache.test.ts
 import { maskCommentSpans } from "./commentDecomposition.js";
 import { pythonLogicalLines, splitPythonImportList, resolvePythonModuleSpecifier } from "./graphPythonImports.js";
@@ -67,7 +68,7 @@ const CONSTRUCTORS = new Set(["FastAPI", "APIRouter", "Flask", "Blueprint", "Sta
 type Binding = { kind: "constructor" } | { kind: "router" } | { kind: "alias" | "construct"; target: string };
 
 /** Resolve identities once, with a monotone worklist (cycles cannot invent roots). */
-export function pythonRouterIdentities(files: Record<string, string>, lookup: Map<string, string>): Map<string, Set<string>> {
+export function pythonRouterIdentities(files: Record<string, string>, lookup: Map<string, string>, pathIndex: GraphPathIndex = buildGraphPathIndex(lookup)): Map<string, Set<string>> {
   const bindings = new Map<string, Binding>();
   const key = (path: string, name: string): string => `${path}\0${name}`;
   const entries = Object.entries(files).filter(([path]) => /\.py$/i.test(path) && lookup.has(path.toLowerCase()));
@@ -86,15 +87,15 @@ export function pythonRouterIdentities(files: Record<string, string>, lookup: Ma
           if (FRAMEWORKS.has(module.split(".")[0]!) && CONSTRUCTORS.has(name)) {
             bindings.set(key(path, local), { kind: "constructor" });
           } else {
-            const submodule = resolvePythonModuleSpecifier(path, `${module}${module.endsWith(".") ? "" : "."}${name}`, lookup);
-            const target = resolvePythonModuleSpecifier(path, module, lookup);
+            const submodule = resolvePythonModuleSpecifier(path, `${module}${module.endsWith(".") ? "" : "."}${name}`, lookup, pathIndex);
+            const target = resolvePythonModuleSpecifier(path, module, lookup, pathIndex);
             if (submodule) bindings.set(key(path, `${local}.`), { kind: "alias", target: `${submodule}\0` });
             else if (target) bindings.set(key(path, local), { kind: "alias", target: key(target, name) });
           }
         } else if (FRAMEWORKS.has(name)) {
           for (const constructor of CONSTRUCTORS) bindings.set(key(path, `${local}.${constructor}`), { kind: "constructor" });
         } else {
-          const target = resolvePythonModuleSpecifier(path, name, lookup);
+          const target = resolvePythonModuleSpecifier(path, name, lookup, pathIndex);
           if (target) {
             // Module imports expose qualified names; resolve these on demand below.
             bindings.set(key(path, `${local}.`), { kind: "alias", target: `${target}\0` });

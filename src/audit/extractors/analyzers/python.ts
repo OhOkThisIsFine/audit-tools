@@ -1,20 +1,20 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+// sites-pinned: tests/audit/tree-sitter-analyzers.test.ts, tests/audit/tree-sitter-batch.test.ts
+import { buildGraphPathIndex, type GraphPathIndex } from "../graphPathIndex.js";
 import type { GraphEdge } from "audit-tools/shared";
-import { graphEdge, normalizeGraphPath } from "../graphPathUtils.js";
+import { graphEdge } from "../graphPathUtils.js";
 import {
   isPythonSourcePath,
   resolvePythonFromImportTargets,
   resolvePythonImportTarget,
 } from "../graphPythonImports.js";
 import type { AnalyzerContext, AnalyzerOutput, LanguageAnalyzer } from "./types.js";
-import { getTreeSitterParser, type TsNode } from "./treeSitter.js";
+import type { TsNode } from "./treeSitter.js";
+import { analyzeTreeSitterFiles } from "./treeSitterBatch.js";
 
 // Set above the regex floor's 0.95 so the merge prefers the AST-resolved edge
 // for the same (from, to). Resolution itself is shared with the floor, so the
 // only difference is parse-grade extraction.
 const PY_IMPORT_EDGE_CONFIDENCE = 0.97;
-const MAX_PYTHON_SOURCE_BYTES = 512 * 1024;
 
 function supports(file: string): boolean {
   return isPythonSourcePath(file);
@@ -35,6 +35,7 @@ function collectFileEdges(
   root: TsNode,
   pathLookup: Map<string, string>,
   edges: GraphEdge[],
+  pathIndex: GraphPathIndex,
 ): void {
   const seen = new Set<string>();
   const push = (
@@ -61,7 +62,7 @@ function collectFileEdges(
     for (const nameNode of childrenForField(node, "name")) {
       const specifier = importModuleText(nameNode);
       if (!specifier) continue;
-      const target = resolvePythonImportTarget(fromPath, specifier, pathLookup);
+      const target = resolvePythonImportTarget(fromPath, specifier, pathLookup, pathIndex);
       if (target) push(target, "py-import", specifier);
     }
   }
@@ -78,6 +79,7 @@ function collectFileEdges(
       moduleSpecifier,
       importedNames,
       pathLookup,
+      pathIndex,
     )) {
       push(target, "py-from-import", specifier);
     }
@@ -100,33 +102,14 @@ async function analyze(
   files: string[],
   context: AnalyzerContext,
 ): Promise<AnalyzerOutput> {
-  if (files.length === 0) return { edges: [] };
-  const parser = await getTreeSitterParser("python", context.dependencyPath);
-  if (!parser) return { edges: [] };
-
-  const root = resolve(context.root);
-  const edges: GraphEdge[] = [];
-  for (const file of files) {
-    let content: string;
-    try {
-      content = await readFile(resolve(root, file), "utf8");
-    } catch {
-      continue;
-    }
-    if (content.length > MAX_PYTHON_SOURCE_BYTES) continue;
-    try {
-      const tree = parser.parse(content);
-      collectFileEdges(
-        normalizeGraphPath(file),
-        tree.rootNode,
-        context.pathLookup,
-        edges,
-      );
-    } catch (e) {
-      process.stderr.write(`[audit-code] python-analyzer: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
-    }
-  }
-  return { edges };
+  let pathIndex: GraphPathIndex;
+  return analyzeTreeSitterFiles(
+    files, context, "python", "python-analyzer",
+    (fromPath, root, pathLookup, edges) =>
+      collectFileEdges(fromPath, root, pathLookup, edges, pathIndex),
+    undefined,
+    () => { pathIndex = buildGraphPathIndex(context.pathLookup); },
+  );
 }
 
 export const pythonAnalyzer: LanguageAnalyzer = {

@@ -64,7 +64,8 @@ vi.mock("node:child_process", () => ({
     else if (cmd.startsWith("gh release create ")) stdout = "";
     else if (cmd === "gh workflow view publish-package.yml") stdout = "";
     else if (cmd.includes("actions/workflows/publish-package.yml/runs?")) stdout = JSON.stringify({
-      workflow_runs: [{ id: 17, head_sha: fixture.head, head_branch: "v0.52.1", created_at: "2026-09-19T00:00:00Z", html_url: "https://github.com/test/repo/actions/runs/17" }],
+      total_count: 1,
+      workflow_runs: [{ id: 17, run_number: 17, head_sha: fixture.head, head_branch: "v0.52.1", created_at: "2026-09-19T00:00:00Z", html_url: "https://github.com/test/repo/actions/runs/17" }],
     });
     else if (cmd.endsWith("actions/runs/17")) stdout = JSON.stringify({ status: "completed", conclusion: "success", html_url: "https://github.com/test/repo/actions/runs/17" });
     else if (cmd.includes("/jobs?")) stdout = JSON.stringify({ jobs: [] });

@@ -349,9 +349,23 @@ function normalizeRelationshipEvidence(
   return evidenceByPair;
 }
 
-function intersects(left: readonly string[], right: readonly string[]): boolean {
-  const values = new Set(left);
-  return right.some((entry) => values.has(entry));
+// sites-pinned: tests/shared/content-coherence.test.ts
+/** Invocation-local lookup scratch; normalized arrays remain the public trace. */
+interface CoherenceEvidenceIndex {
+  filePaths: ReadonlySet<string>;
+  directories: ReadonlySet<string>;
+  unitIds: ReadonlySet<string>;
+  tags: ReadonlySet<string>;
+  criticalFlowIds: ReadonlySet<string>;
+}
+
+function intersects(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  const smaller = left.size <= right.size ? left : right;
+  const larger = smaller === left ? right : left;
+  for (const entry of smaller) {
+    if (larger.has(entry)) return true;
+  }
+  return false;
 }
 
 function parentDirectory(path: string): string {
@@ -359,22 +373,27 @@ function parentDirectory(path: string): string {
   return slash < 0 ? "" : path.slice(0, slash);
 }
 
+function indexEvidence(item: NormalizedContentCoherenceItem): CoherenceEvidenceIndex {
+  return {
+    filePaths: new Set(item.file_paths),
+    directories: new Set(item.file_paths.map(parentDirectory)),
+    unitIds: new Set(item.unit_ids),
+    tags: new Set(item.tags),
+    criticalFlowIds: new Set(item.critical_flow_ids ?? []),
+  };
+}
+
 function directEvidence(
-  left: NormalizedContentCoherenceItem,
-  right: NormalizedContentCoherenceItem,
+  left: CoherenceEvidenceIndex,
+  right: CoherenceEvidenceIndex,
 ): ContentCoherenceEvidence {
-  const leftDirectories = left.file_paths.map(parentDirectory);
-  const rightDirectories = right.file_paths.map(parentDirectory);
   return {
     call_import_reference_adjacency: false,
-    same_directory: intersects(leftDirectories, rightDirectories),
-    shared_critical_flow: intersects(
-      left.critical_flow_ids ?? [],
-      right.critical_flow_ids ?? [],
-    ),
-    shared_file: intersects(left.file_paths, right.file_paths),
+    same_directory: intersects(left.directories, right.directories),
+    shared_critical_flow: intersects(left.criticalFlowIds, right.criticalFlowIds),
+    shared_file: intersects(left.filePaths, right.filePaths),
     shared_semantic_tag_or_same_lens: intersects(left.tags, right.tags),
-    shared_unit: intersects(left.unit_ids, right.unit_ids),
+    shared_unit: intersects(left.unitIds, right.unitIds),
   };
 }
 
@@ -502,6 +521,10 @@ export function buildContentCoherenceTrace(
     input.relationships,
     itemIds,
   );
+  // sites-pinned: tests/shared/content-coherence.test.ts
+  // Index only after item and relationship validation, preserving first errors.
+  // Each item's five sets and parent directories are built once per invocation.
+  const evidenceIndexes = normalizedItems.map(indexEvidence);
   // Only ELIGIBLE pairs are retained. The ineligible majority (82% of pairs on
   // the 3,194-finding dogfood run) can affect nothing downstream — union-find
   // consumes eligibility alone — so materializing the full O(N²) pair layer was
@@ -518,7 +541,10 @@ export function buildContentCoherenceTrace(
     ) {
       const left = normalizedItems[leftIndex]!;
       const right = normalizedItems[rightIndex]!;
-      const evidence = directEvidence(left, right);
+      const evidence = directEvidence(
+        evidenceIndexes[leftIndex]!,
+        evidenceIndexes[rightIndex]!,
+      );
       // Captured BEFORE relationship evidence is folded in — the conjunctive
       // policy must read only what the items themselves assert.
       const direct: DirectConjuncts = {

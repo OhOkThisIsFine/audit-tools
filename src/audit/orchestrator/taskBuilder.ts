@@ -512,7 +512,7 @@ export function buildChunkedAuditTasks(
   const claim = options.critical_flows
     ? claimFlowReviewBlocks(options.critical_flows, eligibleByLens, new Set<string>())
     : undefined;
-  const flowBlocks = (claim ?? [])
+  const flowBlocks = (claim?.blocks ?? [])
     .map((block) => ({
       ...block,
       file_paths: block.file_paths.filter((path) => pendingByLens.get(block.lens)?.has(path)),
