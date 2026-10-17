@@ -5,6 +5,7 @@
 import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 import { win32 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { beginOwnedProcessTermination, spawnOwnedProcess, type OwnedProcessCleanup } from "./ownedProcessLifecycle.js";
 
 export { resolveExecutableFile, type ExecutableLookupOptions } from "./resolveExecutable.js";
 
@@ -41,6 +42,7 @@ export interface RunTrackedOptions {
  */
 export type RunTrackedSyncOptions = RunTrackedOptions & { timeout: number };
 
+// sites-pinned: tests/shared/exec.test.ts, tests/shared/exec-utf8-capture.test.ts, tests/shared/exec-owned-bounds.test.ts
 export interface RunTrackedResult {
   status: number | null;
   stdout: string;
@@ -62,6 +64,8 @@ export interface RunTrackedResult {
    * ruled out.
    */
   signal?: string | null;
+  /** Observed owned-job cleanup/capture state on a bounded failure. */
+  cleanup?: OwnedProcessCleanup;
 }
 
 const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
@@ -113,14 +117,6 @@ function windowsNativeCommand(
   const root = systemRoot ?? process.env.SystemRoot ?? "C:\\Windows";
   return win32.join(root, relative);
 }
-
-/**
- * How long {@link runTrackedAsync} waits after SIGTERM before escalating to an
- * unignorable SIGKILL for a child it killed on its own deadline/overflow bound.
- * Long enough for an ordinary child to flush and exit, short enough that a
- * child which ignores SIGTERM cannot hang the awaiting caller.
- */
-const KILL_ESCALATION_GRACE_MS = 2_000;
 
 /**
  * Deadline for one fold-reachable tracked child. These spawns run inside the
@@ -198,7 +194,7 @@ export interface SpawnDeadlineMiss {
   elapsed_ms: number;
   /** Whether the child had already exited when the deadline fired. */
   child_exited: boolean;
-  /** Whether the child outlived the SIGTERM grace and needed SIGKILL. */
+  /** Whether owned cleanup remained unsettled at the TERM grace and escalation was requested. */
   survived_grace: boolean;
 }
 
@@ -216,10 +212,10 @@ export function describeDeadlineMiss(
   miss: SpawnDeadlineMiss,
 ): string {
   const fate = miss.survived_grace
-    ? "child outlived the SIGTERM grace and was SIGKILLed"
+    ? `${miss.child_exited ? "child exit was already observed; " : ""}owned cleanup did not settle within the SIGTERM grace; SIGKILL requested`
     : miss.child_exited
-      ? "child had already exited when the deadline fired"
-      : "child killed on the deadline (SIGTERM)";
+      ? "child had already exited when the deadline fired; owned cleanup requested (SIGTERM)"
+      : "child exit not yet observed; owned cleanup requested (SIGTERM)";
   return (
     `child exceeded the ${String(deadlineMs)}ms deadline after ${String(miss.elapsed_ms)}ms: ` +
     `${argv.join(" ")} — ${fate}`
@@ -656,13 +652,18 @@ export async function runTrackedAsync(
   });
   const start = Date.now();
   return await new Promise<RunTrackedResult>((resolve) => {
-    const child = spawnHidden(resolved[0], resolved.slice(1), {
-      cwd: options.cwd,
-      env: stripAuditToolsControlEnv(options.env),
-      windowsHide: true,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let owned: ReturnType<typeof spawnOwnedProcess>;
+    try {
+      owned = spawnOwnedProcess(resolved, {
+        cwd: options.cwd,
+        env: stripAuditToolsControlEnv(options.env),
+        ...(options.timeout !== undefined && options.timeout > 0 ? { deadlineAt: start + options.timeout } : {}),
+      });
+    } catch (error) {
+      resolve({ status: null, stdout: "", stderr: "", argv: resolved, cwd: options.cwd, duration_ms: Date.now() - start, error: error instanceof Error ? error : new Error(String(error)), signal: null });
+      return;
+    }
+    const child = owned.child;
     let stdout = "";
     let stderr = "";
     // Pipe data events can split a UTF-8 character. Keep decoding state separate
@@ -694,40 +695,46 @@ export async function runTrackedAsync(
     const MAX_CAPTURE = Math.max(10 * 1024 * 1024, options.maxBuffer ?? 0);
     const overflowLimit = options.maxBuffer;
 
-    let killTimer: NodeJS.Timeout | null = null;
+    let cancelTermination: (() => void) | undefined;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    let stdioIncomplete = false;
+    child.stdout.on("end", () => { stdoutEnded = true; });
+    child.stderr.on("end", () => { stderrEnded = true; });
     /**
      * Terminate the child for a bound this runner owns, and make the
      * termination ACTUALLY terminal.
      *
-     * `child.kill()` sends SIGTERM, which is a request: a child that installs a
-     * handler and ignores it never emits `close`, so the promise would never
-     * settle and the deadline this runner advertises would be a deadline in
-     * name only (`spawnSync`'s `timeout` had no such hole — it kills from the
-     * runtime). So the SIGTERM is followed by an unignorable SIGKILL after a
-     * short grace period. The timer is `unref`d so a settled call never holds
-     * the event loop open.
+     * The owner can terminate an ordinary descendant even after its root exits.
+     * Neither a failed signal nor an escaped descendant may keep capture open
+     * forever. Keep both cleanup timers referenced until exactly-once settlement.
      */
     const killForBound = (): void => {
-      child.kill();
-      if (killTimer) return;
-      killTimer = setTimeout(() => {
+      if (cancelTermination) return;
+      cancelTermination = beginOwnedProcessTermination(owned, () => {
         if (!settled) {
-          // Reaching here means the child ignored SIGTERM — the one point at
-          // which "did anything survive the kill?" is answerable.
+          // Open pipes do not establish that the direct child ignored TERM.
           if (deadlineMiss) deadlineMiss.survived_grace = true;
-          child.kill("SIGKILL");
         }
-      }, KILL_ESCALATION_GRACE_MS);
-      killTimer.unref?.();
+      }, () => {
+        if (settled) return;
+        stdioIncomplete = !stdoutEnded || !stderrEnded;
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.stdin.destroy();
+        finishResult(owned.rootStatus(), owned.rootSignal());
+      });
+      if (settled) cancelTermination();
     };
 
     const timer =
       options.timeout !== undefined && options.timeout > 0
         ? setTimeout(() => {
+            if (killedBy !== null || settled) return;
             killedBy = "timeout";
             deadlineMiss = {
               elapsed_ms: Date.now() - start,
-              child_exited: child.exitCode !== null || child.signalCode !== null,
+              child_exited: owned.rootExited(),
               survived_grace: false,
             };
             killForBound();
@@ -737,12 +744,28 @@ export async function runTrackedAsync(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      cancelTermination?.();
+      owned.release();
       // Flush only at terminal settlement (including spawn errors), after the
       // settled guard. Uncaptured chunks must never complete a pending sequence.
       result.stdout += stdoutDecoder?.end() ?? "";
       result.stderr += stderrDecoder?.end() ?? "";
       resolve(result);
+    };
+    const finishResult = (code: number | null, signal: string | null, spawnError?: Error): void => {
+      const cleanup = owned.cleanup(stdioIncomplete);
+      let error = spawnError;
+      if (killedBy !== null) {
+        const bound: NodeJS.ErrnoException = new Error(
+          (killedBy === "timeout"
+            ? describeDeadlineMiss(resolved, options.timeout as number, deadlineMiss ?? { elapsed_ms: Date.now() - start, child_exited: owned.rootExited(), survived_grace: false })
+            : `child exceeded the ${String(overflowLimit)}-byte output bound`) +
+          `; owned ${cleanup.scope} cleanup ${cleanup.cleanup_verified ? "verified" : "unverified"}${cleanup.stdio_incomplete ? "; stdio incomplete" : ""}`,
+        );
+        bound.code = killedBy === "timeout" ? "ETIMEDOUT" : "ENOBUFS";
+        error = bound;
+      } else if (!error && signal !== null) error = new Error(`child terminated by signal ${signal}`);
+      finish({ status: code, stdout, stderr, argv: resolved, cwd: options.cwd, duration_ms: Date.now() - start, ...(error ? { error } : {}), signal, ...(killedBy !== null ? { cleanup } : {}) });
     };
     /**
      * Accumulate one chunk and enforce the overflow bound.
@@ -768,6 +791,7 @@ export async function runTrackedAsync(
       seen: () => number,
       kept: () => number,
     ): void => {
+      if (settled) return;
       // Whole-chunk admission uses emitted UTF-16 length, not raw bytes. UTF-8
       // can hold at most three pending bytes, so corrected decoding can admit a
       // chunk the old replacement-character decoding discarded. An admitted
@@ -824,48 +848,18 @@ export async function runTrackedAsync(
     child.stdin?.end();
 
     child.on("error", (error) => {
-      finish({
-        status: null,
-        stdout,
-        stderr,
-        argv: resolved,
-        cwd: options.cwd,
-        duration_ms: Date.now() - start,
-        error,
-        signal: null,
-      });
+      if (killedBy !== null) return;
+      if ((error as NodeJS.ErrnoException).code === "ETIMEDOUT") {
+        killedBy = "timeout";
+        deadlineMiss = { elapsed_ms: Date.now() - start, child_exited: owned.rootExited(), survived_grace: false };
+        killForBound();
+      } else finishResult(null, null, error);
     });
     child.on("close", (code, signal) => {
-      let error: Error | undefined;
-      if (killedBy !== null) {
-        const bound: NodeJS.ErrnoException = new Error(
-          killedBy === "timeout"
-            ? describeDeadlineMiss(
-                resolved,
-                options.timeout as number,
-                deadlineMiss ?? {
-                  elapsed_ms: Date.now() - start,
-                  child_exited: code !== null,
-                  survived_grace: false,
-                },
-              )
-            : `child exceeded the ${String(overflowLimit)}-byte output bound`,
-        );
-        bound.code = killedBy === "timeout" ? "ETIMEDOUT" : "ENOBUFS";
-        error = bound;
-      } else if (signal !== null && signal !== undefined) {
-        error = new Error(`child terminated by signal ${signal}`);
-      }
-      finish({
-        status: code,
-        stdout,
-        stderr,
-        argv: resolved,
-        cwd: options.cwd,
-        duration_ms: Date.now() - start,
-        ...(error ? { error } : {}),
-        signal: signal ?? null,
-      });
+      // Capture closure says nothing about descendants which closed their own
+      // writers. Do not cancel the remaining owned-group escalation for them.
+      if (killedBy !== null && !owned.cleanup(false).cleanup_verified) return;
+      finishResult(owned.rootExited() ? owned.rootStatus() : code, owned.rootExited() ? owned.rootSignal() : signal ?? null);
     });
   });
 }

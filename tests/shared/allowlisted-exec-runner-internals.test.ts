@@ -22,6 +22,8 @@ function makeControllableChild(): any {
   const child: any = new EventEmitter();
   child.pid = 4242;
   child.killed = false;
+  child.__closed = false;
+  child.once("close", () => { child.__closed = true; });
   const killCalls: string[] = [];
   child.__killCalls = killCalls;
   child.kill = (signal?: string) => {
@@ -31,6 +33,9 @@ function makeControllableChild(): any {
   };
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
+  child.stdin = Object.assign(new EventEmitter(), { end: vi.fn(), destroy: vi.fn() });
+  child.stdout.destroy = vi.fn();
+  child.stderr.destroy = vi.fn();
   return child;
 }
 
@@ -39,6 +44,14 @@ vi.mock("node:child_process", () => ({
     spawnCalls.push({ command, args });
     currentChild = makeControllableChild();
     return currentChild;
+  },
+}));
+vi.mock("../../src/shared/tooling/ownedProcessLifecycle.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/shared/tooling/ownedProcessLifecycle.js")>(),
+  spawnOwnedProcess: (argv: string[]) => {
+    spawnCalls.push({ command: argv[0]!, args: argv.slice(1) });
+    const child = currentChild = makeControllableChild();
+    return { child, terminate: (signal: string) => child.kill(signal), release: vi.fn(), rootExited: () => false, rootStatus: () => null, rootSignal: () => null, cleanup: (incomplete: boolean) => ({ scope: "process_group", root_exit_observed: false, stdio_incomplete: incomplete, cleanup_verified: child.__closed }) };
   },
 }));
 
@@ -200,4 +213,27 @@ test("a slow (admitted) child is SIGTERM'd at timeoutMs then SIGKILL'd after the
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("missing close after timeout is terminal and ignores later output/error races", async () => {
+  vi.useFakeTimers();
+  try {
+    const promise = runAllowlistedReadOnlyCommand(["git", "log"], process.cwd(), 20);
+    const child = currentChild;
+    child.stdout.emit("data", "partial");
+    await vi.advanceTimersByTimeAsync(3020);
+    const outcome = await promise;
+    expect(outcome).toMatchObject({ timed_out: true, output: "partial", exit_code: null, cleanup: { stdio_incomplete: true, cleanup_verified: false } });
+    expect(outcome.spawn_error).toBeUndefined();
+    expect(outcome.refused).toBeUndefined();
+    expect(child.stdout.destroy).toHaveBeenCalledOnce();
+    expect(child.stderr.destroy).toHaveBeenCalledOnce();
+    expect(child.stdin.destroy).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    child.stdout.emit("data", "late");
+    child.emit("error", new Error("late error"));
+    child.emit("close", 0);
+    expect(await promise).toBe(outcome);
+    expect(outcome.output).toBe("partial");
+  } finally { vi.useRealTimers(); }
 });

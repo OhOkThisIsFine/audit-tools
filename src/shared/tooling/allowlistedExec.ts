@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/allowlisted-exec.test.ts, tests/shared/allowlisted-exec-runner-internals.test.ts
 /**
  * Allowlisted read-only command runner + a DEFAULT-DENY per-executable flag
  * allowlist — single source for both orchestrators (drift-plan E2; CRIT
@@ -28,14 +29,11 @@
  * never the sole guarantee: correctness must not rest on every call site
  * remembering to gate first.
  */
-import { spawn } from "node:child_process";
 import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
+import { beginOwnedProcessTermination, spawnOwnedProcess, type OwnedProcessCleanup } from "./ownedProcessLifecycle.js";
 
 /** Default per-anchor wall-clock budget; a slower command is killed and inconclusive. */
 export const ALLOWLISTED_EXEC_TIMEOUT_MS = 60_000;
-
-/** Grace before a timed-out child is escalated from SIGTERM to SIGKILL. */
-const SIGKILL_GRACE_MS = 2_000;
 
 /** Cap on captured combined output so a runaway command cannot exhaust memory. */
 const MAX_CAPTURED_OUTPUT = 256 * 1024;
@@ -331,6 +329,8 @@ export interface AllowlistedExecOutcome {
    * outcome that reached a real spawn attempt.
    */
   refused?: boolean;
+  /** Bounded-failure cleanup observations; an unverified cleanup is never success. */
+  cleanup?: OwnedProcessCleanup;
 }
 
 export type AllowlistedExecRunner = (
@@ -376,13 +376,17 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
     });
   }
   return new Promise((resolvePromise) => {
-    const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
-    const child = spawn(resolvedCommand, resolvedArgs, {
-      cwd,
-      env: stripAuditToolsControlEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    let owned: ReturnType<typeof spawnOwnedProcess>;
+    try {
+      owned = spawnOwnedProcess(resolveExecArgv(command), { cwd, env: stripAuditToolsControlEnv(), deadlineAt: Date.now() + Math.max(1, Number.isFinite(timeoutMs) ? timeoutMs : 1) });
+    } catch (error) {
+      resolvePromise({ exit_code: null, timed_out: false, output: "", spawn_error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    const child = owned.child;
+    // This runner has always supplied EOF to the admitted read-only command.
+    child.stdin.on("error", () => {});
+    child.stdin.end();
     let output = "";
     // A chunk that arrives once the cap is already reached is genuinely
     // DROPPED (never appended) — that is the only condition that makes the
@@ -391,7 +395,14 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
     // still recorded in full (unchanged cap-application behavior); nothing was
     // lost in that case, so `truncated` correctly stays unset.
     let truncated = false;
+    let settled = false;
+    let stdioIncomplete = false;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    child.stdout.on("end", () => { stdoutEnded = true; });
+    child.stderr.on("end", () => { stderrEnded = true; });
     const capture = (chunk: unknown) => {
+      if (settled) return;
       if (output.length < MAX_CAPTURED_OUTPUT) {
         output += String(chunk);
       } else {
@@ -401,31 +412,36 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-      const hardKill = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
-      hardKill.unref?.();
-    }, timeoutMs);
-    timer.unref?.();
-    child.on("error", (error) => {
+    let cancelTermination: (() => void) | undefined;
+    const finish = (code: number | null, spawnError?: string): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolvePromise({
-        exit_code: null,
-        timed_out: timedOut,
-        spawn_error: error.message,
-        output,
-        ...(truncated ? { truncated: true } : {}),
+      cancelTermination?.();
+      const cleanup = timedOut ? owned.cleanup(stdioIncomplete) : undefined;
+      owned.release();
+      resolvePromise({ exit_code: code, timed_out: timedOut, output, ...(spawnError ? { spawn_error: spawnError } : {}), ...(truncated ? { truncated: true } : {}), ...(cleanup ? { cleanup } : {}) });
+    };
+    const beginTimeout = (): void => {
+      if (settled || timedOut) return;
+      timedOut = true;
+      cancelTermination = beginOwnedProcessTermination(owned, () => {}, () => {
+        stdioIncomplete = !stdoutEnded || !stderrEnded;
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.stdin.destroy();
+        finish(owned.rootStatus());
       });
+      if (settled) cancelTermination();
+    };
+    const timer = setTimeout(beginTimeout, timeoutMs);
+    child.on("error", (error) => {
+      if ((error as NodeJS.ErrnoException).code === "ETIMEDOUT") beginTimeout();
+      else if (!timedOut) finish(null, error.message);
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolvePromise({
-        exit_code: code,
-        timed_out: timedOut,
-        output,
-        ...(truncated ? { truncated: true } : {}),
-      });
+      if (timedOut && !owned.cleanup(false).cleanup_verified) return;
+      finish(owned.rootExited() ? owned.rootStatus() : code);
     });
   });
 };

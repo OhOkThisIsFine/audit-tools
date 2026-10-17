@@ -6,13 +6,23 @@ import { runTrackedAsync, type RunTrackedOptions } from "../../src/shared/toolin
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawn: spawnMock, spawnSync: vi.fn() }));
+vi.mock("../../src/shared/tooling/ownedProcessLifecycle.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../src/shared/tooling/ownedProcessLifecycle.js")>(),
+  spawnOwnedProcess: (argv: string[], options: RunTrackedOptions) => {
+    const child = spawnMock(argv[0], argv.slice(1), options);
+    return { child, terminate: (signal: string) => child.kill(signal), release: vi.fn(), rootExited: () => child.exitCode !== null, rootStatus: () => child.exitCode, rootSignal: () => child.signalCode, cleanup: (incomplete: boolean) => ({ scope: "process_group", root_exit_observed: child.exitCode !== null, stdio_incomplete: incomplete, cleanup_verified: child.cleanupVerified ?? child.closed }) };
+  },
+}));
 
 class MockChild extends EventEmitter {
-  stdout = new EventEmitter();
-  stderr = new EventEmitter();
-  stdin = Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn() });
-  exitCode = null;
-  signalCode = null;
+  closed = false;
+  cleanupVerified?: boolean;
+  constructor() { super(); this.once("close", () => { this.closed = true; }); }
+  stdout = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+  stderr = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+  stdin = Object.assign(new EventEmitter(), { write: vi.fn(), end: vi.fn(), destroy: vi.fn() });
+  exitCode: number | null = null;
+  signalCode: string | null = null;
   kill = vi.fn((_signal?: string) => true);
 }
 
@@ -189,9 +199,9 @@ test("deadline still escalates SIGTERM to SIGKILL and flushes partial UTF-8", as
   const { child, promise } = start({ timeout: 20 });
   child.stdout.emit("data", Buffer.from([0xc3]));
   vi.advanceTimersByTime(20);
-  expect(child.kill.mock.calls).toEqual([[]]);
-  vi.runOnlyPendingTimers();
-  expect(child.kill.mock.calls).toEqual([[], ["SIGKILL"]]);
+  expect(child.kill.mock.calls).toEqual([["SIGTERM"]]);
+  vi.advanceTimersByTime(2000);
+  expect(child.kill.mock.calls).toEqual([["SIGTERM"], ["SIGKILL"]]);
   child.emit("close", null, "SIGKILL");
   const result = await promise;
   expect(result.stdout).toBe("�");
@@ -212,4 +222,77 @@ test("external signal failure retains metadata and flushes both pipes", async ()
   expect(result.error).not.toHaveProperty("code");
   expect(result.signal).toBe("SIGINT");
   expect(result.status).toBeNull();
+});
+
+test("a failed kill and permanently open pipes still settle as an incomplete timeout", async () => {
+  vi.useFakeTimers();
+  const { child, promise } = start({ timeout: 20 });
+  child.kill.mockReturnValue(false);
+  child.stdout.emit("data", Buffer.from([0xc3]));
+  child.stderr.emit("data", Buffer.from([0xe2, 0x82]));
+  await vi.advanceTimersByTimeAsync(3020);
+  const result = await promise;
+  expect(result.error).toMatchObject({ code: "ETIMEDOUT" });
+  expect(result.stdout).toBe("�");
+  expect(result.stderr).toBe("�");
+  expect(result.cleanup).toMatchObject({ stdio_incomplete: true, cleanup_verified: false });
+  expect(child.stdout.destroy).toHaveBeenCalled();
+  expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+  expect(vi.getTimerCount()).toBe(0);
+  child.stdout.emit("data", Buffer.from("late output"));
+  child.emit("error", new Error("late error"));
+  child.emit("close", 0, null);
+  expect(await promise).toBe(result);
+  expect(result.stdout).toBe("�");
+});
+
+test("overflow remains ENOBUFS when the later deadline fires", async () => {
+  vi.useFakeTimers();
+  const { child, promise } = start({ timeout: 20, maxBuffer: 1 });
+  child.stdout.emit("data", Buffer.from("é"));
+  await vi.advanceTimersByTimeAsync(21);
+  child.emit("close", null, "SIGTERM");
+  const result = await promise;
+  expect(result.error).toMatchObject({ code: "ENOBUFS" });
+  expect(result.stdout).toBe("é");
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("an exited root with open stdio is not described as ignoring TERM", async () => {
+  vi.useFakeTimers();
+  const { child, promise } = start({ timeout: 20 });
+  child.exitCode = 0;
+  await vi.advanceTimersByTimeAsync(3020);
+  const result = await promise;
+  expect(result.error).toMatchObject({ code: "ETIMEDOUT" });
+  expect(result.error?.message).toContain("child exit was already observed");
+  expect(result.error?.message).not.toMatch(/ignored|was SIGKILLed/u);
+  expect(result.cleanup).toMatchObject({ root_exit_observed: true, stdio_incomplete: true, cleanup_verified: false });
+});
+
+test("a synchronous spawn failure remains a structured error result", async () => {
+  const error = Object.assign(new Error("synthetic spawn failure"), { code: "ENOENT" });
+  spawnMock.mockImplementationOnce(() => { throw error; });
+  const result = await runTrackedAsync(["missing-tool"], { timeout: 20 });
+  expect(result.error).toBe(error);
+  expect(result.status).toBeNull();
+  expect(result.argv).toEqual(["missing-tool"]);
+});
+
+test("unverified cleanup never claims that an exited root or ended pipes survived grace", async () => {
+  vi.useFakeTimers();
+  const { child, promise } = start({ timeout: 20 });
+  child.cleanupVerified = false;
+  child.exitCode = 0;
+  child.stdout.emit("end");
+  child.stderr.emit("end");
+  vi.advanceTimersByTime(20);
+  child.emit("close", 0, null);
+  await vi.advanceTimersByTimeAsync(3000);
+  const result = await promise;
+  expect(result.error).toMatchObject({ code: "ETIMEDOUT" });
+  expect(result.error?.message).toContain("owned cleanup did not settle within the SIGTERM grace; SIGKILL requested");
+  expect(result.error?.message).not.toMatch(/outlived|ignored/u);
+  expect(result.cleanup).toMatchObject({ root_exit_observed: true, stdio_incomplete: false, cleanup_verified: false });
+  expect(vi.getTimerCount()).toBe(0);
 });

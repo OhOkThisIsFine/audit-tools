@@ -293,7 +293,7 @@ test("describeDeadlineMiss names the argv, the elapsed time and the child's fate
   expect(message).toContain("SIGTERM");
 
   // The three fates must be DISTINGUISHABLE — an expired deadline that the child
-  // had already beaten is not the same event as a child that ignored SIGTERM.
+  // had already beaten is not the same event as a job/capture needing escalation.
   const alreadyExited = describeDeadlineMiss(["slow"], 10, {
     elapsed_ms: 11,
     child_exited: true,
@@ -305,7 +305,7 @@ test("describeDeadlineMiss names the argv, the elapsed time and the child's fate
     survived_grace: true,
   });
   expect(alreadyExited).toContain("already exited");
-  expect(survived).toContain("SIGKILLed");
+  expect(survived).toContain("SIGKILL requested");
   expect(new Set([message, alreadyExited, survived]).size).toBe(3);
 });
 
