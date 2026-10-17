@@ -329,7 +329,10 @@ describe("StateStore — the state contract version", () => {
     );
 
     const store = new StateStore(TEST_DIR);
+    const before = await readFile(join(TEST_DIR, "state.json"));
     await expect(store.loadState()).rejects.toThrow(SchemaVersionMismatchError);
+    await expect(store.loadState()).rejects.toThrow("Preserve this artifact; do not delete it.");
+    expect(await readFile(join(TEST_DIR, "state.json"))).toEqual(before);
   });
 });
 

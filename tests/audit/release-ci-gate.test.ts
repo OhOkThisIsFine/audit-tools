@@ -8,7 +8,7 @@ import { test, expect, vi, beforeEach } from "vitest";
 // static imports elsewhere (release-run-selector.test.ts, release-branch-gate.test.ts)
 // stay real-spawn-free because they never touch this file's module registry.
 
-type SpawnOptions = { timeout?: number; killSignal?: string };
+type SpawnOptions = { timeout?: number; killSignal?: NodeJS.Signals; maxBuffer?: number };
 type SpawnCall = { command: string; args: string[]; options: SpawnOptions };
 type SpawnSyncResult = { error?: Error; status: number | null; stdout: string; stderr: string };
 
@@ -249,6 +249,24 @@ test("ensureCiGreenOnHeadSha: passes on a green SHA and reports the run", async 
   const result = await ensureCiGreenOnHeadSha("o/r");
   expect(result.headSha).toBe(sha);
   expect(result.successfulRuns).toHaveLength(1);
+});
+
+test("ensureCiGreenOnHeadSha: retains Node's default capture limit when none is configured", async () => {
+  const { spawnSync: realSpawnSync } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  const sha = "a".repeat(40);
+  const payload = JSON.stringify({ workflow_runs: [{
+    name: "ci", head_sha: sha, status: "completed", conclusion: "success",
+    created_at: "2026-01-01T00:00:00Z", metadata: "x".repeat(1_300_000),
+  }] });
+  spawnSyncHandler = (command, args, options) => {
+    if (command === "git" && args[0] === "rev-parse") return textResult(`${sha}\n`);
+    expect(command).toBe("gh");
+    expect(args[0]).toBe("api");
+    return realSpawnSync(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+      ...options, stdio: "pipe", encoding: "utf8", input: payload,
+    });
+  };
+  await expect(ensureCiGreenOnHeadSha("o/r", { waitMs: 0 })).rejects.toThrow(/ENOBUFS/);
 });
 
 test("ensureCiGreenOnHeadSha: aborts before tagging when no run exists for HEAD's SHA", async () => {
@@ -649,6 +667,43 @@ function discover(timeout = 20_000) {
     headSha: discoverySha, tagPushedAtMs: 0, detectionTimeoutMs: timeout,
   });
 }
+
+test.each([false, true])("discovery: bounds real page capture (over limit: %s)", async (overLimit) => {
+  // Keep git/gh mocked, but exercise Node's real capture limit with a local echo.
+  const { spawnSync: realSpawnSync } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  const first = firstDiscoveryPage().map((row) => ({ ...row, metadata: "x".repeat(13_000) }));
+  first[0].head_sha = discoverySha;
+  const pages = [
+    JSON.stringify({ total_count: 101, workflow_runs: first }),
+    JSON.stringify({ total_count: 101, workflow_runs: [{
+      ...discoveryRow(101, discoverySha, 2_000), metadata: "x".repeat(overLimit ? 5 * 1024 * 1024 : 0),
+    }] }),
+  ];
+  expect(Buffer.byteLength(pages[0])).toBeGreaterThan(1024 * 1024);
+  spawnSyncHandler = (command, args, options) => {
+    if (command === "gh" && args[0] === "workflow") return textResult("");
+    expect(command).toBe("gh");
+    expect(args[0]).toBe("api");
+    const page = Number(new URL(`https://api.github.com/${args[1]}`).searchParams.get("page"));
+    return realSpawnSync(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+      ...options, stdio: "pipe", encoding: "utf8", input: pages[page - 1],
+    });
+  };
+  vi.useFakeTimers();
+  try {
+    const promise = discover(1_000);
+    const assertion = overLimit
+      ? expect(promise).rejects.toThrow(/complete listing:.*ENOBUFS/)
+      : expect(promise).resolves.toMatchObject({ id: 101 });
+    await Promise.all([assertion, vi.advanceTimersByTimeAsync(1_000)]);
+    // Even with a page-one candidate, overflow on page two must fail closed.
+    const apiCalls = spawnCalls.filter((call) => call.args[0] === "api");
+    expect(apiCalls).toHaveLength(2);
+    expect(apiCalls.every((call) => call.options.maxBuffer === 4 * 1024 * 1024)).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test.each([false, true])("discovery: later-page exact SHA beats page-one %s exact match", async (earlyExact) => {
   const first = firstDiscoveryPage();

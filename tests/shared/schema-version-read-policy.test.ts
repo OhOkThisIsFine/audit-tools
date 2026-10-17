@@ -124,22 +124,27 @@ describe("schema-version read policy pair", () => {
     expect(discardOnSchemaVersionMismatch(null, "thing/v1")).toBeUndefined();
   });
 
-  it("throwOnSchemaVersionMismatch throws naming the artifact and both versions", () => {
+  it.each(["intent_checkpoint.json", "state.json"])("preserves authored %s in schema-mismatch recovery guidance", (artifactName) => {
     let caught: InstanceType<typeof SchemaVersionMismatchError> | undefined;
     try {
       throwOnSchemaVersionMismatch(
         { schema_version: "thing/v0" },
-        "thing.json",
+        artifactName,
         "thing/v1",
       );
     } catch (err) {
       caught = err as InstanceType<typeof SchemaVersionMismatchError>;
     }
     expect(caught).toBeInstanceOf(SchemaVersionMismatchError);
-    expect(caught!.message).toMatch(/thing\.json/);
+    expect(caught!.message).toContain(artifactName);
+    expect(caught!.message).toContain("Preserve this artifact; do not delete it.");
+    expect(caught!.message).toContain("Back up the run before recovery");
+    expect(caught!.message).toContain("a compatible tool version or an explicitly supported migration");
+    expect(caught!.message).not.toContain(`Delete ${artifactName}`);
+    expect(caught!.message).not.toContain("to regenerate it");
     expect(caught!.message).toMatch(/thing\/v0/);
     expect(caught!.message).toMatch(/thing\/v1/);
-    expect(caught!.artifactName).toBe("thing.json");
+    expect(caught!.artifactName).toBe(artifactName);
     expect(caught!.expected).toBe("thing/v1");
     expect(caught!.actual).toBe("thing/v0");
   });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/schema-version-read-policy.test.ts, tests/remediate/store.test.ts
 /**
  * Schema-version read policy — the two directions, named so the choice is
  * unmissable at the call site.
@@ -44,7 +45,8 @@ export class SchemaVersionMismatchError extends Error {
     super(
       `Artifact "${artifactName}" has schema_version "${actual}" but expected "${expected}". ` +
         `This likely means the artifact was produced by an incompatible version of this tool. ` +
-        `Delete ${artifactName} from the artifacts directory to regenerate it.`,
+        `Preserve this artifact; do not delete it. Back up the run before recovery, ` +
+        `then use a compatible tool version or an explicitly supported migration.`,
     );
     this.name = "SchemaVersionMismatchError";
   }

@@ -117,6 +117,7 @@ function run(command, args, options = {}) {
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     windowsHide: true,
+    ...(options.maxBuffer == null ? {} : { maxBuffer: options.maxBuffer }),
     ...(options.timeoutMs == null ? {} : { timeout: options.timeoutMs, killSignal: "SIGKILL" }),
   });
   if (result.error) {
@@ -607,10 +608,11 @@ function fetchReleaseRuns(repoSlug, deadline) {
   const runsById = new Map();
   let total;
   for (let page = 1; ; page += 1) {
+    // A 100-run page can exceed Node's default 1 MiB capture limit.
     const response = runJson("gh", [
       "api",
       `repos/${repoSlug}/actions/workflows/publish-package.yml/runs?event=release&per_page=100&page=${page}`,
-    ], { timeoutMs: discoveryRemainingMs(deadline) });
+    ], { timeoutMs: discoveryRemainingMs(deadline), maxBuffer: 4 * 1024 * 1024 });
     discoveryRemainingMs(deadline);
     if (!Number.isSafeInteger(response?.total_count) || response.total_count < 0 ||
         !Array.isArray(response.workflow_runs) || response.workflow_runs.length > 100) {
