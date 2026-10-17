@@ -14,8 +14,11 @@
  */
 import { test, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
+import { delimiter, isAbsolute, join } from "node:path";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
-const spawnCalls: Array<{ command: string; args: string[] }> = [];
+const spawnCalls: Array<{ command: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
 let currentChild: any = null;
 
 function makeControllableChild(): any {
@@ -48,8 +51,8 @@ vi.mock("node:child_process", () => ({
 }));
 vi.mock("../../src/shared/tooling/ownedProcessLifecycle.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/shared/tooling/ownedProcessLifecycle.js")>(),
-  spawnOwnedProcess: (argv: string[]) => {
-    spawnCalls.push({ command: argv[0]!, args: argv.slice(1) });
+  spawnOwnedProcess: (argv: string[], options: { env?: NodeJS.ProcessEnv }) => {
+    spawnCalls.push({ command: argv[0]!, args: argv.slice(1), env: options.env });
     const child = currentChild = makeControllableChild();
     return { child, terminate: (signal: string) => child.kill(signal), release: vi.fn(), rootExited: () => false, rootStatus: () => null, rootSignal: () => null, cleanup: (incomplete: boolean) => ({ scope: "process_group", root_exit_observed: false, stdio_incomplete: incomplete, cleanup_verified: child.__closed }) };
   },
@@ -62,6 +65,185 @@ const { runAllowlistedReadOnlyCommand, ALLOWLISTED_EXEC_TIMEOUT_MS } = await imp
 beforeEach(() => {
   spawnCalls.length = 0;
   currentChild = null;
+});
+
+test("admitted Git uses an absolute identity and discards inherited executable configuration", async () => {
+  vi.stubEnv("GIT_CONFIG_COUNT", "1");
+  vi.stubEnv("GIT_CONFIG_KEY_0", "core.fsmonitor");
+  vi.stubEnv("GIT_CONFIG_VALUE_0", "./inert-marker");
+  vi.stubEnv("GIT_EXTERNAL_DIFF", "./inert-marker");
+  vi.stubEnv("GIT_CONFIG_PARAMETERS", "'core.fsmonitor=./inert-marker'");
+  vi.stubEnv("GIT_EXEC_PATH", "./inert-marker");
+  vi.stubEnv("Git_TRACE", "./inert-trace");
+  vi.stubEnv("PAGER", "./inert-marker");
+  try {
+    const pending = runAllowlistedReadOnlyCommand(["git", "status", "--short"], process.cwd(), 1000);
+    currentChild?.emit("close", 0);
+    await pending;
+    expect(spawnCalls).toHaveLength(1);
+    expect(isAbsolute(spawnCalls[0]!.command)).toBe(true);
+    expect(spawnCalls[0]!.env?.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_EXTERNAL_DIFF).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_CONFIG_PARAMETERS).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_CONFIG_KEY_0).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_CONFIG_VALUE_0).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_EXEC_PATH).toBeUndefined();
+    expect(spawnCalls[0]!.env?.Git_TRACE).toBeUndefined();
+    expect(spawnCalls[0]!.env?.GIT_PAGER).toBe("cat");
+    expect(spawnCalls[0]!.args[0]).toBe("--no-lazy-fetch");
+    expect(spawnCalls[0]!.args).toContain("--no-pager");
+    expect(spawnCalls[0]!.args).toContain("core.fsmonitor=false");
+    expect(spawnCalls[0]!.args).toContain("format.pretty=format:%h %s");
+    expect(spawnCalls[0]!.args).toContain("log.showSignature=false");
+  } finally { vi.unstubAllEnvs(); }
+});
+
+function identityFixture(): { root: string; repo: string; sub: string; trusted: string; native: string } {
+  const root = mkdtempSync(join(tmpdir(), "inspection-identity-"));
+  const repo = join(root, "repo"), sub = join(repo, "src"), trusted = join(root, "trusted");
+  for (const dir of [join(repo, ".git"), sub, trusted]) mkdirSync(dir, { recursive: true });
+  const native = join(trusted, process.platform === "win32" ? "git.exe" : "git");
+  writeFileSync(native, "inert fixture; spawn is mocked");
+  chmodSync(native, 0o755);
+  return { root, repo, sub, trusted, native };
+}
+
+for (const logicalName of ["rg", "ripgrep"]) {
+  test(`ambient config is disabled before user args for ${logicalName}`, async () => {
+    const fixture = identityFixture();
+    const native = join(fixture.trusted, logicalName + (process.platform === "win32" ? ".EXE" : ""));
+    const command = [logicalName, "needle", "src"];
+    try {
+      writeFileSync(native, "inert native candidate; spawn is mocked");
+      chmodSync(native, 0o755);
+      vi.stubEnv("PATH", fixture.trusted);
+      vi.stubEnv("RIPGREP_CONFIG_PATH", "inert-config");
+      vi.stubEnv("Ripgrep_Config_Path", "inert-config");
+      const pending = runAllowlistedReadOnlyCommand(command, fixture.sub, 1000);
+      currentChild?.emit("close", 0);
+      expect(await pending).toMatchObject({ exit_code: 0 });
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawnCalls[0]!.command).toBe(realpathSync(native));
+      expect(spawnCalls[0]!.args).toEqual(["--no-config", "needle", "src"]);
+      expect(Object.keys(spawnCalls[0]!.env!).some(key => key.toUpperCase() === "RIPGREP_CONFIG_PATH")).toBe(false);
+      expect(process.env.RIPGREP_CONFIG_PATH).toBe("inert-config");
+      expect(command).toEqual([logicalName, "needle", "src"]);
+    } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+  });
+}
+
+test("ordinary external installation symlinks retain trusted identity", async () => {
+  const fixture = identityFixture();
+  try {
+    const installation = join(fixture.root, "installation");
+    mkdirSync(installation);
+    const installed = join(installation, process.platform === "win32" ? "git.EXE" : "git");
+    writeFileSync(installed, "inert installation; spawn is mocked");
+    chmodSync(installed, 0o755);
+    rmSync(fixture.native);
+    if (process.platform === "win32") {
+      rmSync(fixture.trusted, { recursive: true });
+      symlinkSync(installation, fixture.trusted, "junction");
+    } else symlinkSync(installed, fixture.native);
+    vi.stubEnv("PATH", fixture.trusted);
+    const pending = runAllowlistedReadOnlyCommand(["git", "status"], fixture.sub, 1000);
+    currentChild?.emit("close", 0);
+    expect(await pending).toMatchObject({ exit_code: 0 });
+    expect(spawnCalls[0]!.command).toBe(realpathSync(installed));
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("resolution skips repository roots, empty/relative PATH, caller cwd and physical directory aliases", async () => {
+  const fixture = identityFixture();
+  try {
+    const alias = join(fixture.root, "alias");
+    symlinkSync(fixture.repo, alias, process.platform === "win32" ? "junction" : "dir");
+    const bait = join(fixture.repo, process.platform === "win32" ? "git.exe" : "git");
+    writeFileSync(bait, "inert repository candidate");
+    chmodSync(bait, 0o755);
+    vi.stubEnv("PATH", [fixture.repo, "", ".", "relative", process.cwd(), alias, fixture.trusted].join(delimiter));
+    vi.stubEnv("PATHEXT", ".CMD;.BAT;.EXE");
+    vi.stubEnv("ComSpec", join(fixture.repo, "inert-cmd.exe"));
+    const pending = runAllowlistedReadOnlyCommand(["git.cmd", "status", "--short"], fixture.sub, 1000);
+    currentChild?.emit("close", 0);
+    expect(await pending).toMatchObject({ exit_code: 0 });
+    expect(spawnCalls).toHaveLength(1);
+    expect(process.platform === "win32" ? spawnCalls[0]!.command.toLowerCase() : spawnCalls[0]!.command)
+      .toBe(process.platform === "win32" ? realpathSync(fixture.native).toLowerCase() : realpathSync(fixture.native));
+    expect(spawnCalls[0]!.env?.PATH).toBe(realpathSync(fixture.trusted));
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("an external executable symlink into the repository cannot establish identity", async () => {
+  const fixture = identityFixture();
+  try {
+    const baitDir = join(fixture.root, "bait");
+    mkdirSync(baitDir);
+    const bait = join(fixture.repo, "git");
+    writeFileSync(bait, "inert");
+    chmodSync(bait, 0o755);
+    // Windows directory junctions cover aliasing without requiring symlink privilege.
+    if (process.platform === "win32") {
+      const linked = join(baitDir, "linked");
+      symlinkSync(fixture.repo, linked, "junction");
+      vi.stubEnv("PATH", linked);
+    } else {
+      symlinkSync(bait, join(baitDir, "git"));
+      vi.stubEnv("PATH", baitDir);
+    }
+    const outcome = await runAllowlistedReadOnlyCommand(["git", "status"], fixture.sub, 1000);
+    expect(outcome.spawn_error).toMatch(/trusted native/);
+    expect(outcome.refused).toBeUndefined();
+    expect(spawnCalls).toHaveLength(0);
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("shim-only or absent installations fail availability without a shell spawn", async () => {
+  const fixture = identityFixture();
+  try {
+    rmSync(fixture.native);
+    writeFileSync(join(fixture.trusted, "git.cmd"), "@echo inert");
+    writeFileSync(join(fixture.trusted, "git.bat"), "@echo inert");
+    vi.stubEnv("PATH", process.platform === "win32" ? '"' + fixture.trusted + '"' : fixture.trusted);
+    vi.stubEnv("PATHEXT", ".CMD;.BAT");
+    const outcome = await runAllowlistedReadOnlyCommand(["git", "status"], fixture.sub, 1000);
+    expect(outcome.spawn_error).toMatch(/trusted native/);
+    expect(spawnCalls).toHaveLength(0);
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("inspection from inside a bare repository excludes executables elsewhere in that repository", async () => {
+  const fixture = identityFixture();
+  try {
+    rmSync(join(fixture.repo, ".git"), { recursive: true });
+    writeFileSync(join(fixture.repo, "HEAD"), "ref: refs/heads/main\n");
+    const objects = join(fixture.repo, "objects");
+    const bin = join(fixture.repo, "bin");
+    for (const path of [objects, bin, join(fixture.repo, "refs")]) mkdirSync(path);
+    writeFileSync(join(bin, process.platform === "win32" ? "git.exe" : "git"), "inert bare repository candidate");
+    vi.stubEnv("PATH", [bin, fixture.trusted].join(delimiter));
+    const pending = runAllowlistedReadOnlyCommand(["git", "status"], objects, 1000);
+    currentChild?.emit("close", 0);
+    expect(await pending).toMatchObject({ exit_code: 0 });
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]!.env?.PATH).toBe(realpathSync(fixture.trusted));
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("inspection inside ordinary .git metadata still excludes the enclosing worktree", async () => {
+  const fixture = identityFixture();
+  try {
+    const metadata = join(fixture.repo, ".git");
+    const objects = join(metadata, "objects");
+    for (const path of [objects, join(metadata, "refs")]) mkdirSync(path);
+    writeFileSync(join(metadata, "HEAD"), "ref: refs/heads/main\n");
+    vi.stubEnv("PATH", [fixture.repo, fixture.trusted].join(delimiter));
+    writeFileSync(join(fixture.repo, process.platform === "win32" ? "git.exe" : "git"), "inert worktree candidate");
+    const pending = runAllowlistedReadOnlyCommand(["git", "status"], objects, 1000);
+    currentChild?.emit("close", 0);
+    expect(await pending).toMatchObject({ exit_code: 0 });
+    expect(spawnCalls[0]!.env?.PATH).toBe(realpathSync(fixture.trusted));
+  } finally { vi.unstubAllEnvs(); rmSync(fixture.root, { recursive: true, force: true }); }
 });
 
 // ── CRIT: a refused command must NEVER reach spawn ─────────────────────────
@@ -91,6 +273,23 @@ test("CRIT internal gate: a non-allowlisted executable resolves a structured ref
   expect(spawnCalls.length).toBe(0);
   expect(outcome.refused).toBe(true);
 });
+
+for (const command of [
+  ["./untrusted/git", "status"],
+  ["C:\\untrusted\\git.exe", "status"],
+  ["git", "-ccore.fsmonitor=./payload", "status"],
+  ["git", "log", "-o/tmp/report"],
+  ["git", "diff", "--textconv"],
+]) {
+  test(`public refusal never reaches injected spawn: ${JSON.stringify(command)}`, async () => {
+    const pending = runAllowlistedReadOnlyCommand(command, process.cwd(), ALLOWLISTED_EXEC_TIMEOUT_MS);
+    // Settle an incorrectly admitted mock too, so the baseline red leaves no timer.
+    currentChild?.emit("close", 0);
+    const outcome = await pending;
+    expect(spawnCalls).toHaveLength(0);
+    expect(outcome).toMatchObject({ refused: true, timed_out: false, exit_code: null, output: "" });
+  });
+}
 
 test("an ALLOWED command still reaches spawn (the gate does not over-refuse)", async () => {
   const promise = runAllowlistedReadOnlyCommand(

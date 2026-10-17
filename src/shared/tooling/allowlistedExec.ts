@@ -4,13 +4,12 @@
  * allowlist — single source for both orchestrators (drift-plan E2; CRIT
  * ARC-a06a3945).
  *
- * The auditor's executable-anchor pass (S7 tier-2) runs *model-authored* commands
- * at ingest to confirm/refute behavior claims. That is a trust surface: the tool
- * spawns whatever the model wrote. The earlier guard checked only `command[0]`
- * (the executable) against an allowlist and waved every argument through, so
- * `rg --pre <cmd>` (preprocessor exec), `rg --search-zip`, `ast-grep --rewrite`
- * (file write), a non-read-only `git` option, etc. slipped past — arbitrary
- * code-exec / file-writes at ingest.
+ * Exported inspection-command library boundary. There are currently no in-tree
+ * production callers. Admission rejects paths and flags outside declared policies;
+ * execution resolves a trusted native identity outside the inspected worktree
+ * and caller cwd. Git and ripgrep receive fixed configuration protections.
+ * Other tools retain their existing argument policies; this is no general
+ * sandbox or claim about Madge configuration trust.
  *
  * This module replaces that denylist posture with a **default-deny allowlist of
  * arguments**: each allowed executable declares the exact set of flags it may
@@ -22,14 +21,19 @@
  *
  * SAFETY of the runner: commands run only via `runAllowlistedReadOnlyCommand`,
  * which spawns argv-only (never a shell), under a timeout, with the
- * wrapper-only control env stripped (`stripAuditToolsControlEnv`), platform-resolved via the
- * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The runner ENFORCES
+ * wrapper-only control env stripped (`stripAuditToolsControlEnv`), a trusted
+ * native executable identity, and bounded owned-process cleanup. It ENFORCES
  * `isAllowedAnchorCommand` on itself, unconditionally, before ever spawning
  * (invariants[2]) — a caller-side pre-check is only an OPTIONAL fast path,
  * never the sole guarantee: correctness must not rest on every call site
  * remembering to gate first.
  */
-import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { devNull } from "node:os";
+import { stripAuditToolsControlEnv } from "./exec.js";
+import { resolveExecutableFile } from "./resolveExecutable.js";
+import { resolveWithinRoot } from "../io/pathContainment.js";
 import { beginOwnedProcessTermination, spawnOwnedProcess, type OwnedProcessCleanup } from "./ownedProcessLifecycle.js";
 
 /** Default per-anchor wall-clock budget; a slower command is killed and inconclusive. */
@@ -53,9 +57,10 @@ interface ArgPolicy {
 
 /**
  * The inspection-only executables a model-authored anchor may invoke, each with
- * the explicit set of flags it may carry. Every listed flag is read-only: it
- * cannot write a file, execute a sub-process/preprocessor, or decompress
- * arbitrary input. Deliberately ABSENT (so default-deny refuses them):
+ * the explicit set of flags it may carry. These historical policies do not
+ * establish configuration/subcommand safety for every analyzer: Madge config
+ * modules and ast-grep positional subcommands/config discovery remain separate
+ * review scopes. Deliberately ABSENT (so default-deny refuses them):
  *   - ripgrep:  --pre / --pre-glob (run a preprocessor), --search-zip / -z
  *               (decompress), --hostname-bin, -o is fine (only-matching) but
  *               --files-from style file reads are omitted out of caution.
@@ -99,7 +104,7 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
         "--hidden", "--no-ignore", "--color", "--colors", "-H", "--with-filename",
         "--no-filename", "--no-heading", "--heading", "-U", "--multiline",
         "--multiline-dotall", "-P", "--pcre2", "--json", "--vimgrep", "-0",
-        "--null", "-m", "--max-count", "--max-depth", "--maxdepth",
+        "--null", "-m", "--max-count", "--max-depth", "--maxdepth", "--no-config",
       ]),
       allowPositionals: true,
     },
@@ -119,7 +124,7 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
         "--hidden", "--no-ignore", "--color", "--colors", "-H", "--with-filename",
         "--no-filename", "--no-heading", "--heading", "-U", "--multiline",
         "--multiline-dotall", "-P", "--pcre2", "--json", "--vimgrep", "-0",
-        "--null", "-m", "--max-count", "--max-depth", "--maxdepth",
+        "--null", "-m", "--max-count", "--max-depth", "--maxdepth", "--no-config",
       ]),
       allowPositionals: true,
     },
@@ -137,7 +142,7 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
   [
     "madge",
     {
-      // Read-only dependency analysis: circular detection, orphans, JSON. The
+      // Dependency-reporting flags; config modules remain a separate trust surface. The
       // image/dot/svg output-writing flags are absent → refused.
       flags: new Set([
         "--circular", "-c", "--orphans", "--leaves", "--summary", "-s",
@@ -150,8 +155,8 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
   [
     "ast-grep",
     {
-      // Structural search only. --rewrite/-r/--update-all/-U/--interactive/-i
-      // (all of which edit files) are absent → refused. `run`/`scan` are positional.
+      // Known editing flags are absent. Positional subcommands and configuration/
+      // native parser discovery remain separate review scopes.
       flags: new Set([
         "-p", "--pattern", "-l", "--lang", "--language", "--json", "--globs",
         "-A", "--after", "-B", "--before", "-C", "--context", "--heading",
@@ -174,34 +179,43 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
   ],
 ]);
 
-/** Read-only git subcommands an anchor may run (no checkout/reset/clean/push/…). */
-export const GIT_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  "grep",
-  "log",
-  "diff",
-  "show",
-  "ls-files",
-  "cat-file",
-  "blame",
-  "rev-parse",
-  "status",
+type GitValue = (value: string) => boolean;
+interface GitPolicy {
+  flags: ReadonlyMap<string, GitValue | null>;
+  /** Git optional-value long flags must use '=' to avoid consuming a path. */
+  equalsOnly?: ReadonlySet<string>;
+  paths: boolean;
+  positionals: (values: string[], flags: ReadonlySet<string>) => boolean;
+}
+const nonempty: GitValue = value => value.length > 0 && !value.startsWith("-");
+const count: GitValue = value => /^\d+$/.test(value);
+const anyPositionals = (): boolean => true;
+const gitFlags = (zero: string[], values: Array<[string, GitValue]> = []): ReadonlyMap<string, GitValue | null> =>
+  new Map([...zero.map(flag => [flag, null] as const), ...values]);
+const diffFlags = ["--stat", "--numstat", "--shortstat", "--name-only", "--name-status", "--patch", "-p", "--no-patch", "-s", "--raw", "--check", "--no-renames", "--no-ext-diff", "--no-textconv", "--exit-code", "--quiet", "-w", "--ignore-all-space", "--ignore-space-change", "--no-color"];
+const logValues: Array<[string, GitValue]> = [["-n", count], ["--max-count", count], ["--skip", count], ["--since", nonempty], ["--until", nonempty], ["--author", nonempty], ["--grep", nonempty]];
+/**
+ * Small per-subcommand grammar, not Git's complete CLI. Exact flag names only;
+ * null means zero operands, a predicate means one required operand. Required
+ * short operands may be attached; long operands may use '='. Short clusters,
+ * abbreviations and arbitrary pretty formats are omitted. Optional-value Git
+ * flags require an explicit '=' value when included (equalsOnly).
+ * '--' ends option parsing only for commands with path positionals.
+ */
+const GIT_POLICIES: ReadonlyMap<string, GitPolicy> = new Map<string, GitPolicy>([
+  ["grep", { flags: gitFlags(["-n", "--line-number", "-i", "--ignore-case", "-I", "-l", "--files-with-matches", "-c", "--count", "-w", "--word-regexp", "-v", "--invert-match", "-E", "--extended-regexp", "-F", "--fixed-strings", "--cached", "--no-index", "--full-name", "--no-textconv"], [["-e", nonempty], ["-A", count], ["-B", count], ["-C", count]]), paths: true, positionals: (values, flags) => flags.has("-e") || values.length > 0 }],
+  ["log", { flags: gitFlags([...diffFlags, "--oneline", "--decorate", "--no-decorate", "--all", "--reverse", "--first-parent", "--no-merges", "--merges", "--follow"], [...logValues, ["-U", count]]), paths: true, positionals: anyPositionals }],
+  ["diff", { flags: gitFlags(diffFlags, [["-U", count], ["--unified", count]]), paths: true, positionals: anyPositionals }],
+  ["show", { flags: gitFlags([...diffFlags, "--oneline"], [["-U", count], ["--unified", count]]), paths: true, positionals: anyPositionals }],
+  ["ls-files", { flags: gitFlags(["-z", "--cached", "-c", "--deleted", "-d", "--modified", "-m", "--others", "-o", "--ignored", "-i", "--exclude-standard", "--stage", "-s", "--unmerged", "-u", "--full-name"]), paths: true, positionals: anyPositionals }],
+  ["cat-file", { flags: gitFlags(["-p", "-t", "-s", "-e"]), paths: false, positionals: (values, flags) => values.length === 1 && flags.size === 1 }],
+  ["blame", { flags: gitFlags(["--porcelain", "--line-porcelain", "--incremental", "-w", "--show-email", "-e", "--root", "--no-textconv"], [["-L", value => /^\d+(?:,\d+)?$/.test(value)]]), paths: true, positionals: values => values.length >= 1 && values.length <= 2 }],
+  ["rev-parse", { flags: gitFlags(["--verify", "--short", "--abbrev-ref", "--symbolic-full-name", "--is-inside-work-tree", "--show-toplevel", "--show-prefix", "--git-dir", "--is-bare-repository"]), paths: false, positionals: values => values.length <= 1 }],
+  ["status", { flags: gitFlags(["--short", "-s", "--branch", "-b", "--porcelain", "-z", "--no-renames"], [["--untracked-files", value => ["no", "normal", "all"].includes(value)]]), equalsOnly: new Set(["--untracked-files"]), paths: true, positionals: anyPositionals }],
 ]);
 
-/**
- * git flags that write a file or otherwise escape read-only inspection, refused
- * even on a read-only subcommand. `-o`/`--output` write to a file; `-c`,
- * `--exec-path`, `--config-env` reconfigure git arbitrarily (incl. running
- * pagers/externals). Anything in this set, anywhere in the argv, refuses.
- */
-const GIT_REFUSED_OPTIONS: ReadonlySet<string> = new Set([
-  "-o",
-  "--output",
-  "-c",
-  "--exec-path",
-  "--config-env",
-  "--upload-pack",
-  "--receive-pack",
-]);
+/** Read-only Git subcommands, derived from the grammar used for admission. */
+export const GIT_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set(GIT_POLICIES.keys());
 
 /**
  * The set of executables the runner will auto-run, for callers that want to
@@ -264,30 +278,54 @@ function isAllowedNonGitCommand(args: string[], policy: ArgPolicy): boolean {
   return true;
 }
 
-/**
- * Validate a git command: the first positional must be a read-only subcommand,
- * and no token (before OR after the subcommand) may be a write/reconfigure
- * option from {@link GIT_REFUSED_OPTIONS}. A `-c key=val` style reconfiguration
- * before the subcommand is refused, as is an `--output=file` on `git log`.
- */
+const GIT_GLOBAL_FLAGS = new Set(["--no-pager", "--no-optional-locks", "--literal-pathspecs"]);
+function gitSubcommandIndex(args: string[]): number {
+  let index = 0;
+  while (GIT_GLOBAL_FLAGS.has(args[index]!)) index++;
+  return index;
+}
+
+/** Default-deny Git grammar; positionals after '--' are never reparsed. */
 function isAllowedGitCommand(args: string[]): boolean {
-  let subcommand: string | undefined;
-  for (const arg of args) {
-    if (typeof arg !== "string") return false;
-    if (GIT_REFUSED_OPTIONS.has(flagName(arg))) return false;
-    if (subcommand === undefined && !arg.startsWith("-")) {
-      subcommand = arg.trim().toLowerCase();
+  const sub = gitSubcommandIndex(args);
+  const policy = GIT_POLICIES.get(args[sub]!);
+  if (!policy) return false;
+  const positionals: string[] = [];
+  const flags = new Set<string>();
+  let pathsOnly = false;
+  for (let index = sub + 1; index < args.length; index++) {
+    const arg = args[index]!;
+    if (pathsOnly || !arg.startsWith("-")) { positionals.push(arg); continue; }
+    if (arg === "--") {
+      if (!policy.paths) return false;
+      pathsOnly = true;
+      continue;
     }
+    const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    let name = equals < 0 ? arg : arg.slice(0, equals);
+    let value: string | undefined = equals < 0 ? undefined : arg.slice(equals + 1);
+    if (!policy.flags.has(name) && /^-[^-].+/.test(arg)) {
+      name = arg.slice(0, 2);
+      value = arg.slice(2);
+    }
+    if (!policy.flags.has(name)) return false;
+    if (policy.equalsOnly?.has(name) && equals < 0) return false;
+    const validate = policy.flags.get(name)!;
+    if (validate === null) { if (value !== undefined) return false; }
+    else {
+      value ??= args[++index];
+      if (value === undefined || !validate(value)) return false;
+    }
+    flags.add(name);
   }
-  if (subcommand === undefined) return false;
-  return GIT_READONLY_SUBCOMMANDS.has(subcommand);
+  return policy.positionals(positionals, flags);
 }
 
 /**
  * The single authority for what the tool will auto-run on the model's behalf:
  * `command[0]` must be an allowlisted inspection-only executable, AND every
  * argument must satisfy that executable's default-deny argument policy (git:
- * read-only subcommand + no write/reconfigure option). Anything else → false.
+ * subcommand-specific grammar). Anything else → false.
  *
  * CRIT ARC-a06a3945: argument validation is the point — an allowed executable
  * carrying a code-exec/file-write flag (`rg --pre`, `ast-grep --rewrite`,
@@ -295,13 +333,102 @@ function isAllowedGitCommand(args: string[]): boolean {
  */
 export function isAllowedAnchorCommand(command: string[]): boolean {
   const exe = command[0];
-  if (typeof exe !== "string" || exe.trim() === "") return false;
+  if (typeof exe !== "string" || !/^[a-zA-Z0-9.-]+$/.test(exe)) return false;
+  for (const arg of command) {
+    if (typeof arg !== "string" || /[\x00-\x1f\x7f]/.test(arg)) return false;
+  }
   const base = executableBaseName(exe);
   const args = command.slice(1);
   if (base === "git") return isAllowedGitCommand(args);
   const policy = ARG_POLICIES.get(base);
   if (!policy) return false;
   return isAllowedNonGitCommand(args, policy);
+}
+
+/** Discover the enclosing worktree without executing repository config. */
+function inspectionRoot(cwd: string): string {
+  let path = realpathSync(cwd);
+  const initial = path;
+  let bareRoot: string | undefined;
+  for (;;) {
+    if (existsSync(join(path, ".git"))) return path;
+    // Metadata inside a normal worktree also resembles a bare repository.
+    // Keep searching for the enclosing worktree before using this fallback.
+    if (existsSync(join(path, "HEAD")) && existsSync(join(path, "objects")) && existsSync(join(path, "refs"))) bareRoot ??= path;
+    const parent = dirname(path);
+    if (parent === path) return bareRoot ?? initial;
+    path = parent;
+  }
+}
+
+/**
+ * Inspection-specific installation trust: absolute physical PATH directories and
+ * final executable targets outside the inspected worktree and caller cwd only.
+ * The general resolver retains its normal relative/empty PATH semantics.
+ * Windows uses native EXE/COM only, never PATHEXT, CMD/BAT or ComSpec fallback.
+ * Host-managed installations outside those roots are trusted, not sandboxed;
+ * this does not protect against concurrent executable replacement.
+ */
+function inspectionExecutable(base: string, cwd: string): { file: string; env: NodeJS.ProcessEnv } {
+  const roots = [inspectionRoot(cwd), realpathSync(process.cwd())];
+  const env = stripAuditToolsControlEnv();
+  const pathKey = Object.keys(env).find(key => process.platform === "win32" ? key.toUpperCase() === "PATH" : key === "PATH");
+  const directories: string[] = [];
+  for (let entry of (pathKey ? env[pathKey] ?? "" : "").split(delimiter)) {
+    if (process.platform === "win32" && entry.startsWith('"') && entry.endsWith('"')) entry = entry.slice(1, -1);
+    if (!isAbsolute(entry) || roots.some(root => resolveWithinRoot(root, resolve(entry)) !== null)) continue;
+    try {
+      const physical = realpathSync(entry);
+      if (statSync(physical).isDirectory() && !roots.some(root => resolveWithinRoot(root, physical) !== null)) directories.push(physical);
+    } catch { /* Missing PATH entries cannot establish trusted identity. */ }
+  }
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase() === "PATH" || key.toUpperCase() === "PATHEXT") delete env[key];
+  }
+  env.PATH = directories.join(delimiter);
+  if (process.platform === "win32") env.PATHEXT = ".EXE;.COM";
+  const file = resolveExecutableFile(base, {
+    cwd, env,
+    executableFile: candidate => {
+      try {
+        if (!statSync(candidate).isFile()) return null;
+        if (process.platform !== "win32") accessSync(candidate, constants.X_OK);
+        const physical = realpathSync(candidate);
+        if (process.platform === "win32" && !/\.(exe|com)$/i.test(physical)) return null;
+        return roots.some(root => resolveWithinRoot(root, physical) !== null) ? null : physical;
+      } catch { return null; }
+    },
+  });
+  if (!file) throw new Error("No trusted native inspection executable found for " + base);
+  return { file, env };
+}
+
+/**
+ * Git >=2.45 is required by the fixed --no-lazy-fetch global flag: older Git
+ * rejects that flag before repository setup/subcommand execution. This also
+ * excludes old Git's interpretation of core.fsmonitor=false as a hook path.
+ * https://github.com/git/git/blob/v2.45.1/git.c (handle_options)
+ * https://git-scm.com/docs/git-config#Documentation/git-config.txt-corefsmonitor
+ */
+function inspectionGit(args: string[], env: NodeJS.ProcessEnv): string[] {
+  for (const key of Object.keys(env)) if (key.toUpperCase().startsWith("GIT_")) delete env[key];
+  Object.assign(env, {
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: process.platform === "win32" ? "NUL" : devNull,
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : devNull,
+    GIT_PAGER: "cat", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1",
+  });
+  const index = gitSubcommandIndex(args);
+  const sub = args[index]!;
+  const fixed = ["--no-lazy-fetch", "--no-pager", "--no-optional-locks", "--literal-pathspecs"];
+  for (const config of [
+    "core.fsmonitor=false", "core.pager=cat", "log.showSignature=false",
+    "format.pretty=format:%h %s", "submodule.recurse=false",
+    "diff.submodule=short", "status.submoduleSummary=false",
+  ]) fixed.push("-c", config);
+  const protections = ["log", "show", "diff"].includes(sub) ? ["--no-ext-diff", "--no-textconv"] : [];
+  if (["diff", "status"].includes(sub)) protections.push("--ignore-submodules=all");
+  if (["grep", "blame"].includes(sub)) protections.push("--no-textconv");
+  return [...fixed, sub, ...protections, ...args.slice(index + 1)];
 }
 
 /** Outcome of actually running an allowlisted command (injectable for tests). */
@@ -324,7 +451,7 @@ export interface AllowlistedExecOutcome {
    * True when the internal allowlist gate refused `command` BEFORE any spawn
    * was attempted (`isAllowedAnchorCommand` returned false) — a structured
    * refusal, never a spawn, never a throw. Distinct from `spawn_error` (which
-   * means a spawn WAS attempted and the OS failed to launch it): a refusal
+   * means trusted resolution or launching failed): a refusal
    * never touches the child_process API at all. Absent (not `false`) on every
    * outcome that reached a real spawn attempt.
    */
@@ -342,10 +469,10 @@ export type AllowlistedExecRunner = (
 /**
  * Spawn an allowlisted read-only command argv-only (never a shell), capturing
  * combined stdout+stderr (bounded). Strips the host-signalling env
- * (`stripAuditToolsControlEnv`), resolves the platform-correct argv via the shared
- * `resolveExecArgv`, and kills a command that exceeds `timeoutMs`
- * (SIGTERM→SIGKILL). The single runner both orchestrators use for the grounding
- * anchor pass.
+ * (`stripAuditToolsControlEnv`), resolves a trusted native executable outside
+ * the inspected worktree and caller cwd, and kills commands exceeding `timeoutMs`
+ * with bounded owned-process cleanup. This library entry point is shared by
+ * callers of the exported inspection API.
  *
  * INTERNAL GATE (invariants[2]): enforces {@link isAllowedAnchorCommand} on
  * itself, unconditionally, before ever spawning — `isAllowedAnchorCommand` is
@@ -378,7 +505,17 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
   return new Promise((resolvePromise) => {
     let owned: ReturnType<typeof spawnOwnedProcess>;
     try {
-      owned = spawnOwnedProcess(resolveExecArgv(command), { cwd, env: stripAuditToolsControlEnv(), deadlineAt: Date.now() + Math.max(1, Number.isFinite(timeoutMs) ? timeoutMs : 1) });
+      const base = executableBaseName(command[0]!);
+      const { file, env } = inspectionExecutable(base, cwd);
+      let args = command.slice(1);
+      if (base === "git") args = inspectionGit(args, env);
+      else if (base === "rg" || base === "ripgrep") {
+        // Fixed before pattern/path operands, even if a caller uses '--'.
+        // https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md#configuration-file
+        for (const key of Object.keys(env)) if (key.toUpperCase() === "RIPGREP_CONFIG_PATH") delete env[key];
+        args = ["--no-config", ...args];
+      }
+      owned = spawnOwnedProcess([file, ...args], { cwd, env, deadlineAt: Date.now() + Math.max(1, Number.isFinite(timeoutMs) ? timeoutMs : 1) });
     } catch (error) {
       resolvePromise({ exit_code: null, timed_out: false, output: "", spawn_error: error instanceof Error ? error.message : String(error) });
       return;
