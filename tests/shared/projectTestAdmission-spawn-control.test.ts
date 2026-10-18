@@ -246,3 +246,24 @@ test("owned root signal survives a successful Windows helper close", async () =>
     expect(await promise).toMatchObject({ exit_code: null, timed_out: false, spawn_error: "command terminated by signal SIGTERM" });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test.each([false, true])("a verified timeout close reports its deadline without changing captured output (truncated=%s)", async (truncate) => {
+  const dir = makeDiscoverableDir();
+  vi.useFakeTimers();
+  try {
+    const output = "npm banner and test diagnostics\n";
+    const maxCapturedOutput = truncate ? 8 : output.length;
+    const promise = runAdmittedProjectTestCommand(["npm", "test"], dir,
+      { timeoutMs: 100, sigkillGraceMs: 300, maxCapturedOutput });
+    currentChild.stdout.emit("data", Buffer.from(output));
+    vi.advanceTimersByTime(100);
+    currentChild.emit("exit", null, "SIGTERM");
+    currentChild.emit("close", null);
+    const outcome = await promise;
+    expect(outcome.timed_out).toBe(true);
+    expect(outcome.spawn_error).toContain("100ms");
+    expect(outcome.output).toBe(output.slice(0, maxCapturedOutput));
+    expect(outcome.truncated).toBe(truncate);
+    expect(currentChild.__release).toHaveBeenCalledOnce();
+  } finally { vi.useRealTimers(); rmSync(dir, { recursive: true, force: true }); }
+});

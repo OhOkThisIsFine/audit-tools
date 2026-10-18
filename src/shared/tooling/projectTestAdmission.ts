@@ -188,7 +188,9 @@ function runAdmittedProjectCommand(
       child.stderr.destroy();
       owned.release();
       const signal = owned.rootSignal();
-      const error = spawnError ?? (!timedOut && signal !== null ? `command terminated by signal ${signal}` : undefined);
+      const error = spawnError ?? (timedOut
+        ? `the command exceeded its ${String(timeoutMs)}ms deadline`
+        : signal !== null ? `command terminated by signal ${signal}` : undefined);
       resolvePromise({ admitted: true, exit_code: owned.rootStatus(), timed_out: timedOut,
         truncated, output, ...(error ? { spawn_error: error } : {}) });
     };
