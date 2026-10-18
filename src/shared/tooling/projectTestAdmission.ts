@@ -2,7 +2,7 @@
 //   The `landing-gate` role addition (admit a command only when discovery emits
 //   it, same spawn path as test/e2e) is pinned by the landing-gate close suite,
 //   which drives the leg through this runner.
-import { spawn } from "node:child_process";
+import { beginOwnedProcessTermination, OWNED_PROCESS_DRAIN_GRACE_MS, spawnOwnedProcess } from "./ownedProcessLifecycle.js";
 import { discoverProjectCommands } from "./testCommand.js";
 import { discoverLandingGates } from "./landingGates.js";
 import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
@@ -141,17 +141,24 @@ function runAdmittedProjectCommand(
   const sigkillGraceMs = options.sigkillGraceMs ?? PROJECT_TEST_SIGKILL_GRACE_MS;
 
   return new Promise((resolvePromise) => {
-    const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
-    const child = spawn(resolvedCommand, resolvedArgs, {
-      cwd: root,
-      env: stripAuditToolsControlEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    let owned: ReturnType<typeof spawnOwnedProcess>;
+    try {
+      owned = spawnOwnedProcess(resolveExecArgv(command), {
+        cwd: root,
+        env: stripAuditToolsControlEnv(),
+        deadlineAt: Date.now() + timeoutMs,
+      });
+    } catch (error) {
+      resolvePromise({ admitted: true, exit_code: null, timed_out: false,
+        truncated: false, output: "", spawn_error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    const child = owned.child;
     let output = "";
     let truncated = false;
+    let settled = false;
     const capture = (chunk: unknown): void => {
-      if (truncated) return;
+      if (settled || truncated) return;
       const text = String(chunk);
       const remaining = maxCapturedOutput - output.length;
       if (remaining <= 0) {
@@ -168,62 +175,52 @@ function runAdmittedProjectCommand(
     child.stdout?.on("data", capture);
     child.stderr?.on("data", capture);
     let timedOut = false;
-    let settled = false;
-    const settle = (outcome: ProjectTestAdmissionOutcome): void => {
+    let cancelTermination: (() => void) | undefined;
+    const settle = (spawnError?: string): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (escalation) clearTimeout(escalation);
-      resolvePromise(outcome);
+      cancelTermination?.();
+      // In particular, terminal fallback must not leave inherited capture pipes
+      // or a Windows Job owner alive after its promise has resolved.
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      owned.release();
+      const signal = owned.rootSignal();
+      const error = spawnError ?? (!timedOut && signal !== null ? `command terminated by signal ${signal}` : undefined);
+      resolvePromise({ admitted: true, exit_code: owned.rootStatus(), timed_out: timedOut,
+        truncated, output, ...(error ? { spawn_error: error } : {}) });
     };
 
-    // THE DEADLINE IS TERMINAL, which is not the same as "we sent a SIGKILL".
-    // The kill alone bounds nothing: on Windows the admitted vector is the
-    // `cmd.exe /d /s /c "npm.cmd …"` shim `resolveExecArgv` produces, so the
-    // direct child is the SHELL — SIGTERM kills cmd.exe and leaves npm.cmd/node
-    // alive holding the inherited stdout pipe, so `close` never fires and a
-    // caller awaiting this promise waits out the child's own runtime and then
-    // some (measured: a 1500ms `timeoutMs` against a 20s script resolved at
-    // 20274ms, long past the 5s grace). Every leg that awaits this runner — the
-    // landing gates, the project-facts test and the e2e command — would hang the
-    // CLOSE fold instead of reporting a `timed_out` gate, which is the failure
-    // this bound exists to make impossible. So the silence after SIGKILL is
-    // itself an outcome: `runTrackedAsync` (exec.ts) resolves on the same
-    // reasoning, and a child that ignores both signals must not be able to hold
-    // a caller forever.
-    let escalation: NodeJS.Timeout | null = null;
+    // Deadline cleanup owns the group/Job, including descendants after npm or
+    // its shell exits. Keep referenced clocks through TERM grace and bounded
+    // drain: neither root exit nor closed pipes proves the scope is empty.
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      escalation = setTimeout(() => {
-        child.kill("SIGKILL");
-        settle({
-          admitted: true,
-          exit_code: null,
-          timed_out: true,
-          truncated,
-          spawn_error:
-            `the command exceeded its ${String(timeoutMs)}ms deadline, survived the ` +
-            `${String(sigkillGraceMs)}ms SIGTERM grace and did not exit under SIGKILL`,
-          output,
-        });
+      cancelTermination = beginOwnedProcessTermination(owned, () => {}, () => {
+        settle(`the command exceeded its ${String(timeoutMs)}ms deadline; ` +
+          `owned process cleanup reached its ${String(sigkillGraceMs)}ms SIGTERM grace ` +
+          `and ${String(OWNED_PROCESS_DRAIN_GRACE_MS)}ms drain limit`);
       }, sigkillGraceMs);
-      escalation.unref?.();
+      // A synchronous close/error during termination may already have settled.
+      if (settled) cancelTermination();
     }, timeoutMs);
-    timer.unref?.();
     child.on("error", (error) => {
-      settle({
-        admitted: true,
-        exit_code: null,
-        timed_out: timedOut,
-        truncated,
-        spawn_error: error.message,
-        output,
-      });
+      if (settled) return;
+      if ((error as NodeJS.ErrnoException).code === "ETIMEDOUT") timedOut = true;
+      owned.terminate("SIGKILL");
+      settle(error.message);
     });
-    child.on("close", (code) => {
-      settle({ admitted: true, exit_code: code, timed_out: timedOut, truncated, output });
+    child.on("close", () => {
+      if (settled) return;
+      if (timedOut && !owned.cleanup(false).cleanup_verified) return;
+      // The Windows child's code is the Job helper's code, not the target's.
+      // Missing root_exit must never turn an owner failure into a successful test.
+      settle(owned.rootExited() ? undefined : "process owner closed without reporting the command exit");
     });
+    child.stdin.on("error", () => { /* a command may close its input immediately */ });
+    child.stdin.end();
   });
 }
 

@@ -6,7 +6,7 @@
  * child_process + fake timers) in projectTestAdmission-spawn-control.test.ts.
  */
 import { test, expect } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -131,3 +131,46 @@ test("runAdmittedProjectTestCommand reports a non-zero exit code for a failing a
     expect(outcome.exit_code).toBe(1);
   });
 });
+
+// Every fixture process self-exits after eight seconds, including on the red
+// baseline: no machine-wide cleanup and no indefinitely orphaned descendants.
+test("timeout stops an admitted npm child and grandchild before returning", async () => {
+  await withTempDir(async (dir) => {
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    await writeFile(join(dir, "package.json"), JSON.stringify({ scripts: { test: "node child.cjs" } }));
+    await writeFile(join(dir, "grandchild.cjs"), `
+      const fs = require('node:fs');
+      process.on('SIGTERM', () => {});
+      setInterval(() => fs.appendFileSync('heartbeat', '.'), 25);
+      setTimeout(() => process.exit(0), 8000);
+    `);
+    await writeFile(join(dir, "child.cjs"), `
+      const { spawn } = require('node:child_process');
+      const fs = require('node:fs');
+      setInterval(() => fs.appendFileSync('child-heartbeat', '.'), 25);
+      process.on('SIGTERM', () => {});
+      spawn(process.execPath, ['grandchild.cjs'], { stdio: 'inherit' });
+      setTimeout(() => process.exit(0), 8000);
+    `);
+    const started = Date.now();
+    let cleanupObserved = false;
+    try {
+      const outcome = await runAdmittedProjectTestCommand(["npm", "test"], dir,
+        { timeoutMs: 1500, sigkillGraceMs: 250 });
+      expect(outcome.timed_out).toBe(true);
+      expect(Date.now() - started).toBeLessThan(5000);
+      const heartbeats = () => Promise.all(["child-heartbeat", "heartbeat"].map(async (name) =>
+        (await readFile(join(dir, name), "utf8")).length));
+      const before = await heartbeats();
+      for (const count of before) expect(count).toBeGreaterThan(0);
+      await delay(200);
+      const after = await heartbeats();
+      expect(after, "child and grandchild must stop writing before the next gate can start").toEqual(before);
+      cleanupObserved = true;
+    } finally {
+      // A deliberately failing baseline must let its fixture children self-exit
+      // before the containing fixture directory is removed.
+      if (!cleanupObserved) await delay(Math.max(0, 9500 - (Date.now() - started)));
+    }
+  });
+}, 15000);

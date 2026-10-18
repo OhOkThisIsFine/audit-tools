@@ -20,9 +20,10 @@ export function beginOwnedProcessTermination(
   owned: { terminate(signal: NodeJS.Signals): void },
   onEscalate: () => void,
   onDrainLimit: () => void,
+  termGraceMs = OWNED_PROCESS_TERM_GRACE_MS,
 ): () => void {
-  const escalation = setTimeout(() => { onEscalate(); owned.terminate("SIGKILL"); }, OWNED_PROCESS_TERM_GRACE_MS);
-  const drain = setTimeout(() => { owned.terminate("SIGKILL"); onDrainLimit(); }, OWNED_PROCESS_TERM_GRACE_MS + OWNED_PROCESS_DRAIN_GRACE_MS);
+  const escalation = setTimeout(() => { onEscalate(); owned.terminate("SIGKILL"); }, termGraceMs);
+  const drain = setTimeout(() => { owned.terminate("SIGKILL"); onDrainLimit(); }, termGraceMs + OWNED_PROCESS_DRAIN_GRACE_MS);
   owned.terminate("SIGTERM");
   return () => { clearTimeout(escalation); clearTimeout(drain); };
 }
