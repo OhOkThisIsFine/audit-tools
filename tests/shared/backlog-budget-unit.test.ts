@@ -663,6 +663,65 @@ describe("the baseline cannot hold a claim that stopped being true", () => {
   });
 });
 
+describe("--update-baseline cannot grant new entry amnesties", () => {
+  const text = file(
+    entry("Old large", ENTRY_BUDGET_BYTES + 1),
+    entry("New large", ENTRY_BUDGET_BYTES + 1),
+    "- **Old mechanism**\n  The fix is to remove the duplicate.",
+    "- **New mechanism**\n  The fix is to remove the duplicate.",
+    "- **Fixed large**\n  Short now.",
+    "- **Fixed mechanism**\n  **Property:** only one remains.",
+  );
+  const raw = {
+    file_ceilings: {},
+    entries_over_budget: ["small.md::Old large", "small.md::Fixed large", "small.md::Gone"],
+    entries_prescribing_mechanism: ["small.md::Old mechanism", "small.md::Fixed mechanism", "small.md::Gone"],
+  };
+  const expected = {
+    file_ceilings: {},
+    entries_over_budget: ["small.md::Old large"],
+    entries_prescribing_mechanism: ["small.md::Old mechanism"],
+  };
+
+  for (const raiseCeiling of [false, true]) {
+    it(`retains only existing live exemptions (raiseCeiling=${raiseCeiling})`, () => {
+      const files = [{ file: "small.md", text }];
+      const baseline = normalizeBaseline(raw);
+      const result = evaluateBacklog(files, baseline);
+      const plan = planBaselineUpdate(result.nextBaseline, baseline, { raiseCeiling });
+      expect(plan.baseline).toEqual(expected);
+      const updated = normalizeBaseline(plan.baseline);
+      const rechecked = evaluateBacklog(files, updated);
+      expect(rechecked.violations).toHaveLength(2);
+      expect(planBaselineUpdate(rechecked.nextBaseline, updated, { raiseCeiling }).baseline).toEqual(expected);
+    });
+
+    it(`does not launder either violation through the CLI (raiseCeiling=${raiseCeiling})`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "backlog-amnesty-"));
+      try {
+        mkdirSync(join(dir, "scripts", "shared"), { recursive: true });
+        mkdirSync(join(dir, "docs", "backlog"), { recursive: true });
+        const script = join(dir, "scripts", "check-backlog-budget.mjs");
+        const baselineFile = join(dir, "docs", "backlog", ".size-baseline.json");
+        copyFileSync(SCRIPT, script);
+        copyFileSync(ENTRY_GRAMMAR, join(dir, "scripts", "shared", "backlog-entry-grammar.mjs"));
+        copyFileSync(PRIMITIVES, join(dir, "scripts", "shared", "primitives.mjs"));
+        writeFileSync(join(dir, "docs", "backlog", "small.md"), text, "utf8");
+        writeFileSync(baselineFile, JSON.stringify(raw), "utf8");
+        const args = [script, "--update-baseline", ...(raiseCeiling ? ["--raise-ceiling"] : [])];
+        expect(spawnSyncHidden(process.execPath, args, { encoding: "utf8" }).status).toBe(0);
+        expect(JSON.parse(readFileSync(baselineFile, "utf8"))).toEqual(expected);
+        const enforced = spawnSyncHidden(process.execPath, [script], { encoding: "utf8" });
+        expect(enforced.status).toBe(1);
+        expect(enforced.stderr).toContain("New large");
+        expect(enforced.stderr).toContain("New mechanism");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe("--update-baseline may lower a ceiling, never raise one", () => {
   /** An over-budget synthetic file, plus a recorded ceiling `delta` bytes away from it. */
   function overBudget(delta: number) {

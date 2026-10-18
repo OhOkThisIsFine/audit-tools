@@ -522,7 +522,8 @@ export function evaluateBacklog(files, baseline) {
  *
  * @param {{file_ceilings: Record<string, number>, entries_over_budget: string[],
  *   entries_prescribing_mechanism: string[]}} nextBaseline
- * @param {{fileCeilings: Record<string, number>}} baseline  what is recorded today
+ * @param {{fileCeilings: Record<string, number>, entriesOverBudget: Set<string>,
+ *   entriesPrescribingMechanism: Set<string>}} baseline  what is recorded today
  * @param {{raiseCeiling: boolean}} intent
  */
 export function planBaselineUpdate(nextBaseline, baseline, { raiseCeiling }) {
@@ -554,11 +555,10 @@ export function planBaselineUpdate(nextBaseline, baseline, { raiseCeiling }) {
   return {
     baseline: {
       file_ceilings,
-      entries_over_budget: nextBaseline.entries_over_budget,
-      // Carried verbatim: the remedy's job is to drop keys that stopped
-      // applying, so an entry that gained its `**Property:**` in this lap leaves
-      // the list here — which is why the amnesty can only ever shrink.
-      entries_prescribing_mechanism: nextBaseline.entries_prescribing_mechanism,
+      // Refresh existing exemptions only. A measured violation cannot grant
+      // itself amnesty, even when the operator explicitly raises a file ceiling.
+      entries_over_budget: nextBaseline.entries_over_budget.filter((key) => baseline.entriesOverBudget.has(key)),
+      entries_prescribing_mechanism: nextBaseline.entries_prescribing_mechanism.filter((key) => baseline.entriesPrescribingMechanism.has(key)),
     },
     refused,
     raised,
