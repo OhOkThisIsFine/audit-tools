@@ -397,6 +397,25 @@
         "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
       }
     },
+    "b3148880827e283a": {
+      "reviewed_by": "Independent Chat cache-boundary review relayed by source thread 01a11009-2946-7430-9357-b90afaad902d",
+      "attester_class": "agent",
+      "checked": "Independent Chat review traced the exact eight source-read-only executors for stale-index reuse. Unknown and tool-backed dispatches invalidate on success and exceptions, including partial writes. Real formatter success and partial failure preserve fresh planning; the persisted fold matches forced rescans with at least two fewer line scans. Local Windows unfiltered npm test qualified the exact content.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e2214abd1bd7a45953a79586f5fd76e153a3086f",
+        "ran_at": "2026-10-18T09:33:08.385Z"
+      },
+      "attested_at": "2026-10-18T09:45:54.751Z",
+      "vouches": {
+        "src/audit/cli/nextStepHelpers.ts": "fe7693e61feaa5c83677704f85385fdbdf6bcde2",
+        "src/audit/orchestrator/advance.ts": "3e4be5fb16f4e218bf0dbee67b79225ed71033df",
+        "src/audit/orchestrator/executorRunners.ts": "836b0e7ec3d633724706ce7319f30be9e694867d",
+        "src/audit/orchestrator/scopeIndexBaseline.ts": "f1dd9b6b0ee04c9d56a9d32a7b994618d0a9ca3a"
+      }
+    },
     "beb774a606887b42": {
       "reviewed_by": "claude-opus-5-5-session",
       "attester_class": "agent",
@@ -522,7 +541,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "b3148880827e283a"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -543,7 +562,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "b3148880827e283a"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
@@ -612,7 +631,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "392554939aa89e3b"
+      "review": "b3148880827e283a"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "9bc59db653647a3a"
@@ -747,7 +766,7 @@
       "review": "6cd8a9eb36e60d5d"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "b3148880827e283a"
     },
     "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
       "review": "92a14c6e9e3ff056"
