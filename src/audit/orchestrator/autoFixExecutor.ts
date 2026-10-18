@@ -238,10 +238,10 @@ export async function runAutoFixExecutor(
       ...resolveNodeTool(
         root,
         join("node_modules", "prettier", "bin", "prettier.cjs"),
-        ["--write", ...prettierPaths],
+        ["--write", "--", ...prettierPaths],
         display,
       ),
-      { command: "prettier", args: ["--write", ...prettierPaths], display },
+      { command: "prettier", args: ["--write", "--", ...prettierPaths], display },
     ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
@@ -296,12 +296,18 @@ export async function runAutoFixExecutor(
     ], executedTools, failedTools, toolTimings, options.analyzerConsent);
   }
 
+  const hasSeparateLiveTree = options.repositoryRoot !== undefined &&
+    resolve(options.repositoryRoot) !== resolve(root);
   let writeBackDetail = "";
-  if (
-    executedTools.length > 0 &&
-    options.repositoryRoot !== undefined &&
-    resolve(options.repositoryRoot) !== resolve(root)
-  ) {
+  // A nonzero formatter may already have rewritten files. Keep those actual
+  // audit inputs, but do not copy a partially failed phase into the live tree.
+  if (failedTools.length > 0) {
+    writeBackDetail = hasSeparateLiveTree
+      ? " No formatter edits were written back to the live tree because a formatter failed." +
+        " Partial formatter edits may remain in the audit snapshot and will be audited."
+      : " Partial formatter edits may remain in the source tree and will be audited.";
+  }
+  if (executedTools.length > 0 && failedTools.length === 0 && hasSeparateLiveTree) {
     const startHashes = new Map(
       (bundle.repo_manifest?.files ?? []).flatMap((file) =>
         file.hash === undefined ? [] : [[file.path, file.hash] as const],
@@ -309,11 +315,10 @@ export async function runAutoFixExecutor(
     );
     const { written, skipped } = await writeBackSnapshotEdits({
       sourceRoot: root,
-      repositoryRoot: options.repositoryRoot,
+      repositoryRoot: options.repositoryRoot!,
       paths: [...byExtension.values()].flat(),
       startHashes,
     });
-    if (options.artifactsDir !== undefined) await repinRunSnapshot(options.artifactsDir);
     writeBackDetail =
       ` Wrote ${written.length} formatted file(s) back to the live tree.` +
       (skipped.length > 0
@@ -321,7 +326,19 @@ export async function runAutoFixExecutor(
         : "");
   }
 
+  // Reconcile the pin even when every formatter failed, or the caller supplied
+  // only a snapshot/artifacts directory. Restoration must preserve audited bytes.
+  if ((executedTools.length > 0 || failedTools.length > 0) && options.artifactsDir !== undefined) {
+    await repinRunSnapshot(options.artifactsDir);
+  }
+
   const resultsArtifact = {
+    ...(failedTools.length > 0 ? {
+      failure_reconciliation: {
+        source_edits: "retained",
+        live_writeback: hasSeparateLiveTree ? "withheld" : "not_applicable",
+      },
+    } : {}),
     executed_tools: executedTools,
     failed_tools: failedTools,
     tool_timings: toolTimings,
