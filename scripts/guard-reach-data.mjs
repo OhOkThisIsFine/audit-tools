@@ -1351,7 +1351,7 @@ export const GUARDS = [
     ],
     note:
       'PreToolUse on Bash|PowerShell. Refuses an AGENT push that would put a PROTECTED branch (main/master) ' +
-      'on the remote unless suiteGreenVerdict (scripts/shared/suiteGreenStamp.mjs) certifies the tree being ' +
+      'on the remote unless suiteQualificationVerdict (scripts/shared/suiteGreenStamp.mjs) certifies the tree being ' +
       'pushed. The gap it closes: every narrow gate passes on a touched area, and a CROSS-AREA invariant is ' +
       'reachable only by the full suite — which nothing local runs before a push (two commits shipped red on ' +
       '2026-08-27 this way). The stamp is minted by the one gate runner on a FULL run, so the only way to ' +
@@ -1406,6 +1406,15 @@ export const GUARDS = [
       'stamp through the REAL writeSuiteGreenStamp — so the refusal case, the bound case, the STALE case ' +
       '(a stamp covering different content) and the announced relocated-push fail-open are all pinned ' +
       'against the shipped mechanism rather than a hand-rolled stamp file',
+  },
+  {
+    id: 'ledger-suite-transition-test',
+    kind: 'contract-test',
+    impl: 'tests/shared/ledger-suite-transition.test.ts',
+    note:
+      'drives the official attester and qualification consumers; an exact ledger-only transition ' +
+      'retains the original token-bound suite evidence, while other entries, modes, deletions, ' +
+      'tampering and incomplete or filtered run evidence refuse',
   },
   {
     id: 'suite-green-stamp-test',

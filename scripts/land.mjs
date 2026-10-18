@@ -19,7 +19,7 @@
 //     from inside this script would otherwise escape.
 import { spawnSync } from "node:child_process";
 import { guardArgv } from "./shared/argvGuard.mjs";
-import { readSuiteGreenStamp, suiteGreenVerdict } from "./shared/suiteGreenStamp.mjs";
+import { suiteQualificationVerdict } from "./shared/suiteGreenStamp.mjs";
 import {
   CI_CONCLUSION_WAIT_MS,
   CI_POLL_MS,
@@ -72,7 +72,7 @@ if (!git(["merge-base", "--is-ancestor", target, sha]).ok) {
 }
 
 const tree = git(["rev-parse", "HEAD^{tree}"]).out;
-const verdict = suiteGreenVerdict(readSuiteGreenStamp(root), tree);
+const verdict = suiteQualificationVerdict(root, tree, { concernsBlock: true });
 if (!verdict.ok) refuse(`${verdict.reason}. Run \`npm test\` on this exact tree, then land.`);
 
 // A landing branch unique to this commit: a retry of the same commit reuses its

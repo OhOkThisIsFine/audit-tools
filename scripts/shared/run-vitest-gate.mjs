@@ -75,6 +75,7 @@ const require = createRequire(import.meta.url);
 
 const vitestArgs = process.argv.slice(2);
 const token = randomUUID();
+const suiteTreeBefore = isFullSuiteRun(vitestArgs) ? worktreeTree(repoRoot) : null;
 
 const vitestEntry = require.resolve("vitest/vitest.mjs");
 // stderr is PIPED (stdout stays inherited, so progress still streams live) purely
@@ -206,7 +207,14 @@ if (outcome.failed > 0) {
 // A full-suite green is the only run that is evidence about the WHOLE tree, so
 // only that run mints a stamp. Best-effort by construction: a stamp that cannot
 // be written leaves NO evidence, and no-evidence is the safe reading downstream.
-if (isFullSuiteRun(vitestArgs)) writeSuiteGreenStamp(repoRoot, worktreeTree(repoRoot));
+if (isFullSuiteRun(vitestArgs)) {
+  const suiteTreeAfter = worktreeTree(repoRoot);
+  writeSuiteGreenStamp(repoRoot, suiteTreeAfter, {
+    run_token: token, vitest_args: vitestArgs,
+    tree_before: suiteTreeBefore, tree_after: suiteTreeAfter,
+    reporter: { runToken: record.runToken, outcome: record.outcome },
+  });
+}
 
 process.exit(0);
 

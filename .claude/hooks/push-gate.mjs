@@ -9,7 +9,7 @@
 // remain outside this policy. Explicit feature destinations do not arm it.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { readSuiteGreenStamp, suiteGreenVerdict } from '../../scripts/shared/suiteGreenStamp.mjs';
+import { suiteQualificationVerdict } from '../../scripts/shared/suiteGreenStamp.mjs';
 import { splitShellStatements, stripHeredocBodies, stripQuoted } from './shell-split.mjs';
 
 const PROTECTED = ['main', 'master'];
@@ -163,7 +163,6 @@ for (const statement of pushes) {
   }
 }
 if (sources.length === 0) process.exit(0);
-const stamp = readSuiteGreenStamp(root);
 let verdict;
 for (const source of sources) {
   const resolved = git(['rev-parse', '--verify', '--end-of-options', `${source}^{tree}`]);
@@ -171,7 +170,7 @@ for (const source of sources) {
     noteFailOpen(`cannot resolve pushed source ${source} — the suite check was SKIPPED`);
     process.exit(0);
   }
-  verdict = suiteGreenVerdict(stamp, resolved.stdout.trim());
+  verdict = suiteQualificationVerdict(root, resolved.stdout.trim(), { concernsBlock: true });
   if (!verdict.ok) break;
 }
 if (verdict?.ok) process.exit(0);

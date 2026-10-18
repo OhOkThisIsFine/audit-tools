@@ -138,6 +138,7 @@ interface GateCase {
   stderr?: string;
   args?: string[];
   sentinel?: boolean;
+  mutateTree?: boolean;
 }
 
 function runGateCase(scenario: GateCase) {
@@ -152,12 +153,15 @@ function runGateCase(scenario: GateCase) {
     for (const file of [
       "run-vitest-gate.mjs", "vitestShard.mjs", "vitestGateVerdict.mjs",
       "worktree-tree.mjs", "suiteGreenStamp.mjs", "load-flake-record.mjs", "primitives.mjs",
+      "loopCoreAttestationLedger.mjs",
     ]) {
       mkdirSync(resolve(root, "scripts/shared"), { recursive: true });
       copyFileSync(resolve("scripts/shared", file), resolve(root, "scripts/shared", file));
     }
+    mkdirSync(resolve(root, '.claude/hooks'), { recursive: true });
+    copyFileSync(resolve('.claude/hooks/loop-core-patterns.mjs'), resolve(root, '.claude/hooks/loop-core-patterns.mjs'));
     put("package.json", '{"type":"module"}');
-    put(".gitignore", "node_modules/\n.audit-tools-profile/\n.claude/hooks/.state/\n");
+    put(".gitignore", "node_modules/\n.audit-tools-profile/\n.claude/hooks/.state/\nchild-calls.jsonl\n");
     put("node_modules/vitest/package.json", '{"name":"vitest"}');
     put("node_modules/vitest/vitest.mjs", 'throw new Error("must be intercepted");');
     // Not a lock test: fail loudly if an abnormal exit reaches observations.
@@ -173,13 +177,14 @@ cp.spawnSync = (command, args, options) => {
   if (command === process.execPath) {
     fs.appendFileSync(path.join(__dirname, "child-calls.jsonl"), JSON.stringify(args) + "\\n");
     if (args[1] !== "run") throw new Error("unexpected isolated diagnostic");
+    if (scenario.mutateTree) fs.writeFileSync(path.join(__dirname, "during-run.txt"), "changed");
     const ledger = scenario.ledger ?? "fresh";
     if (ledger !== "missing") {
       const profile = path.join(__dirname, ".audit-tools-profile");
       fs.mkdirSync(profile, { recursive: true });
       fs.writeFileSync(path.join(profile, "vitest-latest.json"), JSON.stringify({
         runToken: ledger === "fresh" ? options.env.VITEST_GATE_TOKEN : "previous-run",
-        outcome: { passed: 2, failed: scenario.failed ?? 0, skipped: 0,
+        outcome: { passed: 2, failed: scenario.failed ?? 0, skipped: 0, total: 2 + (scenario.failed ?? 0) + (scenario.unfinished ?? 0),
           unfinished: scenario.unfinished ?? 0,
           failedFiles: scenario.failed ? ["tests/failed.test.ts"] : [] }
       }));
@@ -255,6 +260,8 @@ const numericCases: [string, GateCase, number, boolean][] = [
   ["ordinary numeric failure", { status: 7 }, 7, false],
   ["supported reporter forgiveness", { status: 1, stderr: RPC_TIMEOUT_STDERR }, 0, true],
   ["ordinary success", { status: 0 }, 0, true],
+  ["during-run edit does not mint a stamp", { status: 0, mutateTree: true }, 0, false],
+  ["zero-exit unfinished run does not mint a stamp", { status: 0, unfinished: 1 }, 0, false],
   ["filtered success", { status: 0, args: ["tests/example.test.ts"] }, 0, false],
   ["missing ledger", { status: 0, ledger: "missing" }, 1, false],
   ["stale ledger", { status: 0, ledger: "stale" }, 1, false],
@@ -268,7 +275,14 @@ for (const [name, scenario, status, stamped] of numericCases) {
     const result = runGateCase(scenario);
     assert.equal(result.status, status, result.stderr);
     assert.equal(result.stamp !== null, stamped);
-    if (stamped) assert.match(JSON.parse(result.stamp!).tree, /^[0-9a-f]{40,64}$/);
+    if (stamped) {
+      const stamp = JSON.parse(result.stamp!);
+      assert.match(stamp.tree, /^[0-9a-f]{40,64}$/);
+      assert.equal(stamp.run_evidence.tree_before, stamp.tree);
+      assert.equal(stamp.run_evidence.tree_after, stamp.tree);
+      assert.equal(stamp.run_evidence.reporter.runToken, stamp.run_evidence.run_token);
+      assert.deepEqual(stamp.run_evidence.vitest_args, []);
+    }
     assert.equal(result.calls.length, 1);
   });
 }

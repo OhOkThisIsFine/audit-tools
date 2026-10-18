@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hostMemoryDir } from './hostMemoryDir.mjs';
-import { readSuiteGreenStamp, suiteGreenVerdict } from './suiteGreenStamp.mjs';
+import { readSuiteGreenStamp, suiteQualificationVerdict } from './suiteGreenStamp.mjs';
 import { worktreeTrees } from './worktree-tree.mjs';
 
 /**
@@ -81,7 +81,7 @@ export function closeoutReadinessFindings(root) {
       // release-bump delta, which is admitted here for the same reason the push
       // gate admits it: the release script rewrites two version values after a
       // green run, and that is the whole difference being handed off.
-      const verdict = suiteGreenVerdict(readSuiteGreenStamp(root), current);
+      const verdict = suiteQualificationVerdict(root, current, { concernsBlock: true });
       if (!verdict.ok) {
         findings.push(
           /no full-suite green stamp exists/.test(verdict.reason)

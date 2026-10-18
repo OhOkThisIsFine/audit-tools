@@ -42,7 +42,7 @@ describe("green-mechanism declaration", () => {
     const raw = JSON.parse(readFileSync(DECLARATION, "utf8"));
     expect(raw.command).toBe("node scripts/shared/suite-green-status.mjs");
     expect(readFileSync(join(ROOT, "scripts", "shared", "suite-green-status.mjs"), "utf8"))
-      .toContain("suiteGreenVerdict");
+      .toContain("suiteQualificationVerdict");
   });
 
   it("states a reason — the deferral must explain itself, not just assert", () => {

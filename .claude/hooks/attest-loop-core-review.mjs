@@ -46,13 +46,13 @@
 //                     review also covers. Each such path must be named: the
 //                     attestation refuses rather than vouch for content silently.
 //
-// sites-pinned: tests/shared/loop-core-attestation-ledger.test.ts, tests/shared/attest-derived-file-preflight.test.ts, tests/shared/pre-commit-gate-attestation.test.ts
+// sites-pinned: tests/shared/ledger-suite-transition.test.ts, tests/shared/loop-core-attestation-ledger.test.ts, tests/shared/attest-derived-file-preflight.test.ts, tests/shared/pre-commit-gate-attestation.test.ts
 //   Each suite spawns this hook against a throwaway repo: the ledger suite
 //   drives the ledger write/stage and --include-unvouched refusals, the
 //   preflight suite the preflight-before-ledger ordering, and the gate suite
 //   the tree-bound attestation record the pre-commit gate reads.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -84,7 +84,7 @@ function fail(msg) {
 import { isLoopCorePath } from './loop-core-patterns.mjs';
 import { runDerivedFilePreflight } from '../../scripts/shared/derived-file-preflight.mjs';
 import { resolveNightlyDecisionKeys } from '../../scripts/shared/nightlyDecisionKey.mjs';
-import { readSuiteGreenStamp, suiteGreenVerdict } from '../../scripts/shared/suiteGreenStamp.mjs';
+import { readSuiteGreenStamp, suiteGreenVerdict, suiteGreenStampPath, ledgerSuiteTransition } from '../../scripts/shared/suiteGreenStamp.mjs';
 import {
   LEDGER_PATH,
   applyAttestation,
@@ -286,6 +286,7 @@ const testedTree = git(['write-tree']);
 if (!testedTree.ok || !testedTree.stdout.trim()) {
   fail(`\`git write-tree\` failed — not a git repo, or the index is unmerged. ${testedTree.stderr}`);
 }
+const originalStamp = (() => { try { return readFileSync(suiteGreenStampPath(root), 'utf8'); } catch { return ''; } })();
 const suiteGreen = suiteGreenVerdict(readSuiteGreenStamp(root), testedTree.stdout.trim());
 if (!suiteGreen.ok) {
   fail(
@@ -406,8 +407,18 @@ const gitHead = headRev.ok ? headRev.stdout.trim() : null;
 const dir = join(root, '.claude', 'loop-core-review');
 mkdirSync(dir, { recursive: true });
 const attestPath = join(dir, sha + '.json');
+// Preserve A's real suite stamp. Only this producer may record its exact
+// ledger-only A→B transition, after attributable preflight and final-tree checks.
+// Missing/legacy run evidence keeps the ordinary second-suite requirement.
+const suiteTransition = verdict === 'clear' && preflight.attributable && !preflight.abstention &&
+  preflight.stagedTree === testedTree.stdout.trim() &&
+  preflight.worktreeTreeBefore === testedTree.stdout.trim() &&
+  preflight.worktreeTreeAfter === testedTree.stdout.trim()
+  ? ledgerSuiteTransition(root, testedTree.stdout.trim(), sha, originalStamp)
+  : null;
 const record = {
   schema_version: 'loop-core-review/v2',
+  ...(suiteTransition ? { suite_transition: suiteTransition } : {}),
   staged_tree: sha,
   reviewed_by: reviewedBy,
   // Who ISSUED this attestation (self-declared, required) vs. what the shell
@@ -424,9 +435,9 @@ const record = {
   // What the preflight was actually able to establish about THIS tree. An
   // abstention is recorded as data rather than passing silently, so "the legs
   // were run" and "the legs judged the bound tree" stay distinguishable after
-  // the fact. No schema_version bump: the field has no reader — the gate reads
-  // staged_tree, verdict, override and freshness only. Its `staged_tree` is the
-  // tree the preflight judged: the bound tree minus this run's ledger write.
+  // the fact. Qualification reads these bindings for the ledger-only transition;
+  // records without them retain the ordinary full-suite requirement. Its
+  // `staged_tree` is the tree judged before this run's ledger write.
   preflight: {
     attributable: preflight.attributable,
     staged_tree: preflight.stagedTree,
