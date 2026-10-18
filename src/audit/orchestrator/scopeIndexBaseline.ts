@@ -84,10 +84,10 @@ export async function probeScopeIndexKey(
  *
  * The cache is HELD, not looked up, and the key is the point: it names the
  * probe's WHOLE input — the repo root and the candidate path set — so a probe
- * whose inputs differ cannot replay a stale entry. A step that re-derives the
- * manifest (the auto-fix phase writes into the audited tree, moving `files[]`)
- * mints a different key and re-probes, which is why the re-read the reviewer
- * asked to keep survives: only an identical question is answered from cache.
+ * whose inputs differ cannot replay a stale entry. Intake that changes the
+ * candidate path set mints a different key and re-probes. Source content edits
+ * alone do not change this scope key; source-line indexes are invalidated
+ * separately at dispatch, including when auto-fix retains its manifest.
  * Nothing inside a fold moves the INDEX itself — no deterministic executor
  * stages or unstages, the two directions the rule reads, and the fold is
  * in-process, so no host is running `git add` underneath it.
@@ -124,7 +124,7 @@ export async function probeScopeIndexKeyCached(
 }
 
 /**
- * Return a copy of the manifest carrying the probed index key. `null` (git
+ * Return the manifest carrying the probed index key, preserving identity when unchanged. `null` (git
  * unreadable) leaves the manifest untouched rather than stamping a sentinel —
  * a sentinel would be a claim about the index that the probe could not make,
  * and it would hash differently from the unprobed manifest for no reason.
@@ -133,6 +133,6 @@ export function withScopeIndexKey(
   repoManifest: RepoManifest | undefined,
   key: string | null,
 ): RepoManifest | undefined {
-  if (!repoManifest || key === null) return repoManifest;
+  if (!repoManifest || key === null || repoManifest.scope_index_key === key) return repoManifest;
   return { ...repoManifest, scope_index_key: key };
 }

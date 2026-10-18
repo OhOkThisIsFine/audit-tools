@@ -6,7 +6,7 @@ import { decideNextStep, findObligation, PRIORITY } from "./nextStep.js";
 import { deriveObligationState } from "./obligationDerive.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
-import { EXECUTOR_RUNNERS } from "./executorRunners.js";
+import { EXECUTOR_RUNNERS, preservesSourceIndexes } from "./executorRunners.js";
 import { EXECUTOR_BY_OBLIGATION } from "./executors.js";
 import {
   classifyObligationBranch,
@@ -542,9 +542,17 @@ export async function runSingleAdvanceStep(
         ) ?? [],
       )
     : null;
+  // A runner can rewrite source files without replacing its manifest (and a
+  // failed formatter can still write). Drop identity for every runner not
+  // proven read-only, including forced submission dispatches outside the fold's
+  // deterministic runner and roots with no readable git index.
+  const manifest = run.updated.repo_manifest;
+  const indexedManifest = manifest && !preservesSourceIndexes(selectedExecutor)
+    ? { ...manifest }
+    : manifest;
   const probedBundle = {
     ...run.updated,
-    repo_manifest: withScopeIndexKey(run.updated.repo_manifest, scopeIndexKey),
+    repo_manifest: withScopeIndexKey(indexedManifest, scopeIndexKey),
   };
   const metadata = computeArtifactMetadata(
     probedBundle,

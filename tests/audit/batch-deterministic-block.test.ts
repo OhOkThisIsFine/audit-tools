@@ -191,3 +191,58 @@ test("the fold emits a per-obligation heartbeat record for every execution it dr
     expect(records.map((r) => r.phase)).toContain("repo_manifest");
   });
 });
+
+test("persisted deterministic fold matches forced-rescan output with fewer source scans", async () => {
+  const { vi } = await import("vitest");
+  const indexes = await import("../../src/audit/cli/lineIndex.js");
+  const runners = await import("../../src/audit/orchestrator/executorRunners.js");
+  const { rm } = await import("node:fs/promises");
+  await withTempDir("audit-code-cache-fold-", async (root) => {
+    await writeFixture(root);
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const { execFileSyncHidden } = await import("../helpers/spawn.mjs");
+    execFileSyncHidden("git", ["init", "--quiet"], { cwd: root });
+    execFileSyncHidden("git", ["add", "."], { cwd: root });
+    execFileSyncHidden("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--quiet", "-m", "fixture"], { cwd: root });
+    const scan = vi.spyOn(indexes, "buildLineIndex");
+    async function run() {
+      await mkdir(artifactsDir, { recursive: true });
+      await ensureSupervisorDirs(artifactsDir);
+      await mkdir(submissionsDir(artifactsDir), { recursive: true });
+      await writeFile(laneSubmissionPath(artifactsDir, GATE_LANES.critical_flow_fallback),
+        JSON.stringify({ flows: [] }));
+      scan.mockClear();
+      const result = await runDeterministicForNextStep({
+        root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000,
+        narrativeEnabled: false,
+        analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" },
+        graphLlmEdgeReasoning: false,
+      });
+      expect(result.kind).toBe("confirm_intent");
+      const bundle = await loadArtifactBundle(artifactsDir);
+      return { scans: scan.mock.calls.length, artifacts: {
+        files: bundle.repo_manifest?.files,
+        disposition: bundle.file_disposition,
+        graph: bundle.graph_bundle,
+        design: bundle.design_assessment,
+        decomposition: bundle.structure_decomposition,
+        docs: bundle.docs_digest,
+      } };
+    }
+    try {
+      const optimized = await run();
+      await rm(join(root, ".audit-tools"), { recursive: true, force: true });
+      // Force the existing dispatcher to drop all identities: the same fold,
+      // same source and same real runners, but a fresh line scan on every step.
+      vi.spyOn(runners, "preservesSourceIndexes").mockReturnValue(false);
+      const rescanned = await run();
+      // Generation timestamps are the only intentionally volatile fields in
+      // these persisted semantic artifacts; all source/coverage data is exact.
+      const stable = (value: unknown) => JSON.stringify(value,
+        (key, child: unknown) => key === "generated_at" ? undefined : child);
+      expect(stable(optimized.artifacts)).toBe(stable(rescanned.artifacts));
+      expect(optimized.scans).toBeLessThan(rescanned.scans);
+      expect(rescanned.scans - optimized.scans).toBeGreaterThanOrEqual(2);
+    } finally { vi.restoreAllMocks(); }
+  });
+});

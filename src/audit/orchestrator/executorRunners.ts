@@ -58,6 +58,26 @@ export type AuditExecutorRunner = (
 ) => Promise<ExecutorRunResult>;
 
 /**
+ * Audited source-read-only runners may retain the fold's manifest-index memo.
+ * Keep this an allowlist: new runners and all command-backed tooling invalidate
+ * by default, even when a command reports failure after changing source bytes.
+ */
+const SOURCE_READ_ONLY_EXECUTORS = new Set([
+  "intent_equivalence_executor",
+  "design_assessment_executor",
+  "docs_digest_executor",
+  "structure_decomposition_executor",
+  "critical_flow_fallback_executor",
+  "result_ingestion_executor",
+  "runtime_validation_update_executor",
+  "external_analyzer_import_executor",
+]);
+
+export function preservesSourceIndexes(executor: string | null): boolean {
+  return executor !== null && SOURCE_READ_ONLY_EXECUTORS.has(executor);
+}
+
+/**
  * Narrow an optional root to a definite string for a runner that requires it,
  * throwing the canonical "advanceAudit <executor> requires root" error otherwise.
  */
