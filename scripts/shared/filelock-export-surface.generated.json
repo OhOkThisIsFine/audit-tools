@@ -34,6 +34,21 @@
       ]
     },
     {
+      "name": "FileLockOwnershipLostError",
+      "kind": "class",
+      "heritage": [
+        "extends Error"
+      ],
+      "members": [
+        "constructor(lockPath: string, cause?: unknown)"
+      ]
+    },
+    {
+      "name": "AssertLockOwnership",
+      "kind": "type_alias",
+      "definition": "() => Promise<void>"
+    },
+    {
       "name": "LockOptions",
       "kind": "interface",
       "heritage": [],
@@ -55,7 +70,7 @@
     {
       "name": "withFileLock",
       "kind": "function",
-      "signature": "function withFileLock<T>(lockPath: string, fn: () => Promise<T>, timeoutMs?: number, logger?: RunLogger, options: LockOptions = <default>): Promise<T>"
+      "signature": "function withFileLock<T>(lockPath: string, fn: (assertOwnership: AssertLockOwnership) => Promise<T>, timeoutMs?: number, logger?: RunLogger, options: LockOptions = <default>): Promise<T>"
     },
     {
       "name": "lockedJsonMutate",
@@ -63,5 +78,5 @@
       "signature": "function lockedJsonMutate<T>(lockPath: string, jsonPath: string, mutate: (current: unknown) => T, options: { timeoutMs?: number; logger?: RunLogger } & LockOptions = <default>): Promise<T>"
     }
   ],
-  "sha256": "9837044cddca0b8033374fa6d9f8043c028ef038d280ac37d575070725ea36fe"
+  "sha256": "2674ec055b38cb2dc0367389d68c47c90651b4196869c70249c2d4898ac93dcc"
 }

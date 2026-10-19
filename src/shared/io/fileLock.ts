@@ -65,6 +65,16 @@ export class FileLockTimeoutError extends Error {
   }
 }
 
+export class FileLockOwnershipLostError extends Error {
+  constructor(lockPath: string, cause?: unknown) {
+    super(`File lock ownership lost: ${lockPath}`, { cause });
+    this.name = "FileLockOwnershipLostError";
+  }
+}
+
+/** Cooperative checkpoint before a guarded mutation; not an atomic write fence. */
+export type AssertLockOwnership = () => Promise<void>;
+
 function generateOwnerToken(now: Clock = defaultClock): string {
   return `${process.pid}-${now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -206,6 +216,7 @@ function startLockHeartbeat(
   ownerToken: string,
   now: Clock,
   intervalMs: number,
+  onOwnershipLost: (cause?: unknown) => void,
   logger?: RunLogger,
 ): () => void {
   const timer = setInterval(() => {
@@ -216,12 +227,18 @@ function startLockHeartbeat(
           // Someone else now owns this lock path (stolen after staleness).
           // Distinct from an IO failure: the heartbeat is correctly stopping
           // itself rather than refreshing a lock it no longer holds.
+          onOwnershipLost();
+          clearInterval(timer);
           logger?.event({ kind: "error", note: "lock_heartbeat_stolen", lock_path: lockPath } as never);
           return;
         }
         const stamp = new Date(now());
         await utimes(lockPath, stamp, stamp);
       } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+          onOwnershipLost(err);
+          clearInterval(timer);
+        }
         // IO failure (contention, transient FS error, lock removed underneath
         // us): classified and recorded rather than silently swallowed, so a
         // loss of freshness is visible instead of invisible.
@@ -337,14 +354,36 @@ export async function releaseLock(lockPath: string, ownerToken: string): Promise
   }
 }
 
+/**
+ * The callback must check ownership at its mutation boundary after long work.
+ * A lease can be stolen while it is suspended: rejecting a competing promise
+ * cannot cancel that callback or undo a write already in flight. Checkpoints
+ * refuse observed loss; they do not make check + write atomic with stale steal.
+ */
 export async function withFileLock<T>(
   lockPath: string,
-  fn: () => Promise<T>,
+  fn: (assertOwnership: AssertLockOwnership) => Promise<T>,
   timeoutMs?: number,
   logger?: RunLogger,
   options: LockOptions = {},
 ): Promise<T> {
   const token = await acquireLock(lockPath, timeoutMs, logger, options);
+  let ownershipError: FileLockOwnershipLostError | undefined;
+  const loseOwnership = (cause?: unknown): FileLockOwnershipLostError =>
+    ownershipError ??= new FileLockOwnershipLostError(lockPath, cause);
+  const assertOwnership: AssertLockOwnership = async () => {
+    if (ownershipError) throw ownershipError;
+    let current: string;
+    try {
+      current = await readFile(lockPath, "utf8");
+    } catch (error) {
+      // Missing or unreadable authority cannot authorize another mutation.
+      throw loseOwnership(error);
+    }
+    if (current !== token) throw loseOwnership();
+    // A concurrent heartbeat may have observed loss during the read above.
+    if (ownershipError) throw ownershipError;
+  };
   // Keep a LIVE holder's lock fresh for the whole critical section (INV-SCC-08):
   // without the heartbeat, any fn() outliving STALE_LOCK_MS has its lock stolen
   // while still executing. Stopped (synchronously) before release.
@@ -353,11 +392,15 @@ export async function withFileLock<T>(
     token,
     options.now ?? defaultClock,
     options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+    loseOwnership,
     logger,
   );
   let hasFnError = false;
   try {
-    return await fn();
+    await assertOwnership();
+    const result = await fn(assertOwnership);
+    await assertOwnership();
+    return result;
   } catch (err) {
     hasFnError = true;
     throw err;

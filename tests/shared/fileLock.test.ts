@@ -15,6 +15,7 @@ import {
   releaseLock,
   withFileLock,
   FileLockTimeoutError,
+  FileLockOwnershipLostError,
   isTransientPermissionContention,
   lockedJsonMutate,
 } from "../../src/shared/io/fileLock.js";
@@ -119,6 +120,44 @@ test("withFileLock executes callback and always releases lock", async () => {
       { code: "ENOENT" },
       "lock file should be removed after withFileLock resolves",
     );
+  });
+});
+
+test.each(["replaced", "removed", "unreadable"])("ownership checkpoint refuses a %s lock before mutation", async (loss) => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    let mutated = false;
+    await expect(withFileLock(lockPath, async (assertOwnership) => {
+      await assertOwnership();
+      if (loss === "replaced") await writeFile(lockPath, "successor");
+      else {
+        await rm(lockPath);
+        if (loss === "unreadable") {
+          const { mkdir } = await import("node:fs/promises");
+          await mkdir(lockPath);
+        }
+      }
+      await assertOwnership();
+      mutated = true;
+    })).rejects.toBeInstanceOf(FileLockOwnershipLostError);
+    expect(mutated).toBe(false);
+    if (loss === "replaced") expect(await readFile(lockPath, "utf8")).toBe("successor");
+  });
+});
+
+test("ownership checkpoints do not cancel or undo callback writes already in flight", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    const output = join(dir, "output.txt");
+    await expect(withFileLock(lockPath, async (assertOwnership) => {
+      await assertOwnership();
+      await writeFile(lockPath, "successor");
+      // Deliberate loss AFTER the checkpoint: this remains the callback's
+      // responsibility. Completion refuses success but cannot undo this write.
+      await writeFile(output, "already written");
+    })).rejects.toBeInstanceOf(FileLockOwnershipLostError);
+    expect(await readFile(output, "utf8")).toBe("already written");
+    expect(await readFile(lockPath, "utf8")).toBe("successor");
   });
 });
 
@@ -498,9 +537,9 @@ test("withFileLock preserves original fn() error when releaseLock also throws", 
 });
 
 // ---------------------------------------------------------------------------
-// 17. withFileLock surfaces the releaseLock error when fn() succeeded
+// 17. withFileLock refuses success when ownership can no longer be verified
 // ---------------------------------------------------------------------------
-test("withFileLock surfaces the releaseLock error when fn() succeeds", async () => {
+test("withFileLock refuses success when the lock is unreadable after fn()", async () => {
   await withTempDir(async (dir: string) => {
     const lockPath = tmpLockPath(dir);
     const { unlink, mkdir } = await import("node:fs/promises");
@@ -508,14 +547,14 @@ test("withFileLock surfaces the releaseLock error when fn() succeeds", async () 
     await assert.rejects(
       () =>
         withFileLock(lockPath, async () => {
-          // fn() succeeds, but we sabotage release so releaseLock throws. With no
-          // fn() error to preserve, that release error must propagate.
+          // fn() succeeds, but the lock becomes unreadable before completion.
+          // Surface the ownership failure instead of reporting success.
           await unlink(lockPath);
           await mkdir(lockPath);
           return "ok";
         }),
       (err) => {
-        expect(err instanceof Error, "the release error should propagate").toBeTruthy();
+        expect(err).toBeInstanceOf(FileLockOwnershipLostError);
         return true;
       },
     );
@@ -671,6 +710,7 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
     const lockPath = tmpLockPath(dir);
     const logPath = join(dir, `run-${randomUUID()}.jsonl`);
     const logger = new RunLogger(logPath);
+    let originalToken = "";
 
     let release: (() => void) | undefined;
     const gate = new Promise<void>((r) => {
@@ -681,6 +721,7 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
       async () => {
         // Steal the lock out from under the live holder: the lock path now
         // carries a FOREIGN token, so the next beat must stand down and say so.
+        originalToken = await readFile(lockPath, "utf8");
         await writeFile(lockPath, `foreign-token-${randomUUID()}`, "utf8");
         await gate;
         return "done";
@@ -691,8 +732,10 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
     );
 
     const events = await waitForLoggedNote(logPath, "lock_heartbeat_stolen");
+    // Observed loss is sticky even if external interference restores the bytes.
+    await writeFile(lockPath, originalToken);
     release!();
-    expect(await held).toBe("done");
+    await expect(held).rejects.toBeInstanceOf(FileLockOwnershipLostError);
 
     const stolen = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_stolen");
     expect(
@@ -737,7 +780,7 @@ test("CP-NODE-23: a heartbeat beat whose refresh fails is classified lock_heartb
 
     const events = await waitForLoggedNote(logPath, "lock_heartbeat_failed");
     release!();
-    expect(await held).toBe("done");
+    await expect(held).rejects.toBeInstanceOf(FileLockOwnershipLostError);
 
     const failed = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_failed");
     expect(

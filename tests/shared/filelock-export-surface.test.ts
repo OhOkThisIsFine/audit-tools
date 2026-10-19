@@ -50,6 +50,8 @@ describe("filelock-export-surface.generated.json — cdc-06 snapshot pin", () =>
       Clock: "type_alias",
       isTransientPermissionContention: "function",
       FileLockTimeoutError: "class",
+      FileLockOwnershipLostError: "class",
+      AssertLockOwnership: "type_alias",
       LockOptions: "interface",
       acquireLock: "function",
       releaseLock: "function",

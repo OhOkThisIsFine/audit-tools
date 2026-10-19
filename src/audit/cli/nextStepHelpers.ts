@@ -3567,7 +3567,7 @@ async function runDeterministicFold(
   const outcome = await withArtifactTreeHold(
     params.artifactsDir,
     foldLogger,
-    async () => {
+    async (assertOwnership) => {
       // CX-02 hold measurement: time the IN-HOLD span (acquire→release, this
       // callback), and record the engine's own charged-execution count. The
       // `finally` below runs on the throw path too, still under the hold.
@@ -3661,9 +3661,21 @@ async function runDeterministicFold(
           });
           engineOutcome.step = { ...engineOutcome.step, inspectionRun: inspection.activeReviewRun };
         }
+        await assertOwnership();
         await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
         return engineOutcome;
       } catch (error) {
+        // A suspended fold may have lost its lease. Do not let the throw-path
+        // commit overwrite a successor or consume staging it no longer owns.
+        // Leave staging for the next holder's ordinary recovery + bundle reload.
+        try {
+          await assertOwnership();
+        } catch (ownershipError) {
+          if (ownershipError instanceof Error && ownershipError !== error) {
+            ownershipError.cause = error;
+          }
+          throw ownershipError;
+        }
         // Commit-on-throw: persist the carried bundle WITH dispatch-local
         // failure attribution, then rethrow. This replaces the old catch's
         // second lock acquisition (a deterministic timeout under one hold).
