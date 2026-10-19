@@ -1,4 +1,4 @@
-// sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts
+// sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -42,7 +42,7 @@ async function sourceDigests(paths: readonly string[]): Promise<PlanSource["sour
   return Promise.all([...new Set(paths)].sort().map(async path => ({ path, sha256: hashContent(await readFile(path, "utf8")) })));
 }
 
-export async function writePathASeedFromFindings(artifactsDir: string, sourcePath: string, payload: unknown): Promise<void> {
+export async function writePathASeedFromFindings(artifactsDir: string, sourcePath: string, payload: unknown, guidancePaths: string[] = []): Promise<void> {
   const raw = payload as { findings?: unknown[]; audit_read?: unknown };
   const findings = (raw.findings ?? []).map(finding => FindingSchema.parse(finding));
   const paths = executionPlanPaths(artifactsDir);
@@ -52,9 +52,16 @@ export async function writePathASeedFromFindings(artifactsDir: string, sourcePat
     return;
   }
   const audit = AuditReadSchema.safeParse(raw.audit_read);
+  const sources = await sourceDigests([sourcePath, ...guidancePaths]);
+  const guidanceSources = sources.filter(source => source.path !== sourcePath);
+  const request = guidanceSources.length > 0 ? {
+    id: `request-${randomUUID()}`,
+    text: (await Promise.all(guidanceSources.map(source => readFile(source.path, "utf8")))).join("\n\n"),
+    source_paths: guidanceSources.map(source => source.path),
+  } : undefined;
   await writeJsonFile(paths.source, PlanSourceSchema.parse({
     plan_id: `plan-${randomUUID()}`, findings, audit_read: audit.success ? audit.data : null,
-    sources: await sourceDigests([sourcePath]), intent: await readExecutionIntent(artifactsDir),
+    sources, request, intent: await readExecutionIntent(artifactsDir),
   }));
 }
 

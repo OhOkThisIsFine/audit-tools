@@ -1,6 +1,6 @@
 // sites-pinned: tests/remediate/artifacts-validation.test.ts
 import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { collectFilesSorted } from "../../shared/io/collectFilesSorted.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
@@ -8,10 +8,13 @@ import {
   readJsonFile,
   readSubmissionLedger,
   resolveWithinRoot,
+  RemediationOutcomesReportSchema,
+  type RemediationOutcomesReport,
+  type VerificationReport,
 } from "audit-tools/shared";
 import { verificationReportPath } from "../../shared/io/auditToolsPaths.js";
 import type { RemediationState } from "../state/store.js";
-import { StateStore } from "../state/store.js";
+import { StateStore, validateRemediationState } from "../state/store.js";
 import { isInProgressStatus } from "../state/itemStatus.js";
 import {
   validateRemediationPlan,
@@ -34,6 +37,9 @@ import { readCanonicalPlan, readPlanSource, executionPlanIssues } from "../contr
 
 export interface ArtifactValidationResult {
   status: "ok" | "error";
+  /** Completed validation checks retained deliverables, not purged runtime evidence. */
+  scope: "active" | "completed";
+  limitations: string[];
   issue_count: number;
   issues: string[];
   /**
@@ -414,6 +420,135 @@ async function validateHostSubmissions(
   return { discovered: submissions.length, validated };
 }
 
+/** Retained reports must describe the same subjects as the retained state. */
+function validateCompletedIdentity(
+  state: RemediationState,
+  outcomes: RemediationOutcomesReport,
+  verification: VerificationReport,
+  issues: string[],
+): void {
+  function sameIds(actual: readonly string[], expected: readonly string[], label: string): void {
+    if (new Set(actual).size !== actual.length || JSON.stringify([...actual].sort()) !== JSON.stringify([...expected].sort())) {
+      issues.push(`${label} identities do not match remediation-state.complete.json.`);
+    }
+  }
+  const units = state.plan?.units ?? [];
+  const unitIds = units.map(unit => unit.id);
+  sameIds(Object.keys(state.items ?? {}), unitIds, "remediation-state.complete.json items");
+  const sourceIds = new Set((state.plan?.findings ?? []).map(finding => finding.id));
+  // Dropped sources with retained payloads also appear in both close reports.
+  if (state.plan_coverage && !Array.isArray(state.plan_coverage.entries)) {
+    issues.push("remediation-state.complete.json plan_coverage.entries must be an array.");
+  }
+  for (const entry of Array.isArray(state.plan_coverage?.entries) ? state.plan_coverage.entries : []) {
+    if (entry?.finding) {
+      if (typeof entry.finding.id !== "string" || entry.finding.id !== entry.finding_id) {
+        issues.push("remediation-state.complete.json has a mismatched coverage finding identity.");
+      } else sourceIds.add(entry.finding.id);
+    }
+  }
+  sameIds(outcomes.execution_outcomes.map(unit => unit.unit_id), unitIds, "remediation-outcomes.json execution units");
+  sameIds((verification.units ?? []).map(unit => unit.unit_id), unitIds, "verification_report.json units");
+  sameIds(outcomes.outcomes.map(finding => finding.finding_id), [...sourceIds], "remediation-outcomes.json findings");
+  sameIds(verification.findings.map(finding => finding.finding_id), [...sourceIds], "verification_report.json findings");
+  for (const unit of units) {
+    const outcome = outcomes.execution_outcomes.find(entry => entry.unit_id === unit.id);
+    const verified = verification.units?.find(entry => entry.unit_id === unit.id);
+    if (outcome) sameIds(outcome.source_finding_ids, unit.source_finding_ids, `remediation-outcomes.json ${unit.id} sources`);
+    if (verified) sameIds(verified.source_finding_ids, unit.source_finding_ids, `verification_report.json ${unit.id} sources`);
+  }
+  for (const finding of outcomes.outcomes) {
+    if (finding.finding?.id !== finding.finding_id) issues.push("remediation-outcomes.json finding payload identity does not match its finding_id.");
+    sameIds(finding.unit_ids ?? [], units.filter(unit => unit.source_finding_ids.includes(finding.finding_id)).map(unit => unit.id), `remediation-outcomes.json ${finding.finding_id} units`);
+  }
+  if (outcomes.request?.id !== state.plan?.request?.id ||
+      Boolean(outcomes.request_outcome) !== Boolean(state.plan?.request || state.plan?.request_disposition)) {
+    issues.push("remediation-outcomes.json request identity does not match remediation-state.complete.json.");
+  }
+  if (outcomes.request_outcome) sameIds(outcomes.request_outcome.unit_ids, unitIds, "remediation-outcomes.json request units");
+  if (verification.goal_id !== state.plan?.goal_id) issues.push("verification_report.json goal identity does not match remediation-state.complete.json.");
+}
+
+/** Close promotes these deliverables before deleting the active artifact tree. */
+async function validateCompletedArtifacts(artifactsDir: string, root: string): Promise<ArtifactValidationResult> {
+  const issues: string[] = [];
+  const outputDir = dirname(artifactsDir);
+  async function readRequiredJson(filename: string): Promise<unknown | undefined> {
+    const path = join(outputDir, filename);
+    if (!existsSync(path)) issues.push(`Missing completed remediation artifact at ${path}.`);
+    return readJsonForValidation(path, issues);
+  }
+
+  const statePath = join(outputDir, "remediation-state.complete.json");
+  const state = await readRequiredJson("remediation-state.complete.json");
+  let completeState: RemediationState | undefined;
+  if (state !== undefined) {
+    try {
+      const stateIssues = validateRemediationState(state);
+      issues.push(...stateIssues.map(issue => `${statePath}: ${issue}`));
+      if (stateIssues.length === 0 && isRecord(state) && state.status === "complete") completeState = state as unknown as RemediationState;
+    } catch (error) {
+      issues.push(`${statePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!isRecord(state) || state.status !== "complete") {
+      issues.push(`${statePath} must have status complete.`);
+    }
+  }
+
+  const outcomes = await readRequiredJson("remediation-outcomes.json");
+  const parsedOutcomes = outcomes === undefined ? undefined : RemediationOutcomesReportSchema.safeParse(outcomes);
+  if (parsedOutcomes && !parsedOutcomes.success) issues.push(`remediation-outcomes.json: ${parsedOutcomes.error.message}`);
+  const verification = await readRequiredJson("verification_report.json");
+  if (verification !== undefined) {
+    const verificationIssues = validateVerificationReport(verification, "verification_report.json");
+    pushErrorIssues(issues, verificationIssues);
+    if (completeState && parsedOutcomes?.success && verificationIssues.length === 0) {
+      validateCompletedIdentity(completeState, parsedOutcomes.data, verification as VerificationReport, issues);
+    }
+  }
+  const reportPath = join(outputDir, "remediation-report.md");
+  try {
+    if (!(await readFile(reportPath, "utf8")).trim()) issues.push(`${reportPath} must not be empty.`);
+  } catch (error) {
+    issues.push(`Cannot read completed remediation report at ${reportPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // A new run's active state must not be replaced by an earlier completion.
+  // Close may recreate only its terminal step after removing the active tree.
+  const step = await readJsonForValidation(join(artifactsDir, "steps", "current-step.json"), issues);
+  if (step !== undefined) {
+    pushErrorIssues(issues, validateCurrentStep(step, "current-step.json"));
+    if (!isRecord(step) || step.status !== "complete" || step.step_kind !== "present_report") {
+      issues.push("current-step.json must be a complete present_report step when active remediation state is absent.");
+    }
+    if (isRecord(step)) {
+      for (const [field, expected] of [["repo_root", root], ["artifacts_dir", artifactsDir]] as const) {
+        if (typeof step[field] !== "string" || pathKey(step[field]) !== pathKey(expected)) issues.push(`current-step.json ${field} does not match the validated artifact tree.`);
+      }
+      if (step.run_id !== null && step.run_id !== completeState?.plan?.plan_id) issues.push("current-step.json run_id does not match the completed plan.");
+      const paths = step.artifact_paths;
+      if (!isRecord(paths) || typeof paths.final_report !== "string" || pathKey(paths.final_report) !== pathKey(reportPath)) issues.push("current-step.json final_report does not match the retained report.");
+      if (!isRecord(paths) || paths.current_prompt !== step.prompt_path ||
+          typeof paths.current_step !== "string" || !resolveWithinRoot(artifactsDir, paths.current_step, { allowRoot: false }) ||
+          typeof step.prompt_path !== "string" || !resolveWithinRoot(artifactsDir, step.prompt_path, { allowRoot: false })) {
+        issues.push("current-step.json prompt and step paths must belong to the validated artifact tree.");
+      }
+    }
+  }
+
+  return {
+    status: issues.length > 0 ? "error" : "ok",
+    scope: "completed",
+    limitations: [
+      "Only retained terminal artifacts were checked. Purged host submissions and full command logs are unavailable; their contents were not revalidated.",
+      "The contract-pipeline execution-plan gate was not re-evaluated because its active source and accepted-plan artifacts are unavailable.",
+    ],
+    issue_count: issues.length,
+    issues,
+    scan: { submissions_discovered: 0, submissions_validated: 0, gates_evaluated: 0, gates_skipped: 1 },
+  };
+}
+
 export async function validateArtifacts(
   artifactsDir: string,
   // REQUIRED, deliberately: this feeds `verificationReportPath(root)`, which
@@ -423,6 +558,11 @@ export async function validateArtifacts(
   // cwd. Every call site already passes the resolved root.
   root: string,
 ): Promise<ArtifactValidationResult> {
+  if (!existsSync(join(artifactsDir, "state.json")) &&
+      existsSync(join(dirname(artifactsDir), "remediation-state.complete.json"))) {
+    return validateCompletedArtifacts(artifactsDir, root);
+  }
+
   const issues: string[] = [];
   const store = new StateStore(artifactsDir);
   const state = await store.loadState();
@@ -502,6 +642,8 @@ export async function validateArtifacts(
 
   return {
     status: issues.length > 0 ? "error" : "ok",
+    scope: "active",
+    limitations: [],
     issue_count: issues.length,
     issues,
     scan: {

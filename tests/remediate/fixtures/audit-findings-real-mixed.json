@@ -1,0 +1,228 @@
+{
+  "contract_version": "audit-tools/audit-findings/v1alpha2",
+  "audit_read": {
+    "commit": "9cb43d0f401bde7bc63f6c8dfea94fe40ff37e6c",
+    "dirty_paths": [
+      ".agent/skills/audit-code/SKILL.md",
+      ".gemini/commands/audit-code.toml",
+      ".github/agents/auditor.agent.md",
+      ".github/copilot-instructions.md",
+      ".github/prompts/audit-code.prompt.md",
+      "AGENTS.md",
+      "opencode.json"
+    ]
+  },
+  "summary": {
+    "finding_count": 3,
+    "work_block_count": 1,
+    "severity_breakdown": {
+      "high": 1,
+      "medium": 2
+    },
+    "lens_breakdown": {
+      "correctness": 3
+    },
+    "lens_coverage": [
+      {
+        "lens": "correctness",
+        "selected": true,
+        "findings_count": 3,
+        "outcome": "findings"
+      },
+      {
+        "lens": "security",
+        "selected": true,
+        "findings_count": 0,
+        "outcome": "clean"
+      },
+      {
+        "lens": "reliability",
+        "selected": true,
+        "findings_count": 0,
+        "outcome": "clean"
+      },
+      {
+        "lens": "data_integrity",
+        "selected": true,
+        "findings_count": 0,
+        "outcome": "clean"
+      }
+    ],
+    "audited_file_count": 0,
+    "excluded_file_count": 8,
+    "grounding_status_breakdown": {
+      "grounded": 3
+    },
+    "verification_status_breakdown": {
+      "asserted": 1
+    },
+    "runtime_validation_status_breakdown": {}
+  },
+  "findings": [
+    {
+      "id": "COR-eedf8183",
+      "title": "A positive discount increases the subtotal",
+      "category": "invariant_counterexample",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "README.md lines 3–4 explicitly require a discount to reduce the subtotal and discountedTotal(10000, 2000) to return 8000. In src/discount.mjs line 2, discountedTotal instead adds discountCents to subtotalCents, so that same valid input returns 12000. Every positive discount on ordinary finite nonnegative amounts increases the total; the zero clamp does not enforce the documented invariant. The arithmetic needs to subtract the discount to satisfy the existing contract. This observation follows directly from the frozen source; no tests were run.",
+      "affected_files": [
+        {
+          "path": "src/discount.mjs"
+        }
+      ],
+      "systemic": false,
+      "evidence_lane": "design-review-lane",
+      "grounding": {
+        "status": "grounded"
+      },
+      "verification_status": "asserted",
+      "evidence": [
+        "Independent follow-up deepening:architecture:969f84ac08: [{\"id\":\"verify-dr001-discount-arithmetic\",\"title\":\"Discount arithmetic violates the documented subtotal contract\",\"category\":\"incorrect_arithmetic\",\"severity\":\"medium\",\"confidence\":\"high\",\"lens\":\"correctness\",\"summary\":\"DR-001 stands: the documented positive-discount example returns 12000 cents instead of 8000 because discountedTotal adds discountCents. The failure is local arithmetic and needs no external provider assumptions. Subtract the discount while retaining the zero floor.\",\"affected_files\":[{\"path\":\"src/discount.mjs\",\"quoted_text\":\"  return Math.max(0, subtotalCents + discountCents);\",\"line_start\":2,\"line_end\":2}],\"evidence\":[\"Frozen README.md lines 3-4 specify finite nonnegative cent amounts, require discounts never to increase the subtotal, and explicitly require discountedTotal(10000, 2000) to return 8000.\",\"Frozen src/discount.mjs adds the two inputs. Direct arithmetic evaluation for the documented example is Math.max(0, 10000 + 2000) = 12000, which violates the required 8000 result.\",\"The zero-discount case returns the original subtotal, but it does not refute the positive-discount counterexample. The zero floor leaves the incorrect positive sum unchanged. This is source-based verification; no test or production-provider behavior was executed.\"],\"related_findings\":[\"DR-001\"],\"evidence_lane\":\"per-file-lane\",\"grounding\":{\"status\":\"grounded\"}}] Treat disagreement as unresolved evidence; no semantic resolution is inferred by the tool."
+      ],
+      "theme_id": "T-001"
+    },
+    {
+      "id": "COR-eedf8183-2",
+      "title": "Discount arithmetic violates the documented subtotal contract",
+      "category": "incorrect_arithmetic",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "DR-001 stands: the documented positive-discount example returns 12000 cents instead of 8000 because discountedTotal adds discountCents. The failure is local arithmetic and needs no external provider assumptions. Subtract the discount while retaining the zero floor.",
+      "affected_files": [
+        {
+          "path": "src/discount.mjs",
+          "quoted_text": "  return Math.max(0, subtotalCents + discountCents);",
+          "line_start": 2,
+          "line_end": 2
+        }
+      ],
+      "evidence": [
+        "Frozen README.md lines 3-4 specify finite nonnegative cent amounts, require discounts never to increase the subtotal, and explicitly require discountedTotal(10000, 2000) to return 8000.",
+        "Frozen src/discount.mjs adds the two inputs. Direct arithmetic evaluation for the documented example is Math.max(0, 10000 + 2000) = 12000, which violates the required 8000 result.",
+        "The zero-discount case returns the original subtotal, but it does not refute the positive-discount counterexample. The zero floor leaves the incorrect positive sum unchanged. This is source-based verification; no test or production-provider behavior was executed."
+      ],
+      "evidence_lane": "per-file-lane",
+      "grounding": {
+        "status": "grounded"
+      },
+      "theme_id": "T-001"
+    },
+    {
+      "id": "COR-eedf8183-3",
+      "title": "Positive discounts increase the total",
+      "category": "incorrect_arithmetic",
+      "severity": "medium",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "A positive discount increases the returned total because discountCents is added rather than subtracted. For example, a 1000-cent subtotal with a 200-cent discount becomes 1200 cents instead of 800 cents. Subtract discountCents while retaining the zero floor.",
+      "affected_files": [
+        {
+          "path": "src/discount.mjs",
+          "quoted_text": "  return Math.max(0, subtotalCents + discountCents);",
+          "line_start": 2,
+          "line_end": 2
+        }
+      ],
+      "evidence": [
+        "The exported discountedTotal function adds discountCents to subtotalCents before applying its zero floor.",
+        "By direct evaluation of the expression, discountedTotal(1000, 200) returns 1200 cents; applying a 200-cent discount to a 1000-cent subtotal should produce 800 cents."
+      ],
+      "evidence_lane": "per-file-lane",
+      "grounding": {
+        "status": "grounded"
+      },
+      "theme_id": "T-001"
+    }
+  ],
+  "coherence_trace": {
+    "normalized_items": [
+      {
+        "id": "COR-eedf8183",
+        "file_paths": [
+          "src/discount.mjs"
+        ],
+        "unit_ids": [
+          "src-discount-mjs"
+        ],
+        "tags": [
+          "correctness"
+        ]
+      },
+      {
+        "id": "COR-eedf8183-2",
+        "file_paths": [
+          "src/discount.mjs"
+        ],
+        "unit_ids": [
+          "src-discount-mjs"
+        ],
+        "tags": [
+          "correctness"
+        ]
+      },
+      {
+        "id": "COR-eedf8183-3",
+        "file_paths": [
+          "src/discount.mjs"
+        ],
+        "unit_ids": [
+          "src-discount-mjs"
+        ],
+        "tags": [
+          "correctness"
+        ]
+      }
+    ],
+    "components": [
+      [
+        "COR-eedf8183",
+        "COR-eedf8183-2",
+        "COR-eedf8183-3"
+      ]
+    ]
+  },
+  "work_blocks": [
+    {
+      "id": "block-1",
+      "finding_ids": [
+        "COR-eedf8183",
+        "COR-eedf8183-2",
+        "COR-eedf8183-3"
+      ],
+      "unit_ids": [
+        "src-discount-mjs"
+      ],
+      "owned_files": [
+        "src/discount.mjs"
+      ],
+      "role": "implementation",
+      "max_severity": "high",
+      "rationale": "Canonical coherence component with 3 finding(s).",
+      "depends_on": [],
+      "token_estimate": 2730
+    }
+  ],
+  "work_block_seams": [],
+  "themes": [
+    {
+      "theme_id": "T-001",
+      "title": "Discount uses addition instead of subtraction",
+      "root_cause": "All three finding records describe the same arithmetic defect in src/discount.mjs: adding discountCents increases the total instead of reducing it. The independent contract, verification, and per-file lanes converged on one underlying bug.",
+      "finding_ids": [
+        "COR-eedf8183",
+        "COR-eedf8183-2",
+        "COR-eedf8183-3"
+      ],
+      "suggested_fix_pattern": "Subtract discountCents from subtotalCents while retaining the zero floor, then test positive, zero, and over-subtotal discounts against the documented contract."
+    }
+  ],
+  "executive_summary": "The audit identified one underlying arithmetic bug, represented by three finding records from independent review and verification paths: a positive discount increases the total. The credit control and settlement implementation yielded no supported correctness finding; production provider replay semantics could not be established. This was a source-preserving semantic exercise with external analyzers skipped, no audit-runtime validation results, and zero fully audited files in the machine coverage summary, so it does not establish comprehensive clean coverage.",
+  "top_risks": [
+    "Valid positive discounts produce an inflated amount; the documented 10000-cent subtotal and 2000-cent discount return 12000 instead of 8000.",
+    "Three records repeat one defect and should not be interpreted as three independent bugs.",
+    "Production settlement-provider behavior remains unknown, and absent findings in other selected lenses do not establish executed per-lens inspection."
+  ]
+}

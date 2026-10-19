@@ -1,6 +1,6 @@
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/phase-triage.test.ts
 import { DecisionApplicationReceiptSchema, reconcileDecisionCleanup, type DecisionApplicationReceipt } from "./decisionConsumption.js";
-// sites-pinned: tests/remediate/clarification-round-contract.test.ts
+// sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/artifacts-validation.test.ts, tests/remediate/store.test.ts
 import { z } from "zod";
 import { executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
 import { ITEM_STATUSES, isTerminalStatus } from "./itemStatus.js";
@@ -157,7 +157,7 @@ const PLAN_REQUIRED_STATUSES = new Set<string>([
 ]);
 
 /** Validate that a parsed JSON value is a usable RemediationState. */
-function validateState(value: unknown): string[] {
+export function validateRemediationState(value: unknown): string[] {
   const errors: string[] = [];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     errors.push("state.json must be a JSON object");
@@ -217,9 +217,12 @@ function validateState(value: unknown): string[] {
       if (!parsed.success) errors.push(...parsed.error.issues.map(issue => `plan.${issue.path.join(".")}: ${issue.message}`));
 
     }
+  }
+  // Completion permits absent plan/items, never malformed retained item data.
+  if (obj["items"] !== undefined || PLAN_REQUIRED_STATUSES.has(status)) {
     const items = obj["items"];
     if (!items || typeof items !== "object" || Array.isArray(items)) {
-      errors.push(`status "${status}" requires persisted items`);
+      errors.push(`status "${status}" requires persisted items to be an object`);
     } else {
       for (const [key, item] of Object.entries(items as Record<string, unknown>)) {
         if (!item || typeof item !== "object" || Array.isArray(item)) {
@@ -364,11 +367,11 @@ export class StateStore {
         if (raw === undefined) {
           return null;
         }
-        // `validateState` throws SchemaVersionMismatchError for a state stamped
+        // `validateRemediationState` throws SchemaVersionMismatchError for a state stamped
         // with another release's contract version; that propagates out of the
         // read exactly as the policy requires (see the constant's doc).
         const adopted = raw;
-        const errors = validateState(adopted);
+        const errors = validateRemediationState(adopted);
         if (errors.length > 0) {
           throw new Error(
             `state.json failed schema validation: ${errors.join("; ")}`,
@@ -379,7 +382,7 @@ export class StateStore {
         // on disk and this read is byte-faithful: what `loadState` returns is
         // what the file says, with no field conjured at read time. A state
         // written before the field existed has none until its next write, and
-        // `validateState` admits that (see the constant's doc) — which is the
+        // `validateRemediationState` admits that (see the constant's doc) — which is the
         // whole reason the field is optional on the type rather than required.
         return adopted as RemediationState;
       },
@@ -390,7 +393,7 @@ export class StateStore {
       // reader would accept. The gate and the writer now share ONE validator.
       validate: (next) => {
         if (next === null) return;
-        const errors = validateState(next);
+        const errors = validateRemediationState(next);
         if (errors.length > 0) {
           throw new Error(
             `refusing to write state.json: ${errors.join("; ")}`,
