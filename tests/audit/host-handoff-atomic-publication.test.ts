@@ -80,7 +80,7 @@ it('a held accepted lock prevents publication until the prior coherent generatio
     let notify!: () => void;
     const attempted = new Promise<void>((resolve) => { notify = resolve; });
     vi.spyOn(lockIo, 'withFileLock').mockImplementation(async <T>(
-      path: string, fn: () => Promise<T>, timeout?: number, logger?: RunLogger, options?: lockIo.LockOptions,
+      path: string, fn: (assertOwnership: lockIo.AssertLockOwnership) => Promise<T>, timeout?: number, logger?: RunLogger, options?: lockIo.LockOptions,
     ): Promise<T> => {
       if (path === lockPath) notify();
       return originalLock(path, fn, timeout, logger, options);
