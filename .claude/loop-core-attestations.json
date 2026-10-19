@@ -260,43 +260,6 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
-    "3c25854bb15e0851": {
-      "reviewed_by": "Codex Windows qualification",
-      "attester_class": "agent",
-      "checked": "Inspected bounded inspection write grants and both fold commit checkpoints; native ready-inspection-access verifies one versus 470 results and sibling binding refusal, fold-lock-ownership exercises stale takeover on success and throw paths with successor bytes and staging preserved. Confirmed legitimate callback cleanup remains successful; checkpoints are cooperative and are not atomic fencing.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "3e15dcca456c319163239bfe3291a3dc7f687c2b",
-        "ran_at": "2026-10-19T09:48:33.692Z"
-      },
-      "attested_at": "2026-10-19T09:49:31.905Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "709f4f625e53dc565e65e3ebeedcd161fe4ebf93",
-        "src/audit/cli/nextStepHelpers.ts": "83672235ed72117c2195b947c6b8001892c6ac9a"
-      }
-    },
-    "3e0aee473b384f14": {
-      "reviewed_by": "opus-subagent-w6-review,opus-subagent-w6-delta-review",
-      "attester_class": "agent",
-      "checked": "Two independent read-only Opus reviews (CONCERNS each): property gaps, lock order, plan-draw purity, determinism, fallbacks, test reach. Fixed: per-file ownership key, lead+priority check, flow claim over eligible set. Each new test red-proven by inverting its half. Full suite 595/595 on tree fb3936cb.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "fb3936cb5ecf4cffcc15f6a7a2b36421a99c1bec",
-        "ran_at": "2026-10-07T03:39:30.231Z"
-      },
-      "attested_at": "2026-10-07T03:39:42.175Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "92612e121d1a64a5a8d6f7342a6e3438b1e89be6",
-        "src/audit/cli/semanticReviewStep.ts": "017f0f4f534453565d06c737e54dcc5d716a84ef",
-        "src/audit/orchestrator/executorRunners.ts": "3a2f5cfd2fe01400e99e8d26be9df24449903efe",
-        "src/audit/orchestrator/planningExecutors.ts": "7c14a773bbb946d89875dc3fe828f9f147004ae7",
-        "src/audit/orchestrator/taskBuilder.ts": "fcd8cb4902bf1e81523e8d7a2163f90ebb7e5dae"
-      }
-    },
     "4318b8e7432c3e06": {
       "reviewed_by": "claude-opus-5-5-review-subagent",
       "attester_class": "agent",
@@ -314,22 +277,6 @@
         "scripts/check-loop-core-attestations.mjs": "5e0cf43a19e6397bf394c5cb5e3e6f0b0476cabe",
         "scripts/shared/loopCoreAttestationLedger.mjs": "8857e52161ae230e69f72d3871b3c2927e6599f6",
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
-      }
-    },
-    "5c7f6ac1650e357c": {
-      "reviewed_by": "Independent Chat reviewer /root/review_combined_audit_fix and fixture correction review relayed by source thread 01a11009-2946-7430-9357-b90afaad902d",
-      "attester_class": "agent",
-      "checked": "Independent Chat reviewer /root/review_combined_audit_fix reviewed the combined cache and formatter source: eight-runner read-only cache reuse, invalidation after partial writes and throws, real formatter success and failure feeding fresh-equivalent planning, persisted fold equivalence, both operand delimiters, failed-only and mixed-order snapshot preservation with live writes withheld, and truthful direct-root reporting. The reviewed fixture correction pins local autocrlf=false for deterministic LF restoration assertions; production and assertions are unchanged. Line counts refresh; size hints remain intake-derived. Local focused tests, typecheck and the actual full suite passed on this staged content.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "d8bc58574fe60d31c3402ef5c4388b29b5d98e83",
-        "ran_at": "2026-10-18T10:48:43.154Z"
-      },
-      "attested_at": "2026-10-18T10:48:57.482Z",
-      "vouches": {
-        "src/audit/orchestrator/autoFixExecutor.ts": "e537c9a6ac0aa7eb1f8660e96112d74945687729"
       }
     },
     "6cd8a9eb36e60d5d": {
@@ -447,6 +394,32 @@
         "src/audit/orchestrator/advance.ts": "3e4be5fb16f4e218bf0dbee67b79225ed71033df",
         "src/audit/orchestrator/executorRunners.ts": "836b0e7ec3d633724706ce7319f30be9e694867d",
         "src/audit/orchestrator/scopeIndexBaseline.ts": "f1dd9b6b0ee04c9d56a9d32a7b994618d0a9ca3a"
+      }
+    },
+    "be526ca9e4e1d631": {
+      "reviewed_by": "Codex Windows qualification",
+      "attester_class": "agent",
+      "checked": "Inspected independently reviewed PR70 provenance, mixed finding intake and truthful lens coverage, snapshot trusted-root and cleanup deletion boundaries, tree-sitter disposal, shared scope matching and numeric severity. Native positive and negative ownership, restoration and rollover regressions passed. Fresh unfiltered Windows npm test on exact staged source tree 07714c18605304d83e3c411f6b14619f5579d230 completed 8309 passed, zero failed or unfinished, 38 capability skips. Attribution is agent review; no human identity or OS containment claim.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "07714c18605304d83e3c411f6b14619f5579d230",
+        "ran_at": "2026-10-19T17:58:31.765Z"
+      },
+      "attested_at": "2026-10-19T17:58:51.412Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "9e5ce26ff94fadf6dba273d66236dc91b121708d",
+        "src/audit/cli/nextStepHelpers.ts": "558fa1df7608a1bf482d6c8bfd9e0bb1c3bd5b5c",
+        "src/audit/io/rollover.ts": "3299c92da67e40380a870a02d8daf2f01c853d9e",
+        "src/audit/io/runSnapshot.ts": "b6bba61fe5d33af5391928f577f8481c457a2f78",
+        "src/audit/orchestrator/autoFixExecutor.ts": "dddad389f9db55aafd1c52dc1149230b07722641",
+        "src/audit/orchestrator/intentScopeDisposition.ts": "00bdc2c2efa1c8dc8e39516392d2e375b4a6915d",
+        "src/audit/orchestrator/planningExecutors.ts": "b22f62e2afb5e377dc4c9d1ab1fe7bf2f9d9cfd4",
+        "src/audit/orchestrator/synthesisExecutors.ts": "0b6909d43ddc3212aa9fc01d95ee3254c28fddc1",
+        "src/remediate/steps/contractPipeline.ts": "604ddeda5fd18078378542f5cd86aaf92d5b7c70",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "3c0fd8d922d3ccb90e59dac64ca3c08a1919310d",
+        "src/remediate/steps/nextStep.ts": "72bff5e5d8da4596c8aef2511cd285e52b4ab500"
       }
     },
     "beb774a606887b42": {
@@ -571,10 +544,10 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "3c25854bb15e0851"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "3c25854bb15e0851"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -583,10 +556,10 @@
       "review": "392554939aa89e3b"
     },
     "src/audit/io/rollover.ts": {
-      "review": "339be913c2e2c76d"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/io/runSnapshot.ts": {
-      "review": "392554939aa89e3b"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/accessMemory.ts": {
       "baseline": "7b79934e86baf378"
@@ -610,7 +583,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
-      "review": "5c7f6ac1650e357c"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/charterClarificationExecutor.ts": {
       "baseline": "7b79934e86baf378"
@@ -712,7 +685,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/intentScopeDisposition.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/ledger.ts": {
       "baseline": "7b79934e86baf378"
@@ -745,7 +718,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/planningExecutors.ts": {
-      "review": "3e0aee473b384f14"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/requeue.ts": {
       "baseline": "7b79934e86baf378"
@@ -838,7 +811,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/synthesisExecutors.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/systemicChallengeExecutor.ts": {
       "review": "189c849cd573575f"
@@ -898,7 +871,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "be526ca9e4e1d631"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
       "baseline": "7b79934e86baf378"
@@ -913,7 +886,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "be526ca9e4e1d631"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "beb774a606887b42"
@@ -922,7 +895,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "6cd8a9eb36e60d5d"
+      "review": "be526ca9e4e1d631"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"

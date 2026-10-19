@@ -79,6 +79,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "remediation-closing-result.json",
   "remediation-outcomes.json",
   "remediation-report.md",
+  "remediation-state.complete.json",
   "remediation_plan.json",
   "repo_manifest.json",
   "requeue_tasks.json",

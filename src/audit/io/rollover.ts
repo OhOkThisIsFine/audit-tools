@@ -127,7 +127,7 @@ function warn(message: string): void {
  * deleted: the dir then holds the only copy, or the record of what to clean.
  * Returns whether it rolled the dir over.
  */
-export async function rollOverFinishedRun(artifactsDir: string, runLogger?: RunLogger): Promise<boolean> {
+export async function rollOverFinishedRun(artifactsDir: string, root?: string, runLogger?: RunLogger): Promise<boolean> {
   if (!existsSync(runEndedPath(artifactsDir))) return false;
   return await withArtifactTreeHold(artifactsDir, runLogger, async () => {
     if (!existsSync(runEndedPath(artifactsDir))) return false;
@@ -144,7 +144,7 @@ export async function rollOverFinishedRun(artifactsDir: string, runLogger?: RunL
       warn(`the finished audit in ${artifactsDir} was not rolled over: could not archive ${lost.join("; ")}`);
       return false;
     }
-    const problems = await removeRunSnapshot(artifactsDir);
+    const problems = await removeRunSnapshot(artifactsDir, root);
     if (problems.length > 0) {
       warn(`the finished audit in ${artifactsDir} was not rolled over: run snapshot cleanup: ${problems.join("; ")}`);
       return false;

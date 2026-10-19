@@ -457,6 +457,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
   // Adapter/path-utils test-site declarations also change only comments in this closure.
   // Shared analyzer batch lifecycle changes this conservative closure through html.ts;
   // the cached floor consumes its unchanged HTML_RESOURCE_ATTRIBUTE only, so retain v10.
+  // Tree/parser disposal also changes only that analyzer lifecycle; the cached floor
+  // never calls it, so its per-file contribution format and rules still use v10.
   // Build-local path indexes preserve resolver and schema outputs (including ambiguity);
   // only repeated scans moved into an immutable snapshot, so retain cache version v10.
   expect(
@@ -465,7 +467,7 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("d4d396054265d1da5cc2c26eeb2b8bab96983de80d07b4aa712f6dd1efc291b3");
+  ).toBe("c917fe4dc06a983ada1a32292212c1c830d11662b23961f07af707db783f6a28");
   expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
 });
 

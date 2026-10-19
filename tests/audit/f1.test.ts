@@ -438,3 +438,27 @@ test("CE-008: the scope flip the projection captures is exactly what the prompt 
   // The live contract-prompt path agrees with the shared context.
   expect(renderContractReviewPrompt(scoped)).toMatch(/U2 \[excluded: third-party\]/);
 });
+
+test("write-protected files remain reviewable in the prompt and snapshot", () => {
+  const before = bundle();
+  const readOnly = bundle({ intent_checkpoint: checkpoint({ must_not_touch: ["**"] }) });
+  expect(renderSharedStructuralContext(readOnly, 5)).toBe(renderSharedStructuralContext(before, 5));
+  expect(renderContractReviewPrompt(readOnly)).toMatch(/U1 \[in scope\]/);
+  expect(renderContractReviewPrompt(readOnly)).not.toContain("[excluded:");
+  expect(projStr(readOnly)).toBe(projStr(before));
+  expect(isDesignReviewStale(snapshotFrom(before), readOnly)).toBe(false);
+});
+
+test.each([
+  { excluded_scope: [{ path: "vendor", reason: "third-party" }] },
+  { disposition_overrides: [{ path: "vendor", status: "vendor" as const, reason: "third-party" }] },
+])("true exclusions still apply alongside write protection (%#)", (exclusion) => {
+  const before = bundle();
+  before.unit_manifest!.units[0]!.files.push("vendor/x.ts");
+  const scoped = { ...before, intent_checkpoint: checkpoint({ must_not_touch: ["**"], ...exclusion }) };
+  const prompt = renderContractReviewPrompt(scoped);
+  // U1 mixes an excluded file and a read-only review target; U2 is fully excluded.
+  expect(prompt).toMatch(/U1 \[in scope\]/);
+  expect(prompt).toMatch(/U2 \[excluded: third-party\]/);
+  expect(isDesignReviewStale(snapshotFrom(before), scoped)).toBe(true);
+});

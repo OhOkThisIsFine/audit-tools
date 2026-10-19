@@ -2,7 +2,7 @@
  * The single authority for the `RemediationState` RUN status lifecycle.
  *
  * `RemediationState.status` is the canonical coarse phase of a remediation run;
- * the load gate (`validateState` in `./store.ts`) admits exactly these values
+ * the load gate (`validateRemediationState` in `./store.ts`) admits exactly these values
  * and the run-status invariant test asserts against this array. Nothing outside
  * this module may re-enumerate them.
  *

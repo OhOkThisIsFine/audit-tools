@@ -9,6 +9,7 @@
  */
 export const DISPATCH_BARREL_EXPORTS = [
   "RemediationHostPreparationError",
+  "hasBoundRemediationSubmission",
   "hostDependencyLevels",
   "ingestRemediationHostResults",
   "permanentlyDeadPendingUnits",

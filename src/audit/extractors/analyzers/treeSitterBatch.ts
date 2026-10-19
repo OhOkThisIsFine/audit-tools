@@ -27,24 +27,32 @@ export async function analyzeTreeSitterFiles(
   if (files.length === 0) return { edges: [] };
   const parser = await loadParser(grammar, context.dependencyPath);
   if (!parser) return { edges: [] };
-  prepareBatch?.();
+  try {
+    prepareBatch?.();
 
-  const root = resolve(context.root);
-  const edges: GraphEdge[] = [];
-  for (const file of files) {
-    let content: string;
-    try {
-      content = await readFile(resolve(root, file), "utf8");
-    } catch {
-      continue;
+    const root = resolve(context.root);
+    const edges: GraphEdge[] = [];
+    for (const file of files) {
+      let content: string;
+      try {
+        content = await readFile(resolve(root, file), "utf8");
+      } catch {
+        continue;
+      }
+      if (content.length > MAX_SOURCE_CODE_UNITS) continue;
+      try {
+        const tree = parser.parse(content);
+        try {
+          collectFileEdges(normalizeGraphPath(file), tree.rootNode, context.pathLookup, edges);
+        } finally {
+          tree.delete();
+        }
+      } catch (e) {
+        process.stderr.write(`[audit-code] ${warningLabel}: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
+      }
     }
-    if (content.length > MAX_SOURCE_CODE_UNITS) continue;
-    try {
-      const tree = parser.parse(content);
-      collectFileEdges(normalizeGraphPath(file), tree.rootNode, context.pathLookup, edges);
-    } catch (e) {
-      process.stderr.write(`[audit-code] ${warningLabel}: parse failed for '${file}': ${(e as Error).message ?? String(e)}\n`);
-    }
+    return { edges };
+  } finally {
+    parser.delete();
   }
-  return { edges };
 }

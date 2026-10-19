@@ -7,6 +7,7 @@ import { removeRunSnapshot } from "../io/runSnapshot.js";
 import type { AuditState } from "../types/auditState.js";
 
 export type CleanupOptions = {
+  repositoryRoot?: string;
   force?: boolean;
   dryRun?: boolean;
 };
@@ -100,7 +101,7 @@ export async function cleanupStaleArtifactsDir(
   // registration and a ref in the user's repository) — unless the operator
   // forces it: `--force` is the escape hatch, and a corrupt record would
   // otherwise refuse it for good. A forced delete names what it leaves behind.
-  const problems = await removeRunSnapshot(artifactsDir);
+  const problems = await removeRunSnapshot(artifactsDir, options.repositoryRoot);
   if (problems.length > 0) {
     if (!force) {
       return {

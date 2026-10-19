@@ -1,7 +1,8 @@
-import { test, expect } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { test, expect, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const { getTreeSitterParser, getTreeSitterDegradationCount, __resetTreeSitterForTests } = await import("../../src/audit/extractors/analyzers/treeSitter.js");
 
@@ -140,6 +141,38 @@ test("__resetTreeSitterForTests resets degradation counter", async () => {
     __resetTreeSitterForTests();
     expect(getTreeSitterDegradationCount(), "counter must be 0 after reset").toBe(0);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+    __resetTreeSitterForTests();
+  }
+});
+
+
+test("setLanguage failure deletes only its new parser and preserves runtime and grammar caches", async () => {
+  __resetTreeSitterForTests();
+  const dir = await mkdtemp(join(tmpdir(), "ts-disposal-"));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  try {
+    await writeFile(join(dir, "package.json"), JSON.stringify({ type: "module", main: "index.mjs" }));
+    await writeFile(join(dir, "index.mjs"), `
+      export const calls = [];
+      export class Parser {
+        static async init() { calls.push("init"); }
+        constructor() { calls.push("new"); }
+        setLanguage() { calls.push("setLanguage"); throw new Error("language rejected"); }
+        delete() { calls.push("delete"); }
+      }
+      export const Language = { async load() { calls.push("load"); return {}; } };
+    `);
+    const fixture = await import(pathToFileURL(join(dir, "index.mjs")).href) as { calls: string[] };
+    expect(await getTreeSitterParser("python", dir)).toBeUndefined();
+    expect(await getTreeSitterParser("python", dir)).toBeUndefined();
+    expect(fixture.calls).toEqual(["init", "load", "new", "setLanguage", "delete", "new", "setLanguage", "delete"]);
+    expect(getTreeSitterDegradationCount()).toBe(2);
+    expect(stderr.mock.calls).toEqual(Array.from({ length: 2 }, () => [
+      "[audit-code] tree-sitter: failed to instantiate parser for grammar 'python': language rejected\n",
+    ]));
+  } finally {
+    stderr.mockRestore();
     await rm(dir, { recursive: true, force: true });
     __resetTreeSitterForTests();
   }

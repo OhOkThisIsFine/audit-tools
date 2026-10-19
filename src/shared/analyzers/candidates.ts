@@ -644,13 +644,12 @@ function parseOsvScanner(stdout: string): ExternalAnalyzerParseReport {
           ? group.ids.filter((id): id is string => typeof id === "string")
           : [];
         if (ids.length === 0) continue;
-        const maxSeverity = typeof group.max_severity === "string" ? group.max_severity.toUpperCase() : "";
-        const severity =
-          maxSeverity.includes("CRITICAL") || maxSeverity.includes("HIGH")
-            ? "high"
-            : maxSeverity.includes("LOW")
-              ? "low"
-              : "medium";
+        // OSV v2.4.0 emits a decimal CVSS score, not a severity label.
+        const score = typeof group.max_severity === "string" ? Number(group.max_severity) : NaN;
+        // Keep the existing high ceiling and medium fallback for unknown/zero.
+        const severity = Number.isFinite(score) && score > 0 && score <= 10
+          ? score >= 7 ? "high" : score >= 4 ? "medium" : "low"
+          : "medium";
         const primary = vulns.find(
           (v) => v && typeof v === "object" && ids.includes((v as { id?: unknown }).id as string),
         );

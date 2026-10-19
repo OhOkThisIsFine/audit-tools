@@ -1,6 +1,6 @@
 import { requestedFindingSelection, selectAuditFindings, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 
-// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
+// sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
@@ -282,12 +282,14 @@ export async function resolveIntakeStep(params: {
     let nextManifest: IntakeSourceManifest | undefined;
     const shouldTryAuditFastPath =
       inputResolution.existing.length === 1 &&
-      singleInput.toLowerCase().endsWith(".json") &&
-      (!intake.conversationStart || requestedSelection !== undefined || previousManifest?.finding_selection !== undefined);
+      singleInput.toLowerCase().endsWith(".json");
 
     if (shouldTryAuditFastPath) {
       const content = await readFile(singleInput, "utf8");
-      if (inputResolution.supplied) {
+      // Recognize an explicit audit even alongside guidance, while preserving
+      // mixed document intake's existing fallback for non-audit JSON content.
+      if (inputResolution.supplied &&
+          (!intake.conversationStart || requestedSelection !== undefined || previousManifest?.finding_selection !== undefined)) {
         const validation = validateSuppliedInput(singleInput, content);
         if (!validation.ok) {
           return collectStartingPointStep(

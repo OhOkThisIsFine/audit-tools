@@ -923,6 +923,34 @@ function parseWorkload(
   return value as unknown as RemediationHostWorkload;
 }
 
+/** Recognize returned work, without accepting it or bypassing any ingestion gate. */
+export async function hasBoundRemediationSubmission(params: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  readonly state: unknown;
+}): Promise<boolean> {
+  try {
+    const state = parseCurrentState(params.state);
+    if (!state?.host_handoff) return false;
+    const paths = resolveBoundaryPaths(params);
+    const read = await readSubmissionDocument(paths.workloadPath);
+    if (read.kind !== "value") return false;
+    const workload = parseWorkload(read.value, paths, params.runId, state);
+    if (!workload) return false;
+    for (const item of workload.work_items) {
+      if (state.items[item.id]?.status !== "pending") continue;
+      const path = resolveContainedPath(paths.root, item.result_path, "continuation result");
+      resolveContainedPath(paths.artifactsDir, path, "continuation result");
+      const result = await readSubmissionDocument(path);
+      if (result.kind === "value" && parseResult(result.value, params.runId, item).ok) return true;
+    }
+  } catch {
+    // Unreadable or invalid bindings are not evidence of a continuation.
+  }
+  return false;
+}
+
 type ParsedHostResult =
   | {
       readonly ok: true;

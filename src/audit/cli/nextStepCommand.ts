@@ -342,13 +342,13 @@ async function cmdNextStepBody(
   // so it is not rolled over. Must run BEFORE the sweep, the mkdir and applyGuidanceFile
   // below (fresh guidance must never be swept), and before the fold loads the
   // bundle (a retained `complete` state would short-circuit every derivation).
-  await rollOverFinishedRun(artifactsDir);
+  await rollOverFinishedRun(artifactsDir, root);
   // Pre-run sweep (docs-14; one rule, 74c89b226ab9b9cd): clear a stale working
   // dir so the fresh run starts clean — one whose run is `not_started` (junk
   // from a run that never got going). The rule is the same one the `cleanup`
   // verb applies. Inside the backstop, a malformed audit_state.json re-throw
   // becomes a blocked-step contract rather than a raw crash.
-  await cleanupStaleArtifactsDir(artifactsDir);
+  await cleanupStaleArtifactsDir(artifactsDir, { repositoryRoot: root });
   // Inside the backstop (AGY review catch): a supervisor-dir IO failure must
   // yield a blocked step too. The backstop's own writer needs no pre-created
   // dirs — writeStepContract mkdirs recursively.

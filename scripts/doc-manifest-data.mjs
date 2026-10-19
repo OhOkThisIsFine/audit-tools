@@ -175,6 +175,10 @@ export const DOC_MANIFEST = [
         "tests/fixtures/type-coverage-2.29.7/README.md",
         "test-fixture provenance and reproduction instructions for the pinned analyzer contract",
       ],
+      [
+        "tests/remediate/fixtures/audit-guidance-real-mixed.md",
+        "frozen guidance input for mixed audit provenance regression tests, not a project document",
+      ],
     ],
     check: "—",
     autoApply: "—",

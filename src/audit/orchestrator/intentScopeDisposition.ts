@@ -1,9 +1,9 @@
+// sites-pinned: tests/audit/f1.test.ts, tests/audit/lens-coverage-real-report.test.ts
 /**
  * Single authority for "is this UNIT excluded by the host's STRUCTURED intent
  * scope" — the per-unit disposition derived from the shared per-file exclusion
- * predicate (`fileExclusionReason` in `audit-tools/shared`, which both orchestrators
- * consume so their scope coverage can't drift). A pure leaf module (no artifact /
- * extractor imports) so every consumer can depend on it without an import cycle:
+ * predicate (`fileExclusionReason` in `audit-tools/shared`, selecting review scope).
+ * A pure leaf module (no artifact / extractor imports) so every consumer can depend on it without an import cycle:
  *
  *   - the design-review prompt's per-unit `[in scope]` / `[excluded: reason]`
  *     annotation (`designReviewPrompt.ts`), and
@@ -11,10 +11,11 @@
  *     which captures the disposition KIND so a scope change re-stales the review.
  *
  * Reads ONLY the structured IntentCheckpoint scope fields via the shared authority
- * (`excluded_scope` / `disposition_overrides` / `must_not_touch`) — never
+ * (`excluded_scope` / `disposition_overrides`) — never
  * `free_form_intent` (interpreted into priority/lens signals, never threaded
  * verbatim, INV-S04). Co-locating the unit derivation here means the consumers can
- * never disagree on what "excluded" means.
+ * never disagree on what "excluded" means. `must_not_touch` prohibits writes,
+ * not review, so it does not exclude a unit here.
  */
 import { fileExclusionReason, type IntentCheckpoint } from "audit-tools/shared";
 
@@ -41,7 +42,7 @@ export function deriveUnitScopeDisposition(
   if (!checkpoint || files.length === 0) return { kind: "in_scope" };
   let firstReason: string | null = null;
   for (const file of files) {
-    const reason = fileExclusionReason(file, checkpoint);
+    const reason = fileExclusionReason(file, checkpoint, "review");
     if (reason === null) return { kind: "in_scope" };
     if (firstReason === null) firstReason = reason;
   }

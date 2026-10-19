@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/audit-read-synthesis.test.ts
+// sites-pinned: tests/audit/audit-read-synthesis.test.ts, tests/audit/lens-coverage-real-report.test.ts, tests/audit/lens-coverage-reports-unexercised.test.ts
 import type { AuditResult, CoverageMatrix, Finding, UnitManifest } from "../types.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
 import type {
@@ -7,6 +7,7 @@ import type {
   SubmissionLedgerEvent,
 } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
+import type { DesignReviewSnapshotBundle } from "../orchestrator/designReviewSnapshot.js";
 import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import type { CharterRegister } from "../types/charterRegister.js";
@@ -409,6 +410,30 @@ function formatCountList(summary: Record<string, number>): string {
   return parts.length > 0 ? parts.join(", ") : "none";
 }
 
+/** Qualifying work is lens-specific; a completed but empty-scope review is not inspection. */
+function exercisedReviewLenses(
+  results: readonly AuditResult[],
+  assessment: DesignAssessment | undefined,
+  snapshots: DesignReviewSnapshotBundle | undefined,
+): ReadonlySet<string> {
+  const lenses = new Set(results
+    .filter((result) => result.file_coverage.length > 0)
+    .map((result) => result.lens));
+  for (const snapshot of Object.values(snapshots ?? {})) {
+    if (!snapshot || assessment?.[`${snapshot.pass}_reviewed`] !== true) continue;
+    const units = snapshot.reviewed_inputs.unit_manifest;
+    const hasScope = Array.isArray(units) && units.some((unit: unknown) =>
+      typeof unit === "object" && unit !== null &&
+      "scope" in unit && unit.scope === "in_scope" &&
+      "files" in unit && Array.isArray(unit.files) && unit.files.length > 0,
+    );
+    if (hasScope) {
+      for (const lens of snapshot.reviewed_task.lenses ?? []) lenses.add(lens);
+    }
+  }
+  return lenses;
+}
+
 export function buildAuditReportModel(params: {
   results: AuditResult[];
   unitManifest?: UnitManifest;
@@ -419,6 +444,8 @@ export function buildAuditReportModel(params: {
   runtimeValidationTaskManifest?: RuntimeValidationTaskManifest;
   externalAnalyzerResults?: ExternalAnalyzerResults[];
   designAssessment?: DesignAssessment;
+  /** Existing accepted review snapshots bind the reviewed lenses and unit scope. */
+  designReviewSnapshots?: DesignReviewSnapshotBundle;
   structureDecomposition?: StructureDecomposition;
   charterRegister?: CharterRegister;
   systemicChallenge?: SystemicChallengeRegister;
@@ -446,8 +473,9 @@ export function buildAuditReportModel(params: {
   // before merging, so a re-dispatched result's fresh findings replace the stale
   // base record they superseded — including findings the re-audit dropped, which
   // a finding-id upsert alone would leave behind.
+  const currentResults = selectCurrentResults(params.results);
   const mergedFindings = mergeFindings(
-    selectCurrentResults(params.results),
+    currentResults,
     params.runtimeValidationReport,
     params.externalAnalyzerResults,
     markedConceptual.designAssessment,
@@ -495,17 +523,12 @@ export function buildAuditReportModel(params: {
     sizeIndex: params.sizeIndex,
   });
   const coverage = coverageSummary(params.coverageMatrix);
-  // A lens is only `clean` — "asked, and there was nothing there" — when at
-  // least one LENS-OPEN channel came back. Per-file audit results are lens-gated
-  // by planning (`required_lenses`), and the two design-review passes carry the
-  // selection into their prompts and record their own completion. With none of
-  // them ingested, a selected lens with no findings was never exercised, and
-  // saying `clean` would be exactly the "absence of a finding reads as absence
-  // of a defect" claim this field exists to refuse.
-  const lensOpenChannelIngested =
-    params.results.length > 0 ||
-    params.designAssessment?.contract_reviewed === true ||
-    params.designAssessment?.conceptual_reviewed === true;
+  // Per-file results credit only their own lens. A design pass credits the
+  // lenses in its accepted snapshot only if its reviewed scope was nonempty.
+  // This is exercised-lens evidence, not a claim of full per-file coverage.
+  const exercisedLenses = exercisedReviewLenses(
+    currentResults, params.designAssessment, params.designReviewSnapshots,
+  );
   const selectedLenses = resolveIntentLensSelection(
     params.intentCheckpoint?.lens_selection,
   );
@@ -529,7 +552,7 @@ export function buildAuditReportModel(params: {
             lens_coverage: deriveLensCoverage({
               selectedLenses,
               findings,
-              lensOpenChannelIngested,
+              exercisedLenses,
             }),
           }),
       audited_file_count: coverage.audited_file_count,
@@ -748,10 +771,10 @@ export interface RenderAuditReportOptions {
 }
 
 /**
- * Name the selected lenses this run did not exercise.
+ * Name the selected lenses with no findings, distinguishing reviewed from uninspected.
  *
  * Rendered whenever a selected lens produced no findings, with its outcome, so
- * `clean` ("asked, nothing found") and `not_run` ("never asked") stay legible as
+ * `clean` ("reviewed, nothing found") and `not_run` ("no qualifying inspection") stay legible as
  * the different statements they are. Nothing to say — every selected lens
  * produced findings, or no selection was made — renders nothing.
  */
@@ -772,9 +795,9 @@ function renderUnexercisedLensLine(
     .sort(([left], [right]) => compareCodeUnits(left, right))
     .map(
       ([outcome, lenses]) =>
-        `${outcome === "not_run" ? "never exercised" : "exercised, no findings"}: ${lenses.join(", ")}`,
+        `${outcome === "not_run" ? "no qualifying inspection" : "reviewed, no findings"}: ${lenses.join(", ")}`,
     );
-  return [`- Lenses not exercised: ${parts.join("; ")}`];
+  return [`- Selected lenses without findings: ${parts.join("; ")}`];
 }
 
 /**

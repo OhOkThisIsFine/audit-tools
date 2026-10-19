@@ -1,0 +1,83 @@
+{
+  "units": [
+    {
+      "unit_id": "root-config",
+      "name": "root-config",
+      "kind": "module",
+      "files": [
+        ".gitignore",
+        "package.json"
+      ],
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "risk_score": 1,
+      "critical_flows": []
+    },
+    {
+      "unit_id": "src-credit-mjs",
+      "name": "src-credit-mjs",
+      "kind": "module",
+      "files": [
+        "src/credit.mjs"
+      ],
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "risk_score": 1,
+      "critical_flows": []
+    },
+    {
+      "unit_id": "src-credit-test-mjs",
+      "name": "src-credit-test-mjs",
+      "kind": "test",
+      "files": [
+        "src/credit.test.mjs"
+      ],
+      "required_lenses": [
+        "maintainability",
+        "tests"
+      ],
+      "risk_score": 1,
+      "critical_flows": []
+    },
+    {
+      "unit_id": "src-discount-mjs",
+      "name": "src-discount-mjs",
+      "kind": "module",
+      "files": [
+        "src/discount.mjs"
+      ],
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "risk_score": 1,
+      "critical_flows": []
+    },
+    {
+      "unit_id": "src-settlement-mjs",
+      "name": "src-settlement-mjs",
+      "kind": "module",
+      "files": [
+        "src/settlement.mjs"
+      ],
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "risk_score": 1,
+      "critical_flows": []
+    }
+  ]
+}

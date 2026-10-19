@@ -242,14 +242,14 @@ for (const { analyzer, extension, kind, root } of warningCases) {
   for (const failure of ["parse", "collector"] as const) {
     test(`${analyzer.id}-analyzer warns on ${failure} failure and continues`, async () => {
       const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-      const parser = { setLanguage: vi.fn(), parse: vi.fn((content: string) => {
+      const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn((content: string) => {
         if (content === "broken") {
           if (failure === "parse") throw new Error("forced parse failure");
           const node = fakeNode();
           node.descendantsOfType = () => { throw new Error("forced collector failure"); };
-          return { rootNode: node };
+          return { rootNode: node, delete: vi.fn() };
         }
-        return { rootNode: root() };
+        return { rootNode: root(), delete: vi.fn() };
       }) };
       const loader = vi.spyOn(treeSitter, "getTreeSitterParser").mockResolvedValue(parser);
       try {

@@ -300,7 +300,8 @@ test("osv-scanner binary spec maps platform/arch to the real release asset namin
 // Shape grounded against pkg/models/results.go (VulnerabilityResults) in
 // google/osv-scanner, not guessed: results[].source.path, results[].packages[]
 // .{package:{name,version}, vulnerabilities:[{id,summary,details}], groups:
-// [{ids,max_severity}]}.
+// [{ids,max_severity}]}. max_severity is a decimal CVSS string in v2.4.0:
+// https://github.com/google/osv-scanner/blob/v2.4.0/internal/output/table.go#L370-L387
 test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vulnerability id", () => {
   const report = JSON.stringify({
     results: [
@@ -321,7 +322,7 @@ test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vul
               {
                 ids: ["GHSA-c3h9-896r-86jm", "GO-2021-0053"],
                 aliases: ["CVE-2021-3121"],
-                max_severity: "HIGH",
+                max_severity: "8.8",
               },
             ],
           },
@@ -333,6 +334,7 @@ test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vul
   expect(items.length).toBe(1);
   expect(items[0].category).toBe("security");
   expect(items[0].severity).toBe("high");
+  expect(items[0].id).toBe("osv:GHSA-c3h9-896r-86jm,GO-2021-0053:gogo/protobuf@1.3.1");
   expect(items[0].path).toBe("package-lock.json");
   expect(items[0].rule).toBe("GHSA-c3h9-896r-86jm");
   expect(items[0].summary).toMatch(/gogo\/protobuf@1\.3\.1/);
@@ -340,7 +342,7 @@ test("parseOsvScanner maps one item per group (alias-collapsed), not per raw vul
 });
 
 test("parseOsvScanner maps max_severity to the engine's severity strings and skips groups with no ids", () => {
-  const makeReport = (maxSeverity: string) =>
+  const makeReport = (maxSeverity: unknown) =>
     JSON.stringify({
       results: [
         {
@@ -355,10 +357,23 @@ test("parseOsvScanner maps max_severity to the engine's severity strings and ski
         },
       ],
     });
-  expect(itemsOf(parseOsvScanner(makeReport("CRITICAL")))[0].severity).toBe("high");
-  expect(itemsOf(parseOsvScanner(makeReport("MODERATE")))[0].severity).toBe("medium");
-  expect(itemsOf(parseOsvScanner(makeReport("LOW")))[0].severity).toBe("low");
-  expect(itemsOf(parseOsvScanner(makeReport("")))[0].severity).toBe("medium");
+  // Upstream-shaped golden scores, threshold edges, and the deliberate medium
+  // fallback for zero/unknown/invalid scores. Critical CVSS scores stay high,
+  // matching this analyzer's existing severity ceiling.
+  const cases: [unknown, string][] = [
+    ["9.8", "high"], ["8.8", "high"], ["5.0", "medium"], ["3.1", "low"],
+    ["10.0", "high"], ["7.0", "high"], ["6.9", "medium"], ["4.0", "medium"],
+    ["3.9", "low"], ["0.1", "low"], ["0.0", "medium"],
+    ["-1.0", "medium"], ["10.1", "medium"], ["NaN", "medium"], ["Infinity", "medium"],
+    ["9.8junk", "medium"], ["HIGH", "medium"], ["", "medium"], [" ", "medium"],
+    [undefined, "medium"], [null, "medium"], [9.8, "medium"],
+  ];
+  for (const [score, severity] of cases) {
+    const items = itemsOf(parseOsvScanner(makeReport(score)));
+    expect(items).toHaveLength(1);
+    expect(items[0].severity, `max_severity=${JSON.stringify(score)}`).toBe(severity);
+    expect(items[0].id).toBe("osv:OSV-1:pkg@1.0.0");
+  }
 
   const noIds = JSON.stringify({
     results: [

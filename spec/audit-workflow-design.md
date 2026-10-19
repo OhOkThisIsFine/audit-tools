@@ -292,10 +292,14 @@ and state the operator's scope in their prompts. That is the remedy half, and it
 is not the guarantee — a prompt cannot force a model to produce a finding. The
 guarantee is `summary.lens_coverage` on `audit-findings.json`: synthesis holds
 both the checkpoint and the produced findings, so it states, for every selected
-lens, whether it produced findings (`findings`), was asked through an ingested
-lens-open channel and produced none (`clean`), or was never exercised
-(`not_run`). Absence of a finding is therefore never silently readable as
-absence of a defect. `validateAuditFindingsReport` holds no checkpoint and so
+lens, whether it produced findings (`findings`), had qualifying inspection
+and produced none (`clean`), or had no qualifying inspection (`not_run`). A
+per-file result credits only its own lens and must include file coverage. A
+completed design review credits only the lenses bound in its accepted snapshot,
+and only when that snapshot contains a nonempty in-scope unit. Completion flags
+alone and empty/excluded review scopes do not establish inspection. `clean`
+means reviewed with no findings, not complete file coverage or proof of no defects;
+file completeness is reported separately. `validateAuditFindingsReport` holds no checkpoint and so
 checks internal consistency only — it abstains on the `clean`/`not_run`
 distinction it cannot establish.
 

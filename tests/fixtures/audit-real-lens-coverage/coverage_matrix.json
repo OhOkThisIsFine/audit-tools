@@ -1,0 +1,148 @@
+{
+  "files": [
+    {
+      "path": ".gemini/commands/audit-code.toml",
+      "unit_ids": [],
+      "classification_status": "excluded",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": ".github/agents/auditor.agent.md",
+      "unit_ids": [],
+      "classification_status": "doc_only",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": ".github/copilot-instructions.md",
+      "unit_ids": [],
+      "classification_status": "doc_only",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": ".github/prompts/audit-code.prompt.md",
+      "unit_ids": [],
+      "classification_status": "doc_only",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": ".gitignore",
+      "unit_ids": [],
+      "classification_status": "excluded_trivial",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": "AGENTS.md",
+      "unit_ids": [],
+      "classification_status": "doc_only",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": "README.md",
+      "unit_ids": [],
+      "classification_status": "doc_only",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": "opencode.json",
+      "unit_ids": [],
+      "classification_status": "excluded",
+      "audit_status": "excluded",
+      "required_lenses": [],
+      "completed_lenses": []
+    },
+    {
+      "path": "package.json",
+      "unit_ids": [
+        "root-config"
+      ],
+      "classification_status": "classified",
+      "audit_status": "partial",
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability"
+      ],
+      "completed_lenses": [
+        "correctness"
+      ]
+    },
+    {
+      "path": "src/credit.mjs",
+      "unit_ids": [
+        "src-credit-mjs"
+      ],
+      "classification_status": "classified",
+      "audit_status": "partial",
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "completed_lenses": [
+        "correctness"
+      ]
+    },
+    {
+      "path": "src/credit.test.mjs",
+      "unit_ids": [
+        "src-credit-test-mjs"
+      ],
+      "classification_status": "classified",
+      "audit_status": "pending",
+      "required_lenses": [
+        "maintainability",
+        "tests"
+      ],
+      "completed_lenses": []
+    },
+    {
+      "path": "src/discount.mjs",
+      "unit_ids": [
+        "src-discount-mjs"
+      ],
+      "classification_status": "classified",
+      "audit_status": "partial",
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "completed_lenses": [
+        "correctness"
+      ]
+    },
+    {
+      "path": "src/settlement.mjs",
+      "unit_ids": [
+        "src-settlement-mjs"
+      ],
+      "classification_status": "classified",
+      "audit_status": "partial",
+      "required_lenses": [
+        "correctness",
+        "observability",
+        "maintainability",
+        "tests"
+      ],
+      "completed_lenses": [
+        "correctness"
+      ]
+    }
+  ]
+}

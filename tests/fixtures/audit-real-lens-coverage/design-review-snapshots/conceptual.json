@@ -1,0 +1,231 @@
+{
+  "schema_version": "audit-code/design-review-snapshot/v2alpha1",
+  "pass": "conceptual",
+  "reviewed_at": "2026-10-19T07:49:33.473Z",
+  "prior_findings": [],
+  "reviewed_inputs": {
+    "repo_manifest": {
+      "name": "repo",
+      "files": [
+        {
+          "path": ".gitignore",
+          "language": "ignore list"
+        },
+        {
+          "path": "src/credit.mjs",
+          "language": "javascript"
+        },
+        {
+          "path": "src/credit.test.mjs",
+          "language": "javascript"
+        },
+        {
+          "path": "src/discount.mjs",
+          "language": "javascript"
+        },
+        {
+          "path": "src/settlement.mjs",
+          "language": "javascript"
+        },
+        {
+          "path": "opencode.json",
+          "language": "json"
+        },
+        {
+          "path": "package.json",
+          "language": "json"
+        },
+        {
+          "path": ".github/agents/auditor.agent.md",
+          "language": "markdown"
+        },
+        {
+          "path": ".github/copilot-instructions.md",
+          "language": "markdown"
+        },
+        {
+          "path": ".github/prompts/audit-code.prompt.md",
+          "language": "markdown"
+        },
+        {
+          "path": "AGENTS.md",
+          "language": "markdown"
+        },
+        {
+          "path": "README.md",
+          "language": "markdown"
+        },
+        {
+          "path": ".gemini/commands/audit-code.toml",
+          "language": "toml"
+        }
+      ]
+    },
+    "unit_manifest": [
+      {
+        "unit_id": "root-config",
+        "name": "root-config",
+        "kind": "module",
+        "files": [
+          ".gitignore",
+          "package.json"
+        ],
+        "required_lenses": [
+          "correctness",
+          "maintainability",
+          "observability",
+          "tests"
+        ],
+        "critical_flows": [],
+        "scope": "excluded"
+      },
+      {
+        "unit_id": "src-credit-mjs",
+        "name": "src-credit-mjs",
+        "kind": "module",
+        "files": [
+          "src/credit.mjs"
+        ],
+        "required_lenses": [
+          "correctness",
+          "maintainability",
+          "observability",
+          "tests"
+        ],
+        "critical_flows": [],
+        "scope": "excluded"
+      },
+      {
+        "unit_id": "src-credit-test-mjs",
+        "name": "src-credit-test-mjs",
+        "kind": "test",
+        "files": [
+          "src/credit.test.mjs"
+        ],
+        "required_lenses": [
+          "maintainability",
+          "tests"
+        ],
+        "critical_flows": [],
+        "scope": "excluded"
+      },
+      {
+        "unit_id": "src-discount-mjs",
+        "name": "src-discount-mjs",
+        "kind": "module",
+        "files": [
+          "src/discount.mjs"
+        ],
+        "required_lenses": [
+          "correctness",
+          "maintainability",
+          "observability",
+          "tests"
+        ],
+        "critical_flows": [],
+        "scope": "excluded"
+      },
+      {
+        "unit_id": "src-settlement-mjs",
+        "name": "src-settlement-mjs",
+        "kind": "module",
+        "files": [
+          "src/settlement.mjs"
+        ],
+        "required_lenses": [
+          "correctness",
+          "maintainability",
+          "observability",
+          "tests"
+        ],
+        "critical_flows": [],
+        "scope": "excluded"
+      }
+    ],
+    "graph_bundle": {
+      "imports": [
+        {
+          "from": "src/credit.test.mjs",
+          "to": "src/credit.mjs"
+        }
+      ],
+      "calls": [],
+      "references": [
+        {
+          "from": "src/credit.test.mjs",
+          "to": "src/credit.mjs"
+        }
+      ],
+      "routes": [],
+      "heuristics": [],
+      "co_change": []
+    },
+    "surface_manifest": [],
+    "critical_flows": [],
+    "risk_register": [
+      {
+        "unit_id": "root-config",
+        "risk_score": 1,
+        "signals": []
+      },
+      {
+        "unit_id": "src-discount-mjs",
+        "risk_score": 1,
+        "signals": []
+      },
+      {
+        "unit_id": "src-settlement-mjs",
+        "risk_score": 1,
+        "signals": []
+      },
+      {
+        "unit_id": "src-credit-test-mjs",
+        "risk_score": 2,
+        "signals": [
+          "deletion_candidate",
+          "seam_endpoint"
+        ]
+      },
+      {
+        "unit_id": "src-credit-mjs",
+        "risk_score": 2,
+        "signals": [
+          "seam_endpoint"
+        ]
+      }
+    ],
+    "design_assessment": [
+      {
+        "id": "DA-001",
+        "title": "Architectural seam: src/credit.mjs ↔ src/credit.test.mjs",
+        "category": "architectural_seam",
+        "severity": "medium",
+        "confidence": "medium",
+        "lens": "architecture",
+        "summary": "The dependency between src/credit.mjs and src/credit.test.mjs is a bridge (cut-edge): its removal disconnects the two regions. A single load-bearing link is a fragility and refactor risk.",
+        "affected_files": [
+          "src/credit.mjs",
+          "src/credit.test.mjs"
+        ],
+        "systemic": true,
+        "lead_lineage": {
+          "producer": "detectSeams",
+          "source_hash": "ed7ce39c2bfd2a1f1a74cdd8d3459b04c18c22d7345e3d1a82a58cafd11b86b5",
+          "confirmation": "lead"
+        }
+      }
+    ]
+  },
+  "reviewed_task": {
+    "lenses": [
+      "correctness",
+      "data_integrity",
+      "reliability",
+      "security"
+    ],
+    "degraded_analyzers": [],
+    "conceptual_depth": "shallow",
+    "perspectives": [],
+    "charter_context": []
+  }
+}

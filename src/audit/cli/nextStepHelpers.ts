@@ -448,7 +448,7 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
  * Development reflection belongs to the repository's sprint closeout, not the
  * target repository's audit completion contract.
  */
-async function promoteCompletedReport(artifactsDir: string): Promise<string> {
+async function promoteCompletedReport(root: string, artifactsDir: string): Promise<string> {
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -488,7 +488,7 @@ async function promoteCompletedReport(artifactsDir: string): Promise<string> {
   // report on a stopped fold included — re-reading the same frozen snapshot
   // would only stop it again): its snapshot goes, and the marker lets the next
   // next-step roll the dir over (`rollOverFinishedRun`).
-  for (const problem of await removeRunSnapshot(artifactsDir)) {
+  for (const problem of await removeRunSnapshot(artifactsDir, root)) {
     process.stderr.write(`[audit-code] run snapshot cleanup: ${problem}\n`);
   }
   if (findingsArchived) await markRunEnded(artifactsDir);
@@ -526,7 +526,7 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  const finalReportPath = await promoteCompletedReport(params.artifactsDir);
+  const finalReportPath = await promoteCompletedReport(params.root, params.artifactsDir);
   return {
     kind: "complete",
     state,
@@ -3813,7 +3813,7 @@ async function runDeterministicFold(
       audit_state: state,
       progress_summary: decision.reason,
     });
-    const finalReportPath = await promoteCompletedReport(params.artifactsDir);
+    const finalReportPath = await promoteCompletedReport(params.root, params.artifactsDir);
     return {
       kind: "complete",
       state,

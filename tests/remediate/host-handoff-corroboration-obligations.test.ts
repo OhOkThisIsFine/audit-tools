@@ -287,12 +287,52 @@ describe("independent conformance admission and captured verification evidence",
       expect((await ingestConformance(value)).accepted_count).toBe(1);
       await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
     });
-    it("production next-step emits the independent review step before accepting work", async () => {
+    it("production next-step continues bound returned work without a resume acknowledgment, retaining independent review", async () => {
       const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
-      await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "resume" }));
       const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, finalGateRunner: () => ({ status: 0 }) });
       expect(step.step_kind).toBe("review_contract_conformance");
       expect(await readFile(step.prompt_path, "utf8")).toContain("context that did not author");
+      expect((await new StateStore(value.artifactsDir).loadState())!.items![value.item.id]!.status).toBe("pending");
+      await expect(readFile(join(value.artifactsDir, "confirm_resume_ack.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    });
+  });
+
+  describe("bound returned work only removes the redundant resume acknowledgment", () => {
+    it.each(["wrong run", "wrong prompt", "wrong item", "missing binding", "changed workload", "settled item", "malformed result", "missing result", "explicit restart"])(
+      "%s does not establish a continuation", async (fault) => {
+        const value = await conformanceFixture();
+        const result = await writeConformanceResult(value);
+        const state = boundState(value);
+        if (fault === "wrong run") await writeResult(value, { ...result, run_id: "another-run" });
+        if (fault === "wrong item") await writeResult(value, { ...result, work_item_id: "another-item" });
+        if (fault === "wrong prompt") await writeResult(value, { ...result, prompt_sha256: "0".repeat(64) });
+        if (fault === "missing binding") delete state.host_handoff;
+        if (fault === "changed workload") state.host_handoff = { ...state.host_handoff!, workload_sha256: "0".repeat(64) };
+        if (fault === "settled item") state.items[value.item.id]!.status = "resolved";
+        if (fault === "malformed result") await writeFile(join(value.root, value.item.result_path), "{");
+        if (fault === "missing result") await rm(join(value.root, value.item.result_path));
+        if (fault === "explicit restart") await writeFile(join(value.artifactsDir, "confirm_resume_ack.json"), JSON.stringify({ choice: "restart" }));
+        await persistBoundState(value, state);
+        const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir });
+        expect(step.step_kind).toBe("confirm_resume_or_restart");
+      },
+    );
+
+    it("new guidance still requires the source-conflict choice", async () => {
+      const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
+      const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir, guidanceText: "Use a different scope" });
+      expect(step.step_kind).toBe("input_conflict");
+      expect((await new StateStore(value.artifactsDir).loadState())!.items![value.item.id]!.status).toBe("pending");
+    });
+
+    it.each(["pause", "cancel"] as const)("%s still stops before returned work is ingested", async (action) => {
+      const value = await conformanceFixture(); await writeConformanceResult(value); await persistBoundState(value);
+      const store = new StateStore(value.artifactsDir);
+      await store.withActiveOperator(() => store.setOperatorLifecycleUnderPhaseLock(action));
+      const step = await decideNextStep({ root: value.root, artifactsDir: value.artifactsDir });
+      expect(step.step_kind).toBe(action === "pause" ? "operator_paused" : "operator_cancelled");
+      expect((await store.loadState())!.items![value.item.id]!.status).toBe("pending");
+      await expect(readFile(conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id).request)).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 

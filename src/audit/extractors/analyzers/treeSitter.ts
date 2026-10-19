@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
  * floor. The runtime is initialised once and parsed grammars are cached.
  */
 
+// sites-pinned: tests/audit/tree-sitter-language-cache.test.ts, tests/audit/tree-sitter-batch.test.ts
 // Minimal structural typings — web-tree-sitter is an optional dependency, so we
 // avoid a hard type import and model only the surface the analyzers use.
 export interface TsNode {
@@ -24,6 +25,7 @@ export interface TsNode {
 }
 export interface TsTree {
   rootNode: TsNode;
+  delete(): void;
 }
 export interface TsLanguage {
   __brand?: "tree-sitter-language";
@@ -31,6 +33,7 @@ export interface TsLanguage {
 export interface TsParser {
   setLanguage(language: TsLanguage): void;
   parse(source: string): TsTree;
+  delete(): void;
 }
 
 interface ParserModule {
@@ -197,7 +200,12 @@ export async function getTreeSitterParser(
   if (!language) return undefined;
   try {
     const parser = new parserModule.Parser();
-    parser.setLanguage(language);
+    try {
+      parser.setLanguage(language);
+    } catch (e) {
+      parser.delete();
+      throw e;
+    }
     return parser;
   } catch (e) {
     _degradationCount += 1;

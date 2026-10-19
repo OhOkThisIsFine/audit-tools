@@ -16,6 +16,7 @@ import {
   type ExcludedSummaryRow,
   type AggregatedExcludedRow,
 } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
+import { renderSharedStructuralContext } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
@@ -416,6 +417,86 @@ test("runPlanningExecutor applies disposition_overrides before coverage initiali
   const distTaskPaths = tasks.flatMap((task) => task.file_paths ?? []);
   expect(!distTaskPaths.includes("dist/index.js"), "dist/index.js should not appear in any audit task after disposition override").toBeTruthy();
 });
+
+test.each([
+  "src/generated",
+  "src/generated/",
+  "src\\generated",
+  "src\\generated\\",
+])("runPlanningExecutor shares review scope matching for %s", async (path) => {
+  const paths = ["src/generated/a.ts", "src/generated/nested/b.ts", "src/generated-other/c.ts"];
+  const bundle = makeBaseBundle({
+    repo_manifest: makeRepoManifestWithFiles(paths),
+    file_disposition: { files: paths.map((path) => ({ path, status: "included" })) },
+    unit_manifest: {
+      units: paths.map((path, index) => ({
+        unit_id: `u${index}`, name: path, files: [path], required_lenses: ["correctness"],
+      })),
+    },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1",
+      confirmed_at: "2026-01-01T00:00:00.000Z",
+      confirmed_by: "host", scope_summary: "test", intent_summary: "test",
+      disposition_overrides: [{ path, status: "generated", reason: "generated output" }],
+    },
+  });
+  const result = await runPlanningExecutor(
+    bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
+  );
+  expect(result.updated.coverage_matrix!.files.map((file) => [file.path, file.audit_status])).toEqual([
+    [paths[0], "excluded"], [paths[1], "excluded"], [paths[2], "pending"],
+  ]);
+  const taskPaths = (result.updated.audit_tasks ?? []).flatMap((task) => task.file_paths ?? []);
+  expect(taskPaths).not.toContain(paths[0]);
+  expect(taskPaths).not.toContain(paths[1]);
+  expect(taskPaths).toContain(paths[2]);
+  const review = renderSharedStructuralContext(bundle, 5);
+  expect(review).toContain("u0 [excluded: generated output]");
+  expect(review).toContain("u1 [excluded: generated output]");
+  expect(review).toContain("u2 [in scope]");
+
+  // The same scope without its sibling has no work to dispatch at all.
+  bundle.repo_manifest!.files.pop();
+  bundle.file_disposition!.files.pop();
+  bundle.unit_manifest!.units.pop();
+  const excludedOnly = await runPlanningExecutor(
+    bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
+  );
+  expect(excludedOnly.updated.coverage_matrix!.files.every((file) => file.audit_status === "excluded")).toBe(true);
+  expect(excludedOnly.updated.audit_tasks).toEqual([]);
+});
+
+test.each(["included", "excluded", "generated", "vendor", "binary", "doc_only"] as const)(
+  "runPlanningExecutor preserves first-match %s disposition and exact file matching",
+  async (status) => {
+    const paths = ["src/app.ts", "src/app.tsx"];
+    const bundle = makeBaseBundle({
+      repo_manifest: makeRepoManifestWithFiles(paths),
+      file_disposition: { files: paths.map((path) => ({ path, status: "included" })) },
+      unit_manifest: {
+        units: [{ unit_id: "u1", name: "app", files: paths, required_lenses: ["correctness"] }],
+      },
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1",
+        confirmed_at: "2026-01-01T00:00:00.000Z",
+        confirmed_by: "host", scope_summary: "test", intent_summary: "test",
+        disposition_overrides: [
+          { path: "src/app.ts", status, reason: "first match" },
+          { path: "src/app.ts", status: status === "included" ? "excluded" : "included", reason: "later match" },
+        ],
+      },
+    });
+    const result = await runPlanningExecutor(
+      bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
+    );
+    expect(result.updated.coverage_matrix!.files.map((file) => [file.path, file.audit_status])).toEqual([
+      [paths[0], status === "included" ? "pending" : "excluded"], [paths[1], "pending"],
+    ]);
+    const taskPaths = (result.updated.audit_tasks ?? []).flatMap((task) => task.file_paths ?? []);
+    expect(taskPaths.includes(paths[0])).toBe(status === "included");
+    expect(taskPaths).toContain(paths[1]);
+  },
+);
 
 test("runPlanningExecutor does not affect files without a disposition_override", async () => {
   const bundle = makeBaseBundle({

@@ -1,0 +1,29 @@
+{
+  "schema_version": "intent-checkpoint/v1",
+  "confirmed_at": "2026-10-19T07:44:45.985422+00:00",
+  "confirmed_by": "host",
+  "scope_summary": "All six discovered code/config fixture files, using README.md as the functional contract. Synthetic fixture choices supplied by parent coordinator for this acceptance exercise.",
+  "intent_summary": "Read-only correctness-focused audit of the disposable golden repository; mandatory security, reliability and data_integrity lenses retained.",
+  "must_not_touch": [
+    "src/**",
+    "README.md",
+    "package.json",
+    ".gitignore"
+  ],
+  "lens_selection": {
+    "include": [],
+    "exclude": [
+      "architecture",
+      "tests",
+      "maintainability",
+      "performance",
+      "operability",
+      "config_deployment",
+      "observability"
+    ]
+  },
+  "design_review": {
+    "answered_at": "2026-10-19T07:44:45.985422+00:00",
+    "conceptual_depth": "shallow"
+  }
+}

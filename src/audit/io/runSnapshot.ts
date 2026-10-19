@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/run-snapshot.test.ts, tests/audit/frozen-snapshot.test.ts
+// sites-pinned: tests/audit/run-snapshot.test.ts, tests/audit/frozen-snapshot.test.ts, tests/audit/run-snapshot-ownership.test.ts
 /**
  * The frozen snapshot an audit run reads (docs/backlog/forward-tracks.md, the
  * frozen-snapshot track; design record docs/reviews/frozen-snapshot-design-2026-10-08.md).
@@ -169,6 +169,8 @@ async function removeSnapshotDir(dir: string): Promise<void> {
  * directory, so nothing here ever prunes the user's OTHER worktrees.
  */
 async function addEmptyWorktree(repository: string, path: string, commit: string): Promise<void> {
+  // Re-check after a parent checkout was restored: its content can introduce links.
+  await checkSnapshotDirectories(resolve(resolveAuditCodeStateDir()), path);
   await removeSnapshotDir(path);
   await mkdir(dirname(path), { recursive: true });
   await git(repository, [
@@ -534,10 +536,126 @@ function snapshotKey(repositoryRoot: string, artifactsDir: string): string {
   return hashContent(`${repositoryRoot}\0${artifactsDir}`).slice(0, 12);
 }
 
-async function createRunSnapshot(root: string, artifactsDir: string): Promise<RunSnapshot> {
+/** Persisted paths describe a run; only the caller's identity grants ownership. */
+function ownershipFailure(detail: string): never {
+  throw new Error(`Audit snapshot ownership check failed: ${detail}. Refusing this operation. ` +
+    "Restore the original repository/artifacts/state-directory identity or inspect the snapshot record before retrying; do not delete paths named by an inconsistent record.");
+}
+
+/** Missing suffixes are legitimate after cleanup or a lost checkout; links are not. */
+async function checkSnapshotDirectories(anchor: string, path: string): Promise<void> {
+  const suffix = relative(anchor, path);
+  if (resolveWithinRoot(anchor, path) === null) ownershipFailure(`path escapes its owner: ${path}`);
+  let current = anchor;
+  for (const segment of ["", ...suffix.split(/[\\/]/).filter(Boolean)]) {
+    current = join(current, segment);
+    const info = await lstat(current).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (info === undefined) return;
+    if (info.isSymbolicLink() || !info.isDirectory()) ownershipFailure(`unsafe directory topology at ${current}`);
+  }
+}
+
+async function snapshotLayout(root: string, artifactsDir: string) {
   const repositoryRoot = await realpath(root);
   const key = snapshotKey(repositoryRoot, await realpath(artifactsDir).catch(() => resolve(artifactsDir)));
-  const dir = join(snapshotsRoot(), key);
+  const state = resolve(resolveAuditCodeStateDir());
+  const dir = join(state, "snapshots", key);
+  const tree = join(dir, "tree");
+  await checkSnapshotDirectories(state, tree);
+  return { repositoryRoot, dir, tree, ref: `refs/audit-tools/snapshots/${key}` };
+}
+
+/** Validate the ENTIRE record before cleanup, restoration or re-pinning mutates anything. */
+async function validateSnapshotOwnership(record: RunSnapshot, root: string | undefined, artifactsDir: string) {
+  if (root === undefined) ownershipFailure("the caller did not supply the live repository identity");
+  const layout = await snapshotLayout(root, artifactsDir);
+  if (record.repository_root !== layout.repositoryRoot) ownershipFailure("repository_root differs from the caller");
+  const gitRoot = await isGitRepo(layout.repositoryRoot);
+  if ((record.kind === "git") !== gitRoot) ownershipFailure("snapshot kind differs from the live repository");
+  const top = gitRoot ? await realpath((await git(layout.repositoryRoot, ["rev-parse", "--show-toplevel"])).trim()) : layout.repositoryRoot;
+  const source = join(layout.tree, relative(top, layout.repositoryRoot));
+  // Git's --show-prefix ends in a separator; older records preserved it.
+  // Strip only that harmless spelling difference, never resolve persisted ../ paths.
+  const recordedSource = record.source_root.replace(process.platform === "win32" ? /[\\/]+$/ : /\/+$/, "");
+  if (recordedSource !== source) ownershipFailure("source_root is not the owned source directory");
+  await checkSnapshotDirectories(layout.tree, source);
+  const relativePath = (path: string): boolean => path.length > 0 && !path.includes("\\") &&
+    path.split("/").every((part) => part.length > 0 && part !== "." && part !== ".." && part !== ".git") &&
+    resolveWithinRoot(layout.tree, resolve(layout.tree, path)) !== null && !path.startsWith("/");
+  if (record.linked.some((path) => !relativePath(path))) ownershipFailure("invalid linked path");
+  if (!gitRoot) {
+    if (record.pins.length !== 0) ownershipFailure("a copy snapshot cannot own Git pins");
+    return layout;
+  }
+  if (record.pins.length === 0 || record.pins[0].path !== layout.tree) ownershipFailure("missing root Git pin");
+  const seen = new Map<string, GitPin>();
+  const oid = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+  for (const pin of record.pins) {
+    const suffix = toPosixPath(relative(layout.tree, pin.path));
+    if ((suffix !== "" && !relativePath(suffix)) || pin.path !== join(layout.tree, suffix) || seen.has(pin.path)) {
+      ownershipFailure("invalid or duplicate Git checkout path");
+    }
+    if (pin.ref !== layout.ref || !oid.test(pin.commit) || !oid.test(pin.index) || (pin.base !== null && !oid.test(pin.base))) {
+      ownershipFailure("invalid Git ref or object identity");
+    }
+    let repository = top;
+    if (suffix !== "") {
+      // Establish the historical submodule relation from frozen Git objects,
+      // not the live index, which may legitimately change during this run.
+      const parent = [...seen.values()].reverse().find((candidate) =>
+        resolveWithinRoot(candidate.path, pin.path) !== null);
+      if (parent === undefined) ownershipFailure("Git pins are not parent-first");
+      const sub = toPosixPath(relative(parent.path, pin.path));
+      let gitlink = false;
+      // An unmerged live index may have fallen back to HEAD at capture time;
+      // the content commit still contains a newly populated submodule.
+      for (const tree of new Set([parent.index, parent.commit])) {
+        const entries = splitNul(await git(parent.repository, ["--literal-pathspecs", "ls-tree", "-z", tree, "--", sub]));
+        if (entries.some((entry) => entry.startsWith("160000 ") && entry.slice(entry.indexOf("\t") + 1) === sub)) {
+          gitlink = true;
+          break;
+        }
+      }
+      if (!gitlink) ownershipFailure(`unrecognized frozen submodule ${sub}`);
+      repository = join(parent.repository, sub);
+      await checkSnapshotDirectories(top, repository);
+      repository = await realpath(repository);
+      if (await realpath((await git(repository, ["rev-parse", "--show-toplevel"])).trim()) !== repository) {
+        ownershipFailure(`submodule is no longer a repository at ${repository}`);
+      }
+    }
+    if (pin.repository !== repository) ownershipFailure("Git pin names another repository");
+    await checkSnapshotDirectories(layout.tree, pin.path);
+    // A checkout's .git file must point back to THIS checkout's registration
+    // under the trusted repository. Never run Git through a foreign .git link.
+    const dotgit = join(pin.path, ".git");
+    const info = await lstat(dotgit).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (info !== undefined) {
+      if (!info.isFile() || info.isSymbolicLink()) ownershipFailure(`unsafe Git metadata at ${dotgit}`);
+      const text = (await readFile(dotgit, "utf8")).trim();
+      if (!text.startsWith("gitdir: ")) ownershipFailure(`invalid Git metadata at ${dotgit}`);
+      const common = await realpath(resolve(repository, (await git(repository, ["rev-parse", "--git-common-dir"])).trim()));
+      const registration = resolve(pin.path, text.slice(8));
+      if (dirname(registration) !== join(common, "worktrees")) ownershipFailure("foreign Git worktree registration");
+      await checkSnapshotDirectories(common, registration);
+      if (resolve(registration, (await readFile(join(registration, "gitdir"), "utf8")).trim()) !== dotgit ||
+          await realpath(resolve(registration, (await readFile(join(registration, "commondir"), "utf8")).trim())) !== common) {
+        ownershipFailure("Git worktree registration does not belong to this checkout");
+      }
+    }
+    seen.set(pin.path, pin);
+  }
+  return layout;
+}
+
+async function createRunSnapshot(root: string, artifactsDir: string): Promise<RunSnapshot> {
+  const { repositoryRoot, dir, ref } = await snapshotLayout(root, artifactsDir);
   await removeSnapshotDir(dir);
   const linked = new Set<string>();
   const warnings: string[] = [];
@@ -546,11 +664,11 @@ async function createRunSnapshot(root: string, artifactsDir: string): Promise<Ru
     const toplevel = (await git(repositoryRoot, ["rev-parse", "--show-toplevel"])).trim();
     const prefix = (await git(repositoryRoot, ["rev-parse", "--show-prefix"])).trim();
     const pins: GitPin[] = [];
-    await snapshotRepository(toplevel, join(dir, "tree"), `refs/audit-tools/snapshots/${key}`, pins, linked, "", warnings);
+    await snapshotRepository(toplevel, join(dir, "tree"), ref, pins, linked, "", warnings);
     record = {
       schema_version: "audit-run-snapshot/v1",
       repository_root: repositoryRoot,
-      source_root: prefix ? join(dir, "tree", prefix) : join(dir, "tree"),
+      source_root: resolve(dir, "tree", prefix),
       kind: "git",
       pins,
       linked: [...linked].sort(compareCodeUnits),
@@ -585,9 +703,7 @@ export async function ensureRunSnapshot(root: string, artifactsDir: string): Pro
   fenceSnapshotsFromParentRepositories();
   const existing = await readRunSnapshot(artifactsDir);
   if (existing !== undefined) {
-    if (existing.repository_root !== (await realpath(root))) {
-      throw new Error("Audit run snapshot belongs to another repository");
-    }
+    await validateSnapshotOwnership(existing, root, artifactsDir);
     if (existing.kind === "copy") {
       if (!existsSync(existing.source_root)) {
         throw new Error(
@@ -713,9 +829,11 @@ export async function writeBackSnapshotEdits(params: {
  * links are subtracted — on POSIX a dir-only ignore pattern does not match a
  * symlink, and a pinned link would be restored as a file.
  */
-export async function repinRunSnapshot(artifactsDir: string): Promise<void> {
+export async function repinRunSnapshot(artifactsDir: string, root: string | undefined): Promise<void> {
   const record = await readRunSnapshot(artifactsDir);
-  if (record === undefined || record.kind !== "git") return;
+  if (record === undefined) return;
+  await validateSnapshotOwnership(record, root, artifactsDir);
+  if (record.kind !== "git") return;
   const pins = [...record.pins];
   for (let index = pins.length - 1; index >= 0; index--) {
     const pin = pins[index];
@@ -741,16 +859,17 @@ export async function repinRunSnapshot(artifactsDir: string): Promise<void> {
  * The record goes last and only on a clean removal, so a failed one can be
  * retried and a second call is a no-op.
  */
-export async function removeRunSnapshot(artifactsDir: string): Promise<string[]> {
+export async function removeRunSnapshot(artifactsDir: string, root: string | undefined): Promise<string[]> {
   const problems: string[] = [];
   let record: RunSnapshot | undefined;
+  let dir: string;
   try {
     record = await readRunSnapshot(artifactsDir);
+    if (record === undefined) return problems;
+    ({ dir } = await validateSnapshotOwnership(record, root, artifactsDir));
   } catch (error) {
     return [`unreadable ${runSnapshotPath(artifactsDir)}: ${(error as Error).message}`];
   }
-  if (record === undefined) return problems;
-  const dir = record.pins.length > 0 ? dirname(record.pins[0].path) : dirname(record.source_root);
   try {
     await removeSnapshotDir(dir);
   } catch (error) {

@@ -57,8 +57,8 @@ test("one parser processes input order and duplicates sequentially with normaliz
   const ctx = await fixture({ "a": "A", "b": "B" });
   ctx.root = relative(process.cwd(), ctx.root);
   const events: string[] = [];
-  const parser = { setLanguage: vi.fn(), parse: vi.fn((source: string) => {
-    events.push(`parse:${source}`); return { rootNode: node(source) };
+  const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn((source: string) => {
+    events.push(`parse:${source}`); return { rootNode: node(source), delete: vi.fn() };
   }) };
   const loader = vi.fn(async () => parser);
   const output = await analyzeTreeSitterFiles(["./b", "a", "./b"], ctx, "css", "css-analyzer", (from, root, lookup, edges) => {
@@ -66,6 +66,8 @@ test("one parser processes input order and duplicates sequentially with normaliz
     events.push(`collect:${root.text}`);
     edges.push({ from, to: root.text, kind: "test" });
   }, loader);
+  expect(parser.delete).toHaveBeenCalledTimes(1);
+  for (const result of parser.parse.mock.results) expect(result.value.delete).toHaveBeenCalledTimes(1);
   expect(loader).toHaveBeenCalledTimes(1);
   expect(events).toEqual(["parse:B", "collect:B", "parse:A", "collect:A", "parse:B", "collect:B"]);
   expect(output.edges.map((edge) => edge.from)).toEqual(["b", "a", "b"]);
@@ -74,25 +76,32 @@ test("unreadable and over-limit sources skip; inclusive threshold counts JS code
   const limit = 524288;
   const ctx = await fixture({ below: "x".repeat(limit - 1), exact: "x".repeat(limit), over: "x".repeat(limit + 1), multibyte: "é".repeat(limit), astral: "😀".repeat(limit / 2), later: "ok" });
   await mkdir(join(ctx.root, "directory"));
-  const parser = { setLanguage: vi.fn(), parse: vi.fn((source: string) => ({ rootNode: node(source) })) };
+  const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn((source: string) => ({ rootNode: node(source), delete: vi.fn() })) };
   const collect = vi.fn();
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
   await analyzeTreeSitterFiles(["missing", "directory", "below", "exact", "over", "multibyte", "astral", "later"], ctx, "css", "css-analyzer", collect, async () => parser);
   expect(parser.parse.mock.calls.map(([source]) => source.length)).toEqual([limit - 1, limit, limit, limit, 2]);
+  expect(parser.delete).toHaveBeenCalledTimes(1);
+  for (const result of parser.parse.mock.results) expect(result.value.delete).toHaveBeenCalledTimes(1);
   expect(collect.mock.calls.map(([from]) => from)).toEqual(["below", "exact", "multibyte", "astral", "later"]);
   expect(stderr).not.toHaveBeenCalled();
 });
 test("parse and collector failures warn exactly, retain partial edges, and continue with later files", async () => {
   const ctx = await fixture({ parse: "parse", collect: "collect", later: "later" });
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-  const parser = { setLanguage: vi.fn(), parse: vi.fn((source: string) => {
+  const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn((source: string) => {
     if (source === "parse") throw "string error";
-    return { rootNode: node(source) };
+    return { rootNode: node(source), delete: vi.fn() };
   }) };
   const output = await analyzeTreeSitterFiles(["./parse", "./collect", "later"], ctx, "python", "python-analyzer", (from, root, _lookup, edges) => {
     edges.push({ from, to: "target", kind: "test" });
     if (root.text === "collect") throw new Error("collector error");
   }, async () => parser);
+  expect(parser.delete).toHaveBeenCalledTimes(1);
+  expect(parser.parse.mock.results.filter((result) => result.type === "return")).toHaveLength(2);
+  for (const result of parser.parse.mock.results) {
+    if (result.type === "return") expect(result.value.delete).toHaveBeenCalledTimes(1);
+  }
   expect(output.edges.map((edge) => edge.from)).toEqual(["collect", "later"]);
   expect(stderr.mock.calls).toEqual([
     ["[audit-code] python-analyzer: parse failed for './parse': string error\n"],
@@ -106,7 +115,7 @@ test("batch preparation runs once after parser admission and before root access"
   const originalRoot = ctx.root;
   const events: string[] = [];
   Object.defineProperty(ctx, "root", { get() { events.push("root"); return originalRoot; } });
-  const parser = { setLanguage: vi.fn(), parse: vi.fn((text: string) => ({ rootNode: node(text) })) };
+  const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn((text: string) => ({ rootNode: node(text), delete: vi.fn() })) };
   const prepare = vi.fn(() => { events.push("prepare"); });
   await analyzeTreeSitterFiles(["a", "b"], ctx, "python", "python-analyzer", vi.fn(),
     async () => { events.push("loader"); return parser; }, prepare);
@@ -118,4 +127,24 @@ test("batch preparation runs once after parser admission and before root access"
   await expect(analyzeTreeSitterFiles(["a"], blockedContext(), "python", "python-analyzer", vi.fn(),
     async () => { throw new Error("loader failed"); }, prepare)).rejects.toThrow("loader failed");
   expect(prepare).not.toHaveBeenCalled();
+});
+
+for (const failure of ["preparation", "root"] as const) {
+  test(`parser is deleted exactly once when ${failure} fails before parsing`, async () => {
+    const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn() };
+    const prepare = () => { if (failure === "preparation") throw new Error("preparation failed"); };
+    await expect(analyzeTreeSitterFiles(["a"], blockedContext(), "python", "python-analyzer", vi.fn(),
+      async () => parser, prepare)).rejects.toThrow(failure === "preparation" ? "preparation failed" : "root accessed");
+    expect(parser.parse).not.toHaveBeenCalled();
+    expect(parser.delete).toHaveBeenCalledTimes(1);
+  });
+}
+
+test("parser is deleted when every file is skipped without allocating trees", async () => {
+  const ctx = await fixture({ over: "x".repeat(524289) });
+  const parser = { delete: vi.fn(), setLanguage: vi.fn(), parse: vi.fn() };
+  expect(await analyzeTreeSitterFiles(["missing", "over"], ctx, "css", "css-analyzer", vi.fn(),
+    async () => parser)).toEqual({ edges: [] });
+  expect(parser.parse).not.toHaveBeenCalled();
+  expect(parser.delete).toHaveBeenCalledTimes(1);
 });

@@ -42,8 +42,8 @@ function isPathExcluded(finding: Finding, checkpoint: IntentCheckpoint): boolean
   // A finding is excluded if ANY of its files falls under the checkpoint's structured
   // scope (excluded_scope / disposition_overrides / must_not_touch) — remediating it
   // would require touching forbidden scope. Per-file field coverage is single-sourced
-  // with audit via the shared `fileExclusionReason`; only the ANY-file aggregation
-  // (vs audit's every-file) is remediate's domain policy.
+  // with audit via the shared `fileExclusionReason`, using its default write scope.
+  // Audit review permits must_not_touch files and excludes only all-excluded units.
   return paths.some((path) => fileExclusionReason(path, checkpoint) !== null);
 }
 

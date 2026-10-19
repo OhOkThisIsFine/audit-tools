@@ -8,7 +8,7 @@ import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type Per
 import { INTENT_INTERPRETATION_FILENAME, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
 import { requestedFindingSelection, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 import { parseCommandString } from "../../shared/tooling/commandShape.js";
-// sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/deferred-clarification.test.ts
+// sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/deferred-clarification.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 // (the free-form branch's write
 // scope is normalized — a backslash-spelled citation no longer wedges prepare)
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -69,7 +69,7 @@ import type { CoverageLedger } from "../state/types.js";
 import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
-import { ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
+import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
 import {
   FileLockTimeoutError,
@@ -1455,10 +1455,13 @@ async function handleReadyIntakeContractPipeline(
   const manifestSources = intake.manifest
     ? resolveManifestSources(root, intake.manifest).resolved
     : [];
-  const auditSource =
-    intake.summary.source_type === "structured_audit"
-      ? manifestSources.find((s) => s.type === "structured_audit")
-      : undefined;
+  const auditSource = manifestSources.find((s) => s.type === "structured_audit");
+  // Guidance remains a separate request alongside immutable audit findings.
+  // Do not turn the synthesized brief back into request text: it can describe
+  // audit findings that the review gate subsequently excludes from the seed.
+  const guidancePaths = auditSource
+    ? manifestSources.filter((source) => source.type !== "structured_audit").map((source) => source.path)
+    : [];
   let auditFindingsCache: { value: unknown } | undefined;
   const readAuditFindingsOnce = async (): Promise<unknown> => {
     if (!auditSource) {
@@ -1573,11 +1576,12 @@ async function handleReadyIntakeContractPipeline(
         artifactsDir,
         seedSourcePath,
         approvedPayload,
+        guidancePaths,
       );
     }
   }
 
-  if (auditSource && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, await readAuditFindingsOnce());
+  if (auditSource && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, await readAuditFindingsOnce(), guidancePaths);
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();
@@ -3072,6 +3076,8 @@ export interface PreIntakeSnapshot {
    */
   rejectedCheckpointFields: readonly RejectedCheckpointField[];
   resumeAck: { choice?: string } | undefined;
+  /** A pending result bound to this run is a continuation, not a fresh entry. */
+  boundSubmissionReturned?: boolean;
   /**
    * The state as loaded at advance-entry (post-forceReplan, pre-intake). The
    * resume/conflict/leftover-report gates are about a *pre-existing* run, so they
@@ -3180,7 +3186,7 @@ export function buildPreIntakeObligations(
       },
     },
     {
-      // Bare re-invocation of an in-progress run: present resume/restart/merge
+      // Bare re-invocation without bound returned work: present resume/restart/merge
       // once (gated on the ack file) rather than silently resuming. An ack of
       // choice==='resume' is satisfied — fall through to normal dispatch. Derives
       // from the frozen entry state (a resume is of a *pre-existing* run).
@@ -3188,6 +3194,7 @@ export function buildPreIntakeObligations(
       derive: () => {
         if (
           inputResolution.supplied ||
+          snapshot.boundSubmissionReturned === true ||
           entryState == null ||
           entryState.status === "complete" ||
           entryState.status === "pending"
@@ -3850,6 +3857,9 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
+    boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && state?.host_handoff !== undefined
+      ? await hasBoundRemediationSubmission({ root, artifactsDir, runId: requireStateRunId(state), state: currentHostBoundaryState(state) })
+      : false,
     entryState: state,
     suppliedInputUnchanged,
     sourceAlreadyBound: boundSource !== undefined,

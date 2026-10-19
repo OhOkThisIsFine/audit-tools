@@ -67,13 +67,13 @@ test.each(["failed-only", "failure-first", "failure-last"])("partial formatter f
     expect(await readFile(join(restored.source_root, "b.go"), "utf8")).toBe(mixedSuccess ? goBytes : "original go\n");
   } finally {
     mocks.run.mockReset();
-    await removeRunSnapshot(artifactsDir);
+    await removeRunSnapshot(artifactsDir, root);
     await rm(base, { recursive: true, force: true });
   }
 });
 
 
-test.each([false, true])("direct source failure reports retained edits without claiming a live writeback was withheld (snapshot record: %s)", async (withSnapshot) => {
+test.each([false, true])("formatter failure reports retained edits for live or frozen sources (snapshot record: %s)", async (withSnapshot) => {
   const root = await mkdtemp(join(tmpdir(), "auto-fix-direct-"));
   const artifactsDir = join(root, ".audit-tools", "audit");
   await mkdir(artifactsDir, { recursive: true });
@@ -93,14 +93,16 @@ test.each([false, true])("direct source failure reports retained edits without c
       return { exitCode: 1 };
     });
     const result = await runAutoFixExecutor({ file_disposition: { files: [{ path: "a.py", status: "included" }] } }, source, {
-      autoFix: { enabled: true }, ...(withSnapshot ? { artifactsDir } : { repositoryRoot: root }),
+      autoFix: { enabled: true }, repositoryRoot: root, ...(withSnapshot ? { artifactsDir } : {}),
     });
     expect(result.updated.auto_fixes_applied).toMatchObject({
       executed_tools: [], failed_tools: ["black"],
-      failure_reconciliation: { source_edits: "retained", live_writeback: "not_applicable" },
+      failure_reconciliation: { source_edits: "retained", live_writeback: withSnapshot ? "withheld" : "not_applicable" },
     });
-    expect(result.progress_summary).toContain("Partial formatter edits may remain in the source tree and will be audited.");
-    expect(result.progress_summary).not.toContain("No formatter edits were written back");
+    expect(result.progress_summary).toContain(withSnapshot
+      ? "Partial formatter edits may remain in the audit snapshot and will be audited."
+      : "Partial formatter edits may remain in the source tree and will be audited.");
+    if (!withSnapshot) expect(result.progress_summary).not.toContain("No formatter edits were written back");
     expect(await readFile(join(source, "a.py"), "utf8")).toBe("partial\n");
     if (withSnapshot) {
       await rm(source, { recursive: true, force: true });
@@ -110,7 +112,7 @@ test.each([false, true])("direct source failure reports retained edits without c
     }
   } finally {
     mocks.run.mockReset();
-    await removeRunSnapshot(artifactsDir);
+    await removeRunSnapshot(artifactsDir, root);
     await rm(root, { recursive: true, force: true });
   }
 });

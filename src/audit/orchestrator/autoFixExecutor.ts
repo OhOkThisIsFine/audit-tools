@@ -326,10 +326,10 @@ export async function runAutoFixExecutor(
         : "");
   }
 
-  // Reconcile the pin even when every formatter failed, or the caller supplied
-  // only a snapshot/artifacts directory. Restoration must preserve audited bytes.
+  // Reconcile the pin even when every formatter failed. A frozen source also
+  // requires the caller's live repository identity; restoration preserves audited bytes.
   if ((executedTools.length > 0 || failedTools.length > 0) && options.artifactsDir !== undefined) {
-    await repinRunSnapshot(options.artifactsDir);
+    await repinRunSnapshot(options.artifactsDir, options.repositoryRoot ?? root);
   }
 
   const resultsArtifact = {

@@ -52,7 +52,7 @@ async function dirtyRepo(): Promise<{ root: string; artifactsDir: string }> {
   const artifactsDir = join(root, ".audit-tools", "audit");
   await mkdir(artifactsDir, { recursive: true });
   cleanups.push(async () => {
-    await removeRunSnapshot(artifactsDir);
+    await removeRunSnapshot(artifactsDir, root);
     await rm(base, { recursive: true, force: true });
   });
   return { root, artifactsDir };
@@ -97,6 +97,7 @@ describe("ensureRunSnapshot — git root", () => {
     const sub = join(root, "src");
     const snapshot = await ensureRunSnapshot(sub, artifactsDir);
     expect(await readFile(join(snapshot.source_root, "a.ts"), "utf8")).toBe("export const a = 2;\n");
+    expect(await removeRunSnapshot(artifactsDir, sub)).toEqual([]);
   });
 
   test("a repository with no commit yet is snapshotted with its files", async () => {
@@ -108,7 +109,7 @@ describe("ensureRunSnapshot — git root", () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
     cleanups.push(async () => {
-      await removeRunSnapshot(artifactsDir);
+      await removeRunSnapshot(artifactsDir, root);
       await rm(base, { recursive: true, force: true });
     });
     const snapshot = await ensureRunSnapshot(root, artifactsDir);
@@ -189,7 +190,7 @@ describe("ensureRunSnapshot — git root", () => {
   test("removal deletes the checkout, the ref and the worktree registration, never the linked live directory", async () => {
     const { root, artifactsDir } = await dirtyRepo();
     const snapshot = await ensureRunSnapshot(root, artifactsDir);
-    expect(await removeRunSnapshot(artifactsDir)).toEqual([]);
+    expect(await removeRunSnapshot(artifactsDir, root)).toEqual([]);
     expect(existsSync(snapshot.source_root)).toBe(false);
     expect(await readFile(join(root, "node_modules", "dep", "index.js"), "utf8")).toBe("module.exports = 1;\n");
     await expect(gitOut(root, ["rev-parse", "--verify", "--quiet", snapshot.pins[0].ref])).rejects.toThrow();
@@ -251,7 +252,7 @@ describe("ensureRunSnapshot — git root", () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
     cleanups.push(async () => {
-      await removeRunSnapshot(artifactsDir);
+      await removeRunSnapshot(artifactsDir, root);
       await rm(base, { recursive: true, force: true });
     });
     const first = await ensureRunSnapshot(root, artifactsDir);
@@ -265,7 +266,7 @@ describe("ensureRunSnapshot — git root", () => {
     const artifactsDir = join(fixture.root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
     cleanups.push(async () => {
-      await removeRunSnapshot(artifactsDir);
+      await removeRunSnapshot(artifactsDir, fixture.root);
       await fixture.dispose();
     });
     await writeFile(join(fixture.root, "sub", "a.ts"), "export const x = 2;\n");
@@ -301,7 +302,7 @@ describe("the tool's own snapshot edits (opted-in auto-fix)", () => {
     expect(await readFile(join(root, "src", "a.ts"), "utf8")).toBe("export const a = 2; // formatted\n");
     expect(await readFile(join(root, "src", "b.ts"), "utf8")).toBe("export const b = 'user';\n");
 
-    await repinRunSnapshot(artifactsDir);
+    await repinRunSnapshot(artifactsDir, root);
     const repinned = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { pins: Array<{ commit: string; ref: string }> };
     const pin = repinned.pins[0];
     expect(pin.commit).not.toBe(first.pins[0].commit);
@@ -324,7 +325,7 @@ describe("ensureRunSnapshot — non-git root", () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await mkdir(artifactsDir, { recursive: true });
     cleanups.push(async () => {
-      await removeRunSnapshot(artifactsDir);
+      await removeRunSnapshot(artifactsDir, root);
       await rm(base, { recursive: true, force: true });
     });
     return { root, artifactsDir };
@@ -338,7 +339,7 @@ describe("ensureRunSnapshot — non-git root", () => {
     expect(await readFile(join(snapshot.source_root, "src", "a.ts"), "utf8")).toBe("export const a = 1;\n");
     expect((await lstat(join(snapshot.source_root, "node_modules"))).isSymbolicLink()).toBe(true);
     expect(existsSync(join(snapshot.source_root, ".audit-tools"))).toBe(false);
-    expect(await removeRunSnapshot(artifactsDir)).toEqual([]);
+    expect(await removeRunSnapshot(artifactsDir, root)).toEqual([]);
     expect(existsSync(join(root, "node_modules", "dep", "index.js"))).toBe(true);
   });
 

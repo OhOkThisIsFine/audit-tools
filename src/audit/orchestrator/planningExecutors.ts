@@ -44,7 +44,7 @@ import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { AuditTask, Lens } from "../types.js";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
-import { isSha256 } from "audit-tools/shared";
+import { isSha256, pathMatchesPrefix } from "audit-tools/shared";
 import { derivePendingTaskPartition } from "./pendingTasks.js";
 
 // ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ export async function runPlanningExecutor(
 
   // Apply disposition_overrides before coverage initialization so overridden
   // files never enter coverage at all (not just filtered after).
-  // Supports exact path match and prefix match (entry.path or entry.path + '/').
+  // Use the shared normalized exact-or-directory-prefix matcher.
   const dispositionOverrides = bundle.intent_checkpoint?.disposition_overrides;
   let effectiveFileDisposition = bundle.file_disposition;
   if (dispositionOverrides && dispositionOverrides.length > 0) {
@@ -114,10 +114,7 @@ export async function runPlanningExecutor(
       ...bundle.file_disposition,
       files: bundle.file_disposition.files.map((f) => {
         for (const override of dispositionOverrides) {
-          if (
-            f.path === override.path ||
-            f.path.startsWith(override.path + "/")
-          ) {
+          if (pathMatchesPrefix(f.path, override.path)) {
             return { ...f, status: override.status, reason: override.reason };
           }
         }

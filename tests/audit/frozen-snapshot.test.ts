@@ -101,7 +101,7 @@ test("cleanup removes the run's snapshot with its artifacts dir", async () => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
     expect(existsSync(sourceRoot)).toBe(true);
-    expect((await cleanupStaleArtifactsDir(artifactsDir, { force: true })).action).toBe("deleted");
+    expect((await cleanupStaleArtifactsDir(artifactsDir, { force: true, repositoryRoot: root })).action).toBe("deleted");
     expect(existsSync(sourceRoot)).toBe(false);
   });
 }, 120_000);

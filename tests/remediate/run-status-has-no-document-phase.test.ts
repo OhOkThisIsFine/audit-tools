@@ -77,7 +77,7 @@ describe("RemediationState.status union", () => {
 
   it("the load gate refuses 'documenting' as an unknown status", async () => {
     // The RUNTIME half of the same invariant — the tautology above could not
-    // reach it. `validateState` is exercised through the store's own read path,
+    // reach it. `validateRemediationState` is exercised through the store's own read path,
     // so this reds if the gate's vocabulary ever diverges from the shipped one.
     const { StateStore } = await import("../../src/remediate/state/store.js");
     await writeFile(

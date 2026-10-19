@@ -1,5 +1,5 @@
 import { withArchitectureFollowupEvidence } from "./architectureDiscovery.js";
-// sites-pinned: tests/audit/audit-read-synthesis.test.ts
+// sites-pinned: tests/audit/audit-read-synthesis.test.ts, tests/audit/lens-coverage-real-report.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult } from "../types.js";
@@ -51,6 +51,7 @@ function buildBaseFindingsReport(
       runtimeValidationTaskManifest: bundle.runtime_validation_tasks,
       externalAnalyzerResults: bundle.external_analyzer_results,
       designAssessment: bundle.design_assessment,
+      designReviewSnapshots: bundle.design_review_snapshots,
       structureDecomposition: bundle.structure_decomposition,
       charterRegister: bundle.charter_register,
       systemicChallenge: bundle.systemic_challenge,

@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-10-19T07:44:12.779Z",
+  "findings": [
+    {
+      "id": "DA-001",
+      "title": "Architectural seam: src/credit.mjs ↔ src/credit.test.mjs",
+      "category": "architectural_seam",
+      "severity": "medium",
+      "confidence": "medium",
+      "lens": "architecture",
+      "summary": "The dependency between src/credit.mjs and src/credit.test.mjs is a bridge (cut-edge): its removal disconnects the two regions. A single load-bearing link is a fragility and refactor risk.",
+      "affected_files": [
+        {
+          "path": "src/credit.mjs"
+        },
+        {
+          "path": "src/credit.test.mjs"
+        }
+      ],
+      "systemic": true,
+      "lead_lineage": {
+        "producer": "detectSeams",
+        "source_hash": "ed7ce39c2bfd2a1f1a74cdd8d3459b04c18c22d7345e3d1a82a58cafd11b86b5",
+        "confirmation": "lead"
+      }
+    }
+  ],
+  "contract_findings": [
+    {
+      "id": "DR-001",
+      "title": "A positive discount increases the subtotal",
+      "category": "invariant_counterexample",
+      "severity": "high",
+      "confidence": "high",
+      "lens": "correctness",
+      "summary": "README.md lines 3–4 explicitly require a discount to reduce the subtotal and discountedTotal(10000, 2000) to return 8000. In src/discount.mjs line 2, discountedTotal instead adds discountCents to subtotalCents, so that same valid input returns 12000. Every positive discount on ordinary finite nonnegative amounts increases the total; the zero clamp does not enforce the documented invariant. The arithmetic needs to subtract the discount to satisfy the existing contract. This observation follows directly from the frozen source; no tests were run.",
+      "affected_files": [
+        {
+          "path": "src/discount.mjs"
+        }
+      ],
+      "systemic": false,
+      "evidence_lane": "design-review-lane",
+      "grounding": {
+        "status": "grounded"
+      }
+    }
+  ],
+  "contract_reviewed": true,
+  "rejected_submissions": [],
+  "conceptual_findings": [],
+  "conceptual_reviewed": true
+}

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, dirname, parse, resolve } from "node:path";
 import { AUDIT_TOOLS_DIRNAME, auditArtifactsDir } from "audit-tools/shared";
-import { getArtifactsDir, hasFlag } from "./args.js";
+import { getArtifactsDir, getRootDir, hasFlag } from "./args.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
 
 // The structural identity of an audit artifacts directory, which the `cleanup`
@@ -82,6 +82,7 @@ function emitRefusal(
   process.exitCode = 1;
 }
 
+// sites-pinned: tests/audit/cleanup.test.ts, tests/audit/run-snapshot-ownership.test.ts
 export async function cmdCleanup(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const dryRun = hasFlag(argv, "--dry-run");
@@ -104,7 +105,7 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
     return;
   }
 
-  const result = await cleanupStaleArtifactsDir(artifactsDir, { force, dryRun });
+  const result = await cleanupStaleArtifactsDir(artifactsDir, { force, dryRun, repositoryRoot: getRootDir(argv) });
 
   if (result.action === "skipped") {
     console.log(
