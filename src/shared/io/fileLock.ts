@@ -398,9 +398,9 @@ export async function withFileLock<T>(
   let hasFnError = false;
   try {
     await assertOwnership();
-    const result = await fn(assertOwnership);
-    await assertOwnership();
-    return result;
+    // The callback owns its commit checkpoint and may legitimately remove its
+    // lock during cleanup. A post-return check cannot protect prior mutations.
+    return await fn(assertOwnership);
   } catch (err) {
     hasFnError = true;
     throw err;

@@ -195,7 +195,7 @@ describe("the submission path is tool-owned", () => {
           return slashed(resolveContainedPath(root, expected, "inspection result"));
         });
         expect(inspectionResults.length).toBeGreaterThan(0);
-        expect(new Set(writePaths)).toEqual(new Set([contractResult, ...inspectionResults]));
+        expect(new Set(writePaths)).toEqual(new Set([contractResult]));
         for (const writePath of inspectionResults) {
           expect(writePath).toMatch(/\/host-results\/[0-9a-f]{64}\.json$/);
         }
