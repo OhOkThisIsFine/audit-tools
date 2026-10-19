@@ -1,5 +1,7 @@
 import type { ArtifactBundle } from "../io/artifacts.js";
 import {
+  ExternalAnalyzerResultsSchema,
+  type ExternalAnalyzerResults,
   type ValidationIssue,
   pushValidationIssue,
   requireKeys,
@@ -52,9 +54,6 @@ function validateTopLevelShapes(bundle: ArtifactBundle, issues: ValidationIssue[
   if (bundle.runtime_validation_report) {
     issues.push(...requireKeys(bundle.runtime_validation_report, "runtime_validation_report", ["results"]));
   }
-  if (bundle.external_analyzer_results) {
-    issues.push(...requireKeys(bundle.external_analyzer_results, "external_analyzer_results", ["tool", "results"]));
-  }
   if (bundle.audit_plan_metrics) {
     issues.push(...requireKeys(bundle.audit_plan_metrics, "audit_plan_metrics", ["generated_at", "task_count", "packet_count"]));
   }
@@ -85,7 +84,7 @@ interface BundleIndexes {
   runtimeTaskIds: Set<string>;
 }
 
-function buildIndexes(bundle: ArtifactBundle): BundleIndexes {
+function buildIndexes(bundle: ArtifactBundle, analyzerResults: ExternalAnalyzerResults[]): BundleIndexes {
   const repoManifestFiles = asArray<{ path: string }>(bundle.repo_manifest?.files);
   const fileDispositionEntries = asArray<{ path: string; status: string }>(bundle.file_disposition?.files);
   const unitManifestUnits = asArray<Pick<AuditUnit, "unit_id" | "files" | "required_lenses">>(bundle.unit_manifest?.units);
@@ -95,9 +94,7 @@ function buildIndexes(bundle: ArtifactBundle): BundleIndexes {
   const surfaceEntries = asArray<{ id: string; entrypoint: string }>(bundle.surface_manifest?.surfaces);
   const runtimeValidationTasks = asArray<Pick<RuntimeValidationTask, "id" | "target_paths">>(bundle.runtime_validation_tasks?.tasks);
   const runtimeValidationResults = asArray<{ task_id: string }>(bundle.runtime_validation_report?.results);
-  const externalAnalyzerResults = asArray<{ id: string; path: string }>(
-    bundle.external_analyzer_results?.flatMap((tool) => tool.results),
-  );
+  const externalAnalyzerResults = analyzerResults.flatMap((tool) => tool.results);
   const auditTasks = asArray<{ task_id: string; line_ranges?: Array<{ path: string; start: number; end: number }> }>(bundle.audit_tasks);
   const requeueTasks = asArray<{ task_id: string; line_ranges?: Array<{ path: string; start: number; end: number }> }>(bundle.requeue_tasks);
   const coverageFiles = asArray<{ path: string; unit_ids: string[]; audit_status: string; required_lenses: string[]; completed_lenses: string[] }>(bundle.coverage_matrix?.files);
@@ -348,8 +345,17 @@ export function validateArtifactBundle(
   // Per-artifact shape checks (required keys).
   validateTopLevelShapes(bundle, issues);
 
-  // Build cross-artifact indexes once.
-  const idx = buildIndexes(bundle);
+  // The persisted artifact is an array of per-tool records, not a single import.
+  // Reuse the analyzer contract and keep malformed records out of path indexes.
+  const analyzerResults = ExternalAnalyzerResultsSchema.array().optional().safeParse(bundle.external_analyzer_results);
+  if (!analyzerResults.success) {
+    for (const issue of analyzerResults.error.issues) {
+      pushValidationIssue(issues, ["external_analyzer_results", ...issue.path].join("."), issue.message);
+    }
+  }
+
+  // Build cross-artifact indexes once; unrelated artifact checks still run.
+  const idx = buildIndexes(bundle, analyzerResults.success ? analyzerResults.data ?? [] : []);
 
   // Cross-artifact consistency checks (one helper per artifact pair).
   validateCoverageMatrixConsistency(bundle, idx, issues);

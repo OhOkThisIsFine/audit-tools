@@ -935,12 +935,13 @@ export {
   LOCKED_JSON_STORE_TIMEOUT_MS,
   siblingLockPath,
 } from "./io/lockedJsonStore.js";
-export type { Clock, LockOptions } from "./io/fileLock.js";
+export type { Clock, LockOptions, AssertLockOwnership } from "./io/fileLock.js";
 export {
   acquireLock,
   releaseLock,
   withFileLock,
   FileLockTimeoutError,
+  FileLockOwnershipLostError,
   STALE_LOCK_MS,
   isTransientPermissionContention,
 } from "./io/fileLock.js";

@@ -588,7 +588,7 @@ async function withReadyInspection(
 ): Promise<AuditStepPlan> {
   const inspectionRun = ctx?.result.inspectionRun;
   if (plan.via !== "current" || !ctx || !inspectionRun) return plan;
-  const { handoff, resultPaths } = await prepareSemanticReviewWorkload({
+  const { handoff } = await prepareSemanticReviewWorkload({
     root: ctx.root, sourceRoot: ctx.sourceRoot, artifactsDir: ctx.artifactsDir,
     bundle: ctx.result.bundle, activeReviewRun: inspectionRun,
   });
@@ -613,7 +613,9 @@ async function withReadyInspection(
       stopCondition: "Progress the independent ready workloads and call next-step as results arrive.",
       access: {
         read_paths: [...(plan.params.access?.read_paths ?? []), handoff.workload_path, handoff.result_map_path, inspectionRun.pending_audit_tasks_path],
-        write_paths: [...(plan.params.access?.write_paths ?? []), ...resultPaths],
+        // Inspection workers own their workload item's bound result_path; those
+        // sibling outputs do not widen this architectural step's write scope.
+        write_paths: plan.params.access?.write_paths ?? [],
       },
     },
   };

@@ -260,6 +260,23 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
+    "3c25854bb15e0851": {
+      "reviewed_by": "Codex Windows qualification",
+      "attester_class": "agent",
+      "checked": "Inspected bounded inspection write grants and both fold commit checkpoints; native ready-inspection-access verifies one versus 470 results and sibling binding refusal, fold-lock-ownership exercises stale takeover on success and throw paths with successor bytes and staging preserved. Confirmed legitimate callback cleanup remains successful; checkpoints are cooperative and are not atomic fencing.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "3e15dcca456c319163239bfe3291a3dc7f687c2b",
+        "ran_at": "2026-10-19T09:48:33.692Z"
+      },
+      "attested_at": "2026-10-19T09:49:31.905Z",
+      "vouches": {
+        "src/audit/cli/nextStepCommand.ts": "709f4f625e53dc565e65e3ebeedcd161fe4ebf93",
+        "src/audit/cli/nextStepHelpers.ts": "83672235ed72117c2195b947c6b8001892c6ac9a"
+      }
+    },
     "3e0aee473b384f14": {
       "reviewed_by": "opus-subagent-w6-review,opus-subagent-w6-delta-review",
       "attester_class": "agent",
@@ -554,10 +571,10 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "3c25854bb15e0851"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "b3148880827e283a"
+      "review": "3c25854bb15e0851"
     },
     "src/audit/cli/prompts.ts": {
       "baseline": "7b79934e86baf378"

@@ -15,6 +15,7 @@ import {
   releaseLock,
   withFileLock,
   FileLockTimeoutError,
+  FileLockOwnershipLostError,
   isTransientPermissionContention,
   lockedJsonMutate,
 } from "../../src/shared/io/fileLock.js";
@@ -119,6 +120,56 @@ test("withFileLock executes callback and always releases lock", async () => {
       { code: "ENOENT" },
       "lock file should be removed after withFileLock resolves",
     );
+  });
+});
+
+test("withFileLock preserves success when callback cleanup removes its lock", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    await expect(withFileLock(lockPath, async (assertOwnership) => {
+      await assertOwnership();
+      await rm(lockPath);
+      return "cleaned";
+    })).resolves.toBe("cleaned");
+  });
+});
+
+test.each(["replaced", "removed", "unreadable"])("ownership checkpoint refuses a %s lock before mutation", async (loss) => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    let mutated = false;
+    await expect(withFileLock(lockPath, async (assertOwnership) => {
+      await assertOwnership();
+      if (loss === "replaced") await writeFile(lockPath, "successor");
+      else {
+        await rm(lockPath);
+        if (loss === "unreadable") {
+          const { mkdir } = await import("node:fs/promises");
+          await mkdir(lockPath);
+        }
+      }
+      await assertOwnership();
+      mutated = true;
+    })).rejects.toBeInstanceOf(FileLockOwnershipLostError);
+    expect(mutated).toBe(false);
+    if (loss === "replaced") expect(await readFile(lockPath, "utf8")).toBe("successor");
+  });
+});
+
+test("ownership checkpoints do not cancel or undo callback writes already in flight", async () => {
+  await withTempDir(async (dir: string) => {
+    const lockPath = tmpLockPath(dir);
+    const output = join(dir, "output.txt");
+    await expect(withFileLock(lockPath, async (assertOwnership) => {
+      await assertOwnership();
+      await writeFile(lockPath, "successor");
+      // Deliberate loss AFTER the checkpoint: this remains the callback's
+      // responsibility. A later checkpoint cannot undo this write.
+      await writeFile(output, "already written");
+      await assertOwnership();
+    })).rejects.toBeInstanceOf(FileLockOwnershipLostError);
+    expect(await readFile(output, "utf8")).toBe("already written");
+    expect(await readFile(lockPath, "utf8")).toBe("successor");
   });
 });
 
@@ -516,6 +567,7 @@ test("withFileLock surfaces the releaseLock error when fn() succeeds", async () 
         }),
       (err) => {
         expect(err instanceof Error, "the release error should propagate").toBeTruthy();
+        expect(err).not.toBeInstanceOf(FileLockOwnershipLostError);
         return true;
       },
     );
@@ -671,6 +723,7 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
     const lockPath = tmpLockPath(dir);
     const logPath = join(dir, `run-${randomUUID()}.jsonl`);
     const logger = new RunLogger(logPath);
+    let originalToken = "";
 
     let release: (() => void) | undefined;
     const gate = new Promise<void>((r) => {
@@ -678,11 +731,13 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
     });
     const held = withFileLock(
       lockPath,
-      async () => {
+      async (assertOwnership) => {
         // Steal the lock out from under the live holder: the lock path now
         // carries a FOREIGN token, so the next beat must stand down and say so.
+        originalToken = await readFile(lockPath, "utf8");
         await writeFile(lockPath, `foreign-token-${randomUUID()}`, "utf8");
         await gate;
+        await assertOwnership();
         return "done";
       },
       10_000,
@@ -691,8 +746,10 @@ test("CP-NODE-23: a heartbeat beat that finds ANOTHER holder's token is classifi
     );
 
     const events = await waitForLoggedNote(logPath, "lock_heartbeat_stolen");
+    // Observed loss is sticky even if external interference restores the bytes.
+    await writeFile(lockPath, originalToken);
     release!();
-    expect(await held).toBe("done");
+    await expect(held).rejects.toBeInstanceOf(FileLockOwnershipLostError);
 
     const stolen = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_stolen");
     expect(
@@ -723,11 +780,12 @@ test("CP-NODE-23: a heartbeat beat whose refresh fails is classified lock_heartb
     });
     const held = withFileLock(
       lockPath,
-      async () => {
+      async (assertOwnership) => {
         // Remove the lock underneath the live holder: the beat's read throws
         // ENOENT, which is an IO failure, not a theft.
         await rm(lockPath, { force: true });
         await gate;
+        await assertOwnership();
         return "done";
       },
       10_000,
@@ -737,7 +795,7 @@ test("CP-NODE-23: a heartbeat beat whose refresh fails is classified lock_heartb
 
     const events = await waitForLoggedNote(logPath, "lock_heartbeat_failed");
     release!();
-    expect(await held).toBe("done");
+    await expect(held).rejects.toBeInstanceOf(FileLockOwnershipLostError);
 
     const failed = events.filter((ev) => ev.kind === "error" && ev.note === "lock_heartbeat_failed");
     expect(

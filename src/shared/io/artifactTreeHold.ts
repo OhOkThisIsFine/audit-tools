@@ -1,6 +1,6 @@
 // sites-pinned: tests/audit/artifact-tree-lock-single-surface.test.ts, tests/audit/artifact-tree-lock.test.ts
 import { artifactTreeLockPath } from "./auditToolsPaths.js";
-import { withFileLock } from "./fileLock.js";
+import { withFileLock, type AssertLockOwnership } from "./fileLock.js";
 import type { RunLogger } from "../observability/runLog.js";
 
 // Measured frontier folds hold this lock for 22–58.5 seconds on a 1,051-file
@@ -13,7 +13,7 @@ export const ARTIFACT_TREE_LOCK_TIMEOUT_MS = 120_000;
 export async function withArtifactTreeHold<T>(
   artifactsDir: string,
   runLogger: RunLogger | undefined,
-  fn: () => Promise<T>,
+  fn: (assertOwnership: AssertLockOwnership) => Promise<T>,
 ): Promise<T> {
   return await withFileLock(
     artifactTreeLockPath(artifactsDir),
