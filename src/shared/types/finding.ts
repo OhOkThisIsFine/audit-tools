@@ -579,10 +579,10 @@ export function findingIdentity(finding: Finding): FindingIdentity {
  * found" from "never reviewed". This states the difference:
  *
  *   • `findings` — asked, and it found something.
- *   • `clean` — asked through a lens-open channel that was ingested, and there
- *     was nothing there. The ONLY value that may be read as "no defect".
- *   • `not_run` — selected, and no lens-open channel was ever ingested. Absence
- *     of a finding is not absence of a defect.
+ *   • `clean` — qualifying inspection for this lens returned no findings.
+ *     This is not a claim of complete file coverage or proof of no defects.
+ *   • `not_run` — selected, with no qualifying inspection for this lens;
+ *     an unbound or empty/excluded-scope design review does not qualify.
  */
 export const LensCoverageEntrySchema = z
   .object({

@@ -20,12 +20,9 @@
  *     establish from the report itself. That split is the abstention rule: a
  *     gate that cannot ESTABLISH its verdict abstains rather than approximating.
  *
- * AND THE PROMPT HALF IS NOT THE GUARANTEE. A prompt cannot force a model to
- * produce a finding, so P2 is shipped and never validated. But the report half
- * alone would be INERT rather than merely incomplete: a lens is only `clean`
- * when a LENS-OPEN channel was ingested, and with no channel carrying the
- * selection, every selected lens would honestly report `not_run` on every run
- * forever — true, unactionable, identical run to run.
+ * A completed review flag alone does not establish which lenses or files were
+ * inspected. Bound, nonempty design-review coverage is tested with the real
+ * report regression in lens-coverage-real-report.test.ts.
  */
 import { describe, expect, it } from "vitest";
 
@@ -54,7 +51,7 @@ function finding(id: string, lens: string): Finding {
   } as unknown as Finding;
 }
 
-/** A design assessment whose conceptual pass COMPLETED — a lens-open ingest. */
+/** A completed conceptual pass with no snapshot evidence supplied here. */
 function reviewedAssessment(findings: readonly Finding[]) {
   return {
     generated_at: "2026-09-03T00:00:00Z",
@@ -95,18 +92,17 @@ describe("lens coverage states what a selected lens delivered", () => {
       findings_count: 1,
       outcome: "findings",
     });
-    // Asked through a lens-open channel that was ingested, and it found nothing.
-    // "Reviewed, nothing found" — NOT the same statement as "never reviewed".
+    // A completion flag without its bound scope cannot establish inspection.
     expect(byLens.get("performance")).toEqual({
       lens: "performance",
       selected: true,
       findings_count: 0,
-      outcome: "clean",
+      outcome: "not_run",
     });
     // A custom (non-canonical) lens the operator invented is reported exactly
     // like a canonical one — `resolveEffectiveLenses` appends it verbatim, so
     // dropping it here would silently void half the operator's own choice.
-    expect(byLens.get("provenance_labelling")?.outcome).toBe("clean");
+    expect(byLens.get("provenance_labelling")?.outcome).toBe("not_run");
     // The mandatory base lenses are re-unioned by the resolver, so they are
     // part of the selection and must be stated too.
     expect(byLens.has("security")).toBe(true);
@@ -137,7 +133,7 @@ describe("lens coverage states what a selected lens delivered", () => {
 
   it("names the un-exercised lenses in the rendered report", () => {
     const markdown = renderAuditReportMarkdown(modelWithSelection());
-    expect(markdown).toContain("Lenses not exercised");
+    expect(markdown).toContain("Selected lenses without findings");
     expect(markdown).toContain("performance");
     expect(markdown).toContain("provenance_labelling");
   });

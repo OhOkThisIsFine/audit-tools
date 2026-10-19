@@ -1,15 +1,9 @@
+// sites-pinned: tests/audit/f1.test.ts, tests/remediate/checkpoint-filter.test.ts
 import type { IntentCheckpoint } from "../types/intentCheckpoint.js";
 
 /**
- * Single authority for intent path-scope matching + structured-exclusion policy,
- * shared by both orchestrators so their scope decisions can never drift. Audit
- * (review scope: `intentScopeDisposition.ts`) and remediate (write scope:
- * `checkpointFilter.ts`) previously carried byte-identical prefix predicates AND
- * consulted DIFFERENT checkpoint fields (audit honored `disposition_overrides` but
- * ignored `must_not_touch`; remediate the reverse) — the exact latent scope-policy
- * drift the auditor-agnostic-robustness rule bans. Both now consume this module, so
- * a checkpoint yields the SAME per-file exclusion on both sides.
- *
+ * Shared path matching and structured scope policy. Review and write scope both
+ * honor explicit exclusions; only write scope honors `must_not_touch` globs.
  * All matching is case-sensitive and OS-agnostic (separators normalized to "/").
  */
 function normalize(p: string): string {
@@ -104,23 +98,20 @@ export const EXCLUDED_OVERRIDE_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether a single file is excluded by the checkpoint's STRUCTURED scope, and the
- * human reason when it is (null when in scope). Consults ALL exclusion fields so the
- * two orchestrators cover the same scope:
- *   - `excluded_scope` (path/prefix + its reason),
- *   - `disposition_overrides` with an excluded status (path/prefix + its reason),
- *   - `must_not_touch` globs (write-forbidden ⇒ also out of review/remediation scope;
- *     a synthesized reason since the entry is a bare glob).
- * Precedence follows that field order (first match wins). Never reads
- * `free_form_intent` (interpreted into priority/lens signals, never verbatim, INV-S04).
+ * A file's structured exclusion reason (null when in scope). Explicit exclusions
+ * and excluded dispositions apply to both review and write scope. `must_not_touch`
+ * forbids writes only; it must not hide read-only audit targets from reviewers.
+ * Write scope is the default so remediation callers retain their write guard.
+ * Precedence is `excluded_scope`, `disposition_overrides`, then `must_not_touch`.
+ * Never reads `free_form_intent` (INV-S04).
  *
- * The AGGREGATION over a unit's / finding's files (audit: excluded only when EVERY
- * file is excluded; remediate: dropped when ANY file is excluded) stays the caller's
- * domain policy — only the per-file field coverage is single-sourced here.
+ * Aggregation stays with the caller: audit excludes a unit only when EVERY file
+ * is excluded; remediation drops a finding when ANY affected file is forbidden.
  */
 export function fileExclusionReason(
   filePath: string,
   checkpoint: IntentCheckpoint | undefined,
+  scope: "review" | "write" = "write",
 ): string | null {
   if (!checkpoint) return null;
   for (const entry of checkpoint.excluded_scope ?? []) {
@@ -131,8 +122,10 @@ export function fileExclusionReason(
       return ov.reason;
     }
   }
-  for (const glob of checkpoint.must_not_touch ?? []) {
-    if (globMatches(filePath, glob)) return `must-not-touch scope (${glob})`;
+  if (scope === "write") {
+    for (const glob of checkpoint.must_not_touch ?? []) {
+      if (globMatches(filePath, glob)) return `must-not-touch scope (${glob})`;
+    }
   }
   return null;
 }

@@ -1,0 +1,14 @@
+{
+  "source_tree": "27cc855ed8d21766bd5f3da1183b3f1fd80660ca",
+  "captured_at": "2026-10-19",
+  "source": "Preserved real audit fixture: audit-real-golden-20261019/repo/.audit-tools/audit",
+  "sha256": {
+    "audit_results.jsonl": "d650c7e6736827a3280bffb28ea7710e4b54ac5585f6652450a6a8796b295043",
+    "coverage_matrix.json": "8b322248b6d0d029f75fb140016e8f015e9b0d1e4db78d4c1b8f1b62a480ee68",
+    "design_assessment.json": "911961dd55cab561942a1e2b454b3b01f026ad1eaf891421edd3fd0f9b9a32a3",
+    "intent_checkpoint.json": "a439f0d9f21317107194962cba17c6d899ea10ca87a34f5905527cc5483f2291",
+    "unit_manifest.json": "918bf1cf1d9efcd75c0ae10878ad3e32298f1446da2a3893b3bca9cf58b954b9",
+    "design-review-snapshots/contract.json": "b9cfaf2beb4f9d862a19d1fd95cfa397e9ee3b9f3314574b09986a9a6af9e68e",
+    "design-review-snapshots/conceptual.json": "ae16d64d27f9b5d651e6165ea8e25409f8afc7e0dde1608e04e606a60e762562"
+  }
+}

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/lens-coverage-real-report.test.ts, tests/audit/lens-coverage-reports-unexercised.test.ts, tests/shared/findings-report-lens-coverage.test.ts
 /**
  * The ONE derivation of `lens_coverage` — what each lens the operator selected
  * actually delivered.
@@ -27,21 +28,13 @@ function countByLens(findings: readonly Finding[]): Map<string, number> {
   return counts;
 }
 
-/**
- * What one lens's count means, given whether ANY lens-open channel was ingested.
- *
- * `clean` is the load-bearing distinction: it may be read as "asked, and there
- * was nothing there", so it is reachable only when a channel that carried the
- * operator's selection actually came back. With no such channel, zero findings
- * means the lens was never exercised — `not_run` — which is true, and is the
- * whole point of the field.
- */
+/** What one lens's count means given qualifying work for that same lens. */
 export function lensOutcome(
   findingsCount: number,
-  lensOpenChannelIngested: boolean,
+  lensExercised: boolean,
 ): MeasuredOutcome {
   if (findingsCount > 0) return "findings";
-  return lensOpenChannelIngested ? "clean" : "not_run";
+  return lensExercised ? "clean" : "not_run";
 }
 
 /**
@@ -49,7 +42,7 @@ export function lensOutcome(
  * holding the map but not the run that produced it can actually establish.
  *
  * It deliberately does NOT re-decide `clean` versus `not_run`. Which of the two
- * a zero-count lens deserves depends on whether a lens-open channel was
+ * a zero-count lens deserves depends on whether qualifying work for that lens was
  * ingested, and that is not in the report — so a validator that picked one would
  * refuse legitimate output rather than catch a defect. Abstaining there is the
  * verdict; what it refuses is the contradiction: a lens with findings that is
@@ -75,7 +68,7 @@ export function lensCoverageEntryContradictsCount(
 export function deriveLensCoverage(params: {
   readonly selectedLenses: readonly string[];
   readonly findings: readonly Finding[];
-  readonly lensOpenChannelIngested: boolean;
+  readonly exercisedLenses: ReadonlySet<string>;
 }): LensCoverageEntry[] {
   const counts = countByLens(params.findings);
   const selected = new Set(params.selectedLenses);
@@ -85,7 +78,7 @@ export function deriveLensCoverage(params: {
       lens,
       selected: true,
       findings_count: findingsCount,
-      outcome: lensOutcome(findingsCount, params.lensOpenChannelIngested),
+      outcome: lensOutcome(findingsCount, params.exercisedLenses.has(lens)),
     };
   });
   const unselected = [...counts.keys()]
