@@ -4,6 +4,7 @@
 import { afterEach, expect, test } from 'vitest';
 import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSyncHidden as spawnSync } from '../helpers/spawn.mjs';
 import { worktreeTrees } from '../../scripts/shared/worktree-tree.mjs';
@@ -189,7 +190,8 @@ test('land reaches its publication boundary only for the official ledger transit
   mkdirSync(remote, { recursive: true });
   const init = spawnSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote, encoding: 'utf8' });
   expect(init.status, init.stderr).toBe(0);
-  g(repo, 'remote', 'add', 'origin', remote);
+  // Keep the local transport URL-shaped on Windows as well as POSIX.
+  g(repo, 'remote', 'add', 'origin', pathToFileURL(remote).href);
   g(repo, 'push', '-q', 'origin', 'HEAD:main');
   g(repo, 'remote', 'set-head', 'origin', 'main');
   g(repo, 'commit', '-qm', 'fixture official transition');
