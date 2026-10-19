@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { expect, test, vi } from "vitest";
+import { toPosixPath } from "audit-tools/shared";
 
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { runDeterministicForNextStep } from "../../src/audit/cli/nextStepHelpers.js";
@@ -86,7 +87,7 @@ test("ready inspection keeps the architecture contract constant at 470 pending r
         ...ownStep.access!.read_paths,
         inspectionRun.host_workload_path, inspectionRun.host_result_map_path,
         inspectionRun.pending_audit_tasks_path,
-      ]);
+      ].map(toPosixPath));
 
       const workload: AuditHostWorkload = JSON.parse(await readFile(inspectionRun.host_workload_path, "utf8"));
       expect(workload.work_items).toHaveLength(470);
@@ -94,13 +95,13 @@ test("ready inspection keeps the architecture contract constant at 470 pending r
       const sibling = workload.work_items[1]!;
       for (const item of workload.work_items) {
         expect(item.prompt.text).toContain(item.result_path);
-        expect(many.access!.write_paths).not.toContain(resolve(root, item.result_path));
+        expect(many.access!.write_paths).not.toContain(toPosixPath(resolve(root, item.result_path)));
       }
       expect(first.prompt.text).not.toContain(sibling.result_path);
       for (const [key, path] of Object.entries(many.artifact_paths)) {
         if (!key.startsWith("charter_extraction_") || !key.endsWith("_prompt")) continue;
         const prompt = await readFile(path!, "utf8");
-        expect(prompt).not.toContain(inspectionRun.host_workload_path);
+        expect(prompt).not.toContain(toPosixPath(inspectionRun.host_workload_path));
         expect(prompt).not.toContain(first.result_path);
       }
       const statedPacket = many.access!.read_paths.find(path => path.endsWith("charter-extraction-stated-packet.md"))!;
