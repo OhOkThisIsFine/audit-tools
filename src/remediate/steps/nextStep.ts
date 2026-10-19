@@ -69,7 +69,7 @@ import type { CoverageLedger } from "../state/types.js";
 import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
 import { runClosePhase } from "../phases/close.js";
-import { ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
+import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
 import {
   FileLockTimeoutError,
@@ -3076,6 +3076,8 @@ export interface PreIntakeSnapshot {
    */
   rejectedCheckpointFields: readonly RejectedCheckpointField[];
   resumeAck: { choice?: string } | undefined;
+  /** A pending result bound to this run is a continuation, not a fresh entry. */
+  boundSubmissionReturned?: boolean;
   /**
    * The state as loaded at advance-entry (post-forceReplan, pre-intake). The
    * resume/conflict/leftover-report gates are about a *pre-existing* run, so they
@@ -3184,7 +3186,7 @@ export function buildPreIntakeObligations(
       },
     },
     {
-      // Bare re-invocation of an in-progress run: present resume/restart/merge
+      // Bare re-invocation without bound returned work: present resume/restart/merge
       // once (gated on the ack file) rather than silently resuming. An ack of
       // choice==='resume' is satisfied — fall through to normal dispatch. Derives
       // from the frozen entry state (a resume is of a *pre-existing* run).
@@ -3192,6 +3194,7 @@ export function buildPreIntakeObligations(
       derive: () => {
         if (
           inputResolution.supplied ||
+          snapshot.boundSubmissionReturned === true ||
           entryState == null ||
           entryState.status === "complete" ||
           entryState.status === "pending"
@@ -3854,6 +3857,9 @@ async function advanceUnderPhaseLock(deps: {
     existingCheckpoint,
     rejectedCheckpointFields: checkpointRead?.rejected ?? [],
     resumeAck,
+    boundSubmissionReturned: !inputResolution.supplied && resumeAck === undefined && state?.host_handoff !== undefined
+      ? await hasBoundRemediationSubmission({ root, artifactsDir, runId: requireStateRunId(state), state: currentHostBoundaryState(state) })
+      : false,
     entryState: state,
     suppliedInputUnchanged,
     sourceAlreadyBound: boundSource !== undefined,
