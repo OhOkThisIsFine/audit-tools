@@ -7,6 +7,7 @@ import { access } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   createMemoizedSourceReader,
+  enumerateTrackedFilePaths,
   readJsonFile,
   RunLogger,
   groundFinding,
@@ -369,6 +370,8 @@ export async function stampToolComputedGrounding(
   results: readonly unknown[],
 ): Promise<void> {
   const readSource = createMemoizedSourceReader();
+  // Enumerate once when there are findings; empty submissions need no git call.
+  let knownPaths: ReadonlySet<string> | undefined;
   for (const result of results) {
     if (typeof result !== "object" || result === null) continue;
     const findings = (result as { findings?: unknown }).findings;
@@ -376,7 +379,8 @@ export async function stampToolComputedGrounding(
     for (const finding of findings) {
       if (typeof finding !== "object" || finding === null) continue;
       const typed = finding as Finding;
-      await groundFinding(root, typed, readSource);
+      knownPaths ??= await enumerateTrackedFilePaths(root);
+      await groundFinding(root, typed, readSource, knownPaths);
     }
   }
 }

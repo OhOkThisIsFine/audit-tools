@@ -14,6 +14,7 @@ import { lensDefinition } from "../../types.js";
 
 import {
   createMemoizedSourceReader,
+  enumerateTrackedFilePaths,
   deriveLaneDemand,
   appendSubmissionEvent,
   assertSubmissionRunId,
@@ -2186,6 +2187,9 @@ export async function ingestAuditHostResults(params: {
     const readSource = createMemoizedSourceReader();
     const activeTaskIds = new Set(params.auditTasks.map((task) => task.task_id));
 
+    // Enumerate once when there are findings; an idle ingest needs no git call.
+    let knownPaths: ReadonlySet<string> | undefined;
+
     for (const entry of resultMap.entries) {
       if (acceptedBindings.has(bindingIdentity(entry))) continue;
       const item = items.get(entry.work_item_id);
@@ -2237,7 +2241,8 @@ export async function ingestAuditHostResults(params: {
       // refuse is refused while the item can still be resubmitted, never
       // accepted and then replayed into a failing gate on every later step.
       for (const finding of converted.auditResult.findings) {
-        await groundFinding(boundarySourceRoot(paths), finding, readSource);
+        knownPaths ??= await enumerateTrackedFilePaths(boundarySourceRoot(paths));
+        await groundFinding(boundarySourceRoot(paths), finding, readSource, knownPaths);
       }
 
       // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope

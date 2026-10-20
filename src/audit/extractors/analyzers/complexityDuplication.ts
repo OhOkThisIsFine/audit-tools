@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/extractor-token-regressions.test.ts
 import type { NodeMetric } from "audit-tools/shared";
 
 /**
@@ -31,8 +32,10 @@ export function isJsTsPath(path: string): boolean {
 // these (plus one base path) approximates the number of independent paths
 // through the source without a full parse — deliberately a lexical heuristic,
 // hence the `-approx` suffix in the measure name.
+// `??` is matched before the bare `?` alternative so nullish-coalescing
+// counts as ONE branch token, like `&&`/`||`, not two bare `?` matches.
 const BRANCH_KEYWORD_PATTERN =
-  /\b(?:if|else\s+if|for|while|case|catch|do)\b|&&|\|\||\?(?!\.)/g;
+  /\b(?:if|else\s+if|for|while|case|catch|do)\b|&&|\|\||\?\?|\?(?!\.)/g;
 
 /**
  * Approximate cyclomatic complexity by counting branch/decision tokens plus a

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/extractor-token-regressions.test.ts
 /**
  * Shared bootstrap heuristics for the extractor layer. These rules run before
  * richer graph/unit analysis exists, so they intentionally favor recall over
@@ -135,6 +136,11 @@ const ASYNC_TASK_KEYWORDS = ["task", "tasks"] as const;
 export function normalizeExtractorPath(path: string): string {
   return path
     .replace(/\\/g, "/")
+    // Acronym boundary: an uppercase run immediately followed by a
+    // TitleCase word (e.g. "APIController") gets a hyphen here, before the
+    // lowercase-to-uppercase rule below, so an all-caps acronym segments
+    // the same as "ApiController".
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1-$2")
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
     .toLowerCase();
 }

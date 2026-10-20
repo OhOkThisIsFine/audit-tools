@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/title-citation-regression.test.ts
 /**
  * The single finding-identity-signature authority for the whole pipeline
  * (drift-plan R2). Before this module, three independent "is this the same
@@ -59,6 +60,8 @@ export function normalizeTitle(title: string | undefined): string {
     .toLowerCase()
     // File paths, optionally suffixed with :line or :line:col.
     .replace(/[\w.~-]*[\\/][\w.\\/~-]*(:\d+(:\d+)?)?/g, " ")
+    // Bare "filename.ext:line[:col]" citations with no path separator.
+    .replace(/[\w.-]+\.[a-zA-Z]+:\d+(:\d+)?/g, " ")
     // Counts, line numbers, and any other numerals.
     .replace(/\d+/g, " ")
     // Collapse punctuation, then whitespace.

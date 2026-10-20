@@ -32,14 +32,11 @@
  * confident wrong one. The verdict enum has no repair state, so the exclusion is
  * by construction rather than by intent.
  */
-import { lstatSync, readFileSync, statSync } from "node:fs";
-import { relative, resolve, sep, win32 } from "node:path";
-import { resolveContainedSourcePath } from "../io/sourcePath.js";
+import { readFileSync, statSync } from "node:fs";
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import {
-  isBareBasename,
   quoteMatches,
-  resolveBasenameToTrackedPath,
+  resolveCitedPath,
 } from "./findingGrounding.js";
 
 /** Reads an admitted source file synchronously; injectable independently of path admission. */
@@ -286,46 +283,6 @@ export interface CitationCheckResult {
   delivered_evidence_checked: boolean;
 }
 
-interface ResolvedCitedPath {
-  absolutePath: string;
-  repoRelativePath: string;
-}
-
-/**
- * Resolve a cited path to an existing absolute path plus the repo-relative form
- * it resolved through. A full/dotfile path resolves by the `root` join; a bare
- * basename that is not a top-level file resolves against the tracked-path corpus
- * (INV-B3-3) so a nested `advance.ts` is not false-negatived.
- */
-function resolveCitedPath(
-  root: string,
-  citedPath: string,
-  corpus: ReadonlySet<string>,
-): ResolvedCitedPath | undefined {
-  const trimmed = citedPath.trim();
-  const direct = resolveContainedSourcePath(root, trimmed);
-  const admitted = (absolutePath: string): ResolvedCitedPath => ({
-    absolutePath,
-    repoRelativePath: relative(resolve(root), absolutePath).split(sep).join("/"),
-  });
-  if (direct !== undefined) return admitted(direct);
-  if (isBareBasename(trimmed) && win32.parse(trimmed).root === "") {
-    // Only a missing basename may fall back. An existing rejected file/link
-    // cannot be rehabilitated through a different tracked file of the same name.
-    try {
-      lstatSync(resolve(root, trimmed));
-      return undefined;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
-    }
-    const tracked = resolveBasenameToTrackedPath(trimmed, corpus);
-    if (tracked) {
-      const resolved = resolveContainedSourcePath(root, tracked);
-      if (resolved !== undefined) return admitted(resolved);
-    }
-  }
-  return undefined;
-}
 
 function runContains(
   runs: readonly DeliveredLineRun[],
