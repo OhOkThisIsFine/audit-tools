@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts, tests/shared/git.test.ts, tests/shared/git-dirty-paths.test.ts, tests/audit/scope.test.ts
+// sites-pinned: tests/shared/audit-read-state.test.ts, tests/remediate/phase-close.test.ts, tests/shared/git.test.ts, tests/shared/git-dirty-paths.test.ts, tests/audit/scope.test.ts, tests/shared/working-tree-scratch-exclusion.test.ts
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -122,7 +122,7 @@ export async function workingTreeTree(
   try {
     const head = await headCommit(root);
     if ((await git(head === null ? ["read-tree", "--empty"] : ["read-tree", head])) === null) return null;
-    if ((await git(["add", "-A"])) === null) return null;
+    if ((await git(["add", "-A", "--", `:(top,glob,exclude)${AUDIT_TOOLS_DIRNAME.replace(/^\./u, "[.]")}/**`])) === null) return null;
     await git(["rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", `${AUDIT_TOOLS_DIRNAME}/`]);
     for (const path of options.excludePaths ?? []) {
       await git(["rm", "-r", "-q", "--cached", "-f", "--ignore-unmatch", "--", path]);

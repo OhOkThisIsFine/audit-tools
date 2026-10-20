@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/quote-grounding.test.ts, tests/shared/finding-grounding.test.ts, tests/audit/host-ingest-grounding.test.ts
+// sites-pinned: tests/audit/quote-grounding.test.ts, tests/shared/finding-grounding.test.ts, tests/audit/host-ingest-grounding.test.ts, tests/shared/basename-grounding-regression.test.ts, tests/shared/citation-grounding.test.ts, tests/shared/source-path-containment.test.ts
 /**
  * Finding grounding primitives — single source for both orchestrators.
  *
@@ -21,6 +21,8 @@
  * identical path normalizer; this is the one authority both consume (drift-plan
  * E3 + P7).
  */
+import { lstatSync } from "node:fs";
+import { relative, resolve, sep, win32 } from "node:path";
 import { readFile } from "node:fs/promises";
 import { resolveContainedSourcePath } from "../io/sourcePath.js";
 import { readRecursiveTrackedPaths } from "../gitTrackedPaths.js";
@@ -219,6 +221,47 @@ export function createMemoizedSourceReader(): SourceReader {
   };
 }
 
+interface ResolvedCitedPath {
+  absolutePath: string;
+  repoRelativePath: string;
+}
+
+/**
+ * Resolve a cited path to an existing absolute path plus the repo-relative form
+ * it resolved through. A full/dotfile path resolves by the `root` join; a bare
+ * basename that is not a top-level file resolves against the tracked-path corpus
+ * (INV-B3-3) so a nested `advance.ts` is not false-negatived.
+ */
+export function resolveCitedPath(
+  root: string,
+  citedPath: string,
+  corpus: ReadonlySet<string>,
+): ResolvedCitedPath | undefined {
+  const trimmed = citedPath.trim();
+  const direct = resolveContainedSourcePath(root, trimmed);
+  const admitted = (absolutePath: string): ResolvedCitedPath => ({
+    absolutePath,
+    repoRelativePath: relative(resolve(root), absolutePath).split(sep).join("/"),
+  });
+  if (direct !== undefined) return admitted(direct);
+  if (isBareBasename(trimmed) && win32.parse(trimmed).root === "") {
+    // Only a missing basename may fall back. An existing rejected file/link
+    // cannot be rehabilitated through a different tracked file of the same name.
+    try {
+      lstatSync(resolve(root, trimmed));
+      return undefined;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+    }
+    const tracked = resolveBasenameToTrackedPath(trimmed, corpus);
+    if (tracked) {
+      const resolved = resolveContainedSourcePath(root, tracked);
+      if (resolved !== undefined) return admitted(resolved);
+    }
+  }
+  return undefined;
+}
+
 /**
  * Ground a finding against disk: re-read each cited verbatim span, and let the
  * code it quotes — never a number the reviewer typed — say where it is.
@@ -236,11 +279,19 @@ export function createMemoizedSourceReader(): SourceReader {
  * The verdict is written to `finding.grounding` and also returned. It never
  * refuses: an unlocatable quote is surfaced as unconfirmed, not discarded with
  * its sibling findings.
+ *
+ * `knownPaths` optionally rescues a missing bare basename through the unique
+ * tracked-path corpus. Exact contained paths take precedence, including untracked
+ * root files in a frozen snapshot. The shared citation resolver preserves rejected
+ * existing paths, Windows-root guards, and containment; only a successful fallback
+ * rewrites `loc.path`. Scope validation remains the caller's responsibility.
+ * Without a corpus, existing direct-path behavior is unchanged.
  */
 export async function groundFinding(
   repoRoot: string,
   finding: Finding,
   readSource: SourceReader = defaultSourceReader,
+  knownPaths?: ReadonlySet<string>,
 ): Promise<FindingGrounding> {
   const entries = Array.isArray(finding.affected_files) ? finding.affected_files : [];
   const misses: string[] = [];
@@ -258,7 +309,15 @@ export async function groundFinding(
       continue;
     }
     quotedCount += 1;
-    const absolutePath = resolveContainedSourcePath(repoRoot, loc.path);
+    // Exact admitted paths win, including untracked files captured in a snapshot.
+    let absolutePath = resolveContainedSourcePath(repoRoot, loc.path);
+    if (absolutePath === undefined && knownPaths !== undefined && isBareBasename(loc.path)) {
+      const resolved = resolveCitedPath(repoRoot, loc.path, knownPaths);
+      if (resolved !== undefined) {
+        loc.path = resolved.repoRelativePath;
+        absolutePath = resolved.absolutePath;
+      }
+    }
     if (absolutePath === undefined) {
       misses.push(`${loc.path}: file could not be read on disk`);
       continue;

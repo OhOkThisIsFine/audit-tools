@@ -260,6 +260,22 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
+    "3fc713e152b9e2da": {
+      "reviewed_by": "Independent Chat source reviews relayed by parent thread 01a15666-eb6b-70da-9377-39a63417a00b; final approved tree 3effba17f873dddc7e8165dfe954b1d09c83925e",
+      "attester_class": "agent",
+      "checked": "Checked direct-root citation precedence and rejected-path containment through shared missing-basename resolver; lazy tracked corpus on frozen host snapshot; citation identity and nullish/acronym extractor regressions with graph cache v11; Git pre-staging exclusion against ignored untracked scratch with no scratch in HEAD and deep unignored 271-character scratch, near-match inclusion, tracked scratch removal, real index and HEAD preservation. Independent Chat approved final exact source/test tree after diagnostic and red-green regression evidence.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "3effba17f873dddc7e8165dfe954b1d09c83925e",
+        "ran_at": "2026-10-20T03:19:45.615Z"
+      },
+      "attested_at": "2026-10-20T03:19:55.051Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "48689da5196fd4b92198d42a74f2518b1fecbfa8"
+      }
+    },
     "4318b8e7432c3e06": {
       "reviewed_by": "claude-opus-5-5-review-subagent",
       "attester_class": "agent",
@@ -526,7 +542,7 @@
       "review": "7ecf68a7852f3ff3"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "392554939aa89e3b"
+      "review": "3fc713e152b9e2da"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"

@@ -58,7 +58,7 @@ async function rejected(path: string, corpus: ReadonlySet<string> = new Set<stri
   expect(readSource).not.toHaveBeenCalled();
   const readFinding = vi.fn(async () => "needle");
   const f = finding(path);
-  expect((await groundFinding(root, f, readFinding)).status).toBe("ungrounded");
+  expect((await groundFinding(root, f, readFinding, corpus)).status).toBe("ungrounded");
   expect(readFinding).not.toHaveBeenCalled();
   expect(f.affected_files![0]!.line_start).toBeUndefined();
   expect(f.affected_files![0]!.line_end).toBeUndefined();

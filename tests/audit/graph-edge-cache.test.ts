@@ -445,30 +445,14 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
     digest.update("\0");
   }
 
-  // The disposition tracked-path refactor changes this source closure, but graph.ts
-  // consumes only unchanged buildDispositionMap/isAuditExcludedStatus helpers.
-  // Path-set changes already invalidate via pathLookupHash; retain cache version v10.
-  // Bounded-reader admission/allocation also changes this conservative closure.
-  // Graph routes use only the unchanged pure comment masker, not its file reader;
-  // cached contributions still use supplied content, so retain cache version v10.
-  // The reader's sites-pinned declaration is comment-only; graph behavior is unchanged.
-  // Manifest-relative target extraction preserves all four adapters' graph output;
-  // only ownership of the existing pure prefix moved, so retain cache version v10.
-  // Adapter/path-utils test-site declarations also change only comments in this closure.
-  // Shared analyzer batch lifecycle changes this conservative closure through html.ts;
-  // the cached floor consumes its unchanged HTML_RESOURCE_ATTRIBUTE only, so retain v10.
-  // Tree/parser disposal also changes only that analyzer lifecycle; the cached floor
-  // never calls it, so its per-file contribution format and rules still use v10.
-  // Build-local path indexes preserve resolver and schema outputs (including ambiguity);
-  // only repeated scans moved into an immutable snapshot, so retain cache version v10.
   expect(
     digest.digest("hex"),
     "An extractor feeding a cached per-file contribution changed. A prior cache " +
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("c917fe4dc06a983ada1a32292212c1c830d11662b23961f07af707db783f6a28");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v10");
+  ).toBe("5bd1f8395edc6fd2568e9127fa299e62ff23a2558f86c4a241e8b76a20689918");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v11");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {
