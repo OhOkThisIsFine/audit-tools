@@ -66,7 +66,7 @@ failure independently; recovery expectations now retain `rejected` followed by
 ## Audit quality experiment
 
 The acceptance protocol remains in
-[the workflow-gap review](audit-tools-simplification-workflow-gap-2026-08-26.md).
+the workflow-gap review (retired — in git history).
 The local executor was repinned before fresh trials to AGY 1.1.22 and Gemini
 3.8 Flash high effort because the original model was unavailable. Private gold
 was frozen outside the repository before trial outputs were evaluated. Its SHA-256

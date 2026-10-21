@@ -28,7 +28,7 @@
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
-- `open-bugs.md:9` — Two audit tests time out under full-suite load and pass alone (2026-10-08, medium).
+- `open-bugs.md:9` — Audit/shared tests time out under full-suite load and pass alone (2026-10-08, medium).
 - `open-bugs.md:11` — The merge-routing check measures incoming paths from `CLAUDE_PROJECT_DIR`, not the checkout the command runs in (2026-10-09, medium).
 - `open-bugs.md:13` — The nightly routine has no check for a checkout stale enough to make its own review meaningless (2026-10-20, medium, friction: tool_should_decide).
 - `open-bugs.md:15` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
@@ -69,9 +69,8 @@
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
 - `forward-tracks.md:30` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:45` — CI wall-clock: shard balance and the single-file floor.
-- `forward-tracks.md:54` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:57` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:45` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:48` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
 
 ### [`deferred.md`](backlog/deferred.md)
 
@@ -168,6 +167,7 @@
 - `durable-traps.md:883` — A quota-exhaustion message names a reset date, and that date is not a prediction (2026-08-28).
 - `durable-traps.md:889` — Five accepted limits, moved from open-bugs (owner decision 2026-10-04) — none is a defect.
 - `durable-traps.md:898` — A targeted vitest run after a source edit can red on a half-built `dist/` (2026-10-08).
+- `durable-traps.md:905` — AGY headless now auto-denies `escalate_admin` on reading `CLAUDE.md` itself, dead-ending the leg-1 adversary lane (2026-10-21).
 
 <!-- END GENERATED SEEK INDEX -->
 

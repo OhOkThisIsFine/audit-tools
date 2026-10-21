@@ -2,7 +2,7 @@
 
 # Backlog reconciliation — September 30, 2026
 
-The [frozen September 19 inventory](backlog-inventory-2026-09-19.md) retains the original 203 IDs and titles. This record states their current disposition. Removal from the working queue is supported by the evidence below; it is not evidence by itself. The [completion review](audit-tools-polish-2026-09-30.md) records the significant architectural substitutions.
+The frozen September 19 inventory (retired — in git history) retains the original 203 IDs and titles. This record states their current disposition. Removal from the working queue is supported by the evidence below; it is not evidence by itself. The [completion review](audit-tools-polish-2026-09-30.md) records the significant architectural substitutions.
 
 Local certification passed on frozen index tree `ab4e5231cfb05a12d254dd612b17f2e4e7fd9e91`: 589 test files, 7,742 tests passed, three skipped and zero failed. Aggregate checks, packaged and isolated host fixtures, and all eight generic remediation-gate smoke checks passed. The linked audit lifecycle completed in 36 seconds; linked remediation passed all 14 checks. Linked runs used a verified temporary HOME and npm prefix, which were cleaned afterward. The git-probe case ran successfully; the remaining skips are two Windows-only cases and one explicitly disabled historical finalization test.
 

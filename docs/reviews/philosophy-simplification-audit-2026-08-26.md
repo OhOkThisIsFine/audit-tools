@@ -1,7 +1,7 @@
 # Philosophy and design-choice simplification audit — 2026-08-26
 
 This is a companion to
-[`complexity-reduction-audit-2026-08-26.md`](complexity-reduction-audit-2026-08-26.md).
+`complexity-reduction-audit-2026-08-26.md` (retired — in git history).
 That review asks where the implementation repeats itself. This review asks the earlier
 question: **which governing choices make that machinery necessary, and which choices can be
 restated so the simplest implementation is also the correct one?**

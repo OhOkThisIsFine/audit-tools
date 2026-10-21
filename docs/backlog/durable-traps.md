@@ -901,3 +901,14 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   `cleanup.test.ts`) therefore deletes `dist/` while files running beside it read it; they fail
   with EPERM or "cannot load the AuditResult validator from dist/". `npm test` builds first and is
   immune. After editing `src/`, run `npm run build` before a targeted run that mixes such files.
+
+- **AGY headless now auto-denies `escalate_admin` on reading `CLAUDE.md` itself, dead-ending the
+  leg-1 adversary lane (2026-10-21).** The 2026-09-24 leg-1 stamp used an AGY lane
+  (`claude-opus-4-6-thinking`) to read-and-verify docs fine; tonight that model id no longer exists
+  in AGY's catalog (`agy_fire` now lists Gemini 4 Argon, Gemini 3.8 Flash, Claude Opus/Sonnet 5.5,
+  GPT-OSS 120B instead), and a minimal probe that only reads `CLAUDE.md` and writes one file —
+  with `execution: true`, in an isolated worktree — fails every time with "a tool required the
+  `escalate_admin` permission that headless mode cannot prompt for, so it was auto-denied." A bare
+  file write with no reads succeeds. The routine's own rule applies: a dead lane may not silently
+  shrink coverage, so leg 1 fell back to a primary-session-only pass tonight and reported the gap
+  rather than skip it quietly. Re-probe before trusting an AGY lane for leg 1 again.

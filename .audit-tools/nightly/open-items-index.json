@@ -1,5 +1,20 @@
 {
-  "run": "2026-09-24",
-  "count": 0,
-  "items": []
+  "run": {
+    "date": "2026-10-21",
+    "head": "1498feb8"
+  },
+  "count": 1,
+  "items": [
+    {
+      "id": "leg2-comment-shape-enumeration-check-2026-10-21",
+      "leg": "backlog",
+      "path": "docs/backlog/open-bugs.md",
+      "title": "backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked?",
+      "subject_key": "2439046592dbc16f",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/backlog/open-bugs.md"
+      }
+    }
+  ]
 }

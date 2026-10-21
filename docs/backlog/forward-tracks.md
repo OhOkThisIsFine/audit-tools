@@ -42,15 +42,6 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
     is present + consent given, or a parse that drops all output. (No Rust/Ruby toolchain on the box →
     install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
 
-- **CI wall-clock: shard balance and the single-file floor.** Pointer only — the brief, the measurements,
-  the settled owner decisions and the rejected alternatives are ALL in
-  `docs/reviews/ci-wallclock-plan-critique-2026-08-07.md`, which is deliberately the single home for this
-  work. Nothing is restated here, so there is no second copy to drift. Implementation assigned outside
-  this repo's agent loop by the owner 2026-08-07. [[vitest-shard-is-hash-based-and-file-atomic]]
-
-
-
-
 - **Shared orchestration retains deliberate consumer policies.** Run-directory and prompt-binding mechanisms are shared. Remediation has no consumer graceful cap from which to derive another engine bound, and no measured defect justifies changing obligation granularity. Preserve these non-goals until new evidence warrants revisiting them.
 
 

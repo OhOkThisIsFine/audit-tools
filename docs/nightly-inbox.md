@@ -22,51 +22,59 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: unknown.*
+*Last run: 2026-10-21 at `1498feb8`.*
 
 
 ---
 
-## Nothing to answer
 
-No open propositions. The next run will refill this file if it finds any.
+# Backlog disambiguation
 
+
+<!-- nightly:item key=2439046592dbc16f -->
+
+## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+Some source-code comments describe a workflow's shape (e.g. "steps run in this order") or enumerate a fixed list, without naming a specific file/symbol/path. The existing check:comment-code-citations gate (shipped 2026-10-04) only reconciles comments that name a concrete identifier — a shape or enumeration names none, so it is never checked, and the code behind it can drift silently (the entry cites a 2026-08-31 continuityScore header as the motivating case). The backlog entry already states the desired end property, but not the mechanism: there is no existing tool that parses a free-form "shape" or "enumeration" claim and reconciles it against code. Turning this into a concrete, implementable spec (what counts as a checkable shape/enumeration claim, and what tool would check it) is a design call, not a mechanical fix leg 2 can apply on its own.
+
+### The question
+
+Should this stay an open backlog item as-is (no mechanism proposed yet), should it be narrowed to a scoped A→B spec (e.g. "require every workflow-shape comment to cite a sites-pinned test" rather than a general-purpose shape parser), or should it be dropped as not worth mechanizing (rely on doc review to catch drift here)?
+
+### Your answer
+
+- [ ] **1. Keep as-is** — Keep the entry open as currently written; no new mechanism proposed yet, revisit later.
+- [ ] **2. Narrow to a sites-pinned-citation requirement** — Narrow the fix to requiring every workflow-shape/enumeration comment to cite a sites-pinned test or spec, rather than building a general shape/enumeration parser.
+- [ ] **3. Drop — not worth mechanizing** — Drop this entry; rely on the nightly doc-review pass to catch workflow-shape/enumeration drift by hand rather than building a mechanical check.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
 
 <details>
-<summary>What the last run changed on its own</summary>
+<summary>Evidence (3) — what was verified against code, and how</summary>
 
-
-- Leg 2, mechanical trim under the shipped-entry rule. The open-bugs entry 'Three code comments assert a shape the tree no longer has' named three instances, and all three are fixed at HEAD: the header of src/shared/continuityScore.ts now states the former claim in the past tense and calls it false at HEAD; the doc comment on renderConceptualReviewPrompt (src/audit/orchestrator/designReviewPrompt.ts) now reads 'Categories: see CONCEPTUAL_FINDING_CATEGORIES.'; the doc comment on conceptual_findings (src/audit/types/designAssessment.ts) now reads 'categories are CONCEPTUAL_FINDING_CATEGORIES'; and grep finds no 'combined' pass in designReviewPrompt.ts, its only occurrence at line 1002 being unrelated prose about share allocation. The entry's open remainder stands — no npm script matches /comment/, so nothing reconciles a comment against the code it describes — so the entry was TRIMMED to that remainder rather than deleted, per the partial-entry rule. The three named instances were reported by the independent adversary lane and re-verified against source by the primary session before the trim, so the edit does not rest on one reviewer's verdict.
-
-- docs/backlog.md's generated seek index and docs/HANDOFF.md's generated roadmap block were regenerated after that trim (generate-backlog-index.mjs, generate-handoff-roadmap.mjs), because a backlog edit stales both.
-
+- docs/backlog/open-bugs.md:35-41 (current entry text, quoted in full in the subject).
+- check:comment-code-citations (shipped 2026-10-04 per the entry's own text) resolves backticked paths/symbols only; verified its guard-reach row lists this gap rather than covering it.
+- leg-2 mechanical triage sweep (2026-10-21, litellm/medium) independently classified this entry owner_decision_needed: "states a goal to mechanically reconcile prose workflow shapes and enumerations without specifying the design or mechanism."
 
 </details>
+
+---
 
 
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- Leg 1, the adversary lane — MET tonight, for the first time in five runs. It ran as a separate Antigravity CLI process with its own context on claude-opus-4-6-thinking, reading its own git worktree of HEAD, so it had the repository-reading capability the routine prefers for a whole-document pass. The four consecutive nights without one (2026-09-10, -09-16, -09-17, -09-23) were all the same quota-exhausted lane; this run did not retry that lane at all, which is what the 2026-09-23 change to the routine — state the CAPABILITY, never an order of lanes — was for.
-
-- Leg 1, per-item reviewer pass — PARTIAL by design. 52 documents and 1,628 items are in scope (leg1 plan at HEAD 3c47eae5; 1,442 items carry an evidence window and 186 are cold). This pass covered: the six documents changed since the last stamp, read end to end by the adversary lane; four never-stamped spec documents (conceptual-design-review-design, audit/artifact-contract, audit-workflow-design, self-scaling-pipeline-design) read end to end by a second independent lane as the periodic sweep; a corpus-wide status-noise grep over spec/ and docs/audit-pkg/; the corpus-level condensation review; and fourteen mechanical documentation gates over the whole tracked corpus. It was NOT a per-item judgment pass over all 52 documents.
-
-- Leg 1, the periodic-sweep lane's findings carry NO independent adversary. That lane acted as a reviewer over four documents the adversary lane did not read, and its findings were re-verified against source by the primary session rather than by a third independent context. CONSEQUENCE: for those four documents there is a reviewer and a verifier but no second opinion on what the lane SKIMMED AND PASSED, which is the false-negative half. Nothing from those four documents was auto-applied — both findings are escalated — so no edit rests on one verdict.
-
-- Leg 1, doc-set condensation pass — RAN, and found nothing to propose. The tracked corpus is 228 markdown files. Excluding the runtime audit-report artifact, the six largest are five dated review records under docs/reviews/ (excluded from the manifest by construction and governed by the standing retirement rule, which ran tonight) and docs/backlog/durable-traps.md at 80 KB. No fold, merge, retire or split candidate was formed among the concept docs.
-
-- Leg 2 sweep — PARTIAL. Read the stamp at .audit-tools/nightly/triage-2026-09-24-coverage.json, not this sentence, for what it reached: finished_at is the honest record of whether it ran to the end. The lane is the ported agent-dispatch bridge at litellm/medium, run at concurrency 4 rather than 3, which roughly doubled throughput against 2026-09-23 (19 entries attempted in the first 40 minutes, against 12 in 78 minutes). CONSEQUENCE: every backlog entry the stamp does not count was not checked for shipped-ness or premise tonight. One entry was lost to an unparseable reply, which is the class tonight's leg-3 proposal is about.
-
-- Leg 2 found nothing to delete. Of the entries classified, one returned shipped_claim_unverified and none returned a confirmed shipped verdict, so no entry met the code-anchor bar for deletion. The one mechanical edit tonight came from the adversary lane, not from the sweep.
-
-- The weekly /insights pass — NOT DUE, and therefore not a skipped leg. The stamp at .audit-tools/nightly/insights-last-run.json records ran_at 2026-09-23, one day old against a seven-day cadence.
-
-- The machine-wide static-analysis sweep RAN and found nothing. All thirteen repositories under C:/Code declare no .claude/static-analysis.json and were skipped, which is the runner's normal behaviour. Note the change from 2026-09-23: llm-relay, whose eslint and knip failures were the only findings that night, is no longer present under C:/Code at all, so those two items are gone rather than fixed. For audit-tools the skip is arguably correct, since it owns equivalent checks under npm run verify:checks, but no one has decided that on purpose — the same open question as last night. <!-- retired-infrastructure-exempt: llm-relay — historical sweep; replaced by agent-dispatch -->
-
-- Leg 3 remains propose-only and landed nothing. One proposal was raised (P69) and its premise was established by live measurement against the bridge rather than by a test at HEAD, so no RED-AT record was owed: the change it proposes is a call-site and agent-selection decision, not a hook or a gate.
-
-- SCOPE, stated rather than assumed: the repository half of P69 (scripts/shared/mcp-dispatch-lane.mjs and scripts/shared/triage-backlog.mjs) is filed here. Its machine-wide half — that the agent-dispatch bridge serves format: json_schema for a tooled agent and refuses it for the toolless answer agent — is a fact about agent-dispatch, which serves every repository, and is recorded in the proposal rather than written into this repository's durable stores by an unattended run.
+- leg 1 (docs) — AGY independent-repo-reading lane dead-ended on escalate_admin even for a bare CLAUDE.md read (see docs/backlog/durable-traps.md, 2026-10-21 entry); the primary session did a reduced spot-check of a handful of changed docs (HANDOFF.md, README.md claims) rather than the full reviewer+adversary pass over all 65 changed files. Full leg-1 per-item judgment pass over the remaining changed/cold documents did not run this cycle.
 
 
 </details>

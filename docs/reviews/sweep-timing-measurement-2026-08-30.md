@@ -1,7 +1,7 @@
 # Sweep-timing measurement — what removes a stored session entry, and whether `processAlive` suffices (2026-08-30)
 
 Owner decision, 2026-08-30, taken on reading the
-[`ppid` result](ppid-liveness-measurement-2026-08-30.md): **measure sweep timing before designing.**
+`ppid` result (retired — in git history): **measure sweep timing before designing.**
 That record proved a durable session pid is obtainable from a hook and storable where another
 session can read it, and named the untouched half in its own words — *"nothing was measured about
 write and sweep timing: when a hook writes the entry, what removes it when a session ends without a
