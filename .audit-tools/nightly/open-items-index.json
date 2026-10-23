@@ -1,9 +1,9 @@
 {
   "run": {
-    "date": "2026-10-21",
-    "head": "1498feb8"
+    "date": "2026-10-23",
+    "head": "49a5d1cd"
   },
-  "count": 1,
+  "count": 5,
   "items": [
     {
       "id": "leg2-comment-shape-enumeration-check-2026-10-21",
@@ -11,9 +11,53 @@
       "path": "docs/backlog/open-bugs.md",
       "title": "backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked?",
       "subject_key": "2439046592dbc16f",
+      "nights_open": 3,
+      "target": {
+        "path": "docs/backlog/open-bugs.md"
+      }
+    },
+    {
+      "id": "leg1-synthesis-narrative-always-runs-header-2026-10-23",
+      "leg": "docs",
+      "path": "spec/audit-workflow-design.md",
+      "title": "spec/audit-workflow-design.md: fix or clarify the \"Synthesis narrative (always runs)\" header, which contradicts its own body and the code",
+      "subject_key": "ea994a4b1389d0da",
+      "nights_open": 1,
+      "target": {
+        "path": "spec/audit-workflow-design.md"
+      }
+    },
+    {
+      "id": "leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23",
+      "leg": "docs",
+      "path": "docs/backlog/open-bugs.md",
+      "title": "docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property",
+      "subject_key": "135ae2a4fa2e1db8",
       "nights_open": 1,
       "target": {
         "path": "docs/backlog/open-bugs.md"
+      }
+    },
+    {
+      "id": "leg1-docset-condensation-qualification-triple-pointer-2026-10-23",
+      "leg": "docs",
+      "path": "docs/backlog/deferred.md",
+      "title": "Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct?",
+      "subject_key": "fcdc9f3b916e7bc6",
+      "nights_open": 1,
+      "target": {
+        "path": "docs/backlog/deferred.md"
+      }
+    },
+    {
+      "id": "leg3-p70-stale-main-reads-wrong-checkout-2026-10-23",
+      "leg": "solutions",
+      "path": ".claude/hooks/session-start-guards.mjs",
+      "title": "Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR",
+      "subject_key": "8ccc5183771bb9c2",
+      "nights_open": 1,
+      "target": {
+        "path": ".claude/hooks/session-start-guards.mjs"
       }
     }
   ]

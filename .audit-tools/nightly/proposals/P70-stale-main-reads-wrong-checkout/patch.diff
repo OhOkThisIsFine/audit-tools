@@ -1,0 +1,155 @@
+diff --git a/.claude/hooks/session-start-guards.mjs b/.claude/hooks/session-start-guards.mjs
+index 86ef1548..722cd2ef 100644
+--- a/.claude/hooks/session-start-guards.mjs
++++ b/.claude/hooks/session-start-guards.mjs
+@@ -60,6 +60,25 @@ function gitIn(cwd, args, timeout = 25_000) {
+ 
+ const git = (args, timeout) => gitIn(ROOT, args, timeout);
+ 
++// The directory whose git state a check must read when the check is about
++// THIS SESSION's position relative to a remote — never ROOT unconditionally.
++// CLAUDE_PROJECT_DIR always names the main checkout; a session working in a
++// linked worktree has its OWN HEAD, which can disagree with the main
++// checkout's HEAD in either direction. Reading ROOT there reports a stale-main
++// verdict for the wrong tree (open-bugs, 2026-10-06: a worktree level with
++// `origin/main` still read "N commit(s) BEHIND" because the main checkout's
++// local HEAD was the one actually behind). Fail open to ROOT whenever the
++// payload cwd is missing, gone, or not a worktree of this same repository —
++// this mirrors the stale-agent-worktrees leg below, which already trusts
++// payload.cwd for the session's own tree.
++function resolveSessionGitDir() {
++  const cwd = typeof payload?.cwd === 'string' && payload.cwd ? payload.cwd : null;
++  if (!cwd || !existsSync(cwd)) return ROOT;
++  const probe = gitIn(cwd, ['rev-parse', '--is-inside-work-tree'], 5_000);
++  return probe.ok && probe.stdout === 'true' ? cwd : ROOT;
++}
++const SESSION_GIT_DIR = resolveSessionGitDir();
++
+ // git reports forward slashes even on win32, where the drive letter's case also
+ // varies between `rev-parse` and the worktree list — so path identity is only
+ // meaningful normalized.
+@@ -179,12 +198,12 @@ let remoteName = null; // shared with the worktree leg below
+ try {
+   // Remote is discovered, never assumed: this repo's remote is `audit-tools`,
+   // but a worktree or clone may name it differently.
+-  const remotes = git(['remote']).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
++  const remotes = gitIn(SESSION_GIT_DIR, ['remote']).stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+   const remote = remotes.includes('audit-tools') ? 'audit-tools' : remotes[0];
+   remoteName = remote ?? null;
+   if (remote) {
+-    git(['fetch', remote, 'main']);
+-    const count = git(['rev-list', '--count', `HEAD..${remote}/main`]);
++    gitIn(SESSION_GIT_DIR, ['fetch', remote, 'main']);
++    const count = gitIn(SESSION_GIT_DIR, ['rev-list', '--count', `HEAD..${remote}/main`]);
+     const behind = count.ok ? Number(count.stdout) : 0;
+     mkdirSync(STATE_DIR, { recursive: true });
+     if (Number.isFinite(behind) && behind > 0) {
+diff --git a/tests/shared/hook-session-start-guards-stale-main-worktree.test.ts b/tests/shared/hook-session-start-guards-stale-main-worktree.test.ts
+new file mode 100644
+index 00000000..f2c7c036
+--- /dev/null
++++ b/tests/shared/hook-session-start-guards-stale-main-worktree.test.ts
+@@ -0,0 +1,103 @@
++// Regression for open-bugs.md: "The session-start 'commits BEHIND origin/main'
++// warning measures the main checkout, not the session's worktree
++// (2026-10-06, medium)." `.claude/hooks/session-start-guards.mjs` ran its
++// stale-main check against CLAUDE_PROJECT_DIR (the main checkout) unconditionally,
++// so a session working in a linked worktree that is already level with
++// `origin/main` still saw a false "N commit(s) BEHIND" warning whenever the
++// main checkout's own local HEAD happened to be the stale one.
++//
++// This lives beside tests/shared/hook-session-start-guards.test.ts (same
++// placement rule: vitest excludes `.claude/**`, so a test beside the hook
++// never runs in CI).
++import { describe, it, expect, afterAll } from 'vitest';
++import { spawnSyncHidden } from '../helpers/spawn.mjs';
++import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join, resolve } from 'node:path';
++
++const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
++const GUARDS = join(REPO_ROOT, '.claude', 'hooks', 'session-start-guards.mjs');
++
++const LANE_PROBE_OVERRIDES = {
++  AUDIT_TOOLS_OFFLOAD_PROBE_URL: 'http://127.0.0.1:9/',
++  AUDIT_TOOLS_HEADROOM_PROBE_URL: 'http://127.0.0.1:9/',
++  AUDIT_TOOLS_AGY_PROBE_CMD: 'skip',
++};
++
++const git = (cwd: string, ...args: string[]) =>
++  spawnSyncHidden('git', args, { cwd, encoding: 'utf8', windowsHide: true, timeout: 60_000 });
++
++describe('session-start-guards: stale-main check reads the SESSION worktree, not CLAUDE_PROJECT_DIR', () => {
++  let base: string;
++
++  afterAll(() => {
++    try {
++      rmSync(base, { recursive: true, force: true });
++    } catch {
++      /* windows lock — leave it to the temp cleaner */
++    }
++  });
++
++  it('does not warn BEHIND when the session worktree is level with origin/main, even though the main checkout is stale', () => {
++    base = mkdtempSync(join(tmpdir(), 'staleworktree-'));
++    const origin = join(base, 'origin.git');
++    const mainCheckout = join(base, 'main-checkout');
++    const wt = join(base, 'wt');
++
++    // Bare "origin" with one commit on main.
++    git(base, 'init', '-q', '--bare', '-b', 'main', origin);
++
++    // Main checkout tracks origin and starts level with it.
++    git(base, 'clone', '-q', origin, mainCheckout);
++    git(mainCheckout, 'config', 'user.email', 'test@example.com');
++    git(mainCheckout, 'config', 'user.name', 'test');
++    git(mainCheckout, 'config', 'commit.gpgsign', 'false');
++    writeFileSync(join(mainCheckout, 'a.txt'), 'one\n');
++    git(mainCheckout, 'add', '.');
++    git(mainCheckout, 'commit', '-qm', 'initial');
++    git(mainCheckout, 'push', '-q', 'origin', 'main');
++
++    // A linked worktree, branched from the SAME commit as main right now.
++    git(mainCheckout, 'worktree', 'add', '-q', wt, '-b', 'lap-branch');
++
++    // Origin advances with a second commit (simulating other work landing
++    // while the lap worktree is open) — pushed from a disposable clone so the
++    // main checkout's own ref is left untouched.
++    const pusher = join(base, 'pusher');
++    git(base, 'clone', '-q', origin, pusher);
++    git(pusher, 'config', 'user.email', 'test@example.com');
++    git(pusher, 'config', 'user.name', 'test');
++    git(pusher, 'config', 'commit.gpgsign', 'false');
++    writeFileSync(join(pusher, 'b.txt'), 'two\n');
++    git(pusher, 'add', '.');
++    git(pusher, 'commit', '-qm', 'second');
++    git(pusher, 'push', '-q', 'origin', 'main');
++
++    // The session catches its OWN worktree up to origin/main's new tip...
++    git(wt, 'fetch', '-q', 'origin', 'main');
++    git(wt, 'merge', '-q', '--ff-only', 'origin/main');
++
++    // ...but the main checkout is never touched again — its local HEAD is
++    // now the stale one. This is the exact incident shape: the worktree is
++    // level with origin/main while CLAUDE_PROJECT_DIR (main checkout) is not.
++    const r = spawnSyncHidden(process.execPath, [GUARDS], {
++      cwd: wt,
++      encoding: 'utf8',
++      input: JSON.stringify({
++        hook_event_name: 'SessionStart',
++        session_id: `stale-main-wt-${process.pid}`,
++        source: 'startup',
++        cwd: wt,
++      }),
++      timeout: 120_000,
++      windowsHide: true,
++      env: { ...process.env, ...LANE_PROBE_OVERRIDES, CLAUDE_PROJECT_DIR: mainCheckout },
++    });
++
++    expect(r.status).toBe(0);
++    // The session's own tree (wt) is level with origin/main — it must not be
++    // told to sync. Before the fix this read the main checkout instead and
++    // reported "1 commit(s) BEHIND".
++    expect(r.stdout ?? '').not.toMatch(/BEHIND/);
++  });
++});

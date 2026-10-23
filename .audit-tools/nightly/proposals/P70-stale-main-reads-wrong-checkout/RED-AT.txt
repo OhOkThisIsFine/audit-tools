@@ -1,0 +1,23 @@
+Command: node scripts/shared/run-vitest-gate.mjs tests/shared/hook-session-start-guards-stale-main-worktree.test.ts
+HEAD sha: 49a5d1cdf20e8af5bb64b78d57f01b557011753b
+Hook file at HEAD (unfixed): .claude/hooks/session-start-guards.mjs (git show HEAD:<path>)
+Exit: 1
+
+Verbatim failure:
+
+ ❯ tests/shared/hook-session-start-guards-stale-main-worktree.test.ts (1 test | 1 failed) 1803ms
+   × session-start-guards: stale-main check reads the SESSION worktree, not CLAUDE_PROJECT_DIR > does not warn BEHIND when the session worktree is level with origin/main, even though the main checkout is stale 1783ms
+     → expected 'session-start guards:\n• HEAD is 1 co…' not to match /BEHIND/
+
+AssertionError: expected 'session-start guards:\n• HEAD is 1 commit(s) BEHIND origin/main. Sync BEFORE writing code — a lap branched from stale main once re-implemented an entire commit that had already landed:\n    git fetch origin main && git rebase origin/main\n' not to match /BEHIND/
+
+ ❯ tests/shared/hook-session-start-guards-stale-main-worktree.test.ts:101:32
+
+outcome: 0 passed, 1 failed, 0 skipped, 0 unfinished (total 1)
+
+How this was produced: the test file (new, untracked at HEAD) was written first, then
+.claude/hooks/session-start-guards.mjs was temporarily reverted to its exact HEAD content
+(`git show HEAD:.claude/hooks/session-start-guards.mjs`, saved aside, restored byte-identical
+afterward) to run the regression test against the unfixed hook without disturbing the other
+4 files already dirty in this worktree. After capturing this RED, the fixed hook content was
+restored and the same command exited 0 (1 passed) — see patch.diff for the fix.

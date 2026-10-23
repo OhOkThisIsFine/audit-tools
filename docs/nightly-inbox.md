@@ -22,8 +22,129 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-10-21 at `1498feb8`.*
+*Last run: 2026-10-23 at `49a5d1cd`.*
 
+
+---
+
+
+# Documentation
+
+
+<!-- nightly:item key=ea994a4b1389d0da -->
+
+## `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+spec/audit-workflow-design.md has a section titled "Synthesis narrative (always runs)". The very next sentences in that same section call the narrative layer "optional" and say a user can decline it with no host step ever emitted — and the actual code (src/audit/orchestrator/obligationPolicy.ts, the synthesis_narrative_current obligation) confirms this: when a session passes narrativeEnabled: false, the obligation resolves deterministically to OMIT with no host work at all. So the header's "always runs" is either (a) a documentation bug that should be reworded (e.g. "the obligation is always evaluated/reached in priority order" rather than "host work is always produced"), or (b) the header is deliberately using "always runs" to mean something narrower than "produces host work" and should stay as-is with a one-clause clarification added. Both the nightly reviewer and an independent adversary agent reviewed this file tonight; the adversary caught this specific tension and the reviewer did not flag it, so this is a judgment call about what the header was meant to say, not a confirmed one-line typo.
+
+### The question
+
+Should the header "## Synthesis narrative (always runs)" in spec/audit-workflow-design.md be reworded to match the optional/tri-state behavior the code and the rest of the section already state, or is the current header intentional (meaning something other than "host work is always produced") and should be left as-is?
+
+### Your answer
+
+- [ ] **1. Reword the header** — Reword "Synthesis narrative (always runs)" to reflect that the obligation is always evaluated in priority order but the host-work layer itself is optional (e.g. "Synthesis narrative (host boundary always reached, content optional)"), matching audit-goals.md and the executor's own doc comment.
+- [ ] **2. Leave as-is, add one clarifying clause** — Keep the header text but add a one-clause parenthetical clarifying that "always runs" refers to the obligation always being reached/evaluated, not to host work always being produced.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (6) — what was verified against code, and how</summary>
+
+- spec/audit-workflow-design.md:366 header text "## Synthesis narrative (always runs)".
+- Body text two sentences later in the same section: "an explicit omitted result remains a defined terminal when the user declines that optional layer."
+- src/audit/orchestrator/obligationPolicy.ts synthesis_narrative_current arm (~line 287-308): narrativeEnabled:false takes the deterministic OMIT arm with zero host work emitted; no narrativeEnabled value HALTs at a host boundary instead.
+- src/audit/orchestrator/synthesisExecutors.ts (~line 143-146): executor doc comment calls this "the optional synthesis-narrative obligation".
+- spec/audit/audit-goals.md: "the optional host-authored synthesis narrative may add an additive themes layer... when configured; it never replaces, gates, or is required by the deterministic output" — no "always" framing.
+- Independent adversary lane caught this 2026-10-23; the reviewer lane's independent pass over the same file did not flag it, so this is reported as a single-lane finding with no refutation rather than a contested item.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=135ae2a4fa2e1db8 -->
+
+## `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+One open-bugs.md entry asks for a real, still-missing mechanism: a check that stops the nightly routine from reviewing docs against a local checkout that is badly behind origin/main (because reviewing stale code could reintroduce something a later commit deliberately changed). That ask is still open and valid. But the entry also quotes the specific numbers from the night it was written ("49 commits... through v0.55.13... roughly 26 nights") as if they were still true. Tonight's check shows local main is now exactly level with origin/main (the very next night's commits fixed that specific gap) — so those illustrative numbers are stale narrative about an already-resolved instance, sitting in front of the still-open general request. This is the kind of accreted post-mortem narrative the doc-review rubric asks to be trimmed on every pass, not just at the file's size ceiling.
+
+### The question
+
+Should the checkout-staleness entry in docs/backlog/open-bugs.md be trimmed to drop the dated instance narrative ("49 commits... through v0.55.13... roughly 26 nights") and keep only the Property statement (the still-open mechanism request)?
+
+### Your answer
+
+- [ ] **1. Trim to the Property only** — Trim the entry: remove the dated commit-count/version narrative sentence and keep only the Property statement describing the still-missing staleness-precondition check.
+- [ ] **2. Keep as-is** — Leave the entry as currently written, including the dated illustrative numbers.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (3) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md:13 quoted entry: "This run found local main 49 commits and several releases (through v0.55.13) behind origin/main on a clean tree, and the leg-1 scope ledger's newest coverage stamp was 2026-09-24 — roughly 26 nights with no completed pass on this checkout."
+- Verified tonight (2026-10-23): git rev-list --count HEAD..origin/main = 0 and origin/main..HEAD = 0 — local main is now level with origin/main; the gap this narrative describes was closed by commits 1498feb8 and 49a5d1cd the following night.
+- The entry's own Property clause ("before leg 1 reviews a doc claim against code, the routine detects 'local HEAD has no unpushed commits and is behind its tracked remote' and treats that as a blocking precondition") names a mechanism that still does not exist — this half stays open regardless of the narrative trim.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=fcdc9f3b916e7bc6 -->
+
+## `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 1 night · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+There is one blocked piece of work: qualifying a reviewed audit-tools refactor candidate against a "serialized validation lane" before it can ship. Three different documents each describe this: docs/backlog/deferred.md calls it "awaits the serialized validation lane", docs/backlog/open-bugs.md calls it "still require[s] implementation and exact-tree qualification", and docs/HANDOFF.md names it as the immediate next step. Each is phrased differently enough that a reader cannot tell at a glance whether these are three views of the exact same blocked item, or two related-but-separate open questions (e.g. one about implementation work still needed, another about the qualification gate itself) that happen to cite the same background record. The doc-review rubric's corpus-level pass flags this as worth the owner's eyes — not because it is clearly duplicative (each is a pointer, not a restated copy, so it does not break the "one home per fact" rule in the letter), but because three backlog/handoff homes converging on one blocking condition is exactly the shape that pass exists to catch.
+
+### The question
+
+Are the deferred.md and open-bugs.md entries about the audit-refactor-qualification blocker the SAME blocked item filed under two different framings (implementation-work vs. qualification-lane), or genuinely distinct open items that happen to cite the same background record?
+
+### Your answer
+
+- [ ] **1. Same item — merge to one home** — They are the same blocked item described two ways; fold them into a single entry in one file (owner to pick deferred.md vs open-bugs.md) and delete the other.
+- [ ] **2. Distinct — keep both, cross-reference** — They are genuinely distinct (one about pending implementation, one about the qualification gate); keep both but make each explicitly reference the other rather than let the overlap read as ambiguous.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/backlog/deferred.md:61 — "Audit refactor native qualification awaits the serialized validation lane. The qualification record separates accepted source patches from pending native gates, offline pipx/Lizard smoke and excluded work."
+- docs/backlog/open-bugs.md:58 — "Bounded audit refactors still require implementation and exact-tree qualification. Follow the finalized plan and qualification record; source review alone does not close the accepted defects or authorize release."
+- docs/HANDOFF.md:27-28 — "Next: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the qualification record... for scope and remaining gates."
+- All three cite the same two background records (docs/reviews/audit-refactor-qualification-2026-10-14.md, docs/reviews/audit-final-refactor-plan.md). Flagged independently by the adversary lane 2026-10-23 as a low-confidence doc-set condensation observation; the reviewer lane did not raise it, so reported as a single-lane finding.
+
+</details>
 
 ---
 
@@ -35,7 +156,7 @@ records them in the tracked ledger, and does the work.
 
 ## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · open 3 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -70,11 +191,60 @@ Should this stay an open backlog item as-is (no mechanism proposed yet), should 
 ---
 
 
+# Recurring-problem solutions
+
+
+<!-- nightly:item key=8ccc5183771bb9c2 -->
+
+## `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+When you work inside a git worktree (a second checkout linked to the same repo, used for a "lap" of work), the SessionStart hook that warns "you are behind origin/main, sync before writing code" was checking the MAIN checkout's git state, not the worktree you are actually sitting in. So a worktree that was perfectly up to date with origin/main still got the scary warning, because the separate main checkout happened to be stale. This exact bug (and an identical one in a different hook, the commit-time merge-routing check) was already logged as two separate backlog entries on two different dates (2026-10-06 and 2026-10-09), which is the nightly routine's bar for calling something a genuine recurring pattern rather than a one-off. Tonight's leg-3 pass wrote a ready-to-apply patch for the smaller of the two bugs: it adds a small helper that trusts the session's own working directory (the same pattern a few lines below in the same file already uses for a different check) and falls back to the old behavior whenever that information is not available, so nothing regresses for a session that is not in a worktree. A failing regression test was run against the unfixed code first (red), then against the patched code (green), and the existing test suite for this file still passes. The second bug (same root cause, in the commit-time merge-routing check) needs a different, larger fix and was deliberately left as a named follow-up rather than folded into tonight's patch.
+
+### The question
+
+Apply the P70 proposal (fix session-start-guards.mjs's stale-main check to read the session worktree instead of the main checkout) as written, and separately decide whether to also scope a fix for the related pre-commit-gate.mjs incomingPaths bug (2026-10-09, left out of this proposal as a materially different, larger change)?
+
+### Your answer
+
+- [ ] **1. Apply as-is** — Land the P70 patch (session-start-guards.mjs fix + regression test) as proposed; track the pre-commit-gate.mjs incomingPaths bug separately.
+- [ ] **2. Apply, and also scope the pre-commit-gate.mjs follow-up now** — Land the P70 patch now, and additionally open a scoped task this lap to extend gitTargetDir's parsing to track a leading `cd` in a compound command, fixing the 2026-10-09 sibling bug. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- [ ] **3. Hold — needs more review** — Do not apply yet; the patch needs further review before landing.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+Full proposal: [`.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-checkout/patch.diff`](../.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-checkout/patch.diff) <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+<details>
+<summary>Evidence (4) — what was verified against code, and how</summary>
+
+- docs/backlog/open-bugs.md (2026-10-06 entry): "The session-start 'commits BEHIND origin/main' warning measures the main checkout, not the session's worktree."
+- docs/backlog/open-bugs.md (2026-10-09 entry): "The merge-routing check measures incoming paths from CLAUDE_PROJECT_DIR, not the checkout the command runs in." — same mechanism, different hook, left as a named follow-up.
+- Proposal, patch, and RED-AT.txt written to .audit-tools/nightly/proposals/P70-stale-main-reads-wrong-checkout/ (patch.diff, proposal.md, RED-AT.txt, and the new regression test tests/shared/hook-session-start-guards-stale-main-worktree.test.ts).
+- RED-AT.txt: regression test run against the unfixed hook at HEAD 49a5d1cd failed as predicted (verbatim failure quoted); same command passed (1 passed) once the fix was restored. Existing tests/shared/hook-session-start-guards.test.ts suite (11/11) unaffected.
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- leg 1 (docs) — AGY independent-repo-reading lane dead-ended on escalate_admin even for a bare CLAUDE.md read (see docs/backlog/durable-traps.md, 2026-10-21 entry); the primary session did a reduced spot-check of a handful of changed docs (HANDOFF.md, README.md claims) rather than the full reviewer+adversary pass over all 65 changed files. Full leg-1 per-item judgment pass over the remaining changed/cold documents did not run this cycle.
+- leg1-apply (docs): review ran to completion on 24 in-scope docs with cold items, but the working tree was dirty (.claude/skills/ship/SKILL.md, docs/backlog/forward-tracks.md, docs/backlog/minor-bugs.md, docs/glossary-ids.md uncommitted at run start) — the clean-tree rule blocked ALL review-derived doc edits tonight. Two auto-appliable stale-factual-fixes were identified, verified against code, and confirmed unrefuted by the independent adversary pass, but withheld pending a clean tree: (1) docs/HANDOFF.md:30 pins a future dogfood run to version 0.55.6 while package.json is now 0.55.13 — propose dropping the pinned number per the status-noise rule rather than re-stamping a new one; (2) docs/backlog/open-bugs.md:28 "check-backlog-budget --update-baseline grandfathers new violators" is code-proven fixed by committed commit 7df52a02 (scripts/check-backlog-budget.mjs:559-561 now filters both amnesty lists to pre-existing baseline keys only) and should be deleted outright as a shipped entry. Re-run leg 1's apply step once the tree is clean; these are mechanical, not owner decisions.
+
+- leg1-coverage (docs): 24 of 41 docs carrying unexamined ("cold") scope-ledger items were reviewed tonight by two independent lanes (reviewer + adversary); the remaining 17 cold docs (all generated-host-asset / canonical-loader-body / package-README rows the manifest marks renderer-owned or low-risk, per scripts/nightly/scope-ledger.mjs plan at HEAD 49a5d1cd) were not examined this pass and remain due for a future periodic-sweep night. docs/backlog/durable-traps.md was reviewed at index/title level only per its reference-only disposition, not entry-by-entry.
+
+- leg2 (backlog mechanical sweep): aborted at preflight on BOTH attempts tonight (09:10Z and 09:11Z) — scripts/shared/triage-backlog.mjs's agent-dispatch bridge call (tier litellm/medium) failed with "agent-dispatch free-only policy refused route override" (APIError, HTTP 500), confirmed via opencode_job_list as a reproducible routing-policy rejection, not a transient network blip (agent-dispatch status showed all services healthy). The mechanical backlog sweep (shipped-detection, dedup, premise classification) did NOT run beyond the 6 entries already classified from a prior run; this is a dead lane, logged for the owner rather than retried a third time. See project memory litellm-medium-free-only-policy-dead-lane-2026-10-23.
 
 
 </details>
