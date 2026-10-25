@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-10-23 at `49a5d1cd`.*
+*Last run: 2026-10-25 at `6f0c04730f63b6d93d4d7c73b5695aaf2f9f7d12`.*
 
 
 ---
@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.
 
 ## `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 3 nights · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -76,7 +76,7 @@ Should the header "## Synthesis narrative (always runs)" in spec/audit-workflow-
 
 ## `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 3 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -114,7 +114,7 @@ Should the checkout-staleness entry in docs/backlog/open-bugs.md be trimmed to d
 
 ## `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 1 night · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 3 nights · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -149,6 +149,49 @@ Are the deferred.md and open-bugs.md entries about the audit-refactor-qualificat
 ---
 
 
+<!-- nightly:item key=677de498e4000bb3 -->
+
+## `leg1-dirty-wip-mixed-verdict-2026-10-24` — 4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Documentation · open 2 nights · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The working tree has carried the same uncommitted edits across four tracked docs (.claude/skills/ship/SKILL.md, docs/backlog/forward-tracks.md, docs/backlog/minor-bugs.md, docs/glossary-ids.md) since at least 2026-10-23; last night's run found the tree dirty and, per the clean-tree rule, withheld its own new findings rather than layering on top. Tonight this run independently re-verified the pending edits against current HEAD, using AGY as an independent adversary from a throwaway worktree. Three of the four are confirmed correct: the ship/SKILL.md addition of the validate-source CI job, the INV-WTS path fix and INV-CDI-EXPLICIT-NODE-FIELDS row removal in glossary-ids.md, and both removed forward-tracks.md entries (production-orphan detection, now covered by durable memory; the ship-pipeline-stops-early entry, now shipped in release-and-publish.mjs). The fourth is wrong: the pending edit deletes a minor-bugs.md entry saying "the repo tool-input guard took a plain worktree sub-agent for an audit node" with the open property "the guard identifies an audit node from run state, not from the session's shape" — but .claude/hooks/tool-input-guard.mjs still classifies via a `dispatchShaped` regex over the prompt text (lines ~57-63), never run state, so the bug this entry describes is still live. Deleting the entry as-is would silently drop an unfixed bug from the backlog. Whether this WIP is the owner's own in-progress edit or an earlier interrupted nightly run's uncommitted output could not be determined from the tree alone. <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### The question
+
+How should the pending 4-file uncommitted WIP be resolved — commit the 3 verified-correct files and restore the wrongly-deleted minor-bugs.md entry, discard the whole WIP, or leave it for manual handling?
+
+### Your answer
+
+- [ ] **1. Commit the 3 correct files, restore the wrong deletion** — Commit .claude/skills/ship/SKILL.md, docs/backlog/forward-tracks.md and docs/glossary-ids.md as-is (verified correct); restore the deleted tool-input-guard.mjs entry in docs/backlog/minor-bugs.md before committing that file, since the bug it describes is still live.
+- [ ] **2. Discard all 4 pending edits** — Discard the pending WIP entirely across all 4 files; it was not an edit I intended to keep.
+- [ ] **3. Leave as-is, I'll handle it** — Leave the working tree dirty; I will resolve the pending edits manually.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (7) — what was verified against code, and how</summary>
+
+- git diff (working tree vs HEAD 6f0c0473) on 2026-10-24 showed the same 4 files dirty as the prior run (6f0c0473's own commit message: "the working tree was dirty (4 owner edits already in progress)").
+- src/remediate/steps/dispatch/hostCorroboration.ts:62 defines INV-WTS-3; hostHandoff.ts has zero mentions of INV-WTS — confirms the glossary-ids.md path fix is correct (self-verified + AGY AGREE).
+- src/shared/decompose/charterExtraction.ts has zero occurrences of INV-CDI-EXPLICIT-NODE-FIELDS, node_id, or goal_node_id — confirms the removed glossary row is correctly stale (self-verified + AGY AGREE).
+- .github/workflows/publish-package.yml defines a validate-source job (line 41) that gate (line 82) and test (line 114) both need, and publish (line 170) needs [validate-source, gate, test] — matches the pending ship/SKILL.md edit exactly (self-verified + AGY REFUTE-of-the-OLD-text, i.e. confirms new text right).
+- scripts/release-and-publish.mjs finishGlobalInstall (~line 1167-1226) runs the allowed-scripts global reinstall and smokes both binaries — confirms the removed forward-tracks.md "ship pipeline stops early" entry is correctly shipped (self-verified + AGY AGREE).
+- .claude/hooks/tool-input-guard.mjs:57-63 (`dispatchShaped`) still classifies by regex over prompt text, never run state — the minor-bugs.md entry's open property is NOT satisfied; AGY independently reached the same REFUTE verdict from a clean worktree read of the same file. <!-- doc-citation-exempt: quoted item prose, not citations -->
+- AGY (gemini-3.8-flash-high) ran as an independent adversary from a throwaway detached worktree at HEAD (git worktree add --detach), since the agent-dispatch/opencode dispatch lane timed out at preflight for the 3rd consecutive night (see project memory leg2-dispatch-lane-dead-third-consecutive-night-2026-10-24).
+
+</details>
+
+---
+
+
 # Backlog disambiguation
 
 
@@ -156,7 +199,7 @@ Are the deferred.md and open-bugs.md entries about the audit-refactor-qualificat
 
 ## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · open 3 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · **open 5 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -198,7 +241,7 @@ Should this stay an open backlog item as-is (no mechanism proposed yet), should 
 
 ## `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 3 nights · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -240,11 +283,15 @@ Full proposal: [`.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-check
 <summary>What the last run could NOT cover</summary>
 
 
-- leg1-apply (docs): review ran to completion on 24 in-scope docs with cold items, but the working tree was dirty (.claude/skills/ship/SKILL.md, docs/backlog/forward-tracks.md, docs/backlog/minor-bugs.md, docs/glossary-ids.md uncommitted at run start) — the clean-tree rule blocked ALL review-derived doc edits tonight. Two auto-appliable stale-factual-fixes were identified, verified against code, and confirmed unrefuted by the independent adversary pass, but withheld pending a clean tree: (1) docs/HANDOFF.md:30 pins a future dogfood run to version 0.55.6 while package.json is now 0.55.13 — propose dropping the pinned number per the status-noise rule rather than re-stamping a new one; (2) docs/backlog/open-bugs.md:28 "check-backlog-budget --update-baseline grandfathers new violators" is code-proven fixed by committed commit 7df52a02 (scripts/check-backlog-budget.mjs:559-561 now filters both amnesty lists to pre-existing baseline keys only) and should be deleted outright as a shipped entry. Re-run leg 1's apply step once the tree is clean; these are mechanical, not owner decisions.
+- leg2 (backlog mechanical sweep): triage-backlog.mjs-equivalent probe aborted. Fired a trivial opencode_fire(agent:"answer") probe; opencode_wait exceeded the host time limit with no status after ~55s, and opencode_check showed the worker stuck retrying (attempt 5, "agent-dispatch free-only policy refused route override") with zero model output since acceptance. This is the 4th consecutive night leg 2 has dead-ended (AGY escalate_admin 2026-10-21, litellm free-only-policy 2026-10-23, opencode_wait timeout 2026-10-24, same free-only-policy retry loop again 2026-10-25). No backlog entries were classified, deduplicated, or escalated this cycle.
 
-- leg1-coverage (docs): 24 of 41 docs carrying unexamined ("cold") scope-ledger items were reviewed tonight by two independent lanes (reviewer + adversary); the remaining 17 cold docs (all generated-host-asset / canonical-loader-body / package-README rows the manifest marks renderer-owned or low-risk, per scripts/nightly/scope-ledger.mjs plan at HEAD 49a5d1cd) were not examined this pass and remain due for a future periodic-sweep night. docs/backlog/durable-traps.md was reviewed at index/title level only per its reference-only disposition, not entry-by-entry.
+- leg1 (docs, full coverage): the scope ledger reports 18 cold docs (191 cold items) at run start. This run examined and stamped 9 of them (skills/audit-code/SKILL.md, skills/audit-code/audit-code.prompt.md, .agent/skills/audit-code/SKILL.md, .github/agents/auditor.agent.md, .github/prompts/audit-code.prompt.md, spec/audit/artifact-contract.md, spec/audit/executor-producers.generated.md, src/audit/README.md, .claude/skills/design-check/SKILL.md) against source code and the host-asset-drift/spec-mirror/executor-producers generator checks (all green) and found no contradictions. docs/backlog/durable-traps.md (88 cold items) and the remediate-code generated/canonical-loader family (ship/SKILL.md 8, skills/remediate-code/* ~18) were not reached this cycle.
 
-- leg2 (backlog mechanical sweep): aborted at preflight on BOTH attempts tonight (09:10Z and 09:11Z) — scripts/shared/triage-backlog.mjs's agent-dispatch bridge call (tier litellm/medium) failed with "agent-dispatch free-only policy refused route override" (APIError, HTTP 500), confirmed via opencode_job_list as a reproducible routing-policy rejection, not a transient network blip (agent-dispatch status showed all services healthy). The mechanical backlog sweep (shipped-detection, dedup, premise classification) did NOT run beyond the 6 entries already classified from a prior run; this is a dead lane, logged for the owner rather than retried a third time. See project memory litellm-medium-free-only-policy-dead-lane-2026-10-23.
+- leg1 (adversary): the agent-dispatch dispatch lane that nightly-routine.md names for leg-1 adversary review is the same dead infra as leg 2 (confirmed above). AGY was tried as the fallback adversary (per the last 3 nights' practice): agy_fire in default/execution mode failed immediately with "AGY delivered prompt exceeds bounded Windows argv allowance (24 Ki characters)" on every attempt, including a trivial one-line ping — this is a NEW, 5th distinct dispatch/AGY symptom, separate from the 3 prior ones. agy_fire with promptOnly:true did not hit the argv error and accepted a trivial ping (answered "pong" in ~20s), but the real 9-file review task submitted the same way ran for over 10 minutes producing zero output before being cancelled. So tonight's 9-doc leg-1 finding ("no contradictions") is SELF-VERIFIED ONLY, with no independent adversary pass — reported as a single-lane examination, not a contested or confirmed one.
+
+- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP from 2026-10-23/24 (unanswered in the inbox), so no review-derived document edits were applied tonight.
+
+- leg3: no new audit-tools-owned recurring-problem proposal this cycle (budget spent confirming the leg-1/leg-2 dispatch-lane death). The dispatch/AGY infra itself is now a 5-symptom, 4-consecutive-night pattern but it is machine-wide (agent-dispatch + AGY CLI), not audit-tools-owned code, so no leg-3 patch was authored here; see project memory for the running record.
 
 
 </details>

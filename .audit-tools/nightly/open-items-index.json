@@ -1,9 +1,9 @@
 {
   "run": {
-    "date": "2026-10-23",
-    "head": "49a5d1cd"
+    "date": "2026-10-25",
+    "head": "6f0c04730f63b6d93d4d7c73b5695aaf2f9f7d12"
   },
-  "count": 5,
+  "count": 6,
   "items": [
     {
       "id": "leg2-comment-shape-enumeration-check-2026-10-21",
@@ -11,7 +11,7 @@
       "path": "docs/backlog/open-bugs.md",
       "title": "backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked?",
       "subject_key": "2439046592dbc16f",
-      "nights_open": 3,
+      "nights_open": 5,
       "target": {
         "path": "docs/backlog/open-bugs.md"
       }
@@ -22,7 +22,7 @@
       "path": "spec/audit-workflow-design.md",
       "title": "spec/audit-workflow-design.md: fix or clarify the \"Synthesis narrative (always runs)\" header, which contradicts its own body and the code",
       "subject_key": "ea994a4b1389d0da",
-      "nights_open": 1,
+      "nights_open": 3,
       "target": {
         "path": "spec/audit-workflow-design.md"
       }
@@ -33,7 +33,7 @@
       "path": "docs/backlog/open-bugs.md",
       "title": "docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property",
       "subject_key": "135ae2a4fa2e1db8",
-      "nights_open": 1,
+      "nights_open": 3,
       "target": {
         "path": "docs/backlog/open-bugs.md"
       }
@@ -44,7 +44,7 @@
       "path": "docs/backlog/deferred.md",
       "title": "Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct?",
       "subject_key": "fcdc9f3b916e7bc6",
-      "nights_open": 1,
+      "nights_open": 3,
       "target": {
         "path": "docs/backlog/deferred.md"
       }
@@ -55,9 +55,20 @@
       "path": ".claude/hooks/session-start-guards.mjs",
       "title": "Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR",
       "subject_key": "8ccc5183771bb9c2",
-      "nights_open": 1,
+      "nights_open": 3,
       "target": {
         "path": ".claude/hooks/session-start-guards.mjs"
+      }
+    },
+    {
+      "id": "leg1-dirty-wip-mixed-verdict-2026-10-24",
+      "leg": "docs",
+      "path": "docs/backlog/minor-bugs.md",
+      "title": "4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong",
+      "subject_key": "677de498e4000bb3",
+      "nights_open": 2,
+      "target": {
+        "path": "docs/backlog/minor-bugs.md"
       }
     }
   ]
