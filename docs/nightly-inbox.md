@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-10-26 at `52494e391a415b1e90434fbc7636b3cad16c0a83`.*
+*Last run: 2026-10-27 at `7374e8559bf6fbafb7473491b9145624ba019dd2`.*
 
 
 ---
@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.
 
 ## `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 4 nights · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 5 nights** · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -76,7 +76,7 @@ Should the header "## Synthesis narrative (always runs)" in spec/audit-workflow-
 
 ## `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 4 nights · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 5 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -114,7 +114,7 @@ Should the checkout-staleness entry in docs/backlog/open-bugs.md be trimmed to d
 
 ## `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 4 nights · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 5 nights** · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -153,7 +153,7 @@ Are the deferred.md and open-bugs.md entries about the audit-refactor-qualificat
 
 ## `leg1-dirty-wip-mixed-verdict-2026-10-24` — 4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 3 nights · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · open 4 nights · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -199,7 +199,7 @@ How should the pending 4-file uncommitted WIP be resolved — commit the 3 verif
 
 ## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · **open 6 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · **open 7 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -241,7 +241,7 @@ Should this stay an open backlog item as-is (no mechanism proposed yet), should 
 
 ## `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 4 nights · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · **open 5 nights** · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -283,15 +283,15 @@ Full proposal: [`.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-check
 <summary>What the last run could NOT cover</summary>
 
 
-- leg1 (docs, bounded coverage): examined and stamped 3 of the remaining cold docs against source (skills/remediate-code/SKILL.md, skills/remediate-code/remediate-code.prompt.md, docs/backlog/durable-traps.md) — all CLI commands/flags verified against src/remediate/index.ts (ensure/install/install-host/verify-install intercepted pre-commander per the file's own comment at line ~183; next-step flags --root/--input/--guidance/--guidance-file/--plan-only/--verification-command/--severity/--finding-id/--finalize-closing/--force-replan all present; pause/resume/cancel with --worktree/--outcome all present), and no durable-traps entry was found proven fixed-in-tooling. No new leg-1 findings. .claude/skills/ship/SKILL.md (8 cold items) was deliberately NOT stamped: it is one of the 4 files in the still-open dirty WIP (leg1-dirty-wip-mixed-verdict-2026-10-24), so its content is mid-flux and stamping now would certify an undecided state.
+- leg1 (docs, coverage): no new content to review — HEAD (7374e855) is unchanged since the last leg-1 stamp (that commit was itself last night's nightly commit), so the incremental scope (docs changed since last stamp + declared dependents) was empty. The only non-stamped content (.claude/skills/ship/SKILL.md, 8 cold items) is the still-open dirty WIP (leg1-dirty-wip-mixed-verdict-2026-10-24) and was deliberately left unstamped again, same as 2026-10-26, because stamping now would certify an undecided state.
 
-- leg1 (adversary): the agent-dispatch dispatch lane is dead a 5th consecutive night — opencode_fire(agent:"answer") on a trivial one-line probe never produced output; opencode_check showed the same "agent-dispatch free-only policy refused route override" retry loop as nights 4-5. AGY promptOnly mode is alive tonight (trivial ping answered "pong" in ~8s from a non-repo directory), but AGY execution:true mode failed immediately on EVERY attempt, including a trivial "reply pong" task with no repo content at all, with "AGY delivered prompt exceeds bounded Windows argv allowance (24 Ki characters)" — this narrows last night's new argv-overflow symptom: it is not prompt-length-triggered, it is execution-mode-triggered (promptOnly bypasses it entirely). So tonight's leg-1 finding is again self-verified-only, with no independent adversary pass for file-reading review tasks.
+- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 4), so no review-derived document edits were applied tonight regardless of findings.
 
-- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by the open leg1-dirty-wip-mixed-verdict item (nights_open now 3), so no review-derived document edits were applied tonight regardless of findings.
+- leg2 (backlog mechanical sweep): not run. scripts/shared/triage-backlog.mjs is hard-wired to the agent-dispatch opencode lane (no AGY fallback in that script). Probed tonight: opencode_fire(agent:"answer") on a trivial one-line probe never produced output; opencode_check showed "agent-dispatch free-only policy refused route override" at retry attempt 5 (same symptom as 2026-10-23 and 2026-10-26) despite agent-dispatch CLI status reporting postgres/litellm/opencode all healthy. This is the 6th consecutive dead night for this lane. No backlog entries were classified, deduplicated, or escalated this cycle.
 
-- leg2 (backlog mechanical sweep): not run. It depends on the same dead agent-dispatch lane confirmed dead above (5th consecutive night); no backlog entries were classified, deduplicated, or escalated this cycle.
+- leg3: no new audit-tools-owned recurring-problem proposal this cycle. AGY was re-probed as a potential substitute lane and, unlike 2026-10-26, succeeded in BOTH promptOnly and execution:true modes tonight (trivial pings, non-repo directory) — recorded to project memory (dispatch-lane-dead-sixth-night-agy-fully-recovered-2026-10-27) since it contradicts last night's categorical execution-mode failure. The agent-dispatch lane's repeated failure remains machine-wide infra (agent-dispatch itself), not audit-tools-owned code, so no leg-3 patch is authored here; several open proposals already cover lane-unreliability angles (P1, P5, P11, P36, P43, P46, P49, P58, P59, P66) and were not duplicated.
 
-- leg3: no new audit-tools-owned recurring-problem proposal this cycle. The dispatch/AGY infra is now a 6-symptom, 5-consecutive-night pattern, newly isolated tonight to AGY's execution mode specifically (promptOnly unaffected) — still machine-wide (agent-dispatch + AGY CLI), not audit-tools-owned code, so no leg-3 patch is authored here.
+- /insights weekly pass: not due (last run 2026-10-21T09:55:34Z, 6.0 days old; due at >=7 days).
 
 
 </details>
