@@ -32,13 +32,15 @@ No commit, publication or release acceptance is established. The owner discarded
 
 <!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
-- **6 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
+- **8 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
   - `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked?
   - `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code
   - `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property
   - `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct?
   - `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR
   - `leg1-dirty-wip-mixed-verdict-2026-10-24` — 4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong
+  - `leg3-insights-commit-cadence-policy-2026-10-28` — Insights suggestion: adopt an auto-commit-on-green policy for laps, despite the harness's "only commit when asked" default?
+  - `leg3-insights-dispatch-idle-timeout-2026-10-28` — Insights suggestion: adopt a >10-minute idle-timeout for stalled dispatch lanes, or derive the threshold from measurement instead?
 
 <!-- END GENERATED LIVE STATUS -->
 

@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-10-27 at `7374e8559bf6fbafb7473491b9145624ba019dd2`.*
+*Last run: 2026-10-28 at `c39cd207a7323c519b95e0a82a4c35c4a94b5654`.*
 
 
 ---
@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.
 
 ## `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 5 nights** · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 6 nights** · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -76,7 +76,7 @@ Should the header "## Synthesis narrative (always runs)" in spec/audit-workflow-
 
 ## `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 5 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 6 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -114,7 +114,7 @@ Should the checkout-staleness entry in docs/backlog/open-bugs.md be trimmed to d
 
 ## `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 5 nights** · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 6 nights** · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -153,7 +153,7 @@ Are the deferred.md and open-bugs.md entries about the audit-refactor-qualificat
 
 ## `leg1-dirty-wip-mixed-verdict-2026-10-24` — 4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · open 4 nights · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 5 nights** · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -199,7 +199,7 @@ How should the pending 4-file uncommitted WIP be resolved — commit the 3 verif
 
 ## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · **open 7 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · **open 8 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -241,7 +241,7 @@ Should this stay an open backlog item as-is (no mechanism proposed yet), should 
 
 ## `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · **open 5 nights** · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · **open 6 nights** · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -279,19 +279,97 @@ Full proposal: [`.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-check
 ---
 
 
+<!-- nightly:item key=dd6ead4b601e2308 -->
+
+## `leg3-insights-commit-cadence-policy-2026-10-28` — Insights suggestion: adopt an auto-commit-on-green policy for laps, despite the harness's "only commit when asked" default? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The weekly usage-insights report (built from 406 of your Claude Code sessions) noticed that long autonomous laps sometimes end with finished, test-passing work left uncommitted, because a session stops rather than committing without being asked — and then a usage or spend limit kills the session before anyone commits it, so the work is lost or has to be redone. Its suggested fix is to add a rule telling Claude to always commit completed green work, and to commit after each individual backlog item rather than saving everything for the end. The problem is that this directly contradicts an existing, more fundamental rule every session already follows: "NEVER commit changes unless the user explicitly asks you to." That rule exists on purpose, to stop an agent from making git history changes you did not approve. So this is not a free fix — it is a real tradeoff between losing uncommitted work on a crash versus an agent committing things you have not reviewed. A middle path (e.g. auto-commit only inside a lap the owner has already told the agent to run autonomously, or only to a disposable branch/worktree, or only with a stated justification each time) is possible but is itself a policy call, not something that can be inferred from the conflict alone.
+
+### The question
+
+Should a lap be allowed to auto-commit completed, green, test-passing work without being asked each time (optionally scoped to e.g. explicitly-autonomous laps, or worktree branches only), overriding the general "only commit when asked" rule in that scope — or should the existing rule stand as-is, accepting that an interrupted lap can lose uncommitted work?
+
+### Your answer
+
+- [ ] **1. Allow auto-commit, scoped to autonomous laps** — Add a scoped exception: inside an explicitly autonomous lap (e.g. a nightly run or a lap the owner told the agent to run end-to-end), commit each backlog item once it reaches a green gate, without asking each time. Ordinary interactive sessions keep the existing "only commit when asked" rule.
+- [ ] **2. Keep the existing rule as-is** — Do not add an auto-commit exception. Accept that an interrupted lap can lose uncommitted green work; recovering it is the cost of keeping every commit explicitly owner-approved.
+- [ ] **3. Something else** — Neither option as stated; the owner will specify a different scoping.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (3) — what was verified against code, and how</summary>
+
+- docs/reviews/insights-triage-2026-10-28.md, "Debatable" section items 1, 4 and 5 — the suggestion text, the conflicting Git Safety Protocol rule it was checked against, and why items 4/5 are the same decision restated.
+- This session's own system instructions state: "NEVER commit changes unless the user explicitly asks you to. It is VERY IMPORTANT to only commit when explicitly asked" — verified present in the harness-level Git Safety Protocol this run operates under.
+- The insights report (C:\Users\ethan\.claude\usage-data\report-2026-10-28-021305.html) cites 5 sessions where completed green work was stranded uncommitted by a usage/spend/context limit as the recurrence evidence behind the suggestion.
+
+</details>
+
+---
+
+
+<!-- nightly:item key=bc0d7dc2fc520ad4 -->
+
+## `leg3-insights-dispatch-idle-timeout-2026-10-28` — Insights suggestion: adopt a >10-minute idle-timeout for stalled dispatch lanes, or derive the threshold from measurement instead? <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+*Recurring-problem solutions · open 1 night · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+
+### In plain terms
+
+The weekly usage-insights report noticed that dispatched worker lanes (sub-agents handed a task) sometimes get stuck — one example cost about 30 minutes producing nothing but reasoning before anyone noticed and cancelled it. Its suggested fix is a rule: automatically cancel and retry any lane idle (or stuck only "thinking") for more than 10 minutes. The owner has a standing, explicit rule that a cap or timeout must never be picked "from feel" — it has to come from an actual measurement of real task durations, or it gets removed if nobody can justify the number. "10 minutes" in the suggestion is not measured from anything; it is a round number a report-writer picked. The underlying problem (stalled lanes going unnoticed) is real and already partly addressed by a different practice (reading the "Worker activity" / last-output-timestamp line before deciding to cancel a job), which does not require a fixed timeout at all.
+
+### The question
+
+Should a numeric idle/stall timeout be added for dispatched worker lanes (and if so, what real measurement should set its value), or should the existing practice — read the job's activity/last-output signal and judge per task rather than enforcing one fixed number — stand as the answer to stalled lanes?
+
+### Your answer
+
+- [ ] **1. Measure first, then set a threshold** — Before adopting any numeric idle timeout, gather real stall-duration data from past dispatched jobs (e.g. from the spend/dispatch logs) and derive the threshold from that distribution rather than from the report's round number.
+- [ ] **2. No fixed timeout — keep the activity-signal practice** — Reject a fixed idle-timeout; keep relying on the per-job "Worker activity" / last-output-timestamp signal and a human or agent judgment call each time, consistent with "default to no limit."
+- [ ] **3. Something else** — Neither option as stated; the owner will specify a different approach.
+- [ ] **Other** — record what I write in Notes below.
+- [ ] **Won't fix** — not doing this; reason in Notes.
+- [ ] **Ask back** — the proposition is wrong or unclear; question in Notes, item stays open.
+
+```notes
+
+```
+
+<details>
+<summary>Evidence (3) — what was verified against code, and how</summary>
+
+- docs/reviews/insights-triage-2026-10-28.md, "Debatable" section items 2 and 3 — the suggestion text and the specific threshold objection.
+- C:\Users\ethan\.claude\CLAUDE.md: "Never set a cap, timeout, retry count or threshold from feel. Default to no limit. A limit you need takes its value from a measurement or a documented upstream constraint. Asked \"why N?\" with no measurement behind N: say so, and remove N." — verified present in this session's global instructions.
+- The dispatch skill's existing guidance already reads "Read a running job's Worker activity line before you cancel it," which is a judgment-based alternative to a fixed timeout.
+
+</details>
+
+---
+
+
 <details>
 <summary>What the last run could NOT cover</summary>
 
 
-- leg1 (docs, coverage): no new content to review — HEAD (7374e855) is unchanged since the last leg-1 stamp (that commit was itself last night's nightly commit), so the incremental scope (docs changed since last stamp + declared dependents) was empty. The only non-stamped content (.claude/skills/ship/SKILL.md, 8 cold items) is the still-open dirty WIP (leg1-dirty-wip-mixed-verdict-2026-10-24) and was deliberately left unstamped again, same as 2026-10-26, because stamping now would certify an undecided state.
+- leg1 (docs, coverage): no new content to review — HEAD (c39cd207) is unchanged in reviewable scope since the last leg-1 stamp; the scope ledger plan shows 0 cold items outside the still-open dirty WIP file. Same situation as the prior two nights.
 
-- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 4), so no review-derived document edits were applied tonight regardless of findings.
+- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 5), so no review-derived document edits were applied tonight regardless of findings.
 
-- leg2 (backlog mechanical sweep): not run. scripts/shared/triage-backlog.mjs is hard-wired to the agent-dispatch opencode lane (no AGY fallback in that script). Probed tonight: opencode_fire(agent:"answer") on a trivial one-line probe never produced output; opencode_check showed "agent-dispatch free-only policy refused route override" at retry attempt 5 (same symptom as 2026-10-23 and 2026-10-26) despite agent-dispatch CLI status reporting postgres/litellm/opencode all healthy. This is the 6th consecutive dead night for this lane. No backlog entries were classified, deduplicated, or escalated this cycle.
+- leg2 (backlog mechanical sweep): not run. scripts/shared/triage-backlog.mjs is still hard-wired to the agent-dispatch opencode lane with no AGY fallback (confirmed by source read tonight). Probed tonight: opencode_fire(agent:"answer") on a trivial one-line probe to a non-repo directory stalled with "agent-dispatch free-only policy refused route override" at retry attempt 5 — the same symptom as the prior 6 nights. This is the 7th consecutive dead night for this lane. No backlog entries were classified, deduplicated, or escalated this cycle.
 
-- leg3: no new audit-tools-owned recurring-problem proposal this cycle. AGY was re-probed as a potential substitute lane and, unlike 2026-10-26, succeeded in BOTH promptOnly and execution:true modes tonight (trivial pings, non-repo directory) — recorded to project memory (dispatch-lane-dead-sixth-night-agy-fully-recovered-2026-10-27) since it contradicts last night's categorical execution-mode failure. The agent-dispatch lane's repeated failure remains machine-wide infra (agent-dispatch itself), not audit-tools-owned code, so no leg-3 patch is authored here; several open proposals already cover lane-unreliability angles (P1, P5, P11, P36, P43, P46, P49, P58, P59, P66) and were not duplicated.
+- leg3: no new audit-tools-owned recurring-problem proposal this cycle. AGY was re-probed and succeeded in both promptOnly and execution:true modes tonight (trivial pings; execution probe ran in a non-repo scratch directory since dispatch-cwd-guard refuses the main checkout). The agent-dispatch lane's repeated failure remains machine-wide infra (agent-dispatch itself), not audit-tools-owned code, so no leg-3 patch is authored here; existing open proposals (P1, P5, P11, P36, P43, P46, P49, P58, P59, P66) already cover lane-unreliability angles and were not duplicated.
 
-- /insights weekly pass: not due (last run 2026-10-21T09:55:34Z, 6.0 days old; due at >=7 days).
+- /insights weekly pass: due (last run 2026-10-21T09:55:34Z, 7.0 days old); ran tonight as a nested headless session. 10 concrete suggestions triaged (5 already-shipped, 5 debatable, 0 open) — see docs/reviews/insights-triage-2026-10-28.md. The two distinct debatable policy conflicts it found were escalated as leg-3 inbox items rather than silently adopted or dropped.
 
 
 </details>
