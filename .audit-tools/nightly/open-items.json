@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-10-28T09:16:47.411Z",
+  "generated_at": "2026-10-31T09:18:42.008Z",
   "run": {
-    "date": "2026-10-28",
-    "head": "c39cd207a7323c519b95e0a82a4c35c4a94b5654"
+    "date": "2026-10-31",
+    "head": "bbf5f194f492983b6a43698a12fa88574c88e212"
   },
   "items": [
     {
@@ -40,7 +40,7 @@
       ],
       "auto_close": false,
       "first_seen": "2026-10-21",
-      "nights_open": 8
+      "nights_open": 11
     },
     {
       "id": "leg1-synthesis-narrative-always-runs-header-2026-10-23",
@@ -76,7 +76,7 @@
       ],
       "subject_key": "ea994a4b1389d0da",
       "first_seen": "2026-10-23",
-      "nights_open": 6
+      "nights_open": 9
     },
     {
       "id": "leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23",
@@ -110,7 +110,7 @@
       "auto_close": false,
       "subject_key": "135ae2a4fa2e1db8",
       "first_seen": "2026-10-23",
-      "nights_open": 6
+      "nights_open": 9
     },
     {
       "id": "leg1-docset-condensation-qualification-triple-pointer-2026-10-23",
@@ -149,7 +149,7 @@
       "auto_close": false,
       "subject_key": "fcdc9f3b916e7bc6",
       "first_seen": "2026-10-23",
-      "nights_open": 6
+      "nights_open": 9
     },
     {
       "id": "leg3-p70-stale-main-reads-wrong-checkout-2026-10-23",
@@ -190,7 +190,7 @@
       "patch_path": ".audit-tools/nightly/proposals/P70-stale-main-reads-wrong-checkout/patch.diff",
       "subject_key": "8ccc5183771bb9c2",
       "first_seen": "2026-10-23",
-      "nights_open": 6
+      "nights_open": 9
     },
     {
       "id": "leg1-dirty-wip-mixed-verdict-2026-10-24",
@@ -230,7 +230,7 @@
         }
       ],
       "first_seen": "2026-10-24",
-      "nights_open": 5
+      "nights_open": 8
     },
     {
       "id": "leg3-insights-commit-cadence-policy-2026-10-28",
@@ -268,7 +268,7 @@
       "auto_close": false,
       "first_seen": "2026-10-28",
       "subject_key": "dd6ead4b601e2308",
-      "nights_open": 1
+      "nights_open": 4
     },
     {
       "id": "leg3-insights-dispatch-idle-timeout-2026-10-28",
@@ -306,15 +306,15 @@
       "auto_close": false,
       "first_seen": "2026-10-28",
       "subject_key": "bc0d7dc2fc520ad4",
-      "nights_open": 1
+      "nights_open": 4
     }
   ],
   "applied": [],
   "skipped": [
-    "leg1 (docs, coverage): no new content to review — HEAD (c39cd207) is unchanged in reviewable scope since the last leg-1 stamp; the scope ledger plan shows 0 cold items outside the still-open dirty WIP file. Same situation as the prior two nights.",
-    "leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 5), so no review-derived document edits were applied tonight regardless of findings.",
-    "leg2 (backlog mechanical sweep): not run. scripts/shared/triage-backlog.mjs is still hard-wired to the agent-dispatch opencode lane with no AGY fallback (confirmed by source read tonight). Probed tonight: opencode_fire(agent:\"answer\") on a trivial one-line probe to a non-repo directory stalled with \"agent-dispatch free-only policy refused route override\" at retry attempt 5 — the same symptom as the prior 6 nights. This is the 7th consecutive dead night for this lane. No backlog entries were classified, deduplicated, or escalated this cycle.",
-    "leg3: no new audit-tools-owned recurring-problem proposal this cycle. AGY was re-probed and succeeded in both promptOnly and execution:true modes tonight (trivial pings; execution probe ran in a non-repo scratch directory since dispatch-cwd-guard refuses the main checkout). The agent-dispatch lane's repeated failure remains machine-wide infra (agent-dispatch itself), not audit-tools-owned code, so no leg-3 patch is authored here; existing open proposals (P1, P5, P11, P36, P43, P46, P49, P58, P59, P66) already cover lane-unreliability angles and were not duplicated.",
-    "/insights weekly pass: due (last run 2026-10-21T09:55:34Z, 7.0 days old); ran tonight as a nested headless session. 10 concrete suggestions triaged (5 already-shipped, 5 debatable, 0 open) — see docs/reviews/insights-triage-2026-10-28.md. The two distinct debatable policy conflicts it found were escalated as leg-3 inbox items rather than silently adopted or dropped."
+    "leg1 (docs, coverage): no new content to review — HEAD (bbf5f194) is unchanged in reviewable scope since the last leg-1 stamp; zero commits landed since the prior run. Same situation as the prior four nights.",
+    "leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 7), content unchanged from the prior run's diff, so no review-derived document edits were applied tonight regardless of findings.",
+    "leg2 (backlog mechanical sweep): ran, classified nothing. Re-probed tonight: a trivial opencode_fire(agent:\"answer\", providerID:\"litellm\", modelID:\"medium\") probe succeeded instantly (not the prior 8 nights' \"free-only-policy refused route override\"), so the full triage-backlog.mjs sweep was run. All 18 remaining real entries errored on opencode_wait with \"exceeded the host time limit... outcome is unknown\"; a retry on each also errored. opencode_job_list showed most of those jobs still status:\"running\" server-side after the sweep gave up — a distinct symptom from the prior 8 nights (the lane accepts and starts work but the script's per-call wait budget is too short for real triage-length prompts, not an upstream policy refusal). 0/18 classified; this is the 9th consecutive night with zero leg-2 classifications, now for a different reason.",
+    "leg3: AGY re-probed — promptOnly succeeded again, but execution:true failed with \"AGY delivered prompt exceeds bounded Windows argv allowance (24 Ki characters)\" (the argv-overflow symptom), a recurrence one night after being reported fully recovered in both modes. No new audit-tools-owned recurring-problem proposal this cycle: the leg-2 timeout symptom just found is new evidence for the lane-unreliability pattern, but the existing proposals (P1/P5/P11/P36/P43/P46/P49/P58/P59/P66, plus the still-open P70) already cover that angle, and AGY's flip-flopping argv-overflow behavior is upstream (AGY/agent-dispatch) infra, not audit-tools-owned code, so no new patch is authored here.",
+    "/insights weekly pass: not due (last run 2026-10-28T09:13:05Z, <7 days old)."
   ]
 }

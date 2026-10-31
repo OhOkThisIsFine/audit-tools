@@ -22,7 +22,7 @@ starts here, it applies your answers (`node scripts/nightly/ingest-answers.mjs`)
 records them in the tracked ledger, and does the work.
 
 
-*Last run: 2026-10-28 at `c39cd207a7323c519b95e0a82a4c35c4a94b5654`.*
+*Last run: 2026-10-31 at `bbf5f194f492983b6a43698a12fa88574c88e212`.*
 
 
 ---
@@ -35,7 +35,7 @@ records them in the tracked ledger, and does the work.
 
 ## `leg1-synthesis-narrative-always-runs-header-2026-10-23` — spec/audit-workflow-design.md: fix or clarify the "Synthesis narrative (always runs)" header, which contradicts its own body and the code <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 6 nights** · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 9 nights** · `spec/audit-workflow-design.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -76,7 +76,7 @@ Should the header "## Synthesis narrative (always runs)" in spec/audit-workflow-
 
 ## `leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23` — docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 6 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 9 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -114,7 +114,7 @@ Should the checkout-staleness entry in docs/backlog/open-bugs.md be trimmed to d
 
 ## `leg1-docset-condensation-qualification-triple-pointer-2026-10-23` — Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 6 nights** · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 9 nights** · `docs/backlog/deferred.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -153,7 +153,7 @@ Are the deferred.md and open-bugs.md entries about the audit-refactor-qualificat
 
 ## `leg1-dirty-wip-mixed-verdict-2026-10-24` — 4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Documentation · **open 5 nights** · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Documentation · **open 8 nights** · `docs/backlog/minor-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -199,7 +199,7 @@ How should the pending 4-file uncommitted WIP be resolved — commit the 3 verif
 
 ## `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Backlog disambiguation · **open 8 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Backlog disambiguation · **open 11 nights** · `docs/backlog/open-bugs.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -241,7 +241,7 @@ Should this stay an open backlog item as-is (no mechanism proposed yet), should 
 
 ## `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · **open 6 nights** · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · **open 9 nights** · `.claude/hooks/session-start-guards.mjs`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -283,7 +283,7 @@ Full proposal: [`.audit-tools/nightly/proposals/P70-stale-main-reads-wrong-check
 
 ## `leg3-insights-commit-cadence-policy-2026-10-28` — Insights suggestion: adopt an auto-commit-on-green policy for laps, despite the harness's "only commit when asked" default? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 4 nights · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -322,7 +322,7 @@ Should a lap be allowed to auto-commit completed, green, test-passing work witho
 
 ## `leg3-insights-dispatch-idle-timeout-2026-10-28` — Insights suggestion: adopt a >10-minute idle-timeout for stalled dispatch lanes, or derive the threshold from measurement instead? <!-- doc-citation-exempt: quoted item prose, not citations -->
 
-*Recurring-problem solutions · open 1 night · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
+*Recurring-problem solutions · open 4 nights · `docs/reviews/insights-triage-2026-10-28.md`* <!-- doc-citation-exempt: quoted item prose, not citations -->
 
 ### In plain terms
 
@@ -361,15 +361,15 @@ Should a numeric idle/stall timeout be added for dispatched worker lanes (and if
 <summary>What the last run could NOT cover</summary>
 
 
-- leg1 (docs, coverage): no new content to review — HEAD (c39cd207) is unchanged in reviewable scope since the last leg-1 stamp; the scope ledger plan shows 0 cold items outside the still-open dirty WIP file. Same situation as the prior two nights.
+- leg1 (docs, coverage): no new content to review — HEAD (bbf5f194) is unchanged in reviewable scope since the last leg-1 stamp; zero commits landed since the prior run. Same situation as the prior four nights.
 
-- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 5), so no review-derived document edits were applied tonight regardless of findings.
+- leg1 (apply): the clean-tree rule still applies — the tree remains dirty with the same 4-file WIP tracked by leg1-dirty-wip-mixed-verdict-2026-10-24 (nights_open now 7), content unchanged from the prior run's diff, so no review-derived document edits were applied tonight regardless of findings.
 
-- leg2 (backlog mechanical sweep): not run. scripts/shared/triage-backlog.mjs is still hard-wired to the agent-dispatch opencode lane with no AGY fallback (confirmed by source read tonight). Probed tonight: opencode_fire(agent:"answer") on a trivial one-line probe to a non-repo directory stalled with "agent-dispatch free-only policy refused route override" at retry attempt 5 — the same symptom as the prior 6 nights. This is the 7th consecutive dead night for this lane. No backlog entries were classified, deduplicated, or escalated this cycle.
+- leg2 (backlog mechanical sweep): ran, classified nothing. Re-probed tonight: a trivial opencode_fire(agent:"answer", providerID:"litellm", modelID:"medium") probe succeeded instantly (not the prior 8 nights' "free-only-policy refused route override"), so the full triage-backlog.mjs sweep was run. All 18 remaining real entries errored on opencode_wait with "exceeded the host time limit... outcome is unknown"; a retry on each also errored. opencode_job_list showed most of those jobs still status:"running" server-side after the sweep gave up — a distinct symptom from the prior 8 nights (the lane accepts and starts work but the script's per-call wait budget is too short for real triage-length prompts, not an upstream policy refusal). 0/18 classified; this is the 9th consecutive night with zero leg-2 classifications, now for a different reason.
 
-- leg3: no new audit-tools-owned recurring-problem proposal this cycle. AGY was re-probed and succeeded in both promptOnly and execution:true modes tonight (trivial pings; execution probe ran in a non-repo scratch directory since dispatch-cwd-guard refuses the main checkout). The agent-dispatch lane's repeated failure remains machine-wide infra (agent-dispatch itself), not audit-tools-owned code, so no leg-3 patch is authored here; existing open proposals (P1, P5, P11, P36, P43, P46, P49, P58, P59, P66) already cover lane-unreliability angles and were not duplicated.
+- leg3: AGY re-probed — promptOnly succeeded again, but execution:true failed with "AGY delivered prompt exceeds bounded Windows argv allowance (24 Ki characters)" (the argv-overflow symptom), a recurrence one night after being reported fully recovered in both modes. No new audit-tools-owned recurring-problem proposal this cycle: the leg-2 timeout symptom just found is new evidence for the lane-unreliability pattern, but the existing proposals (P1/P5/P11/P36/P43/P46/P49/P58/P59/P66, plus the still-open P70) already cover that angle, and AGY's flip-flopping argv-overflow behavior is upstream (AGY/agent-dispatch) infra, not audit-tools-owned code, so no new patch is authored here.
 
-- /insights weekly pass: due (last run 2026-10-21T09:55:34Z, 7.0 days old); ran tonight as a nested headless session. 10 concrete suggestions triaged (5 already-shipped, 5 debatable, 0 open) — see docs/reviews/insights-triage-2026-10-28.md. The two distinct debatable policy conflicts it found were escalated as leg-3 inbox items rather than silently adopted or dropped.
+- /insights weekly pass: not due (last run 2026-10-28T09:13:05Z, <7 days old).
 
 
 </details>
