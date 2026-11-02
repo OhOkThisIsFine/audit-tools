@@ -226,7 +226,7 @@ test("buildRiskRegister omits graph signals entirely when none are supplied (bac
   expect(register.items[0].signals).toEqual([]);
 });
 
-test("buildRepoManifestFromFs traverses recursively, ignores configured paths, and hashes bounded files", async () => {
+test("buildRepoManifestFromFs traverses recursively, ignores configured paths, and hashes all inventoried files", async () => {
   await withTempDir("audit-code-fs-intake-", async (root) => {
     await mkdir(join(root, "src", "nested"), { recursive: true });
     await mkdir(join(root, "node_modules", "pkg"), { recursive: true });
@@ -256,7 +256,7 @@ test("buildRepoManifestFromFs traverses recursively, ignores configured paths, a
     const large = manifest.files.find((file) => file.path === "src/large.ts")!;
     expect(small.hash).toBe(createHash("sha256").update("small\n").digest("hex"));
     expect(large.size_bytes).toBe(10);
-    expect(large.hash).toBe(undefined);
+    expect(large.hash).toBe(createHash("sha256").update("0123456789").digest("hex"));
   });
 });
 

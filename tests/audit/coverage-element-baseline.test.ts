@@ -28,7 +28,7 @@ function file(path: string, overrides: Partial<CoverageFileRecord> = {}): Covera
   };
 }
 
-test("coverageContentSignature: prefers hash, falls back to size_bytes", () => {
+test("coverageContentSignature: uses hashes and omits hashless files", () => {
   const sig = coverageContentSignature({
     repository: { name: "x" },
     generated_at: "t",
@@ -38,7 +38,7 @@ test("coverageContentSignature: prefers hash, falls back to size_bytes", () => {
     ],
   });
   expect(sig["a.ts"], "hash wins when present").toBe("deadbeef");
-  expect(sig["b.ts"], "size fallback when no hash").toBe("size:200");
+  expect(sig["b.ts"], "no identity without a hash").toBeUndefined();
 });
 
 test("deriveCoverageElementKey: stable across ordering, moves on any input change", () => {
@@ -161,4 +161,15 @@ test("computeArtifactMetadata: drops an old-shape (pre-F1) coverage baseline sto
   };
   const out = computeArtifactMetadata(bundle, undefined, []);
   expect(out.coverage_element_baselines, "old-shape store is not carried").toBe(undefined);
+});
+
+
+test("hashless coverage never gets or reuses a content baseline", () => {
+  const complete = { files: [file("a.ts", { audit_status: "complete", completed_lenses: ["security"] })] };
+  expect(recordCoverageElementBaselines(complete, {})).toEqual({});
+  const fresh = { files: [file("a.ts")] };
+  // Includes a legacy key for a missing signature, so the preservation guard itself is tested.
+  const legacy = { "a.ts": deriveCoverageElementKey(fresh.files[0], undefined) };
+  expect(applyContentAddressedPreservation(fresh, complete, legacy, {})).toBe(0);
+  expect(fresh.files[0].audit_status).toBe("pending");
 });

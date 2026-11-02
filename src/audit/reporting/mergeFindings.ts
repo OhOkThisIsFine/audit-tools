@@ -5,7 +5,7 @@ import type { StructureDecomposition } from "../types/structureDecomposition.js"
 import type { CharterRegister } from "../types/charterRegister.js";
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
-import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
+import type { RuntimeValidationReport, RuntimeValidationTaskManifest } from "../types/runtimeValidation.js";
 import { severityRank, confidenceRank } from "audit-tools/shared";
 import {
   crossLensDedupe,
@@ -16,21 +16,19 @@ import {
   findingReEmissionKey,
 } from "audit-tools/shared";
 
+// sites-pinned: tests/audit/reporting-remediation.test.ts, tests/audit/orchestration.test.ts
 function relevantRuntimeEvidence(
   finding: Finding,
   report?: RuntimeValidationReport,
+  tasks?: RuntimeValidationTaskManifest,
 ): string[] {
-  if (!report) return [];
+  if (!report || !tasks) return [];
+  const taskById = new Map(tasks.tasks.map((task) => [task.id, task]));
   const findingPaths = new Set(finding.affected_files.map((f) => f.path));
   return report.results
     .filter((result) => result.status !== "pending")
     .filter((result) => {
-      const taskPaths = result.notes
-        ?.flatMap((note) => {
-          const match = note.match(/Target paths:\s*(.+)/);
-          return match ? match[1].split(",").map((p) => p.trim()) : [];
-        }) ?? [];
-      if (taskPaths.length === 0) return true;
+      const taskPaths = taskById.get(result.task_id)?.target_paths ?? [];
       return taskPaths.some((p) => findingPaths.has(p));
     })
     .map((result) => `${result.task_id}: ${result.status} — ${result.summary}`);
@@ -57,6 +55,7 @@ export function mergeFindings(
   structureDecomposition?: StructureDecomposition,
   charterRegister?: CharterRegister,
   systemicChallenge?: SystemicChallengeRegister,
+  runtimeTasks?: RuntimeValidationTaskManifest,
 ): Finding[] {
   const merged = new Map<string, Finding>();
 
@@ -136,7 +135,7 @@ export function mergeFindings(
   }
 
   for (const finding of merged.values()) {
-    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport);
+    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport, runtimeTasks);
     const externalEv = relevantExternalEvidence(finding, externalAnalyzerResults);
     if (runtimeEv.length > 0 || externalEv.length > 0) {
       finding.evidence = [

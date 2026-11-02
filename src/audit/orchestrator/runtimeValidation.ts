@@ -1,7 +1,8 @@
+// sites-pinned: tests/audit/runtime-validation-merge.test.ts
 import type { UnitManifest } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-import { discoverProjectCommands } from "audit-tools/shared";
+import { stableStringify, discoverProjectCommands } from "audit-tools/shared";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTask,
@@ -104,16 +105,33 @@ export function buildRuntimeValidationTasks(params: {
   return { tasks };
 }
 
+// Completion belongs to the performed check, not merely its stable scheduling ID.
+function validationInputs(task: RuntimeValidationTask): string {
+  return stableStringify({
+    kind: task.kind,
+    command: task.command ?? [],
+    target_paths: [...new Set(task.target_paths)].sort(),
+    suggested_checks: task.suggested_checks ?? [],
+  });
+}
+
 export function mergeRuntimeValidationReport(
   tasks: RuntimeValidationTaskManifest,
   existing?: RuntimeValidationReport,
+  previousTasks?: RuntimeValidationTaskManifest,
 ): RuntimeValidationReport {
   const existingMap = new Map(
     (existing?.results ?? []).map((result) => [result.task_id, result]),
   );
+  const previousById = new Map(
+    (previousTasks?.tasks ?? []).map((task) => [task.id, task]),
+  );
   return {
     results: tasks.tasks.map((task) => {
-      const prior = existingMap.get(task.id);
+      const previousTask = previousById.get(task.id);
+      const prior = previousTask && validationInputs(previousTask) === validationInputs(task)
+        ? existingMap.get(task.id)
+        : undefined;
       return (
         prior ?? {
           task_id: task.id,

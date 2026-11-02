@@ -129,7 +129,7 @@ refreshSession() checks the token signature but never the expiry, so an expired 
 - Impact: A leaked token stays usable indefinitely.
 - Likelihood: Any expired token replayed against the refresh endpoint.
 - Files: src/api/auth.ts:41–58
-- Evidence: 4 items (top: "The expiry field read at line 44 is never compared against the clock.") — see audit-findings.json for the full list
+- Evidence: The expiry field read at line 44 is never compared against the clock.
 ```
 
 <!-- END sample-report -->

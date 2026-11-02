@@ -1,6 +1,7 @@
 // sites-pinned: tests/audit/frozen-snapshot.test.ts, tests/audit/run-snapshot.test.ts
+import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { hashContent, toPosixPath } from "audit-tools/shared";
+import { hashContent, hashContentStream, toPosixPath } from "audit-tools/shared";
 import { join, relative, resolve } from "node:path";
 import type { RepoManifest } from "../types.js";
 import { buildRepoManifest } from "./fileInventory.js";
@@ -15,6 +16,7 @@ export interface IntakeOptions {
   name?: string;
   ignore?: string[];
   hash_files?: boolean;
+  /** Maximum buffered hashing size; larger files are stream-hashed. */
   max_file_size_bytes?: number;
 }
 
@@ -113,13 +115,12 @@ async function walk(
       continue;
     }
 
+    // sites-pinned: tests/audit/fs-intake.test.ts
     let hash: string | undefined;
     if (info.size <= ctx.maxFileSizeBytes) {
       hash = await maybeHashFile(absolutePath, ctx.hashFiles);
-    } else {
-      console.warn(
-        `[fsIntake] skipping oversized file: ${relativePath} (${info.size} bytes > ${ctx.maxFileSizeBytes} limit)`,
-      );
+    } else if (ctx.hashFiles) {
+      hash = await hashContentStream(createReadStream(absolutePath));
     }
     results.push({
       path: relativePath,

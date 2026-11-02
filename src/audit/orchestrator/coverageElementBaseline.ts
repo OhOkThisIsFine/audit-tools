@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/coverage-element-baseline.test.ts
 /**
  * Content-addressed, GRANULAR staleness for the coverage matrix (T5 #12 — the
  * general DAG-model extension that pairs with the per-result baseline store in
@@ -21,12 +22,8 @@
  *  - a file with no recorded baseline is never preserved (first plan establishes
  *    the baseline; the run after a ship behaves exactly as before).
  *
- * Content-precision note: the per-file content signal is the repo-manifest
- * `hash` when file hashing is enabled, else `size_bytes`. This is exactly the
- * precision the rest of the staleness DAG already runs at — a same-size file edit
- * with hashing off does not change the repo manifest either, so it does not
- * re-stale coverage today and is not falsely preserved here relative to current
- * behavior. Enabling manifest hashing tightens both at once.
+ * Content-based reuse requires a manifest hash. File size alone cannot identify
+ * source content; hashless files are omitted from baselines and never preserved.
  */
 import { hashContent, stableStringify } from "audit-tools/shared";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
@@ -38,7 +35,7 @@ export type CoverageElementBaselineStore = Record<string, string>;
 
 /**
  * The per-file content signal that determines whether a file's audit must be
- * redone: the repo-manifest content `hash` when present, else its `size_bytes`.
+ * redone: the repo-manifest content hash.
  * Returns a map keyed by repo-manifest path. Files absent from the manifest (no
  * signal) are simply omitted — a file with no signal gets no baseline and is
  * never preserved (fail-safe to re-audit).
@@ -48,7 +45,7 @@ export function coverageContentSignature(
 ): Record<string, string> {
   const sig: Record<string, string> = {};
   for (const file of repoManifest.files) {
-    sig[file.path] = file.hash ?? `size:${file.size_bytes}`;
+    if (file.hash) sig[file.path] = file.hash;
   }
   return sig;
 }
@@ -85,7 +82,7 @@ export function recordCoverageElementBaselines(
 ): CoverageElementBaselineStore {
   const store: CoverageElementBaselineStore = {};
   for (const file of coverage.files) {
-    if (file.audit_status === "excluded") continue;
+    if (file.audit_status === "excluded" || !contentSigByPath[file.path]) continue;
     store[file.path] = deriveCoverageElementKey(file, contentSigByPath[file.path]);
   }
   return store;
@@ -143,7 +140,7 @@ export function applyContentAddressedPreservation(
   const priorByPath = new Map(priorCoverage.files.map((f) => [f.path, f]));
   let preserved = 0;
   for (const file of coverage.files) {
-    if (file.audit_status === "excluded") continue;
+    if (file.audit_status === "excluded" || !contentSigByPath[file.path]) continue;
     // Already complete (e.g. trivial-auto-complete or delta out-of-scope carry):
     // nothing to preserve.
     if (file.audit_status === "complete") continue;

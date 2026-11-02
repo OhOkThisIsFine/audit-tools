@@ -474,6 +474,7 @@ export function buildAuditReportModel(params: {
   // base record they superseded — including findings the re-audit dropped, which
   // a finding-id upsert alone would leave behind.
   const currentResults = selectCurrentResults(params.results);
+  // sites-pinned: tests/audit/reporting-remediation.test.ts
   const mergedFindings = mergeFindings(
     currentResults,
     params.runtimeValidationReport,
@@ -482,6 +483,7 @@ export function buildAuditReportModel(params: {
     params.structureDecomposition,
     params.charterRegister,
     params.systemicChallenge,
+    params.runtimeValidationTaskManifest,
   );
   const conceptualIdsByFinding = extractConceptualAttributionIds(
     mergedFindings,

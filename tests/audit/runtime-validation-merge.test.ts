@@ -24,7 +24,7 @@ function makeTask(id: string): RuntimeValidationTask {
 // Prior-result preservation: matching task_id returns the prior result object
 // ---------------------------------------------------------------------------
 
-test("mergeRuntimeValidationReport preserves a prior result when task_id matches", () => {
+test("mergeRuntimeValidationReport preserves a prior result when task identity and validation inputs match", () => {
   const tasks = { tasks: [makeTask("runtime:unit:foo")] };
   // "confirmed" (a real RuntimeValidationStatus member): the original fixture's
   // "passed" was never in the enum — the property under test is that the prior
@@ -41,7 +41,7 @@ test("mergeRuntimeValidationReport preserves a prior result when task_id matches
     ],
   };
 
-  const report = mergeRuntimeValidationReport(tasks, existing);
+  const report = mergeRuntimeValidationReport(tasks, existing, tasks);
 
   expect(report.results.length, "should return exactly one result").toBe(1);
   expect(report.results[0].status, "prior result status must be preserved").toBe("confirmed");
@@ -69,7 +69,7 @@ test("mergeRuntimeValidationReport emits a pending stub for a task with no prior
     ],
   };
 
-  const report = mergeRuntimeValidationReport(tasks, existing);
+  const report = mergeRuntimeValidationReport(tasks, existing, tasks);
 
   expect(report.results.length, "should return exactly one result").toBe(1);
   expect(report.results[0].status, "result must be pending when no prior entry matches").toBe("pending");
@@ -96,4 +96,35 @@ test("mergeRuntimeValidationReport with no existing report produces all pending 
   expect(report.results.length, "should return exactly one result").toBe(1);
   expect(report.results[0].status, "result must be pending when no existing report is supplied").toBe("pending");
   expect(report.results[0].task_id, "result task_id must match the task").toBe("runtime:unit:baz");
+});
+
+
+test("scope ordering and scheduling metadata do not invalidate the performed check", () => {
+  const task = { ...makeTask("runtime:unit:foo"), target_paths: ["src/b.ts", "src/a.ts"] };
+  const previous = { tasks: [task] };
+  const result = { task_id: task.id, status: "confirmed" as const, summary: "Passed" };
+  const current = { tasks: [{ ...task, target_paths: ["src/a.ts", "src/b.ts"], reason: "Rescheduled", priority: "high" as const }] };
+  expect(mergeRuntimeValidationReport(current, { results: [result] }, previous).results[0]).toBe(result);
+});
+
+test.each([
+  { command: ["npm", "run", "integration"] },
+  { target_paths: ["src/other.ts"] },
+  { suggested_checks: ["Exercise unauthorized inputs"] },
+  { kind: "critical-flow-check" as const },
+])("replanning changed validation inputs resets completion: %j", (change) => {
+  const prior = { tasks: [makeTask("runtime:unit:foo")] };
+  const existing: RuntimeValidationReport = { results: [{
+    task_id: prior.tasks[0].id, status: "confirmed", summary: "Old check passed",
+  }] };
+  const current = { tasks: [{ ...prior.tasks[0], ...change }] };
+  expect(mergeRuntimeValidationReport(current, existing, prior).results[0].status).toBe("pending");
+});
+
+test("completion without its previous task definition cannot be reused", () => {
+  const tasks = { tasks: [makeTask("runtime:unit:foo")] };
+  const report: RuntimeValidationReport = { results: [{
+    task_id: tasks.tasks[0].id, status: "not_required", summary: "Old exemption",
+  }] };
+  expect(mergeRuntimeValidationReport(tasks, report).results[0].status).toBe("pending");
 });

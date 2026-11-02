@@ -110,6 +110,9 @@ test("mergeFindings deduplicates duplicate findings and aggregates runtime plus 
         ],
       },
     ],
+    undefined, undefined, undefined, undefined,
+    { tasks: [{ id: "rv-confirmed", kind: "unit-risk-check", target_paths: ["src/api/auth.ts"],
+      reason: "Auth risk", priority: "high" }] },
   );
 
   expect(merged.length).toBe(2);
@@ -509,4 +512,28 @@ test("mergeFindings merges an AuditResult finding into a matching designAssessme
   expect(merged[0].confidence, "higher confidence from AuditResult is preserved").toBe("high");
   expect(merged[0].evidence!.includes("design-ev"), "design-assessment evidence is retained").toBeTruthy();
   expect(merged[0].evidence!.includes("audit-ev"), "AuditResult evidence is unioned in").toBeTruthy();
+});
+
+
+test("synthesis attributes runtime evidence through structured tasks despite absent or misleading notes", () => {
+  const report = buildAuditReportModel({
+    results: [],
+    designAssessment: { generated_at: "t", findings: [
+      makeFinding({ id: "a", title: "Auth audit trail missing", affected_files: [{ path: "src/auth.ts" }], evidence: ["static-auth"] }),
+      makeFinding({ id: "b", title: "Invoice decimal truncation", affected_files: [{ path: "src/invoice.ts" }], evidence: ["static-invoice"] }),
+    ] },
+    runtimeValidationTaskManifest: { tasks: [{
+      id: "runtime:auth", kind: "unit-risk-check", priority: "high", reason: "Auth risk",
+      target_paths: ["src/auth.ts"], command: ["npm", "test"],
+    }] },
+    runtimeValidationReport: { results: [
+      { task_id: "runtime:auth", status: "confirmed", summary: "Auth reproduced" },
+      { task_id: "orphan", status: "confirmed", summary: "Unknown scope", notes: ["Target paths: src/invoice.ts"] },
+    ] },
+  });
+  const auth = report.findings.find(f => f.title === "Auth audit trail missing")!;
+  const invoice = report.findings.find(f => f.title === "Invoice decimal truncation")!;
+  expect(auth.evidence?.some(entry => entry.startsWith("runtime:auth:") && entry.includes("Auth reproduced"))).toBe(true);
+  expect(auth.evidence?.some(entry => entry.startsWith("orphan:"))).toBe(false);
+  expect(invoice.evidence).toEqual(["static-invoice"]);
 });

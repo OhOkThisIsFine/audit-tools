@@ -14,7 +14,7 @@ async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise<T> {
   }
 }
 
-test("walk logs a warning and skips hashing for oversized files", async () => {
+test("walk hashes oversized files without a skip warning", async () => {
   await withTempRepo(async (root) => {
     await writeFile(join(root, "small.js"), "console.log('small');\n");
     await writeFile(join(root, "large.js"), "x".repeat(200));
@@ -35,20 +35,14 @@ test("walk logs a warning and skips hashing for oversized files", async () => {
     // The oversized file is still in the manifest
     const largeEntry = manifest.files.find((f) => f.path.includes("large.js"));
     expect(largeEntry, "oversized file should still be inventoried").toBeTruthy();
-    expect(largeEntry!.hash, "oversized file should have no hash").toBe(undefined);
+    expect(largeEntry!.hash, "oversized file should have a content hash").toMatch(/^[a-f0-9]{64}$/);
 
     // The small file is hashed normally
     const smallEntry = manifest.files.find((f) => f.path.includes("small.js"));
     expect(smallEntry, "small file should be inventoried").toBeTruthy();
     expect(smallEntry!.hash, "small file should have a hash").toBeTruthy();
 
-    // A warning was emitted for the oversized file
-    const oversizedWarning = warnings.find(
-      (w) => w.includes("skipping oversized file") && w.includes("large.js"),
-    );
-    expect(oversizedWarning, `expected oversized-file warning; got: ${JSON.stringify(warnings)}`).toBeTruthy();
-    expect(oversizedWarning!.includes("bytes"), "warning should mention byte size").toBeTruthy();
-    expect(oversizedWarning!.includes("limit"), "warning should mention the configured limit").toBeTruthy();
+    expect(warnings, "streamed files should not produce skip warnings").toEqual([]);
   });
 });
 
@@ -108,5 +102,23 @@ test("walk logs a warning and continues when stat throws", async () => {
     expect(entryB, "file-b.js should be in results").toBeTruthy();
 
     expect(warnings.filter((w) => w.includes("skipping unreadable file")).length, "no unreadable-file warnings expected for a clean walk").toBe(0);
+  });
+});
+
+
+test("same-size changes above 1 MiB invalidate content identity and integrity", async () => {
+  const { checkFileIntegrity } = await import("../../src/audit/orchestrator/fileIntegrity.js");
+  await withTempRepo(async (root) => {
+    const path = join(root, "large.ts");
+    const size = 1024 * 1024 + 1;
+    await writeFile(path, "a".repeat(size));
+    const before = await buildRepoManifestFromFs({ root, hash_files: true });
+    await writeFile(path, "b".repeat(size));
+    const after = await buildRepoManifestFromFs({ root, hash_files: true });
+    expect(before.files[0].hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(after.files[0].hash).not.toBe(before.files[0].hash);
+    const integrity = await checkFileIntegrity(root, before);
+    expect(integrity.changed_files).toEqual(["large.ts"]);
+    expect(integrity.is_clean).toBe(false);
   });
 });

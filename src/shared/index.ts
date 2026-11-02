@@ -526,7 +526,7 @@ export {
 
 // Content hashing: shared SHA-256 primitive (single source; explicit length)
 export type { HashContentOptions } from "./hash.js";
-export { hashContent } from "./hash.js";
+export { hashContent, hashContentStream } from "./hash.js";
 
 // File integrity: the shared classify-and-bucket loop behind audit-code's
 // checkFileIntegrity and remediate-code's checkAffectedFileIntegrity.

@@ -176,6 +176,7 @@ export function runResultIngestionExecutor(
     ? mergeRuntimeValidationReport(
         runtimeValidationTasks,
         bundle.runtime_validation_report,
+        bundle.runtime_validation_tasks,
       )
     : bundle.runtime_validation_report;
   // O3 drift re-keying (must run BEFORE the append): a base result whose owning

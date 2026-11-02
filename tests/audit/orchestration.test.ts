@@ -804,7 +804,8 @@ test("buildAuditReportModel keeps identity-distinct findings separate while merg
       (entry) =>
         entry.includes("rv-orphan: confirmed") &&
         entry.includes("Detached runtime replay still corroborated the issue."),
-    )).toBeTruthy();
+    )).toBe(false);
+  expect(report.summary.runtime_validation_status_breakdown.confirmed).toBe(1);
   expect(mergedFinding.evidence.includes(
       "external:eslint:src/api/auth.ts:Static analysis corroborated the auth-path gap.",
     )).toBeTruthy();

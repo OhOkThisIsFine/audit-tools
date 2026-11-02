@@ -179,6 +179,7 @@ export async function runPlanningExecutor(
     ? mergeRuntimeValidationReport(
         runtimeValidationTasks,
         bundle.runtime_validation_report,
+        bundle.runtime_validation_tasks,
       )
     : undefined;
   // Interpret free_form_intent into lens priority boosts via the single shared

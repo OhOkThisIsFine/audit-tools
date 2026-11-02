@@ -807,7 +807,7 @@ export async function writeBackSnapshotEdits(params: {
     const edited = await readFile(join(params.sourceRoot, path)).catch(() => undefined);
     if (edited === undefined) continue;
     const live = await readFile(join(params.repositoryRoot, path)).catch(() => undefined);
-    // A file intake did not hash (oversized) has no recorded start: identical
+    // A file intake did not hash has no recorded start: identical
     // bytes mean nothing was edited; different bytes cannot be attributed.
     const start = params.startHashes.get(path)
       ?? (live !== undefined && live.equals(edited) ? hashContent(edited) : undefined);

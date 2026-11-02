@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/fs-intake.test.ts
 /**
  * Shared content-hash primitive.
  *
@@ -13,6 +14,13 @@
  * bare `.slice(0, N)` literal on a hash result anymore.
  */
 import { createHash } from "node:crypto";
+
+/** Hash streamed bytes without buffering the complete input in memory. */
+export async function hashContentStream(content: AsyncIterable<Uint8Array>): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of content) hash.update(chunk);
+  return hash.digest("hex");
+}
 
 export interface HashContentOptions {
   /**

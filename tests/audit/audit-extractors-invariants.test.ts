@@ -332,9 +332,9 @@ test("INV-07: typescript analyzer source does not import readFileSync", () => {
 
 // ── INV-audit-extractors-08: oversized file handling in fsIntake ─────────────
 // An oversized file must still appear in the manifest (with its size_bytes),
-// but without a hash — not silently dropped or left half-present.
+// with a content hash when hashing is enabled.
 
-test("INV-08: buildRepoManifestFromFs includes oversized files without a hash", async () => {
+test("INV-08: buildRepoManifestFromFs hashes oversized files", async () => {
   const { buildRepoManifestFromFs } = await importSourceModule("src/extractors/fsIntake.ts");
 
   await withTempDir("audit-code-inv08-", async (root) => {
@@ -355,7 +355,7 @@ test("INV-08: buildRepoManifestFromFs includes oversized files without a hash", 
     expect(typeof small.hash, "small file must have a hash").toBe("string");
 
     expect(huge, "oversized file must appear in manifest (not silently dropped)").toBeTruthy();
-    expect(huge.hash, "oversized file must NOT have a hash").toBe(undefined);
+    expect(huge.hash, "oversized file must have a content hash").toMatch(/^[a-f0-9]{64}$/);
     expect(huge.size_bytes > 100, "oversized file must have its actual size_bytes recorded").toBeTruthy();
   });
 });
@@ -436,7 +436,7 @@ test("INV-10: fsIntake emits warn diagnostic for unreadable directory", async ()
   expect(src.includes("console.warn") && src.includes("skipping unreadable"), "fsIntake must have console.warn for unreadable directory/file errors").toBeTruthy();
 });
 
-test("INV-10: fsIntake emits warn diagnostic for oversized files", async () => {
+test("INV-10: fsIntake hashes oversized files without a skip diagnostic", async () => {
   const { buildRepoManifestFromFs } = await importSourceModule("src/extractors/fsIntake.ts");
 
   await withTempDir("audit-code-inv10-", async (root) => {
@@ -461,7 +461,7 @@ test("INV-10: fsIntake emits warn diagnostic for oversized files", async () => {
     const hasSkipLog = warnMessages.some(
       (msg) => msg.includes("[fsIntake]") && msg.includes("oversized"),
     );
-    expect(hasSkipLog, "fsIntake must emit a warn diagnostic for oversized files").toBeTruthy();
+    expect(hasSkipLog, "streamed files are not skipped").toBe(false);
   });
 });
 

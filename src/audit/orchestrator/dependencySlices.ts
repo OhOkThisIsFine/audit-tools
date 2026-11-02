@@ -69,9 +69,8 @@ function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
  *    slice and the packets can never drift). That set is consensus MEMBER
  *    paths (every channel is a projection of member content) plus every
  *    doc-intent path (the stated channel's doc universe). The content proxy is
- *    the manifest hash, falling back to a size marker for oversized files the
- *    intake leaves unhashed (>1 MiB carries only `size_bytes`; `hash ?? ""`
- *    erased a real change signal).
+ *    the manifest hash, falling back to a size marker for legacy or explicitly
+ *    unhashed manifests. Production intake hashes oversized files too.
  *  - `paths`: the COMPLETE sorted path list, content-free. The register's
  *    SECOND producer — the fidelity executor — grounds difference findings
  *    against the full path set (`groundDesignFindings`: exact-path membership +
