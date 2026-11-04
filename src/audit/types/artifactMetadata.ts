@@ -78,6 +78,9 @@ export interface IntentBaseline {
 }
 
 export interface ArtifactMetadataManifest {
+  // sites-pinned: tests/audit/runtime-validation-source.test.ts
+  /** Source content observed by the runtime-validation producer; never synthesized by metadata refresh. */
+  runtime_validation_source_key?: string;
   /**
    * F1 metadata-shape tag (CE-007). An absent or lower value than
    * `METADATA_SCHEMA_VERSION` marks an old-shape (pre-F1) manifest → readers fail

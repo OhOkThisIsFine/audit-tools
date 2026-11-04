@@ -12,6 +12,7 @@ const { computeArtifactMetadata, computeArtifactStateSignature, present } =
 const { computeStaleArtifacts, resetStalenessDedup } =
   await import("../../src/audit/orchestrator/staleness.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
+const { runRuntimeValidationUpdateExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
 const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.js");
 const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { stableStringify } = await import("../../src/shared/stableStringify.js");
@@ -319,8 +320,13 @@ test("runtime_validation_current obligation: stale when report exists but tasks 
   const stateMissing = deriveAuditState(bundleNoReport);
   expect(stateMissing.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'missing' when no report exists").toBe("missing");
 
-  // Case 3: report exists and result has a non-pending status -> obligation is 'satisfied'.
+  // Case 3: source-bound observations satisfy a nonempty validation task set.
   const bundleComplete: ArtifactBundle = {
+    repo_manifest: {
+      repository: { name: "fixture" },
+      generated_at: "2026-11-04T00:00:00Z",
+      files: [{ path: "src/api/auth.ts", language: "typescript", size_bytes: 100, hash: "a".repeat(64) }],
+    },
     runtime_validation_tasks: {
       tasks: [
         {
@@ -336,7 +342,8 @@ test("runtime_validation_current obligation: stale when report exists but tasks 
       results: [{ task_id: "rv-task-1", status: "confirmed", summary: "Mitigation confirmed." }],
     },
   };
-  const stateSatisfied = deriveAuditState(bundleComplete);
+  const observed = runRuntimeValidationUpdateExecutor(bundleComplete, bundleComplete.runtime_validation_report!);
+  const stateSatisfied = deriveAuditState(observed.updated);
   expect(stateSatisfied.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'satisfied' when all tasks have non-pending results").toBe("satisfied");
 });
 

@@ -29,6 +29,9 @@ import type { AuditState } from "../../src/audit/types/auditState.js";
 const { deriveAuditState } = await import(
   "../../src/audit/orchestrator/state.js"
 );
+const { runRuntimeValidationUpdateExecutor } = await import(
+  "../../src/audit/orchestrator/ingestionExecutors.js"
+);
 const { buildAuditCodeHandoff } = await import(
   "../../src/audit/supervisor/operatorHandoff.js"
 );
@@ -65,9 +68,13 @@ describe("a gate with an empty input set is not_applicable", () => {
   });
 
   it("still reports a NON-empty input set as satisfied", () => {
-    // The member must not swallow the real success case: one planned task with
-    // a non-pending result is `satisfied`, exactly as before.
+    // A nonempty task set with source-bound observations remains satisfied.
     const bundle: ArtifactBundle = {
+      repo_manifest: {
+        repository: { name: "fixture" },
+        generated_at: "2026-11-04T00:00:00Z",
+        files: [{ path: "src/api/auth.ts", language: "typescript", size_bytes: 100, hash: "a".repeat(64) }],
+      },
       runtime_validation_tasks: {
         tasks: [
           {
@@ -85,7 +92,8 @@ describe("a gate with an empty input set is not_applicable", () => {
         ],
       },
     };
-    expect(stateOf(deriveAuditState(bundle), "runtime_validation_current")).toBe(
+    const observed = runRuntimeValidationUpdateExecutor(bundle, bundle.runtime_validation_report!);
+    expect(stateOf(deriveAuditState(observed.updated), "runtime_validation_current")).toBe(
       "satisfied",
     );
   });

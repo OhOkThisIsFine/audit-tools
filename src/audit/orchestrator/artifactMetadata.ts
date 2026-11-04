@@ -278,6 +278,14 @@ export function computeArtifactMetadata(
   if (carriedGitHistoryBaseline) {
     manifest.git_history_baseline = carriedGitHistoryBaseline;
   }
+  // sites-pinned: tests/audit/runtime-validation-source.test.ts
+  const carriedRuntimeSourceKey =
+    bundleIsCurrent && Object.hasOwn(bundleMetadata ?? {}, "runtime_validation_source_key")
+      ? bundleMetadata?.runtime_validation_source_key
+      : usablePrevious?.runtime_validation_source_key;
+  if (carriedRuntimeSourceKey) {
+    manifest.runtime_validation_source_key = carriedRuntimeSourceKey;
+  }
   // Carry the DD-9 intent-equivalence baseline on the SAME CE-007 terms (the
   // hoisted `carriedIntentBaseline` already preferred the bundle manifest's
   // freshly-committed copy over the pre-executor `usablePrevious`).

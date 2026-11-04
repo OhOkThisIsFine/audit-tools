@@ -152,6 +152,26 @@
     }
   },
   "reviews": {
+    "132b243de694e051": {
+      "reviewed_by": "runtime_review",
+      "attester_class": "agent",
+      "checked": "Independent source review checked source invalidation, legacy metadata, explicit key clearing, planner ingestion, direct execution and partial updates. Clearing regression was reproduced red, fixed, retested and independently cleared. Required site-to-test annotations passed structural preflight; full normal gate passed 8350 tests on this tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "669ac3f649ed023098628470ab79d0f88dfbabdb",
+        "ran_at": "2026-11-04T09:16:51.877Z"
+      },
+      "attested_at": "2026-11-04T09:20:46.509Z",
+      "vouches": {
+        "src/audit/orchestrator/artifactMetadata.ts": "015a4fb380dea81c7de6e60cf5ac0fdbacfd9ee7",
+        "src/audit/orchestrator/ingestionExecutors.ts": "6cca988107da7d4afa70505e8d7cc37dc078b8d9",
+        "src/audit/orchestrator/planningExecutors.ts": "da80b6c0ee81984bda4fb3feb274f37e9af2a718",
+        "src/audit/orchestrator/runtimeValidation.ts": "f59414ae6895f2337a5507e2391c08dc21636044",
+        "src/audit/orchestrator/state.ts": "3dc42abe6fffb668b49ef89cde9e6d32cf67c375"
+      }
+    },
     "189c849cd573575f": {
       "reviewed_by": "claude-opus-5-5-session",
       "attester_class": "agent",
@@ -614,7 +634,7 @@
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "132b243de694e051"
     },
     "src/audit/orchestrator/auditTaskUtils.ts": {
       "baseline": "7b79934e86baf378"
@@ -704,7 +724,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "6257346a73ffb600"
+      "review": "132b243de694e051"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -755,7 +775,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/planningExecutors.ts": {
-      "review": "6257346a73ffb600"
+      "review": "132b243de694e051"
     },
     "src/audit/orchestrator/requeue.ts": {
       "baseline": "7b79934e86baf378"
@@ -800,7 +820,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/runtimeValidation.ts": {
-      "review": "6257346a73ffb600"
+      "review": "132b243de694e051"
     },
     "src/audit/orchestrator/runtimeValidationUpdate.ts": {
       "baseline": "7b79934e86baf378"
@@ -839,7 +859,7 @@
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "132b243de694e051"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "baseline": "7b79934e86baf378"

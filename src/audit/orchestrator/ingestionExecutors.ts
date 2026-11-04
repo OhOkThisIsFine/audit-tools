@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/audit-frontier.test.ts
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/runtime-validation-source.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult, AuditTask } from "../types.js";
 import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
@@ -11,7 +11,9 @@ import { buildFlowCoverage } from "./flowCoverage.js";
 import { buildRequeuePayload } from "./requeueCommand.js";
 import {
   buildRuntimeValidationTasks,
-  mergeRuntimeValidationReport,
+  mergeCurrentRuntimeValidationReport,
+  runtimeValidationSourceKey,
+  withRuntimeValidationSourceKey,
 } from "./runtimeValidation.js";
 import {
   ingestAuditResults,
@@ -173,10 +175,9 @@ export function runResultIngestionExecutor(
         })
       : bundle.runtime_validation_tasks;
   const runtimeValidationReport = runtimeValidationTasks
-    ? mergeRuntimeValidationReport(
+    ? mergeCurrentRuntimeValidationReport(
         runtimeValidationTasks,
-        bundle.runtime_validation_report,
-        bundle.runtime_validation_tasks,
+        bundle,
       )
     : bundle.runtime_validation_report;
   // O3 drift re-keying (must run BEFORE the append): a base result whose owning
@@ -310,7 +311,8 @@ export async function runRuntimeValidationExecutor(
     throw new Error("Cannot execute runtime validation without runtime_validation_tasks");
   }
 
-  const existing = bundle.runtime_validation_report ?? { results: [] };
+  const sourceKey = runtimeValidationSourceKey(bundle);
+  const existing = mergeCurrentRuntimeValidationReport(bundle.runtime_validation_tasks, bundle);
   const byTaskId = new Map(existing.results.map((result) => [result.task_id, result]));
   const byCommand = new Map<string, Awaited<ReturnType<typeof runCommand>>>();
   let uniqueCommandsRun = 0;
@@ -363,6 +365,7 @@ export async function runRuntimeValidationExecutor(
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
     runtime_validation_report: runtimeValidationReport,
+    artifact_metadata: withRuntimeValidationSourceKey(bundle.artifact_metadata, sourceKey),
     audit_report: undefined,
   };
   const selectiveDeepening = applySelectiveDeepening({
@@ -392,8 +395,8 @@ export function runRuntimeValidationUpdateExecutor(
       "Cannot update runtime validation without runtime_validation_tasks",
     );
   }
-  const existingReport =
-    bundle.runtime_validation_report ?? { results: [] };
+  const sourceKey = runtimeValidationSourceKey(bundle);
+  const existingReport = mergeCurrentRuntimeValidationReport(bundle.runtime_validation_tasks, bundle);
   const mergedReport = updateRuntimeValidationReport(
     bundle.runtime_validation_tasks,
     existingReport,
@@ -402,6 +405,7 @@ export function runRuntimeValidationUpdateExecutor(
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
     runtime_validation_report: mergedReport,
+    artifact_metadata: withRuntimeValidationSourceKey(bundle.artifact_metadata, sourceKey),
     audit_report: undefined,
   };
   const selectiveDeepening = applySelectiveDeepening({

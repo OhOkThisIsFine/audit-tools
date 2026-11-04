@@ -3,6 +3,11 @@ import type { UnitManifest } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
 import { stableStringify, discoverProjectCommands } from "audit-tools/shared";
+import type { ArtifactBundle } from "../io/artifacts.js";
+import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
+import { METADATA_SCHEMA_VERSION } from "../types/artifactMetadata.js";
+import { hashArtifactValue } from "../../shared/artifactFreshness.js";
+import { isMetadataManifestCurrent } from "./resultBaseline.js";
 import type {
   RuntimeValidationReport,
   RuntimeValidationTask,
@@ -113,6 +118,42 @@ function validationInputs(task: RuntimeValidationTask): string {
     target_paths: [...new Set(task.target_paths)].sort(),
     suggested_checks: task.suggested_checks ?? [],
   });
+}
+
+// sites-pinned: tests/audit/runtime-validation-source.test.ts
+export function runtimeValidationSourceKey(bundle: ArtifactBundle): string | undefined {
+  const manifest = bundle.repo_manifest;
+  if (!manifest || manifest.files.some((file) => !file.hash)) return undefined;
+  return hashArtifactValue("repo_manifest.json", manifest);
+}
+
+export function runtimeValidationSourceIsCurrent(bundle: ArtifactBundle): boolean {
+  const key = runtimeValidationSourceKey(bundle);
+  return key !== undefined && isMetadataManifestCurrent(bundle.artifact_metadata) &&
+    bundle.artifact_metadata?.runtime_validation_source_key === key;
+}
+
+export function mergeCurrentRuntimeValidationReport(
+  tasks: RuntimeValidationTaskManifest,
+  bundle: ArtifactBundle,
+): RuntimeValidationReport {
+  return mergeRuntimeValidationReport(
+    tasks,
+    runtimeValidationSourceIsCurrent(bundle) ? bundle.runtime_validation_report : undefined,
+    bundle.runtime_validation_tasks,
+  );
+}
+
+export function withRuntimeValidationSourceKey(
+  metadata: ArtifactMetadataManifest | undefined,
+  key: string | undefined,
+): ArtifactMetadataManifest {
+  return {
+    ...(isMetadataManifestCurrent(metadata) ? metadata : undefined),
+    metadata_schema_version: METADATA_SCHEMA_VERSION,
+    artifacts: metadata?.artifacts ?? {},
+    runtime_validation_source_key: key,
+  };
 }
 
 export function mergeRuntimeValidationReport(

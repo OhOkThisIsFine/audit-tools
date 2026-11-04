@@ -11,6 +11,8 @@ import type {
 import { computeStaleArtifacts } from "./staleness.js";
 import { deriveIntentEquivalenceStatus } from "./intentEquivalenceExecutor.js";
 import { derivePendingTaskPartition } from "./pendingTasks.js";
+// sites-pinned: tests/audit/runtime-validation-source.test.ts
+import { runtimeValidationSourceIsCurrent } from "./runtimeValidation.js";
 import {
   unresolvedConstraintClauses,
 } from "./intentInterpreter.js";
@@ -514,7 +516,7 @@ export function deriveAuditState(
   // recorded while `planning_artifacts` was still `missing` — the gate passed
   // because zero tasks existed to validate. The `reason` here was already
   // honest; only the `state` was not.
-  const runtimeReady = runtimeTasks.every((task) =>
+  const runtimeReady = runtimeValidationSourceIsCurrent(bundle) && runtimeTasks.every((task) =>
     runtimeResults.some(
       (result) => result.task_id === task.id && result.status !== "pending",
     ),

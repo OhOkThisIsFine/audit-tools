@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/audit-frontier.test.ts
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/runtime-validation-source.test.ts
 import { DEEPENING_TAG } from "./selectiveDeepening/shared.js";
 import { architectureDiscoveryTasks, isArchitectureDiscoveryTask } from "./architectureDiscovery.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -14,7 +14,7 @@ import { buildRequeuePayload } from "./requeueCommand.js";
 import {
   buildRuntimeValidationTasks,
   discoverRuntimeValidationCommand,
-  mergeRuntimeValidationReport,
+  mergeCurrentRuntimeValidationReport,
 } from "./runtimeValidation.js";
 import {
   buildChunkedAuditTasks,
@@ -176,10 +176,9 @@ export async function runPlanningExecutor(
     command: runtimeCommand,
   });
   const runtimeValidationReport = runtimeValidationTasks.tasks.length > 0
-    ? mergeRuntimeValidationReport(
+    ? mergeCurrentRuntimeValidationReport(
         runtimeValidationTasks,
-        bundle.runtime_validation_report,
-        bundle.runtime_validation_tasks,
+        bundle,
       )
     : undefined;
   // Interpret free_form_intent into lens priority boosts via the single shared
