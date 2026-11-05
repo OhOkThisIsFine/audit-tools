@@ -61,6 +61,11 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // AND risk_register atomically off the merged flows (no self-clobber loop from a
   // separate post-hoc rewrite). Absent on the common (bar-met) path → recorded at
   // revision 0, never stale.
+  // critical_flows (like surface_manifest) reads the graph but deliberately does
+  // NOT list graph_bundle.json: structure hands it the floor graph built in the
+  // same call, whose inputs (repo_manifest, file_disposition) are declared here.
+  // A direct edge would re-stale it after every graph enrichment, rebuild the
+  // floor, re-stale analyzer_capability, and loop (spec/audit/dependency-map.md).
   "critical_flows.json": [
     "repo_manifest.json",
     "file_disposition.json",

@@ -6,6 +6,7 @@ import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
 import { computeScopePreDigest } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
 import { renderConfirmIntentPrompt, proposeConceptualDepth } from "../../src/audit/cli/confirmIntentStep.js";
 import { MANDATORY_LENSES } from "../../src/audit/orchestrator/lensSelection.js";
+import { DEFAULT_CONCEPTUAL_PERSPECTIVES } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { validateArtifactBundle } from "../../src/audit/validation/artifacts.js";
 import { applyIntentExclusionsToCoverage } from "../../src/audit/orchestrator/scope.js";
 import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.js";
@@ -215,6 +216,41 @@ await test("computeScopePreDigest reads design_assessment: a lens-tagged structu
   ).toBe("recommend_include");
 });
 
+await test("the evidence-overlay reason names what it counted: pre-review structural leads by category, apart from review findings", async () => {
+  const lead = (id: string, category: string) => ({
+    id,
+    title: `${category}: src/a.ts`,
+    category,
+    severity: "low" as const,
+    confidence: "medium" as const,
+    lens: "maintainability" as const,
+    summary: "deterministic structural signal",
+    affected_files: [{ path: "src/a.ts" }],
+  });
+  const bundle: ArtifactBundle = {
+    ...readyForIntentBundle(),
+    design_assessment: {
+      generated_at: "2026-01-01T00:00:00.000Z",
+      findings: [
+        lead("DA-001", "code_duplication"),
+        lead("DA-002", "code_duplication"),
+        lead("DA-003", "complexity_hotspot"),
+      ],
+      conceptual_findings: [lead("DR-001", "conceptual")],
+    },
+  };
+  const pre = await computeScopePreDigest(bundle, "/repo");
+  const row = pre.lens_propositions.find((p) => p.lens === "maintainability");
+  expect(row?.disposition).toBe("recommend_include");
+  // The self-audit read "design assessment carries 1899 maintainability-tagged
+  // finding(s)" before any review ran: every one was a deterministic heuristic
+  // lead (complexity hotspots + duplication), not a reviewed finding.
+  expect(row?.reason).toBe(
+    "structural design assessment (deterministic, pre-review) flagged 3 maintainability-tagged lead(s): " +
+      "code_duplication 2, complexity_hotspot 1; design review carries 1 maintainability-tagged finding(s)",
+  );
+});
+
 await test("docs_digest is a registered artifact feeding the confirm-intent prompt", async () => {
   expect(Object.keys(ARTIFACT_DEFINITIONS)).toContain("docs_digest");
 });
@@ -387,8 +423,13 @@ await test("renderConfirmIntentPrompt proposes deep for a bare full audit and of
   // shape that omitted `answered_at` would produce a checkpoint whose own
   // settings are read back as unanswered (see `resolveRunBoundDesignReview`).
   expect(prompt).toMatch(
-    /"design_review":\s*\{\s*"answered_at":\s*"<the same ISO-8601 timestamp as confirmed_at>",\s*"conceptual_depth":\s*"deep",\s*"perspectives":\s*5\s*\}/,
+    new RegExp(
+      `"design_review":\\s*\\{\\s*"answered_at":\\s*"<the same ISO-8601 timestamp as confirmed_at>",\\s*"conceptual_depth":\\s*"deep",\\s*"perspectives":\\s*${DEFAULT_CONCEPTUAL_PERSPECTIVES}\\s*\\}`,
+    ),
   );
+  // The example's count is the default the prose promises ("fan out N"), so a
+  // host that copies the example does not silently shrink the deep review.
+  expect(prompt).toContain(`fan out ${DEFAULT_CONCEPTUAL_PERSPECTIVES} independent reviewers`);
   expect(
     prompt,
     "the prompt must state what the binding means, not just emit the field",
@@ -420,6 +461,38 @@ await test("depth proposal keeps targeted full audits and bare delta audits shal
   const delta = renderConfirmIntentPrompt({ ...base, mode: "delta" }, opts);
   expect(delta).toMatch(/proposed.*\*\*shallow\*\*/);
   expect(delta).toMatch(/"conceptual_depth":\s*"shallow"/);
+  // "Omit for shallow": the shallow example must not carry a perspective count.
+  expect(delta).toMatch(/"conceptual_depth":\s*"shallow"\s*\}/);
+});
+
+await test("renderConfirmIntentPrompt omits the constraint_clauses shape when no clause blocks, so nothing points at absent text", async () => {
+  const preDigest = {
+    mode: "full" as const,
+    since: null,
+    files_in_scope: 1,
+    scope_dirs: [{ dir: "src", files: 1 }],
+    excluded_summary: [],
+    disposition_override_proposals: [],
+    lens_propositions: [],
+    docs_digest: [],
+    mis_scope_smells: [],
+  };
+  const opts = { intentCheckpointPath: "/repo/intent.json", continueCommand: "next" };
+
+  const clean = renderConfirmIntentPrompt(preDigest, opts);
+  expect(clean).not.toMatch(/Blocking: unencodable intent clauses/);
+  expect(clean).not.toMatch(/constraint_clauses/);
+  expect(clean).not.toMatch(/clause_id/);
+
+  const blocked = renderConfirmIntentPrompt(preDigest, {
+    ...opts,
+    unresolvedConstraintClauses: [
+      { clause_id: "clause-1", text: "keep the mascot cheerful", checkpoint_question: "How should this apply?" },
+    ],
+  });
+  expect(blocked).toMatch(/Blocking: unencodable intent clauses/);
+  expect(blocked).toMatch(/"constraint_clauses"/);
+  expect(blocked).toMatch(/clause_id from the Blocking section/);
 });
 
 // ── Validation ──────────────────────────────────────────────────────────────

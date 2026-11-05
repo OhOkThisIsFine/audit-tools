@@ -13,7 +13,12 @@ import type {
   RouteEdge,
 } from "audit-tools/shared";
 import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
-import { computeNodeMetricsForFile } from "./analyzers/complexityDuplication.js";
+import {
+  complexityScope,
+  computeNodeMetricsForFile,
+  loadFunctionComplexityParsers,
+  type FunctionComplexityParsers,
+} from "./analyzers/complexityDuplication.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
@@ -83,6 +88,12 @@ export interface BuildGraphBundleOptions {
    * carries the cache.
    */
   edgeCacheSink?: { cache?: GraphEdgeCache };
+  /**
+   * Parsers that give js/ts function boundaries, so complexity is measured per
+   * function. Absent → the lexical file-level proxy. `buildGraphBundleFromFs`
+   * loads them; the synchronous build cannot (grammar loading is async).
+   */
+  complexityParsers?: FunctionComplexityParsers;
 }
 
 /** One file's cached per-file edge contribution (everything the per-file loop body produces). */
@@ -581,7 +592,12 @@ export async function buildGraphBundleFromFs(
     );
   }
 
-  return buildGraphBundle(repoManifest, disposition, { ...options, fileContents });
+  const complexityParsers = await loadFunctionComplexityParsers();
+  try {
+    return buildGraphBundle(repoManifest, disposition, { ...options, fileContents, complexityParsers });
+  } finally {
+    for (const parser of Object.values(complexityParsers)) parser?.delete();
+  }
 }
 
 /**
@@ -742,6 +758,7 @@ function extractPerFileContribution(
   pathLookup: Map<string, string>,
   routers: ReadonlySet<string> | undefined,
   pathIndex: GraphPathIndex,
+  complexityParsers: FunctionComplexityParsers | undefined,
 ): PerFileGraphContribution {
   const local: GraphEdgeAccumulator = {
     imports: [],
@@ -756,7 +773,7 @@ function extractPerFileContribution(
   let metrics: NodeMetrics[string] | undefined;
   if (hasExtractableContent(content)) {
     extractContentEdgesForFile(filePath, content, pathLookup, local, fileRoutes, routers, pathIndex);
-    metrics = computeNodeMetricsForFile(filePath, content);
+    metrics = computeNodeMetricsForFile(filePath, content, complexityParsers);
   }
   fileRoutes.push(...extractConventionalRouteEvidence(filePath, content));
   if (fileRoutes.length === 0) {
@@ -784,7 +801,7 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v11";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v12";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
@@ -1047,12 +1064,22 @@ export function buildGraphBundle(
       contentHash === undefined
         ? undefined
         : graphEdgeCacheKey(contentHash, hasExtractableContent(content)) +
+          // A per-function and a file-proxy complexity metric are different
+          // contributions; neither may be replayed for the other.
+          `:${complexityScope(file.path, options.complexityParsers)}` +
           (/\.py$/i.test(file.path) ? `:${JSON.stringify([...routers].sort())}` : "");
     const cached = cacheKey !== undefined ? reusableEntries?.[file.path] : undefined;
     const contribution =
       cacheKey !== undefined && isReusableCacheEntry(cached, cacheKey)
         ? cached!.contribution
-        : extractPerFileContribution(file.path, content, pathLookup, routers, pathIndex);
+        : extractPerFileContribution(
+            file.path,
+            content,
+            pathLookup,
+            routers,
+            pathIndex,
+            options.complexityParsers,
+          );
 
     acc.imports.push(...contribution.imports);
     acc.calls.push(...contribution.calls);

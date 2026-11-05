@@ -1,16 +1,19 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import type { GraphSignals } from "../../src/audit/extractors/graphSignals.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { manifest, edgeBundle } from "./test-helpers.js";
 
 const { deriveGraphSignals } = await import(
   "../../src/audit/extractors/graphSignals.js"
 );
-const { buildGraphBundle } = await import(
+const { buildGraphBundle, buildGraphBundleFromFs } = await import(
   "../../src/audit/extractors/graph.js"
 );
 const { GraphBundleSchema } = await import("../../src/shared/index.js");
-const { computeNodeMetricsForFile } = await import(
+const { computeNodeMetricsForFile, loadFunctionComplexityParsers } = await import(
   "../../src/audit/extractors/analyzers/complexityDuplication.js"
 );
 
@@ -29,19 +32,113 @@ test("complexity/duplication present for js/ts with measure+reach tags", () => {
   const ts = bundle.node_metrics!["src/a.ts"];
   expect(ts.complexity, "ts has complexity").toBeTruthy();
   expect(ts.duplication, "ts has duplication").toBeTruthy();
-  expect(ts.complexity!.measure).toBe("cyclomatic-approx");
+  // No parser handed to the synchronous build: the lexical file-level proxy.
+  expect(ts.complexity!.measure).toBe("cyclomatic-approx-file");
   expect(ts.complexity!.reach).toBe("js-ts-effective");
-  expect(ts.duplication!.measure).toBe("duplicate-line-count");
+  expect(ts.duplication!.measure).toBe("duplicate-block-lines");
   expect(ts.duplication!.reach).toBe("js-ts-effective");
   // if + for => 2 branches + base path = 3
   expect(ts.complexity!.value).toBe(3);
-  // foo(); appears twice => 1 duplicated occurrence
-  expect(ts.duplication!.value).toBe(1);
+  // `foo();` repeats as a single LINE, never as a block: no duplicated code.
+  expect(ts.duplication!.value).toBe(0);
 
   // non-js/ts files: ABSENT (no entry), never zero-filled
   expect(bundle.node_metrics!["src/b.json"]).toBe(undefined);
   expect(bundle.node_metrics!["README.md"]).toBe(undefined);
   expect(computeNodeMetricsForFile("src/b.json", "{}")).toBe(undefined);
+});
+
+// Dogfood (2026-11-04): the per-line measure flagged 1147 of 1285 js/ts files,
+// because every file repeats a closing `});`, a `/**`, a `try {`. A repeated
+// LINE is not duplicated code; a repeated BLOCK is.
+test("duplication counts repeated blocks, never repeated boilerplate lines", () => {
+  const boilerplate = [
+    "describe('x', () => {",
+    "  it('a', () => {",
+    "    try {",
+    "      run(1);",
+    "    } finally {",
+    "      cleanup();",
+    "    }",
+    "  });",
+    "  it('b', () => {",
+    "    try {",
+    "      other(2);",
+    "    } finally {",
+    "      cleanup();",
+    "    }",
+    "  });",
+    "});",
+  ].join("\n");
+  expect(computeNodeMetricsForFile("t.test.ts", boilerplate)!.duplication!.value).toBe(0);
+
+  const block = [
+    "const a = load(path);",
+    "if (!a) throw new Error('missing');",
+    "const b = parse(a);",
+    "validate(b, schema);",
+    "return normalize(b);",
+  ];
+  const cloned = ["function f() {", ...block, "}", "function g() {", ...block, "}"].join("\n");
+  // The second copy of the five-line block is duplicated; the first is the original.
+  expect(computeNodeMetricsForFile("c.ts", cloned)!.duplication!.value).toBe(block.length);
+
+  // A shorter repeated run is below the block size and is not a clone.
+  const short = ["function f() {", ...block.slice(0, 4), "}", "function g() {", ...block.slice(0, 4), "}"].join("\n");
+  expect(computeNodeMetricsForFile("s.ts", short)!.duplication!.value).toBe(0);
+});
+
+// Dogfood (2026-11-04): the hotspot threshold (10, McCabe's per-function limit)
+// was compared against a branch count summed over the WHOLE file, so any file
+// with a handful of small functions became a hotspot (752 of 1285 files).
+test("complexity is the highest per-function cyclomatic number when function boundaries are parsed", async () => {
+  const parsers = await loadFunctionComplexityParsers();
+  try {
+    expect(parsers.typescript, "the tree-sitter typescript grammar ships as a runtime dependency").toBeDefined();
+    const sixBranches = (name: string) =>
+      `function ${name}(a?: number) {\n` +
+      "  if (a) {} else if (b) {}\n" +
+      "  for (const x of y) {}\n" +
+      "  while (c && d) {}\n" +
+      "  return e ? 1 : 2;\n" +
+      "}\n";
+    const source =
+      sixBranches("f") +
+      sixBranches("g") +
+      // The nested arrow's branches are its own, never its parent's.
+      "function outer() { const inner = () => { if (p) {} if (q) {} if (r) {} }; return inner; }\n" +
+      // Branch words inside strings and comments are not branches.
+      "const s = 'if (x) for (y) while (z) && ||'; // if if if\n";
+    const metric = computeNodeMetricsForFile("src/a.ts", source, parsers)!.complexity!;
+    expect(metric.measure).toBe("cyclomatic-max-function");
+    // f and g each: if, else-if, for, while, &&, ternary = 6 decisions + 1.
+    expect(metric.value).toBe(7);
+    // The lexical proxy sums the whole file, string, comment and `?:` included.
+    const proxy = computeNodeMetricsForFile("src/a.ts", source)!.complexity!;
+    expect(proxy.measure).toBe("cyclomatic-approx-file");
+    expect(proxy.value).toBeGreaterThan(14);
+
+    // .js and .tsx files parse with their own grammars.
+    expect(computeNodeMetricsForFile("src/b.js", sixBranches("h").replace("a?: number", "a"), parsers)!.complexity!.value).toBe(7);
+    expect(computeNodeMetricsForFile("src/c.tsx", sixBranches("k"), parsers)!.complexity!.measure).toBe("cyclomatic-max-function");
+  } finally {
+    for (const parser of Object.values(parsers)) parser?.delete();
+  }
+});
+
+test("the filesystem graph build measures complexity per function", async () => {
+  const root = mkdtempSync(join(tmpdir(), "audit-fn-complexity-"));
+  try {
+    writeFileSync(join(root, "a.ts"), "function f() { if (a) {} }\nfunction g() { if (b) {} }\n");
+    const bundle = await buildGraphBundleFromFs(manifest([{ path: "a.ts", content: "" }]), root);
+    expect(bundle.node_metrics!["a.ts"].complexity).toEqual({
+      value: 2,
+      measure: "cyclomatic-max-function",
+      reach: "js-ts-effective",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("legacy bundle without node_metrics parses and yields empty complexity/duplication", () => {
@@ -203,7 +300,7 @@ test("two derivations are identical (determinism)", () => {
     ],
     {
       node_metrics: {
-        "src/b.ts": { duplication: { value: 2, measure: "duplicate-line-count", reach: "js-ts-effective" } },
+        "src/b.ts": { duplication: { value: 2, measure: "duplicate-block-lines", reach: "js-ts-effective" } },
         "src/a.ts": { complexity: { value: 5, measure: "cyclomatic-approx", reach: "js-ts-effective" } },
       },
     },
@@ -224,4 +321,17 @@ test("deriveGraphSignals performs no IO and does not mutate input", () => {
   const snapshot = JSON.stringify(bundle);
   deriveGraphSignals(bundle);
   expect(JSON.stringify(bundle), "input bundle unchanged").toBe(snapshot);
+});
+
+test("a complexity hotspot is a ROUTINE above the McCabe limit; the file-level proxy makes no hotspot claim", async () => {
+  const { isComplexityHotspot, hasDuplicatedBlock } = await import(
+    "../../src/audit/extractors/analyzers/complexityDuplication.js"
+  );
+  // NIST SP 500-235: a module EXCEEDING 10 needs justification; 10 is within it.
+  expect(isComplexityHotspot({ measure: "cyclomatic-max-function", value: 10 })).toBe(false);
+  expect(isComplexityHotspot({ measure: "cyclomatic-max-function", value: 11 })).toBe(true);
+  // A whole-file branch count is not a per-routine number, however large.
+  expect(isComplexityHotspot({ measure: "cyclomatic-approx-file", value: 500 })).toBe(false);
+  expect(hasDuplicatedBlock({ value: 0 })).toBe(false);
+  expect(hasDuplicatedBlock({ value: 5 })).toBe(true);
 });

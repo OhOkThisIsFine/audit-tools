@@ -80,10 +80,12 @@ export async function runStructureExecutor(
   // AND its risk_register sibling atomically off the enriched flows — no post-hoc
   // rewrite of critical_flows from a separate executor (which would re-stale
   // risk_register and re-fire this structure step in a clobber loop).
+  // sites-pinned: tests/audit/critical-flow-graph-neighborhood.test.ts
   const deterministicFlows = buildCriticalFlowManifest(
     bundle.repo_manifest,
     surfaceManifest,
     disposition,
+    { graphBundle },
   );
   const criticalFlows = bundle.critical_flow_fallback
     ? mergeCriticalFlowFallback(deterministicFlows, bundle.critical_flow_fallback)

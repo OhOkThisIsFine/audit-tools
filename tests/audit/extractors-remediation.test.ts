@@ -390,13 +390,27 @@ test("isDeploymentConfigPath matches keyword tokens without substring false posi
   );
 });
 
-test("isGeneratedPath matches keyword tokens without substring false positives", () => {
+test("isGeneratedPath matches generation conventions, not names that merely mention generation", () => {
   assertPredicateCases(
     "generated",
     isGeneratedPath,
     [
       "src/generated/client.ts",
-      "src/generatedClient.ts",
+      "src/__generated__/schema.ts",
+      "src/audit/extractors/languageMap.generated.ts",
+      "spec/audit/executor-producers.generated.md",
+      "scripts/shared/filelock-export-surface.generated.json",
+      // Tool conventions (each named in isGeneratedPath's comments).
+      "pkg/apis/v1/zz_generated.deepcopy.go",
+      "include/monster_generated.h",
+      "src/schema/monster_generated.rs",
+      "web/monster_generated.ts",
+      "src/api/generated.ts",
+      "app/GeneratedCode/Client.cs",
+      "app/Generated_Files/Page.g.h",
+      "app/Generated Files/winrt/base.h",
+      "target/generated-sources/annotations/Foo.java",
+      "app/build/generated/source/R.java",
       "vendor/left-pad/index.js",
       "third_party/zlib/index.c",
     ],
@@ -404,6 +418,17 @@ test("isGeneratedPath matches keyword tokens without substring false positives",
       "src/regenerated/client.ts",
       "src/vendorized.ts",
       "src/autogenerator.ts",
+      // A word in the basename is not evidence the file is generated: these
+      // are hand-written sources whose NAMES mention generation (the 2026-11-04
+      // self-audit marked them `generated` and dropped them from scope).
+      "src/generatedClient.ts",
+      "tests/shared/generated-artifact-registry.test.ts",
+      "tests/shared/generated-artifacts-splice.test.ts",
+      "scripts/check-generated-artifacts.mjs",
+      "scripts/shared/generated-renders.mjs",
+      "scripts/shared/generatedArtifacts.mjs",
+      "docs/proposals/P56-generated-artifact-registry/notes.md",
+      "src/generators/generated_by.ts",
     ],
   );
 });
@@ -550,6 +575,23 @@ test("buildFileDisposition excludes generated install and test artifacts before 
       disposition,
       "tests/.test-plan-artifacts/remediation_plan.json",
     )?.status).toBe("generated");
+});
+
+test("buildFileDisposition keeps hand-written files whose names mention 'generated' in scope", async () => {
+  const repoManifest = makeRepoManifest([
+    "tests/shared/generated-artifact-registry.test.ts",
+    "scripts/check-generated-artifacts.mjs",
+    "scripts/shared/generatedArtifacts.mjs",
+    "src/audit/extractors/languageMap.generated.ts",
+    "spec/audit/executor-producers.generated.md",
+  ]);
+  const disposition = await buildFileDisposition(repoManifest);
+
+  expect(getDispositionItem(disposition, "tests/shared/generated-artifact-registry.test.ts")?.status).toBe("included");
+  expect(getDispositionItem(disposition, "scripts/check-generated-artifacts.mjs")?.status).toBe("included");
+  expect(getDispositionItem(disposition, "scripts/shared/generatedArtifacts.mjs")?.status).toBe("included");
+  expect(getDispositionItem(disposition, "src/audit/extractors/languageMap.generated.ts")?.status).toBe("generated");
+  expect(getDispositionItem(disposition, "spec/audit/executor-producers.generated.md")?.status).toBe("generated");
 });
 
 test("buildFileDisposition excludes bundled .tmp artifacts (e.g. .tmp/cache)", async () => {
@@ -725,7 +767,10 @@ test("buildCriticalFlowManifest links normalized related paths and dedupes dupli
   expect(flowManifest.flows.some(
       (flow) => flow.entrypoints[0] === "examples\\session-config\\claude-code-model.json",
     )).toBe(false);
-  expect(flowManifest.fallback_required).toBe(false);
+  // No dependency graph was supplied, so every link above is keyword-only
+  // evidence: never high confidence, and the host fallback pass is requested.
+  expect(flowManifest.flows.every((flow) => flow.confidence === "low")).toBe(true);
+  expect(flowManifest.fallback_required).toBe(true);
 });
 
 // Shared fixture for the three Chrome-extension tests below.

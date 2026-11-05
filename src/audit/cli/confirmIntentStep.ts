@@ -303,8 +303,8 @@ export function renderConfirmIntentPrompt(
     "1. Present the scope summary above.",
     "2. Show the prepared lens table. Ask which **optional** lenses to",
     "   **layer on top** of the always-on mandatory set (and whether to flip any",
-    "   recommend-include / recommend-exclude). Do NOT re-confirm or even mention the",
-    "   mandatory lenses — they are always on. The user may add **any number** of",
+    "   recommend-include / recommend-exclude). Do NOT ask the user about the",
+    "   mandatory (●) rows — they are always on. The user may add **any number** of",
     "   additional custom lenses (freeform names).",
     `3. Ask the conceptual design-review depth (proposed **${proposedDepth}** for this intent). The choice is fresh each run and remains the user's confirmation.`,
     "4. Wait for the user to confirm before proceeding.",
@@ -332,21 +332,37 @@ export function renderConfirmIntentPrompt(
     '  "scope_summary": "<what is in scope>",',
     '  "intent_summary": "<the goal, e.g. full-audit / security-focused>",',
     '  "free_form_intent": "<optional: what to focus on; interpreted into lens/priority signals at planning, never threaded verbatim into review prompts>",',
-    '  "constraint_clauses": [{ "clause_id": "<the clause_id above>", "text": "<unencodable clause>", "checkpoint_question": "<the question above>", "host_answer": "<how to apply it>" }],',
+    // The clause shape points back at the Blocking section, so it renders only
+    // when that section does; without blocking clauses it is a dangling
+    // reference to text that is not in the prompt.
+    ...(hasBlockingClauses
+      ? [
+          '  "constraint_clauses": [{ "clause_id": "<the clause_id from the Blocking section>", "text": "<the clause text>", "checkpoint_question": "<the Question from the Blocking section>", "host_answer": "<how to apply it>" }],',
+        ]
+      : []),
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
     `  "disposition_overrides": [{ "path": "<path>", "status": "<${FileDispositionStatusSchema.options.join("|")}>", "reason": "<why>" }],`,
     '  "lens_selection": { "include": ["<lens>"], "exclude": ["<lens>"] },',
-    '  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',
+    // The example carries the PROPOSED depth; on deep it carries the default
+    // perspective count the prose above promises, and on shallow it omits
+    // `perspectives` (the bullet below says to), so copying it is never wrong.
+    `  "design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "${proposedDepth}"${
+      proposedDepth === "deep" ? `, "perspectives": ${DEFAULT_CONCEPTUAL_PERSPECTIVES}` : ""
+    } }`,
     "}",
     "```",
     "",
-    "- `constraint_clauses` resolves the blocking clauses above: each unencodable",
-    "  `free_form_intent` clause needs one entry carrying its `clause_id` and a",
-    "  concrete `host_answer`. Resolution is keyed on `clause_id`, so each distinct",
-    "  clause must be answered individually. Until every blocking clause is answered",
-    "  (or its clause removed from `free_form_intent`), this confirm-intent step",
-    "  re-fires and planning is held.",
+    ...(hasBlockingClauses
+      ? [
+          "- `constraint_clauses` resolves the blocking clauses above: each unencodable",
+          "  `free_form_intent` clause needs one entry carrying its `clause_id` and a",
+          "  concrete `host_answer`. Resolution is keyed on `clause_id`, so each distinct",
+          "  clause must be answered individually. Until every blocking clause is answered",
+          "  (or its clause removed from `free_form_intent`), this confirm-intent step",
+          "  re-fires and planning is held.",
+        ]
+      : []),
     "- `excluded_scope` entries are pruned from planning so excluded files never",
     "  become audit tasks, and they are listed in the final report under",
     '  "Excluded / Out-of-Scope".',
@@ -366,8 +382,5 @@ export function renderConfirmIntentPrompt(
     "",
     `Then run: ${opts.continueCommand}`,
     "",
-  ].join("\n").replace(
-    '"design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "shallow", "perspectives": 5 }',
-    `"design_review": { "answered_at": "<the same ISO-8601 timestamp as confirmed_at>", "conceptual_depth": "${proposedDepth}", "perspectives": 5 }`,
-  );
+  ].join("\n");
 }

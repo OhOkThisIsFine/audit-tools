@@ -116,7 +116,14 @@ export interface AnalyzerSafetyProfile {
 export interface AnalyzerInvocationContext {
   /** Allocated once by the engine, inside this invocation's private directory. */
   readonly reportPath?: string;
+  /** Root-relative POSIX paths from the candidate's {@link ExternalAnalyzerCandidate.discoverInputs}. */
+  readonly inputs?: readonly string[];
 }
+
+/** What {@link ExternalAnalyzerCandidate.discoverInputs} established. */
+export type AnalyzerInputDiscovery =
+  | { ok: true; paths: readonly string[] }
+  | { ok: false; reason: string };
 
 export interface ExternalAnalyzerCandidate {
   /** Stable id; also the `analyzers.<id>` session-config key. */
@@ -158,6 +165,14 @@ export interface ExternalAnalyzerCandidate {
    * and repo root. MUST NOT request fixes/writes — acquisition is observe-only.
    */
   buildArgv(runnerPrefix: string[], root: string, context?: AnalyzerInvocationContext): string[];
+  /**
+   * For a tool whose own file discovery cannot be trusted to honour the
+   * repository's ignore rules: name the exact inputs instead. The engine awaits
+   * it after admission and hands the paths to {@link buildArgv} as
+   * `context.inputs`. A failed discovery fails the run (`failed`), never a
+   * silent scan of nothing.
+   */
+  discoverInputs?(root: string): Promise<AnalyzerInputDiscovery>;
   /** Private, engine-owned file report. Raw output/error snippets are withheld. */
   managedReport?: boolean;
   /**
@@ -663,6 +678,24 @@ export async function runExternalAnalyzer(
 
   const beforeScan = expiredOutcome();
   if (beforeScan) return beforeScan;
+  let inputs: readonly string[] | undefined;
+  if (candidate.discoverInputs) {
+    const discovered = await candidate.discoverInputs(root);
+    if (!discovered.ok) {
+      log("[f5] %s input discovery failed: %s", candidate.id, discovered.reason);
+      return {
+        results: emptyResults(candidate.id),
+        status: {
+          tool: candidate.id,
+          resolved: true,
+          status: "failed",
+          error: `input discovery failed: ${discovered.reason}`,
+          duration_ms: 0,
+        },
+      };
+    }
+    inputs = discovered.paths;
+  }
   let ownedDirectory: string | undefined;
   let reportPath: string | undefined;
   let outcome: AcquisitionOutcome | undefined;
@@ -686,7 +719,7 @@ export async function runExternalAnalyzer(
       }
       reportPath = join(ownedDirectory, "report.json");
     }
-    const context: AnalyzerInvocationContext = { reportPath };
+    const context: AnalyzerInvocationContext = { reportPath, inputs };
     const invoke = async (): Promise<AcquisitionOutcome> => {
       const argv = candidate.buildArgv(prefix, root, context);
       const afterArgv = expiredOutcome();

@@ -1,13 +1,16 @@
+// sites-pinned: tests/audit/critical-flow-graph-neighborhood.test.ts, tests/audit/extractors-remediation.test.ts
 import type { RepoManifest } from "../types.js";
 import type {
   FileDisposition,
   CriticalFlow,
   CriticalFlowManifest,
   CriticalFlowFallbackResult,
+  GraphBundle,
   SurfaceManifest,
 } from "audit-tools/shared";
 import { CriticalFlowSchema, compareCodeUnits } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
+import { structuralImportEdges } from "./graphSignals.js";
 import {
   EXTRACTOR_HEURISTIC_NOTE,
   isAsyncTaskPath,
@@ -43,7 +46,62 @@ function isSupportArtifactPath(normalized: string): boolean {
   return isTestPath(normalized) || normalized.startsWith("examples/");
 }
 
-function relatedPaths(entry: string, availablePaths: string[]): string[] {
+/**
+ * Undirected structural adjacency (the `imports` + `calls` buckets only — a
+ * prose `references` mention or a co-change edge is not a load-order neighbor),
+ * restricted to in-scope paths.
+ */
+function buildStructuralAdjacency(
+  graphBundle: GraphBundle,
+  inScope: ReadonlySet<string>,
+): Map<string, Set<string>> {
+  const adjacency = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    let neighbors = adjacency.get(a);
+    if (!neighbors) {
+      neighbors = new Set<string>();
+      adjacency.set(a, neighbors);
+    }
+    neighbors.add(b);
+  };
+  for (const edge of structuralImportEdges(graphBundle)) {
+    if (edge.from === edge.to) continue;
+    if (!inScope.has(edge.from) || !inScope.has(edge.to)) continue;
+    link(edge.from, edge.to);
+    link(edge.to, edge.from);
+  }
+  return adjacency;
+}
+
+interface FlowPathEvidence {
+  paths: string[];
+  confidence: "high" | "low";
+}
+
+/**
+ * A flow's paths are its entrypoint's OWN neighborhood. When the dependency
+ * graph gives the entrypoint structural neighbors (what it imports and what
+ * imports it), those are the paths and only they earn `high`. Otherwise — no
+ * graph, or a graph with no import/call edge for this entry (a migration, seed
+ * or schema file; a language the graph cannot parse) — the keyword heuristic is
+ * the evidence. It links every same-category path in the repository, so
+ * unrelated entrypoints can share one path set: it is kept, but never `high`,
+ * so the host fallback pass reviews it.
+ */
+function flowPathEvidence(
+  entry: string,
+  availablePaths: string[],
+  adjacency: Map<string, Set<string>> | undefined,
+): FlowPathEvidence {
+  const neighbors = adjacency?.get(entry);
+  if (neighbors && neighbors.size > 0) {
+    const paths = [entry, ...neighbors].sort((a, b) => compareCodeUnits(a, b));
+    return { paths, confidence: "high" };
+  }
+  return { paths: keywordRelatedPaths(entry, availablePaths), confidence: "low" };
+}
+
+function keywordRelatedPaths(entry: string, availablePaths: string[]): string[] {
   const normalized = normalizeExtractorPath(entry);
   const linked = new Set<string>([entry]);
 
@@ -88,14 +146,17 @@ function dedupeFlows(flows: CriticalFlow[]): CriticalFlow[] {
 }
 
 /**
- * Builds coarse critical-flow coverage from shared path heuristics. These
- * bootstrap flows are intentionally conservative and should be reviewed when a
- * repo uses unconventional naming or layout conventions.
+ * Builds critical-flow coverage. Surfaces and data-layer files are chosen by
+ * shared path heuristics; each flow's paths are that entrypoint's own graph
+ * neighborhood when a dependency graph is supplied (see `flowPathEvidence`).
+ * Flows without graph corroboration are `low` confidence and request the host
+ * fallback pass.
  */
 export function buildCriticalFlowManifest(
   repoManifest: RepoManifest,
   surfaceManifest: SurfaceManifest,
   disposition?: FileDisposition,
+  options: { graphBundle?: GraphBundle } = {},
 ): CriticalFlowManifest {
   const dispositionMap = buildDispositionMap(disposition);
   const availablePaths = repoManifest.files
@@ -104,19 +165,22 @@ export function buildCriticalFlowManifest(
       const status = dispositionMap.get(path);
       return !(status && isAuditExcludedStatus(status));
     });
+  const adjacency = options.graphBundle
+    ? buildStructuralAdjacency(options.graphBundle, new Set(availablePaths))
+    : undefined;
 
   const flows: CriticalFlow[] = [];
 
   for (const surface of surfaceManifest.surfaces) {
     const entry = surface.entrypoint;
-    const paths = relatedPaths(entry, availablePaths);
+    const { paths, confidence } = flowPathEvidence(entry, availablePaths, adjacency);
     flows.push({
       id: `flow:${surface.id.replace(/[^a-zA-Z0-9:_-]/g, "-")}`,
       name: `${surface.kind} flow for ${entry}`,
       entrypoints: [entry],
       paths,
       concerns: inferConcerns(paths),
-      confidence: paths.length > 1 ? "high" : "low",
+      confidence,
       notes: [EXTRACTOR_HEURISTIC_NOTE],
     });
   }
@@ -128,13 +192,14 @@ export function buildCriticalFlowManifest(
       !isSchemaContractPath(normalized) &&
       !isSupportArtifactPath(normalized)
     ) {
+      const { paths, confidence } = flowPathEvidence(path, availablePaths, adjacency);
       flows.push({
         id: `flow:data:${path.replace(/[^a-zA-Z0-9:_-]/g, "-")}`,
         name: `data evolution flow for ${path}`,
         entrypoints: [path],
-        paths: relatedPaths(path, availablePaths),
+        paths,
         concerns: ["data_integrity", "reliability"],
-        confidence: "high",
+        confidence,
         notes: [EXTRACTOR_HEURISTIC_NOTE],
       });
     }

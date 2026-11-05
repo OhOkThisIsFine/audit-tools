@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/docs-digest.test.ts
 // Docs-digest extractor (change 3, scope-confirmation context). Deterministic
 // and bounded: the doc universe comes from the pipeline's single doc predicate
 // (`isDocIntentFile` — never a second "what is a doc" rule), selection is
@@ -14,6 +15,7 @@ import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
 import type { DocsDigest, DocsDigestEntry } from "../types/docsDigest.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 import { toPosixPath } from "../../shared/paths.js";
+import { isLicensePath, normalizeExtractorPath } from "./pathPatterns.js";
 
 /** Selection cap: how many docs the digest carries (budget-context rule). */
 const DEFAULT_MAX_DOCS = 12;
@@ -82,6 +84,10 @@ export async function buildDocsDigest(
     ...new Set(
       params.disposition.files
         .filter((file) => isDocIntentFile(file.path, file.status))
+        // A license is legal boilerplate, not a statement of the repository's
+        // purpose: digesting it spends a slot and quotes legal text to the
+        // scope decider as if it described what the code is for.
+        .filter((file) => !isLicensePath(normalizeExtractorPath(file.path)))
         .map((file) => toPosixPath(file.path)),
     ),
   ].sort((a, b) => pathDepth(a) - pathDepth(b) || compareCodeUnits(a, b));

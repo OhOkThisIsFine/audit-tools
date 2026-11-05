@@ -8,7 +8,7 @@ export interface NodeMetricSignal {
   node: string;
   /** Raw metric value. */
   value: number;
-  /** Concrete algorithm name (e.g. `cyclomatic-approx`, `duplicate-line-count`). */
+  /** Concrete algorithm name (e.g. `cyclomatic-max-function`, `duplicate-block-lines`). */
   measure: string;
   /** Scope of source the measure actually covered. */
   reach: NodeMetric["reach"];

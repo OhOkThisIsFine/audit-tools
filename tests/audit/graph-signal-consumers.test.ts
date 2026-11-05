@@ -28,14 +28,14 @@ function makeBundle(): GraphBundle {
     },
     node_metrics: {
       "a.ts": {
-        complexity: { value: 25, measure: "cyclomatic-approx", reach: "js-ts-effective" },
+        complexity: { value: 25, measure: "cyclomatic-max-function", reach: "js-ts-effective" },
       },
       "b.ts": {
-        duplication: { value: 40, measure: "duplicate-line-count", reach: "js-ts-effective" },
+        duplication: { value: 40, measure: "duplicate-block-lines", reach: "js-ts-effective" },
       },
       // A metric on a node owned by NO unit — must still surface node-keyed.
       "orphan.ts": {
-        complexity: { value: 30, measure: "cyclomatic-approx", reach: "js-ts-effective" },
+        complexity: { value: 30, measure: "cyclomatic-max-function", reach: "js-ts-effective" },
       },
     },
   };
@@ -132,7 +132,7 @@ test("appended detectors do not renumber existing DA-### ids", () => {
     },
     node_metrics: {
       "a.ts": {
-        complexity: { value: 50, measure: "cyclomatic-approx", reach: "js-ts-effective" },
+        complexity: { value: 50, measure: "cyclomatic-max-function", reach: "js-ts-effective" },
       },
     },
   };

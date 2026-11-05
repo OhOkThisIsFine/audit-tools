@@ -16,6 +16,14 @@ describe("fanout fallback preserves lane requirements", () => {
     expect(text).not.toContain("follow each file sequentially yourself");
   });
 
+  it("states demand-ranked lanes as a capability need, not a ranking to match against", () => {
+    const demandLanes = [{ ...lanes[0]!, demand: { size: "large", complexity: "high", risk: "high" } }];
+    const text = renderFanoutExecutionLines({ lanes: demandLanes }).join("\n");
+    expect(text).toContain("A larger, deeper or riskier lane needs a more capable executor");
+    expect(text).not.toContain("against that ranking");
+    expect(renderFanoutExecutionLines({ lanes }).join("\n")).not.toContain("tagged with its demand");
+  });
+
   it("does not ask for independent work when no lane remains pending", () => {
     expect(renderFanoutExecutionLines({ lanes: [], independenceRequired: true }).join("\n")).toContain("nothing to execute");
   });

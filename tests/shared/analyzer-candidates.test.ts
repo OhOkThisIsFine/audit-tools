@@ -241,7 +241,8 @@ test("jscpd is registered, consent-gated like eslint/semgrep/knip, npx runner", 
   const argv = jscpdCandidate.buildArgv(["npx", "jscpd@4"], "/repo");
   expect(argv.includes("--reporters") && argv.includes("json")).toBeTruthy();
   expect(argv.includes("--output")).toBeTruthy();
-  expect(argv.includes("/repo")).toBeTruthy();
+  // The engine spawns with cwd = root; the root is never handed to jscpd's glob layer.
+  expect(argv.at(-1)).toBe(".");
 });
 
 test("parseJscpd maps duplicates into generic items", () => {
@@ -277,15 +278,22 @@ test("osv-scanner is registered, consent-gated, binary runner, ecosystem-agnosti
   expect(osvScannerCandidate.runner).toBe("binary");
   expect(osvScannerCandidate.detect("/any/repo")).toBe(true);
   expect(osvScannerCandidate.binary?.archived).toBe(false);
-  const argv = osvScannerCandidate.buildArgv(["/cache/osv-scanner"], "/repo");
-  expect(argv).toEqual([
+  // No lockfile: a clean scan of nothing, never a recursive walk of the root.
+  expect(osvScannerCandidate.buildArgv(["/cache/osv-scanner"], "/repo", { inputs: [] })).toEqual([
     "/cache/osv-scanner",
     "scan",
     "--format",
     "json",
-    "--recursive",
-    "/repo",
+    "--allow-no-lockfiles",
   ]);
+  // Without discovered inputs the argv cannot be built at all.
+  expect(() => osvScannerCandidate.buildArgv(["/cache/osv-scanner"], "/repo")).toThrow();
+});
+
+test("osv-scanner's no-input answer (`results: null`) parses as a clean scan, not a parse failure", () => {
+  const report = osvScannerCandidate.parse('{"results": null, "experimental_config": {}}');
+  expect(itemsOf(report)).toEqual([]);
+  expect(reportOf(report).parse_failed).not.toBe(true);
 });
 
 test("osv-scanner binary spec maps platform/arch to the real release asset naming", () => {

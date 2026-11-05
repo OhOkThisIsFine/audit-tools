@@ -189,6 +189,93 @@ test("formatDeterministicFindings — caps at 20 items and emits '... and N more
   ).toBeTruthy();
 });
 
+// Dogfood (2026-11-04): 752 complexity rows were emitted ahead of the seam and
+// hidden-coupling leads, so the 20-row window showed only cycles and
+// complexity — the high-volume kind crowded every other kind out.
+test("formatDeterministicFindings — every kind of lead is represented, not the high-volume one", () => {
+  const lead = (category: string, i: number, severity: "high" | "medium" | "low") => ({
+    id: `${category}-${i}`,
+    title: `${category} ${i}`,
+    summary: "s",
+    severity,
+    confidence: "medium" as const,
+    lens: "architecture",
+    category,
+    affected_files: [],
+    evidence: [],
+  });
+  const findings = [
+    ...Array.from({ length: 30 }, (_, i) => lead("complexity_hotspot", i, "medium")),
+    ...Array.from({ length: 25 }, (_, i) => lead("code_duplication", i, "low")),
+    lead("dependency_cycle", 0, "high"),
+    lead("architectural_seam", 0, "medium"),
+    lead("architectural_seam", 1, "medium"),
+    lead("hidden_coupling", 0, "medium"),
+  ];
+  const render = (rows: typeof findings) =>
+    extractSection(
+      renderContractReviewPrompt({ design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings: rows } }),
+      "### Deterministic structural findings",
+      "\n##",
+    );
+  const section = render(findings);
+  const shown = section.split("\n").filter((line) => line.startsWith("- ["));
+
+  expect(shown).toHaveLength(20);
+  for (const title of ["dependency_cycle 0", "architectural_seam 0", "architectural_seam 1", "hidden_coupling 0", "code_duplication 0"]) {
+    expect(section.includes(title), `${title} must reach the window`).toBe(true);
+  }
+  // Highest-severity kind leads; each kind keeps its own emission order.
+  expect(shown[0]).toContain("dependency_cycle 0");
+  expect(section.indexOf("complexity_hotspot 0")).toBeLessThan(section.indexOf("complexity_hotspot 1"));
+  // What the window dropped is counted by kind, so the reviewer sees the volume.
+  expect(section).toMatch(/Not shown by kind: complexity_hotspot \d+, code_duplication \d+/);
+  // Content-derived: the same set emitted in another detector order selects the same window.
+  expect(render([...findings.slice(55), ...findings.slice(0, 55)])).toBe(section);
+});
+
+test("formatDeterministicFindings — within a metric kind, the strongest value leads, then path", () => {
+  const hotspot = (path: string) => ({
+    id: `c-${path}`,
+    title: `High complexity: ${path}`,
+    summary: "s",
+    severity: "medium" as const,
+    confidence: "medium" as const,
+    lens: "maintainability",
+    category: "complexity_hotspot",
+    affected_files: [{ path }],
+    evidence: [],
+  });
+  const metric = (value: number) => ({
+    complexity: { value, measure: "cyclomatic-max-function", reach: "js-ts-effective" as const },
+  });
+  // Alphabetical emission order puts the weakest first.
+  const findings = ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"].map(hotspot);
+  const section = extractSection(
+    renderContractReviewPrompt({
+      design_assessment: { generated_at: "2026-01-01T00:00:00Z", findings },
+      graph_bundle: {
+        graphs: {},
+        node_metrics: {
+          "src/a.ts": metric(11),
+          "src/b.ts": metric(80),
+          "src/c.ts": metric(30),
+          "src/d.ts": metric(30),
+        },
+      },
+    }),
+    "### Deterministic structural findings",
+    "\n##",
+  );
+  const shown = section.split("\n").filter((line) => line.startsWith("- ["));
+  expect(shown.map((line) => line.slice(line.indexOf("src/"), line.indexOf(".ts") + 3))).toEqual([
+    "src/b.ts",
+    "src/c.ts",
+    "src/d.ts",
+    "src/a.ts",
+  ]);
+});
+
 test("formatDeterministicFindings — a lineage-stamped lead renders its producer and source hash", () => {
   const findings = [
     {

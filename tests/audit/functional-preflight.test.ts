@@ -34,6 +34,10 @@ it("the public next-step emits capability work before semantic or deterministic 
   expect(prompt).toContain("Actor: the host");
   expect(prompt).toContain("operator_approved_degraded");
   expect(prompt).not.toContain("check:tests");
+  // Every decision value is named with the condition that selects it, so the
+  // example's placeholder `stop` is not the only value a host ever sees.
+  for (const decision of ["ready", "degraded", "stop"]) expect(prompt).toContain(`- \`${decision}\``);
+  expect(prompt).toContain("replace its placeholder values");
 });
 it("a host that copies the emitted example verbatim satisfies the run binding (the prompt body forward-slashes win32 paths)", async () => {
   const { root, artifactsDir } = await fixture();

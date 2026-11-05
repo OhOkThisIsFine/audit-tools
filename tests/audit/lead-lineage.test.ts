@@ -88,6 +88,86 @@ test("a different signal generation yields a different source hash", () => {
   ).toBe(false);
 });
 
+/**
+ * A fixture that fires EVERY design-assessment detector: a cycle, a hub with
+ * eight importers and eight imports (each a bridge, so seams), an orphan unit, a
+ * dominant unit, a risk register concentrated in one unit, a flow with no graph
+ * coverage, per-node complexity and duplication, and a co-change pair with no
+ * structural edge.
+ */
+function everyDetectorInputs() {
+  const importers = Array.from({ length: 8 }, (_, i) => `i${i}.ts`);
+  const imported = Array.from({ length: 8 }, (_, i) => `o${i}.ts`);
+  const graph = {
+    generated_at: "2026-01-01T00:00:00.000Z",
+    graphs: {
+      imports: [
+        { from: "c1.ts", to: "c2.ts", kind: "imports" },
+        { from: "c2.ts", to: "c1.ts", kind: "imports" },
+        ...importers.map((from) => ({ from, to: "h.ts", kind: "imports" })),
+        ...imported.map((to) => ({ from: "h.ts", to, kind: "imports" })),
+      ],
+      co_change: [{ from: "x.ts", to: "y.ts", kind: "co_change", confidence: 0.6, reason: "3 commits" }],
+    },
+    node_metrics: {
+      "h.ts": {
+        complexity: { value: 25, measure: "cyclomatic-max-function", reach: "js-ts-effective" },
+        duplication: { value: 5, measure: "duplicate-block-lines", reach: "js-ts-effective" },
+      },
+    },
+  } as unknown as GraphBundle;
+  const units = [
+    { unit_id: "u-big", files: [...importers, "h.ts", ...imported] },
+    { unit_id: "u-cyc", files: ["c1.ts", "c2.ts"] },
+    { unit_id: "u-orphan", files: ["lonely.ts"] },
+  ];
+  return {
+    unitManifest: { units },
+    graphBundle: graph,
+    criticalFlows: { flows: [{ name: "f", paths: ["lonely.ts", "nowhere.ts"] }] },
+    riskRegister: {
+      items: [
+        { unit_id: "u-big", risk_score: 100 },
+        { unit_id: "u-cyc", risk_score: 1 },
+        { unit_id: "u-orphan", risk_score: 1 },
+        { unit_id: "u-none", risk_score: 1 },
+      ],
+    },
+  };
+}
+
+// Dogfood (2026-11-04): eight of the ten design-assessment detectors emitted
+// unstamped rows, and mergeFindings promotes an unstamped row straight into
+// audit-findings.json — 877 lexical complexity/duplication heuristics alone
+// landed in the report as findings no reviewer confirmed.
+test("every design-assessment detector emits stamped leads, never report findings", () => {
+  const design = buildDesignAssessment(everyDetectorInputs() as never);
+  const categories = new Set(design.findings.map((f) => f.category));
+  expect([...categories].sort(), "the fixture must fire every detector").toEqual([
+    "architectural_seam",
+    "code_duplication",
+    "complexity_hotspot",
+    "dependency_cycle",
+    "flow_gap",
+    "hidden_coupling",
+    "hub_module",
+    "monolith_unit",
+    "orphan_units",
+    "risk_concentration",
+  ]);
+  const producerByCategory = new Map<string, string>();
+  for (const finding of design.findings) {
+    expect(finding.lead_lineage, `${finding.category} carries no lineage`).toBeDefined();
+    expect(finding.lead_lineage!.confirmation).toBe("lead");
+    // One producer per category: a reader can tell which heuristic made the claim.
+    const seen = producerByCategory.get(finding.category);
+    expect(seen ?? finding.lead_lineage!.producer).toBe(finding.lead_lineage!.producer);
+    producerByCategory.set(finding.category, finding.lead_lineage!.producer);
+  }
+  expect(new Set(producerByCategory.values()).size).toBe(producerByCategory.size);
+  expect(mergeFindings([], undefined, undefined, design)).toEqual([]);
+});
+
 test("detectNonColocalization names which of its two detectors produced each lead", () => {
   // 4 tightly-coupled files declared nowhere → the behavioral lead. A doc group
   // of 2 that is not one coupling cluster → the purpose lead.

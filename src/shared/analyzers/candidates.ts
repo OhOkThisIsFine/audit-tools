@@ -2,9 +2,11 @@
 import { parseGitleaksVersion, parseOsvScannerVersion, parseHadolintVersion, parseActionlintVersion } from "./binaryVersions.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
-import type { ExternalAnalyzerCandidate } from "./acquisitionEngine.js";
+import { compareCodeUnits } from "../compareCodeUnits.js";
+import { readGitPathList } from "../git.js";
+import type { AnalyzerInputDiscovery, ExternalAnalyzerCandidate } from "./acquisitionEngine.js";
 import {
   detectNodeEcosystem,
   detectPythonEcosystem,
@@ -554,14 +556,19 @@ const jscpdCandidate: ExternalAnalyzerCandidate = {
   // can be reliably disabled.
   defaultRun: false,
   detect: (root) => detectNodeEcosystem(root),
-  buildArgv: (prefix, root) => [
+  buildArgv: (prefix) => [
     ...prefix,
     "--reporters",
     "json",
     "--output",
     jscpdReportDir(),
     "--silent",
-    root,
+    // jscpd globs its positional path (fast-glob), so an absolute root breaks on
+    // anything fast-glob reads as syntax: a Windows backslash, or `(` `[` `{` `!`
+    // in any directory name above the repo. The engine spawns with cwd = root, so
+    // `.` names the root with no glob characters at all; jscpd then reports
+    // root-relative paths, which the normalizer accepts as they are.
+    ".",
   ],
   reportFile: () => jscpdReportPath(),
   parse: parseJscpd,
@@ -616,6 +623,9 @@ function parseOsvScanner(stdout: string): ExternalAnalyzerParseReport {
   } catch {
     return parseFailure("osv-scanner", "output is not valid JSON");
   }
+  // `results: null` is osv-scanner's own clean answer when no lockfile was given
+  // (measured, 2.4.0 with `--allow-no-lockfiles`: exit 0, `"results": null`).
+  if (isRecord(payload) && payload.results === null) return items([]);
   if (!isRecord(payload) || !Array.isArray(payload.results)) {
     return parseFailure("osv-scanner", "output has no `results` array");
   }
@@ -673,6 +683,81 @@ function parseOsvScanner(stdout: string): ExternalAnalyzerParseReport {
   return items(parsed);
 }
 
+/**
+ * The file names osv-scanner 2.4.0 extracts, from its own table
+ * (https://github.com/google/osv-scanner/blob/v2.4.0/docs/supported_languages_and_lockfiles.md).
+ * Matching is by basename, as osv's extractors match. Two rows of that table are
+ * patterns, measured against the 2.4.0 binary with `-L`: .NET's `deps.json` is
+ * `<app>.deps.json` (a bare `deps.json` is refused, "could not determine
+ * extractor"), and pip's `requirements.txt` also matches a prefixed name
+ * (`dev-requirements.txt` is extracted). Gradle's verification metadata is read
+ * only at `gradle/verification-metadata.xml`.
+ */
+const OSV_LOCKFILE_BASENAMES: ReadonlySet<string> = new Set([
+  "conan.lock",
+  "pubspec.lock",
+  "mix.lock",
+  "go.mod",
+  "cabal.project.freeze",
+  "stack.yaml.lock",
+  "buildscript-gradle.lockfile",
+  "gradle.lockfile",
+  "pom.xml",
+  "bun.lock",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "packages.config",
+  "packages.lock.json",
+  "composer.lock",
+  "Pipfile.lock",
+  "poetry.lock",
+  "pdm.lock",
+  "pylock.toml",
+  "uv.lock",
+  "renv.lock",
+  "Gemfile.lock",
+  "gems.locked",
+  "Cargo.lock",
+]);
+
+function isOsvLockfilePath(path: string): boolean {
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  return (
+    OSV_LOCKFILE_BASENAMES.has(base) ||
+    base.endsWith(".deps.json") ||
+    base.endsWith("requirements.txt") ||
+    path === "gradle/verification-metadata.xml" ||
+    path.endsWith("/gradle/verification-metadata.xml")
+  );
+}
+
+/**
+ * The repository's OWN lockfiles: tracked or untracked-but-not-ignored, per the
+ * repository's own ignore rules (`git ls-files --cached --others
+ * --exclude-standard`), present on disk, in code-unit order.
+ *
+ * Why not `osv-scanner scan --recursive <root>`: osv-scanner 2.4.0 starts its
+ * walk at the FILESYSTEM root (`Starting filesystem walk for root: C:\`) and
+ * applies every `.gitignore` it passes on the way down, including those ABOVE
+ * the repository. The run snapshot sits under the state directory
+ * (`~/.audit-code/snapshots/<id>/tree`), and a `.gitignore` in the home directory
+ * listing `.audit-code/` hid the whole tree: exit 128, "No package sources
+ * found". `--no-ignore` reaches the snapshot but then scans every ignored
+ * directory too (measured: `build/`, `.venv/`; the snapshot links the live
+ * tree's ignored dependency and build directories in), attributing vendored and
+ * built lockfiles to the repository. An explicit `-L` list is read regardless of
+ * any `.gitignore` and names exactly the repository's files.
+ */
+async function discoverOsvLockfiles(root: string): Promise<AnalyzerInputDiscovery> {
+  const listed = await readGitPathList(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  if (!listed.ok) return listed;
+  const paths = [...new Set(listed.paths)]
+    .filter((path) => isOsvLockfilePath(path) && existsSync(join(root, path)))
+    .sort(compareCodeUnits);
+  return { ok: true, paths };
+}
+
 const osvScannerCandidate: ExternalAnalyzerCandidate = {
   id: "osv-scanner",
   runner: "binary",
@@ -687,11 +772,24 @@ const osvScannerCandidate: ExternalAnalyzerCandidate = {
   // CONSENT-GATED: network-dependent (queries the OSV vulnerability database)
   // and heavier than gitleaks — same tier as semgrep/eslint/knip/jscpd.
   defaultRun: false,
-  // Ecosystem-agnostic by design: osv-scanner recursively discovers whatever
-  // lockfiles exist (npm/pip/cargo/go/…) itself, so no per-ecosystem marker
-  // gate is needed here (mirrors gitleaks' `() => true`).
+  // Ecosystem-agnostic: the input set covers every lockfile kind osv-scanner
+  // reads, so no per-ecosystem marker gate is needed (mirrors gitleaks' `() => true`).
   detect: () => true,
-  buildArgv: (prefix, root) => [...prefix, "scan", "--format", "json", "--recursive", root],
+  discoverInputs: discoverOsvLockfiles,
+  // `-L` per repository lockfile, never `--recursive <root>`: see
+  // discoverOsvLockfiles. `--allow-no-lockfiles` makes a repository without one
+  // a clean scan (exit 0, `results: null`) instead of exit 128.
+  buildArgv: (prefix, _root, context) => {
+    if (!context?.inputs) throw new Error("osv-scanner requires its discovered lockfile inputs");
+    return [
+      ...prefix,
+      "scan",
+      "--format",
+      "json",
+      "--allow-no-lockfiles",
+      ...context.inputs.flatMap((path) => ["-L", path]),
+    ];
+  },
   parse: parseOsvScanner,
 };
 

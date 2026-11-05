@@ -1,8 +1,10 @@
+// sites-pinned: tests/audit/graph-signal-consumers.test.ts
 import type { UnitManifest } from "../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { CriticalFlowManifest, RiskItem, RiskRegister } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
 import type { GraphSignals } from "./graphSignals.js";
+import { hasDuplicatedBlock, isComplexityHotspot } from "./analyzers/complexityDuplication.js";
 
 const MAX_RISK_SCORE = 10;
 
@@ -14,12 +16,6 @@ const MAX_RISK_SCORE = 10;
  * MAX_RISK_SCORE clamp.
  */
 const STRUCTURAL_FAMILY_CAP = 2;
-
-/** Complexity value (from node_metrics) at/above which a unit is flagged. */
-const HIGH_COMPLEXITY = 10;
-
-/** Duplication value (from node_metrics) at/above which a unit is flagged. */
-const DUPLICATION_FLOOR = 1;
 
 /**
  * CCU-analyzer-merge-helper-seam (risk half).
@@ -170,13 +166,13 @@ export function buildRiskRegister(
     const hasHighComplexity =
       graphSignals != null &&
       (graphSignals.complexity ?? []).some(
-        (m) => unit.files.includes(m.node) && m.value >= HIGH_COMPLEXITY,
+        (m) => unit.files.includes(m.node) && isComplexityHotspot(m),
       );
     if (hasHighComplexity) signals.push("high_complexity");
     const hasDuplication =
       graphSignals != null &&
       (graphSignals.duplication ?? []).some(
-        (m) => unit.files.includes(m.node) && m.value >= DUPLICATION_FLOOR,
+        (m) => unit.files.includes(m.node) && hasDuplicatedBlock(m),
       );
     if (hasDuplication) signals.push("duplicated_code");
 

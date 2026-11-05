@@ -47,7 +47,9 @@ async function writeFixture(root: string): Promise<void> {
   // so the finalization loop genuinely exercises runtime_validation ↔ synthesis.
   await writeFile(
     join(root, "src", "api", "auth.ts"),
-    "export function authenticate(token: string): boolean {\n  if (!token) return false;\n  return token.trim().length > 0;\n}\n",
+    // The import graph-corroborates auth.ts's critical flow, so flow inference
+    // meets its confidence bar and no host critical-flow fallback is owed.
+    'import { createSession } from "../lib/session.js";\nexport function authenticate(token: string): boolean {\n  if (!token) return false;\n  return createSession(token).id.trim().length > 0;\n}\n',
   );
   await writeFile(
     join(root, "src", "lib", "session.ts"),

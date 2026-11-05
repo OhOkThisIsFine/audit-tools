@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/intent-checkpoint.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { FileDispositionStatus } from "audit-tools/shared";
 import type { Lens } from "../types.js";
@@ -22,7 +23,7 @@ import {
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
 import { isMandatoryLens } from "./lensSelection.js";
-import { LENSES } from "audit-tools/shared";
+import { compareCodeUnits, LENSES } from "audit-tools/shared";
 
 /**
  * A row in the excluded_summary that represents a collapsed directory.
@@ -267,24 +268,64 @@ function buildDispositionOverrideProposals(
  * the evidence overlay in `buildLensPropositions` consumes these counts.
  * Absence is deliberately NO-SIGNAL: an empty or auto-completed assessment
  * means "unreviewed / nothing detected", never "the lens does not apply".
+ *
+ * The two kinds are counted apart because they are different evidence: the
+ * base `findings` group is the deterministic structural pass (heuristic leads
+ * such as complexity hotspots and duplication, present before any review ran),
+ * while the contract/conceptual groups are review output.
  */
+interface LensEvidence {
+  /** Structural-pass lead count per category. */
+  structural: Map<string, number>;
+  structuralTotal: number;
+  review: number;
+}
+
 function collectLensEvidence(
   assessment: DesignAssessment | undefined,
-): Map<string, number> {
-  const counts = new Map<string, number>();
-  if (!assessment) return counts;
-  const groups = [
-    assessment.findings,
-    assessment.contract_findings,
-    assessment.conceptual_findings,
-  ];
-  for (const group of groups) {
+): Map<string, LensEvidence> {
+  const evidence = new Map<string, LensEvidence>();
+  if (!assessment) return evidence;
+  const entryFor = (lens: string): LensEvidence => {
+    let entry = evidence.get(lens);
+    if (!entry) {
+      entry = { structural: new Map(), structuralTotal: 0, review: 0 };
+      evidence.set(lens, entry);
+    }
+    return entry;
+  };
+  for (const finding of assessment.findings ?? []) {
+    if (!finding.lens) continue;
+    const entry = entryFor(finding.lens);
+    entry.structural.set(finding.category, (entry.structural.get(finding.category) ?? 0) + 1);
+    entry.structuralTotal += 1;
+  }
+  for (const group of [assessment.contract_findings, assessment.conceptual_findings]) {
     for (const finding of group ?? []) {
       if (!finding.lens) continue;
-      counts.set(finding.lens, (counts.get(finding.lens) ?? 0) + 1);
+      entryFor(finding.lens).review += 1;
     }
   }
-  return counts;
+  return evidence;
+}
+
+/** Operator-facing "Why" for an evidence-flipped lens: states exactly what was counted. */
+function describeLensEvidence(lens: string, evidence: LensEvidence): string {
+  const parts: string[] = [];
+  if (evidence.structuralTotal > 0) {
+    const byCategory = [...evidence.structural.entries()]
+      .sort(([a, an], [b, bn]) => bn - an || compareCodeUnits(a, b))
+      .map(([category, count]) => `${category} ${count}`)
+      .join(", ");
+    parts.push(
+      `structural design assessment (deterministic, pre-review) flagged ${evidence.structuralTotal} ` +
+        `${lens}-tagged lead(s): ${byCategory}`,
+    );
+  }
+  if (evidence.review > 0) {
+    parts.push(`design review carries ${evidence.review} ${lens}-tagged finding(s)`);
+  }
+  return parts.join("; ");
 }
 
 /**
@@ -431,12 +472,12 @@ function buildLensPropositions(
   const lensEvidence = collectLensEvidence(designAssessment);
   return propositions.map((proposition) => {
     if (proposition.disposition !== "recommend_exclude") return proposition;
-    const evidenceCount = lensEvidence.get(proposition.lens) ?? 0;
-    if (evidenceCount === 0) return proposition;
+    const evidence = lensEvidence.get(proposition.lens);
+    if (!evidence) return proposition;
     return {
       lens: proposition.lens,
       disposition: "recommend_include" as const,
-      reason: `design assessment carries ${evidenceCount} ${proposition.lens}-tagged finding(s)`,
+      reason: describeLensEvidence(proposition.lens, evidence),
     };
   });
 }

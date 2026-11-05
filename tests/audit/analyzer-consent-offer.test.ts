@@ -209,6 +209,20 @@ describe("renderAnalyzerConsentPrompt — tool-rendered offer", () => {
     expect(prompt).toContain('"eslint": "granted"');
     expect(prompt).toContain("audit-code next-step");
   });
+
+  it("says what happens when a granted analyzer's runner is missing, and labels a binary's spec as its version", () => {
+    const binary = EXTERNAL_ANALYZER_CANDIDATES.find((c) => c.runner === "binary")!;
+    const prompt = renderAnalyzerConsentPrompt({
+      pending: [binary],
+      decisionsPath: "X:/artifacts/submissions/decisions.json",
+      continueCommand: "audit-code next-step",
+    });
+    expect(prompt).toContain("A grant does not install the runner it names");
+    expect(prompt).toContain("records it as not resolved and continues without it");
+    expect(prompt).toContain(`(binary, version \`${binary.spec}\`)`);
+    // The intro sentence ends; it does not dangle into the next one.
+    expect(prompt).not.toMatch(/record their choices —/);
+  });
 });
 
 describe("the consent gate refuses a submission it understands nothing in", () => {

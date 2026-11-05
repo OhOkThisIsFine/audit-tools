@@ -1,8 +1,23 @@
 import { test, expect } from "vitest";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFixtureRepo } from "./helpers/fixture.mjs";
+import { writeFixtureRepo as writeSharedFixtureRepo } from "./helpers/fixture.mjs";
+
+// The drain tests below assume the fixture's deterministic frontier reaches
+// intent_checkpoint with no host critical-flow fallback in between. A flow's
+// confidence is high only when its entrypoint has a structural graph neighbor,
+// so auth.ts imports session.ts here (the regex-floor graph reads it from the
+// real root these tests pass).
+async function writeFixtureRepo(root: string): Promise<void> {
+  await writeSharedFixtureRepo(root);
+  await writeFile(
+    join(root, "src", "api", "auth.ts"),
+    'import { createSession } from "../lib/session.js";\n' +
+      "export const authenticate = (token: string): boolean =>\n" +
+      "  createSession(token).id.trim().length > 0;\n",
+  );
+}
 import type { AnalyzerSetting } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";

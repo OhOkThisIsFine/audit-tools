@@ -170,7 +170,7 @@ export function renderFanoutExecutionLines(params: {
     ...concurrency,
     ...(params.lanes.some((lane) => lane.demand !== undefined)
       ? [
-          "Each lane states its demand (size / complexity / risk) — match the model you dispatch to it against that ranking. The tool names demand only; which backend or model satisfies it is your choice.",
+          "Each lane below is tagged with its demand (size / complexity / risk). A larger, deeper or riskier lane needs a more capable executor; choose each lane's model accordingly. The tool states demand only; which backend or model satisfies it is your choice.",
           "",
         ]
       : []),

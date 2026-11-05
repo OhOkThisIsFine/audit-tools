@@ -47,6 +47,36 @@ await test("buildDocsDigest selects the doc universe via the single doc predicat
   expect(digest.omitted_paths).toBeUndefined();
 });
 
+await test("buildDocsDigest leaves license files out: legal text is not the repository's purpose", async () => {
+  const digest = await buildDocsDigest({
+    root: "/repo",
+    disposition: disposition([
+      { path: "LICENSE", status: "doc_only" },
+      { path: "LICENSE.md", status: "doc_only" },
+      { path: "LICENSE-MIT", status: "doc_only" },
+      { path: "LICENSE-APACHE.txt", status: "doc_only" },
+      { path: "LICENCE", status: "doc_only" },
+      { path: "COPYING", status: "doc_only" },
+      { path: "COPYING.LESSER", status: "doc_only" },
+      { path: "docs/licensing-faq.md", status: "doc_only" },
+      { path: "README.md", status: "included" },
+    ]),
+    readFileText: readerFor({
+      LICENSE: "ISC License\n\nPermission to use, copy, modify...",
+      "LICENSE.md": "# MIT License",
+      "LICENSE-MIT": "MIT License",
+      "LICENSE-APACHE.txt": "Apache License",
+      LICENCE: "MIT Licence",
+      COPYING: "GNU GENERAL PUBLIC LICENSE",
+      "COPYING.LESSER": "GNU LESSER GENERAL PUBLIC LICENSE",
+      "docs/licensing-faq.md": "# Licensing FAQ",
+      "README.md": "# Fixture\n\nAudits codebases.",
+    }),
+  });
+  expect(digest.docs.map((d) => d.path)).toEqual(["README.md", "docs/licensing-faq.md"]);
+  expect(digest.omitted_paths).toBeUndefined();
+});
+
 await test("buildDocsDigest caps the selection and records omitted paths; unreadable docs are skipped", async () => {
   const digest = await buildDocsDigest({
     root: "/repo",

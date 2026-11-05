@@ -1,6 +1,8 @@
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
+import { compareCodeUnits, confidenceRank, severityRank } from "audit-tools/shared";
+import type { NodeMetrics } from "audit-tools/shared";
 import { projectConceptualCharterContext } from "./designReviewTask.js";
 import { designReviewInputRevision } from "./designReviewProjection.js";
 import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
@@ -241,7 +243,72 @@ function summarizeFiles(bundle: ArtifactBundle): string {
   return `${files.length} files (${langSummary}).`;
 }
 
-function formatDeterministicFindings(findings: Finding[], max = 20): string {
+/**
+ * The per-node metric behind each metric-lead category: its rows all share one
+ * severity and confidence, so the metric value is what separates them.
+ */
+const METRIC_KIND_BY_CATEGORY: Readonly<Record<string, "complexity" | "duplication">> = {
+  complexity_hotspot: "complexity",
+  code_duplication: "duplication",
+};
+
+/** The metric value behind a metric lead (its first affected file's), else undefined. */
+function leadMagnitude(finding: Finding, nodeMetrics: NodeMetrics | undefined): number | undefined {
+  const kind = METRIC_KIND_BY_CATEGORY[finding.category];
+  const path = finding.affected_files[0]?.path;
+  if (!kind || path === undefined) return undefined;
+  return nodeMetrics?.[path]?.[kind]?.value;
+}
+
+/**
+ * Order deterministic findings so a bounded window represents every KIND
+ * (category) instead of whichever detector emits the most rows. Within a kind,
+ * rows rank by severity, then confidence, then metric value descending (a
+ * complexity-80 routine before a complexity-11 one), then first affected path.
+ * Kinds are then interleaved round-robin — each kind's best row, then each
+ * kind's second, … — with kinds ranked by their best row's severity and
+ * confidence, then by category name. Every key is content-derived, so detector
+ * emission order never decides what is shown.
+ */
+function representativeOrder(findings: Finding[], nodeMetrics?: NodeMetrics): Finding[] {
+  const kindRank = (a: Finding, b: Finding): number =>
+    severityRank(b.severity) - severityRank(a.severity) ||
+    confidenceRank(b.confidence) - confidenceRank(a.confidence);
+  const rank = (a: Finding, b: Finding): number =>
+    kindRank(a, b) ||
+    (leadMagnitude(b, nodeMetrics) ?? -Infinity) - (leadMagnitude(a, nodeMetrics) ?? -Infinity) ||
+    compareCodeUnits(a.affected_files[0]?.path ?? "", b.affected_files[0]?.path ?? "");
+  const byKind = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const rows = byKind.get(finding.category) ?? [];
+    rows.push(finding);
+    byKind.set(finding.category, rows);
+  }
+  const kinds = [...byKind.entries()]
+    .map(([category, rows]) => ({ category, rows: [...rows].sort(rank) }))
+    .sort((a, b) => kindRank(a.rows[0]!, b.rows[0]!) || compareCodeUnits(a.category, b.category));
+  const ordered: Finding[] = [];
+  for (let depth = 0; ordered.length < findings.length; depth += 1) {
+    for (const kind of kinds) {
+      const row = kind.rows[depth];
+      if (row) ordered.push(row);
+    }
+  }
+  return ordered;
+}
+
+/** Per-kind counts of the rows a bounded window left out, largest first. */
+function omittedByKind(omitted: Finding[]): string[] {
+  if (omitted.length === 0) return [];
+  const counts = new Map<string, number>();
+  for (const finding of omitted) counts.set(finding.category, (counts.get(finding.category) ?? 0) + 1);
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || compareCodeUnits(a[0], b[0]))
+    .map(([category, count]) => `${category} ${count}`);
+  return [`  Not shown by kind: ${parts.join(", ")}`];
+}
+
+function formatDeterministicFindings(findings: Finding[], nodeMetrics?: NodeMetrics, max = 20): string {
   if (findings.length === 0)
     return "No structural issues detected by deterministic analysis.";
 
@@ -251,10 +318,11 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
   // guards is a heuristic being read as an approved finding — a reader who does
   // not know which rows are leads will treat them all as verdicts.
   const unlineaged = findings.filter((finding) => finding.lead_lineage === undefined);
+  const ordered = representativeOrder(findings, nodeMetrics);
 
   return [
     formatTopNList(
-      findings,
+      ordered,
       max,
       (total) =>
         `${total} structural findings from deterministic analysis — **leads, not verdicts**. ` +
@@ -270,6 +338,7 @@ function formatDeterministicFindings(findings: Finding[], max = 20): string {
             `\n  Confirmation identity: ${JSON.stringify({ lens: finding.lens, category: finding.category, title: finding.title, affected_files: finding.affected_files })}`
           : ""),
     ),
+    ...omittedByKind(ordered.slice(max)),
     // Any finding here WITHOUT a lineage record is called out rather than
     // silently absorbed into the list above: an unstamped row means a producer
     // emitted it without declaring itself, which is the gap this section exists
@@ -733,7 +802,7 @@ export function renderSharedStructuralContext(
     "",
     "### Deterministic structural findings",
     "",
-    formatDeterministicFindings(deterministicFindings),
+    formatDeterministicFindings(deterministicFindings, bundle.graph_bundle?.node_metrics),
     "",
     "### Starting points (orient, then roam)",
     "",

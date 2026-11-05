@@ -57,8 +57,12 @@ export function renderAnalyzerConsentPrompt(params: {
           `its version is ${candidate.safetyProfile.version_pinning}`,
         );
       }
+      // A `binary` candidate's spec is its pinned version, not an install spec.
+      const source = candidate.runner === "binary"
+        ? `binary, version \`${candidate.spec}\``
+        : `${candidate.runner}: \`${candidate.spec}\``;
       return [
-        `### \`${candidate.id}\` (${candidate.runner}: \`${candidate.spec}\`)`,
+        `### \`${candidate.id}\` (${source})`,
         "",
         `- Detects: ${candidate.purpose ?? "(no purpose recorded)"}`,
         `- Consent-gated because ${why.join("; ") || "it is heavier than the default set"}.`,
@@ -78,9 +82,12 @@ export function renderAnalyzerConsentPrompt(params: {
   return `# External Analyzer Consent
 
 This repo is applicable to ${params.pending.length} consent-gated analyzer(s) with no recorded
-decision. Present EACH candidate below to the operator and record their choices —
+decision. Present EACH candidate below to the operator and record their choices.
 Both \`declined\` and \`granted\` cover this run only; a new audit asks again.
 Ask explicitly before installing these analyzers or permitting their code/config execution.
+A grant does not install the runner it names (npx, pipx, …). If a granted analyzer
+cannot run on this machine, for example because its runner is not installed, the audit
+records it as not resolved and continues without it; do not install a runner to make it run.
 Audits do not format source by default. Source formatting requires separate operator approval
 and \`next-step --auto-fix\` for this run; \`--dry-run\` always prevents formatting.
 Do not decide on the operator's behalf.
