@@ -1,0 +1,77 @@
+diff --git a/tests/remediate/n-r22-ownership-registry.test.ts b/tests/remediate/n-r22-ownership-registry.test.ts
+index a14db91f..d3b4ca4c 100644
+--- a/tests/remediate/n-r22-ownership-registry.test.ts
++++ b/tests/remediate/n-r22-ownership-registry.test.ts
+@@ -17,8 +17,10 @@
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { mkdir, rm, writeFile } from "node:fs/promises";
+ import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
++import { tmpdir } from "node:os";
+ import { join, dirname } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { AUDIT_TOOLS_CALLER_CWD_ENV } from "audit-tools/shared";
+ import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
+ import { routeAmendmentRequest } from "../../src/remediate/dispatch/amendmentClaim.js";
+ import { mergeImplementResults } from "../../src/remediate/steps/dispatch.js";
+@@ -538,7 +540,51 @@ async function writeDispatchPlan(
+   );
+ }
+ 
++/**
++ * mergeImplementResults (via marshal.ts) drives StateStore.mutate, which
++ * asserts `assertNotNodeWorktreeCwd` (src/shared/io/nodeWorktreeGuard.ts) as
++ * defense-in-depth against a dispatched worker mutating shared run state. The
++ * guard's discriminator is deliberately CWD-only (its own header comment:
++ * "CWD is the honest mechanical discriminator") — so running THIS suite from
++ * inside a node worktree (e.g. a per-node implement verify, exactly how this
++ * file is normally invoked) trips the guard on tests that are not a live
++ * cross-node clobber: a suite-invocation artifact, not a defect in the guard
++ * or in mergeImplementResults. Neutralize it for exactly the two describe
++ * blocks below (state-transition tests), never weakening the guard itself:
++ * `nodeWorktreeAncestor` is purely path-string-based (no filesystem access,
++ * per its own doc comment), so `process.chdir()` to any already-existing
++ * non-worktree directory suffices — `os.tmpdir()` always exists. Also point
++ * `AUDIT_TOOLS_CALLER_CWD_ENV` (the wrapper-propagated-caller-cwd seam) at the
++ * same directory: `cwdCandidates()` checks BOTH sources whenever the env var
++ * is set, so leaving it stale/unset while only chdir'ing is the minimum fix,
++ * but setting both keeps this future-proof against a caller that starts
++ * passing an explicit cwd sourced from the env var. Both are saved/restored
++ * per-test so no other test in this file is affected.
++ */
++let savedCwdForGuardSeam: string | undefined;
++let savedCallerCwdEnvForGuardSeam: string | undefined;
++
++function neutralizeNodeWorktreeGuardCwd(): void {
++  savedCwdForGuardSeam = process.cwd();
++  savedCallerCwdEnvForGuardSeam = process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
++  const outside = tmpdir();
++  process.chdir(outside);
++  process.env[AUDIT_TOOLS_CALLER_CWD_ENV] = outside;
++}
++
++function restoreNodeWorktreeGuardCwd(): void {
++  if (savedCwdForGuardSeam !== undefined) process.chdir(savedCwdForGuardSeam);
++  if (savedCallerCwdEnvForGuardSeam === undefined) {
++    delete process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
++  } else {
++    process.env[AUDIT_TOOLS_CALLER_CWD_ENV] = savedCallerCwdEnvForGuardSeam;
++  }
++}
++
+ describe("mergeImplementResults: unowned amended_files are accepted and added to effective scope", () => {
++  beforeEach(neutralizeNodeWorktreeGuardCwd);
++  afterEach(restoreNodeWorktreeGuardCwd);
++
+   it("an ImplementWorkerResult with amended_files listing an unowned path is accepted", async () => {
+     const runId = "run-r22-a";
+     await writeMinimalState(ARTIFACTS_DIR, [{ block_id: "BLK-001", items: ["F-001"] }], [{ id: "F-001" }]);
+@@ -570,6 +616,9 @@ describe("mergeImplementResults: unowned amended_files are accepted and added to
+ });
+ 
+ describe("mergeImplementResults: owned amended_files block the item", () => {
++  beforeEach(neutralizeNodeWorktreeGuardCwd);
++  afterEach(restoreNodeWorktreeGuardCwd);
++
+   it("an ImplementWorkerResult with amended_files listing a path owned by another block blocks the item", async () => {
+     const runId = "run-r22-b";
+     await writeMinimalState(

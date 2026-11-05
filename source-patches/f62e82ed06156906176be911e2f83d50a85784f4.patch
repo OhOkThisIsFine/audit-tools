@@ -1,0 +1,10 @@
+diff --git a/dispatch/validate.mjs b/dispatch/validate.mjs
+index fd9855be..cc89d17e 100644
+--- a/dispatch/validate.mjs
++++ b/dispatch/validate.mjs
+@@ -1,4 +1,4 @@
+-import { validateAuditResults } from "../dist/audit/validation/auditResults.js";
++import { validateAuditResults } from "../src/audit/validation/auditResults.ts";
+ 
+ /**
+  * Validate one audit result in the context of its assigned task.

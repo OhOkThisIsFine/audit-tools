@@ -1,0 +1,387 @@
+diff --git a/src/remediate/phases/close.ts b/src/remediate/phases/close.ts
+index 21506613..07c2289f 100644
+--- a/src/remediate/phases/close.ts
++++ b/src/remediate/phases/close.ts
+@@ -843,6 +843,24 @@ export function executeClosingAction(
+       }
+     }
+   } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
++    // TRUST-BOUNDARY EXEMPTION (close.ts:845-846, CP-NODE-2-f01 / CDC-012):
++    // custom_command is spawned here with NO allowlist check, deliberately.
++    // It is NOT run through CP-NODE-4's `isAllowedAnchorCommand` gate
++    // (src/shared/tooling/allowlistedExec.ts) — that gate's reach is scoped,
++    // by its own doc comment, to "the model-authored anchor/targeted command
++    // class ONLY": a default-deny allowlist of read-only inspection flags for
++    // grep/rg/git/etc, built for commands a model wrote and the tool must not
++    // fully trust. custom_command is the opposite trust shape: it is
++    // OPERATOR-DECLARED FIXED CONFIG carried on `state.closing_plan`, set once
++    // by the operator via session/plan config before the run starts — never
++    // runtime model output — and its whole purpose is to run an arbitrary
++    // operator-chosen release/deploy/automation command (e.g. `npm run
++    // deploy`, a build script, `gh` automation) that would never pass a
++    // read-only-inspection allowlist. Gating it there would break the feature,
++    // not secure it. It runs unconditionally on the same trust basis as the
++    // publish / tag / merge-to-base branches immediately above: all of them
++    // read from this same operator-configured `state.closing_plan`, never a
++    // per-call model decision.
+     run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
+   }
+ 
+@@ -1122,8 +1140,14 @@ function buildRemediationReportMarkdown(
+   // node actually committed a change — a no-change/skip-only run leaves no commits.
+   if (entries.resolved.length > 0) {
+     const branch = remediationBranchName(state.plan?.plan_id ?? "");
++    // Route through the single-sourced completion classification rather than a
++    // second literal `status === "success"` comparison (INV: no closingResult.
++    // status literal comparison exists outside closingActionCompleted itself).
++    // Equivalent here: closingActionCompleted's `skipped && action === "none"`
++    // disjunct can never fire once action is pinned to "merge-to-base" above,
++    // so this reduces to exactly the same `status === "success"` check.
+     const mergedToBase =
+-      closingResult.action === "merge-to-base" && closingResult.status === "success";
++      closingResult.action === "merge-to-base" && closingActionCompleted(closingResult);
+     reportContent += mergedToBase
+       ? `## Review\n\nAll code changes were applied on \`${branch}\` and merged into your base branch as one \`--no-ff\` merge commit (\`Merge remediation run ${state.plan?.plan_id ?? ""}\`). Review the diff; revert the whole run with \`git revert -m 1 <merge-commit>\` if needed.\n\n`
+       : `## Review\n\nAll code changes were applied on the dedicated branch \`${branch}\` — your base branch was left untouched. Review the diff and merge \`${branch}\` into your base branch (or re-run with the \`merge-to-base\` closing action to land it automatically).\n\n`;
+@@ -1297,9 +1321,14 @@ export async function cleanupTempBranchesAndArtifacts(
+   } catch (error) {
+     const reason = error instanceof Error ? error.message : String(error);
+     console.warn("Failed to clean up temporary git branches.", error);
++    // kind:"error" (not "outcome" — that kind is reserved for the one-line-
++    // per-finding remediation outcome emitted below; a cleanup failure is a
++    // run-level diagnostic, not a finding disposition. Mislabeling this
++    // duplicated the outcome-line count whenever this branch fired — see the
++    // matching fix a few lines down for the state-persist failure.)
+     runLogger?.event({
+       phase: "close",
+-      kind: "outcome",
++      kind: "error",
+       obligation: "closing",
+       note: `Failed to clean up temporary git branches: ${reason}`,
+     });
+@@ -1320,9 +1349,13 @@ export async function cleanupTempBranchesAndArtifacts(
+     console.warn(
+       `Failed to persist the final remediation state — a resumed run may re-execute closing actions: ${reason}`,
+     );
++    // kind:"error" — see the matching note on the branch-cleanup catch above:
++    // this is a run-level diagnostic (the final-state persist itself failed),
++    // never a per-finding outcome, so it must not share the "outcome" kind
++    // the per-finding loop below emits.
+     runLogger?.event({
+       phase: "close",
+-      kind: "outcome",
++      kind: "error",
+       obligation: "closing",
+       note: `Final state persist FAILED (run still reported complete): ${reason}`,
+     });
+diff --git a/tests/remediate/phase-close.test.ts b/tests/remediate/phase-close.test.ts
+index 6e8a58a8..4c52c94e 100644
+--- a/tests/remediate/phase-close.test.ts
++++ b/tests/remediate/phase-close.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+-import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger, executeClosingAction } from "../../src/remediate/phases/close.js";
++import { runClosePhase, collectStagingFiles, buildOutcomeCoverageLedger, executeClosingAction, cleanupTempBranchesAndArtifacts } from "../../src/remediate/phases/close.js";
+ import { remediationBaseBranchPath } from "../../src/remediate/steps/dispatch.js";
+ import { readFile, rm, mkdir, writeFile as writeFileAsync } from "node:fs/promises";
+ import { writeFileSync, mkdirSync, existsSync, readdirSync, readFileSync } from "node:fs";
+@@ -1274,6 +1274,75 @@ describe("runClosePhase", () => {
+     });
+   });
+ 
++  // Each of the four booleans `cleanupTempBranchesAndArtifacts`'s `fullyGreen`
++  // is built from — combinedTest.passed / e2eResult.passed / closingActionCompleted
++  // / !anyBlocked ("no unsuccessful item") — must independently gate deletion.
++  // `runClosePhase` never reaches cleanup with e2eResult.passed===false (it
++  // returns to triage first), so this isolates each flag by calling the
++  // exported cleanup function directly rather than through the whole phase.
++  describe("cleanupTempBranchesAndArtifacts: each fullyGreen flag independently preserves the artifacts dir (CP-NODE-2-f01)", () => {
++    const GREEN_COMBINED_TEST = { passed: true, duration_ms: 0, output: "" };
++    const GREEN_E2E_RESULT = { ran: false, passed: true, output: "" };
++    const GREEN_CLOSING_RESULT = {
++      contract_version: "remediate-code-closing-result/v1alpha1" as const,
++      action: "none" as const,
++      status: "skipped" as const,
++      commands: [],
++    };
++
++    it("combinedTest.passed=false alone (others green) preserves the artifacts dir", async () => {
++      const state = makeState({ items: {} });
++      await cleanupTempBranchesAndArtifacts(
++        BASE_OPTIONS,
++        state,
++        { ...GREEN_COMBINED_TEST, passed: false },
++        GREEN_E2E_RESULT,
++        GREEN_CLOSING_RESULT,
++      );
++      expect(existsSync(TEST_DIR)).toBe(true);
++    });
++
++    it("e2eResult.passed=false alone (others green) preserves the artifacts dir", async () => {
++      const state = makeState({ items: {} });
++      await cleanupTempBranchesAndArtifacts(
++        BASE_OPTIONS,
++        state,
++        GREEN_COMBINED_TEST,
++        { ran: true, passed: false, output: "" },
++        GREEN_CLOSING_RESULT,
++      );
++      expect(existsSync(TEST_DIR)).toBe(true);
++    });
++
++    it("closingActionCompleted=false alone (others green) preserves the artifacts dir", async () => {
++      const state = makeState({ items: {} });
++      await cleanupTempBranchesAndArtifacts(
++        BASE_OPTIONS,
++        state,
++        GREEN_COMBINED_TEST,
++        GREEN_E2E_RESULT,
++        { ...GREEN_CLOSING_RESULT, action: "commit", status: "failed" },
++      );
++      expect(existsSync(TEST_DIR)).toBe(true);
++    });
++
++    it("an unsuccessful (blocked) item alone (others green) preserves the artifacts dir", async () => {
++      const state = makeState({
++        items: {
++          F1: { finding_id: "F1", status: "blocked", block_id: "B1", failure_reason: "x" },
++        },
++      });
++      await cleanupTempBranchesAndArtifacts(
++        BASE_OPTIONS,
++        state,
++        GREEN_COMBINED_TEST,
++        GREEN_E2E_RESULT,
++        GREEN_CLOSING_RESULT,
++      );
++      expect(existsSync(TEST_DIR)).toBe(true);
++    });
++  });
++
+   it("buildRemediationReportMarkdown: combined test failure section only present when passed=false", async () => {
+     // Passing test command — no failure section should appear.
+     const state = makeState({
+@@ -1511,3 +1580,75 @@ describe("buildOutcomeCoverageLedger — review-gate declines (1c-2)", () => {
+     expect(entry.rationale).toMatch(/review gate/i);
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// CP-NODE-2-f01 obligation 3 / CDC-012: state.closing_plan.custom_command trust
++// boundary. custom_command is spawned at close.ts:845-846 with no allowlist
++// check. The finding requires the decision to be RECORDED — either (a) the
++// spawn is routed through CP-NODE-4's `isAllowedAnchorCommand` gate
++// (src/shared/tooling/allowlistedExec.ts), or (b) an explicit exemption naming
++// close.ts:845-846 with its rationale is recorded in the source. Resolution by
++// omission (neither) is forbidden — this contract test fails on silence.
++// ---------------------------------------------------------------------------
++
++describe("close.ts source — custom_command trust boundary is RECORDED (CP-NODE-2-f01 / CDC-012)", () => {
++  const CLOSE_TS_PATH = join(__dirname, "..", "..", "src", "remediate", "phases", "close.ts");
++
++  /**
++   * The decision is recorded when the text around the 'custom' action branch
++   * contains EITHER evidence of a gate call (isAllowedAnchorCommand) OR an
++   * exemption comment that both names the site (close.ts:845-846) and reads as
++   * an exemption/rationale, not an incidental mention.
++   */
++  function customCommandTrustDecisionRecorded(src: string): boolean {
++    const anchor = src.indexOf('action === "custom"');
++    if (anchor === -1) return false;
++    const window = src.slice(Math.max(0, anchor - 1200), anchor + 600);
++    const hasGate = /isAllowedAnchorCommand\(/.test(window);
++    const hasExemption =
++      /exemption/i.test(window) && /close\.ts:845-846/.test(window);
++    return hasGate || hasExemption;
++  }
++
++  it("sanity: the checker locates the real 'custom' action branch in close.ts", () => {
++    const src = readFileSync(CLOSE_TS_PATH, "utf8");
++    expect(src).toContain('action === "custom"');
++  });
++
++  it("the shipped close.ts records the trust-boundary decision (gate or exemption) for custom_command", () => {
++    const src = readFileSync(CLOSE_TS_PATH, "utf8");
++    expect(customCommandTrustDecisionRecorded(src)).toBe(true);
++  });
++
++  it("RED: recognizes a gated-spawn branch as satisfying the check", () => {
++    const gated = `
++      } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
++        if (!isAllowedAnchorCommand(state.closing_plan!.custom_command)) {
++          throw new Error("refused");
++        }
++        run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
++      }
++    `;
++    expect(customCommandTrustDecisionRecorded(gated)).toBe(true);
++  });
++
++  it("RED: neither a gate nor a recorded exemption fails the check", () => {
++    const neither = `
++      } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
++        // no gate, no exemption comment at all
++        run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
++      }
++    `;
++    expect(customCommandTrustDecisionRecorded(neither)).toBe(false);
++  });
++
++  it("RED: a bare mention of the citation without exemption language does not satisfy the check", () => {
++    const incidental = `
++      // see close.ts:845-846 for details
++      } else if (action === "custom" && state.closing_plan!.custom_command?.length) {
++        run(state.closing_plan!.custom_command[0], state.closing_plan!.custom_command.slice(1));
++      }
++    `;
++    expect(customCommandTrustDecisionRecorded(incidental)).toBe(false);
++  });
++});
+diff --git a/tests/remediate/remediate-phases-invariants.test.ts b/tests/remediate/remediate-phases-invariants.test.ts
+index b57054c0..366cde28 100644
+--- a/tests/remediate/remediate-phases-invariants.test.ts
++++ b/tests/remediate/remediate-phases-invariants.test.ts
+@@ -13,10 +13,14 @@
+  * TST-d1399aa3: groundAffectedFiles and evidenceCitesRealPath dedicated unit tests
+  * TST-761e8471: buildCoverageLedger disposition precedence with overlapping sets
+  * TST-cb981ad0: close.ts summarizeItemSpec and FINAL_STATUS_BY_OUTCOME via buildRemediationOutcomesReport
++ * INV-remediate-phases-11: close.ts carries no closingResult.status==="success" literal
++ *   comparison outside closingActionCompleted itself (single-sourced completion classification)
++ * INV-remediate-phases-12: runClosePhase does not preview-gate 'merge-to-base' or 'custom' —
++ *   both run immediately even with pre_authorized unset (CP-NODE-2-f01)
+  */
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { mkdir, rm, writeFile } from "node:fs/promises";
+-import { writeFileSync, mkdirSync } from "node:fs";
++import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+ import { join, dirname } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
+@@ -1099,3 +1103,127 @@ describe("buildRemediationOutcomesReport — TST-cb981ad0: summarizeItemSpec and
+     expect(outcome.final_status).toBe("fixed");
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// INV-remediate-phases-11: close.ts carries no closingResult.status==="success"
++// literal comparison outside closingActionCompleted itself. closingActionCompleted
++// is the single-sourced completion classification (COR-fb656e3f) the verification
++// trace, the report-level verdict, and the artifact-cleanup gate all key on; a
++// second hand-rolled `=== "success"` comparison elsewhere is the exact class of
++// drift that classification exists to prevent (CP-NODE-2-f01).
++// ---------------------------------------------------------------------------
++
++describe("close.ts source — INV-remediate-phases-11: single-sourced completion classification", () => {
++  const CLOSE_TS_PATH = join(__dirname, "..", "..", "src", "remediate", "phases", "close.ts");
++
++  /** The one legitimate declaration site, stripped before scanning for strays. */
++  const CLOSING_ACTION_COMPLETED_FN = /export function closingActionCompleted\([\s\S]*?\n\}\n/;
++
++  /**
++   * True when a `closingResult.status === "success"` (or `'success'`) literal
++   * comparison exists ANYWHERE in `src` outside closingActionCompleted's own body.
++   */
++  function hasStrayStatusComparison(src: string): boolean {
++    const withoutFn = src.replace(CLOSING_ACTION_COMPLETED_FN, "");
++    return /closingResult\.status\s*===\s*["']success["']/.test(withoutFn);
++  }
++
++  it("sanity: the stripped region really is closingActionCompleted and really contains the comparison", () => {
++    const src = readFileSync(CLOSE_TS_PATH, "utf8");
++    const fnMatch = src.match(CLOSING_ACTION_COMPLETED_FN);
++    expect(fnMatch, "closingActionCompleted must exist in close.ts").not.toBeNull();
++    expect(fnMatch![0]).toContain("export function closingActionCompleted");
++    expect(fnMatch![0]).toMatch(/closingResult\.status\s*===\s*"success"/);
++  });
++
++  it("the shipped close.ts carries no stray closingResult.status==='success' comparison", () => {
++    const src = readFileSync(CLOSE_TS_PATH, "utf8");
++    expect(hasStrayStatusComparison(src)).toBe(false);
++  });
++
++  it("RED: the check detects a reintroduced literal comparison outside closingActionCompleted", () => {
++    const src = readFileSync(CLOSE_TS_PATH, "utf8");
++    const regressed = src.replace(
++      "export function closingActionCompleted",
++      `function bogusDuplicateCheck(closingResult: ClosingResult) { return closingResult.status === "success"; }\nexport function closingActionCompleted`,
++    );
++    expect(hasStrayStatusComparison(regressed)).toBe(true);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// INV-remediate-phases-12: runClosePhase does not preview-gate 'merge-to-base'
++// or 'custom' — PREVIEW_ACTIONS is exactly {commit, push, open-pr, publish}, so
++// both run immediately on the first next-step call even when pre_authorized is
++// entirely unset (CP-NODE-2-f01 obligation 3 — custom_command trust boundary
++// depends on this: it is NOT gated behind an operator confirmation step).
++// ---------------------------------------------------------------------------
++
++describe("runClosePhase — INV-remediate-phases-12: 'merge-to-base' and 'custom' run immediately (no preview) with pre_authorized unset", () => {
++  const REPO_DIR = scratchDir(".test-phases-inv-12-repo");
++  const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "remediation");
++  const BASE_OPTIONS = { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR };
++
++  function makeClosingState(overrides: Record<string, unknown> = {}) {
++    return makeState({
++      status: "closing",
++      plan: {
++        plan_id: "P-INV12",
++        findings: [],
++        blocks: [],
++        project_type: "unknown",
++        candidate_closing_actions: ["none"],
++      },
++      closing_plan: { action: "none" },
++      ...overrides,
++    });
++  }
++
++  beforeEach(async () => {
++    await rm(REPO_DIR, { recursive: true, force: true });
++    await mkdir(ARTIFACTS_DIR, { recursive: true });
++    execSync("git init", { cwd: REPO_DIR });
++    execSync("git config user.email test@test.com", { cwd: REPO_DIR });
++    execSync("git config user.name Test", { cwd: REPO_DIR });
++    writeFileSync(join(REPO_DIR, "init.txt"), "init");
++    execSync("git add . && git commit -m init", { cwd: REPO_DIR });
++  });
++
++  afterEach(async () => {
++    await rm(REPO_DIR, { recursive: true, force: true });
++  });
++
++  it("action='custom' with pre_authorized UNSET actually spawns custom_command (no preview pause)", async () => {
++    const marker = join(REPO_DIR, "custom-ran.txt");
++    const state = makeClosingState({
++      closing_plan: {
++        action: "custom",
++        // pre_authorized deliberately absent — proves 'custom' is not gated on it.
++        custom_command: [
++          process.execPath,
++          "-e",
++          `require("fs").writeFileSync(${JSON.stringify(marker)}, "ran")`,
++        ],
++      },
++    });
++    const next = await runClosePhase(state, BASE_OPTIONS);
++    // Reached complete in one call — never paused at a confirmation preview.
++    expect(next.status).toBe("complete");
++    expect(next.closing_plan!.closing_action_preview).toBeUndefined();
++    // The command genuinely executed (not merely "not blocked").
++    expect(existsSync(marker)).toBe(true);
++  });
++
++  it("action='merge-to-base' with pre_authorized UNSET is not preview-gated (reaches complete, not a preview pause)", async () => {
++    const state = makeClosingState({
++      closing_plan: { action: "merge-to-base" }, // pre_authorized deliberately absent
++    });
++    const next = await runClosePhase(state, BASE_OPTIONS);
++    // merge-to-base is absent from PREVIEW_ACTIONS, so it runs straight to
++    // execution — no recorded base sidecar in this fixture means the merge
++    // itself comes back 'skipped', but the run must still reach 'complete'
++    // in one call, never pause on a confirmation preview.
++    expect(next.status).toBe("complete");
++    expect(next.closing_plan!.closing_action_preview).toBeUndefined();
++  });
++});

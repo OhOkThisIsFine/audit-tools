@@ -1,0 +1,465 @@
+{
+  "currentRemoteMain": "9538b256f884f50986347d8f172d6fdcdfa67aa3",
+  "sourcePatches": [
+    {
+      "originalCommit": "2648a0fb07499eb09292b5f75e6c5dc94d4b190c",
+      "originalParent": "68c04ec86551eeffab3ce2c9f170e0a0bd0166b7",
+      "status": "patch-equivalent on remote main",
+      "role": "branch/detached implementation",
+      "paths": [
+        "src/audit/cli/auditStep.ts",
+        "src/audit/cli/dispatch/hostHandoff.ts",
+        "src/audit/extractors/analyzers/complexityDuplication.ts",
+        "src/audit/extractors/graph.ts",
+        "src/audit/extractors/pathPatterns.ts",
+        "src/shared/findingIdentitySignature.ts",
+        "src/shared/git.ts",
+        "src/shared/validation/citationGrounding.ts",
+        "src/shared/validation/findingGrounding.ts",
+        "tests/audit/extractor-token-regressions.test.ts",
+        "tests/audit/graph-edge-cache.test.ts",
+        "tests/shared/basename-grounding-regression.test.ts",
+        "tests/shared/source-path-containment.test.ts",
+        "tests/shared/title-citation-regression.test.ts",
+        "tests/shared/working-tree-scratch-exclusion.test.ts"
+      ],
+      "patch": "source-patches/2648a0fb07499eb09292b5f75e6c5dc94d4b190c.patch",
+      "sha256": "13fc74e5fe60c3a92f19707acd37f2dc996c465bd45aad049b2d8397f98f207a",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "76791d98a98490ef7547f4293467ce0f2fce1317",
+      "originalParent": "486296f506033f06f26314b1d127d733210bb11b",
+      "status": "feature and regression cases already implemented in newer remote main",
+      "role": "branch/detached implementation",
+      "paths": [
+        "src/audit/cli/dispatch/hostHandoff.ts",
+        "src/audit/cli/semanticReviewStep.ts",
+        "src/audit/orchestrator/executorRunners.ts",
+        "src/audit/orchestrator/planningExecutors.ts",
+        "tests/audit/host-handoff.test.ts",
+        "tests/audit/planning-inflight-tasks.test.ts",
+        "tests/shared/contract-construction-sites.test.ts"
+      ],
+      "patch": "source-patches/76791d98a98490ef7547f4293467ce0f2fce1317.patch",
+      "sha256": "b42ad7f835d75b7725f1fbe278f659d5b6829dcd87c69533e3cbdc32d6db3a49",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "9adc1c06e8193018c8377ff6fa38c097a7d90162",
+      "originalParent": "a8e1949b3d83c075f87285f8ee2ff9b24191384f",
+      "status": "feature and regression cases already implemented in newer remote main",
+      "role": "branch/detached implementation",
+      "paths": [
+        "src/audit/cli/nextStepHelpers.ts",
+        "tests/audit/next-step-integrity-reintake.test.ts"
+      ],
+      "patch": "source-patches/9adc1c06e8193018c8377ff6fa38c097a7d90162.patch",
+      "sha256": "9e2867a8497be4f0b8201218b30e706d645353b8fb0e8e1eb92b7757b06868fd",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "034a734175b553e519c9ac437a39d6972240ef65",
+      "originalParent": "35b2dde7c7b8e0f3bed46afa11588e283321e987",
+      "status": "already integrated equivalent/effects",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/steps/dispatch/verifyCommands.ts",
+        "src/shared/quota/state.ts",
+        "wrapper/remediate-code-wrapper-install-hosts.mjs",
+        "wrapper/remediate-code-wrapper-io.mjs"
+      ],
+      "patch": "source-patches/034a734175b553e519c9ac437a39d6972240ef65.patch",
+      "sha256": "12de064309804390b6aae50eea3fd9eacdc76e9a7ed66b811d1064d8ff5a1d53",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "42b1f1340dc6169e8f07d88bc6d7a310ea92e487",
+      "originalParent": "d85b3a70627fc4c2f796425df6ca83069d382734",
+      "status": "already integrated equivalent/effects",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "dispatch/merge-results.mjs",
+        "dispatch/validate-result.mjs",
+        "src/audit/cli/nextStepHelpers.ts",
+        "src/audit/decompose/findings.ts",
+        "src/remediate/contractPipeline/changeClassification.ts",
+        "src/shared/findings/dedupe.ts",
+        "src/shared/friction/triage.ts",
+        "src/shared/io/nodeWorktreeGuard.ts",
+        "src/shared/providers/spawnLoggedCommand.ts",
+        "src/shared/quota/claudeOAuthQuotaSource.ts",
+        "src/shared/quota/state.ts",
+        "tests/audit/adapters-remediation.test.ts",
+        "tests/audit/audit-dispatch-observability.test.ts",
+        "tests/audit/charter-clarification.test.ts",
+        "tests/audit/f3-schema-enforced-generation.test.ts",
+        "tests/audit/graph-signal-metrics.test.ts",
+        "tests/audit/hybrid-dispatch.test.ts",
+        "tests/audit/test-helpers.ts",
+        "tests/helpers/jsonEventFilter.ts",
+        "tests/remediate/partial-completion-terminal.test.ts",
+        "tests/shared/finding-identity-single-source.test.ts",
+        "tests/shared/friction-derived-observations.test.ts",
+        "tests/shared/grounding-runner-single-source.test.ts",
+        "tests/shared/id-glossary.test.ts",
+        "tests/shared/io-hash-primitives-single-source.test.ts",
+        "tests/shared/shared-core-invariants.test.ts",
+        "tests/shared/spawnLoggedCommand.test.ts",
+        "tests/shared/testFileUtils.ts",
+        "wrapper/remediate-code-wrapper-install-hosts.mjs",
+        "wrapper/remediate-code-wrapper-io.mjs"
+      ],
+      "patch": "source-patches/42b1f1340dc6169e8f07d88bc6d7a310ea92e487.patch",
+      "sha256": "b25df04d832744b4b18db289bb67e40eee67267619729dba47fe50e5d9631215",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "6853334dd77c8473a866501f72047d3890fcadbe",
+      "originalParent": "d85b3a70627fc4c2f796425df6ca83069d382734",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/state/store.ts",
+        "src/shared/io/nodeWorktreeGuard.ts",
+        "tests/helpers/state-dir-setup.mjs",
+        "tests/remediate/n-r13-document-phase-dissolved.test.ts"
+      ],
+      "patch": "source-patches/6853334dd77c8473a866501f72047d3890fcadbe.patch",
+      "sha256": "6ca07691ba662ca4f3bf7b7c20ebd876b8a1cebaa8493a4fbe3b16c5fff4152d",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "71d333702e450bf9566aa375cd0bc880e2db1e37",
+      "originalParent": "d85b3a70627fc4c2f796425df6ca83069d382734",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "scripts/audit/postinstall.mjs"
+      ],
+      "patch": "source-patches/71d333702e450bf9566aa375cd0bc880e2db1e37.patch",
+      "sha256": "12a92e4b37d2e05ea3e1369f7a46fb9e3efde33657eb303c734b27fa6f1122eb",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "87fab958c957fbc02b9125181a26c0f42ac629f6",
+      "originalParent": "e491a129239e79ab5c24b841456a160175e8b32b",
+      "status": "retired target paths: historical archival material",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/steps/dispatch/marshal.ts"
+      ],
+      "patch": "source-patches/87fab958c957fbc02b9125181a26c0f42ac629f6.patch",
+      "sha256": "97c85273bffae2d16a03fd252f125a006e32f54b6d1a705229e6d991223e1ce9",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "f62e82ed06156906176be911e2f83d50a85784f4",
+      "originalParent": "d85b3a70627fc4c2f796425df6ca83069d382734",
+      "status": "historical run logs only; no source implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "dispatch/validate.mjs"
+      ],
+      "patch": "source-patches/f62e82ed06156906176be911e2f83d50a85784f4.patch",
+      "sha256": "56d6b0e1082737eba2f09a47857e8d40144123535da0fd3bb1d0f8e29f90f916",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "c0b943f0e5274be15e2ef853abc1c46b5000b9d1",
+      "originalParent": "9296fdd3a98fc98241feab15b617ab27fe0c587f",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/audit/supervisor/sessionConfig.ts",
+        "src/remediate/steps/sessionConfigLoad.ts",
+        "src/shared/index.ts",
+        "src/shared/types/sessionConfig.ts",
+        "src/shared/validation/sessionConfig.ts",
+        "tests/remediate/session-config-load.test.ts"
+      ],
+      "patch": "source-patches/c0b943f0e5274be15e2ef853abc1c46b5000b9d1.patch",
+      "sha256": "896ac7e0f980a589a7c66c46e1e6d98b17a2319c955cc63d7407bbe07b7be0d7",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "9e8e1a5b049377280d6540a11a278b7a90ea9bbe",
+      "originalParent": "d3d6a4dbf7f551cefc3f75fd80c1bcf79987c2cd",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/shared/io/nodeWorktreeGuard.ts",
+        "tests/helpers/global-setup.ts"
+      ],
+      "patch": "source-patches/9e8e1a5b049377280d6540a11a278b7a90ea9bbe.patch",
+      "sha256": "3cbf8075fbc44841e66682b83b37013e6fa69864d1cb9f8988f2e63313137d20",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "f0fdfb679ef18342365747ca4c3b68dbab0db6eb",
+      "originalParent": "d3d6a4dbf7f551cefc3f75fd80c1bcf79987c2cd",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/state/store.ts",
+        "src/remediate/steps/rollingSession.ts",
+        "tests/helpers/state-dir-setup.mjs"
+      ],
+      "patch": "source-patches/f0fdfb679ef18342365747ca4c3b68dbab0db6eb.patch",
+      "sha256": "ea4e92762d632d48b9ccf7995043647317d3dc9243f8ae662d4badd82fe3a51f",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "07cbe4eb176efa27e96ff2ad1b522092465cd797",
+      "originalParent": "9b65ebc2e1a4e613394d9efbb8fdab0245119cc7",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/steps/nextStep.ts"
+      ],
+      "patch": "source-patches/07cbe4eb176efa27e96ff2ad1b522092465cd797.patch",
+      "sha256": "6c182f0fa31ee09be89c029270602f940b05094b0921662992190a966b68454a",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "4a77182c59f327691638365a0f6bc58f4dfc8fc3",
+      "originalParent": "726b406c54d7e79a33b04deef3e1d801eda89253",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/state/store.ts",
+        "src/remediate/steps/dispatch/marshal.ts"
+      ],
+      "patch": "source-patches/4a77182c59f327691638365a0f6bc58f4dfc8fc3.patch",
+      "sha256": "73809b3e6936f292461497a355ef351387b60161d84a2cf89c38f79487255e88",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "504438fc2ed34752e0bdc63a6dfab23be25ea97a",
+      "originalParent": "d85b3a70627fc4c2f796425df6ca83069d382734",
+      "status": "retired target paths: historical archival material",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "tests/remediate/dispatch-worktree-safety.test.ts"
+      ],
+      "patch": "source-patches/504438fc2ed34752e0bdc63a6dfab23be25ea97a.patch",
+      "sha256": "3c66e966e6c8112eccd17dd892b4ee3b0f8e7a7b9250991632a3891a7985ea91",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "c9d2ed32ed10bd7b2e4ded90508aabbaffb9dcd5",
+      "originalParent": "939d84e6ef29de6965255d7adf75acf780a2178d",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/state/store.ts",
+        "tests/remediate/artifacts-validation.test.ts"
+      ],
+      "patch": "source-patches/c9d2ed32ed10bd7b2e4ded90508aabbaffb9dcd5.patch",
+      "sha256": "3ef5aa2be46274b65e7152b4a6a2ebe0ee115780817d821aa0842e77a5b3b4cb",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "9186c92a4ad86501d2bd632b5d8e69234464e97c",
+      "originalParent": "aa1e8c6159f2f02cc5d8d3043adb61a24ff420aa",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/steps/nextStep.ts"
+      ],
+      "patch": "source-patches/9186c92a4ad86501d2bd632b5d8e69234464e97c.patch",
+      "sha256": "c3917fe9c90621d79c72e801288726f98d70699c14a09e924d3611a0b0afc967",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "aa1e8c6159f2f02cc5d8d3043adb61a24ff420aa",
+      "originalParent": "8afb66d7e4115c86159389afa76a4a44062ad811",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/steps/nextStep.ts"
+      ],
+      "patch": "source-patches/aa1e8c6159f2f02cc5d8d3043adb61a24ff420aa.patch",
+      "sha256": "f68a94b616082d0739fa3215e3b5d910c1b7f7fc2ec1966ac02cb8e7a95bde62",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "bb6dd4440bb58dae467d5a976645074fc2b2a629",
+      "originalParent": "52f40b6ed8d7ab5bc2fb396f4413c61e32bd8cd3",
+      "status": "already integrated equivalent/effects",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "tests/audit/observability-signals.test.ts"
+      ],
+      "patch": "source-patches/bb6dd4440bb58dae467d5a976645074fc2b2a629.patch",
+      "sha256": "d4422a9c74578784007fdf2d856a8f5098240c4d0d04d09b9080223ef732a164",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "4148234b56851ca155dd67c52cd443075778a73e",
+      "originalParent": "7ea5c79956b9590328fd7d103cdc6a0d7a8164c1",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/phases/close.ts"
+      ],
+      "patch": "source-patches/4148234b56851ca155dd67c52cd443075778a73e.patch",
+      "sha256": "d938c1a75b97d55a0ac55fd17c746e349a098e0c03a4ada2fa7726c7420f2144",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "7ea5c79956b9590328fd7d103cdc6a0d7a8164c1",
+      "originalParent": "8703ee5530aa9d7459140f24d4aec5ecd53de3b0",
+      "status": "retired target paths: historical archival material",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "tests/remediate/n-r22-ownership-registry.test.ts"
+      ],
+      "patch": "source-patches/7ea5c79956b9590328fd7d103cdc6a0d7a8164c1.patch",
+      "sha256": "615f8c6a69fdbbec5df715373b7e82f17c2de355cce2c81a09c1b9207d31c359",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "a4e1cbd9ac7c291edc8395e5ed9b56e522be1577",
+      "originalParent": "4e0ab074c7c5b9b12e4091f7a2f4f7f13fdabdd4",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/phases/close.ts",
+        "tests/remediate/phase-close.test.ts",
+        "tests/remediate/remediate-phases-invariants.test.ts"
+      ],
+      "patch": "source-patches/a4e1cbd9ac7c291edc8395e5ed9b56e522be1577.patch",
+      "sha256": "bb7b9c4beefaaf1db340d035dec06c5d1180ec2bbc0d3fdf33e9deb4ba32b77a",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "4e0ab074c7c5b9b12e4091f7a2f4f7f13fdabdd4",
+      "originalParent": "10ce04b338df533043a323e9e95eed7582bf5ce2",
+      "status": "retired target paths: historical archival material",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "tests/remediate/n-r22-ownership-registry.test.ts"
+      ],
+      "patch": "source-patches/4e0ab074c7c5b9b12e4091f7a2f4f7f13fdabdd4.patch",
+      "sha256": "39f02c31ad994e835626dafae207fdd156c9bfda47f77fbc8d32f231ebe32cce",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "9dd1c274db68cff43fe0a3eb3bdb06951b5127ca",
+      "originalParent": "731327c2af7b8e47cb3c1b43433916ef99d5f4ed",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/phases/close.ts"
+      ],
+      "patch": "source-patches/9dd1c274db68cff43fe0a3eb3bdb06951b5127ca.patch",
+      "sha256": "213456ab8484836bd14127d6b4514953df507f59970c6fe8c4f65e78ae624cf5",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "52f40b6ed8d7ab5bc2fb396f4413c61e32bd8cd3",
+      "originalParent": "8703ee5530aa9d7459140f24d4aec5ecd53de3b0",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/audit/cli/dispatch.ts",
+        "src/audit/cli/dispatch/pausePersist.ts",
+        "src/audit/cli/lineIndex.ts",
+        "src/audit/cli/rollingAuditDispatch.ts",
+        "tests/audit/line-index.test.ts",
+        "tests/audit/partial-completion-terminal.test.ts",
+        "tests/audit/rolling-audit-dispatch.test.ts"
+      ],
+      "patch": "source-patches/52f40b6ed8d7ab5bc2fb396f4413c61e32bd8cd3.patch",
+      "sha256": "5bd36997f89b09f3404528b810bb1a82ca4e60d6b36bfe150f9681e7997f8292",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "10ce04b338df533043a323e9e95eed7582bf5ce2",
+      "originalParent": "8703ee5530aa9d7459140f24d4aec5ecd53de3b0",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/dispatch/ownershipRegistry.ts",
+        "src/remediate/intake.ts",
+        "tests/remediate/intake-sources-and-digest.test.ts",
+        "tests/remediate/n-r22-ownership-registry.test.ts"
+      ],
+      "patch": "source-patches/10ce04b338df533043a323e9e95eed7582bf5ce2.patch",
+      "sha256": "01be6126b09e66d236d1a01eecce6dc832030ba428cde1a29f645c4ee7b89b30",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "731327c2af7b8e47cb3c1b43433916ef99d5f4ed",
+      "originalParent": "8703ee5530aa9d7459140f24d4aec5ecd53de3b0",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/remediate/phases/close.ts",
+        "tests/remediate/phase-close.test.ts",
+        "tests/remediate/remediate-phases-invariants.test.ts"
+      ],
+      "patch": "source-patches/731327c2af7b8e47cb3c1b43433916ef99d5f4ed.patch",
+      "sha256": "ef614f25854ace5ecc1c105adba50cd8d9c14f20833dd98ccb1d110ab1d5bf37",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "8703ee5530aa9d7459140f24d4aec5ecd53de3b0",
+      "originalParent": "380476eb29ff6a1c2713194476cb43882b5a87ae",
+      "status": "already integrated equivalent/effects",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/shared/rolling/pausedState.ts",
+        "tests/shared/pausedState.test.ts"
+      ],
+      "patch": "source-patches/8703ee5530aa9d7459140f24d4aec5ecd53de3b0.patch",
+      "sha256": "cd4c637e89c3cdb5f152a76400f0d28389238b576641ae11ea0dbb269c3ee1e1",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "d2d164c0ac0366c215c306f8bf72b2e722d22ab4",
+      "originalParent": "bc6f8ae642be7a3f387d4344cb290c468bf70f8e",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/shared/index.ts",
+        "src/shared/providers/providerFactory.ts",
+        "src/shared/tooling/allowlistedExec.ts",
+        "src/shared/tooling/projectTestAdmission.ts",
+        "tests/shared/allowlisted-exec-runner-internals.test.ts",
+        "tests/shared/allowlisted-exec.test.ts",
+        "tests/shared/projectTestAdmission-spawn-control.test.ts",
+        "tests/shared/projectTestAdmission.test.ts",
+        "tests/shared/provider-construction-and-resolution.test.ts",
+        "tests/shared/spawnLoggedCommand.test.ts"
+      ],
+      "patch": "source-patches/d2d164c0ac0366c215c306f8bf72b2e722d22ab4.patch",
+      "sha256": "24984d328cf090aff737b7002cb32b1871085a9a1cb275bf7cb2b4b2c8ade5df",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    },
+    {
+      "originalCommit": "bc6f8ae642be7a3f387d4344cb290c468bf70f8e",
+      "originalParent": "93c2a3abf7b1b11b75e66b6b7cdd60e893eac3c0",
+      "status": "mixed/current target paths: preserve quarantined candidate; not approved implementation",
+      "role": "quarantined historical remediation",
+      "paths": [
+        "src/shared/findings/dedupe.ts",
+        "tests/audit/merge-findings-dedup.test.ts",
+        "tests/shared/cross-lens-dedupe.test.ts"
+      ],
+      "patch": "source-patches/bc6f8ae642be7a3f387d4344cb290c468bf70f8e.patch",
+      "sha256": "35c3da41dcecdf46963a0615c8b187e9127aaf36a71368a75ef3d31d794d40b7",
+      "qualification": "Source-history reference only. Not applied, not independently accepted as a current-runtime fix."
+    }
+  ],
+  "documentationPatch": "documentation-cleanup.patch",
+  "documentationSnapshots": [
+    ".claude/skills/ship/SKILL.md",
+    "docs/backlog/forward-tracks.md",
+    "docs/backlog/minor-bugs.md",
+    "docs/glossary-ids.md"
+  ],
+  "hookReference": "hindsight-post-commit-reference.sh.txt",
+  "excluded": "Run logs, audit/remediation artifacts, credentials, dependencies, local settings, stash/quarantine raw commit ancestry and database/service storage."
+}

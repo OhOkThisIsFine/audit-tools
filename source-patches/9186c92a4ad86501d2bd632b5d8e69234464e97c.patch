@@ -1,0 +1,21 @@
+diff --git a/src/remediate/steps/nextStep.ts b/src/remediate/steps/nextStep.ts
+index 8af0b21f..256cfce4 100644
+--- a/src/remediate/steps/nextStep.ts
++++ b/src/remediate/steps/nextStep.ts
+@@ -100,6 +100,7 @@ import { runTriagePhase } from "../phases/triage.js";
+ import { runClosePhase } from "../phases/close.js";
+ import { validateRemediationPlan } from "../validation/remediationState.js";
+ import {
++  type AcceptNodeWorktreeResult,
+   mergeImplementResults,
+   prepareImplementDispatch,
+   readExtractedPlanIfPresent,
+@@ -1451,7 +1452,7 @@ export async function driveRollingImplementDispatch(
+     // `accept-node` callback. `touched_files` is the block's authoritative declared
+     // write set (the source the dispatch plan's write scope is derived from).
+     let result: RollingDispatchResult<{ block_id: string }>;
+-    let accept: NodeAcceptance;
++    let accept: AcceptNodeWorktreeResult;
+     try {
+       ({ result, accept } = await executeNodeInWorktree({
+         block,

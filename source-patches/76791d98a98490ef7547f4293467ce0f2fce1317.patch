@@ -1,0 +1,575 @@
+diff --git a/src/audit/cli/dispatch/hostHandoff.ts b/src/audit/cli/dispatch/hostHandoff.ts
+index 83753b24..92612e12 100644
+--- a/src/audit/cli/dispatch/hostHandoff.ts
++++ b/src/audit/cli/dispatch/hostHandoff.ts
+@@ -4,13 +4,18 @@ import { recordHostRootLogBoundary } from "../../../shared/observability/rootLog
+ // optional envelope key, the refusal of that key on a lane whose contract never
+ // asked for it, the enforcement of every property the prompt states, and the
+ // task-bindings version bump whose refusal names the remedy)
++import type { ArtifactBundle } from "../../io/artifacts.js";
++import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
++import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
+ import { mkdir } from "node:fs/promises";
+ import { join } from "node:path";
+ import { lensDefinition } from "../../types.js";
+ 
+ import {
+   createMemoizedSourceReader,
++  deriveLaneDemand,
+   appendSubmissionEvent,
++  assertSubmissionRunId,
+   SUBMISSION_LEDGER_EVENT_CONTRACT_VERSION,
+   bindingIdentity,
+   compareCodeUnits,
+@@ -221,6 +226,54 @@ export interface AuditHostTask {
+ /** One surface file's metrics, exactly as `AuditTask.file_metrics` declares them. */
+ type LensSurfaceFileMetric = NonNullable<AuditTask["file_metrics"]>[number];
+ 
++/**
++ * The audit draw's lane demand.
++ *
++ * The bounding rules are the SHARED ones ({@link deriveLaneDemand}); the draw
++ * supplies only the genuinely per-mode input — its frozen, content-derived
++ * `risk_estimate`. The banding helpers that used to live here read the task's
++ * `priority` enum as if it were a risk score, which is what put a coarsely
++ * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
++ */
++export function toAuditHostTask(task: AuditTask, manifest: ArtifactBundle["repo_manifest"]): AuditHostTask {
++  const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
++  const demand = deriveLaneDemand({
++    tokenEstimate,
++    fileCount: task.file_paths.length,
++    riskScore: task.risk_estimate ?? 0,
++  });
++  // construction-site: AuditTask (the host-facing work item; `demand` is handoff metadata, the rest is the contract)
++  return {
++    task_id: task.task_id,
++    unit_id: task.unit_id,
++    pass_id: task.pass_id,
++    lens: task.lens,
++    file_paths: task.file_paths,
++    file_line_counts: task.file_line_counts ?? {},
++    rationale: task.rationale + "\nSource revision: " + JSON.stringify(task.file_paths.map((path) => ({
++      path, hash: manifest?.files.find((file) => file.path === path)?.hash ?? "unversioned",
++    }))),
++    priority: task.priority ?? "low",
++    demand,
++    token_estimate: tokenEstimate,
++    // The lane tags ride the harness so the boundary can tell the steward lane
++    // (whose contract asks for `verification` metadata) from the base one. A
++    // boundary that cannot see the lane cannot render a lane-aware contract, and
++    // this mapper is where that signal was being dropped.
++    ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
++    // The coverage policy and the surface metrics ride the harness for the same
++    // reason the tags do: the boundary decides from them whether the result must
++    // cover every assigned file, and what the lane is told about the surface it
++    // chooses from. Dropped here, a steward would be dispatched its whole
++    // surface under the COMPLETE gate and refused for not reading all of it.
++    ...(task.coverage_policy === undefined
++      ? {}
++      : { coverage_policy: task.coverage_policy }),
++    ...(task.file_metrics === undefined ? {} : { file_metrics: task.file_metrics }),
++  };
++}
++
++
+ export interface AuditHostWorkItem {
+   readonly id: string;
+   readonly lens: string;
+@@ -1550,6 +1603,49 @@ function validateHandoffBinding(
+   return items;
+ }
+ 
++/** Snapshot current publication under its existing lock; release before planning. */
++export async function readPublishedAuditTaskIds(params: {
++  root: string; artifactsDir: string; tasks: readonly AuditTask[];
++  manifest: ArtifactBundle["repo_manifest"]; lineIndex: Readonly<Record<string, number>>; logger?: RunLogger;
++}): Promise<ReadonlySet<string>> {
++  let run;
++  try { run = ActiveReviewRunSchema.safeParse(await readJsonFile<unknown>(join(params.artifactsDir, "dispatch", CURRENT_TASK_FILENAME))); }
++  catch (error) { if (isFileMissingError(error) || isJsonParseError(error)) return new Set(); throw error; }
++  if (!run.success) return new Set();
++  // The pointer schema accepts strings; only the existing run-id grammar may
++  // authorize a directory segment. An unusable pointer is not publication.
++  try { assertSubmissionRunId(run.data.run_id); }
++  catch { return new Set(); }
++  const paths = resolveBoundaryPaths({ root: params.root, artifactsDir: params.artifactsDir, runId: run.data.run_id });
++  return withAcceptedResultsLock(paths, params.logger, async () => {
++    let items: Map<string, AuditHostWorkItem>;
++    let bindings: Map<string, AuditHostTaskBinding>;
++    try {
++      const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId);
++      const resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), paths.runId);
++      bindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), paths.runId);
++      items = validateHandoffBinding(paths, workload, resultMap, bindings);
++    } catch (error) {
++      if (isFileMissingError(error) || isJsonParseError(error) || error instanceof StaleAuditHostWorkloadError ||
++        error instanceof StaleAuditHostTaskBindingsError || error instanceof AuditHostBindingError) return new Set<string>();
++      throw error;
++    }
++    const ids = new Set<string>();
++    for (const task of params.tasks) {
++      const item = items.get(task.task_id), binding = bindings.get(task.task_id);
++      if (!item || !binding || task.file_paths.some(path => !Number.isInteger(params.lineIndex[path]) || params.lineIndex[path]! < 0)) continue;
++      const measuredTask = { ...task, file_line_counts: Object.fromEntries(task.file_paths.map(path => [path, params.lineIndex[path]!])) };
++      const expected = buildWorkItem(paths, toAuditHostTask(measuredTask, params.manifest));
++      if (binding.pass_id !== task.pass_id || !sameStrings([...binding.tags], task.tags ?? []) ||
++          binding.coverage_policy !== (task.coverage_policy ?? "complete")) continue;
++      // Re-render with CURRENT source revisions and review/lens contract code,
++      // not merely the historical tuple's self-consistency.
++      if (stableStringify(expected) === stableStringify(item)) ids.add(task.task_id);
++    }
++    return ids;
++  });
++}
++
+ /** Recognized tool-owned binding corruption; the owning emitter can re-prepare it. */
+ class AuditHostBindingError extends Error {
+   readonly code = "workload_stale" as const;
+diff --git a/src/audit/cli/semanticReviewStep.ts b/src/audit/cli/semanticReviewStep.ts
+index 53d56f96..017f0f4f 100644
+--- a/src/audit/cli/semanticReviewStep.ts
++++ b/src/audit/cli/semanticReviewStep.ts
+@@ -1,11 +1,10 @@
+ // sites-pinned: tests/audit/host-handoff.test.ts
+ // (the steward-lane verification
+-// contract — `toHostTask` is where the lane tags were being dropped, so this is
++// contract — `toAuditHostTask` is where the lane tags were being dropped, so this is
+ // the site whose revert makes the prompt branch unreachable)
+ import { resolve } from "node:path";
+ 
+ import {
+-  deriveLaneDemand,
+   linkFrictionRunIds,
+   readJsonFile,
+ } from "audit-tools/shared";
+@@ -23,58 +22,12 @@ import {
+ import { renderIngestReportLines } from "audit-tools/shared";
+ import {
+   prepareAuditHostHandoff,
+-  type AuditHostTask,
++  toAuditHostTask,
+   type AuditHostValidationWarning,
+ } from "./dispatch/hostHandoff.js";
+ import { nextStepCommand } from "./prompts.js";
+ import { writeCurrentStep } from "./steps.js";
+ 
+-/**
+- * The audit draw's lane demand.
+- *
+- * The bounding rules are the SHARED ones ({@link deriveLaneDemand}); the draw
+- * supplies only the genuinely per-mode input — its frozen, content-derived
+- * `risk_estimate`. The banding helpers that used to live here read the task's
+- * `priority` enum as if it were a risk score, which is what put a coarsely
+- * bucketed dispatch PRIORITY where a likelihood×stakes estimate belongs.
+- */
+-function toHostTask(task: AuditTask, manifest: ArtifactBundle["repo_manifest"]): AuditHostTask {
+-  const tokenEstimate = Math.max(0, Math.floor(task.token_estimate ?? 0));
+-  const demand = deriveLaneDemand({
+-    tokenEstimate,
+-    fileCount: task.file_paths.length,
+-    riskScore: task.risk_estimate ?? 0,
+-  });
+-  // construction-site: AuditTask (the host-facing work item; `demand` is handoff metadata, the rest is the contract)
+-  return {
+-    task_id: task.task_id,
+-    unit_id: task.unit_id,
+-    pass_id: task.pass_id,
+-    lens: task.lens,
+-    file_paths: task.file_paths,
+-    file_line_counts: task.file_line_counts ?? {},
+-    rationale: task.rationale + "\nSource revision: " + JSON.stringify(task.file_paths.map((path) => ({
+-      path, hash: manifest?.files.find((file) => file.path === path)?.hash ?? "unversioned",
+-    }))),
+-    priority: task.priority ?? "low",
+-    demand,
+-    token_estimate: tokenEstimate,
+-    // The lane tags ride the harness so the boundary can tell the steward lane
+-    // (whose contract asks for `verification` metadata) from the base one. A
+-    // boundary that cannot see the lane cannot render a lane-aware contract, and
+-    // this mapper is where that signal was being dropped.
+-    ...(Array.isArray(task.tags) ? { tags: task.tags } : {}),
+-    // The coverage policy and the surface metrics ride the harness for the same
+-    // reason the tags do: the boundary decides from them whether the result must
+-    // cover every assigned file, and what the lane is told about the surface it
+-    // chooses from. Dropped here, a steward would be dispatched its whole
+-    // surface under the COMPLETE gate and refused for not reading all of it.
+-    ...(task.coverage_policy === undefined
+-      ? {}
+-      : { coverage_policy: task.coverage_policy }),
+-    ...(task.file_metrics === undefined ? {} : { file_metrics: task.file_metrics }),
+-  };
+-}
+ 
+ /**
+  * Publish the complete semantic-review workload. The host owns every execution
+@@ -125,7 +78,7 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
+     root,
+     artifactsDir,
+     runId: activeReviewRun.run_id,
+-    tasks: tasks.map((task) => toHostTask(task, params.bundle.repo_manifest)),
++    tasks: tasks.map((task) => toAuditHostTask(task, params.bundle.repo_manifest)),
+     pendingTaskCount: pendingTasks.length,
+   });
+   // Name this round's runs on the audit friction record, which is keyed by a fixed
+diff --git a/src/audit/orchestrator/executorRunners.ts b/src/audit/orchestrator/executorRunners.ts
+index c0838c58..3a2f5cfd 100644
+--- a/src/audit/orchestrator/executorRunners.ts
++++ b/src/audit/orchestrator/executorRunners.ts
+@@ -12,6 +12,7 @@ import {
+   runStructureDecompositionExecutor,
+ } from "./structureExecutors.js";
+ import { runPlanningExecutor } from "./planningExecutors.js";
++import { readPublishedAuditTaskIds } from "../cli/dispatch/hostHandoff.js";
+ import {
+   runResultIngestionExecutor,
+   runRuntimeValidationExecutor,
+@@ -157,6 +158,8 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
+       options.lineIndex ?? {},
+       options.sizeIndex,
+       plannedScope,
++      options.artifactsDir ? await readPublishedAuditTaskIds({ root, artifactsDir: options.artifactsDir,
++        tasks: bundle.audit_tasks ?? [], manifest: bundle.repo_manifest, lineIndex: options.lineIndex ?? {}, logger: log }) : new Set(),
+     );
+   },
+   result_ingestion_executor: async (bundle, { options }) =>
+diff --git a/src/audit/orchestrator/planningExecutors.ts b/src/audit/orchestrator/planningExecutors.ts
+index add11555..98ea0af3 100644
+--- a/src/audit/orchestrator/planningExecutors.ts
++++ b/src/audit/orchestrator/planningExecutors.ts
+@@ -35,11 +35,14 @@ import {
+   readCoverageElementBaselines,
+   recordCoverageElementBaselines,
+   withCoverageElementBaselines,
++  deriveCoverageElementKey,
+ } from "./coverageElementBaseline.js";
+ import { interpretFreeFormIntentForAudit } from "./intentInterpreter.js";
+ import type { ExecutorRunResult } from "./executorResult.js";
+ import type { AuditTask, Lens } from "../types.js";
+ import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
++import { isSha256, stableStringify } from "audit-tools/shared";
++import { derivePendingTaskPartition } from "./pendingTasks.js";
+ 
+ // ---------------------------------------------------------------------------
+ // Free-form intent interpreter (keyword → lens boost, deterministic, no LLM)
+@@ -77,6 +80,7 @@ export async function runPlanningExecutor(
+   lineIndex: Record<string, number> = {},
+   sizeIndex?: Record<string, number>,
+   scope?: AuditScopeManifest,
++  publishedTaskIds: ReadonlySet<string> = new Set(),
+ ): Promise<ExecutorRunResult> {
+   if (!bundle.repo_manifest) {
+     throw new Error("Cannot run planning executor without repo_manifest");
+@@ -201,12 +205,35 @@ export async function runPlanningExecutor(
+     );
+   }
+ 
+-  const auditTasks = buildChunkedAuditTasks(coverage, lineIndex, {
++  const taskBuildOptions = {
+     external_analyzer_results: externalAnalyzerResults,
+     critical_flows: bundle.critical_flows,
+     ...(effectiveLenses !== undefined ? { limit_lenses: effectiveLenses } : {}),
+     ...(intentBoostLenses.length > 0 ? { intent_priority_boost: intentBoostLenses } : {}),
+-  });
++  };
++  // Ask the existing flow-first builder who owns every current review subject,
++  // including paths another result already covered, before reserving old work.
++  const assignmentTasks = buildChunkedAuditTasks({ ...coverage, files: coverage.files.map(file => file.audit_status === "excluded" ? file :
++    { ...file, audit_status: "pending" as const, completed_lenses: [] }) }, lineIndex, taskBuildOptions);
++  const assignment = (task: AuditTask): string => stableStringify({ unit_id: task.unit_id, pass_id: task.pass_id,
++    priority: task.priority, tags: (task.tags ?? []).filter(tag => tag !== "line_budget_split").sort() });
++  const liveAssignments = new Map(assignmentTasks.flatMap(task => task.file_paths.map(path => [`${task.lens}:${path}`, assignment(task)] as const)));
++  const liveCoverage = new Map(coverage.files.map(file => [file.path, file]));
++  const oldBaselines = readCoverageElementBaselines(bundle.artifact_metadata);
++  const partition = derivePendingTaskPartition(bundle);
++  const preservedReviewTasks = partition.pendingTasks.filter(task => publishedTaskIds.has(task.task_id) &&
++    !partition.staleResultTaskIds.has(task.task_id) && !task.tags?.includes(DEEPENING_TAG) && !isArchitectureDiscoveryTask(task) &&
++    task.file_paths.every(path => {
++      const file = liveCoverage.get(path);
++      const source = coverageContentSig[path];
++      return file && file.audit_status !== "excluded" && file.required_lenses.includes(task.lens) &&
++        isSha256(source) && task.inputs?.[`source:${path}`] === source &&
++        oldBaselines?.[path] === deriveCoverageElementKey(file, source) && liveAssignments.get(`${task.lens}:${path}`) === assignment(task);
++    }));
++  const reserved = new Set(preservedReviewTasks.flatMap(task => task.file_paths.map(path => `${task.lens}:${path}`)));
++  const remainingCoverage = { ...coverage, files: coverage.files.map(file => ({ ...file,
++    completed_lenses: [...new Set([...file.completed_lenses, ...file.required_lenses.filter(lens => reserved.has(`${lens}:${file.path}`))])] })) };
++  const auditTasks = buildChunkedAuditTasks(remainingCoverage, lineIndex, taskBuildOptions);
+   const taggedAuditTasks = auditTasks.map((task) => ({
+     ...task,
+     status: task.status ?? ("pending" as const),
+@@ -226,7 +253,7 @@ export async function runPlanningExecutor(
+   // (INV-PLAN-PERSIST-COMPLETE).
+   const pendingRequeueTasks = foldPendingRequeueTasks({
+     requeueTasks: requeuePayload.tasks,
+-    auditTasks: taggedAuditTasks,
++    auditTasks: [...preservedReviewTasks, ...taggedAuditTasks],
+     lineIndex,
+     effectiveLenses,
+   });
+@@ -244,6 +271,8 @@ export async function runPlanningExecutor(
+   });
+   const enrichedAuditTasks = taggedAuditTasks.map(freezeEstimates);
+   const allReviewTasks = canonicalizeAuditTasks([
++    // Keep the original frozen subject, including its source snapshots and prompt rationale.
++    ...preservedReviewTasks,
+     ...enrichedAuditTasks,
+     ...pendingRequeueTasks.map(freezeEstimates),
+     // Reconciliation must not drop unrelated in-flight verification work.
+diff --git a/tests/audit/host-handoff.test.ts b/tests/audit/host-handoff.test.ts
+index d13a5253..fd5569d1 100644
+--- a/tests/audit/host-handoff.test.ts
++++ b/tests/audit/host-handoff.test.ts
+@@ -1072,7 +1072,7 @@ describe(FAILURE_SIGNATURE, () => {
+     });
+ 
+     // The steward's two selective-lane fields must survive the boundary's own
+-    // normalization. `toHostTask` passes them in; if the boundary drops them,
++    // normalization. `toAuditHostTask` passes them in; if the boundary drops them,
+     // the steward is published under the COMPLETE gate (refused unless it opens
+     // every surface file), its prompt inlines the whole surface, and the scope
+     // carries no metrics to choose from.
+diff --git a/tests/audit/planning-inflight-tasks.test.ts b/tests/audit/planning-inflight-tasks.test.ts
+new file mode 100644
+index 00000000..95897f46
+--- /dev/null
++++ b/tests/audit/planning-inflight-tasks.test.ts
+@@ -0,0 +1,217 @@
++import { afterEach, expect, test } from "vitest";
++import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { hashContent } from "audit-tools/shared";
++import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
++import { runResultIngestionExecutor } from "../../src/audit/orchestrator/ingestionExecutors.js";
++import { prepareAuditHostHandoff, ingestAuditHostResults, readPublishedAuditTaskIds, toAuditHostTask, type AuditHostWorkItem } from "../../src/audit/cli/dispatch/hostHandoff.js";
++import { advanceAudit } from "../../src/audit/orchestrator/advance.js";
++import { materializeReviewRun, writeHandoffOnly } from "../../src/audit/cli/reviewRun.js";
++import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
++import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepHelpers.js";
++import { loadArtifactBundle, writeCoreArtifacts, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
++import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
++import { buildAdvancedBundle } from "./helpers/advancedBundle.mjs";
++import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
++
++const roots: string[] = [];
++afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
++
++async function persistFixture(artifactsDir: string, bundle: ArtifactBundle) {
++  await writeCoreArtifacts(artifactsDir, bundle);
++  // Stamp the schema-normalized persisted shape, including schema defaults.
++  const persisted = await loadArtifactBundle(artifactsDir);
++  persisted.artifact_metadata = computeArtifactMetadata(persisted);
++  await writeCoreArtifacts(artifactsDir, persisted);
++  expect(deriveAuditState(await loadArtifactBundle(artifactsDir), { emitStaleness: false }).obligations.find(obligation => obligation.id === "planning_artifacts")!.state).toBe("satisfied");
++}
++
++async function fixture(options: { customArtifacts?: boolean; lens?: "correctness" | "maintainability" } = {}) {
++  const lens = options.lens ?? "correctness";
++  const root = await mkdtemp(join(tmpdir(), "audit-inflight-plan-")); roots.push(root);
++  await mkdir(join(root, "src"));
++  const lineIndex = { "src/a.ts": 1500, "src/b.ts": 2000, "src/c.ts": 1000, "src/d.ts": 1500 };
++  const files = await Promise.all(Object.entries(lineIndex).map(async ([path, lines]) => {
++    const content = Array.from({ length: lines }, (_, i) => `export const value${i} = ${i};`).join("\n") + "\n";
++    await writeFile(join(root, path), content);
++    return { path, language: "ts", size_bytes: Buffer.byteLength(content), hash: hashContent(content) };
++  }));
++  let bundle: ArtifactBundle = {
++    ...await buildAdvancedBundle(root, "audit_tasks_completed"),
++    repo_manifest: { repository: { name: "inflight-plan" }, generated_at: "2026-10-05T00:00:00.000Z", files },
++    file_disposition: { files: files.map(file => ({ path: file.path, status: "included" })) },
++    unit_manifest: { units: [{ unit_id: "unit-all", name: "all", files: files.map(file => file.path), risk_score: 5, required_lenses: [lens] }] },
++    surface_manifest: { surfaces: [] }, critical_flows: { flows: [] }, risk_register: { items: [] },
++  };
++  bundle = runIntentEquivalenceResolve({ ...bundle, artifact_metadata: computeArtifactMetadata(bundle) }).updated;
++  const artifactsDir = join(root, ".audit-tools", options.customArtifacts ? "custom-audit" : "audit");
++  const planned = (await runPlanningExecutor(bundle, root, lineIndex)).updated;
++  const tasks = planned.audit_tasks!.filter(task => task.lens === lens);
++  expect(tasks.map(task => task.file_paths).sort()).toEqual([["src/a.ts"], ["src/b.ts", "src/c.ts"], ["src/d.ts"]].sort());
++  const reviewRun = await materializeReviewRun({ root, artifactsDir, bundle: planned, obligationId: "audit_tasks_completed", tasksOverride: tasks });
++  await writeHandoffOnly({ root, artifactsDir, bundle: planned, audit_state: deriveAuditState(planned), progress_summary: "Published inspection fixture", activeReviewRun: reviewRun.activeReviewRun });
++  const runId = reviewRun.activeReviewRun.run_id;
++  const publish = (current: ArtifactBundle) => prepareAuditHostHandoff({ root, artifactsDir, runId, tasks: current.audit_tasks!.filter(task => task.lens === lens && task.status !== "complete").map(task => toAuditHostTask({
++    ...task, file_line_counts: Object.fromEntries(task.file_paths.map(path => [path, lineIndex[path as keyof typeof lineIndex]])),
++  }, current.repo_manifest)) });
++  const published = await publish(planned);
++  const submit = async (item: AuditHostWorkItem) => {
++    const path = join(root, item.result_path); await mkdir(join(path, ".."), { recursive: true });
++    await writeFile(path, JSON.stringify({ contract_version: "audit-host-result/v1alpha1", result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`, run_id: runId,
++      work_item_id: item.id, prompt_sha256: item.prompt.sha256, findings: [], file_coverage: item.scope.files.map(path => ({ path, reviewed_lines: lineIndex[path as keyof typeof lineIndex], total_lines: lineIndex[path as keyof typeof lineIndex] })) }));
++  };
++  const middle = published.workload.work_items.find(item => item.scope.files.includes("src/b.ts"))!;
++  const inflight = published.workload.work_items.find(item => item.scope.files.length === 1 && item.scope.files[0] === "src/d.ts")!;
++  await submit(middle);
++  const accepted = await ingestAuditHostResults({ root, artifactsDir, runId, auditTasks: planned.audit_tasks!, lineIndex });
++  expect(accepted.accepted_count).toBe(1);
++  const ingested = runResultIngestionExecutor(planned, [...accepted.accepted_results]).updated;
++  expect(ingested.coverage_matrix!.files.find(file => file.path === "src/b.ts")!.completed_lenses).toContain(lens);
++  return { root, artifactsDir, lineIndex, runId, ingested, inflight, submit, publish };
++}
++
++const replan = async (value: Awaited<ReturnType<typeof fixture>>) => (await advanceAudit(value.ingested,
++  { root: value.root, artifactsDir: value.artifactsDir, preferredExecutor: "planning_executor", lineIndex: value.lineIndex })).updated_bundle;
++
++test("publication preservation honors a custom artifacts directory", async () => {
++  const value = await fixture({ customArtifacts: true });
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.find(task => task.task_id === value.inflight.id)).toEqual(value.ingested.audit_tasks!.find(task => task.task_id === value.inflight.id));
++  expect((await value.publish(replanned)).workload.work_items.find(item => item.id === value.inflight.id)).toEqual(value.inflight);
++});
++
++test("intent scope exclusion removes an unchanged published task", async () => {
++  const value = await fixture();
++  value.ingested.intent_checkpoint!.excluded_scope = [{ path: "src/d.ts", reason: "Host excluded this subject" }];
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.some(task => task.file_paths.includes("src/d.ts"))).toBe(false);
++  expect(replanned.coverage_matrix!.files.find(file => file.path === "src/d.ts")!.audit_status).toBe("excluded");
++});
++
++test("changed lens policy removes an unchanged published nonmandatory lens", async () => {
++  const value = await fixture({ lens: "maintainability" });
++  value.ingested.intent_checkpoint!.lens_selection = { exclude: ["maintainability"] };
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.some(task => task.lens === "maintainability")).toBe(false);
++});
++
++test("new critical flow membership uses the current shared builder assignment", async () => {
++  const value = await fixture();
++  value.ingested.critical_flows = { flows: [{ id: "flow-new", name: "New flow", entrypoints: ["src/d.ts"], paths: ["src/d.ts"], concerns: ["correctness"] }] };
++  const replanned = await replan(value);
++  const tasks = replanned.audit_tasks!.filter(task => task.lens === "correctness" && task.file_paths.includes("src/d.ts"));
++  expect(tasks).toHaveLength(1);
++  expect(tasks[0]!.task_id).not.toBe(value.inflight.id);
++  expect(tasks[0]!.unit_id).toBe("flow:flow-new");
++});
++
++test("changed unit membership invalidates the published subject even with unchanged bytes", async () => {
++  const value = await fixture();
++  value.ingested.unit_manifest!.units[0]!.unit_id = "unit-reassigned";
++  const replanned = await replan(value);
++  const tasks = replanned.audit_tasks!.filter(task => task.lens === "correctness" && task.file_paths.includes("src/d.ts"));
++  expect(tasks).toHaveLength(1);
++  expect(tasks[0]!.task_id).not.toBe(value.inflight.id);
++  expect(tasks[0]!.unit_id).toBe("unit-reassigned");
++});
++
++test("missing source hash cannot preserve prior published authority from file size alone", async () => {
++  const value = await fixture();
++  delete value.ingested.repo_manifest!.files.find(file => file.path === "src/d.ts")!.hash;
++  const replanned = await replan(value);
++  const task = replanned.audit_tasks!.find(task => task.lens === "correctness" && task.file_paths.includes("src/d.ts"))!;
++  expect(task.inputs?.["source:src/d.ts"]).toBe("unversioned");
++  const published = await value.publish(replanned);
++  expect(published.workload.work_items.find(item => item.id === task.task_id)!.prompt.sha256).not.toBe(value.inflight.prompt.sha256);
++  await value.submit(value.inflight);
++  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
++  expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
++});
++
++test("changed current review premise cannot preserve a historically valid prompt", async () => {
++  const value = await fixture();
++  value.ingested.audit_tasks!.find(task => task.task_id === value.inflight.id)!.rationale = "A different review requirement";
++  const publishedIds = await readPublishedAuditTaskIds({ root: value.root, artifactsDir: value.artifactsDir, tasks: value.ingested.audit_tasks!, manifest: value.ingested.repo_manifest, lineIndex: value.lineIndex });
++  expect(publishedIds.has(value.inflight.id)).toBe(false);
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.find(task => task.task_id === value.inflight.id)!.rationale).not.toBe("A different review requirement");
++});
++
++test.each(["missing", "invalid"])("%s publication tuple falls back to rebuilding pending work", async mode => {
++  const value = await fixture();
++  const path = join(value.artifactsDir, "runs", value.runId, "host-task-bindings.json");
++  if (mode === "missing") await rm(path); else await writeFile(path, "{}");
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.some(task => task.task_id === value.inflight.id)).toBe(false);
++  expect(replanned.audit_tasks!.some(task => task.lens === "correctness" && task.file_paths.includes("src/d.ts"))).toBe(true);
++});
++
++test("unsafe active review pointer is unusable publication rather than a path resolution error", async () => {
++  const value = await fixture();
++  const path = join(value.artifactsDir, "dispatch", "current-review-run.json");
++  const pointer = JSON.parse(await readFile(path, "utf8"));
++  pointer.run_id = "../outside";
++  await writeFile(path, JSON.stringify(pointer));
++  const replanned = await replan(value);
++  expect(replanned.audit_tasks!.some(task => task.task_id === value.inflight.id)).toBe(false);
++});
++
++test("publication I/O failures remain visible rather than silently authorizing fallback", async () => {
++  const value = await fixture();
++  const path = join(value.artifactsDir, "runs", value.runId, "host-task-bindings.json");
++  await rm(path); await mkdir(path);
++  await expect(replan(value)).rejects.toThrow();
++});
++
++test("replanning retains published unchanged pending tasks and consumes their genuine late bound result", async () => {
++  const value = await fixture();
++  const replanned = await replan(value);
++  const pendingOriginals = value.ingested.audit_tasks!.filter(task => task.lens === "correctness" && task.status !== "complete");
++  for (const task of pendingOriginals) expect.soft(replanned.audit_tasks!.find(current => current.task_id === task.task_id)).toEqual(task);
++  for (const path of ["src/a.ts", "src/d.ts"]) expect(replanned.audit_tasks!.filter(task => task.lens === "correctness" && task.file_paths.includes(path))).toHaveLength(1);
++  const republished = await value.publish(replanned);
++  expect(republished.workload.work_items.find(item => item.id === value.inflight.id)).toEqual(value.inflight);
++  await value.submit(value.inflight);
++  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
++  expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(true);
++  replanned.artifact_metadata = computeArtifactMetadata(replanned);
++  expect(deriveAuditState(replanned, { emitStaleness: false }).obligations.find(obligation => obligation.id === "planning_artifacts")!.state).toBe("satisfied");
++  await persistFixture(value.artifactsDir, replanned);
++  await runDeterministicForNextStep({ root: value.root, artifactsDir: value.artifactsDir, selfCliPath: "audit-code.mjs", timeoutMs: 30_000,
++    analyzers: { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" } });
++  const resumed = await loadArtifactBundle(value.artifactsDir);
++  expect.soft(resumed.audit_results?.some(result => result.task_id === value.inflight.id)).toBe(true);
++  expect(resumed.coverage_matrix!.files.find(file => file.path === "src/d.ts")!.completed_lenses).toContain("correctness");
++});
++
++test("changed reviewed source refreshes workload authority and cannot reuse the old bound result", async () => {
++  const value = await fixture();
++  const path = "src/d.ts";
++  const changed = (await readFile(join(value.root, path), "utf8")).replace("value0 = 0", "value0 = 9");
++  await writeFile(join(value.root, path), changed);
++  const file = value.ingested.repo_manifest!.files.find(file => file.path === path)!;
++  file.hash = hashContent(changed);
++  const replanned = await replan(value);
++  const currentTasks = replanned.audit_tasks!.filter(task => task.lens === "correctness" && task.file_paths.includes(path));
++  expect(currentTasks.length).toBeGreaterThan(0);
++  for (const task of currentTasks) expect(task.inputs?.[`source:${path}`]).toBe(file.hash);
++  await value.publish(replanned);
++  await value.submit(value.inflight);
++  const late = await ingestAuditHostResults({ root: value.root, artifactsDir: value.artifactsDir, runId: value.runId, auditTasks: replanned.audit_tasks!, lineIndex: value.lineIndex });
++  expect(late.accepted_results.some(result => result.task_id === value.inflight.id)).toBe(false);
++  expect(replanned.coverage_matrix!.files.find(file => file.path === path)!.completed_lenses).not.toContain("correctness");
++});
++
++test("a genuine late result is consumed by the production fold while its published task remains active", async () => {
++  const value = await fixture();
++  value.ingested.artifact_metadata = computeArtifactMetadata(value.ingested);
++  expect(deriveAuditState(value.ingested, { emitStaleness: false }).obligations.find(obligation => obligation.id === "planning_artifacts")!.state).toBe("satisfied");
++  await persistFixture(value.artifactsDir, value.ingested);
++  await value.submit(value.inflight);
++  await runDeterministicForNextStep({ root: value.root, artifactsDir: value.artifactsDir, selfCliPath: "audit-code.mjs", timeoutMs: 30_000,
++    analyzers: { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" } });
++  const resumed = await loadArtifactBundle(value.artifactsDir);
++  expect(resumed.audit_results?.some(result => result.task_id === value.inflight.id)).toBe(true);
++  expect(resumed.coverage_matrix!.files.find(file => file.path === "src/d.ts")!.completed_lenses).toContain("correctness");
++});
+diff --git a/tests/shared/contract-construction-sites.test.ts b/tests/shared/contract-construction-sites.test.ts
+index 7a725921..5e11c746 100644
+--- a/tests/shared/contract-construction-sites.test.ts
++++ b/tests/shared/contract-construction-sites.test.ts
+@@ -384,12 +384,15 @@ describe("the real tree", () => {
+     // reads as coverage. Walked over the REAL producer sources.
+     const types = new Set(CONTRACT_PROPERTY_SHAPES.map((c) => c.type));
+     for (const rel of [
+-      "src/audit/cli/semanticReviewStep.ts",
++      "src/audit/cli/dispatch/hostHandoff.ts",
+       "src/shared/validation/designFindingGrounding.ts",
+       "src/audit/orchestrator/partitionTaskGraph.ts",
+     ]) {
+       const markers = parseSiteMarkers(readFileSync(join(REPO_ROOT, rel), "utf8"));
+       expect(markers.length, `${rel} declares no construction site`).toBeGreaterThan(0);
++      if (rel === "src/audit/cli/dispatch/hostHandoff.ts") {
++        expect(markers.map(marker => marker.type)).toContain("AuditTask");
++      }
+       for (const marker of markers) {
+         expect(types.has(marker.type), `${rel} → unknown type ${marker.type}`).toBe(true);
+       }

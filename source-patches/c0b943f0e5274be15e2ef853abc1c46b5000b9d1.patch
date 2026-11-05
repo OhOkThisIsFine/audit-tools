@@ -1,0 +1,363 @@
+diff --git a/src/audit/supervisor/sessionConfig.ts b/src/audit/supervisor/sessionConfig.ts
+index baf2ea0b..fbacc01a 100644
+--- a/src/audit/supervisor/sessionConfig.ts
++++ b/src/audit/supervisor/sessionConfig.ts
+@@ -3,6 +3,7 @@ import {
+   type AnalyzerSetting,
+   type LockedJsonStore,
+   type RepoSessionIntent,
++  REPO_SESSION_INTENT_SCHEMA_VERSION,
+   createLockedJsonStore,
+   SKIP_WRITE,
+   isRecord,
+@@ -15,7 +16,9 @@ import {
+ 
+ const SESSION_CONFIG_FILENAME = "session-config.json";
+ const SESSION_CONFIG_LOCK_FILENAME = "session-config.lock";
+-const DEFAULT_SESSION_CONFIG: RepoSessionIntent = {};
++const DEFAULT_SESSION_CONFIG: RepoSessionIntent = {
++  schema_version: REPO_SESSION_INTENT_SCHEMA_VERSION,
++};
+ 
+ export function getSessionConfigPath(artifactsDir: string): string {
+   return join(artifactsDir, SESSION_CONFIG_FILENAME);
+@@ -98,6 +101,31 @@ function throwOnConfigErrors(
+   }
+ }
+ 
++/**
++ * Detect schema version mismatch and log a warning to stderr. If a config was
++ * persisted on an older schema version, the loading code may not understand all
++ * its fields or may expect fields that are absent. This function surfaces the
++ * mismatch without failing the load (the config may still be usable).
++ *
++ * Absence of schema_version is treated as v1 (the initial version before
++ * versioning was added).
++ */
++function checkConfigVersionMatch(
++  configPath: string,
++  loaded: RepoSessionIntent,
++): void {
++  const persistedVersion = loaded.schema_version ?? REPO_SESSION_INTENT_SCHEMA_VERSION;
++  if (persistedVersion !== REPO_SESSION_INTENT_SCHEMA_VERSION) {
++    console.warn(
++      `⚠ Session config schema version mismatch at ${configPath}\n` +
++        `  Persisted version: ${persistedVersion}\n` +
++        `  Current version: ${REPO_SESSION_INTENT_SCHEMA_VERSION}\n` +
++        `  The config may have been created by an older or newer version of audit-tools.\n` +
++        `  Some fields or schema changes may not be reflected.`,
++    );
++  }
++}
++
+ export async function loadSessionConfig(
+   artifactsDir: string,
+ ): Promise<RepoSessionIntent> {
+@@ -110,7 +138,10 @@ export async function loadSessionConfig(
+ 
+   throwOnConfigErrors(configPath, validateRepoSessionIntent(rawConfig));
+ 
+-  return rawConfig as RepoSessionIntent;
++  const loaded = rawConfig as RepoSessionIntent;
++  checkConfigVersionMatch(configPath, loaded);
++
++  return loaded;
+ }
+ 
+ /**
+@@ -118,6 +149,8 @@ export async function loadSessionConfig(
+  * preserving any unknown fields, validating, and persisting the result. Used by
+  * the conversation-first `analyzer_install` step to durably record the host's
+  * `{ephemeral|permanent|skip}` choices under `analyzers.<id>`.
++ *
++ * Ensures the schema_version field is always present in the persisted config.
+  */
+ export async function persistAnalyzerSettings(
+   artifactsDir: string,
+@@ -125,6 +158,14 @@ export async function persistAnalyzerSettings(
+ ): Promise<RepoSessionIntent> {
+   return mutateSessionConfigLocked(artifactsDir, (base) => {
+     const current = isRecord(base.analyzers) ? base.analyzers : {};
+-    return { ...base, analyzers: { ...current, ...settings } };
++    const merged: Record<string, unknown> = {
++      ...base,
++      analyzers: { ...current, ...settings },
++    };
++    // Ensure schema_version is always present
++    if (merged.schema_version === undefined) {
++      merged.schema_version = REPO_SESSION_INTENT_SCHEMA_VERSION;
++    }
++    return merged;
+   });
+ }
+diff --git a/src/remediate/steps/sessionConfigLoad.ts b/src/remediate/steps/sessionConfigLoad.ts
+index 485ed003..8d602e11 100644
+--- a/src/remediate/steps/sessionConfigLoad.ts
++++ b/src/remediate/steps/sessionConfigLoad.ts
+@@ -3,10 +3,36 @@ import {
+   readValidatedRepoSessionIntent,
+   resolveSessionConfig,
+   ambientAuditorDescriptor,
++  REPO_SESSION_INTENT_SCHEMA_VERSION,
+   type SessionConfig,
++  type RepoSessionIntent,
+   type ResolveSessionConfigOptions,
+ } from "audit-tools/shared";
+ 
++/**
++ * Detect schema version mismatch and log a warning. If a config was persisted
++ * on an older schema version, the loading code may not understand all its fields
++ * or may expect fields that are absent. This function surfaces the mismatch
++ * without failing the load.
++ *
++ * Absence of schema_version is treated as v1 (before versioning was added).
++ */
++function checkConfigVersionMatch(
++  path: string,
++  loaded: RepoSessionIntent,
++): void {
++  const persistedVersion = loaded.schema_version ?? REPO_SESSION_INTENT_SCHEMA_VERSION;
++  if (persistedVersion !== REPO_SESSION_INTENT_SCHEMA_VERSION) {
++    console.warn(
++      `⚠ Session config schema version mismatch at ${path}\n` +
++        `  Persisted version: ${persistedVersion}\n` +
++        `  Current version: ${REPO_SESSION_INTENT_SCHEMA_VERSION}\n` +
++        `  The config may have been created by an older or newer version of audit-tools.\n` +
++        `  Some fields or schema changes may not be reflected.`,
++    );
++  }
++}
++
+ /**
+  * The ONE place remediate turns a persisted `RepoSessionIntent` into an effective
+  * {@link SessionConfig} — so the descriptor choice cannot drift across call sites.
+@@ -18,6 +44,10 @@ import {
+  * persisted host capability, explicit config, or synced models.dev metadata. A pool
+  * that still has unknown capacity is unplaceable rather than assigned a guessed floor.
+  *
++ * SCHEMA VERSIONING: When loading session-config.json, the loader checks for schema
++ * version mismatch and emits a warning to stderr if the persisted version differs from
++ * the current code's version. This alerts operators to potential mid-run upgrade issues.
++ *
+  * ⚠ Why this function exists rather than three call sites each choosing: passing `null`
+  * FAILS CLOSED to driver-self-only — no pool at all — and that is exactly what happened.
+  * Between v0.32.68 and the fix, all three remediate sites hardcoded `null`, so remediate
+@@ -60,11 +90,20 @@ export async function loadRemediateSessionConfig(params: {
+     join(params.root, "session-config.json"),
+   ];
+   let intent;
++  let loadedPath: string | undefined;
+   for (const path of candidatePaths) {
+     intent = await readValidatedRepoSessionIntent(path);
+-    if (intent) break;
++    if (intent) {
++      loadedPath = path;
++      break;
++    }
+   }
+-  return intent
+-    ? resolveSessionConfig(intent, ambientAuditorDescriptor(), params.ambient)
+-    : undefined;
++  if (!intent) return undefined;
++
++  // Check for version mismatch
++  if (loadedPath) {
++    checkConfigVersionMatch(loadedPath, intent);
++  }
++
++  return resolveSessionConfig(intent, ambientAuditorDescriptor(), params.ambient);
+ }
+diff --git a/src/shared/index.ts b/src/shared/index.ts
+index 96b0138b..0cf5f570 100644
+--- a/src/shared/index.ts
++++ b/src/shared/index.ts
+@@ -289,6 +289,7 @@ export {
+   DISPATCHABLE_TRANSPORTS,
+   ANALYZER_SETTINGS,
+   AnalyzerSettingSchema,
++  REPO_SESSION_INTENT_SCHEMA_VERSION,
+   resolveHostDispatchCapability,
+   resolveAutonomousMode,
+   resolveRollingEngineFlag,
+diff --git a/src/shared/types/sessionConfig.ts b/src/shared/types/sessionConfig.ts
+index 2bdcd675..e7adaab4 100644
+--- a/src/shared/types/sessionConfig.ts
++++ b/src/shared/types/sessionConfig.ts
+@@ -1,6 +1,14 @@
+ import { z } from "zod";
+ import type { DispatchModelTier } from "./stepContract.js";
+ 
++// ── Version constants ────────────────────────────────────────────────────────
++
++/** Schema version for RepoSessionIntent (persisted session-config.json). */
++export const REPO_SESSION_INTENT_SCHEMA_VERSION =
++  "audit-tools/session-config/v1" as const;
++
++// ── Provider names ───────────────────────────────────────────────────────────
++
+ export const PROVIDER_NAMES = [
+   "auto",
+   "worker-command",
+@@ -1029,10 +1037,23 @@ export type RepoDispatchConfig = Omit<DispatchConfig, "rolling_engine">;
+  * the other capability fields still present). The "zero dispatch/capability fields" endpoint
+  * is reached only after G4/G5. (`confirmed_provider_pool` was an inert slot and is GONE as
+  * of G3 commit C.)
++ *
++ * SCHEMA VERSIONING: RepoSessionIntent carries an optional `schema_version` field to detect
++ * mid-run upgrade mismatches. When loading session-config.json, code can compare the persisted
++ * version against REPO_SESSION_INTENT_SCHEMA_VERSION and migrate fields if needed. If no version
++ * is present, the config is treated as v1 (the initial/current schema).
+  */
+ export type RepoSessionIntent = Omit<
+   SessionConfig,
+   DispatchInventoryField | "dispatch"
+ > & {
+   dispatch?: RepoDispatchConfig;
++  /**
++   * Schema version marker for this session config file. Used to detect mid-run
++   * upgrade mismatches between versions. Callers can compare this against
++   * REPO_SESSION_INTENT_SCHEMA_VERSION to detect schema skew and apply migrations
++   * if needed. Optional for backwards compatibility with configs created before
++   * versioning was added — missing version is treated as v1.
++   */
++  schema_version?: typeof REPO_SESSION_INTENT_SCHEMA_VERSION;
+ };
+diff --git a/src/shared/validation/sessionConfig.ts b/src/shared/validation/sessionConfig.ts
+index bf93a54b..580969c9 100644
+--- a/src/shared/validation/sessionConfig.ts
++++ b/src/shared/validation/sessionConfig.ts
+@@ -966,8 +966,27 @@ export function validateSessionConfig(value: unknown): ValidationIssue[] {
+  * TS-write-only — both the audit store and remediate's disk read route through it.
+  */
+ export function validateRepoSessionIntent(value: unknown): ValidationIssue[] {
+-  const issues = validateSessionConfig(value);
+-  if (!isRecord(value)) return issues;
++  if (!isRecord(value)) {
++    // Let validateSessionConfig handle non-object values
++    return validateSessionConfig(value);
++  }
++
++  // Remove schema_version before validation (it's a RepoSessionIntent-specific field,
++  // not part of SessionConfig) so it doesn't trigger "unknown key" warnings
++  const { schema_version, ...valueWithoutVersion } = value;
++
++  // Validate schema_version field if present
++  const issues: ValidationIssue[] = [];
++  if (schema_version !== undefined) {
++    if (typeof schema_version !== "string") {
++      pushIssue(issues, "schema_version", "schema_version must be a string.");
++    }
++  }
++
++  // Continue validating the rest of the config
++  const restIssues = validateSessionConfig(valueWithoutVersion);
++  issues.push(...restIssues);
++
+   for (const field of DISPATCH_INVENTORY_FIELDS) {
+     if (value[field] !== undefined) {
+       pushIssue(
+diff --git a/tests/remediate/session-config-load.test.ts b/tests/remediate/session-config-load.test.ts
+index d1d670ee..450d8d3c 100644
+--- a/tests/remediate/session-config-load.test.ts
++++ b/tests/remediate/session-config-load.test.ts
+@@ -20,7 +20,7 @@
+  * Red-green validated: reverting the loader's descriptor to `null` fails case 1.
+  */
+ 
+-import { test, describe, expect, beforeEach, afterEach } from "vitest";
++import { test, describe, expect, beforeEach, afterEach, vi } from "vitest";
+ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+@@ -160,3 +160,91 @@ describe("loadRemediateSessionConfig", () => {
+     expect(eff?.dispatch).toEqual(intent.dispatch);
+   });
+ });
++
++describe("session config schema versioning", () => {
++  test("detects version mismatch and logs warning", async () => {
++    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++    try {
++      const { REPO_SESSION_INTENT_SCHEMA_VERSION } = await import(
++        "../../src/shared/types/sessionConfig.js"
++      );
++
++      // Config with mismatched version
++      const outdatedVersion = "audit-tools/session-config/v0";
++      await writeFile(
++        join(root, "session-config.json"),
++        JSON.stringify({ schema_version: outdatedVersion }),
++      );
++
++      const eff = await loadRemediateSessionConfig({
++        root,
++        artifactsFirst: false,
++        ambient: ambient(),
++      });
++
++      // Should still load even with version mismatch
++      expect(eff).toBeDefined();
++
++      // Should have logged warning
++      expect(warnSpy).toHaveBeenCalled();
++      const warnMsg = warnSpy.mock.calls[0]?.[0]?.toString() ?? "";
++      expect(warnMsg).toContain("schema version mismatch");
++      expect(warnMsg).toContain(outdatedVersion);
++      expect(warnMsg).toContain(REPO_SESSION_INTENT_SCHEMA_VERSION);
++    } finally {
++      warnSpy.mockRestore();
++    }
++  });
++
++  test("treats missing schema_version as v1 (initial version)", async () => {
++    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++    try {
++      // Config without schema_version (pre-versioning format)
++      await writeFile(
++        join(root, "session-config.json"),
++        JSON.stringify({ synthesis: { narrative: true } }),
++      );
++
++      const eff = await loadRemediateSessionConfig({
++        root,
++        artifactsFirst: false,
++        ambient: ambient(),
++      });
++
++      // Should load without warning (missing = v1 is treated as current)
++      expect(eff).toBeDefined();
++      expect(eff?.synthesis).toEqual({ narrative: true });
++      expect(warnSpy).not.toHaveBeenCalled();
++    } finally {
++      warnSpy.mockRestore();
++    }
++  });
++
++  test("no warning when schema_version matches current version", async () => {
++    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
++    try {
++      const { REPO_SESSION_INTENT_SCHEMA_VERSION } = await import(
++        "../../src/shared/types/sessionConfig.js"
++      );
++
++      await writeFile(
++        join(root, "session-config.json"),
++        JSON.stringify({
++          schema_version: REPO_SESSION_INTENT_SCHEMA_VERSION,
++          synthesis: { narrative: true },
++        }),
++      );
++
++      const eff = await loadRemediateSessionConfig({
++        root,
++        artifactsFirst: false,
++        ambient: ambient(),
++      });
++
++      expect(eff).toBeDefined();
++      expect(warnSpy).not.toHaveBeenCalled();
++    } finally {
++      warnSpy.mockRestore();
++    }
++  });
++});

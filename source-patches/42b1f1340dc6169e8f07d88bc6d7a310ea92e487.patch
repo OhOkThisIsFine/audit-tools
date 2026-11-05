@@ -1,0 +1,1451 @@
+diff --git a/dispatch/merge-results.mjs b/dispatch/merge-results.mjs
+index 49156530..1fe06bcb 100644
+--- a/dispatch/merge-results.mjs
++++ b/dispatch/merge-results.mjs
+@@ -1,7 +1,8 @@
+-import { resolve, join } from "node:path";
++import { join } from "node:path";
+ import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+ import { validateResult } from "./validate.mjs";
+ import { PACKET_SCHEMA_FILENAMES } from "../dist/audit/io/runArtifacts.js";
++import { resolveArtifactsDir } from "../wrapper/remediate-code-wrapper-io.mjs";
+ 
+ const runIdIdx = process.argv.indexOf("--run-id");
+ if (runIdIdx === -1 || !process.argv[runIdIdx + 1]) {
+@@ -10,13 +11,10 @@ if (runIdIdx === -1 || !process.argv[runIdIdx + 1]) {
+ }
+ const runId = process.argv[runIdIdx + 1];
+ 
+-const artifactsDirIdx = process.argv.indexOf("--artifacts-dir");
+ // Default must match where the orchestrator/wrapper actually writes runs:
+ // <root>/.audit-tools/audit (COR-bf5c7331). The prior `.audit-artifacts`
+ // default resolved to a directory the pipeline never populates.
+-const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
+-  ? resolve(process.argv[artifactsDirIdx + 1])
+-  : join(process.cwd(), ".audit-tools", "audit");
++const artifactsDir = resolveArtifactsDir(process.argv);
+ 
+ const taskResultsDir = join(artifactsDir, "runs", runId, "task-results");
+ const auditResultsPath = join(artifactsDir, "runs", runId, "run-results.json");
+diff --git a/dispatch/validate-result.mjs b/dispatch/validate-result.mjs
+index a49fd5d3..0be9bfd9 100644
+--- a/dispatch/validate-result.mjs
++++ b/dispatch/validate-result.mjs
+@@ -1,10 +1,10 @@
+-import { resolve, join } from "node:path";
++import { join } from "node:path";
+ import { readFileSync, existsSync } from "node:fs";
+ import { validateResult } from "./validate.mjs";
++import { resolveArtifactsDir } from "../wrapper/remediate-code-wrapper-io.mjs";
+ 
+ const runIdIdx = process.argv.indexOf("--run-id");
+ const taskIdIdx = process.argv.indexOf("--task-id");
+-const artifactsDirIdx = process.argv.indexOf("--artifacts-dir");
+ 
+ const runId = runIdIdx !== -1 ? process.argv[runIdIdx + 1] : undefined;
+ const taskId = taskIdIdx !== -1 ? process.argv[taskIdIdx + 1] : undefined;
+@@ -16,9 +16,7 @@ if (!runId || !taskId) {
+ 
+ // Default must match where the orchestrator/wrapper actually writes runs:
+ // <root>/.audit-tools/audit (COR-bf5c7331), not the legacy `.audit-artifacts`.
+-const artifactsDir = artifactsDirIdx !== -1 && process.argv[artifactsDirIdx + 1]
+-  ? resolve(process.argv[artifactsDirIdx + 1])
+-  : join(process.cwd(), ".audit-tools", "audit");
++const artifactsDir = resolveArtifactsDir(process.argv);
+ 
+ const sanitized = taskId.replace(/[^a-zA-Z0-9_-]/g, "_");
+ const resultPath = join(artifactsDir, "runs", runId, "task-results", sanitized + ".json");
+diff --git a/src/audit/cli/nextStepHelpers.ts b/src/audit/cli/nextStepHelpers.ts
+index dbb3527d..1635f136 100644
+--- a/src/audit/cli/nextStepHelpers.ts
++++ b/src/audit/cli/nextStepHelpers.ts
+@@ -99,6 +99,24 @@ import {
+ } from "./reviewRun.js";
+ import { mergeAndIngest } from "./mergeAndIngestCommand.js";
+ import { buildPendingAuditTasks } from "./dispatch.js";
++import {
++  driveRollingAuditDispatch,
++  resolveAuditRollingEngineEnabled,
++} from "./rollingAuditDispatch.js";
++import {
++  buildAuditSourcePools,
++  isInProcessAuditPool,
++  auditNodeClaimRegistry,
++  auditHybridSettledPath,
++} from "./hybridDispatch.js";
++import {
++  planHybridDispatch,
++  readSettledPools,
++  addSettledPool,
++  buildSelfSpawnExclusion,
++  captureZeroCapacityFriction,
++} from "audit-tools/shared";
++import { resolveHostDispatchCapability } from "./args.js";
+ 
+ /**
+  * Skip the design-review enrichment when the host quota wall has persisted past the
+@@ -114,47 +132,54 @@ export async function stampDesignReviewSkipped(
+ ): Promise<void> {
+   const path = join(artifactsDir, "design_assessment.json");
+   const reviewedAt = new Date().toISOString();
+-  const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
+-  // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
+-  // it closes was never reviewed, and the stamp must say so. Per-pass, because
+-  // the skip can fire when only ONE pass is outstanding — a pass a real
+-  // submission already satisfied must NOT be retro-stamped unreviewed.
+-  const contractGenuine =
+-    existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
+-  const conceptualGenuine =
+-    existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
+-  const assessment: DesignAssessment = {
+-    ...(existing ?? { generated_at: reviewedAt, findings: [] }),
+-    findings: existing?.findings ?? [],
+-    contract_findings: existing?.contract_findings ?? [],
+-    conceptual_findings: existing?.conceptual_findings ?? [],
+-    contract_reviewed: true,
+-    conceptual_reviewed: true,
+-    ...(contractGenuine ? {} : { contract_auto_completed: true }),
+-    ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
+-  };
+-  await writeJsonFile(path, assessment);
+-  // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
+-  // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
+-  // null for an absent design_assessment, but the file we just wrote projects to []
+-  // — snapshotting the input bundle would record `null` and re-stale against the
+-  // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
+-  // assessment makes the skip stick in a single cycle even when it created the file.
+-  const snapshotBundle = { ...bundle, design_assessment: assessment };
+-  await captureDesignReviewSnapshot(
+-    artifactsDir,
+-    "contract",
+-    assessment.contract_findings ?? [],
+-    snapshotBundle,
+-    reviewedAt,
+-  );
+-  await captureDesignReviewSnapshot(
+-    artifactsDir,
+-    "conceptual",
+-    assessment.conceptual_findings ?? [],
+-    snapshotBundle,
+-    reviewedAt,
+-  );
++  try {
++    const existing = await readJsonFile<DesignAssessment>(path).catch(() => null);
++    // The quota-wall skip is the give-up analogue of headless auto-complete: a pass
++    // it closes was never reviewed, and the stamp must say so. Per-pass, because
++    // the skip can fire when only ONE pass is outstanding — a pass a real
++    // submission already satisfied must NOT be retro-stamped unreviewed.
++    const contractGenuine =
++      existing?.contract_reviewed === true && existing.contract_auto_completed !== true;
++    const conceptualGenuine =
++      existing?.conceptual_reviewed === true && existing.conceptual_auto_completed !== true;
++    const assessment: DesignAssessment = {
++      ...(existing ?? { generated_at: reviewedAt, findings: [] }),
++      findings: existing?.findings ?? [],
++      contract_findings: existing?.contract_findings ?? [],
++      conceptual_findings: existing?.conceptual_findings ?? [],
++      contract_reviewed: true,
++      conceptual_reviewed: true,
++      ...(contractGenuine ? {} : { contract_auto_completed: true }),
++      ...(conceptualGenuine ? {} : { conceptual_auto_completed: true }),
++    };
++    await writeJsonFile(path, assessment);
++    // Capture the snapshots against the JUST-WRITTEN assessment, not the (possibly
++    // design_assessment-less) input bundle: `projectDesignAssessmentFindings` returns
++    // null for an absent design_assessment, but the file we just wrote projects to []
++    // — snapshotting the input bundle would record `null` and re-stale against the
++    // reloaded `[]` next pass (one wasted livelock cycle). Snapshotting the written
++    // assessment makes the skip stick in a single cycle even when it created the file.
++    const snapshotBundle = { ...bundle, design_assessment: assessment };
++    await captureDesignReviewSnapshot(
++      artifactsDir,
++      "contract",
++      assessment.contract_findings ?? [],
++      snapshotBundle,
++      reviewedAt,
++    );
++    await captureDesignReviewSnapshot(
++      artifactsDir,
++      "conceptual",
++      assessment.conceptual_findings ?? [],
++      snapshotBundle,
++      reviewedAt,
++    );
++  } catch (error) {
++    // File operation failures (permissions, disk full) should not crash the stamp operation.
++    // Log for debugging but allow the operation to proceed.
++    console.error(`Failed to stamp design review skipped: ${error instanceof Error ? error.message : String(error)}`);
++    throw error; // Re-throw to preserve the error semantics for callers
++  }
+ }
+ 
+ /**
+@@ -168,38 +193,27 @@ export async function stampSystemicChallengeSkipped(
+   bundle: ArtifactBundle,
+ ): Promise<void> {
+   const path = join(artifactsDir, "systemic_challenge.json");
+-  const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
+-  const register: SystemicChallengeRegister = existing
+-    ? { ...existing, converged: true }
+-    : {
+-        generated_at: new Date().toISOString(),
+-        target: "systemic_challenge",
+-        ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
+-        rounds: [],
+-        converged: true,
+-        findings: [],
+-        validation_issues: [],
+-      };
+-  await writeJsonFile(path, register);
++  try {
++    const existing = await readJsonFile<SystemicChallengeRegister>(path).catch(() => null);
++    const register: SystemicChallengeRegister = existing
++      ? { ...existing, converged: true }
++      : {
++          generated_at: new Date().toISOString(),
++          target: "systemic_challenge",
++          ceiling: resolveCharterCeiling(bundle.intent_checkpoint),
++          rounds: [],
++          converged: true,
++          findings: [],
++          validation_issues: [],
++        };
++    await writeJsonFile(path, register);
++  } catch (error) {
++    // File operation failures (permissions, disk full) should not crash the stamp operation.
++    // Log for debugging but allow the operation to proceed.
++    console.error(`Failed to stamp systemic challenge skipped: ${error instanceof Error ? error.message : String(error)}`);
++    throw error; // Re-throw to preserve the error semantics for callers
++  }
+ }
+-import {
+-  driveRollingAuditDispatch,
+-  resolveAuditRollingEngineEnabled,
+-} from "./rollingAuditDispatch.js";
+-import {
+-  buildAuditSourcePools,
+-  isInProcessAuditPool,
+-  auditNodeClaimRegistry,
+-  auditHybridSettledPath,
+-} from "./hybridDispatch.js";
+-import {
+-  planHybridDispatch,
+-  readSettledPools,
+-  addSettledPool,
+-  buildSelfSpawnExclusion,
+-  captureZeroCapacityFriction,
+-} from "audit-tools/shared";
+-import { resolveHostDispatchCapability } from "./args.js";
+ 
+ // ── In-process dispatch: bounded no-progress retry (D1, NIM/Codex fix set) ─────
+ 
+diff --git a/src/audit/decompose/findings.ts b/src/audit/decompose/findings.ts
+index 59273f4e..191f8cef 100644
+--- a/src/audit/decompose/findings.ts
++++ b/src/audit/decompose/findings.ts
+@@ -89,64 +89,59 @@ export function detectNonColocalization(
+     agreementThreshold,
+   );
+ 
+-  // --- Behavioral cluster with no coherent purpose ---
+-  const behaviorClusters = allBehaviorClusters
+-    .filter((c) => c.length >= minClusterSize)
+-    .sort(bySizeThenFirst);
+-  for (const cluster of behaviorClusters.slice(0, maxPerKind)) {
+-    const best = bestContainment(cluster, input.intentBoundaries);
+-    if (best + 1e-12 >= overlapThreshold) continue; // aligns to a declared boundary
+-    findings.push({
+-      id: nextId(),
+-      title: `Behavioral cluster spans declared boundaries: ${cluster.length} files`,
+-      category: "non_colocalization_behavioral",
+-      severity: "low",
+-      confidence: "low",
+-      lens: LENS,
+-      summary:
+-        `These ${cluster.length} files are tightly coupled by behavior (call/import, ` +
+-        `co-change, and/or shared state) yet no single declared boundary ` +
+-        `(directory, doc, or comment grouping) contains most of them ` +
+-        `(best overlap ${(best * 100).toFixed(0)}%). A coupling cluster no ` +
+-        `declared purpose owns is accidental complexity or a dead subsystem — a ` +
+-        `lead for the conceptual charter pass to confirm.`,
+-      affected_files: cluster.map((path) => ({ path })),
+-      evidence: [
+-        `Behavioral coupling consensus across ${input.behaviorPartitions.length} resolution levels.`,
+-        `Best containment in any declared boundary: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
+-      ],
+-      systemic: true,
+-    });
++  // Single-sourced detection loop for both behavioral and purpose non-colocalization findings.
++  function detectNonColocalGroup(
++    groups: string[][],
++    boundary: string[][],
++    label: "behavioral" | "purpose",
++  ): void {
++    const filtered = (label === "behavioral"
++      ? groups.filter((g) => g.length >= minClusterSize)
++      : groups.filter((g) => g.length >= 2)
++    ).sort(bySizeThenFirst);
++
++    for (const group of filtered.slice(0, maxPerKind)) {
++      const best = bestContainment(
++        group,
++        label === "behavioral" ? input.intentBoundaries : allBehaviorClusters,
++      );
++      if (best + 1e-12 >= overlapThreshold) continue;
++
++      const titleSuffix = label === "behavioral"
++        ? `Behavioral cluster spans declared boundaries: ${group.length} files`
++        : `Declared purpose is behaviorally smeared: ${group.length} files`;
++
++      const summaryText = label === "behavioral"
++        ? `These ${group.length} files are tightly coupled by behavior (call/import, co-change, and/or shared state) yet no single declared boundary (directory, doc, or comment grouping) contains most of them (best overlap ${(best * 100).toFixed(0)}%). A coupling cluster no declared purpose owns is accidental complexity or a dead subsystem — a lead for the conceptual charter pass to confirm.`
++        : `A doc/comment grouping declares these ${group.length} files a unit, but they do not form a behavioral cluster — no single coupling cluster contains most of them (best overlap ${(best * 100).toFixed(0)}%). A purpose smeared across the codebase and never modularized is often the highest-value refactor — a lead for the conceptual charter pass.`;
++
++      const evidenceText = label === "behavioral"
++        ? `Behavioral coupling consensus across ${input.behaviorPartitions.length} resolution levels.`
++        : `Declared as one unit by an intent-declared source (doc/comment).`;
++
++      findings.push({
++        id: nextId(),
++        title: titleSuffix,
++        category: label === "behavioral" ? "non_colocalization_behavioral" : "non_colocalization_purpose",
++        severity: "low",
++        confidence: "low",
++        lens: LENS,
++        summary: summaryText,
++        affected_files: group.map((path) => ({ path })),
++        evidence: [
++          evidenceText,
++          `Best containment in any ${label === "behavioral" ? "declared boundary" : "behavioral cluster"}: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
++        ],
++        systemic: true,
++      });
++    }
+   }
+ 
++  // --- Behavioral cluster with no coherent purpose ---
++  detectNonColocalGroup(allBehaviorClusters, input.intentBoundaries, "behavioral");
++
+   // --- A purpose with no behavioral cluster (smeared) ---
+-  const purposeGroups = [...input.purposeGroups]
+-    .filter((g) => g.length >= 2)
+-    .sort(bySizeThenFirst);
+-  for (const group of purposeGroups.slice(0, maxPerKind)) {
+-    const best = bestContainment(group, allBehaviorClusters);
+-    if (best + 1e-12 >= overlapThreshold) continue; // the purpose IS a behavior cluster
+-    findings.push({
+-      id: nextId(),
+-      title: `Declared purpose is behaviorally smeared: ${group.length} files`,
+-      category: "non_colocalization_purpose",
+-      severity: "low",
+-      confidence: "low",
+-      lens: LENS,
+-      summary:
+-        `A doc/comment grouping declares these ${group.length} files a unit, but ` +
+-        `they do not form a behavioral cluster — no single coupling cluster ` +
+-        `contains most of them (best overlap ${(best * 100).toFixed(0)}%). A ` +
+-        `purpose smeared across the codebase and never modularized is often the ` +
+-        `highest-value refactor — a lead for the conceptual charter pass.`,
+-      affected_files: group.map((path) => ({ path })),
+-      evidence: [
+-        `Declared as one unit by an intent-declared source (doc/comment).`,
+-        `Best containment in any behavioral cluster: ${(best * 100).toFixed(0)}% (threshold ${(overlapThreshold * 100).toFixed(0)}%).`,
+-      ],
+-      systemic: true,
+-    });
+-  }
++  detectNonColocalGroup(input.purposeGroups, allBehaviorClusters, "purpose");
+ 
+   return findings;
+ }
+diff --git a/src/remediate/contractPipeline/changeClassification.ts b/src/remediate/contractPipeline/changeClassification.ts
+index 519c2c21..63fb2aaa 100644
+--- a/src/remediate/contractPipeline/changeClassification.ts
++++ b/src/remediate/contractPipeline/changeClassification.ts
+@@ -383,13 +383,20 @@ export function obligationScopeAnchors(
+ 
+ // ── Verify-gate enforcement (mergeImplementResults) ────────────────────────────
+ 
++/**
++ * Extract test_specs array from a raw testValidatorPlanPayload.
++ * Returns an empty array if the payload is malformed or missing test_specs.
++ */
++function extractTestSpecs(testValidatorPlanPayload: unknown): unknown[] {
++  return isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
++    ? (testValidatorPlanPayload.test_specs as unknown[])
++    : [];
++}
++
+ /** A test_validator_plan spec's assertions, indexed by obligation id. */
+ function assertionsByObligation(testValidatorPlanPayload: unknown): Map<string, string[]> {
+   const byId = new Map<string, string[]>();
+-  const specs =
+-    isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
+-      ? (testValidatorPlanPayload.test_specs as unknown[])
+-      : [];
++  const specs = extractTestSpecs(testValidatorPlanPayload);
+   for (const spec of specs) {
+     if (!isRecord(spec) || typeof spec.obligation_id !== "string") continue;
+     const list = byId.get(spec.obligation_id) ?? [];
+@@ -408,10 +415,7 @@ function obligationOptedOut(
+   testValidatorPlanPayload: unknown,
+   obligationId: string,
+ ): boolean {
+-  const specs =
+-    isRecord(testValidatorPlanPayload) && Array.isArray(testValidatorPlanPayload.test_specs)
+-      ? (testValidatorPlanPayload.test_specs as unknown[])
+-      : [];
++  const specs = extractTestSpecs(testValidatorPlanPayload);
+   return specs.some(
+     (spec) =>
+       isRecord(spec) &&
+diff --git a/src/shared/findings/dedupe.ts b/src/shared/findings/dedupe.ts
+index d6409fd8..1c3b9446 100644
+--- a/src/shared/findings/dedupe.ts
++++ b/src/shared/findings/dedupe.ts
+@@ -253,30 +253,16 @@ export function crossLensDedupe(
+         // lives on the survivor's single clone, never on the caller's object.
+         const a = canonical(originalA);
+         const b = canonical(originalB);
++        // crossLensDedupe only pairs findings of DIFFERENT lenses
+         if (normalizeText(a.lens) === normalizeText(b.lens)) continue;
+ 
+-        const catMatch = normalizeText(a.category) === normalizeText(b.category);
+-        // Hard category gate applies ahead of BOTH the exact-match and fuzzy layers.
+-        if (policy.categoryGate === "hard" && !catMatch) continue;
+-
+-        let matched = false;
+-        if (policy.exactIdentityShortCircuit) {
+-          const keyA = discriminatingIdentityKey(a);
+-          const keyB = discriminatingIdentityKey(b);
+-          matched = keyA !== null && keyA === keyB;
+-        }
+-        if (!matched) {
+-          const titleSim = wordJaccard(a.title, b.title);
+-          const threshold = policy.categoryGate === "soft" ? (catMatch ? 0.4 : 0.5) : 0.4;
+-          if (titleSim < threshold) continue;
+-          if (filePathOverlap(a, b) < 0.5) continue;
+-        }
++        const comparison = compareFindingPair(a, b, {
++          categoryGate: policy.categoryGate,
++          exactIdentityShortCircuit: policy.exactIdentityShortCircuit,
++        });
++        if (!comparison.matched) continue;
+ 
+-        const aSev = severityRank(a.severity);
+-        const bSev = severityRank(b.severity);
+-        const aConf = confidenceRank(a.confidence);
+-        const bConf = confidenceRank(b.confidence);
+-        const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
++        const keepA = comparison.keepA;
+         const survivorOriginal = keepA ? originalA : originalB;
+         const absorbedOriginal = keepA ? originalB : originalA;
+         // Absorb the absorbed side's ACCUMULATED view so data it absorbed earlier
+@@ -401,6 +387,67 @@ export function crossLensDedupe(
+   };
+ }
+ 
++/**
++ * Shared pairwise comparison result: should these two findings be merged?
++ * Extracted to eliminate duplication between crossLensDedupe and sameLensDedupe.
++ */
++interface PairwiseComparisonResult {
++  /** If true, a is kept as survivor; if false, b is kept. */
++  keepA: boolean;
++  /** Did the pair match under the comparison criteria? */
++  matched: boolean;
++}
++
++/**
++ * Perform pairwise comparison of two findings using similarity metrics.
++ * Returns whether they match and which should be the survivor.
++ * This logic is shared by both crossLensDedupe and sameLensDedupe.
++ */
++function compareFindingPair(
++  a: Finding,
++  b: Finding,
++  options: {
++    skipLensCheck?: boolean; // Skip the lens equality check (crossLensDedupe sets different-lens requirement in its own logic)
++    categoryGate?: "soft" | "hard";
++    exactIdentityShortCircuit?: boolean;
++  },
++): PairwiseComparisonResult {
++  const catMatch = normalizeText(a.category) === normalizeText(b.category);
++
++  // Hard category gate applies ahead of both exact-match and fuzzy layers
++  if (options.categoryGate === "hard" && !catMatch) {
++    return { matched: false, keepA: false };
++  }
++
++  let matched = false;
++  if (options.exactIdentityShortCircuit) {
++    const keyA = discriminatingIdentityKey(a);
++    const keyB = discriminatingIdentityKey(b);
++    matched = keyA !== null && keyA === keyB;
++  }
++
++  if (!matched) {
++    const titleSim = wordJaccard(a.title, b.title);
++    const threshold = options.categoryGate === "soft" ? (catMatch ? 0.4 : 0.5) : 0.4;
++    if (titleSim < threshold) {
++      return { matched: false, keepA: false };
++    }
++    if (filePathOverlap(a, b) < 0.5) {
++      return { matched: false, keepA: false };
++    }
++    matched = true;
++  }
++
++  // Rank by severity then confidence
++  const aSev = severityRank(a.severity);
++  const bSev = severityRank(b.severity);
++  const aConf = confidenceRank(a.confidence);
++  const bConf = confidenceRank(b.confidence);
++  const keepA = aSev > bSev || (aSev === bSev && aConf >= bConf);
++
++  return { matched, keepA };
++}
++
+ /**
+  * File-independent finding identity for exact re-emission collapse: the same logical
+  * finding (normalized lens + category + title) re-emitted across files / units /
+@@ -459,8 +506,9 @@ export function sameLensDedupe(findings: Finding[]): Finding[] {
+         const a = group[i];
+         const b = group[j];
+ 
+-        const titleSim = wordJaccard(a.title, b.title);
++        // sameLensDedupe has different similarity thresholds than crossLensDedupe
+         const catMatch = normalizeText(a.category) === normalizeText(b.category);
++        const titleSim = wordJaccard(a.title, b.title);
+         const threshold = catMatch ? 0.35 : 0.45;
+         if (titleSim < threshold) continue;
+         if (!lineRangeOverlaps(a, b) && filePathOverlap(a, b) < 0.5) continue;
+diff --git a/src/shared/friction/triage.ts b/src/shared/friction/triage.ts
+index 19bb61a8..71896259 100644
+--- a/src/shared/friction/triage.ts
++++ b/src/shared/friction/triage.ts
+@@ -206,7 +206,7 @@ export function measureFrictionCost(
+   items: readonly CapturedFrictionItem[],
+ ): FrictionCostSignals {
+   const round_trips = items.length;
+-  const verbatim_re_authors = round_trips > 1 ? round_trips : 0;
++  const verbatim_re_authors = round_trips > 1 ? round_trips - 1 : 0;
+   const tokens = items.reduce(
+     (sum, item) =>
+       sum +
+diff --git a/src/shared/io/nodeWorktreeGuard.ts b/src/shared/io/nodeWorktreeGuard.ts
+index b115881b..d09342cf 100644
+--- a/src/shared/io/nodeWorktreeGuard.ts
++++ b/src/shared/io/nodeWorktreeGuard.ts
+@@ -43,7 +43,7 @@ import { AUDIT_TOOLS_DIRNAME, WORKTREES_DIRNAME } from "./auditToolsPaths.js";
+  */
+ export function nodeWorktreeAncestor(p: string): string | null {
+   const segments = resolve(p).split(sep);
+-  for (let i = 1; i + 2 < segments.length + 1; i++) {
++  for (let i = 1; i + 2 < segments.length; i++) {
+     // Case-insensitive segment compare (review hardening): win32 paths are
+     // case-preserving but case-insensitive, so a re-cased cwd must still be
+     // detected. Refusing more is safe — a posix dir literally spelled
+diff --git a/src/shared/providers/spawnLoggedCommand.ts b/src/shared/providers/spawnLoggedCommand.ts
+index 09025c47..dd15bd1d 100644
+--- a/src/shared/providers/spawnLoggedCommand.ts
++++ b/src/shared/providers/spawnLoggedCommand.ts
+@@ -237,7 +237,7 @@ class SpawnRunController {
+ 
+   private emitOutputLine(line: string): void {
+     const trimmed = line.trim();
+-    if (trimmed.length > 0 && this.input.onProgress) {
++    if (trimmed.length > 0 && this.input.onProgress && !this.settled) {
+       this.input.onProgress({
+         type: "output",
+         runId: this.input.runId,
+diff --git a/src/shared/quota/claudeOAuthQuotaSource.ts b/src/shared/quota/claudeOAuthQuotaSource.ts
+index d06c430e..65a2fca8 100644
+--- a/src/shared/quota/claudeOAuthQuotaSource.ts
++++ b/src/shared/quota/claudeOAuthQuotaSource.ts
+@@ -239,7 +239,7 @@ export class ClaudeOAuthQuotaSource extends BaseHttpQuotaSource {
+         if (typeof oauth.refreshToken !== "string" || oauth.refreshToken === "") return null;
+ 
+         const grant = await this.runRefreshGrant(oauth.refreshToken);
+-        if (!grant?.access_token || !grant.refresh_token || typeof grant.expires_in !== "number") {
++        if (!grant?.access_token || !grant.refresh_token || typeof grant.expires_in !== "number" || grant.expires_in <= 0) {
+           return null;
+         }
+         const next: ClaudeOAuthCredentials & Record<string, unknown> = {
+diff --git a/src/shared/quota/state.ts b/src/shared/quota/state.ts
+index 53509e93..f86e88df 100644
+--- a/src/shared/quota/state.ts
++++ b/src/shared/quota/state.ts
+@@ -220,6 +220,32 @@ export const TOKENS_PER_PCT_EWMA_ALPHA = 0.3;
+ // barely moved) and Δtokens/Δpercent explodes — skip it.
+ export const MIN_SLOPE_DELTA_PERCENT = 0.5;
+ 
++/**
++ * Fold one observation into a learned EWMA estimate, returning the updated map
++ * (pure — never mutates the input). Core extraction of the EWMA blending logic
++ * used by both tokens-per-percent slopes and output-ratio ratios.
++ *
++ * Degrade-safe: returns the prior map unchanged when the sample is non-finite
++ * or non-positive. Never throws.
++ */
++function blendEwmaObservation(
++  prior: Record<string, number> | undefined,
++  key: string,
++  sample: number,
++  alpha: number,
++): Record<string, number> {
++  const base = prior ?? {};
++  if (!Number.isFinite(sample) || sample <= 0) {
++    return base;
++  }
++  const previous = base[key];
++  const blended =
++    typeof previous === "number" && Number.isFinite(previous) && previous > 0
++      ? previous * (1 - alpha) + sample * alpha
++      : sample;
++  return { ...base, [key]: blended };
++}
++
+ /**
+  * Fold one tokens→percent slope observation into a window's learned EWMA slope,
+  * returning the updated map (pure — never mutates the input). Given a prior and
+@@ -251,13 +277,7 @@ export function foldTokensPerPctObservation(
+   const deltaPercent = (priorRemainingPct - newRemainingPct) * 100;
+   if (deltaPercent < MIN_SLOPE_DELTA_PERCENT) return base;
+   const sampleSlope = tokensDispatched / deltaPercent;
+-  if (!Number.isFinite(sampleSlope) || sampleSlope <= 0) return base;
+-  const previous = base[slopeKey];
+-  const blended =
+-    typeof previous === "number" && Number.isFinite(previous) && previous > 0
+-      ? previous * (1 - TOKENS_PER_PCT_EWMA_ALPHA) + sampleSlope * TOKENS_PER_PCT_EWMA_ALPHA
+-      : sampleSlope;
+-  return { ...base, [slopeKey]: blended };
++  return blendEwmaObservation(prior, slopeKey, sampleSlope, TOKENS_PER_PCT_EWMA_ALPHA);
+ }
+ 
+ // EWMA weight for a new output/input ratio observation. Shares the responsive-but-
+@@ -291,13 +311,7 @@ export function foldOutputRatioObservation(
+     return base;
+   }
+   const sampleRatio = actualOutputTokens / actualInputTokens;
+-  if (!Number.isFinite(sampleRatio) || sampleRatio <= 0) return base;
+-  const previous = base[lens];
+-  const blended =
+-    typeof previous === "number" && Number.isFinite(previous) && previous > 0
+-      ? previous * (1 - OUTPUT_RATIO_EWMA_ALPHA) + sampleRatio * OUTPUT_RATIO_EWMA_ALPHA
+-      : sampleRatio;
+-  return { ...base, [lens]: blended };
++  return blendEwmaObservation(prior, lens, sampleRatio, OUTPUT_RATIO_EWMA_ALPHA);
+ }
+ 
+ /**
+diff --git a/tests/audit/adapters-remediation.test.ts b/tests/audit/adapters-remediation.test.ts
+index 4d81c118..3ab8508b 100644
+--- a/tests/audit/adapters-remediation.test.ts
++++ b/tests/audit/adapters-remediation.test.ts
+@@ -281,8 +281,6 @@ test("normalizeSemgrepJson maps mixed-case semgrep severity to lowercase schema
+ });
+ 
+ test("normalizeSemgrepJson produces undefined/fallback severity for missing or unknown severity (COR-cffe3d7b)", () => {
+-  const VALID_SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
+-
+   // Missing severity — normalizeGenericExternalResults should supply a fallback
+   const withMissing = normalizeSemgrepJson({
+     results: [
+diff --git a/tests/audit/audit-dispatch-observability.test.ts b/tests/audit/audit-dispatch-observability.test.ts
+index d9abbfba..0835dc1a 100644
+--- a/tests/audit/audit-dispatch-observability.test.ts
++++ b/tests/audit/audit-dispatch-observability.test.ts
+@@ -15,6 +15,7 @@ import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+ import { fileURLToPath } from "node:url";
+ import { dirname } from "node:path";
++import { filterJsonLinesByEvent, findJsonEventLine } from "../helpers/jsonEventFilter.js";
+ import type { AuditResult, AuditTask } from "../../src/audit/types.js";
+ import type {
+   CapacityPool,
+@@ -116,17 +117,12 @@ test("FND-OBS-c8d43100: buildSelectiveDeepeningTasks emits a strategy_summary st
+     else process.env.AUDIT_CODE_VERBOSE = prevVerbose;
+   }
+ 
+-  const summaryLines = stderrLines.filter((l) => {
+-    try {
+-      const obj = JSON.parse(l.trim());
+-      return obj.event === "strategy_summary";
+-    } catch { return false; }
+-  });
++  const summaryLines = filterJsonLinesByEvent(stderrLines, "strategy_summary");
+   expect(summaryLines.length, "expected exactly one strategy_summary log line").toBe(1);
+   if (summaryLines[0] === undefined) {
+     throw new Error("strategy_summary log line missing");
+   }
+-  const parsed = JSON.parse(summaryLines[0].trim());
++  const parsed = summaryLines[0];
+   expect(parsed.source).toBe("audit-code:selectiveDeepening");
+   expect(parsed.level).toBe("info");
+   expect(typeof parsed.created === "number", "created is a number").toBeTruthy();
+@@ -213,15 +209,9 @@ test("FND-OBS-99e3a861: runRollingDispatch emits packet_result progress events t
+   }
+ 
+   expect(dispatchCount, "both packets were dispatched").toBe(2);
+-  const resultLines = stderrLines.filter((l) => {
+-    try {
+-      const obj = JSON.parse(l.trim());
+-      return obj.event === "packet_result";
+-    } catch { return false; }
+-  });
++  const resultLines = filterJsonLinesByEvent(stderrLines, "packet_result");
+   expect(resultLines.length, "expected one packet_result log line per packet").toBe(2);
+-  for (const line of resultLines) {
+-    const parsed = JSON.parse(line.trim());
++  for (const parsed of resultLines) {
+     expect(parsed.source).toBe("audit-code:rollingDispatch");
+     expect(typeof parsed.packet_id === "string", "packet_id present").toBeTruthy();
+     expect(parsed.outcome).toBe("success");
+@@ -484,17 +474,11 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary
+ 
+     // stdout must contain a parseable JSON line with event=merge_summary
+     const stdoutLines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
+-    const summaryLine = stdoutLines.find((l) => {
+-      try {
+-        const obj = JSON.parse(l.trim());
+-        return obj.event === "merge_summary";
+-      } catch { return false; }
+-    });
+-    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
+-    if (summaryLine === undefined) {
++    const parsed = findJsonEventLine(stdoutLines, "merge_summary");
++    expect(parsed, "expected a JSON merge_summary line on stdout").toBeTruthy();
++    if (parsed === undefined) {
+       throw new Error("merge_summary log line missing");
+     }
+-    const parsed = JSON.parse(summaryLine.trim());
+     expect(parsed.source).toBe("audit-code:merge-results");
+     expect(parsed.total).toBe(1);
+     expect(parsed.accepted).toBe(1);
+@@ -504,7 +488,12 @@ test("FND-OBS-bf5c7331: merge-results.mjs emits a structured JSON merge_summary
+ 
+     // The JSON summary line must appear before the plain text line
+     const summaryIdx = stdoutLines.findIndex((l) => {
+-      try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
++      try {
++        const obj = JSON.parse(l.trim());
++        return obj.event === "merge_summary";
++      } catch {
++        return false;
++      }
+     });
+     const textIdx = stdoutLines.findIndex((l) => l.includes("tasks valid"));
+     expect(summaryIdx !== -1, "JSON summary line present").toBeTruthy();
+@@ -536,14 +525,13 @@ test("FND-OBS-bf5c7331: merge-results.mjs JSON summary includes failed_tasks_pat
+     ]);
+     expect(result.status, "expected non-zero exit on validation failure").toBe(1);
+ 
+-    const summaryLine = result.stdout.split("\n").find((l) => {
+-      try { return JSON.parse(l.trim()).event === "merge_summary"; } catch { return false; }
+-    });
+-    expect(summaryLine, "expected a JSON merge_summary line on stdout").toBeTruthy();
+-    if (summaryLine === undefined) {
++    const stdoutLines2 = result.stdout.split("\n").filter((l) => l.trim().length > 0);
++    const parsed2 = findJsonEventLine(stdoutLines2, "merge_summary");
++    expect(parsed2, "expected a JSON merge_summary line on stdout").toBeTruthy();
++    if (parsed2 === undefined) {
+       throw new Error("merge_summary log line missing");
+     }
+-    const parsed = JSON.parse(summaryLine.trim());
++    const parsed = parsed2;
+     expect(parsed.rejected).toBe(1);
+     expect(typeof parsed.failed_tasks_path === "string", "failed_tasks_path present when rejections > 0").toBeTruthy();
+   } finally {
+diff --git a/tests/audit/charter-clarification.test.ts b/tests/audit/charter-clarification.test.ts
+index 2c29f1cb..7c22ff4c 100644
+--- a/tests/audit/charter-clarification.test.ts
++++ b/tests/audit/charter-clarification.test.ts
+@@ -393,7 +393,7 @@ describe("D3 runCharterClarificationExecutor — run path", () => {
+     expect(reg.findings.length).toBe(2);
+   });
+ 
+-  test("applying answers to banked questions (with lower attention threshold)", () => {
++  test("lower attention threshold allows lower-blast deltas to reach clarification", () => {
+     // Test with only architecture_betrayal (lower blast than wrong_goal) to ensure
+     // it can pass through the risk gate with lower blast radius.
+     const lowerBlastDeltas: CharterDelta[] = [
+diff --git a/tests/audit/f3-schema-enforced-generation.test.ts b/tests/audit/f3-schema-enforced-generation.test.ts
+index fb364bea..129c3435 100644
+--- a/tests/audit/f3-schema-enforced-generation.test.ts
++++ b/tests/audit/f3-schema-enforced-generation.test.ts
+@@ -78,6 +78,30 @@ const brokerContext: Omit<BrokerDispatchInput, "slots"> = {
+   hostModel: null,
+ };
+ 
++/**
++ * Build a broker schedule fixture with standard configuration.
++ * Used by broker stub factories to reduce duplication.
++ */
++function buildBrokerSchedule(maxConcurrent: number) {
++  return {
++    max_concurrent: maxConcurrent,
++    estimated_wave_tokens: 0,
++    cooldown_until: null,
++    confidence: "high" as const,
++    source: "default" as const,
++    resolved_limits: {
++      context_tokens: 128000,
++      output_tokens: 4096,
++      requests_per_minute: null,
++      input_tokens_per_minute: null,
++      output_tokens_per_minute: null,
++    },
++    host_concurrency_limit: null,
++    model: null,
++    binding_cap: "none" as const,
++  };
++}
++
+ test("F3: discovery is provider-agnostic — agentic CLIs degrade to 'none'", () => {
+   for (const name of [
+     "claude-code",
+@@ -243,23 +267,7 @@ test("F3: a refused broker means no LLM touch — O3 falls to the re-dispatch si
+       cooldownUntil: null,
+       bindingCap: "none",
+       capableHost: false,
+-      schedule: {
+-        max_concurrent: 0,
+-        estimated_wave_tokens: 0,
+-        cooldown_until: null,
+-        confidence: "high",
+-        source: "default",
+-        resolved_limits: {
+-          context_tokens: 128000,
+-          output_tokens: 4096,
+-          requests_per_minute: null,
+-          input_tokens_per_minute: null,
+-          output_tokens_per_minute: null,
+-        },
+-        host_concurrency_limit: null,
+-        model: null,
+-        binding_cap: "none",
+-      },
++      schedule: buildBrokerSchedule(0),
+     }),
+     awaitNextCompletion: (c: BrokeredCompletion) => c,
+   };
+@@ -305,23 +313,7 @@ test("F3 inv-5 [CP-NODE-26]: capability 'none' degrades through the brokered rep
+         cooldownUntil: null,
+         bindingCap: "none",
+         capableHost: true,
+-        schedule: {
+-          max_concurrent: 1,
+-          estimated_wave_tokens: 0,
+-          cooldown_until: null,
+-          confidence: "high",
+-          source: "default",
+-          resolved_limits: {
+-            context_tokens: 128000,
+-            output_tokens: 4096,
+-            requests_per_minute: null,
+-            input_tokens_per_minute: null,
+-            output_tokens_per_minute: null,
+-          },
+-          host_concurrency_limit: null,
+-          model: null,
+-          binding_cap: "none",
+-        },
++        schedule: buildBrokerSchedule(1),
+       };
+     },
+     awaitNextCompletion: (completion: BrokeredCompletion) => {
+@@ -684,23 +676,7 @@ test("F3 fail-1 [CP-NODE-29]: mis-advertised mode + invalid emit => degrade to r
+           cooldownUntil: null,
+           bindingCap: "none",
+           capableHost: true,
+-          schedule: {
+-            max_concurrent: 1,
+-            estimated_wave_tokens: 0,
+-            cooldown_until: null,
+-            confidence: "high",
+-            source: "default",
+-            resolved_limits: {
+-              context_tokens: 128000,
+-              output_tokens: 4096,
+-              requests_per_minute: null,
+-              input_tokens_per_minute: null,
+-              output_tokens_per_minute: null,
+-            },
+-            host_concurrency_limit: null,
+-            model: null,
+-            binding_cap: "none",
+-          },
++          schedule: buildBrokerSchedule(1),
+         };
+       },
+       awaitNextCompletion: (completion) => {
+@@ -790,23 +766,7 @@ test("F3 fail-4 [CP-NODE-32]: tool-owned identity strip handled by O3 stage-1 co
+         cooldownUntil: null,
+         bindingCap: "none",
+         capableHost: true,
+-        schedule: {
+-          max_concurrent: 1,
+-          estimated_wave_tokens: 0,
+-          cooldown_until: null,
+-          confidence: "high",
+-          source: "default",
+-          resolved_limits: {
+-            context_tokens: 128000,
+-            output_tokens: 4096,
+-            requests_per_minute: null,
+-            input_tokens_per_minute: null,
+-            output_tokens_per_minute: null,
+-          },
+-          host_concurrency_limit: null,
+-          model: null,
+-          binding_cap: "none",
+-        },
++        schedule: buildBrokerSchedule(1),
+       };
+     },
+     awaitNextCompletion: (completion) => {
+diff --git a/tests/audit/graph-signal-metrics.test.ts b/tests/audit/graph-signal-metrics.test.ts
+index 508ea4a3..9c40c77e 100644
+--- a/tests/audit/graph-signal-metrics.test.ts
++++ b/tests/audit/graph-signal-metrics.test.ts
+@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
+ import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+ import type { RepoManifest } from "../../src/audit/types.js";
+ import type { GraphSignals } from "../../src/audit/extractors/graphSignals.js";
++import { manifest, edgeBundle } from "./test-helpers.js";
+ 
+ const { deriveGraphSignals } = await import(
+   "../../src/audit/extractors/graphSignals.js"
+@@ -15,29 +16,6 @@ const { computeNodeMetricsForFile } = await import(
+   "../../src/audit/extractors/analyzers/complexityDuplication.js"
+ );
+ 
+-interface FixtureFile {
+-  path: string;
+-  content?: string;
+-  size_bytes?: number;
+-  language?: string;
+-}
+-
+-function manifest(files: FixtureFile[]): RepoManifest {
+-  return {
+-    generated_at: new Date(0).toISOString(),
+-    repository: { name: "fixture-repo" },
+-    files: files.map((f) => ({
+-      path: f.path,
+-      size_bytes: f.size_bytes ?? (f.content ? f.content.length : 0),
+-      language: f.language ?? "typescript",
+-      excluded: false,
+-    })),
+-  };
+-}
+-
+-function edgeBundle(edges: GraphEdge[], extra: Partial<GraphBundle> = {}): GraphBundle {
+-  return { graphs: { imports: edges, calls: [], references: [], routes: [] }, ...extra };
+-}
+ 
+ test("complexity/duplication present for js/ts with measure+reach tags", () => {
+   const tsSource = "if (a) { foo(); }\nfor (const x of y) { bar(); }\nfoo();\nfoo();\n";
+diff --git a/tests/audit/hybrid-dispatch.test.ts b/tests/audit/hybrid-dispatch.test.ts
+index adbe791a..25a447d4 100644
+--- a/tests/audit/hybrid-dispatch.test.ts
++++ b/tests/audit/hybrid-dispatch.test.ts
+@@ -19,6 +19,7 @@ import { join } from "node:path";
+ import type { CapacityPool } from "../../src/shared/quota/capacity.js";
+ import type { FrontierNode } from "../../src/shared/dispatch/coordinator.js";
+ import type { SessionConfig } from "../../src/shared/types/sessionConfig.js";
++import { snapshot } from "./test-helpers.js";
+ 
+ const { ClaimRegistry } = await import("../../src/shared/quota/claimRegistry.js");
+ const { isInProcessAuditPool } = await import("../../src/audit/cli/hybridDispatch.js");
+@@ -36,16 +37,6 @@ function tasks(count: number, tokens = 1000): FrontierNode[] {
+   return Array.from({ length: count }, (_, i) => ({ id: `task-${i}`, estimatedTokens: tokens }));
+ }
+ 
+-function snapshot(pct: number): NonNullable<CapacityPool["quotaSourceSnapshot"]> {
+-  return {
+-    remaining_pct: pct,
+-    reset_at: null,
+-    requests_remaining: null,
+-    tokens_remaining: null,
+-    captured_at: new Date(0).toISOString(),
+-    source: "test",
+-  };
+-}
+ 
+ function nimPool(over: Partial<CapacityPool> = {}): CapacityPool {
+   return {
+diff --git a/tests/audit/test-helpers.ts b/tests/audit/test-helpers.ts
+new file mode 100644
+index 00000000..8a26c39d
+--- /dev/null
++++ b/tests/audit/test-helpers.ts
+@@ -0,0 +1,52 @@
++/**
++ * Shared test helpers for audit test suite.
++ * Extracted to eliminate duplication across test files.
++ */
++
++import type { GraphBundle, GraphEdge } from "audit-tools/shared";
++import type { CapacityPool } from "../../src/shared/quota/capacity.js";
++import type { RepoManifest } from "../../src/audit/types.js";
++
++export interface FixtureFile {
++  path: string;
++  content?: string;
++  size_bytes?: number;
++  language?: string;
++}
++
++/**
++ * Build a minimal RepoManifest fixture from a list of fixture files.
++ */
++export function manifest(files: FixtureFile[]): RepoManifest {
++  return {
++    generated_at: new Date(0).toISOString(),
++    repository: { name: "fixture-repo" },
++    files: files.map((f) => ({
++      path: f.path,
++      size_bytes: f.size_bytes ?? (f.content ? f.content.length : 0),
++      language: f.language ?? "typescript",
++      excluded: false,
++    })),
++  };
++}
++
++/**
++ * Build a GraphBundle fixture from edge lists.
++ */
++export function edgeBundle(edges: GraphEdge[], extra: Partial<GraphBundle> = {}): GraphBundle {
++  return { graphs: { imports: edges, calls: [], references: [], routes: [] }, ...extra };
++}
++
++/**
++ * Build a quota snapshot fixture for testing quota/capacity logic.
++ */
++export function snapshot(pct: number): NonNullable<CapacityPool["quotaSourceSnapshot"]> {
++  return {
++    remaining_pct: pct,
++    reset_at: null,
++    requests_remaining: null,
++    tokens_remaining: null,
++    captured_at: new Date(0).toISOString(),
++    source: "test",
++  };
++}
+diff --git a/tests/helpers/jsonEventFilter.ts b/tests/helpers/jsonEventFilter.ts
+new file mode 100644
+index 00000000..f0623069
+--- /dev/null
++++ b/tests/helpers/jsonEventFilter.ts
+@@ -0,0 +1,54 @@
++/**
++ * Shared helpers for filtering and parsing JSON event lines from test output.
++ * Single-sources the JSON filtering logic used across multiple test files.
++ */
++
++/**
++ * Filter lines to only those that parse as JSON with a specific event type.
++ * @param lines - Array of string lines, potentially containing JSON
++ * @param eventType - The event field value to match
++ * @returns Array of JSON-parsed objects matching the event type
++ */
++export function filterJsonLinesByEvent<T extends { event?: string }>(
++  lines: string[],
++  eventType: string,
++): T[] {
++  return lines.flatMap((line) => {
++    try {
++      const obj = JSON.parse(line.trim()) as unknown;
++      if (isRecord(obj) && obj.event === eventType) {
++        return [obj as T];
++      }
++      return [];
++    } catch {
++      return [];
++    }
++  });
++}
++
++/**
++ * Find the first JSON-parsed line with a specific event type.
++ * @param lines - Array of string lines
++ * @param eventType - The event field value to match
++ * @returns The parsed JSON object or undefined
++ */
++export function findJsonEventLine<T extends { event?: string }>(
++  lines: string[],
++  eventType: string,
++): T | undefined {
++  for (const line of lines) {
++    try {
++      const obj = JSON.parse(line.trim()) as unknown;
++      if (isRecord(obj) && obj.event === eventType) {
++        return obj as T;
++      }
++    } catch {
++      // Continue to next line
++    }
++  }
++  return undefined;
++}
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++  return typeof value === "object" && value !== null;
++}
+diff --git a/tests/remediate/partial-completion-terminal.test.ts b/tests/remediate/partial-completion-terminal.test.ts
+index 04749fc0..1c4e7b76 100644
+--- a/tests/remediate/partial-completion-terminal.test.ts
++++ b/tests/remediate/partial-completion-terminal.test.ts
+@@ -10,6 +10,7 @@ import type { RemediationState } from "../../src/remediate/state/store.js";
+ import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
+ import type { PartialCompletionTerminal } from "audit-tools/shared";
+ import { scratchDir } from "../helpers/scratch.js";
++import { makeState as makeBaseState } from "./test-helpers.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const TEST_DIR = scratchDir(".test-partial-terminal");
+@@ -40,7 +41,7 @@ function makeImplementingState(
+     ...extraItems,
+   };
+ 
+-  const state: RemediationState = {
++  const overrides: Record<string, unknown> = {
+     status: "implementing",
+     plan: {
+       plan_id: "PLAN-TERMINAL",
+@@ -80,10 +81,10 @@ function makeImplementingState(
+   };
+ 
+   if (terminalOverride) {
+-    state.partial_completion_terminal = terminalOverride;
++    overrides.partial_completion_terminal = terminalOverride;
+   }
+ 
+-  return state;
++  return makeBaseState(overrides);
+ }
+ 
+ async function acknowledgeResume(): Promise<void> {
+diff --git a/tests/shared/finding-identity-single-source.test.ts b/tests/shared/finding-identity-single-source.test.ts
+index 9bd733fe..9ae5cc9a 100644
+--- a/tests/shared/finding-identity-single-source.test.ts
++++ b/tests/shared/finding-identity-single-source.test.ts
+@@ -19,9 +19,10 @@
+  * here rather than silently drifting.
+  */
+ import { test, expect } from "vitest";
+-import { readFileSync, readdirSync } from "node:fs";
++import { readFileSync } from "node:fs";
+ import { resolve, dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { collectTsFiles } from "./testFileUtils.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const REPO_PACKAGES = resolve(__dirname, "../..");
+@@ -37,17 +38,6 @@ function read(path: string): string {
+   return readFileSync(path, "utf8");
+ }
+ 
+-/** Recursively collect every `*.ts` file under `dir`. */
+-function collectTsFiles(dir: string): string[] {
+-  const out: string[] = [];
+-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+-    const full = join(dir, entry.name);
+-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
+-    else if (entry.name.endsWith(".ts")) out.push(full);
+-  }
+-  return out;
+-}
+-
+ const ALL_SRC_FILES = [
+   ...collectTsFiles(SHARED_SRC),
+   ...collectTsFiles(AUDIT_SRC),
+diff --git a/tests/shared/friction-derived-observations.test.ts b/tests/shared/friction-derived-observations.test.ts
+index a33ce478..b94c2327 100644
+--- a/tests/shared/friction-derived-observations.test.ts
++++ b/tests/shared/friction-derived-observations.test.ts
+@@ -61,7 +61,7 @@ test("measureFrictionCost: repeated touches on one subject count as verbatim re-
+     evt("c", "inefficient_feeding", "x"), // no tokens → contributes 0, never fabricated
+   ]);
+   expect(cost.round_trips).toBe(3);
+-  expect(cost.verbatim_re_authors).toBe(3);
++  expect(cost.verbatim_re_authors, "3 events = original + 2 re-works").toBe(2);
+   expect(cost.tokens, "only real measures sum; missing counts as 0").toBe(150);
+ });
+ 
+diff --git a/tests/shared/grounding-runner-single-source.test.ts b/tests/shared/grounding-runner-single-source.test.ts
+index ffdb868c..21b6bc62 100644
+--- a/tests/shared/grounding-runner-single-source.test.ts
++++ b/tests/shared/grounding-runner-single-source.test.ts
+@@ -17,9 +17,10 @@
+  *      total function for the G1 verify-before-fix path).
+  */
+ import { test, expect } from "vitest";
+-import { readFileSync, readdirSync } from "node:fs";
++import { readFileSync } from "node:fs";
+ import { resolve, dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { collectTsFiles } from "./testFileUtils.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const REPO_PACKAGES = resolve(__dirname, "../..");
+@@ -35,16 +36,6 @@ function read(path: string): string {
+   return readFileSync(path, "utf8");
+ }
+ 
+-function collectTsFiles(dir: string): string[] {
+-  const out: string[] = [];
+-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+-    const full = join(dir, entry.name);
+-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
+-    else if (entry.name.endsWith(".ts")) out.push(full);
+-  }
+-  return out;
+-}
+-
+ const ALL_SRC_FILES = [
+   ...collectTsFiles(SHARED_SRC),
+   ...collectTsFiles(AUDIT_SRC),
+diff --git a/tests/shared/id-glossary.test.ts b/tests/shared/id-glossary.test.ts
+index 3578e0a1..85178443 100644
+--- a/tests/shared/id-glossary.test.ts
++++ b/tests/shared/id-glossary.test.ts
+@@ -16,9 +16,10 @@
+  * recommendation is one row per family, with load-bearing ids enumerated under it.
+  */
+ import { test, expect } from "vitest";
+-import { readFileSync, readdirSync, existsSync } from "node:fs";
++import { readFileSync } from "node:fs";
+ import { resolve, dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { collectTsFiles } from "./testFileUtils.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const REPO_ROOT = resolve(__dirname, "../..");
+@@ -30,18 +31,6 @@ const SRC_DIRS = [
+   join(REPO_ROOT, "src", "remediate"),
+ ];
+ 
+-/** Recursively collect every `*.ts` file under `dir`. */
+-function collectTsFiles(dir: string): string[] {
+-  const out: string[] = [];
+-  if (!existsSync(dir)) return out;
+-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+-    const full = join(dir, entry.name);
+-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
+-    else if (entry.name.endsWith(".ts")) out.push(full);
+-  }
+-  return out;
+-}
+-
+ /**
+  * Map a raw identifier token to its glossary *family key*:
+  *   INV-RS-01            -> INV-RS   (invariant area)
+diff --git a/tests/shared/io-hash-primitives-single-source.test.ts b/tests/shared/io-hash-primitives-single-source.test.ts
+index d775483e..cae8ac45 100644
+--- a/tests/shared/io-hash-primitives-single-source.test.ts
++++ b/tests/shared/io-hash-primitives-single-source.test.ts
+@@ -19,9 +19,10 @@
+  * AccessDeclaration) fails here rather than silently drifting.
+  */
+ import { test, expect } from "vitest";
+-import { readFileSync, readdirSync } from "node:fs";
++import { readFileSync } from "node:fs";
+ import { resolve, dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
++import { collectTsFiles } from "./testFileUtils.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const REPO_PACKAGES = resolve(__dirname, "../..");
+@@ -38,17 +39,6 @@ function read(path: string): string {
+   return readFileSync(path, "utf8");
+ }
+ 
+-/** Recursively collect every `*.ts` file under `dir`. */
+-function collectTsFiles(dir: string): string[] {
+-  const out: string[] = [];
+-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+-    const full = join(dir, entry.name);
+-    if (entry.isDirectory()) out.push(...collectTsFiles(full));
+-    else if (entry.name.endsWith(".ts")) out.push(full);
+-  }
+-  return out;
+-}
+-
+ const ALL_SRC_FILES = [
+   ...collectTsFiles(SHARED_SRC),
+   ...collectTsFiles(AUDIT_SRC),
+diff --git a/tests/shared/shared-core-invariants.test.ts b/tests/shared/shared-core-invariants.test.ts
+index e539d489..458c2915 100644
+--- a/tests/shared/shared-core-invariants.test.ts
++++ b/tests/shared/shared-core-invariants.test.ts
+@@ -50,6 +50,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
+ const REPO_ROOT = resolve(__dirname, "../../");
+ const AUDIT_CODE_SCHEMAS = resolve(REPO_ROOT, "schemas");
+ 
++/**
++ * Load and parse a JSON schema file from the schemas directory.
++ * Asserts that the file exists before returning the parsed schema.
++ */
++function loadSchema(filename: string): Record<string, unknown> {
++  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, filename);
++  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
++  return JSON.parse(readFileSync(schemaPath, "utf8")) as Record<string, unknown>;
++}
++
+ // ── INV-shared-core-01: Schema drift detection ───────────────────────────────
+ 
+ test("INV-shared-core-01: finding.schema.json stays consistent with the zod Finding contract (mechanically derived, no hand list)", () => {
+@@ -65,9 +75,7 @@ test("INV-shared-core-01: finding.schema.json stays consistent with the zod Find
+   //   1. every schema-required key is a real base-contract property;
+   //   2. every schema property is a real base-contract property (no orphans);
+   //   3. every base-contract REQUIRED key appears in the schema's properties.
+-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
+-  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
+-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
++  const schema = loadSchema("finding.schema.json");
+ 
+   const zodShape = FindingSchema.shape;
+   const baseKeys = new Set(Object.keys(zodShape));
+@@ -92,8 +100,7 @@ test("INV-shared-core-01: finding.schema.json stays consistent with the zod Find
+ });
+ 
+ test("INV-shared-core-01: finding.schema.json severity enum matches SEVERITIES", () => {
+-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "finding.schema.json");
+-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
++  const schema = loadSchema("finding.schema.json");
+ 
+   const schemaEnum: string[] = schema.properties?.severity?.enum ?? [];
+   const tsEnum = Array.from(SEVERITIES);
+@@ -110,9 +117,7 @@ test("INV-shared-core-01: finding.schema.json severity enum matches SEVERITIES",
+ });
+ 
+ test("INV-shared-core-01: audit_result.schema.json required keys are present in the shared contract", () => {
+-  const schemaPath = resolve(AUDIT_CODE_SCHEMAS, "audit_result.schema.json");
+-  expect(existsSync(schemaPath), `schema not found: ${schemaPath}`).toBeTruthy();
+-  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
++  const schema = loadSchema("audit_result.schema.json");
+ 
+   // The audit_result schema required keys are: task_id, unit_id, pass_id, lens,
+   // file_coverage, findings. These match the auditor's AuditResult contract.
+diff --git a/tests/shared/spawnLoggedCommand.test.ts b/tests/shared/spawnLoggedCommand.test.ts
+index 96e8bad6..ab9e985f 100644
+--- a/tests/shared/spawnLoggedCommand.test.ts
++++ b/tests/shared/spawnLoggedCommand.test.ts
+@@ -25,9 +25,13 @@ type SpawnDouble = (
+ 
+ // A WriteStream stand-in that satisfies the surface spawnLoggedCommand uses
+ // (write(chunk, cb), end(cb), on("error")) without touching the filesystem.
+-function fakeWriteStream(): WriteStream {
++// Extracted shared builder for various write-callback patterns.
++function makeWriteStreamMock(
++  onWrite?: (chunk: any) => void,
++): WriteStream {
+   const stream: any = new EventEmitter();
+-  stream.write = (_chunk: any, cb?: (error?: Error | null) => void) => {
++  stream.write = (chunk: any, cb?: (error?: Error | null) => void) => {
++    if (onWrite) onWrite(chunk);
+     if (typeof cb === "function") cb();
+     return true;
+   };
+@@ -37,6 +41,10 @@ function fakeWriteStream(): WriteStream {
+   return stream as WriteStream;
+ }
+ 
++function fakeWriteStream(): WriteStream {
++  return makeWriteStreamMock();
++}
++
+ function fakeCreateWriteStream(): WriteStream {
+   return fakeWriteStream();
+ }
+@@ -128,16 +136,9 @@ function makeOpenChild(): any {
+ // A stderr-log stand-in that records the human "[provider] ... still running"
+ // lines written to the per-run stderr log file.
+ function recordingWriteStream(sink: string[]): WriteStream {
+-  const stream: any = new EventEmitter();
+-  stream.write = (chunk: any, cb?: (error?: Error | null) => void) => {
++  return makeWriteStreamMock((chunk) => {
+     sink.push(String(chunk));
+-    if (typeof cb === "function") cb();
+-    return true;
+-  };
+-  stream.end = (cb?: () => void) => {
+-    if (typeof cb === "function") cb();
+-  };
+-  return stream as WriteStream;
++  });
+ }
+ 
+ test("spawnLoggedCommand routes structured heartbeat to stderrLog, not process.stderr, in headless mode (OBS-101)", async (t) => {
+diff --git a/tests/shared/testFileUtils.ts b/tests/shared/testFileUtils.ts
+new file mode 100644
+index 00000000..fe491a13
+--- /dev/null
++++ b/tests/shared/testFileUtils.ts
+@@ -0,0 +1,21 @@
++/**
++ * Shared test utilities for file and directory operations.
++ * Extracted from duplicated implementations across multiple test files.
++ */
++
++import { readdirSync, existsSync } from "node:fs";
++import { join } from "node:path";
++
++/**
++ * Recursively collect every `*.ts` file under `dir`.
++ */
++export function collectTsFiles(dir: string): string[] {
++  const out: string[] = [];
++  if (!existsSync(dir)) return out;
++  for (const entry of readdirSync(dir, { withFileTypes: true })) {
++    const full = join(dir, entry.name);
++    if (entry.isDirectory()) out.push(...collectTsFiles(full));
++    else if (entry.name.endsWith(".ts")) out.push(full);
++  }
++  return out;
++}
+diff --git a/wrapper/remediate-code-wrapper-install-hosts.mjs b/wrapper/remediate-code-wrapper-install-hosts.mjs
+index fe7a370a..7e5c67de 100644
+--- a/wrapper/remediate-code-wrapper-install-hosts.mjs
++++ b/wrapper/remediate-code-wrapper-install-hosts.mjs
+@@ -24,6 +24,7 @@ import {
+   renderCodexAutomationRecipe,
+   renderAntigravityPlanningGuide,
+   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
++  INSTALLED_PROMPT_FILENAME,
+ } from './remediate-code-wrapper-install-renderers.mjs';
+ 
+ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+@@ -34,7 +35,6 @@ const INSTALL_MARKER_END = '<!-- remediate-code:end -->';
+ const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
+ const INSTALL_MANIFEST_FILENAME = 'manifest.json';
+ const DEFAULT_INSTALL_HOST = 'all';
+-const INSTALLED_PROMPT_FILENAME = 'remediate-code.import.md';
+ const INSTALL_DIR = '.remediate-code';
+ 
+ function hasFlag(argv, name) {
+diff --git a/wrapper/remediate-code-wrapper-io.mjs b/wrapper/remediate-code-wrapper-io.mjs
+index d429ecf2..3a1a3d36 100644
+--- a/wrapper/remediate-code-wrapper-io.mjs
++++ b/wrapper/remediate-code-wrapper-io.mjs
+@@ -1,6 +1,16 @@
+ import { access, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+ import { constants } from 'node:fs';
+-import { dirname } from 'node:path';
++import { dirname, join, resolve } from 'node:path';
++
++/**
++ * Resolve the artifacts directory from command-line args or default to
++ * <cwd>/.audit-tools/audit. The --artifacts-dir flag is optional; when omitted
++ * or invalid, defaults to the standard location.
++ */
++export function resolveArtifactsDir(argv, defaultDir = join(process.cwd(), '.audit-tools', 'audit')) {
++  const idx = argv.indexOf('--artifacts-dir');
++  return idx !== -1 && argv[idx + 1] ? resolve(argv[idx + 1]) : defaultDir;
++}
+ 
+ export async function fileExists(path) {
+   try {

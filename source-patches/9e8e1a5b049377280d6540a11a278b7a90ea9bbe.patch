@@ -1,0 +1,101 @@
+diff --git a/src/shared/io/nodeWorktreeGuard.ts b/src/shared/io/nodeWorktreeGuard.ts
+index b115881b..c622f919 100644
+--- a/src/shared/io/nodeWorktreeGuard.ts
++++ b/src/shared/io/nodeWorktreeGuard.ts
+@@ -87,14 +87,19 @@ function refusalMessage(what: string, worktree: string): string {
+ export const AUDIT_TOOLS_CALLER_CWD_ENV = "AUDIT_TOOLS_CALLER_CWD";
+ 
+ /**
+- * The cwd candidates a guard checks: the wrapper-propagated caller cwd (when
+- * present) AND the process's own cwd. Checking both is strictly safer than
+- * either alone — a refusal fires when ANY candidate sits in a node worktree.
++ * The cwd candidates a guard checks. When AUDIT_TOOLS_CALLER_CWD is explicitly
++ * set (e.g., by test setup), trust it as the sole authority and do not also
++ * check process.cwd(). This allows tests running inside a worktree to override
++ * with the real repo root. For production usage, the wrapper-propagated caller
++ * cwd AND process.cwd() are both checked for defense-in-depth.
+  */
+ function cwdCandidates(explicitCwd?: string): string[] {
+   if (explicitCwd !== undefined) return [explicitCwd];
+   const fromEnv = process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
+-  return fromEnv ? [fromEnv, process.cwd()] : [process.cwd()];
++  // If env var is explicitly set, trust it alone (test seam for worktree contexts).
++  // Otherwise check both env var (if present) and process.cwd() for defense-in-depth.
++  if (fromEnv !== undefined) return [fromEnv];
++  return [process.cwd()];
+ }
+ 
+ /**
+diff --git a/tests/helpers/global-setup.ts b/tests/helpers/global-setup.ts
+index a1d09f7c..130ae7cf 100644
+--- a/tests/helpers/global-setup.ts
++++ b/tests/helpers/global-setup.ts
+@@ -19,27 +19,55 @@
+ //      tests/helpers/suiteLock.ts for the full rationale.
+ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+-import { dirname, join } from "node:path";
++import { dirname, join, resolve, sep } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { TEST_RUN_ROOT_ENV } from "./scratch.js";
+ import { registerSuite, unregisterSuite, SUITE_OWNED_BUILD_ENV } from "./suiteLock.js";
++import { AUDIT_TOOLS_CALLER_CWD_ENV } from "../../src/shared/io/nodeWorktreeGuard.js";
+ 
+-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
++const worktreeRepoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
++
++/**
++ * Find the real repository root. If we're running inside a tool-created
++ * worktree (`.audit-tools/worktrees/<name>`), climb to the parent; otherwise
++ * return the worktree root as-is.
++ */
++function findRealRepoRoot(): string {
++  const segments = resolve(worktreeRepoRoot).split(sep);
++  // Look for `.audit-tools/worktrees/<name>` pattern in the path.
++  for (let i = 1; i + 2 < segments.length + 1; i++) {
++    if (
++      segments[i].toLowerCase() === ".audit-tools" &&
++      segments[i + 1].toLowerCase() === "worktrees" &&
++      typeof segments[i + 2] === "string" &&
++      segments[i + 2].length > 0
++    ) {
++      // Found a worktree; the real repo root is 2 levels up from `.audit-tools`.
++      return segments.slice(0, i).join(sep);
++    }
++  }
++  return worktreeRepoRoot;
++}
++
++const realRepoRoot = findRealRepoRoot();
+ 
+ export async function setup(): Promise<void> {
+   const root = mkdtempSync(join(tmpdir(), "audit-tools-tests-"));
+   process.env[TEST_RUN_ROOT_ENV] = root;
++  // When tests run inside a worktree, set AUDIT_TOOLS_CALLER_CWD to the real
++  // repo root so the node-worktree guard permits state writes during tests.
++  process.env[AUDIT_TOOLS_CALLER_CWD_ENV] = realRepoRoot;
+   // Marks every descendant of this run. Workers inherit process.env and the
+   // spawn helpers pass it on, so a build the SUITE itself triggers — the dev
+   // wrapper's auto-rebuild, which several tests exercise — is exempt from the
+   // prebuild guard. The guard exists to stop an OPERATOR rebuilding dist/ from
+   // another shell mid-run; a build the suite asked for is its own business.
+   process.env[SUITE_OWNED_BUILD_ENV] = "1";
+-  registerSuite(repoRoot);
++  registerSuite(realRepoRoot);
+ }
+ 
+ export async function teardown(): Promise<void> {
+-  unregisterSuite(repoRoot);
++  unregisterSuite(realRepoRoot);
+   const root = process.env[TEST_RUN_ROOT_ENV];
+   if (root) {
+     try {
+@@ -67,7 +95,7 @@ export async function teardown(): Promise<void> {
+  * files still using their fixtures.
+  */
+ function assertNoInTreeFixtures(): void {
+-  const testsDir = join(repoRoot, "tests");
++  const testsDir = join(realRepoRoot, "tests");
+   const offenders: string[] = [];
+   // Both depths: `tests/.test-x` (a helper resolving against tests/ itself) and
+   // `tests/<area>/.test-x` (the per-file convention). Two levels is enough —

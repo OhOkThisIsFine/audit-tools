@@ -1,0 +1,91 @@
+diff --git a/.claude/skills/ship/SKILL.md b/.claude/skills/ship/SKILL.md
+index 1d25022f..fbc116ff 100644
+--- a/.claude/skills/ship/SKILL.md
++++ b/.claude/skills/ship/SKILL.md
+@@ -78,9 +78,10 @@ gate, so the local preflight is a quick fast-fail, not the full run.
+      allowed**, the deferred-postinstall check, and both binary smokes (`audit-code --version` +
+      `remediate-code --version`). MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
+   Nothing destructive is ever retried; every observation phase is idempotent and safe to re-enter.
+-- That workflow runs parallel jobs: `gate` runs `npm run verify:checks`, the authoritative gate
+-  defined in `package.json`, plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
+-  (`needs: [gate, test]`)
++- That workflow first runs a `validate-source` job (verifies the release commit), then parallel `gate`
++  (`npm run verify:checks`, the authoritative gate defined in `package.json`) and `test` (vitest sharded
++  4 ways) jobs that both depend on it — and only the `publish` job
++  (`needs: [validate-source, gate, test]`)
+   uploads. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
+ - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
+ - The smokes pack ONE tarball; Windows-flaky on temp-dir EPERM/EBUSY — re-run a smoke before calling it a regression.
+@@ -99,8 +100,9 @@ gate, so the local preflight is a quick fast-fail, not the full run.
+ 
+ `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or
+ manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version)
+-→ `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded
+-`vitest run`) jobs → `publish` (needs both). The `publish` job requests `id-token: write` for the npm
++→ `next` dist-tag, else `latest`. CI: a `validate-source` job first verifies the release commit, then
++parallel `gate` (`verify:checks`) and `test` (4-way sharded `vitest run`) jobs, both depending on
++`validate-source` → `publish` (needs all three). The `publish` job requests `id-token: write` for the npm
+ OIDC exchange, pins the Node + npm versions declared in the workflow, rebuilds `dist/` for packing,
+ previews the tarball with `npm pack --dry-run`, publishes with public access + provenance, verifies the
+ published version resolves from the registry, and uploads `*-npm-logs` artifacts on failure.
+diff --git a/docs/backlog/forward-tracks.md b/docs/backlog/forward-tracks.md
+index a0dd8bdc..3904a1b0 100644
+--- a/docs/backlog/forward-tracks.md
++++ b/docs/backlog/forward-tracks.md
+@@ -11,15 +11,6 @@
+ - **Governance consolidation retains explicit scope limits.** The executable gate catalog, backlog corpus, document pins, shared vocabulary, outcome evaluation and graph reachability are consolidated. Snapshot retention stays consumer-specific. A validation-receipt cache and a universal execution/mutation-certification gate are deliberately omitted without demonstrated value. Source-to-test declarations provide navigation, not behavioral proof. Remaining specific test-replica claims require independent evidence rather than another generic certification subsystem.
+ 
+ 
+-
+-**Track 2.5 — keep production-orphan detection beside knip.** The dated
+-[`slimdown-review-2026-07-28.md`](../reviews/slimdown-review-2026-07-28.md) is a historical lead set,
+-not a current deletion list; the provider and dispatch subgraphs it identified have since been retired.
+-Its surviving structural finding is that neither knip mode reports a whole module that is exported
+-through a barrel and otherwise referenced only by its own tests. Periodically run a relative-import
+-graph check for production files whose only consumers are tests, then verify each candidate against
+-current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-modes]]
+-
+ ---
+ 
+ 
+@@ -43,6 +34,3 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
+     install `rustup` / `ruby`+`bundler` first, or point at a repo that vendors them.)
+ 
+ - **Shared orchestration retains deliberate consumer policies.** Run-directory and prompt-binding mechanisms are shared. Remediation has no consumer graceful cap from which to derive another engine bound, and no measured defect justifies changing obligation granularity. Preserve these non-goals until new evidence warrants revisiting them.
+-
+-
+-- **The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).** `scripts/release-and-publish.mjs` ends at registry visibility; global reinstall, the allowed postinstall lifecycle scripts and both binary smokes live in `.claude/skills/ship/SKILL.md` as instructions an agent must remember and execute — the host-remembering shape the auditor-agnostic rule bans, applied to the project's own pipeline-ownership rule. There is also no single resumable record spanning the phases, so a stall part-way is recovered by hand. **Property:** one idempotent command owns gated ref verification, exactly-once tag/release/publish creation, delayed release observation, registry verification, reinstall with allowed lifecycle scripts, and smoke checks of both global binaries and the installed host assets — resuming only its observation and completion phases and never retrying a destructive creation. The observation half already has its own entry (the await-run timeout shorter than a release-event delivery delay); fix it inside this command rather than beside it. YAML critical-path profiling moves out of release correctness into best-effort reporting.
+diff --git a/docs/backlog/minor-bugs.md b/docs/backlog/minor-bugs.md
+index 6c3f2cf9..468145f4 100644
+--- a/docs/backlog/minor-bugs.md
++++ b/docs/backlog/minor-bugs.md
+@@ -31,8 +31,6 @@
+ 
+ - **A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).** `attest-loop-core-review.mjs` overwrites earlier values, so a two-reviewer attestation records one. **Property:** every given reviewer is recorded, or a repeat is refused.
+ 
+-- **The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).** `.claude/hooks/tool-input-guard.mjs` refused a sub-agent that ran in a lap worktree and was not an audit lane. **Property:** the guard identifies an audit node from run state, not from the session's shape.
+-
+ - **The stale-main guard reports a sync that already happened (2026-10-05, low).** `session-start-guards.mjs` writes `.claude/hooks/.state/stale-main.json` once at session start; `tool-input-guard.mjs` refuses the first source edit from that marker without counting again, so a session that pulled after start was told "HEAD is 13 commits behind" when HEAD equalled `origin/main`. **Property:** the edit-time refusal recounts `HEAD..<remote>/main` and fires only when it is still positive.
+ 
+ - **Test-command discovery knows only npm, Go and pytest (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); every other ecosystem reaches the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
+diff --git a/docs/glossary-ids.md b/docs/glossary-ids.md
+index d9f3554b..015705c5 100644
+--- a/docs/glossary-ids.md
++++ b/docs/glossary-ids.md
+@@ -20,7 +20,6 @@ is deleted too.
+ |---|---|---|
+ | INV-B3 | Repository-path grounding, including dotfile paths and unambiguous basename resolution. | `src/shared/validation/findingGrounding.ts`; `src/remediate/phases/grounding.ts` |
+ | INV-CC | Idempotent, sole-writer intent guidance bootstrap. | `src/shared/intake/guidanceBootstrap.ts` |
+-| INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
+ | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
+ | INV-COVERAGE | Per-module remediation coverage joins preserve every owned finding's terminal outcome, verification evidence, and producing-module attribution; run close also reports planned findings missing from state. | `runClosePhase` in `src/remediate/phases/close.ts`; `RemediationItemState.recorded_by_module` in `src/remediate/state/types.ts`; `RemediationOutcomeRecord.recorded_by_module` in `src/shared/types/remediationOutcome.ts` |
+ | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
+@@ -47,7 +46,7 @@ is deleted too.
+ | INV-SOO | Canonical physical-file identity for ownership and overlap checks. | `src/shared/io/pathIdentity.ts` |
+ | INV-SSF | Sync-spawn fold safety: child processes reachable while a lock or fold is held use the asynchronous tracked runner with a positive deadline, so event-loop heartbeats continue and hung children are bounded. | `runTrackedAsync` in `src/shared/tooling/exec.ts`; `git` in `src/shared/git.ts`; `enumerateTrackedFilePaths` in `src/remediate/phases/grounding.ts` |
+ | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
+-| INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostHandoff.ts` |
++| INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostCorroboration.ts` |
+ 
+ The replacement executable-plan contract has no separate obligation, module-contract, or
+ interface-definition graph. Scoped positive/negative assertions are enforced by

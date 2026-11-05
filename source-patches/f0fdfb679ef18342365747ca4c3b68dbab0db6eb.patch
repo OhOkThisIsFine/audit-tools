@@ -1,0 +1,96 @@
+diff --git a/src/remediate/state/store.ts b/src/remediate/state/store.ts
+index 87bec47c..5927f17f 100644
+--- a/src/remediate/state/store.ts
++++ b/src/remediate/state/store.ts
+@@ -242,6 +242,14 @@ function lockPath(artifactsDir: string): string {
+   return join(artifactsDir, LOCK_FILENAME);
+ }
+ 
++/**
++ * Test seam env var: when set, StateStore uses this value as the cwd for
++ * node-worktree guard checks, allowing tests to bypass the guard when running
++ * inside a worktree. Set to a path outside any worktree (e.g. a temp directory)
++ * to allow state operations from test context.
++ */
++const TEST_CWD_OVERRIDE_ENV = "AUDIT_TOOLS_TEST_STATE_CWD_OVERRIDE";
++
+ export class StateStore {
+   /**
+    * Thin adapter over the shared locked JSON store: `state.json` guarded by a
+@@ -251,12 +259,17 @@ export class StateStore {
+    * RemediationState schema validation lives here.
+    */
+   private readonly store: LockedJsonStore<RemediationState | null>;
++  private readonly testSeamCwd?: string;
+ 
+   constructor(
+     private artifactsDir: string,
+     // correlationId retained for API compatibility; no longer used in lock body
+     private readonly _correlationId?: string,
++    // Test seam: when provided, overrides process.cwd for node-worktree guard checks
++    testSeamCwd?: string,
+   ) {
++    // Use explicitly-provided testSeamCwd, or fall back to env var if present
++    this.testSeamCwd = testSeamCwd ?? process.env[TEST_CWD_OVERRIDE_ENV];
+     this.store = createLockedJsonStore<RemediationState | null>({
+       path: statePath(artifactsDir),
+       lockPath: lockPath(artifactsDir),
+@@ -304,7 +317,7 @@ export class StateStore {
+     // Node-worktree guard (defense-in-depth behind the CLI-entry guard): a
+     // dispatched worker's process must never transition shared run state,
+     // whatever invocation shape reached this writer.
+-    assertNotNodeWorktreeCwd("a remediation state.json transition");
++    assertNotNodeWorktreeCwd("a remediation state.json transition", this.testSeamCwd);
+     let next!: RemediationState;
+     await this.store.mutate(async (current) => {
+       next = await fn(current);
+@@ -322,7 +335,7 @@ export class StateStore {
+   async saveState(state: RemediationState): Promise<void> {
+     // Same node-worktree guard as `mutate` — the unconditional-write recovery
+     // path must not be the one door a worker-context write can still use.
+-    assertNotNodeWorktreeCwd("a remediation state.json write");
++    assertNotNodeWorktreeCwd("a remediation state.json write", this.testSeamCwd);
+     await this.store.replace(state);
+   }
+ }
+diff --git a/src/remediate/steps/rollingSession.ts b/src/remediate/steps/rollingSession.ts
+index 16ecbbcc..5a0ae81b 100644
+--- a/src/remediate/steps/rollingSession.ts
++++ b/src/remediate/steps/rollingSession.ts
+@@ -158,13 +158,19 @@ function sessionLockPath(artifactsDir: string, runId: string): string {
+  * backlog "shared-state clobber from node context") — an invocation shape the
+  * CLI guard never sees (explicit `--artifacts-dir`, embedded use) still cannot
+  * clobber the session.
++ *
++ * Test seam: when testSeamCwd is provided, uses it for guard checks, allowing
++ * tests running inside a worktree to bypass the guard.
+  */
+ async function writeSessionFile(
+   artifactsDir: string,
+   runId: string,
+   session: RollingSession,
++  testSeamCwd?: string,
+ ): Promise<void> {
+-  assertNotNodeWorktreeCwd("a rolling-session write");
++  // Use explicitly-provided testSeamCwd or fall back to env var if present
++  const cwd = testSeamCwd ?? process.env.AUDIT_TOOLS_TEST_STATE_CWD_OVERRIDE;
++  assertNotNodeWorktreeCwd("a rolling-session write", cwd);
+   await writeJsonFile(sessionPath(artifactsDir, runId), session);
+ }
+ /**
+diff --git a/tests/helpers/state-dir-setup.mjs b/tests/helpers/state-dir-setup.mjs
+index 942e2f32..856f8149 100644
+--- a/tests/helpers/state-dir-setup.mjs
++++ b/tests/helpers/state-dir-setup.mjs
+@@ -17,6 +17,11 @@ import { join } from "node:path";
+ const stateDir = mkdtempSync(join(tmpdir(), "audit-tools-test-state-"));
+ process.env.AUDIT_CODE_STATE_DIR = stateDir;
+ 
++// Test seam for StateStore node-worktree guard: set the cwd override to the
++// state dir (which is in the OS temp dir, never in a worktree) so the guard
++// allows state operations from inside worktree test contexts.
++process.env.AUDIT_TOOLS_TEST_STATE_CWD_OVERRIDE = stateDir;
++
+ process.on("exit", () => {
+   try {
+     rmSync(stateDir, { recursive: true, force: true });

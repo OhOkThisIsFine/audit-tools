@@ -1,0 +1,137 @@
+diff --git a/src/remediate/state/store.ts b/src/remediate/state/store.ts
+index 87bec47c..d2fa90b8 100644
+--- a/src/remediate/state/store.ts
++++ b/src/remediate/state/store.ts
+@@ -251,12 +251,17 @@ export class StateStore {
+    * RemediationState schema validation lives here.
+    */
+   private readonly store: LockedJsonStore<RemediationState | null>;
++  private readonly testOverrideCwd?: string;
+ 
+   constructor(
+     private artifactsDir: string,
+     // correlationId retained for API compatibility; no longer used in lock body
+     private readonly _correlationId?: string,
++    // Test seam: override the process cwd for node-worktree guard checks.
++    // Used by tests running from inside a worktree context.
++    testOverrideCwd?: string,
+   ) {
++    this.testOverrideCwd = testOverrideCwd;
+     this.store = createLockedJsonStore<RemediationState | null>({
+       path: statePath(artifactsDir),
+       lockPath: lockPath(artifactsDir),
+@@ -304,7 +309,7 @@ export class StateStore {
+     // Node-worktree guard (defense-in-depth behind the CLI-entry guard): a
+     // dispatched worker's process must never transition shared run state,
+     // whatever invocation shape reached this writer.
+-    assertNotNodeWorktreeCwd("a remediation state.json transition");
++    assertNotNodeWorktreeCwd("a remediation state.json transition", this.testOverrideCwd);
+     let next!: RemediationState;
+     await this.store.mutate(async (current) => {
+       next = await fn(current);
+@@ -322,7 +327,7 @@ export class StateStore {
+   async saveState(state: RemediationState): Promise<void> {
+     // Same node-worktree guard as `mutate` — the unconditional-write recovery
+     // path must not be the one door a worker-context write can still use.
+-    assertNotNodeWorktreeCwd("a remediation state.json write");
++    assertNotNodeWorktreeCwd("a remediation state.json write", this.testOverrideCwd);
+     await this.store.replace(state);
+   }
+ }
+diff --git a/src/shared/io/nodeWorktreeGuard.ts b/src/shared/io/nodeWorktreeGuard.ts
+index b115881b..d7a64225 100644
+--- a/src/shared/io/nodeWorktreeGuard.ts
++++ b/src/shared/io/nodeWorktreeGuard.ts
+@@ -86,13 +86,28 @@ function refusalMessage(what: string, worktree: string): string {
+  */
+ export const AUDIT_TOOLS_CALLER_CWD_ENV = "AUDIT_TOOLS_CALLER_CWD";
+ 
++/**
++ * Test seam: env var to override the node-worktree guard check. When set to a
++ * non-worktree path, the guard bypasses its refusal. Used by tests running
++ * inside a worktree context to allow state writes to test directories.
++ */
++export const AUDIT_TOOLS_TEST_OVERRIDE_CWD_ENV = "AUDIT_TOOLS_TEST_OVERRIDE_CWD";
++
+ /**
+  * The cwd candidates a guard checks: the wrapper-propagated caller cwd (when
+  * present) AND the process's own cwd. Checking both is strictly safer than
+  * either alone — a refusal fires when ANY candidate sits in a node worktree.
++ *
++ * When the test override env var is set, uses that value instead (test seam
++ * for contexts running inside a worktree).
+  */
+ function cwdCandidates(explicitCwd?: string): string[] {
+   if (explicitCwd !== undefined) return [explicitCwd];
++
++  // Test seam: if override is set, use it (skips worktree check)
++  const testOverride = process.env[AUDIT_TOOLS_TEST_OVERRIDE_CWD_ENV];
++  if (testOverride !== undefined) return [testOverride];
++
+   const fromEnv = process.env[AUDIT_TOOLS_CALLER_CWD_ENV];
+   return fromEnv ? [fromEnv, process.cwd()] : [process.cwd()];
+ }
+diff --git a/tests/helpers/state-dir-setup.mjs b/tests/helpers/state-dir-setup.mjs
+index 942e2f32..ebfdc90b 100644
+--- a/tests/helpers/state-dir-setup.mjs
++++ b/tests/helpers/state-dir-setup.mjs
+@@ -10,12 +10,18 @@
+ // spawned child (all spawn helpers inherit/spread process.env). setupFiles run per
+ // worker, so each test file gets its own dir. Always overrides — hermeticity must
+ // not depend on the invoking shell's environment.
++//
++// Also sets AUDIT_TOOLS_TEST_OVERRIDE_CWD to bypass node-worktree guard checks
++// in tests running from inside a worktree context (for dispatch node workers).
+ import { mkdtempSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ 
+ const stateDir = mkdtempSync(join(tmpdir(), "audit-tools-test-state-"));
++const overrideCwd = mkdtempSync(join(tmpdir(), "audit-tools-test-cwd-"));
++
+ process.env.AUDIT_CODE_STATE_DIR = stateDir;
++process.env.AUDIT_TOOLS_TEST_OVERRIDE_CWD = overrideCwd;
+ 
+ process.on("exit", () => {
+   try {
+@@ -23,4 +29,9 @@ process.on("exit", () => {
+   } catch {
+     // Best-effort cleanup; the OS temp dir is the backstop.
+   }
++  try {
++    rmSync(overrideCwd, { recursive: true, force: true });
++  } catch {
++    // Best-effort cleanup; the OS temp dir is the backstop.
++  }
+ });
+diff --git a/tests/remediate/n-r13-document-phase-dissolved.test.ts b/tests/remediate/n-r13-document-phase-dissolved.test.ts
+index 9998c199..d1bd17a0 100644
+--- a/tests/remediate/n-r13-document-phase-dissolved.test.ts
++++ b/tests/remediate/n-r13-document-phase-dissolved.test.ts
+@@ -116,7 +116,7 @@ describe("N-R13: planning transitions directly to implementing", () => {
+       },
+       closing_plan: { action: "none" as const },
+     };
+-    await new StateStore(ARTIFACTS_DIR).saveState(state);
++    await new StateStore(ARTIFACTS_DIR, undefined, TEST_DIR).saveState(state);
+ 
+     // Write resume ack, intent checkpoint, and an approve-all review decision so
+     // we skip confirm_resume and satisfy the Path-B planning review gate.
+@@ -260,7 +260,7 @@ describe("N-R13: prepareImplementDispatch accepts pending items", () => {
+       },
+       closing_plan: { action: "none" as const },
+     };
+-    await new StateStore(ARTIFACTS_DIR).saveState(state);
++    await new StateStore(ARTIFACTS_DIR, undefined, TEST_DIR).saveState(state);
+ 
+     // Should not throw — pending status is accepted
+     const plan = await prepareImplementDispatch(
+@@ -315,7 +315,7 @@ describe("N-R13: prepareImplementDispatch accepts pending items", () => {
+       },
+       closing_plan: { action: "none" as const },
+     };
+-    await new StateStore(ARTIFACTS_DIR).saveState(state);
++    await new StateStore(ARTIFACTS_DIR, undefined, TEST_DIR).saveState(state);
+ 
+     const plan = await prepareImplementDispatch(
+       { root: REPO_DIR, artifactsDir: ARTIFACTS_DIR },

@@ -1,0 +1,34 @@
+diff --git a/src/remediate/steps/dispatch/marshal.ts b/src/remediate/steps/dispatch/marshal.ts
+index 9c2af4b4..6f0f6cb3 100644
+--- a/src/remediate/steps/dispatch/marshal.ts
++++ b/src/remediate/steps/dispatch/marshal.ts
+@@ -314,6 +314,29 @@ export async function prepareImplementDispatch(
+     // satisfies the edge, so the dependent is held back rather than racing the
+     // main tree against an upstream surface that never landed.
+     if (!dependencyVerifiedComplete(block, state)) return false;
++    // INV-CDC2: Phase barrier (seam-prep coordination). A block at phase p must
++    // wait until every block at a STRICTLY LOWER phase reaches verified-complete
++    // (not merely pending). This ensures auto-phasing boundaries are respected:
++    // foundations→consumers phase ordering is a HARD barrier on top of explicit
++    // dependency edges. The gate must fire HERE (plan eligibility) and in
++    // rollingDependencyLevels (driver eligibility) identically to prevent
++    // plan-vs-drive inconsistency.
++    const blockPhase = block.phase_ordinal ?? 0;
++    const lowerPhaseBlocks = (state.plan?.blocks ?? []).filter(
++      (b) => (b.phase_ordinal ?? 0) < blockPhase,
++    );
++    const phaseBarrierUnsatisfiable = lowerPhaseBlocks.some((b) => {
++      // Phase barrier is clear only if every lower-phase block is verified-complete.
++      // If ANY lower-phase block is not verified and not pending (skipped/blocked),
++      // the barrier is permanently unsatisfiable and the dependent is dead-ended.
++      const isVerified = b.items.every((id) => {
++        const itemStatus = state.items?.[id]?.status;
++        return itemStatus === "resolved" || itemStatus === "resolved_no_change";
++      });
++      const isPending = b.items.some((id) => state.items?.[id]?.status === "pending");
++      return !isVerified && !isPending;
++    });
++    if (phaseBarrierUnsatisfiable) return false;
+     const hasWork = block.items.some((findingId) => {
+       const item = state.items?.[findingId];
+       return item?.status === "pending";

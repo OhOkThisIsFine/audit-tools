@@ -1,0 +1,421 @@
+diff --git a/src/remediate/dispatch/ownershipRegistry.ts b/src/remediate/dispatch/ownershipRegistry.ts
+index 35852b39..246d2c47 100644
+--- a/src/remediate/dispatch/ownershipRegistry.ts
++++ b/src/remediate/dispatch/ownershipRegistry.ts
+@@ -509,26 +509,60 @@ export class OwnershipRegistry {
+     return registry;
+   }
+ 
+-  /** Write checkpoint synchronously after each mutation. */
++  /**
++   * PERSIST-LOCKING-DISJUNCTION-RESOLUTION (CP-NODE-2 invariants[7]) — branch (b).
++   *
++   * The disjunction required EITHER (a) routing this checkpoint write through
++   * the shared async locked-JSON persistence path (src/shared/io/lockedJsonStore.ts,
++   * built on the async `withFileLock`), OR (b) a recorded finding that
++   * single-writer discipline genuinely holds for `ownership-registry.json`.
++   *
++   * Branch (a) is not implementable in this module's granted write scope: the
++   * shared locked-JSON store has no synchronous entry point, while `_persist`
++   * is called synchronously from six in-class mutators (`initialize`,
++   * `claimAmendment`, `releaseAmendments`, `claimInFlight`, `releaseInFlight`,
++   * `handoffInFlight`) whose own callers — `src/remediate/dispatch/amendmentClaim.ts`,
++   * `src/remediate/steps/dispatch/marshal.ts`, `src/remediate/steps/dispatch/writeScope.ts`
++   * — consume the synchronous return/throw semantics directly and sit outside
++   * this contract's file scope. Converting `_persist` to async would also turn
++   * `claimInFlight`'s synchronous disjointness-violation throw into a rejected
++   * promise, changing failure semantics those callers depend on. Minting a
++   * second, synchronous locking primitive alongside the shared async one is
++   * forbidden regardless.
++   *
++   * Branch (b), taken here: single-writer discipline holds — trivially, because
++   * checkpoint persistence has no live writer in production today. Evidence
++   * (re-verify with the same greps before ever relying on this holding):
++   *   - `grep -rn "new OwnershipRegistry(" src/` finds exactly two production
++   *     instantiation sites — `src/remediate/steps/dispatch/marshal.ts` ("a
++   *     lightweight ownership registry ... interim path, until rollingDispatch
++   *     replaces this") and `src/remediate/steps/dispatch/writeScope.ts` (an
++   *     "ephemeral OwnershipRegistry") — both zero-argument, so `checkpointPath`
++   *     is `undefined` and the early-return below makes this method a no-op on
++   *     every current production call.
++   *   - `OwnershipRegistry.loadFromCheckpoint` (the only reader of a persisted
++   *     checkpoint) has zero production callers.
++   *   So there is no live writer — concurrent or solo — to the checkpoint file
++   *   today. Should a future caller (e.g. the rolling-dispatch engine the
++   *   marshal.ts comment anticipates) start passing a real `checkpointPath`, it
++   *   would drive from the single in-process synchronous scheduling loop this
++   *   file's own header already documents ("Atomicity: ... a single-threaded
++   *   orchestrator") — so single-writer discipline would continue to hold
++   *   structurally, not merely by absence of wiring. Re-run the greps above
++   *   before wiring a second `checkpointPath`-bearing caller.
++   *
++   * UNCONDITIONALLY on either branch: a persist failure must reach the caller
++   * instead of being swallowed. This method previously caught the write error
++   * and only logged it to stderr, leaving the in-memory registry silently
++   * ahead of disk so a restart lost every claim since the last successful
++   * persist. It no longer catches: an `mkdirSync`/`writeFileSync` failure now
++   * propagates straight out of `_persist` and its six mutator callers.
++   */
+   private _persist(): void {
+     if (!this.checkpointPath) return;
+     const json = JSON.stringify(this.serialize(), null, 2) + "\n";
+-    try {
+-      mkdirSync(dirname(this.checkpointPath), { recursive: true });
+-      writeFileSync(this.checkpointPath, json, "utf8");
+-    } catch (err) {
+-      // Best-effort: a checkpoint write failure must not crash the orchestrator.
+-      process.stderr.write(
+-        JSON.stringify({
+-          level: "warn",
+-          event: "ownership_registry_persist_failed",
+-          path: this.checkpointPath,
+-          code: (err as NodeJS.ErrnoException).code ?? null,
+-          message: String(err),
+-          ts: new Date().toISOString(),
+-        }) + "\n",
+-      );
+-    }
++    mkdirSync(dirname(this.checkpointPath), { recursive: true });
++    writeFileSync(this.checkpointPath, json, "utf8");
+   }
+ 
+   /** Load from a checkpoint file; returns undefined if the file doesn't exist or can't be parsed. */
+diff --git a/src/remediate/intake.ts b/src/remediate/intake.ts
+index add8a976..0bf5bf09 100644
+--- a/src/remediate/intake.ts
++++ b/src/remediate/intake.ts
+@@ -1,6 +1,7 @@
+ import { existsSync } from "node:fs";
+ import { readdir } from "node:fs/promises";
+ import { join, resolve } from "node:path";
++import { z } from "zod";
+ import type { AuditFindingsReport, Finding, WorkBlock, FindingSeverity } from "audit-tools/shared";
+ import {
+   hashContent,
+@@ -35,22 +36,71 @@ export interface IntakeSourceManifest {
+   sources: IntakeSource[];
+ }
+ 
+-export interface IntakeOpenQuestion {
+-  id: string;
+-  question: string;
+-  category?: string;
+-  blocking?: boolean;
+-}
++// Zod is the single source for shape + type here (matching the repo-wide
++// zod-single-source convention, e.g. RemediationBlockSchema/ItemSpecSchema in
++// src/remediate/state/types.ts) rather than a hand-written interface kept in
++// lockstep with a second, independent runtime check. Deliberately NOT
++// `.strict()`: intake-summary.json is HOST-AUTHORED (the LLM-produced artifact
++// synthesizeIntakePrompt's template asks for), the same trust tier as the
++// auditor's `Finding` contract (FindingSchema, also non-strict) — an unknown
++// extra field is not the defect class this validates; a wrong-shaped KNOWN
++// field is (CP-NODE-2 invariants[11]).
++export const IntakeOpenQuestionSchema = z.object({
++  id: z.string(),
++  question: z.string(),
++  category: z.string().optional(),
++  blocking: z.boolean().optional(),
++});
++export type IntakeOpenQuestion = z.infer<typeof IntakeOpenQuestionSchema>;
++
++export const IntakeSummarySchema = z.object({
++  schema_version: z.literal(INTAKE_SUMMARY_SCHEMA_VERSION),
++  ready: z.boolean(),
++  source_type: z.enum(["structured_audit", "documents", "conversation", "mixed"]),
++  goals: z.array(z.string()),
++  non_goals: z.array(z.string()),
++  constraints: z.array(z.string()),
++  affected_files: z.array(
++    z.object({ path: z.string(), reason: z.string().optional() }),
++  ),
++  open_questions: z.array(IntakeOpenQuestionSchema),
++});
++export type IntakeSummary = z.infer<typeof IntakeSummarySchema>;
+ 
+-export interface IntakeSummary {
+-  schema_version: typeof INTAKE_SUMMARY_SCHEMA_VERSION;
+-  ready: boolean;
+-  source_type: "structured_audit" | "documents" | "conversation" | "mixed";
+-  goals: string[];
+-  non_goals: string[];
+-  constraints: string[];
+-  affected_files: { path: string; reason?: string }[];
+-  open_questions: IntakeOpenQuestion[];
++/**
++ * Validate a raw parsed `intake-summary.json` payload against
++ * {@link IntakeSummarySchema}, throwing a legible Error when the shape does
++ * not conform — the read-time refusal for CP-NODE-2 invariants[11]'s
++ * 'unvalidated intake artifacts' defect class. Before this, `readIntakeArtifacts`
++ * read the file through `readOptionalJsonFile<T>`, a bare `JSON.parse(content)
++ * as T` assertion with zero runtime shape checking (src/shared/io/json.ts), so
++ * a structurally malformed summary — e.g. `ready: "yes"` (a truthy STRING, not
++ * a boolean, so `Boolean(summary.ready)` in `isIntakeReady` silently accepted
++ * it) or a non-array `goals` — was trusted verbatim. The thrown Error's
++ * message becomes the caller's refusal reason: `readIntakeArtifacts` and its
++ * callers run inside `runWithBlockedStepBackstop` (src/shared/io/stepContractWriter.ts),
++ * which turns any throw into a `blocked` step contract naming the cause
++ * verbatim — the mechanism this validation deliberately relies on instead of
++ * degrading silently to `undefined` (contrast the sibling clarification-file
++ * JSON-parse-failure branch a few lines below, which intentionally DOES
++ * degrade to absent because `resolveIntakeStep` re-prompts for it downstream;
++ * `intake-summary.json` has no such re-synthesis path, so silence there would
++ * strand the run on unvalidated data instead).
++ */
++export function validateIntakeSummary(raw: unknown, path: string): IntakeSummary {
++  const parsed = IntakeSummarySchema.safeParse(raw);
++  if (!parsed.success) {
++    const issues = parsed.error.issues
++      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
++      .join("; ");
++    throw new Error(
++      `Malformed intake summary at ${path}: ${issues}. Fix the file to match the ` +
++        "IntakeSummary contract (schema_version, ready:boolean, source_type, " +
++        "goals/non_goals/constraints:string[], affected_files:{path,reason?}[], " +
++        "open_questions:{id,question,category?,blocking?}[]) and rerun next-step.",
++    );
++  }
++  return parsed.data;
+ }
+ 
+ export function intakePaths(artifactsDir: string): {
+@@ -426,12 +476,19 @@ export async function readIntakeArtifacts(
+   brief?: string;
+ }> {
+   const paths = intakePaths(artifactsDir);
++  const rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
+   return {
+     manifest: await readOptionalJsonFile<IntakeSourceManifest>(
+       paths.sourceManifest,
+     ),
+     conversationStart: await readOptionalTextFile(paths.conversationStart),
+-    summary: await readOptionalJsonFile<IntakeSummary>(paths.summary),
++    // File absent → undefined (no summary yet, not a defect). File present →
++    // validated at read time (see validateIntakeSummary); malformed content
++    // throws rather than being trusted as a well-formed IntakeSummary.
++    summary:
++      rawSummary === undefined
++        ? undefined
++        : validateIntakeSummary(rawSummary, paths.summary),
+     clarificationResolution: await (async () => {
+       try {
+         return await readOptionalJsonFile<unknown>(paths.clarificationResolution);
+diff --git a/tests/remediate/intake-sources-and-digest.test.ts b/tests/remediate/intake-sources-and-digest.test.ts
+index dbe55e9d..30221890 100644
+--- a/tests/remediate/intake-sources-and-digest.test.ts
++++ b/tests/remediate/intake-sources-and-digest.test.ts
+@@ -3,9 +3,11 @@
+  *   - buildFindingsDigest + buildFindingEnumeration: bounded digest + complete
+  *     enumeration for enumerable (structured_audit) sources (INV-ID-08)
+  *   - computeContentHash: deterministic SHA-256 prefix
++ *   - readIntakeArtifacts / validateIntakeSummary: CP-NODE-2 invariants[11]
++ *     read-time schema validation for the host-authored intake-summary.json
+  */
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+-import { rm, mkdir } from "node:fs/promises";
++import { rm, mkdir, writeFile } from "node:fs/promises";
+ import { join } from "node:path";
+ import { dirname } from "node:path";
+ import { fileURLToPath } from "node:url";
+@@ -15,7 +17,11 @@ import {
+   buildFindingsDigest,
+   buildFindingEnumeration,
+   buildDocumentSourceManifest,
++  readIntakeArtifacts,
++  validateIntakeSummary,
++  intakePaths,
+   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
++  INTAKE_SUMMARY_SCHEMA_VERSION,
+   FINDINGS_DIGEST_SCHEMA_VERSION,
+   FINDING_ENUMERATION_SCHEMA_VERSION,
+ } from "../../src/remediate/intake.js";
+@@ -252,3 +258,76 @@ describe("buildFindingEnumeration", () => {
+     expect(ids).toEqual(["F-001", "F-002", "F-003"]);
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// readIntakeArtifacts / validateIntakeSummary — CP-NODE-2 invariants[11]:
++// intake-summary.json is validated at READ TIME, not trusted as a bare cast.
++// ---------------------------------------------------------------------------
++
++describe("readIntakeArtifacts — CP-NODE-2 invariants[11]: intake-summary.json schema validation", () => {
++  const WELL_FORMED_SUMMARY = {
++    schema_version: INTAKE_SUMMARY_SCHEMA_VERSION,
++    ready: true,
++    source_type: "documents",
++    goals: ["Fix the bug"],
++    non_goals: [],
++    constraints: [],
++    affected_files: [{ path: "src/a.ts" }],
++    open_questions: [],
++  };
++
++  async function writeSummaryFile(artifactsDir: string, content: unknown) {
++    const paths = intakePaths(artifactsDir);
++    await mkdir(paths.dir, { recursive: true });
++    await writeFile(paths.summary, JSON.stringify(content), "utf8");
++    return paths;
++  }
++
++  it("REFUSES a summary whose `ready` is a truthy STRING instead of a boolean", async () => {
++    await writeSummaryFile(TEST_DIR, { ...WELL_FORMED_SUMMARY, ready: "yes" });
++    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/ready/);
++  });
++
++  it("REFUSES a summary whose `goals` is not an array", async () => {
++    await writeSummaryFile(TEST_DIR, {
++      ...WELL_FORMED_SUMMARY,
++      goals: "Fix the bug",
++    });
++    await expect(readIntakeArtifacts(TEST_DIR)).rejects.toThrow(/goals/);
++  });
++
++  it("the refusal error names the file path (legible, not opaque)", async () => {
++    const paths = await writeSummaryFile(TEST_DIR, {
++      ...WELL_FORMED_SUMMARY,
++      ready: "yes",
++    });
++    let caught: unknown;
++    try {
++      await readIntakeArtifacts(TEST_DIR);
++    } catch (err) {
++      caught = err;
++    }
++    expect(caught).toBeInstanceOf(Error);
++    expect((caught as Error).message).toContain(paths.summary);
++  });
++
++  it("a well-formed summary passes through unchanged", async () => {
++    await writeSummaryFile(TEST_DIR, WELL_FORMED_SUMMARY);
++    const intake = await readIntakeArtifacts(TEST_DIR);
++    expect(intake.summary).toEqual(WELL_FORMED_SUMMARY);
++  });
++
++  it("a missing summary file is undefined — absence is not a validation refusal", async () => {
++    const intake = await readIntakeArtifacts(TEST_DIR);
++    expect(intake.summary).toBeUndefined();
++  });
++
++  it("validateIntakeSummary directly: rejects a non-boolean ready and accepts a well-formed summary", () => {
++    expect(() =>
++      validateIntakeSummary({ ...WELL_FORMED_SUMMARY, ready: "yes" }, "intake-summary.json"),
++    ).toThrow();
++    expect(validateIntakeSummary(WELL_FORMED_SUMMARY, "intake-summary.json")).toEqual(
++      WELL_FORMED_SUMMARY,
++    );
++  });
++});
+diff --git a/tests/remediate/n-r22-ownership-registry.test.ts b/tests/remediate/n-r22-ownership-registry.test.ts
+index 60ab343a..a14db91f 100644
+--- a/tests/remediate/n-r22-ownership-registry.test.ts
++++ b/tests/remediate/n-r22-ownership-registry.test.ts
+@@ -11,9 +11,12 @@
+  * - mergeImplementResults: unowned amended_files are accepted and added to effective scope
+  * - mergeImplementResults: owned amended_files block the item
+  * - OwnershipRegistry: stale in-flight claims are purged on load
++ * - OwnershipRegistry._persist: CP-NODE-2 invariants[7] persist-locking disjunction
++ *   is settled (branch b) and a persist failure surfaces to the caller
+  */
+ import { describe, it, expect, beforeEach, afterEach } from "vitest";
+ import { mkdir, rm, writeFile } from "node:fs/promises";
++import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+ import { join, dirname } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { OwnershipRegistry } from "../../src/remediate/dispatch/ownershipRegistry.js";
+@@ -322,6 +325,95 @@ describe("OwnershipRegistry: stale in-flight claims are purged on load", () => {
+   });
+ });
+ 
++// ---------------------------------------------------------------------------
++// OwnershipRegistry._persist — CP-NODE-2 invariants[7]: checkpoint-locking
++// disjunction is settled (branch b), and a persist failure surfaces.
++// ---------------------------------------------------------------------------
++
++/**
++ * Classifies which branch of the persist-locking disjunction a given source
++ * text resolves to. Branch (a): `_persist` actually calls into the shared
++ * locked-JSON store (`createLockedJsonStore(`). Branch (b): the recorded
++ * resolution marker naming single-writer discipline. Deliberately looks for
++ * the real CALL syntax (not just the bare word `lockedJsonStore`, which
++ * branch (b)'s own explanatory prose legitimately mentions when describing
++ * why branch (a) was rejected) so the two branches can never both fire on the
++ * same source text.
++ */
++function classifyPersistLockingDisjunction(
++  sourceText: string,
++): "branch-a" | "branch-b" | "neither" {
++  const branchA = /createLockedJsonStore\s*\(/.test(sourceText);
++  const branchB = /PERSIST-LOCKING-DISJUNCTION-RESOLUTION[\s\S]{0,6000}branch \(b\)/i.test(
++    sourceText,
++  );
++  if (branchA) return "branch-a";
++  if (branchB) return "branch-b";
++  return "neither";
++}
++
++describe("OwnershipRegistry._persist — CP-NODE-2 invariants[7]: checkpoint-locking disjunction is settled, not silent", () => {
++  const SOURCE_PATH = join(
++    __dirname,
++    "../../src/remediate/dispatch/ownershipRegistry.ts",
++  );
++
++  it("the shipped tree resolves to exactly one of branch (a) or branch (b) — currently branch (b)", () => {
++    const sourceText = readFileSync(SOURCE_PATH, "utf8");
++    const classification = classifyPersistLockingDisjunction(sourceText);
++    expect(classification).not.toBe("neither");
++    // Recorded resolution: single-writer discipline holds (see the doc
++    // comment directly above OwnershipRegistry's private `_persist`).
++    expect(classification).toBe("branch-b");
++  });
++
++  it("a THIRD state (neither branch present) fails the check — proves the check is not vacuous", () => {
++    const neitherSource = `
++      export class OwnershipRegistry {
++        private _persist(): void {
++          // no locked-store call, no recorded resolution marker
++        }
++      }
++    `;
++    expect(classifyPersistLockingDisjunction(neitherSource)).toBe("neither");
++  });
++
++  it("a source calling createLockedJsonStore( classifies as branch (a)", () => {
++    const branchASource = `
++      import { createLockedJsonStore } from "audit-tools/shared";
++      class X {
++        private _persist(): void {
++          createLockedJsonStore({ path: this.checkpointPath }).mutate(() => this.serialize());
++        }
++      }
++    `;
++    expect(classifyPersistLockingDisjunction(branchASource)).toBe("branch-a");
++  });
++
++  it("UNCONDITIONALLY: an injected write failure surfaces to the caller instead of being swallowed", () => {
++    // Make a path segment an existing regular FILE so mkdirSync(dirname(...),
++    // {recursive:true}) is forced to fail (it cannot create a directory where
++    // a file already sits) — the write failure this method must now propagate
++    // instead of catching+logging to stderr.
++    mkdirSync(TEST_DIR, { recursive: true });
++    const blockerFile = join(TEST_DIR, "blocker-file");
++    writeFileSync(blockerFile, "not a directory", "utf8");
++    const checkpointPath = join(blockerFile, "sub", "ownership-registry.json");
++
++    const registry = new OwnershipRegistry(checkpointPath);
++    expect(() =>
++      registry.initialize([{ node_id: "NODE-A", write_paths: ["src/a.ts"] }]),
++    ).toThrow();
++  });
++
++  it("a checkpoint-less registry (no checkpointPath) never touches disk and never throws from persist", () => {
++    const registry = new OwnershipRegistry();
++    expect(() =>
++      registry.initialize([{ node_id: "NODE-A", write_paths: ["src/a.ts"] }]),
++    ).not.toThrow();
++  });
++});
++
+ // ---------------------------------------------------------------------------
+ // mergeImplementResults: amended_files integration
+ // ---------------------------------------------------------------------------

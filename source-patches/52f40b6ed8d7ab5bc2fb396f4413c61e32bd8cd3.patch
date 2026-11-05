@@ -1,0 +1,886 @@
+diff --git a/src/audit/cli/dispatch.ts b/src/audit/cli/dispatch.ts
+index 9f9ee030..7f4ab59f 100644
+--- a/src/audit/cli/dispatch.ts
++++ b/src/audit/cli/dispatch.ts
+@@ -766,6 +766,16 @@ export async function prepareDispatchArtifacts(params: {
+         }
+       : {}),
+     ...(carriedPausedState ? { paused_state: carriedPausedState } : {}),
++    // CP-NODE-6 ratchet: partial_completion_terminal is a ONE-WAY ratchet for the
++    // run — once the dispatch engine stamps it (livelock/empty-pool), every later
++    // same-run_id re-preparation of THIS artifact must carry it forward, or a
++    // routine follow-up pass (a pending task outside the terminal's stranded_ids)
++    // silently erases the completion gate's basis. pause_count bookkeeping is
++    // already carried above via carriedPausedState (paused_state.lifecycle).
++    ...(priorActiveDispatch?.run_id === runId &&
++    priorActiveDispatch.partial_completion_terminal
++      ? { partial_completion_terminal: priorActiveDispatch.partial_completion_terminal }
++      : {}),
+     ...(confirmationShown ? { confirmation_shown: true } : {}),
+   };
+   await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), activeDispatch);
+diff --git a/src/audit/cli/dispatch/pausePersist.ts b/src/audit/cli/dispatch/pausePersist.ts
+index 64a44178..81ded0e4 100644
+--- a/src/audit/cli/dispatch/pausePersist.ts
++++ b/src/audit/cli/dispatch/pausePersist.ts
+@@ -1,8 +1,9 @@
+ import { join } from "node:path";
+ import {
+-  readJsonFile,
+-  writeJsonFile,
+   checkLivelockGuard,
++  createLockedJsonStore,
++  SKIP_WRITE,
++  type LockedJsonStore,
+   type PartialCompletionTerminal,
+ } from "audit-tools/shared";
+ import {
+@@ -11,22 +12,53 @@ import {
+   type DispatchPausedState,
+ } from "../../types/activeDispatch.js";
+ 
++const ACTIVE_DISPATCH_LOCK_FILENAME = "active-dispatch.lock";
++
+ /**
+  * Resumable-pause persistence on `active-dispatch.json`, single-sourced so the
+  * IN-PROCESS rolling driver (`advanceRollingPause`) and the HOST-dispatch path
+- * (`advanceHostDispatchPause`) share ONE copy. The paused_state ⊕
+- * partial_completion_terminal mutual-exclusion invariant (activeDispatch.ts) is held
+- * by these helpers clearing one when setting the other — a fork would let the two
+- * producers violate it, so this extraction is load-bearing for correctness, not just DRY.
++ * (`advanceHostDispatchPause`) share ONE copy.
++ *
++ * `paused_state` ⊕ `partial_completion_terminal` is an ASYMMETRIC invariant, not
++ * a symmetric mutual exclusion (CP-NODE-6): stamping a terminal ALWAYS clears any
++ * paused_state (below, `recordPartialCompletionTerminal` does this atomically —
++ * callers no longer order two calls by hand), but a terminal, once stamped, is a
++ * ONE-WAY RATCHET for the run — it must SURVIVE every later write under the same
++ * run_id, including a later `persistPausedState` (a routine follow-up pass over
++ * tasks outside the terminal's `stranded_ids`; see `advanceRollingPause`). Erasing
++ * it would also reset `lifecycle.pause_count` to 0, forcing the livelock bound to
++ * re-earn `LIVELOCK_PAUSE_LIMIT` from scratch and breaking the no-indefinite-stall
++ * guarantee CP-NODE-7's stranded-subtraction completion gate rests on. Every write
++ * below therefore starts from a freshly-read `current` and only ever ADDS/REMOVES
++ * its own field — never rebuilding the record from scratch — so an already-stamped
++ * terminal is preserved by construction, not by caller discipline.
++ *
++ * Every read-modify-write below goes through the shared locked-JSON store
++ * (`createLockedJsonStore`), so two concurrent advancers on the same run_id (e.g.
++ * a host-dispatch pass and an in-process rolling pass racing on the same
++ * artifacts dir) can never interleave read↔write and lose one another's update —
++ * no bespoke lock is added here.
+  */
++function activeDispatchStore(
++  artifactsDir: string,
++): LockedJsonStore<ActiveDispatchState | null> {
++  return createLockedJsonStore<ActiveDispatchState | null>({
++    path: join(artifactsDir, ACTIVE_DISPATCH_FILENAME),
++    lockPath: join(artifactsDir, ACTIVE_DISPATCH_LOCK_FILENAME),
++    parse: (raw) => (raw as ActiveDispatchState | undefined) ?? null,
++  });
++}
+ 
+-/** Read the run's active-dispatch artifact, or null when absent / for another run. */
++/**
++ * Read the run's active-dispatch artifact, or null when absent / for another
++ * run. A plain lockless read (matches the store's own `read()` contract) — the
++ * three mutators below are the ones that need TOCTOU safety.
++ */
+ export async function readActiveDispatch(
+   artifactsDir: string,
+   runId: string,
+ ): Promise<ActiveDispatchState | null> {
+-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
++  const existing = await activeDispatchStore(artifactsDir).read();
+   return existing && existing.run_id === runId ? existing : null;
+ }
+ 
+@@ -36,12 +68,15 @@ export async function persistPausedState(
+   runId: string,
+   pausedState: DispatchPausedState,
+ ): Promise<void> {
+-  const existing = await readActiveDispatch(artifactsDir, runId);
+-  if (!existing) return;
+-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
+-    ...existing,
+-    paused_state: pausedState,
+-  } satisfies ActiveDispatchState);
++  await activeDispatchStore(artifactsDir).mutate((current) => {
++    if (!current || current.run_id !== runId) return SKIP_WRITE;
++    // Spread `current` (never rebuild) so an already-stamped
++    // partial_completion_terminal survives this write untouched (the ratchet).
++    return {
++      ...current,
++      paused_state: pausedState,
++    } satisfies ActiveDispatchState;
++  });
+ }
+ 
+ /** Clear the paused state (run resumed or went terminal). */
+@@ -49,31 +84,34 @@ export async function clearPausedState(
+   artifactsDir: string,
+   runId: string,
+ ): Promise<void> {
+-  const existing = await readActiveDispatch(artifactsDir, runId);
+-  if (!existing || !existing.paused_state) return;
+-  const { paused_state: _dropped, ...rest } = existing;
+-  await writeJsonFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), {
+-    ...rest,
+-  } satisfies ActiveDispatchState);
++  await activeDispatchStore(artifactsDir).mutate((current) => {
++    if (!current || current.run_id !== runId || !current.paused_state) {
++      return SKIP_WRITE;
++    }
++    const { paused_state: _dropped, ...rest } = current;
++    return { ...rest } satisfies ActiveDispatchState;
++  });
+ }
+ 
+ /**
+  * Stamp the partial-completion terminal onto the run's active-dispatch artifact
+- * (leaving every other field intact). The caller clears any paused_state first so the
+- * two never coexist.
++ * (leaving every other field intact) and atomically clear any paused_state in
++ * the SAME write — the caller no longer needs to call `clearPausedState` first;
++ * the mutual exclusion on the WAY IN is guaranteed here, not by call-site order.
+  */
+ export async function recordPartialCompletionTerminal(
+   artifactsDir: string,
+   runId: string,
+   terminal: PartialCompletionTerminal,
+ ): Promise<void> {
+-  const path = join(artifactsDir, ACTIVE_DISPATCH_FILENAME);
+-  const existing = await readJsonFile<ActiveDispatchState>(path).catch(() => null);
+-  if (!existing || existing.run_id !== runId) return;
+-  await writeJsonFile(path, {
+-    ...existing,
+-    partial_completion_terminal: terminal,
+-  } satisfies ActiveDispatchState);
++  await activeDispatchStore(artifactsDir).mutate((current) => {
++    if (!current || current.run_id !== runId) return SKIP_WRITE;
++    const { paused_state: _dropped, ...rest } = current;
++    return {
++      ...rest,
++      partial_completion_terminal: terminal,
++    } satisfies ActiveDispatchState;
++  });
+ }
+ 
+ /** Outcome of a host-path pause advance. */
+@@ -166,7 +204,9 @@ export async function advanceHostDispatchPause(params: {
+   // are STILL at the wall) and bound livelock.
+   const nextPauseCount = priorPaused.lifecycle.pause_count + 1;
+   if (checkLivelockGuard(nextPauseCount, 0, params.livelockLimit)) {
+-    await clearPausedState(artifactsDir, runId);
++    // recordPartialCompletionTerminal atomically clears any paused_state as part
++    // of the SAME write (CP-NODE-6 ratchet hardening) — no separate
++    // clearPausedState call needed here.
+     await recordPartialCompletionTerminal(artifactsDir, runId, {
+       reason: "livelock_guard",
+       stranded_ids: strandedTaskIds,
+diff --git a/src/audit/cli/lineIndex.ts b/src/audit/cli/lineIndex.ts
+index 53908a7b..7a117830 100644
+--- a/src/audit/cli/lineIndex.ts
++++ b/src/audit/cli/lineIndex.ts
+@@ -11,6 +11,37 @@ import { isFileMissingError } from "audit-tools/shared";
+ // descriptors so a large repo manifest does not exhaust the fd limit.
+ const LINE_COUNT_BATCH_SIZE = 25;
+ 
++/**
++ * Sentinel line-count value marking a file as UNMEASURED (a read failure, or —
++ * via {@link isUnmeasuredLineCount} — a key entirely absent from the index),
++ * distinct from a genuine zero-line file (CP-NODE-6). Deliberately stays within
++ * the `number` domain (`Record<string, number>` is unchanged as the index's
++ * shape, so no consumer's type signature needs to change to read it) while
++ * every ordinary numeric comparison against it (`=== 0`, `<= 1`, `> 0`) is
++ * `false` by IEEE 754 definition — an unmeasured entry can never be silently
++ * read as a genuine empty file by an unaware call site. A schema-validated
++ * contract field that can only ever hold a real count (`AuditTask.file_line_counts`,
++ * `z.number().int().min(0)`) must never persist this value — see
++ * `addFileLineCountHints` below, which is the boundary that degrades it to 0
++ * before the value crosses into that schema-constrained artifact.
++ */
++export const UNMEASURED_LINE_COUNT = Number.NaN;
++
++/**
++ * True when `value` denotes "unmeasured" rather than a genuine line count:
++ * either the key is entirely ABSENT from the index (`undefined` — e.g. a
++ * caller queries a path the index was never built for, or a normalization
++ * mismatch against the index's key form) or present but marked
++ * {@link UNMEASURED_LINE_COUNT} (a read failure). A real zero-line file reads
++ * as `0`, which is neither. Prefer this predicate over a bare `?? 0` fallback
++ * so a read failure or a missing key is never silently treated as a genuine
++ * empty file — the distinction is a VALUE this module emits, not a habit each
++ * call site must remember to reimplement (CP-NODE-6).
++ */
++export function isUnmeasuredLineCount(value: number | undefined): boolean {
++  return value === undefined || Number.isNaN(value);
++}
++
+ export async function buildLineIndex(
+   root: string,
+   repoManifest: RepoManifest,
+@@ -34,7 +65,8 @@ export async function buildLineIndex(
+             `[lineIndex] ${kind} counting lines for '${file.path}': ${err instanceof Error ? err.message : String(err)}\n`,
+           );
+           failureCount++;
+-          return [file.path, 0] as const;
++          // Unmeasured, not a silent 0 (CP-NODE-6) — see UNMEASURED_LINE_COUNT.
++          return [file.path, UNMEASURED_LINE_COUNT] as const;
+         }
+       }),
+     );
+@@ -42,9 +74,13 @@ export async function buildLineIndex(
+   }
+   if (failureCount > 0) {
+     process.stderr.write(
+-      `[lineIndex] ${failureCount} of ${repoManifest.files.length} file(s) failed line counting; those entries default to 0.\n`,
++      `[lineIndex] ${failureCount} of ${repoManifest.files.length} file(s) failed line counting; those entries are marked unmeasured.\n`,
+     );
+   }
++  // Keys are `file.path` VERBATIM (no transform) — the same field
++  // `initializeCoverageFromPlan` seeds `coverage.files[].path` from
++  // (src/audit/orchestrator/planning.ts), so a lookup against a coverage path
++  // always round-trips against this index's keys.
+   return Object.fromEntries(entries);
+ }
+ 
+@@ -68,7 +104,8 @@ export async function buildLineIndexForPaths(
+             `[lineIndex] ${kind} counting lines for '${path}': ${err instanceof Error ? err.message : String(err)}\n`,
+           );
+           failureCount++;
+-          return [path, 0] as const;
++          // Unmeasured, not a silent 0 (CP-NODE-6) — see UNMEASURED_LINE_COUNT.
++          return [path, UNMEASURED_LINE_COUNT] as const;
+         }
+       }),
+     );
+@@ -76,9 +113,11 @@ export async function buildLineIndexForPaths(
+   }
+   if (failureCount > 0) {
+     process.stderr.write(
+-      `[lineIndex] ${failureCount} of ${uniquePaths.length} file(s) failed line counting; those entries default to 0.\n`,
++      `[lineIndex] ${failureCount} of ${uniquePaths.length} file(s) failed line counting; those entries are marked unmeasured.\n`,
+     );
+   }
++  // Keys are the input `paths` VERBATIM (no transform) — same round-trip
++  // guarantee as buildLineIndex above.
+   return Object.fromEntries(entries);
+ }
+ 
+@@ -93,7 +132,16 @@ export async function addFileLineCountHints(
+   return tasks.map((task) => ({
+     ...task,
+     file_line_counts: Object.fromEntries(
+-      task.file_paths.map((path) => [path, lineIndex[path] ?? 0]),
++      task.file_paths.map((path) => {
++        const measured = lineIndex[path];
++        // `file_line_counts` is the schema-constrained contract field
++        // (`z.number().int().min(0)` — schemas/audit_result.schema.json,
++        // src/audit/types.ts) with no "unmeasured" concept of its own: degrade
++        // explicitly to 0 HERE, at the boundary where the value leaves this
++        // diagnostic index and enters a persisted, schema-validated artifact,
++        // rather than leaking the UNMEASURED_LINE_COUNT sentinel into it.
++        return [path, isUnmeasuredLineCount(measured) ? 0 : measured] as const;
++      }),
+     ),
+   }));
+ }
+diff --git a/src/audit/cli/rollingAuditDispatch.ts b/src/audit/cli/rollingAuditDispatch.ts
+index 2071c9ac..932cba70 100644
+--- a/src/audit/cli/rollingAuditDispatch.ts
++++ b/src/audit/cli/rollingAuditDispatch.ts
+@@ -642,6 +642,17 @@ export async function driveRollingAuditDispatch(params: {
+       discoverProviders: params.discoverProviders,
+       livelockLimit: params.livelockLimit,
+     });
++  } else {
++    // CP-NODE-3(a) clear-paused-state directive, APPLIED HERE: audit-orchestrator-core
++    // cannot do this (deriveAuditState is contractually synchronous and I/O-free, and
++    // its dispatch_capacity obligation is deliberately non-actionable — see
++    // src/audit/orchestrator/state.ts). This pass drove every packet with nothing
++    // stranded, i.e. capacity fully returned; clear any paused_state carried forward
++    // from a prior pause BEFORE the orchestrator next derives obligations, or a
++    // resumed run keeps reporting dispatch_capacity:"blocked" forever (advanceRollingPause
++    // is only invoked on a full strand, so without this the "no strand at all" resume
++    // case had no path that ever cleared the carried pause).
++    await clearPausedState(artifactsDir, runId);
+   }
+ 
+   // Ingest only when at least one packet produced a result. A full strand (every
+@@ -826,7 +837,9 @@ async function advanceRollingPause(params: {
+     // degrades to packet ids. The current stranded set IS the still-uncovered tasks and
+     // is guaranteed present in this pass's result map (parity with the host path's
+     // `advanceHostDispatchPause` `strandedTaskIds`, Increment B residual b).
+-    await clearPausedState(artifactsDir, runId);
++    // recordPartialCompletionTerminal atomically clears any paused_state as
++    // part of the SAME write (CP-NODE-6 ratchet hardening) — no separate
++    // clearPausedState call needed here.
+     const strandedTaskIds = await packetIdsToTaskIds(artifactsDir, runId, strandedIds);
+     await recordPartialCompletionTerminal(artifactsDir, runId, {
+       reason: "livelock_guard",
+diff --git a/tests/audit/line-index.test.ts b/tests/audit/line-index.test.ts
+index 11b3f3cb..b557f237 100644
+--- a/tests/audit/line-index.test.ts
++++ b/tests/audit/line-index.test.ts
+@@ -5,8 +5,22 @@ import { tmpdir } from "node:os";
+ import { dirname, join } from "node:path";
+ import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
+ 
+-const { buildLineIndex, buildLineIndexForPaths, addFileLineCountHints } =
+-  await import("../../src/audit/cli/lineIndex.js");
++const {
++  buildLineIndex,
++  buildLineIndexForPaths,
++  addFileLineCountHints,
++  UNMEASURED_LINE_COUNT,
++  isUnmeasuredLineCount,
++} = await import("../../src/audit/cli/lineIndex.js");
++const { buildFileDisposition } = await import(
++  "../../src/audit/extractors/disposition.js"
++);
++const { buildUnitManifest } = await import(
++  "../../src/audit/orchestrator/unitBuilder.js"
++);
++const { initializeCoverageFromPlan } = await import(
++  "../../src/audit/orchestrator/planning.js"
++);
+ 
+ // ---------------------------------------------------------------------------
+ // Helpers
+@@ -88,7 +102,10 @@ test("buildLineIndex returns a line-count record keyed by file path", async (t:
+   }
+ });
+ 
+-test("buildLineIndex maps a non-existent file path to 0 rather than throwing", async (t: TestContext) => {
++// CP-NODE-6: a read failure must surface as UNMEASURED, not a silent 0 — a
++// missing file and a genuine zero-line file were previously indistinguishable,
++// which stamped missing files as excluded_trivial with no diagnostic.
++test("buildLineIndex maps a non-existent file path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
+   const dir = setup();
+   try {
+     const manifest = makeManifest(["does-not-exist.ts"]);
+@@ -96,7 +113,69 @@ test("buildLineIndex maps a non-existent file path to 0 rather than throwing", a
+     const result = await buildLineIndex(dir, manifest);
+ 
+     expect(Object.prototype.hasOwnProperty.call(result, "does-not-exist.ts"), "missing file should be present in result").toBeTruthy();
+-    expect(result["does-not-exist.ts"], "missing file should map to 0").toBe(0);
++    expect(result["does-not-exist.ts"], "a read failure must be the UNMEASURED sentinel").toBe(UNMEASURED_LINE_COUNT);
++    expect(isUnmeasuredLineCount(result["does-not-exist.ts"]), "isUnmeasuredLineCount must recognize the failure").toBe(true);
++    // A read failure must never satisfy the numeric comparisons trivial-exclusion
++    // logic uses (`=== 0`, `<= 1`) — it fails BOTH by IEEE 754 NaN semantics, so a
++    // downstream consumer can never mistake it for a genuine empty/tiny file.
++    expect(result["does-not-exist.ts"] === 0, "unmeasured must not equal 0").toBe(false);
++    expect(result["does-not-exist.ts"] <= 1, "unmeasured must not satisfy <= 1 either").toBe(false);
++  } finally {
++    teardown();
++  }
++});
++
++// CP-NODE-6: a genuine zero-line file stays a real, distinguishable 0.
++test("buildLineIndex maps a genuine empty file to a real 0, distinguishable from unmeasured", async (t: TestContext) => {
++  const dir = setup();
++  try {
++    // A TRULY empty (0-byte) file — writeLines(..., 0) would still emit a
++    // trailing newline (one blank line), so write it directly.
++    mkdirSync(dir, { recursive: true });
++    writeFileSync(join(dir, "empty.ts"), "");
++    const manifest = makeManifest(["empty.ts"]);
++
++    const result = await buildLineIndex(dir, manifest);
++
++    expect(result["empty.ts"]).toBe(0);
++    expect(isUnmeasuredLineCount(result["empty.ts"]), "a genuine 0 must NOT read as unmeasured").toBe(false);
++  } finally {
++    teardown();
++  }
++});
++
++// CP-NODE-6: a key entirely absent from the index (never queried) is ALSO
++// unmeasured, not a silent 0 — isUnmeasuredLineCount is the single seam every
++// caller should use instead of re-deriving the distinction with `?? 0`.
++test("isUnmeasuredLineCount treats a key absent from the index the same as a failed measurement", () => {
++  const index: Record<string, number> = { "present.ts": 0 };
++  expect(isUnmeasuredLineCount(index["not-a-key.ts"]), "an absent key must be unmeasured").toBe(true);
++  expect(isUnmeasuredLineCount(UNMEASURED_LINE_COUNT), "the sentinel itself must be unmeasured").toBe(true);
++  expect(isUnmeasuredLineCount(index["present.ts"]), "a genuine 0 must not be unmeasured").toBe(false);
++});
++
++// CP-NODE-6: buildLineIndex's keys are the SAME path form coverage.files[].path
++// uses — initializeCoverageFromPlan seeds coverage.files[].path verbatim from
++// repoManifest.files[].path, so a lookup against a coverage path always finds
++// its buildLineIndex entry (no normalization mismatch / lookup miss).
++test("buildLineIndex keys round-trip against coverage.files[].path (same repo_manifest source, mixed case/space path)", async (t: TestContext) => {
++  const dir = setup();
++  try {
++    const weirdPath = "src/Weird Dir/File Name.TS";
++    writeLines(dir, weirdPath, 3);
++    const manifest = makeManifest([weirdPath]);
++    const disposition = buildFileDisposition(manifest);
++    const unitManifest = buildUnitManifest(manifest, disposition);
++    const coverage = initializeCoverageFromPlan(manifest, unitManifest, disposition);
++
++    const result = await buildLineIndex(dir, manifest);
++
++    const coveragePaths = coverage.files.map((f) => f.path).sort();
++    expect(Object.keys(result).sort()).toEqual(coveragePaths);
++    for (const p of coveragePaths) {
++      expect(Object.prototype.hasOwnProperty.call(result, p), `coverage path '${p}' must resolve in the line index`).toBeTruthy();
++      expect(isUnmeasuredLineCount(result[p]), `the actually-written file '${p}' must be measured, not unmeasured`).toBe(false);
++    }
+   } finally {
+     teardown();
+   }
+@@ -160,13 +239,14 @@ test("buildLineIndexForPaths contains every unique path regardless of input orde
+   }
+ });
+ 
+-test("buildLineIndexForPaths maps a non-existent path to 0 rather than throwing", async (t: TestContext) => {
++test("buildLineIndexForPaths maps a non-existent path to UNMEASURED rather than throwing or reading as a genuine 0", async (t: TestContext) => {
+   const dir = setup();
+   try {
+     const result = await buildLineIndexForPaths(dir, ["missing.ts"]);
+ 
+     expect(Object.prototype.hasOwnProperty.call(result, "missing.ts"), "missing path should be present").toBeTruthy();
+-    expect(result["missing.ts"], "missing path should map to 0").toBe(0);
++    expect(result["missing.ts"], "a read failure must be the UNMEASURED sentinel").toBe(UNMEASURED_LINE_COUNT);
++    expect(isUnmeasuredLineCount(result["missing.ts"])).toBe(true);
+   } finally {
+     teardown();
+   }
+@@ -221,6 +301,29 @@ test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async
+   }
+ });
+ 
++// CP-NODE-6: file_line_counts is the schema-constrained contract field
++// (`z.number().int().min(0)`) with no "unmeasured" concept — addFileLineCountHints
++// is the deliberate boundary that degrades UNMEASURED_LINE_COUNT (NaN) to a
++// schema-valid 0 rather than leaking the sentinel into a persisted artifact.
++test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0, never leaking NaN into file_line_counts", async (t: TestContext) => {
++  const dir = setup();
++  try {
++    const tasks: AuditTask[] = [
++      { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "correctness", file_paths: ["ghost.ts"], rationale: "Fixture task" },
++    ];
++
++    const result = await addFileLineCountHints(dir, tasks);
++    const counts = result[0]?.file_line_counts;
++    if (!counts) throw new Error("addFileLineCountHints must annotate every returned task");
++
++    expect(Number.isNaN(counts["ghost.ts"]), "NaN must never leak into file_line_counts").toBe(false);
++    expect(Number.isInteger(counts["ghost.ts"]), "must stay schema-valid (z.number().int().min(0))").toBe(true);
++    expect(counts["ghost.ts"]).toBe(0);
++  } finally {
++    teardown();
++  }
++});
++
+ test("addFileLineCountHints preserves original task fields (no mutation of input)", async (t: TestContext) => {
+   const dir = setup();
+   try {
+@@ -324,13 +427,13 @@ test("buildLineIndexForPaths deduplicates input paths (fewer result keys than in
+   }
+ });
+ 
+-test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t: TestContext) => {
++test("buildLineIndexForPaths maps a path that throws countLines to UNMEASURED", async (t: TestContext) => {
+   const dir = setup();
+   try {
+     const result = await buildLineIndexForPaths(dir, ["this-does-not-exist.ts"]);
+ 
+     expect(Object.prototype.hasOwnProperty.call(result, "this-does-not-exist.ts"), "Error path should still appear as a key").toBeTruthy();
+-    expect(result["this-does-not-exist.ts"], "Error path should map to 0").toBe(0);
++    expect(result["this-does-not-exist.ts"], "Error path should be marked UNMEASURED, not 0").toBe(UNMEASURED_LINE_COUNT);
+   } finally {
+     teardown();
+   }
+@@ -340,7 +443,7 @@ test("buildLineIndexForPaths maps a path that throws countLines to 0", async (t:
+ // COR-c868f53d: missing vs IO error distinguished in stderr diagnostic
+ // ---------------------------------------------------------------------------
+ 
+-test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns 0 (COR-c868f53d)", async (t: TestContext) => {
++test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, returns UNMEASURED (COR-c868f53d, CP-NODE-6)", async (t: TestContext) => {
+   const dir = setup();
+   const stderrChunks: string[] = [];
+   const origWrite = process.stderr.write;
+@@ -351,7 +454,8 @@ test("buildLineIndexForPaths emits 'file not found' diagnostic for ENOENT, retur
+   };
+   try {
+     const result = await buildLineIndexForPaths(dir, ["definitely-missing-abc123.ts"]);
+-    expect(result["definitely-missing-abc123.ts"], "missing path maps to 0").toBe(0);
++    expect(result["definitely-missing-abc123.ts"], "missing path maps to the UNMEASURED sentinel, not 0").toBe(UNMEASURED_LINE_COUNT);
++    // Keep the file-not-found vs IO-error logging split — still asserted here.
+     const combined = stderrChunks.join("");
+     expect(combined.includes("file not found"), `expected 'file not found' in stderr; got: ${combined}`).toBeTruthy();
+   } finally {
+diff --git a/tests/audit/partial-completion-terminal.test.ts b/tests/audit/partial-completion-terminal.test.ts
+index a5cead5d..64b64cec 100644
+--- a/tests/audit/partial-completion-terminal.test.ts
++++ b/tests/audit/partial-completion-terminal.test.ts
+@@ -1,11 +1,20 @@
+ // Tests for N-CE301: partial-completion terminal — audit state + synthesis report
+ 
+-import { test, expect } from "vitest";
++import { test, expect, onTestFinished } from "vitest";
++import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
+ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+ import type { AuditTask } from "../../src/audit/types.js";
+ 
+ const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
+ const { buildAuditReportModel, renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
++const {
++  readActiveDispatch,
++  persistPausedState,
++  recordPartialCompletionTerminal,
++} = await import("../../src/audit/cli/dispatch/pausePersist.js");
++const { ACTIVE_DISPATCH_FILENAME } = await import("../../src/audit/types/activeDispatch.js");
+ 
+ // ── Minimal bundle helpers ───────────────────────────────────────────────────
+ 
+@@ -192,3 +201,143 @@ await test("N-CE301: no partial-coverage warning when no terminal set", () => {
+   const md = renderAuditReportMarkdown(model);
+   expect(md).not.toMatch(/provider pool was exhausted/);
+ });
++
++// ── CP-NODE-6: paused_state ⊕ partial_completion_terminal ASYMMETRIC ratchet ──
++// (pausePersist.ts persistence layer, not just its obligation-derivation effect
++// covered above). The invariant is asymmetric, not a plain XOR: stamping a
++// terminal always clears paused_state (direction a), but once stamped a
++// terminal must SURVIVE every later same-run_id write, including a later
++// persistPausedState (direction b) — erasing it would also reset
++// lifecycle.pause_count, forcing the livelock bound to re-earn
++// LIVELOCK_PAUSE_LIMIT from scratch.
++
++const RUN_ID_RATCHET = "run-ratchet";
++
++async function seedActiveDispatch(): Promise<string> {
++  const dir = await mkdtemp(join(tmpdir(), "terminal-ratchet-"));
++  await writeFile(
++    join(dir, ACTIVE_DISPATCH_FILENAME),
++    JSON.stringify({
++      run_id: RUN_ID_RATCHET,
++      created_at: "2026-01-01T00:00:00Z",
++      packet_count: 3,
++      task_count: 3,
++      status: "active",
++    }),
++    "utf8",
++  );
++  return dir;
++}
++
++async function readActiveDispatchRaw(dir: string): Promise<{
++  paused_state?: unknown;
++  partial_completion_terminal?: { reason: string; stranded_ids: string[] };
++}> {
++  return JSON.parse(await readFile(join(dir, ACTIVE_DISPATCH_FILENAME), "utf8"));
++}
++
++await test("CP-NODE-6 ratchet (a): recordPartialCompletionTerminal clears paused_state atomically, even with NO prior clearPausedState call", async () => {
++  const dir = await seedActiveDispatch();
++  onTestFinished(() => rm(dir, { recursive: true, force: true }));
++
++  await persistPausedState(dir, RUN_ID_RATCHET, {
++    lifecycle: {
++      kind: "waiting_for_provider",
++      paused_at: "2026-01-01T00:00:00Z",
++      pause_count: 2,
++      stranded_node_ids: ["p1"],
++    },
++    settled_exclusions: ["poolA"],
++  });
++  expect((await readActiveDispatchRaw(dir)).paused_state, "paused_state recorded").toBeTruthy();
++
++  // A NEW call site, calling recordPartialCompletionTerminal DIRECTLY with no
++  // preceding clearPausedState call — the mutual exclusion on the way IN must
++  // still be guaranteed by recordPartialCompletionTerminal itself.
++  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
++    reason: "livelock_guard",
++    stranded_ids: ["T1"],
++  });
++
++  const ad = await readActiveDispatchRaw(dir);
++  expect(ad.paused_state, "terminal must clear paused_state even without a prior manual clear").toBeUndefined();
++  expect(ad.partial_completion_terminal?.reason).toBe("livelock_guard");
++});
++
++await test("CP-NODE-6 ratchet (b): a later persistPausedState must NOT clear an already-stamped partial_completion_terminal", async () => {
++  const dir = await seedActiveDispatch();
++  onTestFinished(() => rm(dir, { recursive: true, force: true }));
++
++  // Prior pass already went terminal for a stranded subset of tasks.
++  await recordPartialCompletionTerminal(dir, RUN_ID_RATCHET, {
++    reason: "livelock_guard",
++    stranded_ids: ["T-stranded"],
++  });
++  let ad = await readActiveDispatchRaw(dir);
++  expect(ad.partial_completion_terminal).toBeTruthy();
++  expect(ad.paused_state).toBeUndefined();
++
++  // One more same-run_id pass: a pending task OUTSIDE the terminal's
++  // stranded_ids drives a fresh first-pause (the "!priorPaused" branch) —
++  // routine, per the module doc. This must NOT erase the terminal.
++  await persistPausedState(dir, RUN_ID_RATCHET, {
++    lifecycle: {
++      kind: "waiting_for_provider",
++      paused_at: "2026-02-01T00:00:00Z",
++      pause_count: 0,
++      stranded_node_ids: ["p-other"],
++    },
++    settled_exclusions: [],
++  });
++
++  ad = await readActiveDispatchRaw(dir);
++  expect(ad.paused_state, "the new pause is recorded").toBeTruthy();
++  expect(
++    ad.partial_completion_terminal,
++    "the terminal MUST survive a later persistPausedState — a version that drops it must turn this test red",
++  ).toBeTruthy();
++  expect(ad.partial_completion_terminal?.stranded_ids).toEqual(["T-stranded"]);
++  expect(ad.partial_completion_terminal?.reason).toBe("livelock_guard");
++});
++
++// ── CP-NODE-6: locked read-modify-write (failure_modes[7]) ───────────────────
++// Two concurrent advancers racing persistPausedState on the SAME run_id must
++// never interleave read↔write and lose one another's update — the shared
++// locked-JSON store (createLockedJsonStore) serializes the critical section.
++await test("CP-NODE-6: concurrent persistPausedState calls on the same run_id never lose an update (locked read-modify-write)", async () => {
++  const dir = await seedActiveDispatch();
++  onTestFinished(() => rm(dir, { recursive: true, force: true }));
++
++  const N = 6;
++  await Promise.all(
++    Array.from({ length: N }, (_, i) =>
++      persistPausedState(dir, RUN_ID_RATCHET, {
++        lifecycle: {
++          kind: "waiting_for_provider",
++          paused_at: "2026-01-01T00:00:00Z",
++          pause_count: i,
++          stranded_node_ids: [`p-${i}`],
++        },
++        settled_exclusions: [`pool-${i}`],
++      }),
++    ),
++  );
++
++  // Every write is independently valid — the correctness property under test
++  // is that the FINAL file is coherent (a legitimate one-of-N result, not a
++  // corrupted merge/partial write from an unserialized interleave).
++  const ad = await readActiveDispatchRaw(dir);
++  expect(ad.paused_state, "a paused_state must be present after N concurrent writes").toBeTruthy();
++  const state = ad.paused_state as {
++    lifecycle: { pause_count: number; stranded_node_ids: string[] };
++    settled_exclusions: string[];
++  };
++  const i = state.lifecycle.pause_count;
++  expect(i >= 0 && i < N, "pause_count must be one of the N written values, not corrupted").toBeTruthy();
++  expect(state.lifecycle.stranded_node_ids).toEqual([`p-${i}`]);
++  expect(state.settled_exclusions).toEqual([`pool-${i}`]);
++
++  // readActiveDispatch (the public lockless read) sees the same coherent value.
++  const viaHelper = await readActiveDispatch(dir, RUN_ID_RATCHET);
++  expect(viaHelper?.paused_state).toEqual(state);
++});
+diff --git a/tests/audit/rolling-audit-dispatch.test.ts b/tests/audit/rolling-audit-dispatch.test.ts
+index 6ec3c08d..6c5001a2 100644
+--- a/tests/audit/rolling-audit-dispatch.test.ts
++++ b/tests/audit/rolling-audit-dispatch.test.ts
+@@ -445,6 +445,195 @@ test("A8a: driveRollingAuditDispatch pauses resumably (waiting_for_provider) whe
+   expect(result.exhausted_pool_ids.length > 0, "the rate-limit-exhausted pool is named in exhausted_pool_ids").toBeTruthy();
+ });
+ 
++// ── 3b. CP-NODE-6: clear-paused-state directive, ratchet, settled accumulation ─
++
++test("CP-NODE-6: a run that pauses then regains capacity clears paused_state on the very next full-success pass", async (t) => {
++  // Directive application (invariants[3]/CDC-006): advanceRollingPause is only
++  // invoked when THIS pass strands (run.status === "partial" && stranded_ids
++  // .length > 0). Without an explicit else-branch clear, a pass that dispatches
++  // everything successfully (capacity fully returned) had NO path that ever
++  // cleared a carried paused_state — the run kept reporting dispatch_capacity:
++  // "blocked" forever even though nothing was actually blocked any more.
++  const { artifactsDir, runDir, taskList } = await makeRun();
++  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
++
++  const stranding: AuditPacketDispatcher = async (packet) => ({ packet, outcome: "rate_limited" });
++  const paused = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible", quota: {} },
++    timeoutMs: 1000,
++    dispatchPacket: stranding,
++    ingest: async () => {
++      throw new Error("ingestion must be skipped on a full strand");
++    },
++  });
++  expect(paused.status).toBe("paused");
++  const afterPause = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  );
++  expect(afterPause.paused_state, "paused_state recorded after the strand").toBeTruthy();
++
++  // Capacity returns: the next pass dispatches every packet successfully, with
++  // nothing stranded at all.
++  const resumed = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible" },
++    timeoutMs: 1000,
++    dispatchPacket: makeWritingDispatcher(runDir, taskList),
++    ingest: async ({ runId }) => ({
++      summary: { run_id: runId, accepted_count: taskList.length },
++      has_failures: false,
++    }),
++  });
++  expect(resumed.status).toBe("complete");
++  expect(resumed.stranded_ids.length).toBe(0);
++
++  const afterResume = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  );
++  expect(
++    afterResume.paused_state,
++    "paused_state must be ABSENT once capacity fully returns — a version that leaves it behind must turn this test red",
++  ).toBeUndefined();
++});
++
++test("CP-NODE-6: partial_completion_terminal survives a same-run_id prepareDispatchArtifacts re-preparation", async (t) => {
++  // Ownership extension (seam_adjustments[3]): prepareDispatchArtifacts (dispatch.ts)
++  // rewrites active-dispatch.json wholesale on EVERY pass (paused-or-not). Before the
++  // fix, its ActiveDispatchState object literal carried forward only paused_state and
++  // confirmation_shown — never partial_completion_terminal — so a routine follow-up
++  // pass (a pending task outside the terminal's stranded_ids) silently erased the
++  // completion gate's basis on its very next prepareDispatchArtifacts call.
++  const { artifactsDir, runDir, taskList } = await makeRun();
++  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
++
++  const { recordPartialCompletionTerminal } = await import(
++    "../../src/audit/cli/dispatch/pausePersist.js"
++  );
++
++  // Simulate: a prior pass already stamped a terminal for one already-stranded
++  // task. driveRollingAuditDispatch always calls prepareDispatchArtifacts before
++  // anything else, which creates active-dispatch.json for RUN_ID first.
++  const seedWritingDispatcher = makeWritingDispatcher(runDir, taskList);
++  const seedResult = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible" },
++    timeoutMs: 1000,
++    dispatchPacket: seedWritingDispatcher,
++    ingest: async ({ runId }) => ({
++      summary: { run_id: runId, accepted_count: taskList.length },
++      has_failures: false,
++    }),
++  });
++  expect(seedResult.status).toBe("complete");
++
++  await recordPartialCompletionTerminal(artifactsDir, RUN_ID, {
++    reason: "livelock_guard",
++    stranded_ids: ["t-a"],
++  });
++  const seeded = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  );
++  expect(seeded.partial_completion_terminal).toBeTruthy();
++
++  // One more same-run_id pass: prepareDispatchArtifacts re-prepares the SAME
++  // active-dispatch.json artifact (nothing pending this time, so it completes
++  // trivially) — the previously-stamped terminal must survive that rewrite.
++  const again = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible" },
++    timeoutMs: 1000,
++    dispatchPacket: async () => {
++      throw new Error("must not dispatch — nothing pending");
++    },
++    ingest: async ({ runId }) => ({ summary: { run_id: runId, accepted_count: 0 }, has_failures: false }),
++  });
++  expect(again.status).toBe("complete");
++
++  const afterReprep = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  );
++  expect(
++    afterReprep.partial_completion_terminal,
++    "the terminal must survive prepareDispatchArtifacts's re-preparation — a version that drops it must turn this test red",
++  ).toEqual({ reason: "livelock_guard", stranded_ids: ["t-a"] });
++});
++
++test("CP-NODE-6 (CE-001): a pool exhausted on pass 1 stays settled through pass 2 (accumulation, never shrinks)", async (t) => {
++  // invariants[8]/CE-001: advanceRollingPause's settled set is `prior settled ∪
++  // this pass's exhausted ids`. If the union dropped the PRIOR settled set (only
++  // this pass's own exhausted ids), a pool settled two passes ago would silently
++  // fall out of the exclusion set and re-offering it on re-discovery would read
++  // as genuinely-new capacity — a false resume.
++  const { artifactsDir, runDir } = await makeRun();
++  onTestFinished(() => rm(artifactsDir, { recursive: true, force: true }));
++
++  const { persistPausedState } = await import(
++    "../../src/audit/cli/dispatch/pausePersist.js"
++  );
++
++  // Seed: a prior pause already settled "pool-already-settled" — an id this
++  // run's OWN pool never touches, so the only way it survives into pass 2's
++  // persisted settled_exclusions is via the prior-settled union, not this
++  // pass's own exhausted-pool computation.
++  const seedResult = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible", quota: {} },
++    timeoutMs: 1000,
++    dispatchPacket: async (packet) => ({ packet, outcome: "rate_limited" }),
++    ingest: async () => {
++      throw new Error("ingestion must be skipped on a full strand");
++    },
++  });
++  expect(seedResult.status).toBe("paused");
++  const priorPaused = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  ).paused_state;
++
++  await persistPausedState(artifactsDir, RUN_ID, {
++    lifecycle: priorPaused.lifecycle,
++    settled_exclusions: [
++      ...priorPaused.settled_exclusions,
++      "pool-already-settled",
++    ].sort(),
++  });
++
++  // Pass 2: still strands on this run's real pool; re-discovery offers back the
++  // SAME already-settled seeded id (never genuinely new capacity).
++  const pass2 = await driveRollingAuditDispatch({
++    root: artifactsDir,
++    artifactsDir,
++    activeReviewRun: activeReviewRun(artifactsDir, runDir),
++    sessionConfig: { provider: "openai-compatible", quota: {} },
++    timeoutMs: 1000,
++    dispatchPacket: async (packet) => ({ packet, outcome: "rate_limited" }),
++    discoverProviders: async () => ["pool-already-settled"],
++    ingest: async () => {
++      throw new Error("ingestion must be skipped on a full strand");
++    },
++  });
++  expect(pass2.status, "re-discovering an already-settled pool must NOT resume the run").toBe("paused");
++
++  const afterPass2 = JSON.parse(
++    await readFile(join(artifactsDir, ACTIVE_DISPATCH_FILENAME), "utf8"),
++  );
++  expect(
++    afterPass2.paused_state.settled_exclusions,
++    "pass 1's seeded settled id must still be present in pass 2's persisted settled_exclusions — dropping the prior-settled union must turn this test red",
++  ).toContain("pool-already-settled");
++  expect(afterPass2.paused_state.lifecycle.pause_count, "no genuinely-new capacity → pause_count bumps, not a resume").toBeGreaterThan(priorPaused.lifecycle.pause_count);
++});
++
+ // ── 3a. Write scope: spawned workers launch against a disposable snapshot ─────
+ 
+ test("write-scope: in a git repo, spawned review workers launch against a disposable snapshot worktree, never the real checkout", async () => {

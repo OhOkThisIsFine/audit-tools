@@ -1,0 +1,16 @@
+diff --git a/src/remediate/steps/nextStep.ts b/src/remediate/steps/nextStep.ts
+index 256cfce4..fc41723d 100644
+--- a/src/remediate/steps/nextStep.ts
++++ b/src/remediate/steps/nextStep.ts
+@@ -3630,6 +3630,11 @@ async function handleReadyIntakeContractPipeline(
+             leanPlan,
+           );
+           if (planned) {
++            // Lean path: no documentable findings expected (all already grounded).
++            // Transition directly to implementing, bypassing planning_zero question.
++            if (documentableFindings(planned).length === 0) {
++              planned.status = "implementing";
++            }
+             return planned;
+           }
+           // Defensive: a deterministically-built lean plan should always

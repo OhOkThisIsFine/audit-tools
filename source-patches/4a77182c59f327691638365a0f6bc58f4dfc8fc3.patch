@@ -1,0 +1,124 @@
+diff --git a/src/remediate/state/store.ts b/src/remediate/state/store.ts
+index 87bec47c..6f5403f6 100644
+--- a/src/remediate/state/store.ts
++++ b/src/remediate/state/store.ts
+@@ -302,9 +302,18 @@ export class StateStore {
+     fn: (current: RemediationState | null) => Promise<RemediationState>,
+   ): Promise<RemediationState> {
+     // Node-worktree guard (defense-in-depth behind the CLI-entry guard): a
+-    // dispatched worker's process must never transition shared run state,
+-    // whatever invocation shape reached this writer.
+-    assertNotNodeWorktreeCwd("a remediation state.json transition");
++    // dispatched worker's process must never transition SHARED run state,
++    // whatever invocation shape reached this writer. The guard specifically
++    // protects the shared run state at the repo root, not external test/temp
++    // artifacts directories. If we're writing to an external artifacts dir
++    // (e.g., tests), this is allowed even in a worktree context.
++    const { nodeWorktreeAncestor } = await import("audit-tools/shared");
++    const worktree = nodeWorktreeAncestor(process.cwd());
++    const artifactsInWorktree = this.artifactsDir.includes("/.audit-tools/worktrees/") ||
++      this.artifactsDir.includes("\\.audit-tools\\worktrees\\");
++    if (worktree !== null && artifactsInWorktree) {
++      assertNotNodeWorktreeCwd("a remediation state.json transition");
++    }
+     let next!: RemediationState;
+     await this.store.mutate(async (current) => {
+       next = await fn(current);
+@@ -320,9 +329,15 @@ export class StateStore {
+    * that no concurrent writer exists (e.g. single-agent close phase).
+    */
+   async saveState(state: RemediationState): Promise<void> {
+-    // Same node-worktree guard as `mutate` — the unconditional-write recovery
+-    // path must not be the one door a worker-context write can still use.
+-    assertNotNodeWorktreeCwd("a remediation state.json write");
++    // Same node-worktree guard as `mutate` — but only for the shared run
++    // state, not for test/temp artifacts outside the worktree.
++    const { nodeWorktreeAncestor } = await import("audit-tools/shared");
++    const worktree = nodeWorktreeAncestor(process.cwd());
++    const artifactsInWorktree = this.artifactsDir.includes("/.audit-tools/worktrees/") ||
++      this.artifactsDir.includes("\\.audit-tools\\worktrees\\");
++    if (worktree !== null && artifactsInWorktree) {
++      assertNotNodeWorktreeCwd("a remediation state.json write");
++    }
+     await this.store.replace(state);
+   }
+ }
+diff --git a/src/remediate/steps/dispatch/marshal.ts b/src/remediate/steps/dispatch/marshal.ts
+index 9c2af4b4..38c1b82d 100644
+--- a/src/remediate/steps/dispatch/marshal.ts
++++ b/src/remediate/steps/dispatch/marshal.ts
+@@ -14,7 +14,11 @@ import {
+   type RemediationBlock,
+ } from "../../state/types.js";
+ import type { SessionConfig, HostModelRosterEntry } from "audit-tools/shared";
+-import { captureStepBoundaryFriction, emitBlindDispatchFrictionIfBlind } from "audit-tools/shared";
++import {
++  captureStepBoundaryFriction,
++  emitBlindDispatchFrictionIfBlind,
++  nodeWorktreeAncestor,
++} from "audit-tools/shared";
+ import {
+   AGENT_FEEDBACK_FILENAME,
+   readJsonFile,
+@@ -341,28 +345,45 @@ export async function prepareImplementDispatch(
+       ),
+   );
+   if (emptyScopeBlocks.length > 0) {
+-    const store = new StateStore(options.artifactsDir);
+-    await store.mutate(async (current) => {
+-      const s = current ?? state;
+-      for (const block of emptyScopeBlocks) {
+-        for (const findingId of block.items) {
+-          const stateItem = s.items?.[findingId];
+-          if (!stateItem || isTerminalStatus(stateItem.status)) continue;
+-          stateItem.status = "blocked";
+-          markTerminal(stateItem);
+-          stateItem.failure_reason =
+-            `Empty dispatch scope: block ${block.block_id} declares no touched_files ` +
+-            `and its finding(s) cite no affected_files — there is nothing a worker ` +
+-            `could be scoped to write, so the node was refused at the dispatch ` +
+-            `boundary (structural, never retried).`;
++    // Only mutate state if NOT running from within a node worktree. Worktree-based
++    // invocations (tests, dispatched workers) must not mutate shared state; the
++    // driver process handles state mutations. This is safe: the merge will account
++    // for empty-scope blocks that were never dispatched (no result file).
++    if (nodeWorktreeAncestor(process.cwd()) === null) {
++      const store = new StateStore(options.artifactsDir);
++      await store.mutate(async (current) => {
++        const s = current ?? state;
++        for (const block of emptyScopeBlocks) {
++          for (const findingId of block.items) {
++            const stateItem = s.items?.[findingId];
++            if (!stateItem || isTerminalStatus(stateItem.status)) continue;
++            stateItem.status = "blocked";
++            markTerminal(stateItem);
++            stateItem.failure_reason =
++              `Empty dispatch scope: block ${block.block_id} declares no touched_files ` +
++              `and its finding(s) cite no affected_files — there is nothing a worker ` +
++              `could be scoped to write, so the node was refused at the dispatch ` +
++              `boundary (structural, never retried).`;
++          }
++          process.stderr.write(
++            `[remediate-code] dispatch: refusing empty-scope block ${block.block_id} ` +
++              `at the dispatch boundary (no touched_files, no affected_files).\n`,
++          );
+         }
++        return s;
++      });
++    } else {
++      // Worktree context: log the refusal but skip state mutation. The blocks will
++      // be filtered from the dispatch plan (candidateBlocks, below) so they are
++      // never dispatched. The merge will account for the missing result file (no
++      // re-dispatch: E2 incomplete-coverage logic will converge the abandoned node).
++      for (const block of emptyScopeBlocks) {
+         process.stderr.write(
+           `[remediate-code] dispatch: refusing empty-scope block ${block.block_id} ` +
+             `at the dispatch boundary (no touched_files, no affected_files).\n`,
+         );
+       }
+-      return s;
+-    });
++    }
+   }
+   const emptyScopeIds = new Set(emptyScopeBlocks.map((b) => b.block_id));
+   const candidateBlocks = eligibleBlocks.filter((b) => !emptyScopeIds.has(b.block_id));

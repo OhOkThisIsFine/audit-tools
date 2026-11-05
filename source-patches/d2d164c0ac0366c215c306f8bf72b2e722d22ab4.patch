@@ -1,0 +1,1367 @@
+diff --git a/src/shared/index.ts b/src/shared/index.ts
+index aa3c43ad..dea14278 100644
+--- a/src/shared/index.ts
++++ b/src/shared/index.ts
+@@ -493,6 +493,19 @@ export {
+ export type { ProjectCommands } from "./tooling/testCommand.js";
+ export { discoverProjectCommands } from "./tooling/testCommand.js";
+ 
++// Tooling: project-test admission gate (CP-NODE-4 obligation 3) — a SECOND,
++// separately-owned admission mechanism anchored to discoverProjectCommands,
++// distinct from the model-authored anchor allowlist above. Produced here;
++// CP-NODE-7 is the consumer that routes runtimeCommand.ts's spawn through it.
++export type { ProjectTestAdmissionOutcome } from "./tooling/projectTestAdmission.js";
++export {
++  PROJECT_TEST_TIMEOUT_MS,
++  PROJECT_TEST_SIGKILL_GRACE_MS,
++  PROJECT_TEST_MAX_CAPTURED_OUTPUT,
++  isAdmittedProjectTestCommand,
++  runAdmittedProjectTestCommand,
++} from "./tooling/projectTestAdmission.js";
++
+ // Tooling: optional analyzer dependency resolution
+ export type {
+   AnalyzerDepVia,
+@@ -931,12 +944,17 @@ export type { AgyProviderOptions } from "./providers/agyProvider.js";
+ export type {
+   AutoProviderContext,
+   FreshSessionProviderDeps,
++  ProviderConstructionFailureKind,
++  ProviderLaunchOutcomeEnvelope,
+ } from "./providers/providerFactory.js";
+ export {
+   resolveFreshSessionProviderName,
+   createFreshSessionProvider,
+   hasConfiguredOpenAiCompatible,
+   discoverOutputConstraintCapability,
++  getAutoProviderContext,
++  chooseAutoProvider,
++  ProviderConstructionError,
+ } from "./providers/providerFactory.js";
+ 
+ // Provider confirmation (Gate-0 pool discovery + selection)
+diff --git a/src/shared/providers/providerFactory.ts b/src/shared/providers/providerFactory.ts
+index 83726fba..c07e77c2 100644
+--- a/src/shared/providers/providerFactory.ts
++++ b/src/shared/providers/providerFactory.ts
+@@ -97,7 +97,13 @@ export interface AutoProviderContext {
+   agyAvailable: boolean;
+ }
+ 
+-function getAutoProviderContext(
++/**
++ * Exported for direct testability of the self-spawn guard's effect on the
++ * `*Available` flags (a "live" test against the real `isSelfSpawnBlocked`
++ * guard rather than inferring the flags indirectly from
++ * `resolveFreshSessionProviderName`'s final resolved name).
++ */
++export function getAutoProviderContext(
+   sessionConfig: SessionConfig,
+   env: NodeJS.ProcessEnv,
+   lookupCommand: (command: string) => boolean,
+@@ -109,7 +115,10 @@ function getAutoProviderContext(
+   // Note: `CODEX_*` vars in quota/hostLimits.ts denote Anthropic's "Codex
+   // Desktop" originator — a distinct concept from the OpenAI Codex CLI.
+   // These signals are the behavioral contract; regression-tested in
+-  // packages/shared/tests/codex-antigravity-providers.test.mjs.
++  // tests/shared/codex-antigravity-providers.test.ts (RE-GROUNDED: the prior
++  // citation named a pre-single-package-layout test path that no longer
++  // exists in this tree — this repo ships one package, not a workspace of
++  // several, so there is no separate "shared" sub-package tests directory).
+   const insideClaudeCode = isSelfSpawnBlocked("claude-code", env);
+   const claudeCommand = sessionConfig.claude_code?.command ?? "claude";
+   const opencodeCommand = sessionConfig.opencode?.command ?? "opencode";
+@@ -129,7 +138,8 @@ function getAutoProviderContext(
+     // pattern. Both paths require an operator-configured command_template to
+     // activate (template-absent falls through to the next priority rung).
+     // This signal is the behavioral contract; it is regression-tested in
+-    // packages/shared/tests/codex-antigravity-providers.test.mjs.
++    // tests/shared/codex-antigravity-providers.test.ts (RE-GROUNDED: same
++    // stale pre-single-package-layout citation as above — see that note).
+     inAntigravity:
+       Boolean(env.ANTIGRAVITY) ||
+       (env.TERM_PROGRAM ?? "").toLowerCase() === "antigravity",
+@@ -285,7 +295,15 @@ const PROVIDER_PRIORITY_RULES: ProviderPriorityRule[] = [
+   },
+ ];
+ 
+-function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
++/**
++ * Exported for direct property testing over the full `AutoProviderContext`
++ * space (invariants[7]-adjacent: `claude-worker` is excluded AT THE TYPE via
++ * `ProviderPriorityRule.name`'s `Exclude<>`, and the fallback is the literal
++ * `"worker-command"` — this function can never return `claude-worker` by
++ * construction; the exported form lets a test assert that runtime property
++ * directly rather than only inferring it through `resolveFreshSessionProviderName`).
++ */
++export function chooseAutoProvider(context: AutoProviderContext): ResolvedProviderName {
+   for (const rule of PROVIDER_PRIORITY_RULES) {
+     if (rule.predicate(context)) return rule.name;
+   }
+@@ -479,6 +497,55 @@ export function createFreshSessionProvider(
+   return provider;
+ }
+ 
++/**
++ * Structured, non-retryable outcome for a provider CONSTRUCTION failure
++ * (invariants[7]): a missing required config block, or an unrecognized
++ * provider name. These are construction-time failures — they happen before
++ * any launch is attempted and today bypass the rolling engine's launch-result
++ * accounting entirely (a raw synchronous throw). This envelope gives a future
++ * catcher (CP-NODE-3's paused-state engine) a structured, machine-classifiable
++ * shape to route them into a terminal configuration failure rather than a
++ * bare, unclassified `Error`.
++ */
++export type ProviderConstructionFailureKind =
++  | "missing_required_config"
++  | "unknown_provider";
++
++export interface ProviderLaunchOutcomeEnvelope {
++  contract_version: "provider-launch-outcome-envelope/v1alpha1";
++  outcome: "construction_failed";
++  /** Always false: a construction failure is never fixed by retrying the same call — the config must change first. */
++  retryable: false;
++  kind: ProviderConstructionFailureKind;
++  provider: string;
++  reason: string;
++}
++
++/**
++ * Thrown by {@link constructProvider} for a construction-time (not
++ * launch-time) failure. Still a synchronous `Error` throw — construction
++ * stays synchronous, so this is additive, not a breaking return-type change —
++ * but `.message` is documentation-stable (unchanged from the prior raw
++ * `Error` text) while `.launchOutcome` carries the structured,
++ * non-retryable classification for a consumer that wants it.
++ */
++export class ProviderConstructionError extends Error {
++  readonly launchOutcome: ProviderLaunchOutcomeEnvelope;
++
++  constructor(
++    envelope: Pick<ProviderLaunchOutcomeEnvelope, "kind" | "provider" | "reason">,
++  ) {
++    super(envelope.reason);
++    this.name = "ProviderConstructionError";
++    this.launchOutcome = {
++      contract_version: "provider-launch-outcome-envelope/v1alpha1",
++      outcome: "construction_failed",
++      retryable: false,
++      ...envelope,
++    };
++  }
++}
++
+ /** Instantiate the concrete provider class for a resolved provider name. */
+ function constructProvider(
+   providerName: ResolvedProviderName,
+@@ -496,9 +563,12 @@ function constructProvider(
+       return deps.createClaudeWorkerProvider(sessionConfig.claude_worker);
+     case "subprocess-template":
+       if (!sessionConfig.subprocess_template?.command_template?.length) {
+-        throw new Error(
+-          "subprocess-template provider requires session-config.json with subprocess_template.command_template.",
+-        );
++        throw new ProviderConstructionError({
++          kind: "missing_required_config",
++          provider: providerName,
++          reason:
++            "subprocess-template provider requires session-config.json with subprocess_template.command_template.",
++        });
+       }
+       return new SubprocessTemplateProvider(
+         sessionConfig.subprocess_template,
+@@ -518,9 +588,12 @@ function constructProvider(
+       return deps.createAgyProvider(sessionConfig.agy);
+     case "vscode-task":
+       if (!sessionConfig.vscode_task?.command_template?.length) {
+-        throw new Error(
+-          "vscode-task provider requires session-config.json with vscode_task.command_template.",
+-        );
++        throw new ProviderConstructionError({
++          kind: "missing_required_config",
++          provider: providerName,
++          reason:
++            "vscode-task provider requires session-config.json with vscode_task.command_template.",
++        });
+       }
+       return new SubprocessTemplateProvider(
+         sessionConfig.vscode_task,
+@@ -528,15 +601,22 @@ function constructProvider(
+       );
+     case "antigravity":
+       if (!sessionConfig.antigravity?.command_template?.length) {
+-        throw new Error(
+-          "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
+-        );
++        throw new ProviderConstructionError({
++          kind: "missing_required_config",
++          provider: providerName,
++          reason:
++            "antigravity provider requires session-config.json with antigravity.command_template — Antigravity is an agentic IDE, not a headless CLI, so it must be driven via a configured command/task template.",
++        });
+       }
+       return new SubprocessTemplateProvider(
+         sessionConfig.antigravity,
+         "antigravity",
+       );
+     default:
+-      throw new Error(`Unknown provider: ${providerName}`);
++      throw new ProviderConstructionError({
++        kind: "unknown_provider",
++        provider: String(providerName),
++        reason: `Unknown provider: ${providerName}`,
++      });
+   }
+ }
+diff --git a/src/shared/tooling/allowlistedExec.ts b/src/shared/tooling/allowlistedExec.ts
+index 0b1f2cf5..95ca3b3e 100644
+--- a/src/shared/tooling/allowlistedExec.ts
++++ b/src/shared/tooling/allowlistedExec.ts
+@@ -22,8 +22,11 @@
+  * SAFETY of the runner: commands run only via `runAllowlistedReadOnlyCommand`,
+  * which spawns argv-only (never a shell), under a timeout, with the
+  * host-signalling env stripped (`stripClaudeCodeEnv`), platform-resolved via the
+- * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The caller still
+- * gates each command through `isAllowedAnchorCommand` before running it.
++ * shared `resolveExecArgv`, and SIGTERM→SIGKILL on timeout. The runner ENFORCES
++ * `isAllowedAnchorCommand` on itself, unconditionally, before ever spawning
++ * (invariants[2]) — a caller-side pre-check (e.g. `anchorGrounding.ts`) is now
++ * an OPTIONAL fast path, never the sole guarantee: correctness must not rest on
++ * every call site remembering to gate first.
+  */
+ import { spawn } from "node:child_process";
+ import { resolveExecArgv, stripClaudeCodeEnv } from "./exec.js";
+@@ -310,6 +313,15 @@ export interface AllowlistedExecOutcome {
+   spawn_error?: string;
+   /** Full combined stdout+stderr (bounded), used to evaluate output matches. */
+   output: string;
++  /**
++   * True when the internal allowlist gate refused `command` BEFORE any spawn
++   * was attempted (`isAllowedAnchorCommand` returned false) — a structured
++   * refusal, never a spawn, never a throw. Distinct from `spawn_error` (which
++   * means a spawn WAS attempted and the OS failed to launch it): a refusal
++   * never touches the child_process API at all. Absent (not `false`) on every
++   * outcome that reached a real spawn attempt.
++   */
++  refused?: boolean;
+ }
+ 
+ export type AllowlistedExecRunner = (
+@@ -326,16 +338,35 @@ export type AllowlistedExecRunner = (
+  * (SIGTERM→SIGKILL). The single runner both orchestrators use for the grounding
+  * anchor pass.
+  *
+- * NOTE: this does NOT re-check the allowlist — callers MUST gate the command
+- * through {@link isAllowedAnchorCommand} first. It is named/scoped so a future
+- * caller cannot reasonably read it as a general-purpose runner.
++ * INTERNAL GATE (invariants[2]): enforces {@link isAllowedAnchorCommand} on
++ * itself, unconditionally, before ever spawning — `isAllowedAnchorCommand` is
++ * pure, total, and non-throwing, so this check is cheap and correctness no
++ * longer depends on every call site remembering to gate first. A refused
++ * command resolves a structured refusal (`refused: true`); it is NEVER spawned
++ * and this function NEVER throws for a refusal. A caller-side pre-check (e.g.
++ * `anchorGrounding.ts`'s `isAllowedAnchorCommand` call before invoking this
++ * function) is now a redundant, OPTIONAL fast path: double-gating is
++ * observationally identical to single-gating, since the check is idempotent.
++ *
++ * Its reach is the model-authored anchor/targeted command class ONLY — it does
++ * NOT reach `runtimeCommand.ts`'s project-test spawn (a discovered, non-model-
++ * authored vector the default-deny anchor premise excludes by construction;
++ * see `projectTestAdmission.ts` for that surface's own admission gate).
+  */
+ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
+   command,
+   cwd,
+   timeoutMs,
+-) =>
+-  new Promise((resolvePromise) => {
++) => {
++  if (!isAllowedAnchorCommand(command)) {
++    return Promise.resolve({
++      exit_code: null,
++      timed_out: false,
++      output: "",
++      refused: true,
++    });
++  }
++  return new Promise((resolvePromise) => {
+     const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
+     const child = spawn(resolvedCommand, resolvedArgs, {
+       cwd,
+@@ -371,3 +402,4 @@ export const runAllowlistedReadOnlyCommand: AllowlistedExecRunner = (
+       resolvePromise({ exit_code: code, timed_out: timedOut, output });
+     });
+   });
++};
+diff --git a/src/shared/tooling/projectTestAdmission.ts b/src/shared/tooling/projectTestAdmission.ts
+new file mode 100644
+index 00000000..dcb36bd7
+--- /dev/null
++++ b/src/shared/tooling/projectTestAdmission.ts
+@@ -0,0 +1,170 @@
++import { spawn } from "node:child_process";
++import { discoverProjectCommands } from "./testCommand.js";
++import { resolveExecArgv, stripClaudeCodeEnv } from "./exec.js";
++
++/**
++ * The project-test admission gate (CP-NODE-4 obligation 3 / seam_adjustments[2]).
++ *
++ * `runtimeCommand.ts`'s deterministic runtime-validation spawn is a DIFFERENT
++ * trust surface from the model-authored anchor commands `allowlistedExec.ts`
++ * gates: the command here is never model-authored — it is PRODUCED by
++ * {@link discoverProjectCommands} from the repository's own project files
++ * (package.json / go.mod / pyproject.toml). So admission is anchored to
++ * discovery itself, not to a static per-executable flag table: a command is
++ * admitted iff it is EXACTLY the `.test` vector `discoverProjectCommands(root)`
++ * emits for `root` right now (`['npm','test']` / `['go','test','./...']` /
++ * `['python','-m','pytest']`). Anything discovery did not emit is refused —
++ * including a superficially similar command carrying extra flags.
++ *
++ * This is a SECOND, separately-owned admission mechanism (invariants[0] in
++ * allowlistedExec.ts stays intact): it shares no table with `ARG_POLICIES` /
++ * `isAllowedAnchorCommand`, and it is never an extension of that allowlist.
++ * Its timeout/output-capture bounds are sized for a real test suite rather
++ * than the anchor runner's 60s / 256 KiB inspection bounds (CDC-019) — a
++ * suite-sized command run through the anchor runner's bounds would SIGTERM a
++ * healthy suite and misreport it as `timed_out` rather than validated.
++ *
++ * This module PRODUCES the gate; CP-NODE-7 is the consumer that routes
++ * `runtimeCommand.ts`'s spawn through it.
++ */
++
++/**
++ * Suite-sized wall-clock budget (CDC-019 derivation rule: an order of
++ * magnitude above the anchor runner's 60s inspection budget). A real project
++ * test suite (install + build + full unit/integration run) routinely takes
++ * minutes, not seconds; ten minutes gives a healthy suite generous headroom
++ * while still bounding a truly hung process so a dispatch node can't block on
++ * it forever.
++ */
++export const PROJECT_TEST_TIMEOUT_MS = 10 * 60_000;
++
++/** Grace before a timed-out suite is escalated from SIGTERM to SIGKILL. */
++export const PROJECT_TEST_SIGKILL_GRACE_MS = 5_000;
++
++/**
++ * Suite-sized output cap (CDC-019 derivation rule: an order of magnitude above
++ * the anchor runner's 256 KiB inspection cap). A verbose test runner's
++ * combined stdout+stderr can be far larger than a short inspection command's;
++ * 4 MiB is generous enough that a normal suite is captured in full while still
++ * bounding memory against a truly runaway process. Output beyond the cap is
++ * TRUNCATED (`truncated: true`, never silently dropped) — see
++ * {@link ProjectTestAdmissionOutcome.truncated}.
++ */
++export const PROJECT_TEST_MAX_CAPTURED_OUTPUT = 4 * 1024 * 1024;
++
++export interface ProjectTestAdmissionOutcome {
++  /** False when `command` is not the exact vector discovery emits for `root` — nothing was spawned. */
++  admitted: boolean;
++  /** Populated only when `admitted` is false. */
++  refusal_reason?: string;
++  exit_code: number | null;
++  timed_out: boolean;
++  /**
++   * True when captured output hit {@link PROJECT_TEST_MAX_CAPTURED_OUTPUT} and
++   * further output was truncated. Distinct from silently stopping capture: a
++   * caller can tell "the suite said more than we kept" apart from "the suite
++   * said exactly this much."
++   */
++  truncated: boolean;
++  spawn_error?: string;
++  /** Full combined stdout+stderr, bounded by the capture cap (see `truncated`). */
++  output: string;
++}
++
++/**
++ * Admit ONLY the exact test command {@link discoverProjectCommands} would
++ * return right now for `root` — never a static table, so the repository's own
++ * project files are the sole source of truth for what is admitted. Pure and
++ * total: no spawn, no throw.
++ */
++export function isAdmittedProjectTestCommand(command: string[], root: string): boolean {
++  const discovered = discoverProjectCommands(root).test;
++  if (!discovered || discovered.length === 0) return false;
++  if (command.length !== discovered.length) return false;
++  return command.every((token, index) => token === discovered[index]);
++}
++
++/**
++ * Run the repository's discovered test command under the gate. Refuses
++ * anything discovery did not emit for `root` (never spawns a refused
++ * command); for an admitted command, spawns argv-only (never a shell) with
++ * the host-signalling env stripped (`stripClaudeCodeEnv`), platform-resolved
++ * via the shared `resolveExecArgv`, under suite-sized timeout/capture bounds,
++ * killing a hung suite (SIGTERM→SIGKILL) and truncating — never silently
++ * dropping — output beyond the capture cap.
++ */
++export function runAdmittedProjectTestCommand(
++  command: string[],
++  root: string,
++  options: {
++    timeoutMs?: number;
++    maxCapturedOutput?: number;
++    sigkillGraceMs?: number;
++  } = {},
++): Promise<ProjectTestAdmissionOutcome> {
++  if (!isAdmittedProjectTestCommand(command, root)) {
++    return Promise.resolve({
++      admitted: false,
++      refusal_reason: `\`${command.join(" ")}\` is not the test command discoverProjectCommands() emits for this repository; refused.`,
++      exit_code: null,
++      timed_out: false,
++      truncated: false,
++      output: "",
++    });
++  }
++  const timeoutMs = options.timeoutMs ?? PROJECT_TEST_TIMEOUT_MS;
++  const maxCapturedOutput = options.maxCapturedOutput ?? PROJECT_TEST_MAX_CAPTURED_OUTPUT;
++  const sigkillGraceMs = options.sigkillGraceMs ?? PROJECT_TEST_SIGKILL_GRACE_MS;
++
++  return new Promise((resolvePromise) => {
++    const [resolvedCommand, ...resolvedArgs] = resolveExecArgv(command);
++    const child = spawn(resolvedCommand, resolvedArgs, {
++      cwd: root,
++      env: stripClaudeCodeEnv(),
++      stdio: ["ignore", "pipe", "pipe"],
++      windowsHide: true,
++    });
++    let output = "";
++    let truncated = false;
++    const capture = (chunk: unknown): void => {
++      if (truncated) return;
++      const text = String(chunk);
++      const remaining = maxCapturedOutput - output.length;
++      if (remaining <= 0) {
++        truncated = true;
++        return;
++      }
++      if (text.length > remaining) {
++        output += text.slice(0, remaining);
++        truncated = true;
++      } else {
++        output += text;
++      }
++    };
++    child.stdout?.on("data", capture);
++    child.stderr?.on("data", capture);
++    let timedOut = false;
++    const timer = setTimeout(() => {
++      timedOut = true;
++      child.kill("SIGTERM");
++      const hardKill = setTimeout(() => child.kill("SIGKILL"), sigkillGraceMs);
++      hardKill.unref?.();
++    }, timeoutMs);
++    timer.unref?.();
++    child.on("error", (error) => {
++      clearTimeout(timer);
++      resolvePromise({
++        admitted: true,
++        exit_code: null,
++        timed_out: timedOut,
++        truncated,
++        spawn_error: error.message,
++        output,
++      });
++    });
++    child.on("close", (code) => {
++      clearTimeout(timer);
++      resolvePromise({ admitted: true, exit_code: code, timed_out: timedOut, truncated, output });
++    });
++  });
++}
+diff --git a/tests/shared/allowlisted-exec-runner-internals.test.ts b/tests/shared/allowlisted-exec-runner-internals.test.ts
+new file mode 100644
+index 00000000..48d15f67
+--- /dev/null
++++ b/tests/shared/allowlisted-exec-runner-internals.test.ts
+@@ -0,0 +1,134 @@
++/**
++ * allowlisted-exec-runner-internals.test.ts — the internal allowlist gate
++ * (CP-NODE-4 obligation 1 / invariants[2]) and the runner's timeout/kill
++ * escalation, exercised with a FULLY MOCKED `node:child_process` so:
++ *   - a refused command's "no spawn occurred" claim is verifiable directly
++ *     (the RED case, pre-fix, actually called `spawn`; the GREEN case never
++ *     does), rather than inferred indirectly from timing or exit codes;
++ *   - the SIGTERM→SIGKILL timeout escalation is deterministic (fake timers),
++ *     not dependent on a real slow child process.
++ *
++ * This file is kept separate from allowlisted-exec.test.ts, which needs REAL
++ * spawns for its other assertions — `vi.mock("node:child_process")` is
++ * file-scoped, so a file that needs both would have to fake every spawn.
++ */
++import { test, expect, vi, beforeEach } from "vitest";
++import { EventEmitter } from "node:events";
++
++const spawnCalls: Array<{ command: string; args: string[] }> = [];
++let currentChild: any = null;
++
++function makeControllableChild(): any {
++  const child: any = new EventEmitter();
++  child.pid = 4242;
++  child.killed = false;
++  const killCalls: string[] = [];
++  child.__killCalls = killCalls;
++  child.kill = (signal?: string) => {
++    killCalls.push(signal ?? "SIGTERM");
++    child.killed = true;
++    return true;
++  };
++  child.stdout = new EventEmitter();
++  child.stderr = new EventEmitter();
++  return child;
++}
++
++vi.mock("node:child_process", () => ({
++  spawn: (command: string, args: string[]) => {
++    spawnCalls.push({ command, args });
++    currentChild = makeControllableChild();
++    return currentChild;
++  },
++}));
++
++const { runAllowlistedReadOnlyCommand, ALLOWLISTED_EXEC_TIMEOUT_MS } = await import(
++  "../../src/shared/tooling/allowlistedExec.js"
++);
++
++beforeEach(() => {
++  spawnCalls.length = 0;
++  currentChild = null;
++});
++
++// ── CRIT: a refused command must NEVER reach spawn ─────────────────────────
++
++test("CRIT internal gate: a refused ANCHOR argv with NO prior caller-side check resolves a structured refusal and NEVER spawns", async () => {
++  // rg --pre is on the adversarial-refusal list (preprocessor exec) — this is
++  // called DIRECTLY, with no isAllowedAnchorCommand() call first, unlike
++  // anchorGrounding.ts's caller-gated path.
++  const outcome = await runAllowlistedReadOnlyCommand(
++    ["rg", "--pre", "x"],
++    process.cwd(),
++    ALLOWLISTED_EXEC_TIMEOUT_MS,
++  );
++  expect(spawnCalls.length, "a refused command must never reach child_process.spawn").toBe(0);
++  expect(outcome.refused).toBe(true);
++  expect(outcome.exit_code).toBe(null);
++  expect(outcome.timed_out).toBe(false);
++  expect(outcome.spawn_error, "a refusal is not a spawn error").toBe(undefined);
++});
++
++test("CRIT internal gate: a non-allowlisted executable resolves a structured refusal and NEVER spawns", async () => {
++  const outcome = await runAllowlistedReadOnlyCommand(
++    ["node", "-e", "1"],
++    process.cwd(),
++    ALLOWLISTED_EXEC_TIMEOUT_MS,
++  );
++  expect(spawnCalls.length).toBe(0);
++  expect(outcome.refused).toBe(true);
++});
++
++test("an ALLOWED command still reaches spawn (the gate does not over-refuse)", async () => {
++  const promise = runAllowlistedReadOnlyCommand(
++    ["git", "log"],
++    process.cwd(),
++    ALLOWLISTED_EXEC_TIMEOUT_MS,
++  );
++  // Let the mocked spawn run synchronously, then settle the child cleanly.
++  await Promise.resolve();
++  expect(spawnCalls.length, "an allowed command must reach spawn").toBe(1);
++  currentChild.emit("close", 0);
++  const outcome = await promise;
++  expect(outcome.refused).not.toBe(true);
++  expect(outcome.exit_code).toBe(0);
++});
++
++// ── SIGTERM → SIGKILL escalation at the documented offsets ─────────────────
++
++test("a slow (admitted) child is SIGTERM'd at timeoutMs then SIGKILL'd after the grace period, with timed_out:true", async () => {
++  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
++  try {
++    const timeoutMs = 5_000;
++    const promise = runAllowlistedReadOnlyCommand(["git", "log"], process.cwd(), timeoutMs);
++    // Let the mocked spawn run (it's called synchronously inside the executor).
++    await Promise.resolve();
++    expect(spawnCalls.length).toBe(1);
++    const child = currentChild;
++
++    // Not yet at the timeout: no kill signal sent.
++    vi.advanceTimersByTime(timeoutMs - 1);
++    expect(child.__killCalls).toEqual([]);
++
++    // Exactly at the documented timeoutMs offset: SIGTERM fires.
++    vi.advanceTimersByTime(1);
++    expect(child.__killCalls).toEqual(["SIGTERM"]);
++
++    // Documented SIGKILL_GRACE_MS offset (allowlistedExec.ts) is 2_000ms after
++    // SIGTERM; short of it, no escalation yet.
++    vi.advanceTimersByTime(1_999);
++    expect(child.__killCalls).toEqual(["SIGTERM"]);
++
++    // Exactly at the grace offset: SIGKILL escalation fires.
++    vi.advanceTimersByTime(1);
++    expect(child.__killCalls).toEqual(["SIGTERM", "SIGKILL"]);
++
++    // The child eventually closes (as if SIGKILL took effect) — outcome
++    // reports timed_out:true regardless of the reported exit code.
++    child.emit("close", null);
++    const outcome = await promise;
++    expect(outcome.timed_out).toBe(true);
++  } finally {
++    vi.useRealTimers();
++  }
++});
+diff --git a/tests/shared/allowlisted-exec.test.ts b/tests/shared/allowlisted-exec.test.ts
+index 24c43683..120e911d 100644
+--- a/tests/shared/allowlisted-exec.test.ts
++++ b/tests/shared/allowlisted-exec.test.ts
+@@ -23,6 +23,8 @@ test("isAllowedAnchorCommand allows legitimate read-only inspection commands", (
+     ["grep", "--include", "*.ts", "x", "src"],
+     ["rg", "-i", "--json", "pattern", "src"],
+     ["rg", "-t", "js", "x"],
++    // Canonical allowed form cited by CP-NODE-4's allowlist-shape obligation.
++    ["rg", "-n", "-e", "foo"],
+     ["ripgrep", "x"],
+     ["findstr", "/s", "/i", "x", "."],
+     ["madge", "--circular", "src"],
+@@ -81,7 +83,10 @@ test("CRIT: git is refused for non-read-only subcommands and for write/reconfigu
+     ["git", "apply", "patch"],
+     // read-only subcommand BUT a write/reconfigure option anywhere → refused
+     ["git", "log", "--output=/tmp/evil"],
++    ["git", "log", "-o", "file"],
+     ["git", "log", "-o", "/tmp/evil"],
++    // Canonical fixture cited by CP-NODE-4's allowlist-shape obligation.
++    ["git", "-c", "x=y", "log"],
+     ["git", "-c", "core.pager=evil", "log"],
+     ["git", "--exec-path=/tmp", "status"],
+     ["git", "--config-env", "X=Y", "diff"],
+@@ -136,12 +141,56 @@ test("runAllowlistedReadOnlyCommand runs an allowlisted command argv-only and re
+   expect(r.output.trim()).toMatch(/true/);
+ });
+ 
+-test("runAllowlistedReadOnlyCommand reports a spawn error for a missing executable without throwing", async () => {
++test("runAllowlistedReadOnlyCommand reports a spawn error for an ALLOWLISTED executable whose path does not resolve, without throwing", async () => {
++  // The internal gate (invariants[2]) now refuses a non-allowlisted executable
++  // NAME before ever reaching spawn (see allowlisted-exec-runner-internals.test.ts
++  // for that refusal path) — so a genuine "spawn failed" outcome now requires an
++  // executable whose BASENAME is allowlisted ("grep") but whose resolved path
++  // does not exist, still reaching a real ENOENT from the OS.
+   const r = await runAllowlistedReadOnlyCommand(
+-    ["definitely-not-a-real-binary-xyz", "--help"],
++    ["definitely-not-a-real-directory-xyz/grep", "-n", "x"],
+     process.cwd(),
+     ALLOWLISTED_EXEC_TIMEOUT_MS,
+   );
++  expect(r.refused, "an allowlisted basename must not be refused by the internal gate").not.toBe(true);
+   expect(r.exit_code).toBe(null);
+   expect(typeof r.spawn_error === "string" && r.spawn_error.length > 0).toBeTruthy();
+ });
++
++// ── internal gate idempotence (invariants[2]) ───────────────────────────────
++// runAllowlistedReadOnlyCommand now enforces isAllowedAnchorCommand on itself,
++// unconditionally, before spawning. A caller-side pre-check (the
++// anchorGrounding.ts pattern) becomes a redundant, OPTIONAL fast path —
++// double-gating must be OBSERVATIONALLY IDENTICAL to single-gating for an
++// already-allowed command: the internal gate must never additionally refuse,
++// alter timing semantics, or change the outcome shape for a command the
++// caller already confirmed.
++test("internal gate idempotence: a pre-gated allowed command behaves identically with and without the caller-side check", async () => {
++  const allowedCommand = ["git", "rev-parse", "--is-inside-work-tree"];
++
++  // Caller-side pre-check, THEN run (today's anchorGrounding.ts pattern).
++  expect(isAllowedAnchorCommand(allowedCommand)).toBe(true);
++  const withCallerCheck = await runAllowlistedReadOnlyCommand(
++    allowedCommand,
++    process.cwd(),
++    ALLOWLISTED_EXEC_TIMEOUT_MS,
++  );
++
++  // Direct call, no caller-side pre-check at all — the internal gate alone.
++  const withoutCallerCheck = await runAllowlistedReadOnlyCommand(
++    allowedCommand,
++    process.cwd(),
++    ALLOWLISTED_EXEC_TIMEOUT_MS,
++  );
++
++  // Neither call was refused, both actually ran the command, and both agree
++  // on the outcome shape (exit_code / timed_out / refused / output presence).
++  expect(withCallerCheck.refused).not.toBe(true);
++  expect(withoutCallerCheck.refused).not.toBe(true);
++  expect(withCallerCheck.timed_out).toBe(false);
++  expect(withoutCallerCheck.timed_out).toBe(false);
++  expect(withCallerCheck.spawn_error).toBe(undefined);
++  expect(withoutCallerCheck.spawn_error).toBe(undefined);
++  expect(withCallerCheck.exit_code).toBe(withoutCallerCheck.exit_code);
++  expect(withCallerCheck.output.trim()).toBe(withoutCallerCheck.output.trim());
++});
+diff --git a/tests/shared/projectTestAdmission-spawn-control.test.ts b/tests/shared/projectTestAdmission-spawn-control.test.ts
+new file mode 100644
+index 00000000..62081d8a
+--- /dev/null
++++ b/tests/shared/projectTestAdmission-spawn-control.test.ts
+@@ -0,0 +1,144 @@
++/**
++ * projectTestAdmission-spawn-control.test.ts — deterministic (mocked
++ * child_process + fake timers) coverage of runAdmittedProjectTestCommand's
++ * suite-sized timeout/SIGTERM/SIGKILL escalation (CDC-019) and its truncation
++ * (never silent-drop) behavior at the output-capture cap. Kept separate from
++ * projectTestAdmission.test.ts, which needs REAL spawns for its happy-path
++ * assertions — vi.mock("node:child_process") is file-scoped.
++ */
++import { test, expect, vi, beforeEach } from "vitest";
++import { EventEmitter } from "node:events";
++import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++
++const spawnCalls: Array<{ command: string; args: string[] }> = [];
++let currentChild: any = null;
++
++function makeControllableChild(): any {
++  const child: any = new EventEmitter();
++  child.pid = 7331;
++  const killCalls: string[] = [];
++  child.__killCalls = killCalls;
++  child.kill = (signal?: string) => {
++    killCalls.push(signal ?? "SIGTERM");
++    return true;
++  };
++  child.stdout = new EventEmitter();
++  child.stderr = new EventEmitter();
++  return child;
++}
++
++vi.mock("node:child_process", () => ({
++  spawn: (command: string, args: string[]) => {
++    spawnCalls.push({ command, args });
++    currentChild = makeControllableChild();
++    return currentChild;
++  },
++}));
++
++const {
++  runAdmittedProjectTestCommand,
++  PROJECT_TEST_MAX_CAPTURED_OUTPUT,
++} = await import("../../src/shared/tooling/projectTestAdmission.js");
++
++beforeEach(() => {
++  spawnCalls.length = 0;
++  currentChild = null;
++});
++
++function makeDiscoverableDir(): string {
++  const dir = mkdtempSync(join(tmpdir(), "audit-tools-testadmit-spawn-"));
++  writeFileSync(join(dir, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
++  return dir;
++}
++
++// ── suite-sized SIGTERM → SIGKILL escalation ────────────────────────────────
++
++test("a hung admitted suite is SIGTERM'd at timeoutMs then SIGKILL'd after sigkillGraceMs, with timed_out:true", async () => {
++  const dir = makeDiscoverableDir();
++  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
++  try {
++    const timeoutMs = 10_000;
++    const sigkillGraceMs = 3_000;
++    const promise = runAdmittedProjectTestCommand(["npm", "test"], dir, {
++      timeoutMs,
++      sigkillGraceMs,
++    });
++    await Promise.resolve();
++    expect(spawnCalls.length, "an admitted command must reach spawn").toBe(1);
++    const child = currentChild;
++
++    vi.advanceTimersByTime(timeoutMs - 1);
++    expect(child.__killCalls).toEqual([]);
++
++    vi.advanceTimersByTime(1);
++    expect(child.__killCalls).toEqual(["SIGTERM"]);
++
++    vi.advanceTimersByTime(sigkillGraceMs - 1);
++    expect(child.__killCalls).toEqual(["SIGTERM"]);
++
++    vi.advanceTimersByTime(1);
++    expect(child.__killCalls).toEqual(["SIGTERM", "SIGKILL"]);
++
++    child.emit("close", null);
++    const outcome = await promise;
++    expect(outcome.admitted).toBe(true);
++    expect(outcome.timed_out).toBe(true);
++  } finally {
++    vi.useRealTimers();
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++test("a suite that closes before the timeout is never killed", async () => {
++  const dir = makeDiscoverableDir();
++  vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "Date"] });
++  try {
++    const promise = runAdmittedProjectTestCommand(["npm", "test"], dir, { timeoutMs: 10_000 });
++    await Promise.resolve();
++    const child = currentChild;
++    child.emit("close", 0);
++    const outcome = await promise;
++    expect(outcome.timed_out).toBe(false);
++    expect(child.__killCalls).toEqual([]);
++    expect(outcome.exit_code).toBe(0);
++  } finally {
++    vi.useRealTimers();
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++// ── suite-sized output cap: TRUNCATED, never silently dropped ──────────────
++
++test("output beyond PROJECT_TEST_MAX_CAPTURED_OUTPUT is truncated:true, not silently dropped", async () => {
++  const dir = makeDiscoverableDir();
++  const promise = runAdmittedProjectTestCommand(["npm", "test"], dir, { timeoutMs: 60_000 });
++  await Promise.resolve();
++  const child = currentChild;
++
++  // First chunk fills the cap exactly; a second chunk goes entirely over.
++  const filler = "a".repeat(PROJECT_TEST_MAX_CAPTURED_OUTPUT);
++  child.stdout.emit("data", Buffer.from(filler));
++  child.stdout.emit("data", Buffer.from("overflow"));
++  child.emit("close", 0);
++
++  const outcome = await promise;
++  expect(outcome.truncated, "output past the cap must be marked truncated, not merely stopped").toBe(true);
++  expect(outcome.output.length).toBe(PROJECT_TEST_MAX_CAPTURED_OUTPUT);
++  expect(outcome.output.includes("overflow"), "overflow bytes must not appear in captured output").toBe(false);
++  rmSync(dir, { recursive: true, force: true });
++});
++
++test("output within the cap is captured in full with truncated:false", async () => {
++  const dir = makeDiscoverableDir();
++  const promise = runAdmittedProjectTestCommand(["npm", "test"], dir, { timeoutMs: 60_000 });
++  await Promise.resolve();
++  const child = currentChild;
++  child.stdout.emit("data", Buffer.from("all good\n"));
++  child.emit("close", 0);
++  const outcome = await promise;
++  expect(outcome.truncated).toBe(false);
++  expect(outcome.output).toBe("all good\n");
++  rmSync(dir, { recursive: true, force: true });
++});
+diff --git a/tests/shared/projectTestAdmission.test.ts b/tests/shared/projectTestAdmission.test.ts
+new file mode 100644
+index 00000000..631ed4cd
+--- /dev/null
++++ b/tests/shared/projectTestAdmission.test.ts
+@@ -0,0 +1,133 @@
++/**
++ * projectTestAdmission.test.ts — the project-test admission gate (CP-NODE-4
++ * obligation 3 / seam_adjustments[2]): admission logic anchored to
++ * discoverProjectCommands, plus a real happy-path spawn. Timeout/SIGTERM/
++ * SIGKILL/truncation behavior is exercised deterministically (mocked
++ * child_process + fake timers) in projectTestAdmission-spawn-control.test.ts.
++ */
++import { test, expect } from "vitest";
++import { mkdtemp, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import {
++  isAdmittedProjectTestCommand,
++  runAdmittedProjectTestCommand,
++} from "../../src/shared/tooling/projectTestAdmission.js";
++
++async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
++  const dir = await mkdtemp(join(tmpdir(), "audit-tools-testadmit-"));
++  try {
++    return await fn(dir);
++  } finally {
++    await rm(dir, { recursive: true, force: true });
++  }
++}
++
++// ── isAdmittedProjectTestCommand: anchored to discovery, never a static table ──
++
++test("admits the exact npm-test vector discovery emits for a Node project", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "vitest run" } }),
++      "utf8",
++    );
++    expect(isAdmittedProjectTestCommand(["npm", "test"], dir)).toBe(true);
++  });
++});
++
++test("admits the exact go-test vector discovery emits for a Go project", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(join(dir, "go.mod"), "module example.com/x\n", "utf8");
++    expect(isAdmittedProjectTestCommand(["go", "test", "./..."], dir)).toBe(true);
++  });
++});
++
++test("admits the exact pytest vector discovery emits for a Python project", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(join(dir, "pyproject.toml"), "[project]\nname='x'\n", "utf8");
++    expect(isAdmittedProjectTestCommand(["python", "-m", "pytest"], dir)).toBe(true);
++  });
++});
++
++test("refuses a command discovery did NOT emit — extra flags on an otherwise-correct vector", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "vitest run" } }),
++      "utf8",
++    );
++    // Superficially similar, but discovery only ever emits exactly ["npm","test"].
++    expect(isAdmittedProjectTestCommand(["npm", "test", "--", "--coverage"], dir)).toBe(false);
++    expect(isAdmittedProjectTestCommand(["npm", "run", "test"], dir)).toBe(false);
++  });
++});
++
++test("refuses a command belonging to a DIFFERENT project shape (Go vector against a Node project)", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "vitest run" } }),
++      "utf8",
++    );
++    expect(isAdmittedProjectTestCommand(["go", "test", "./..."], dir)).toBe(false);
++  });
++});
++
++test("refuses anything at all when discovery emits no test command", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(join(dir, "package.json"), JSON.stringify({}), "utf8");
++    expect(isAdmittedProjectTestCommand(["npm", "test"], dir)).toBe(false);
++    expect(isAdmittedProjectTestCommand([], dir)).toBe(false);
++  });
++});
++
++// ── runAdmittedProjectTestCommand: refusal path never spawns ───────────────
++
++test("runAdmittedProjectTestCommand resolves admitted:false with a refusal_reason and does not spawn, for a non-matching command", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "vitest run" } }),
++      "utf8",
++    );
++    const outcome = await runAdmittedProjectTestCommand(["rm", "-rf", "/"], dir);
++    expect(outcome.admitted).toBe(false);
++    expect(typeof outcome.refusal_reason === "string" && outcome.refusal_reason.length > 0).toBeTruthy();
++    expect(outcome.exit_code).toBe(null);
++    expect(outcome.timed_out).toBe(false);
++    expect(outcome.truncated).toBe(false);
++    expect(outcome.output).toBe("");
++  });
++});
++
++// ── runAdmittedProjectTestCommand: real happy-path spawn ───────────────────
++
++test("runAdmittedProjectTestCommand actually runs an admitted command and reports its exit code", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "node -e \"console.log('ran'); process.exit(0)\"" } }),
++      "utf8",
++    );
++    const outcome = await runAdmittedProjectTestCommand(["npm", "test"], dir);
++    expect(outcome.admitted).toBe(true);
++    expect(outcome.spawn_error).toBe(undefined);
++    expect(outcome.timed_out).toBe(false);
++    expect(outcome.exit_code, `expected exit 0, got ${outcome.exit_code}: ${outcome.output}`).toBe(0);
++    expect(outcome.output).toMatch(/ran/);
++  });
++});
++
++test("runAdmittedProjectTestCommand reports a non-zero exit code for a failing admitted suite", async () => {
++  await withTempDir(async (dir) => {
++    await writeFile(
++      join(dir, "package.json"),
++      JSON.stringify({ scripts: { test: "node -e \"process.exit(1)\"" } }),
++      "utf8",
++    );
++    const outcome = await runAdmittedProjectTestCommand(["npm", "test"], dir);
++    expect(outcome.admitted).toBe(true);
++    expect(outcome.exit_code).toBe(1);
++  });
++});
+diff --git a/tests/shared/provider-construction-and-resolution.test.ts b/tests/shared/provider-construction-and-resolution.test.ts
+new file mode 100644
+index 00000000..640845ba
+--- /dev/null
++++ b/tests/shared/provider-construction-and-resolution.test.ts
+@@ -0,0 +1,205 @@
++/**
++ * provider-construction-and-resolution.test.ts — CP-NODE-4 obligation 2
++ * (structured provider-construction outcome) and the auto-resolution
++ * red-green obligations: chooseAutoProvider's claude-worker exclusion as a
++ * property over the full AutoProviderContext space, the self-spawn guard's
++ * effect on the raw `*Available` flags, the stale-citation re-ground, and the
++ * standing no-hardcoded-model-id contract for discoverOutputConstraintCapability.
++ */
++import { test, expect } from "vitest";
++import assert from "node:assert/strict";
++import { readFileSync, existsSync } from "node:fs";
++import { resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import {
++  createFreshSessionProvider,
++  chooseAutoProvider,
++  getAutoProviderContext,
++  discoverOutputConstraintCapability,
++  ProviderConstructionError,
++  PROVIDER_NAMES,
++} from "audit-tools/shared";
++import type {
++  AutoProviderContext,
++  FreshSessionProviderDeps,
++  ResolvedProviderName,
++} from "audit-tools/shared";
++
++const __dirname = fileURLToPath(new URL(".", import.meta.url));
++const repoRoot = resolve(__dirname, "../..");
++
++const deps: FreshSessionProviderDeps = {
++  orchestratorName: "test",
++  createClaudeCodeProvider: () => {
++    throw new Error("unexpected: createClaudeCodeProvider called");
++  },
++  createClaudeWorkerProvider: () => {
++    throw new Error("unexpected: createClaudeWorkerProvider called");
++  },
++  createOpenCodeProvider: () => {
++    throw new Error("unexpected: createOpenCodeProvider called");
++  },
++  createAgyProvider: () => {
++    throw new Error("unexpected: createAgyProvider called");
++  },
++};
++
++// ── obligation 2: structured, non-retryable provider-construction outcome ──
++
++const TEMPLATE_REQUIRING_CASES: Array<{
++  provider: "subprocess-template" | "vscode-task" | "antigravity";
++  sessionConfig: Record<string, unknown>;
++}> = [
++  { provider: "subprocess-template", sessionConfig: {} },
++  { provider: "vscode-task", sessionConfig: {} },
++  { provider: "antigravity", sessionConfig: {} },
++];
++
++for (const { provider, sessionConfig } of TEMPLATE_REQUIRING_CASES) {
++  test(`construction of '${provider}' with no config yields a structured, non-retryable ProviderConstructionError`, () => {
++    let caught: unknown;
++    try {
++      createFreshSessionProvider(provider, sessionConfig, deps);
++    } catch (error) {
++      caught = error;
++    }
++    expect(caught instanceof ProviderConstructionError, `expected a ProviderConstructionError, got ${caught}`).toBe(true);
++    const err = caught as InstanceType<typeof ProviderConstructionError>;
++    expect(err.launchOutcome.outcome).toBe("construction_failed");
++    expect(err.launchOutcome.retryable).toBe(false);
++    expect(err.launchOutcome.kind).toBe("missing_required_config");
++    expect(err.launchOutcome.provider).toBe(provider);
++    expect(err.launchOutcome.contract_version).toBe("provider-launch-outcome-envelope/v1alpha1");
++    expect(typeof err.message).toBe("string");
++    expect(err.message.length).toBeGreaterThan(0);
++  });
++}
++
++test("construction with an unrecognized provider name yields a structured, non-retryable ProviderConstructionError", () => {
++  let caught: unknown;
++  try {
++    createFreshSessionProvider("totally-not-a-real-provider", {}, deps);
++  } catch (error) {
++    caught = error;
++  }
++  expect(caught instanceof ProviderConstructionError).toBe(true);
++  const err = caught as InstanceType<typeof ProviderConstructionError>;
++  expect(err.launchOutcome.kind).toBe("unknown_provider");
++  expect(err.launchOutcome.retryable).toBe(false);
++  expect(err.launchOutcome.outcome).toBe("construction_failed");
++});
++
++test("a construction failure is thrown SYNCHRONOUSLY, exactly once — no busy-retry loop", () => {
++  let callCount = 0;
++  const wrapped = () => {
++    callCount += 1;
++    createFreshSessionProvider("vscode-task", {}, deps);
++  };
++  assert.throws(wrapped, ProviderConstructionError);
++  // The caller invoked construction exactly once; construction itself does not
++  // loop or retry internally (there is no retry/backoff logic in constructProvider).
++  expect(callCount).toBe(1);
++});
++
++test("the original error message text is preserved verbatim (existing regex-based test coupling stays valid)", () => {
++  assert.throws(
++    () => createFreshSessionProvider("antigravity", {}, deps),
++    /antigravity.*command_template/i,
++  );
++  assert.throws(
++    () => createFreshSessionProvider("vscode-task", {}, deps),
++    /vscode-task.*command_template/i,
++  );
++});
++
++// ── chooseAutoProvider: claude-worker exclusion as a property, not a sample ──
++
++const AUTO_PROVIDER_CONTEXT_FIELDS: (keyof AutoProviderContext)[] = [
++  "headless",
++  "inVSCode",
++  "insideOpenCode",
++  "insideClaudeCode",
++  "insideCodex",
++  "insideAgy",
++  "inAntigravity",
++  "hasVSCodeTaskTemplate",
++  "hasAntigravityTemplate",
++  "hasSubprocessTemplate",
++  "hasClaudeCodeConfig",
++  "hasOpenCodeConfig",
++  "hasCodexConfig",
++  "hasAgyConfig",
++  "hasOpenAiCompatibleConfig",
++  "claudeAvailable",
++  "opencodeAvailable",
++  "codexAvailable",
++  "agyAvailable",
++];
++
++test("chooseAutoProvider NEVER returns 'claude-worker' and ALWAYS returns a defined, valid ResolvedProviderName — exhaustive over the full AutoProviderContext boolean space", () => {
++  const validNames = new Set<string>(PROVIDER_NAMES.filter((n) => n !== "auto"));
++  const fieldCount = AUTO_PROVIDER_CONTEXT_FIELDS.length;
++  const total = 1 << fieldCount; // 2^19 — every boolean combination.
++  const seenClaudeWorker: number[] = [];
++  const invalid: Array<{ mask: number; resolved: unknown }> = [];
++
++  for (let mask = 0; mask < total; mask++) {
++    const ctx = {} as AutoProviderContext;
++    for (let i = 0; i < fieldCount; i++) {
++      (ctx as unknown as Record<string, boolean>)[AUTO_PROVIDER_CONTEXT_FIELDS[i]] = (mask & (1 << i)) !== 0;
++    }
++    const resolved: ResolvedProviderName = chooseAutoProvider(ctx);
++    if ((resolved as string) === "claude-worker") seenClaudeWorker.push(mask);
++    if (resolved === undefined || resolved === null || !validNames.has(resolved)) {
++      invalid.push({ mask, resolved });
++      if (invalid.length > 5) break;
++    }
++  }
++
++  expect(seenClaudeWorker, `claude-worker returned for context masks: ${seenClaudeWorker.slice(0, 5).join(", ")}`).toEqual([]);
++  expect(invalid, `undefined/invalid resolution for: ${JSON.stringify(invalid)}`).toEqual([]);
++});
++
++// ── self-spawn guard: *Available flags forced false, live against the real guard ──
++
++test("getAutoProviderContext forces claudeAvailable/codexAvailable/agyAvailable false under each self-spawn env signal, even with the command on PATH", () => {
++  const allCommandsExist = () => true;
++
++  const claudeCtx = getAutoProviderContext({}, { CLAUDECODE: "1" }, allCommandsExist);
++  expect(claudeCtx.claudeAvailable, "claudeAvailable must be forced false inside a CLAUDECODE session").toBe(false);
++
++  const codexCtx = getAutoProviderContext({}, { CODEX: "1" }, allCommandsExist);
++  expect(codexCtx.codexAvailable, "codexAvailable must be forced false inside a CODEX session").toBe(false);
++
++  for (const signal of ["AGY_CLI", "ANTIGRAVITY_CLI", "GEMINI_CLI"]) {
++    const agyCtx = getAutoProviderContext({}, { [signal]: "1" }, allCommandsExist);
++    expect(agyCtx.agyAvailable, `agyAvailable must be forced false under ${signal}`).toBe(false);
++  }
++
++  // Sanity control: outside any self-spawn session, with the command on PATH,
++  // *Available is true — proves the forcing above is the self-spawn guard's
++  // doing, not e.g. lookupCommand always returning false.
++  const clean = getAutoProviderContext({}, {}, allCommandsExist);
++  expect(clean.claudeAvailable).toBe(true);
++  expect(clean.codexAvailable).toBe(true);
++  expect(clean.agyAvailable).toBe(true);
++});
++
++// ── RE-GROUND: the self-spawn signal citation must point at a real, current file ──
++
++test("RE-GROUND: providerFactory.ts's self-spawn-signal citation points at the current single-package test path, not a stale packages/* path", () => {
++  const src = readFileSync(resolve(repoRoot, "src/shared/providers/providerFactory.ts"), "utf8");
++  expect(src.includes("packages/"), "providerFactory.ts must not cite a packages/* path — this is a single-package layout").toBe(false);
++  const citedPath = "tests/shared/codex-antigravity-providers.test.ts";
++  expect(src.includes(citedPath), `the self-spawn signal citation must name ${citedPath}`).toBe(true);
++  expect(existsSync(resolve(repoRoot, citedPath)), `the cited test file must actually exist at ${citedPath}`).toBe(true);
++});
++
++// ── standing contract: no hardcoded model-id literal in discoverOutputConstraintCapability ──
++
++test("standing contract: discoverOutputConstraintCapability's source contains no model-id literal", () => {
++  const src = discoverOutputConstraintCapability.toString();
++  const modelIdPattern =
++    /claude-[0-9]|claude-(opus|sonnet|haiku)|gpt-4|gpt-3\.5|gpt-oss|gemini-|llama-|mistral-|o[13]-mini|o1-preview/i;
++  expect(modelIdPattern.test(src), `discoverOutputConstraintCapability must not hardcode a model id. Source:\n${src}`).toBe(false);
++});
+diff --git a/tests/shared/spawnLoggedCommand.test.ts b/tests/shared/spawnLoggedCommand.test.ts
+index 96e8bad6..7c7f467d 100644
+--- a/tests/shared/spawnLoggedCommand.test.ts
++++ b/tests/shared/spawnLoggedCommand.test.ts
+@@ -9,6 +9,31 @@ import type {
+   LaunchFreshSessionResult,
+ } from "../../src/shared/providers/types.js";
+ 
++// Every test in this file injects the MAIN child via `options.spawn`, so the
++// only call that ever reaches the raw `node:child_process.spawn` import inside
++// spawnLoggedCommand.ts is `killTree`'s best-effort win32 taskkill-reaper call.
++// Mocking it here makes that reaper call deterministic and hermetic (no real
++// `taskkill.exe` spawned against a fake PID on every timeout test) and lets
++// the "a taskkill ENOENT is swallowed" obligation be asserted directly.
++const rawSpawnCalls: Array<{ command: string; args: unknown }> = [];
++vi.mock("node:child_process", () => ({
++  spawn: (command: string, args?: unknown) => {
++    rawSpawnCalls.push({ command, args });
++    if (command === "taskkill") {
++      const proc: any = new EventEmitter();
++      setImmediate(() => {
++        const err: any = new Error("spawn taskkill ENOENT");
++        err.code = "ENOENT";
++        proc.emit("error", err);
++      });
++      return proc;
++    }
++    throw new Error(
++      `unexpected raw node:child_process.spawn call for "${command}" — spawnLoggedCommand tests must inject the main child via options.spawn`,
++    );
++  },
++}));
++
+ const { spawnLoggedCommand } = await import("../../src/shared/providers/spawnLoggedCommand.js");
+ 
+ /**
+@@ -697,3 +722,136 @@ test("spawnLoggedCommand lifecycle: stdout/stderr logged and result carries corr
+   if (result.command === undefined) throw new Error("expected result.command to be set");
+   expect(result.command.includes(ORIGINAL_COMMAND), "command must be in result").toBeTruthy();
+ });
++
++// ── CP-NODE-4 (b) Spawn behavior obligations ────────────────────────────────
++
++test("spawnLoggedCommand scrubs CLAUDECODE / CLAUDE_CODE_* from the caller-supplied env before spawning the child", async () => {
++  const calls: Array<{ command: string; args: string[]; options: any }> = [];
++  const spawnDouble: SpawnDouble = (command, args, options) => {
++    calls.push({ command, args: args as string[], options });
++    return makeChild();
++  };
++  const result = await spawnLoggedCommand(
++    ORIGINAL_COMMAND,
++    ORIGINAL_ARGS,
++    baseInput(),
++    { CLAUDECODE: "1", CLAUDE_CODE_SOMETHING: "x", CUSTOM_VAR: "keep-me" },
++    { createWriteStream: fakeCreateWriteStream, spawn: spawnDouble },
++  );
++  expect(result.accepted).toBe(true);
++  expect(calls.length).toBe(1);
++  const env = calls[0].options.env;
++  expect(env.CLAUDECODE, "CLAUDECODE must be scrubbed from the spawned child's env").toBe(undefined);
++  expect(env.CLAUDE_CODE_SOMETHING, "any CLAUDE_CODE_* var must be scrubbed").toBe(undefined);
++  expect(env.CUSTOM_VAR, "a non-CLAUDECODE caller-supplied var must survive the scrub").toBe("keep-me");
++});
++
++test("spawnLoggedCommand does not settle until a delayed log-stream write callback fires (flush-before-settle)", async () => {
++  const pendingCallbacks: Array<() => void> = [];
++  function deferredWriteStream(): WriteStream {
++    const stream: any = new EventEmitter();
++    stream.write = (_chunk: any, cb?: (error?: Error | null) => void) => {
++      if (typeof cb === "function") pendingCallbacks.push(cb);
++      return true;
++    };
++    stream.end = (cb?: () => void) => {
++      if (typeof cb === "function") cb();
++    };
++    return stream as WriteStream;
++  }
++
++  const child: any = new EventEmitter();
++  child.pid = 5150;
++  child.killed = false;
++  child.kill = () => {
++    child.killed = true;
++    return true;
++  };
++  child.stdout = new PassThrough();
++  child.stderr = new PassThrough();
++  child.stdin = new PassThrough();
++
++  let settled = false;
++  const promise = spawnLoggedCommand(ORIGINAL_COMMAND, ORIGINAL_ARGS, baseInput(), undefined, {
++    createWriteStream: deferredWriteStream,
++    spawn: (() => child) as SpawnDouble,
++  });
++  promise.then(
++    () => {
++      settled = true;
++    },
++    () => {
++      settled = true;
++    },
++  );
++
++  // Emit stdout data (triggers writeLog → stdoutLog.write, whose callback is
++  // captured rather than invoked) and let the PassThrough deliver it.
++  child.stdout.write("hello\n");
++  await new Promise((resolve) => setImmediate(resolve));
++  expect(pendingCallbacks.length, "expected the stdoutLog.write callback to be captured, not fired").toBeGreaterThan(0);
++
++  // Close the child — settle must NOT proceed while a log write is pending.
++  child.emit("exit", 0, null);
++  child.emit("close", 0, null);
++  await new Promise((resolve) => setImmediate(resolve));
++  await new Promise((resolve) => setImmediate(resolve));
++  expect(settled, "must not settle while a log write callback is still pending (flush-before-settle)").toBe(false);
++
++  // Fire the deferred callback(s) now — settle can proceed.
++  const toFire = pendingCallbacks.splice(0);
++  toFire.forEach((cb) => cb());
++
++  const result = await promise;
++  expect(result.accepted).toBe(true);
++  expect(settled).toBe(true);
++});
++
++test.skipIf(process.platform !== "win32")(
++  "a taskkill ENOENT on win32 is swallowed rather than surfacing as a rejection",
++  async () => {
++    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout", "Date"] });
++    let openChild: any;
++    const rawCallsBefore = rawSpawnCalls.length;
++    try {
++      const input = { ...baseInput(), timeoutMs: 5_000 };
++      const promise = spawnLoggedCommand(ORIGINAL_COMMAND, ORIGINAL_ARGS, input, undefined, {
++        killGraceMs: 200,
++        createWriteStream: fakeCreateWriteStream,
++        spawn: (() => {
++          openChild = makeOpenChild();
++          return openChild;
++        }) as SpawnDouble,
++      });
++
++      // Advance past timeoutMs — killTree(SIGTERM) fires, which on win32 also
++      // attempts the best-effort taskkill reaper (mocked to emit ENOENT above).
++      vi.advanceTimersByTime(5_001);
++
++      // Let the mocked reaper's async 'error' (ENOENT) event flush. setImmediate
++      // is real (not in the faked-timer set), so this is a genuine tick.
++      await new Promise((resolve) => setImmediate(resolve));
++      await new Promise((resolve) => setImmediate(resolve));
++
++      // The reaper call happened (proves this test actually exercised the
++      // taskkill path) and — the point of this test — its ENOENT did NOT
++      // surface as anything: no thrown/unhandled error, no altered rejection.
++      const reaperCalls = rawSpawnCalls.slice(rawCallsBefore).filter((c) => c.command === "taskkill");
++      expect(reaperCalls.length, "expected the taskkill reaper to have been invoked").toBeGreaterThan(0);
++
++      // Settle the main child as if SIGTERM took effect — the overall promise
++      // still rejects with the SAME timeout error as the un-mocked case
++      // (spawnLoggedCommand.test.ts's other SIGTERM/SIGKILL tests), proving the
++      // swallowed taskkill ENOENT did not change or block the outcome.
++      openChild.emit("exit", null, "SIGTERM");
++      openChild.emit("close", null, "SIGTERM");
++
++      await assert.rejects(promise, (err: any) => {
++        expect(err.message.includes("timed out"), `expected 'timed out' in error message, got: ${err.message}`).toBeTruthy();
++        return true;
++      });
++    } finally {
++      vi.useRealTimers();
++    }
++  },
++);

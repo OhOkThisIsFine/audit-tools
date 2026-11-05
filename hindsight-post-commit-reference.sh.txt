@@ -1,0 +1,5 @@
+#!/bin/sh
+# hindsight-future-commit-capture: new commit only; no history scan
+if command -v node >/dev/null 2>&1 && [ -f "$HOME/.hindsight/future-commit-capture.mjs" ]; then
+  node "$HOME/.hindsight/future-commit-capture.mjs" --background >/dev/null 2>&1 || :
+fi

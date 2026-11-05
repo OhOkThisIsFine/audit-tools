@@ -1,0 +1,21 @@
+diff --git a/scripts/audit/postinstall.mjs b/scripts/audit/postinstall.mjs
+index c6673365..ea3552d9 100644
+--- a/scripts/audit/postinstall.mjs
++++ b/scripts/audit/postinstall.mjs
+@@ -127,6 +127,7 @@ function mergeOpenCodeGlobalPermissionConfig(existingPermission, generatedPermis
+     mergeOpenCodeAgentPermissionRule,
+     mergeOpenCodeGlobalPermissionRule,
+     migrateOpenCodeGlobalExternalDirectory,
++    withoutOpenCodeWildcard,
+   } = sharedOpenCodePermissions;
+   const existing = objectValue(existingPermission);
+ 
+@@ -144,7 +145,7 @@ function mergeOpenCodeGlobalPermissionConfig(existingPermission, generatedPermis
+     bash: mergeOpenCodeGlobalPermissionRule(
+       existing.bash,
+       generatedPermission.bash,
+-      OPENCODE_AUDIT_BASH_PERMISSION,
++      withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
+     ),
+   };
+ 

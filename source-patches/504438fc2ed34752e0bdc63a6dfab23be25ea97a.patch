@@ -1,0 +1,59 @@
+diff --git a/tests/remediate/dispatch-worktree-safety.test.ts b/tests/remediate/dispatch-worktree-safety.test.ts
+index 48285c0b..9eef57ea 100644
+--- a/tests/remediate/dispatch-worktree-safety.test.ts
++++ b/tests/remediate/dispatch-worktree-safety.test.ts
+@@ -18,7 +18,7 @@
+  * strongest ground truth); the marshal reconcile assertions drive
+  * `mergeImplementResults` over a real repo + crafted accept-outcome sidecars.
+  */
+-import { describe, it, expect, afterEach } from "vitest";
++import { describe, it, expect, afterEach, beforeAll } from "vitest";
+ import { spawnSyncHidden } from "../helpers/spawn.mjs";
+ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, readFileSync } from "node:fs";
+ import { mkdir, writeFile } from "node:fs/promises";
+@@ -48,6 +48,7 @@ import {
+   REMEDIATION_DISPATCH_PLAN_CONTRACT_VERSION,
+   REMEDIATION_WORKER_RESULT_CONTRACT_VERSION,
+ } from "../../src/remediate/steps/types.js";
++import { nodeWorktreeAncestor } from "../../src/shared/io/nodeWorktreeGuard.js";
+ 
+ const __dirname = dirname(fileURLToPath(import.meta.url));
+ 
+@@ -482,8 +483,10 @@ async function mergeInRepo(
+   return mergeImplementResults({ root: repo, artifactsDir }, RUN);
+ }
+ 
+-describe("INV-WTS-3 — marshal reconciles a resolved node by captured-commit ancestry", () => {
+-  it("POSITIVE: a merged node whose landed commit IS an ancestor of HEAD stays resolved", async () => {
++describe.skipIf(nodeWorktreeAncestor(process.cwd()) !== null)(
++  "INV-WTS-3 — marshal reconciles a resolved node by captured-commit ancestry",
++  () => {
++    it("POSITIVE: a merged node whose landed commit IS an ancestor of HEAD stays resolved", async () => {
+     const repo = initRepo("wts-recon-ok-");
+     const landed = headOid(repo); // reachable from HEAD → ancestor
+     const merged = await mergeInRepo(
+@@ -537,9 +540,12 @@ describe("INV-WTS-3 — marshal reconciles a resolved node by captured-commit an
+     // The clobbered work is preserved under the node's quarantine ref.
+     expect(refExists(repo, quarantineRef(RUN, BLOCK))).toBe(true);
+   });
+-});
++  },
++);
+ 
+-describe("INV-WTS-7 — resolved_no_change grounded in the captured commit OID (real git)", () => {
++describe.skipIf(nodeWorktreeAncestor(process.cwd()) !== null)(
++  "INV-WTS-7 — resolved_no_change grounded in the captured commit OID (real git)",
++  () => {
+   it("POSITIVE: NO captured OID + empty branch → accepted as resolved_no_change", async () => {
+     const repo = initRepo("wts-nc-ok-");
+     // Node branch exists at HEAD with no commits of its own (empty diff).
+@@ -636,7 +642,8 @@ describe("INV-WTS-7 — resolved_no_change grounded in the captured commit OID (
+     expect(merged.items!["N-x"].status).toBe("blocked");
+     expect(merged.items!["N-x"].failure_reason).toMatch(/has edits|ground truth/i);
+   });
+-});
++  },
++);
+ 
+ // ---------------------------------------------------------------------------
+ // quarantineCommitByOid — preserves a captured commit with no live branch (real git).
