@@ -78,6 +78,17 @@ rebuilds `critical_flows.json` AND its `risk_register.json` sibling atomically o
 the merged flows (no self-clobber from a separate post-hoc rewrite). Absent on the
 common bar-met path → recorded at revision 0, never stale.
 
+`critical_flows.json` and `surface_manifest.json` read the dependency graph, but
+deliberately do NOT list `graph_bundle.json`. The structure phase builds the
+regex-floor graph IN THE SAME CALL and hands it straight to both, so their real
+inputs are the floor's own upstreams (`repo_manifest.json`,
+`file_disposition.json`), which they already declare. The persisted
+`graph_bundle.json` revision also moves when graph enrichment (a later
+obligation) merges analyzer edges, so a direct edge would re-stale
+`critical_flows.json` after every enrichment. Structure would then rebuild the
+floor graph, which re-stales `analyzer_capability.json`, which re-runs
+enrichment: the loop never settles.
+
 `analyzer_capability.json` is the marker recording the outcome of the optional
 graph-enrichment pass (its shape is defined in
 [`spec/audit/artifact-contract.md`](artifact-contract.md)); the merged analyzer
