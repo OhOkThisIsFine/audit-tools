@@ -1,0 +1,648 @@
+# Pinned phases, one shared task lifecycle
+
+<!-- review-routing: memory -->
+The selected architecture is reflected in `CLAUDE.md`; qualification of this
+implementation remains part of the current proposal, not a separate work program.
+
+Status: approved design implemented in an isolated proposal workspace; aggregate
+qualification is pending. This document itself grants no authority to execute
+live/model audits, publish, or deploy.
+
+Source basis: PR #72 head `2648a0fb07499eb09292b5f75e6c5dc94d4b190c`.
+All 1,754 original tracked files were reconstructed with their exact blob bytes
+and modes, yielding upstream tree `3ba91cd9a027a5e616efdea5498ad861f55cd989`.
+Local snapshot commit `3e36b07010f24b575cbae392e4f9cc7336c400af` is a clearly
+labeled synthetic baseline for local diffs and guards, not the upstream commit
+or reconstructed upstream history. Implementation changes are relative to that
+verified baseline; the upstream source is unchanged.
+
+## Decision
+
+Use one shared lifecycle core, with audit/read-only and remediation/write
+policies. Finish and pin the premises of a phase before issuing work that
+depends on them. Workers return per-attempt outputs; only the tool-owned
+coordinator accepts outputs and changes run/task state.
+
+For auditing, complete the selected foundational and broad architectural work,
+pin its outputs, then derive the fine-grained plan once. Later findings and
+follow-ups do not change that basis or rewrite issued tasks. Changed source or
+owner premises require a new run, not a freshness cascade or an in-run phase
+reopening mechanism.
+
+For remediation, use the same lifecycle for plan authoring, criticism, judging,
+implementation, landing, verification, triage and reporting. Different
+permissions and domain validation do not justify a second orchestration model.
+An accepted executable plan is a read-only input to implementation. A repair
+that needs changed instructions is a new, explicitly reviewed task/revision,
+not a mutation of an issued task.
+
+Keep the existing analytical capabilities, independent review where required,
+source/evidence safety, and machine report contracts. Remove duplicate state
+authorities and orchestration whose only purpose is accommodating moving
+premises. There is no new database, framework dependency, provider adapter,
+model router, worker launcher, heartbeat, lease service or event-sourcing layer.
+
+## Requirements and deliberate tradeoffs
+
+- The host still chooses and launches workers. `next-step` emits complete,
+  provider-neutral workloads. A task runner means lifecycle progression or a
+  deterministic local command, never a new agent-execution backend.
+- Preserve the bounded deterministic drain and deterministic-only plan draw.
+  Stop at a host-input boundary; never consume host submissions in the plan draw.
+- Audit uses the existing frozen source helper, with existing explicit
+  preparation-only auto-fix consent. Fine auditing never writes audited source.
+- Preserve charter channel blindness, comparison/fidelity independence, separate
+  contract assessment and conceptual critique, and required author/critic/judge
+  relationships. Do not add new mandatory passes.
+- Prefer a later, stable fine-grained start over concurrent planning and
+  architectural discovery. This is the selected tradeoff, not an optional mode.
+- Preserve existing user entrypoints and meaningful report JSON. Internal
+  artifact shape compatibility is not a goal; there are no external consumers.
+- Main receives replacement and deletion together. Temporary branch seams may
+  support green intermediate commits, but no dual runtime or dual authoritative
+  writes remain at integration.
+
+## 1. Phases and immutable inputs
+
+The shared lifecycle has `preparing`, `executing`, `finalizing`, and `complete`.
+The draw policy determines the concrete tasks and legal domain transitions.
+Paused/cancelled is operator control on the same state, not a second state file.
+
+### Audit preparing
+
+Retain the selected existing work and its semantic dependencies:
+
+1. Freeze source; intake/disposition; permitted auto-fix and syntax handling;
+   acquire/import permitted analyzer inputs.
+2. Construct/enrich structural graphs, units, surfaces, critical flows, risks,
+   structure decomposition and document digest; resolve intent/scope.
+3. Execute selected charter extraction lanes, comparison and fidelity; selected
+   contract and conceptual review; clarification and systemic challenge.
+4. Close the required preparation tasks, preserving their findings, omissions,
+   uncertainty and remaining conceptual disagreements. Questions that determine
+   scope or the governing premise must be resolved or explicitly left outside
+   the planned work before proceeding.
+5. Materialize and seal the audit basis; derive the initial fine-grained plan.
+
+Independent preparation tasks can run concurrently. This is not a requirement
+to serialize unrelated lanes. The concrete prerequisite list, not an artifact
+freshness scan, decides readiness.
+
+The basis is one immutable manifest of content references to:
+
+- frozen source identity and file manifest;
+- confirmed intent, scope, dispositions, required lenses and review depth;
+- code graphs, structure decomposition, units, surfaces, flows and risks;
+- accepted analyzer inputs;
+- finalized charter graphs/comparison/fidelity and selected broad-review output.
+
+Its ID is a hash of the canonical manifest. Bodies can remain separate JSON
+files. The single checkpoint points to the manifest; a collection of independent
+artifact revision counters does not establish its validity.
+
+The pin and initial fine-plan references become authoritative in the same
+checkpoint commit. There is no interval in which the phase says `executing` but
+its plan or basis has not been durably written.
+
+### Audit executing and finalizing
+
+All fine tasks reference that basis. Their immutable subject also names files,
+lens/ranges, question, permitted evidence and completion policy. A task may
+reference an earlier accepted result as additional evidence.
+
+Accepted work adds findings/coverage and, when warranted, new bounded tasks.
+It cannot rewrite the basis, change an existing question, silently extend an
+issued scope, retract already-issued work, or clear accepted results.
+
+A discovered graph error is an audit finding. Investigating it reads the same
+frozen source, without rebuilding its graph underneath other workers. A run
+whose premise is unusable stops with an honest limitation rather than silently
+changing what it claims to have audited.
+
+Finalization joins accepted evidence, completes selected runtime validation and
+synthesis/narrative, and writes the existing deliverable pair. Required missing,
+blocked or partial work cannot become a complete audit by omission. An explicit
+user halt can produce a clearly partial report using existing semantics.
+
+### Remediation preparing, executing and finalizing
+
+Preparation accepts original findings/request and selected intent, then uses the
+existing executable-plan author/revision, critique, independent critic and judge
+as ordinary typed tasks with dependencies. Review repair cycles retain their
+existing bound and independence requirements. They are not another lifecycle.
+
+Seal the accepted executable plan, source evidence and initial working-tree
+identity as the remediation basis. Preserve unit identities, requirement
+coverage, explicit source dispositions and owner decisions.
+
+Implementation uses separate writable worktrees/checkouts and the exact
+approved write scope. Task inputs can reference accepted predecessor output
+trees; resolve these references before issuing the task, then freeze them for
+that attempt. This is an explicit dependency, not continuous graph freshness.
+
+Separate implementation, serialized landing, and final-tree verification:
+
+- Host implementation returns the existing typed evidence for its candidate.
+- Only one landing assignment may be active for the run's target checkout.
+  Its input pins the candidate and expected target base. The host executes it;
+  the tool verifies actual ancestry, changed files, dirty-baseline protection
+  and the approved scope before accepting it.
+- Missing/uncertain landing output is reconciled against the actual Git state
+  before any retry. Never reapply an effect just because state acceptance was
+  interrupted. A landing assignment cannot be retried while the original
+  effect's outcome remains unknown.
+- Final verification binds the merged tree and existing required assertions.
+  Prior per-unit checks do not substitute for verification of the merged tree.
+  A changed target during observation invalidates that observation, not the
+  original plan or completed audit.
+- Failed implementation/verification becomes explicit triage/repair tasks.
+  A new task cannot widen approved permissions. A changed approved plan must
+  pass the existing review/authorization policy before new tasks are issued.
+
+Keep the original audit basis and report untouched throughout remediation.
+Do not make audit runtime provenance rules override remediation's necessary
+write/landing validation.
+
+## 2. One authoritative checkpoint
+
+One versioned checkpoint per run owns lifecycle truth. Audit and remediation may
+retain their current filenames behind thin path adapters, but use one schema
+and store implementation. Domain payloads carry different facts, not a second
+state machine.
+
+```ts
+type Phase = "preparing" | "executing" | "finalizing" | "complete";
+type Mode = "audit" | "remediate";
+type Control = "active" | "paused" | "cancelled";
+type Ref = { path: string; sha256: string }; // tool-owned, contained path
+
+interface RunState<Domain> {
+  contract_version: "audit-tools-run/v1";
+  run_id: string;
+  mode: Mode;
+  phase: Phase;
+  control: Control;
+  source: Ref;
+  basis?: Ref;
+  tasks: Record<string, TaskRecord>;
+  domain: Domain;
+  deliverables?: Record<string, Ref>;
+}
+
+interface TaskSpec {
+  id: string;
+  kind: string;                         // closed registry in each draw
+  phase: Exclude<Phase, "complete">;
+  depends_on: TaskDependency[];
+  inputs: Record<string, Ref | TaskOutputRef>;
+  subject: unknown;                     // validated by the kind's schema
+  completion: "complete" | "selective"; // kind fixes the legal value
+}
+interface TaskDependency {
+  task_id: string;
+  requires: "accepted_evidence" | "completed_required_scope";
+}
+interface TaskOutputRef { task_id: string; output: string }
+
+interface TaskRecord {
+  spec: TaskSpec;                        // immutable after insertion
+  status: "pending" | "issued" | "accepted" | "blocked";
+  attempt: number;                       // initially 0, first issue is 1
+  issued?: {
+    inputs: Record<string, Ref>;         // resolved once, never live aliases
+    prompt: Ref;
+    binding_sha256: string;              // all identity/input/grant fields
+    result_path: string;                 // attempt-specific host output
+  };
+  accepted?: {
+    raw: Ref;                           // coordinator-owned immutable copy
+    normalized?: Ref;                   // omitted if raw already canonical
+    outcome: "complete" | "partial" | "blocked";
+  };
+  blocker?: { code: string; detail: string };
+}
+
+interface TaskSubmission {
+  contract_version: "audit-tools-task-result/v1";
+  run_id: string;
+  task_id: string;
+  attempt: number;
+  binding_sha256: string;
+  outcome: "complete" | "partial" | "blocked";
+  payload: unknown;                      // existing domain payload schemas
+}
+```
+
+`normalized` is optional in implementation. Do not create a second copy when no
+tool-derived enrichment is necessary. Domain state contains source/requirement
+relationships, operator decisions and verified write attribution where needed;
+it must not duplicate task lifecycle/attempt/completion fields.
+
+Lifecycle state is not inferred from file existence. Coverage, task manifests,
+affinity/coherence views, metrics and status displays derive from the checkpoint
+and immutable bodies. If retained on disk for usability, they are disposable
+renders and cannot drive readiness or acceptance.
+
+### Persistence and replay
+
+Reuse the existing locked JSON IO and atomic-rename implementation. Do not add a
+database or another lock/backoff implementation.
+
+Write immutable payloads first, then atomically replace the checkpoint under its
+lock. Only referenced outputs count as accepted. A crash before the checkpoint
+leaves an unreferenced file, not partial success. A crash after it leaves accepted
+work; replay is a no-op and regenerates missing display files if needed.
+
+Read accepted payloads from the coordinator-owned copy, not a worker-writable
+submission path. Verify referenced bytes when loading/consuming them; missing
+or modified authoritative evidence blocks with preservation instructions. Never
+treat corruption as an empty run or trigger regeneration of costly work.
+
+Reject old/unknown checkpoint versions without mutation. Old runs/reports and
+evidence remain readable for diagnosis. Starting a new run uses a fresh run
+directory/identity; archiving old work requires the existing explicit user
+action, never automatic deletion or a silent restart.
+
+## 3. Shared APIs and ownership of decisions
+
+Replace the current shared selection seed with one lifecycle implementation.
+No mode implements its own claim, retry, idempotency or crash-replay algorithm.
+
+```ts
+interface TaskDefinition<Domain, Payload> {
+  kind: string;
+  execution: "deterministic" | "host";
+  parseSubject(value: unknown): unknown;
+  parsePayload(value: unknown): Payload;
+  render(task: IssuedTask, context: ReadContext<Domain>): string;
+  runDeterministic?: (task: IssuedTask, io: LocalIO) => Promise<unknown>;
+  validate(
+    task: IssuedTask, payload: Payload, context: ReadContext<Domain>
+  ): Promise<ValidationResult>; // no checkpoint writes
+  reduce(
+    task: IssuedTask, payload: Payload, state: Readonly<RunState<Domain>>
+  ): DomainTransition<Domain>; // pure, coordinator applies once
+  requiredScopeComplete(
+    task: TaskRecord, context: ReadContext<Domain>
+  ): boolean; // pure domain projection over immutable accepted evidence
+}
+
+interface DrawPolicy<Domain> {
+  definitions: ReadonlyMap<string, TaskDefinition<Domain, unknown>>;
+  initialTasks(source: Ref, domain: Domain): TaskSpec[];
+  phaseTransition(state: Readonly<RunState<Domain>>): PhaseTransition | null;
+  acceptanceGuard(
+    task: IssuedTask, observation: ValidationResult, io: LocalIO
+  ): Promise<string[]>; // mode-specific source/tree guard, no re-planning
+}
+
+readyTasks(state, policy): TaskSpec[];
+issueTasks(store, taskIds, policy, io): Promise<IssuedTask[]>;
+acceptSubmission(store, submissionPath, policy, io): Promise<AcceptOutcome>;
+retryTask(store, taskId, expectedAttempt, reason): Promise<void>;
+setControl(store, control, reason): Promise<void>;
+advanceRun(store, policy, io, {
+  draw: "full" | "deterministic",
+  maxExecutions: number
+}): Promise<StepContract>;
+```
+
+These are the required API responsibilities, not permission to add a generic
+plugin system. Define concrete TypeScript/Zod types and use existing task and
+step contracts where they express them; untyped `unknown` above marks the
+domain boundary, not an escape from validation.
+
+`DomainTransition` can add new task specs, update validated domain facts and
+publish output references. It cannot edit existing specs, accepted results,
+attempts or phase directly. Core invariants enforce those restrictions.
+`PhaseTransition` supplies the next phase and prepared immutable references;
+the core validates prerequisites and commits the transition. It cannot jump
+past required work.
+
+Readiness validates missing dependency IDs/cycles as producer errors. It never
+calls a graph-freshness service. State says a task is accepted only after all
+checks and the commit. `accepted_evidence` requires a valid accepted result
+reference, which may contain partial evidence. `completed_required_scope`
+requires the task kind's `requiredScopeComplete` projection; acceptance alone
+does not establish completion. There is no separate completion ledger.
+
+Kinds requiring a coherent whole payload, such as a charter lane, require that
+complete accepted payload. The core never merges partial domain payloads or
+guesses an aggregate output. If downstream work needs an aggregate, its domain
+explicitly projects it from named immutable accepted references and publishes
+that output through an ordinary task.
+
+### Issue, accept, retry
+
+- Under the store lock, resolve inputs, record the attempt/prompt/grant and
+  persist before exposing the workload. This is the claim; do not add a separate
+  claim service. Re-emission returns identical outstanding assignments.
+- Validate submissions through one shared ingress used by full-fold and
+  standalone/batch commands. Both parse the same binding and call the same
+  domain validator; there is no weaker alternate door.
+- Run expensive read-only validation or commands outside the state lock.
+  Reacquire and check the exact issued binding/attempt plus the draw's observed
+  source/tree guard before accepting. An unrelated accepted audit task should
+  not invalidate an otherwise unchanged observation.
+- Identical accepted attempt/payload replay is a no-op. Conflicting bytes under
+  that accepted identity are refused. Wrong-run, wrong-basis/prompt,
+  unknown-task and superseded-attempt outputs cannot advance state.
+- An explicit retry increments the attempt without changing the subject.
+  Changing instructions/inputs is a new task, not a retry. Late old output is
+  stale even if it looks plausible.
+- No expiry silently creates another worker or repeats a landing. Host
+  execution failure/abandonment must be established before retrying.
+- Diagnostic refusals may be logged, but the log is never acceptance truth.
+  Keep the current blocker, not a new mandatory receipt chain.
+
+### Partial results and bounded follow-ups
+
+For ordinary audit coverage, accept valid partial evidence once, retain exactly
+the declared covered scope, and create one residual task for required uncovered
+scope. The residual's identity derives from its parent and canonical remainder.
+Its subject explicitly records the coverage root and parent; it depends on the
+parent's `accepted_evidence`, not `completed_required_scope`. The original
+accepted result remains immutable and partial. The audit domain derives the
+union of valid accepted coverage in that residual lineage against the original
+required scope. Only an empty remainder satisfies downstream
+`completed_required_scope` dependencies. Do not write a second completion flag
+or ledger, or make an original partial payload appear complete.
+
+The residual does not repeat accepted coverage. Selective tasks retain selective
+semantics. Do not claim that line-count validation proves an LLM read or
+understood a file.
+
+No-progress partial/blocked replies do not automatically create a new identical
+residual task. They block until failure/remaining work is addressed. Required
+coverage is finite; each automatically generated residual must strictly reduce
+the remaining required scope.
+
+Keep current deepening/independent-verification strategies, but make their
+eligibility and dedup keys explicit over accepted evidence. An investigation
+identity includes basis, source finding/question, strategy/purpose and scope.
+Replay cannot generate it twice. Follow-up results do not recursively re-seed
+the same broad strategy; new observations remain reportable findings. A genuinely
+new investigation beyond the selected finite strategy graph is surfaced as
+remaining work, not hidden in an unbounded automatic loop.
+
+Preserve existing domain bounds, including the steward's four follow-up tasks
+per result and remediation's review-repair bound. Preserve the per-invocation
+deterministic drain budget. Do not restore deliberately deleted global finding
+or steward file-list caps, and do not introduce provider/token quota routing.
+Budget exhaustion states unperformed work; it is never a clean verdict.
+
+## 4. Validation is not semantic proof
+
+Deterministic checks own shapes, graph acyclicity, dependency/reference integrity,
+scope/permission bindings, source/path containment, citation existence, attempt
+identity, required coverage shape and actual write/test observations.
+
+Semantic tasks own charter meaning, comparison, fidelity, conceptual criticism,
+independent adjudication and synthesis. Preserve independence checks and current
+unresolved/refuted distinctions. Quote grounding does not prove a behavioral
+claim. Do not resurrect the retired anchor execution path as part of this work.
+
+An optional or declined pass remains explicitly omitted, not an empty successful
+review. No new consensus, receipt or reviewer is added merely to justify the new
+lifecycle.
+
+## 5. Concrete source changes
+
+### Shared core, retained foundations
+
+Implement lifecycle types/store/engine under `src/shared/engine/`, reusing
+`src/shared/io/lockedJsonStore.ts`, file locking, JSON IO, submission parsing,
+prompt binding, path containment and existing step rendering.
+
+Replace the algorithm in `src/shared/engine/obligationEngine.ts` with the common
+task lifecycle, or retire that file after both callers move. Do not retain two
+generic engines. The old `missing/stale` artifact scan is not the new task state.
+`src/shared/submission/` provides common ingestion mechanics; remove duplicated
+authority in submission-ledger/expected-submission stores as callers migrate.
+Keep diagnostics only where they have real consumers.
+
+### Audit policy and analytical modules
+
+Retain `src/audit/io/runSnapshot.ts`, extractors/decomposition and domain
+validators. Adapt existing charter extraction/comparison/fidelity, contract and
+conceptual review, clarification, systemic challenge and reporting functions as
+typed definitions. Their judgment is not reimplemented by the core.
+
+Replace orchestration in `nextStep.ts`, `state.ts`, `advance.ts` and
+`cli/nextStepHelpers.ts` with thin adapters to shared state/progression.
+`planningExecutors.ts` derives the fine plan once after the pin.
+`ingestionExecutors.ts`, `architectureDiscovery.ts` and selective-deepening
+modules add evidence/new tasks without re-deriving prior work.
+`cli/dispatch/hostHandoff.ts` remains the audit payload/prompt adapter, not a
+second lifecycle.
+
+Retire audit-side `dependencyMap.ts`, `dependencySlices.ts`, `staleness.ts`,
+artifact revision propagation, `resultBaseline.ts`, `coverageElementBaseline.ts`,
+late-input deferral, published-task preservation, result re-key/supersession,
+and continuous design-review re-review/projection machinery after caller removal.
+Replace useful reviewed-input provenance with the accepted task's input refs.
+Retain graph extraction caches only as optional computation caches that cannot
+alter phase or completion.
+
+### Remediation policy and domain modules
+
+Adapt `src/remediate/steps/nextStep.ts`, `steps/contractPipeline.ts`,
+`state/store.ts`, and `steps/dispatch/hostHandoff.ts` to the same shared
+checkpoint/tasks/attempt/acceptance operations. Remove their alternative
+lifecycle authority; do not keep them as a permanently independent old engine.
+
+Retain plan/execution-unit schemas and validators in `contractPipeline/` and
+shared execution-plan types, review independence, intake/source provenance,
+dirty-baseline checks, write-scope/ancestry corroboration, source dispositions,
+triage decisions and close verification as policy/task behavior.
+
+Move lifecycle acceptance/decision-consumption identity into shared acceptance.
+Preserve the consequential decision content and actual verified landing facts;
+do not delete evidence needed to prevent a repeated write. Operator lifecycle
+controls live in the authoritative checkpoint, not a competing sidecar.
+
+### Public surfaces and deletion
+
+Keep `/audit-code`, `/remediate-code`, conversation-first entrypoints, reports
+and provider-neutral workload semantics. Update schemas, prompt renderers,
+generated host assets, source mirrors and documentation to the new mechanism in
+the same integrated change. Delete orphan tests and declarations for removed
+behavior; replace them with tests of the new boundary rather than compatibility
+shims. Do not copy stale DAG semantics into new docs.
+
+## 6. Parallel implementation ownership
+
+Agree this API after the single refutation, then assign non-overlapping owners:
+
+1. **Shared lifecycle:** `src/shared/engine/`, common submission mechanics and
+   store; shared lifecycle tests. Owns the schema/API and no domain code.
+2. **Audit draw:** `src/audit/` and `tests/audit/`; pin construction, preparation
+   task adapters, fine plan, audit validation/report projections and deletion of
+   old audit freshness. Consumes the agreed shared API.
+3. **Remediation draw:** `src/remediate/` and `tests/remediate/`; plan/review,
+   implementation/landing/triage/verification adapters and removal of its old
+   lifecycle. Consumes the same API.
+4. **Integrator:** shared public exports, root schemas/fixtures, entrypoints,
+   rendered assets, docs and aggregate checks. Reconciles both draws and owns the
+   atomic cutover/dead-path deletion.
+
+Do not let multiple owners edit a shared contract simultaneously. A necessary
+API correction returns to the shared owner and is propagated to both consumers.
+No owner implements a substitute local scheduler while waiting.
+
+## 7. First implementation slice and deterministic proof
+
+Before engine coding, run one independent design refutation against this plan
+and the identified source paths. Verify its concrete claims against source.
+The review asks the repository's three questions: retirement collision,
+newly reachable adjacent strand, and smallest failing test. No live audit,
+provider/model sweep or benchmark is part of qualification.
+
+The first coding slice is the shared lifecycle contract/store plus a real
+vertical path through both consumers:
+
+- audit preparation join -> pin -> fine task -> partial/full acceptance;
+- remediation approved-plan join -> issued unit/landing evidence -> acceptance.
+
+Connect both real entrypoints to the common mechanics; do not prove only an
+unused helper. Migrate the remaining domain tasks using those adapters before
+integration. Green intermediate branch commits are allowed; main does not
+receive a half-cutover or a runtime feature flag selecting old/new engines.
+
+The smallest initial red is an audit boundary test through the actual
+`next-step`/workload emitter: a bundle with confirmed intent/structure but
+required charter work outstanding must emit only preparation work, never fine
+inspection. Current priority and concurrent emission violate that invariant.
+Add it before changing priority/dispatch. The common lifecycle tests then prove
+the replacement rather than relying on this one ordering test.
+
+Required deterministic acceptance tests use fixed semantic submissions:
+
+1. <!-- acceptance-01 --> Both consumer entrypoints invoke the same claim/accept/retry path; no
+   sidecar or worker edit can satisfy a task.
+2. <!-- acceptance-02 --> Audit fine tasks cannot issue before the selected preparation join/pin.
+3. <!-- acceptance-03 --> Accepted findings, residuals and follow-ups do not change basis bytes or
+   existing task definitions; external analyzer/intent changes cannot silently
+   replace a pinned run.
+4. <!-- acceptance-04 --> Resume preserves source, basis, task IDs, attempts and accepted payloads.
+5. <!-- acceptance-05 --> Fault injection before payload write, after payload write, before checkpoint
+   rename and after rename produces neither lost acceptance nor duplicate work.
+6. <!-- acceptance-06 --> Identical replay is a no-op; conflicting replay is refused; wrong run/basis,
+   prompt, task and superseded attempts cannot advance coverage or write state.
+7. <!-- acceptance-07 --> Partial coverage creates exactly the canonical remainder; no-progress partial
+   reports block; replay creates no second residual; selective coverage remains
+   selective. Pin the real A/B regression: a task requires A and B, accepts A as
+   partial, and emits residual B dependent on accepted parent evidence. After
+   resume/replay, accepting B makes the derived union complete and releases a
+   dependent requiring the original scope, while the parent's accepted payload
+   stays partial and unchanged. Coherent-whole-payload kinds must not gain this
+   coverage-union behavior by default.
+8. <!-- acceptance-08 --> Discovery replay creates no duplicate follow-up, cannot rewrite earlier tasks,
+   and cannot recursively restart a strategy after its selected work is done.
+9. <!-- acceptance-09 --> Old checkpoint versions remain untouched and readable; no automatic rerun,
+   deletion, migration of accepted meaning or fallback to the old engine.
+10. <!-- acceptance-10 --> Fixed charter/design/conceptual/clarification/systemic payloads reach the
+    report with their required independence, omissions, uncertainty and refuted
+    findings preserved.
+11. <!-- acceptance-11 --> Remediation preserves plan/source identity and required review dependencies;
+    an unapproved revision or widened write scope cannot issue/accept a unit.
+12. <!-- acceptance-12 --> Remediation serializes landing, recognizes an already-landed candidate after
+    interrupted acceptance, refuses uncertain retries, and rejects wrong
+    ancestry, unrelated dirty files and changed-tree verification observations.
+13. <!-- acceptance-13 --> Final verification concerns the merged tree; remediation cannot mutate the
+    original audit basis/report.
+14. <!-- acceptance-14 --> The deterministic-only draw never consumes host input or issues a host claim;
+    the full draw stops at host input and the per-call budget pauses resumably.
+
+Run existing affected deterministic tests, type checks and canonical aggregate
+gates against the integrated tree, sequentially where required. Do not run
+`npm test` concurrently with checks that consume `dist/`. Record failures and
+blocked/not-run stages accurately. No code execution qualification has happened
+merely because this plan exists.
+
+## 8. Refutation evidence and known boundaries
+
+Read source evidence:
+
+- `CLAUDE.md`: ideal endpoint over compatibility; one core/two draws; no provider
+  execution substrate; independent contract/conceptual modes; analyzer consent.
+- `.claude/skills/design-check/SKILL.md`: retirement evidence, one independent
+  refutation and a real failing test before implementation.
+- `docs/backlog/durable-traps.md`: quota harm from repeated parallel model
+  reviews and sequential aggregate-check requirement.
+- `docs/backlog/open-bugs.md`: coverage claims are not proof of actual reading;
+  stale-state preservation and bounded step outputs remain relevant.
+- Current audit priority, late-input/slice machinery, frozen snapshot,
+  ingestion/planning and result-baseline modules substantiate the removed
+  interleaving and mutable-premise mechanisms.
+- `src/remediate/steps/contractPipeline.ts` and its state/host-handoff code
+  substantiate required reviewed revisions, exact source identity, landed
+  evidence, tree guards and original dirty-baseline preservation.
+- Selective-deepening source explicitly retired global caps. This plan does not
+  restore them; it removes recursive strategy re-seeding while retaining
+  findings and explicit unperformed work.
+
+Historical Git log and machine-local project memory are not present in this
+verified file snapshot. They were not fabricated or fetched externally for this
+plan. The independent refutation should identify a specific documented collision
+if these inspected sources show one; absent historical access is not a claimed
+clean history review.
+
+The latest owner direction supersedes the old continuous-staleness premise, not
+unrelated safety or analytical contracts. There is no unresolved choice of
+architecture here. Any concrete contradiction found in refutation must be
+settled before implementation, without commissioning a series of trial audits.
+
+## 9. Durable engineering acceptance
+
+Oracle revision: 2
+Oracle change: Execute the original hello behavior on the merged remediation tree and add a wrong-result refusal control; expected outcomes and all fourteen obligations are unchanged.
+
+The fourteen acceptance rows above remain the requirements authority. The
+[oracle mapping](../../tests/fixtures/pinned-workflow-golden/contract.json) binds
+every row to executable tests and SHA-256 identities for assertion-bearing tests,
+static test helpers and literal expected data. It adds no lifecycle, ledger,
+semantic pass or runtime authority. Expected outcomes are independently authored;
+do not regenerate them from the implementation merely to make a failure green.
+
+Run `npm run check:engineering-contract` for structural coverage and oracle-byte
+checks. Run `npm run test:engineering-contract` for the exact mapped roster through
+the existing canonical Vitest gate. The latter requires a fresh runner result,
+exact file/count coverage, zero skipped/failed/unfinished tests and an unchanged
+source tree. A static pass is not a test pass; this focused run is not the native
+full suite, host/package qualification, semantic quality proof or a release.
+
+A changed assertion, helper, literal expectation or case mapping must carry an
+explicit higher Oracle revision and a new concrete Oracle change reason here.
+Review the delta against the governing requirement before changing its pin.
+Changing tests and their hashes together without that plan delta fails. This
+visible revision is not proof of independent review; the existing review and
+attestation requirements still apply. The default comparison base is HEAD: revision
+checking covers pending local/staged changes. For already committed changes, use
+`--base` with the actual reviewed baseline commit; CI without that explicit base
+checks identities/coverage but does not certify the cross-commit review delta.
+Static relative test imports are included
+in the pin closure; non-imported fixture inputs must be listed explicitly.
+
+Use synthetic complete-flow outcomes as the primary oracle, not source-string
+checks or production-generated expected values. Existing bounded adversarial
+regressions supplement them. Retain charter extraction/comparison, contract
+assessment and conceptual critique as distinct obligations without adding a
+ceremonial review loop. Cost is measured by deterministic work/task counts,
+accepted-scope replay and local elapsed time, not provider calls or speculative
+mini-audits. Host transport and provider quota policy remain outside this package.
+
+Before editing, identify the governing plan, actual source tree, branch and
+reviewed pending delta. Do not infer authority from a newer timestamp or HEAD
+when reviewed work is staged. Preserve pending work in a genuine isolated Git
+worktree with its own gitdir/index and matching backpointer; never copy a .git
+file or directory to simulate isolation. Report exact qualification boundaries
+and retain original negative evidence instead of weakening tests or claiming
+unrun native, host, package or operational gates passed.
+
+Introduce stronger enforcement in two separately reviewed changes: first qualify
+and land the contract, fixed goldens and their exact baseline under the existing
+gates; only then activate mandatory behavioral execution and explicit-base
+comparison in a successor. The first change is bootstrap evidence, not evidence
+that the new enforcement already protected it. Do not combine activation with a
+pre-contract comparison base or add a candidate-controlled bootstrap exemption.

@@ -1,4 +1,4 @@
-Audit-tools source preservation — 2026-11-05
+Audit-tools source preservation â€” 2026-11-05
 
 This history-isolated branch preserves source/test review material before local cleanup.
 It is not an application release, an integration branch, or approval to apply old patches.
@@ -24,3 +24,10 @@ run artifacts cannot become reachable through a commit parent. No private operat
 backup is included. Raw audit/recovery evidence, settings and service/database data must
 be preserved separately before deleting their local copies. The source archive does not
 replace those backups. Existing source/history on main remains in its normal branches.
+
+Two further working-source snapshots preserve the large uncommitted pinned shared-lifecycle
+redesign and the citation-route variant. Their source/tests/schemas/prompts/CI definitions
+are retained as inert patches against the recorded main. Generated operational records,
+nightly state, private settings, dependency installations and audit results are excluded.
+These snapshots require substantial independent qualification before any integration.
+The design reference records the engineering proposal, not an approved runtime rollout.
