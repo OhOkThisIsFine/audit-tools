@@ -331,6 +331,23 @@
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
       }
     },
+    "491762bb82302829": {
+      "reviewed_by": "independent-sonnet-reviewer-subagent",
+      "attester_class": "agent",
+      "checked": "D4 surfaces.ts isTestPath skip, D6 criticalFlowFallbackPrompt rewrite, D7 confirmIntentStep cap removal; each regression test red on old code; projectTestAdmission flake fix red at 50ms first deadline then green; full npm test green on this staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "3c69914fda56a4c1865133051c90b662a2e5f9fb",
+        "ran_at": "2026-11-06T17:45:03.181Z"
+      },
+      "attested_at": "2026-11-06T17:45:18.230Z",
+      "vouches": {
+        "src/audit/cli/confirmIntentStep.ts": "ca7f34f3ab1d309c7c3226dc0b2e139b0c6f3222",
+        "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
+      }
+    },
     "6257346a73ffb600": {
       "reviewed_by": "AGY/gemini-3.8-flash-high/5072f699-00b5-4233-ad6d-9d8555b6bc99; Codex/orphan-assertion-and-generated-metadata-only",
       "attester_class": "agent",
@@ -584,7 +601,7 @@
       "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/confirmIntentStep.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "491762bb82302829"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
       "review": "4244b52bb0fdec45"
@@ -890,7 +907,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/reporting/criticalFlowFallbackPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "491762bb82302829"
     },
     "src/audit/reporting/synthesisNarrativePrompt.ts": {
       "baseline": "7b79934e86baf378"

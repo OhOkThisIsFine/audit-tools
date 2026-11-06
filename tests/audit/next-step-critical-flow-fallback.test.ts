@@ -224,14 +224,24 @@ test.concurrent("structure merges the host critical-flow submission into critica
   }
 });
 
-test("critical-flow prompt binds the complete artifact at the 80/81 boundary", async () => {
+test("critical-flow prompt renders the low-confidence flows in full and lists every other flow by id", async () => {
+  // Dogfood 2026-11-06 D6: the prompt inlined 80 of 97 flows (77 of them high,
+  // paths cut to 6) for 3 low ones, said "above" for a list below, and pointed
+  // at the live-repo artifact while telling the lane to read only the snapshot.
   const { renderCriticalFlowFallbackPrompt } = await import("../../src/audit/reporting/criticalFlowFallbackPrompt.js");
+  type Manifest = Parameters<typeof renderCriticalFlowFallbackPrompt>[0];
   const manifestPath = "/repo/custom artifacts/critical_flows.json";
-  for (const count of [80, 81]) {
-    const manifest = { flows: Array.from({ length: count }, (_, index) => ({ ...HOST_FLOW, id: `flow:${index}` })) };
-    const prompt = renderCriticalFlowFallbackPrompt(manifest as Parameters<typeof renderCriticalFlowFallbackPrompt>[0], manifestPath);
-    expect(prompt).toContain(manifestPath);
-    expect(prompt.includes("1 more flows")).toBe(count === 81);
-    if (count === 81) expect(renderCriticalFlowFallbackPrompt(manifest as Parameters<typeof renderCriticalFlowFallbackPrompt>[0])).toContain("flow:80");
-  }
+  const lowPaths = Array.from({ length: 9 }, (_, index) => `src/low/candidate-${index}.ts`);
+  const flows = [
+    ...Array.from({ length: 120 }, (_, index) => ({ ...HOST_FLOW, id: `flow:high-${index}`, paths: ["src/high/never-rendered.ts"], confidence: "high" as const })),
+    { ...HOST_FLOW, id: "flow:low-0", paths: lowPaths, confidence: "low" as const },
+  ];
+  const prompt = renderCriticalFlowFallbackPrompt({ flows } as Manifest, manifestPath);
+  for (const flow of flows) expect(prompt).toContain(`\`${flow.id}\``);
+  for (const path of lowPaths) expect(prompt).toContain(path);
+  expect(prompt).not.toContain("src/high/never-rendered.ts");
+  expect(prompt).toContain("1 of 121 inferred flow(s) are low-confidence");
+  expect(prompt).toContain(manifestPath);
+  expect(prompt).toMatch(/audit artifact, not repository source/);
+  expect(prompt).not.toMatch(/\babove\b/);
 });

@@ -291,6 +291,27 @@ await test("renderConfirmIntentPrompt renders the docs digest as the repo's stat
   expect(withoutDocs).not.toMatch(/Repository purpose/);
 });
 
+await test("renderConfirmIntentPrompt lists EVERY in-scope top-level entry, so the rows sum to files in scope", async () => {
+  // Dogfood 2026-11-06 D7: a `.slice(0, 20)` cut the list silently — 20 rows
+  // summed to 1324 of 1329 in-scope files, and five root config files vanished.
+  const scope_dirs = Array.from({ length: 25 }, (_, i) => ({ dir: `entry-${String(i).padStart(2, "0")}`, files: 1 }));
+  const prompt = renderConfirmIntentPrompt(
+    {
+      mode: "full" as const,
+      since: null,
+      files_in_scope: 25,
+      scope_dirs,
+      excluded_summary: [],
+      disposition_override_proposals: [],
+      lens_propositions: [],
+      mis_scope_smells: [],
+      docs_digest: [],
+    },
+    { intentCheckpointPath: "/repo/.audit-tools/audit/intent_checkpoint.json", continueCommand: "audit-code next-step" },
+  );
+  for (const { dir } of scope_dirs) expect(prompt).toContain(`- \`${dir}\` — 1 file(s)`);
+});
+
 await test("renderConfirmIntentPrompt surfaces mis_scope_smells at the confirm-intent pause, and omits the section when empty", async () => {
   const base = {
     mode: "full" as const,

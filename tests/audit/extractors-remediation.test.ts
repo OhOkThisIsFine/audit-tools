@@ -849,6 +849,23 @@ test("buildGraphBundle understands Chrome extension manifests and HTML resources
   expect(references.some(([, to]) => to === "bitmaps/logo-128.png")).toBe(false);
 });
 
+test("buildSurfaceManifest never makes a test file an execution surface, so no critical flow starts at one", async () => {
+  // Dogfood 2026-11-06 D4: 28 of 92 surfaces were test files matched by the
+  // `cli` token (`tests/audit/audit-cli-correctness.test.ts` became an
+  // `interface` surface), and every surface becomes a critical flow.
+  const repoManifest = makeRepoManifest([
+    "src/cli/main.ts",
+    "tests/audit/audit-cli-correctness.test.ts",
+    "src/api/route.spec.ts",
+    "test/worker-queue.ts",
+  ]);
+  const disposition = await buildFileDisposition(repoManifest);
+  const manifest = buildSurfaceManifest(repoManifest, disposition);
+  expect(manifest.surfaces.map((surface) => surface.entrypoint)).toEqual(["src/cli/main.ts"]);
+  const flows = buildCriticalFlowManifest(repoManifest, manifest, disposition);
+  expect(flows.flows.map((flow) => flow.entrypoints[0])).toEqual(["src/cli/main.ts"]);
+});
+
 test("buildSurfaceManifest understands Chrome extension manifests and HTML resources", async () => {
   const { repoManifest, fileContents } = makeChromeExtensionFixture();
   const disposition = await buildFileDisposition(repoManifest);

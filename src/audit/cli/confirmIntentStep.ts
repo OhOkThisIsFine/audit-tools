@@ -88,7 +88,6 @@ export function renderConfirmIntentPrompt(
 ): string {
   const dirLines =
     preDigest.scope_dirs
-      .slice(0, 20)
       .map((d) => `- \`${d.dir}\` — ${d.files} file(s)`)
       .join("\n") || "_(none)_";
 

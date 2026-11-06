@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/extractors-remediation.test.ts
 import type { RepoManifest } from "../types.js";
 import type { FileDisposition, GraphBundle, SurfaceManifest, SurfaceRecord } from "audit-tools/shared";
 import { buildBrowserExtensionSurfacesFromGraph } from "./browserExtension.js";
@@ -7,6 +8,7 @@ import {
   isBackgroundSurfacePath,
   isNetworkSurfacePath,
   isSurfacePath,
+  isTestPath,
   normalizeExtractorPath,
 } from "./pathPatterns.js";
 
@@ -47,6 +49,10 @@ export function buildSurfaceManifest(
     }
 
     const normalized = normalizeExtractorPath(file.path);
+    // A test file exercises a surface; it is never one. Its name carries the
+    // surface's tokens (`audit-cli-correctness.test.ts`), so the keyword match
+    // alone would make it an entrypoint — and every surface becomes a flow.
+    if (isTestPath(normalized)) continue;
     if (isSurfacePath(normalized)) {
       addSurface({
         id: `surface:${file.path}`,
