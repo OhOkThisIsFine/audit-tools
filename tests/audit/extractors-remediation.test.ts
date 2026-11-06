@@ -898,6 +898,32 @@ test("buildUnitManifest understands Chrome extension manifests", async () => {
   expect(serviceUnit?.required_lenses.includes("security")).toBeTruthy();
 });
 
+test("buildUnitManifest classifies CI workflows as config, not tests, and slugs dot-directories without a leading dash", () => {
+  const unitManifest = buildUnitManifest(makeRepoManifest([
+    ".github/workflows/audit-code-test-suite.yml",
+    ".githooks/pre-commit",
+    "vitest.config.ts",
+    "tests/audit/a.test.ts",
+    "src/app/main.ts",
+    "lib/workflow.test.ts",
+    "lib/workflow/engine.ts",
+  ]));
+  const unitOf = (path: string) => unitManifest.units.find((unit) => unit.files.includes(path));
+
+  expect(unitOf(".github/workflows/audit-code-test-suite.yml")).toMatchObject({
+    unit_id: "dot-github-workflows",
+    kind: "config",
+  });
+  expect(unitOf(".githooks/pre-commit")?.unit_id).toBe("dot-githooks");
+  expect(unitOf("vitest.config.ts")?.kind).not.toBe("test");
+  expect(unitOf("tests/audit/a.test.ts")?.kind).toBe("test");
+  expect(unitOf("src/app/main.ts")?.kind).toBe("module");
+  // A deployment keyword in a SOURCE path does not make it config.
+  expect(unitOf("lib/workflow.test.ts")?.kind).toBe("test");
+  expect(unitOf("lib/workflow/engine.ts")?.kind).toBe("module");
+  expect(unitManifest.units.filter((unit) => unit.unit_id.startsWith("-"))).toEqual([]);
+});
+
 test("buildGraphBundle resolves code imports and literal path references", async () => {
   const repoManifest = makeRepoManifest([
     "src/api/auth.ts",

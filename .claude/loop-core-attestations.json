@@ -369,6 +369,22 @@
         "src/audit/orchestrator/runtimeValidation.ts": "7b7a98d0f331bbc3e11867904992f25a97b30bf0"
       }
     },
+    "677face55f9a5a77": {
+      "reviewed_by": "independent-sonnet-reviewer-subagent",
+      "attester_class": "agent",
+      "checked": "D11 unit kind/id: inferUnitKind uses shared predicates (test dir -> YAML config -> test token); slugSegment dot- prefix; isYamlPath extracted; graph cache v14 + pin; reviewer finding 3 (workflow.test.ts -> config) fixed and re-reviewed clear; test red-green on both halves; full suite 8402 passed",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "7792351a8c706663c9ce9cb16540d58acd7b600c",
+        "ran_at": "2026-11-06T18:26:34.884Z"
+      },
+      "attested_at": "2026-11-06T18:26:48.900Z",
+      "vouches": {
+        "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
+      }
+    },
     "6cd8a9eb36e60d5d": {
       "reviewed_by": "/root/final_candidate_review",
       "attester_class": "agent",
@@ -904,7 +920,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/unitBuilder.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "677face55f9a5a77"
     },
     "src/audit/reporting/criticalFlowFallbackPrompt.ts": {
       "review": "491762bb82302829"

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/extractors-remediation.test.ts
 import type { AuditUnit, Lens, RepoManifest, UnitManifest } from "../types.js";
 import type { FileDisposition } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
@@ -8,7 +9,13 @@ import {
 } from "../extractors/browserExtension.js";
 import { bucketFile, type FileBucket } from "../extractors/bucketing.js";
 import { buildDispositionMap, isAuditExcludedStatus } from "../extractors/disposition.js";
-import { pathTokens, normalizeExtractorPath } from "../extractors/pathPatterns.js";
+import {
+  isTestDirectoryPath,
+  isTestPath,
+  isYamlPath,
+  normalizeExtractorPath,
+  pathTokens,
+} from "../extractors/pathPatterns.js";
 import { sortLenses } from "./auditTaskUtils.js";
 
 const LENS_MAP: Record<FileBucket, Lens[]> = {
@@ -41,7 +48,16 @@ function inferUnitKind(path: string, isBrowserExtensionProject = false): string 
   if (normalized.startsWith("infra/")) return "infrastructure";
   if (normalized.startsWith("scripts/") || normalized.startsWith("bin/"))
     return "script";
-  if (normalized.includes("test") || normalized.includes("spec")) return "test";
+  // The shared path predicates, never substrings: `vitest.config.ts` and
+  // `inspector.ts` are not tests. A file in a test directory is a test. A YAML
+  // file elsewhere is config even when its name says `test` (a CI workflow
+  // such as `audit-code-test-suite.yml`). The deployment KEYWORDS do not make
+  // a source file config: a test file named `workflow.test.ts` stays a test and
+  // a source file under a `workflow` directory stays a module.
+  const extractorPath = normalizeExtractorPath(path);
+  if (isTestDirectoryPath(extractorPath)) return "test";
+  if (isYamlPath(extractorPath)) return "config";
+  if (isTestPath(extractorPath)) return "test";
   if (
     normalized.includes("api/") ||
     normalized.includes("route") ||
@@ -58,6 +74,18 @@ function inferUnitKind(path: string, isBrowserExtensionProject = false): string 
   return "module";
 }
 
+/**
+ * One path segment as an id part. A leading dot becomes `dot-`, so
+ * `.github` and `github` stay two different units and no id starts with `-`.
+ */
+function slugSegment(segment: string): string {
+  return segment.replace(/^\./, "dot-").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function slugSegments(...segments: string[]): string {
+  return segments.map(slugSegment).join("-");
+}
+
 function inferUnitId(path: string, kind: string): string {
   const parts = path.split("/");
   const normalized = path.toLowerCase();
@@ -68,23 +96,20 @@ function inferUnitId(path: string, kind: string): string {
         parts[1],
       )
     ) {
-      return `${parts[0]}-${parts[1]}-${parts[2]}`.replace(
-        /[^a-zA-Z0-9_-]/g,
-        "-",
-      );
+      return slugSegments(parts[0], parts[1], parts[2]);
     }
   }
   if ((parts[0] === "src" || parts[0] === "lib") && parts.length >= 2) {
-    return `${parts[0]}-${parts[1]}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    return slugSegments(parts[0], parts[1]);
   }
   if ((parts[0] === "tests" || parts[0] === "test") && parts.length >= 2) {
-    return `tests-${parts[1]}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    return slugSegments("tests", parts[1]);
   }
   if (parts.length >= 3) {
-    return `${parts[0]}-${parts[1]}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    return slugSegments(parts[0], parts[1]);
   }
   if (parts.length === 2) {
-    return parts[0].replace(/[^a-zA-Z0-9_-]/g, "-");
+    return slugSegment(parts[0]);
   }
   if (
     normalized.endsWith(".json") ||
@@ -97,7 +122,7 @@ function inferUnitId(path: string, kind: string): string {
   ) {
     return "root-config";
   }
-  return `${kind}-${path.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  return slugSegments(kind, path);
 }
 
 export { LENS_ORDER, sortLenses } from "./auditTaskUtils.js";
