@@ -152,21 +152,39 @@ test("timeout stops an admitted npm child and grandchild before returning", asyn
       spawn(process.execPath, ['grandchild.cjs'], { stdio: 'inherit' });
       setTimeout(() => process.exit(0), 8000);
     `);
-    const started = Date.now();
+    const heartbeatNames = ["child-heartbeat", "heartbeat"];
+    // A missing heartbeat file is zero writes: that process never started.
+    const heartbeats = () => Promise.all(heartbeatNames.map(async (name) =>
+      (await readFile(join(dir, name), "utf8").catch(() => "")).length));
+    // The deadline runs from the spawn of `npm`, so it also covers npm's and
+    // node's start-up, which has no fixed upper bound under load. An attempt
+    // whose deadline fired before BOTH processes wrote proves nothing about
+    // stopping them; the next attempt adds the measured elapsed time to the
+    // deadline. The first deadline is only a first probe: the result does
+    // not depend on it.
+    let timeoutMs = 1500;
+    let started = Date.now();
     let cleanupObserved = false;
     try {
-      const outcome = await runAdmittedProjectTestCommand(["npm", "test"], dir,
-        { timeoutMs: 1500, sigkillGraceMs: 250 });
-      expect(outcome.timed_out).toBe(true);
-      expect(Date.now() - started).toBeLessThan(5000);
-      const heartbeats = () => Promise.all(["child-heartbeat", "heartbeat"].map(async (name) =>
-        (await readFile(join(dir, name), "utf8")).length));
-      const before = await heartbeats();
-      for (const count of before) expect(count).toBeGreaterThan(0);
-      await delay(200);
-      const after = await heartbeats();
-      expect(after, "child and grandchild must stop writing before the next gate can start").toEqual(before);
-      cleanupObserved = true;
+      for (;;) {
+        await Promise.all(heartbeatNames.map((name) => rm(join(dir, name), { force: true })));
+        started = Date.now();
+        const outcome = await runAdmittedProjectTestCommand(["npm", "test"], dir,
+          { timeoutMs, sigkillGraceMs: 250 });
+        const elapsed = Date.now() - started;
+        expect(outcome.timed_out).toBe(true);
+        expect(elapsed, "the runner returns soon after its deadline").toBeLessThan(timeoutMs + 3500);
+        const before = await heartbeats();
+        if (before.some((count) => count === 0)) {
+          timeoutMs += elapsed;
+          continue;
+        }
+        await delay(200);
+        const after = await heartbeats();
+        expect(after, "child and grandchild must stop writing before the next gate can start").toEqual(before);
+        cleanupObserved = true;
+        break;
+      }
     } finally {
       // A deliberately failing baseline must let its fixture children self-exit
       // before the containing fixture directory is removed.
