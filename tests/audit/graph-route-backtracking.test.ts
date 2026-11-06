@@ -1,4 +1,4 @@
-import { runAfterReadyWithDeadline } from "../helpers/spawn.mjs";
+import { runAfterReadyWithDeadline } from "../helpers/trackedSpawn.js";
 import { describe, expect, it } from "vitest";
 
 import {

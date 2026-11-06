@@ -1,4 +1,4 @@
-import { runAfterReadyWithDeadline } from "../helpers/spawn.mjs";
+import { runAfterReadyWithDeadline } from "../helpers/trackedSpawn.js";
 import { expect, test } from "vitest";
 
 test("public scanners keep semantics under growing malformed inputs within a bounded process", async () => {
