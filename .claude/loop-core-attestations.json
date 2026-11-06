@@ -172,28 +172,6 @@
         "src/audit/orchestrator/state.ts": "3dc42abe6fffb668b49ef89cde9e6d32cf67c375"
       }
     },
-    "189c849cd573575f": {
-      "reviewed_by": "claude-opus-5-5-session",
-      "attester_class": "agent",
-      "checked": "fanoutLanes.ts writeGeneratedContext/renderReadOnlyContextSection read whole; generated paths join contextPaths so they are fingerprinted and bound in inputs (re-hashed by auditReviewBindings); ordinary-lane guard; conceptualDispatch/nextStepCommand emission sites pass generatedContext; systemicReviewInputRevision includes map text; plan refuted by independent AGY lane (HOLDS-WITH-CHANGES, adopted); red proofs re-run here: unbound generated paths and missing 0o444 each fail; full suite green on staged tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "a71526233df57acb9adf22d9585ba685dbce299b",
-        "ran_at": "2026-10-04T23:47:35.789Z"
-      },
-      "attested_at": "2026-10-04T23:47:44.419Z",
-      "vouches": {
-        "src/audit/cli/conceptualDispatch.ts": "7c37598046c5d53f91c6ec276e030c3de4df88cc",
-        "src/audit/cli/fanoutLanes.ts": "3ce826dc3a8a335f8f863bb76119dc06ca02f928",
-        "src/audit/cli/nextStepCommand.ts": "f6bd7f211be809ca247ea5ade9714f0d53d5c2c1",
-        "src/audit/orchestrator/designReviewPrompt.ts": "18cb02d073d7a4c9da53a5fdf42504ebe6dc7706",
-        "src/audit/orchestrator/systemicChallengeExecutor.ts": "30a68ae3f849012c0a3c1da172a37f2b4b8dc26b",
-        "src/audit/systemic/reviewFileMap.ts": "b05396e310c13e69b2749c565ad3b349a2df8400",
-        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "c822ea3dc98d929b7da711836d777bc1d2fbe557"
-      }
-    },
     "2db6d216d6520425": {
       "reviewed_by": "/root/triage_conformance/w2_design_refute",
       "attester_class": "agent",
@@ -301,20 +279,37 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
-    "3fc713e152b9e2da": {
-      "reviewed_by": "Independent Chat source reviews relayed by parent thread 01a15666-eb6b-70da-9377-39a63417a00b; final approved tree 3effba17f873dddc7e8165dfe954b1d09c83925e",
+    "4244b52bb0fdec45": {
+      "reviewed_by": "orchestrator-session-41e45b93",
       "attester_class": "agent",
-      "checked": "Checked direct-root citation precedence and rejected-path containment through shared missing-basename resolver; lazy tracked corpus on frozen host snapshot; citation identity and nullish/acronym extractor regressions with graph cache v11; Git pre-staging exclusion against ignored untracked scratch with no scratch in HEAD and deep unignored 271-character scratch, near-match inclusion, tracked scratch removal, real index and HEAD preservation. Independent Chat approved final exact source/test tree after diagnostic and red-green regression evidence.",
+      "checked": "Integration of four reviewed fix branches (prompt-contracts 8bfcee44, inspection-handoff f584c9b9, review-evidence 329c371c, charter R5 1ec582a0), each attested and full-suite green alone; diffs applied with no conflicts; build, check, check:tests green; full npm test green on this combined staged tree.",
       "verdict": "clear",
       "override": null,
       "tests_ran": {
         "scope": "full-suite",
-        "tree": "3effba17f873dddc7e8165dfe954b1d09c83925e",
-        "ran_at": "2026-10-20T03:19:45.615Z"
+        "tree": "5aba5936405cc2e78e22cd9680bb0faa5c82f497",
+        "ran_at": "2026-11-06T07:24:32.279Z"
       },
-      "attested_at": "2026-10-20T03:19:55.051Z",
+      "attested_at": "2026-11-06T07:24:51.100Z",
       "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "48689da5196fd4b92198d42a74f2518b1fecbfa8"
+        "src/audit/cli/conceptualDispatch.ts": "3c7f465f7e4e605b3eebae51c2fc7643e58f7129",
+        "src/audit/cli/dispatch/hostHandoff.ts": "a020b584d0204fb57da648a6f844f6ff0ad303bd",
+        "src/audit/cli/fanoutLanes.ts": "7449ad1dc2e44c105dded1b77cb9e7a2342c914b",
+        "src/audit/cli/nextStepCommand.ts": "c6bea70a78b994f8ff0dfb4e9ceda3a7d7e621da",
+        "src/audit/cli/nextStepHelpers.ts": "d488ea705a111f156c822d4b92c942787fa05bab",
+        "src/audit/cli/prompts.ts": "d8ed4636272a6bd0d07f4a0762151028cf22b8d7",
+        "src/audit/cli/semanticReviewStep.ts": "4f4072a72e28eba5c91adbaa8cf807b16a277118",
+        "src/audit/orchestrator/advance.ts": "c434d13eb332a5fdf048e8b70533c5df15df2d8f",
+        "src/audit/orchestrator/architectureDiscovery.ts": "32e2d5bf7a6d6280e0e772d70783b779f81dc8df",
+        "src/audit/orchestrator/charterPackets.ts": "4b55035a262bdfdfbcb9a536dff06bbc9ddc4e44",
+        "src/audit/orchestrator/dependencyMap.ts": "78abfa7b7b5b3f7b0d23e48c10fd1193d586ff1d",
+        "src/audit/orchestrator/dependencySlices.ts": "bede558d3925c576efd2987a7eac312310c131ed",
+        "src/audit/orchestrator/designReviewPrompt.ts": "927aad6f48c7111311bf425b84744e4140a513f5",
+        "src/audit/orchestrator/intentCheckpointExecutor.ts": "5ee953afb0051f91867c4f3541d76402991308b4",
+        "src/audit/orchestrator/state.ts": "b275a635843a148b2489ae638dca15e6fc43fa14",
+        "src/audit/orchestrator/systemicChallengeExecutor.ts": "fa14635c60c6f683be863a432c4da65e90efb410",
+        "src/audit/systemic/reviewFileMap.ts": "029a61abf51b28c5b0a27a7882431e48e7baeaea",
+        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "85f1803f76714c1fccd8651fa34baf6d3704d4fc"
       }
     },
     "4318b8e7432c3e06": {
@@ -586,19 +581,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "392554939aa89e3b"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/confirmIntentStep.ts": {
       "review": "32765e3dafb89abf"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "3fc713e152b9e2da"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "392554939aa89e3b"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
@@ -610,16 +605,16 @@
       "review": "8aa0d48e64560f2e"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/prompts.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/semanticReviewStep.ts": {
-      "review": "392554939aa89e3b"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/io/rollover.ts": {
       "review": "be526ca9e4e1d631"
@@ -634,13 +629,13 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
-      "review": "b3148880827e283a"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
       "review": "132b243de694e051"
@@ -670,7 +665,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/charterPackets.ts": {
-      "review": "2fd8f3fd2058e9bd"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/coverageElementBaseline.ts": {
       "review": "6257346a73ffb600"
@@ -679,16 +674,16 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
-      "review": "6257346a73ffb600"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "339be913c2e2c76d"
@@ -739,7 +734,7 @@
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/intentCheckpointExecutor.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/intentCheckpointGate.ts": {
       "baseline": "7b79934e86baf378"
@@ -868,7 +863,7 @@
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "132b243de694e051"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "review": "32765e3dafb89abf"
@@ -880,7 +875,7 @@
       "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/systemicChallengeExecutor.ts": {
-      "review": "189c849cd573575f"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/taskAffinityGraph.ts": {
       "baseline": "7b79934e86baf378"
@@ -904,10 +899,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/systemic/reviewFileMap.ts": {
-      "review": "189c849cd573575f"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
-      "review": "189c849cd573575f"
+      "review": "4244b52bb0fdec45"
     },
     "src/audit/validation/ingestIssueCodes.ts": {
       "baseline": "7b79934e86baf378"

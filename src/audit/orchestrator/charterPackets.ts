@@ -37,41 +37,87 @@ import {
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
+import { isTestPath, normalizeExtractorPath } from "../extractors/pathPatterns.js";
 import {
   extractCommentLines,
   strippedSourceLines,
   type NumberedSourceLine,
 } from "../extractors/commentDecomposition.js";
 
+/** One unit of the charter read-set: a unit and the non-test files it contributes. */
+export interface CharterPacketUnit {
+  unit_id: string;
+  name: string;
+  kind?: string;
+  /** Path-sorted; a file already contributed by an earlier unit is not repeated. */
+  files: string[];
+}
+
+// sites-pinned: tests/audit/charter-packets.test.ts
 /**
- * The charter layer's read-set over the repo: consensus MEMBER files (every
- * channel is a projection of member content — comments for stated, organization
- * for structural, stripped bodies for revealed) plus every doc-intent file per
- * the pipeline's single doc predicate (`isDocIntentFile` — the stated channel's
- * doc universe). The staleness slice consumes this same function.
+ * The charter layer's read-set over the repo: the MEMBER files (every channel
+ * is a projection of member content — comments for stated, organization for
+ * structural, stripped bodies for revealed) plus every doc-intent file per the
+ * pipeline's single doc predicate (`isDocIntentFile` — the stated channel's doc
+ * universe) that is not already a member. The staleness slices consume this
+ * same function.
+ *
+ * Members are the audited files of the `unit_manifest` partition — code plus
+ * whatever config or data the disposition includes — minus every test file,
+ * partitioned BY UNIT (content coherence): units in `unit_id` order, paths
+ * sorted within a unit, a file listed once under the first unit that holds it,
+ * and a unit dropped only when no file is left. Tests are excluded PER FILE by
+ * the extractors' one test classifier (`isTestPath`), never by the unit's
+ * `kind` label: that label comes from whichever file the builder saw first, so
+ * one test-looking file would drop a whole unit's non-test files. A charter
+ * states what the project is for; a test restates behaviour the revealed
+ * channel already reads.
+ *
+ * A doc-intent file that is also a member is read once, as a member, so no
+ * file appears in two channels' universes of one packet.
+ *
+ * The members were once the `structure_decomposition` consensus. On the
+ * audit-tools self-audit (0.55.15) that consensus was one dyad of two test
+ * files, so every lane read almost none of the audited source; the consensus
+ * is a size-hostile vote with a community cap, not a coverage set.
  */
 export function charterPacketReadSet(bundle: ArtifactBundle): {
+  units: CharterPacketUnit[];
   memberPaths: string[];
   docPaths: string[];
 } {
-  const members = new Set<string>();
-  for (const node of bundle.structure_decomposition?.consensus ?? []) {
-    for (const member of node.members) members.add(member);
+  const seen = new Set<string>();
+  const units: CharterPacketUnit[] = [];
+  const sortedUnits = [...(bundle.unit_manifest?.units ?? [])]
+    .sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id));
+  for (const unit of sortedUnits) {
+    const files = [...new Set(unit.files)]
+      .filter((path) => !seen.has(path) && !isTestPath(normalizeExtractorPath(path)))
+      .sort((a, b) => compareCodeUnits(a, b));
+    if (files.length === 0) continue;
+    for (const path of files) seen.add(path);
+    units.push({
+      unit_id: unit.unit_id,
+      name: unit.name,
+      ...(unit.kind === undefined ? {} : { kind: unit.kind }),
+      files,
+    });
   }
   const docs = new Set<string>();
   for (const file of bundle.file_disposition?.files ?? []) {
-    if (isDocIntentFile(file.path, file.status)) docs.add(file.path);
+    if (isDocIntentFile(file.path, file.status) && !seen.has(file.path)) docs.add(file.path);
   }
   return {
-    memberPaths: [...members].sort((a, b) => compareCodeUnits(a, b)),
+    units,
+    memberPaths: units.flatMap((unit) => unit.files),
     docPaths: [...docs].sort((a, b) => compareCodeUnits(a, b)),
   };
 }
 
 /**
  * The dependency-edge lines the STRUCTURAL channel's packet embeds: every
- * `imports`/`calls`/`references` edge whose BOTH endpoints are consensus
- * members, rendered one per line, sorted. The single home of this derivation —
+ * `imports`/`calls`/`references` edge whose BOTH endpoints are members,
+ * rendered one per line, sorted. The single home of this derivation —
  * the packet renders it and the staleness slice (`dependencySlices.ts` →
  * `charterGraphEdgeSlice`) compares it, so what the packet shows and what
  * re-stales it can never drift.
@@ -341,7 +387,7 @@ function addCandidate(plan: PacketPlan, candidate: ExcerptCandidate): void {
 export async function materializeCharterPacket(
   params: MaterializeCharterPacketParams,
 ): Promise<MaterializedCharterPacket> {
-  const { memberPaths, docPaths } = charterPacketReadSet(params.bundle);
+  const { units, memberPaths, docPaths } = charterPacketReadSet(params.bundle);
   const plan = emptyPlan();
 
   if (params.kind === "stated") {
@@ -374,13 +420,19 @@ export async function materializeCharterPacket(
     const manifestByPath = new Map(
       (params.bundle.repo_manifest?.files ?? []).map((f) => [f.path, f]),
     );
+    // sites-pinned: tests/audit/charter-packets.test.ts
+    // One block per unit (`<unit_id> — <name> (<kind>)`, then its files
+    // indented), so the tree shows the same partition the read-set draws.
     plan.fixedSections.push({
-      heading: "File tree (members)",
-      body: memberPaths
-        .map((path) => {
-          const entry = manifestByPath.get(path);
-          return entry ? `${path} (${entry.size_bytes} bytes)` : path;
-        })
+      heading: "File tree (members, by unit)",
+      body: units
+        .flatMap((unit) => [
+          `${unit.unit_id} — ${unit.name}${unit.kind === undefined ? "" : ` (${unit.kind})`}`,
+          ...unit.files.map((path) => {
+            const entry = manifestByPath.get(path);
+            return `  ${entry ? `${path} (${entry.size_bytes} bytes)` : path}`;
+          }),
+        ])
         .join("\n"),
     });
     const edgeLines = memberDependencyEdgeLines(params.bundle);
@@ -534,7 +586,7 @@ function renderPacket(
     "## Provenance manifest",
     "",
     "```json",
-    JSON.stringify(buildCharterPacketManifest(kind, excerpts, coverage), null, 2),
+    renderManifestJson(buildCharterPacketManifest(kind, excerpts, coverage)),
     "```",
     "",
   ];
@@ -565,6 +617,32 @@ function renderPacket(
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * The manifest as JSON with ONE LINE PER ARRAY ELEMENT (one per excerpt, one per
+ * coverage class). Pretty-printing nested values put every line run on four
+ * lines; a prose file skips its blank lines, so its runs number in the
+ * hundreds, and the manifest of a dogfood stated packet reached 425 KB of 3 MB.
+ * Same data, same parse — only the layout differs. Generic over the manifest's
+ * fields, so a field added to the type cannot be dropped here.
+ */
+function renderManifestJson(manifest: CharterPacketManifest): string {
+  const render = (value: unknown, indent: string): string => {
+    const inner = `${indent}  `;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return "[]";
+      return `[\n${value.map((item) => `${inner}${JSON.stringify(item)}`).join(",\n")}\n${indent}]`;
+    }
+    if (value !== null && typeof value === "object") {
+      const fields = Object.entries(value).map(
+        ([key, field]) => `${inner}${JSON.stringify(key)}: ${render(field, inner)}`,
+      );
+      return `{\n${fields.join(",\n")}\n${indent}}`;
+    }
+    return JSON.stringify(value);
+  };
+  return render(manifest, "");
 }
 
 const OMISSION_PROSE: Record<OmissionReason, string> = {

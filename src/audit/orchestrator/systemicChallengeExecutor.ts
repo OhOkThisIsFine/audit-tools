@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -10,7 +10,13 @@ import type {
   SystemicChallengeStop,
   SystemicChallengeSubmission,
 } from "audit-tools/shared";
-import { hashContent, stableStringify } from "audit-tools/shared";
+import {
+  hashContent,
+  repoPathUniverse,
+  stableStringify,
+  systemicChallengeSchema,
+} from "audit-tools/shared";
+import type { ZodTypeAny } from "zod";
 import { hashArtifactValue } from "../../shared/artifactFreshness.js";
 import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
 import {
@@ -97,6 +103,17 @@ export function systemicPremiseToken(bundle: ArtifactBundle): string {
   return hashContent(stableStringify(parts), { length: 12 });
 }
 
+/**
+ * The systemic submission contract bound to THIS run's repository manifest. The
+ * fold's gate and its apply path both read it, so they cannot disagree. The lens
+ * selection is deliberately NOT bound here: a finding keeps its TRUE lens, as the
+ * design-review lanes have since 7a624e00 (owner decision, 2026-11-05) — the
+ * selection is the round's focus, stated in its prompt, never an admission filter.
+ */
+export function systemicChallengeSchemaForBundle(bundle: ArtifactBundle): ZodTypeAny {
+  return systemicChallengeSchema(repoPathUniverse(bundle.repo_manifest));
+}
+
 /** Pending review identity includes the actual carried evidence; it never resets loop history. */
 export function systemicReviewInputRevision(bundle: ArtifactBundle): string {
   return hashContent(stableStringify({
@@ -110,7 +127,7 @@ export function systemicReviewInputRevision(bundle: ArtifactBundle): string {
     }),
     // The prompt carries only the map's summary; the map itself is a bound
     // context file, so a rewired call site must re-stale the round here too.
-    fileMap: adversaryFileMapContext(bundle).contextFile.text,
+    fileMap: adversaryFileMapContext(bundle).contextFiles.map((file) => [file.filename, file.text]),
   }));
 }
 

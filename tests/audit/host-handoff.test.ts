@@ -84,7 +84,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "audit-host-workload/v1alpha4";
+  readonly contract_version: "audit-host-workload/v1alpha5";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -582,7 +582,7 @@ describe(FAILURE_SIGNATURE, () => {
       tasks,
     });
     expect(first.workload.contract_version).toBe(
-      "audit-host-workload/v1alpha4",
+      "audit-host-workload/v1alpha5",
     );
     expect(first.result_map.contract_version).toBe(
       "audit-host-result-map/v1alpha1",
@@ -939,7 +939,7 @@ describe(FAILURE_SIGNATURE, () => {
     // It names BOTH versions — the one found and the one this build mints — and
     // the one repair, so the host is not left to infer any of the three.
     expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
-    expect(refusal!.message).toContain("audit-host-workload/v1alpha4");
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha5");
     expect(refusal!.message).toContain("re-prepare");
 
     // RUN-SCOPED, deliberately: the refusal is about the workload DOCUMENT, not
@@ -1968,7 +1968,7 @@ describe("prompt 20: tool-filled result template (audit draw)", () => {
         ),
       ],
     });
-    expect(prepared.workload.contract_version).toBe("audit-host-workload/v1alpha4");
+    expect(prepared.workload.contract_version).toBe("audit-host-workload/v1alpha5");
     for (const item of prepared.workload.work_items) {
       const text = item.prompt.text;
       const at = text.indexOf(TEMPLATE_LEAD);

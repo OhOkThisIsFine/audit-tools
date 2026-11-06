@@ -212,7 +212,12 @@ const CODE_BODY_MARKER = "secretBodyDetail";
 const COMMENT_MARKER = "intentCommentMarker";
 const DOC_MARKER = "readmePurposeMarker";
 
-function makeStructure(): StructureDecomposition {
+/**
+ * The dogfood shape (audit-tools 0.55.15 on itself): the decomposition's whole
+ * consensus was ONE dyad of two test files. The charter packets once read only
+ * consensus members, so every lane read those two tests and no audited source.
+ */
+function makeDegenerateStructure(): StructureDecomposition {
   return {
     generated_at: "2026-08-06T00:00:00Z",
     target: "structure",
@@ -220,8 +225,8 @@ function makeStructure(): StructureDecomposition {
     source_ids: ["s"],
     consensus: [
       {
-        node_id: "src/a.ts",
-        members: ["src/a.ts", "src/b.ts"],
+        node_id: "tests/a.test.ts",
+        members: ["tests/a.test.ts", "tests/b.test.ts"],
         agreed_across_source: 1,
         stable_across_scale: 1,
         contested: false,
@@ -250,7 +255,12 @@ function makeBundle(): ArtifactBundle {
         { path: "README.md", status: "doc_only" },
       ],
     },
-    structure_decomposition: makeStructure(),
+    unit_manifest: {
+      units: [
+        { unit_id: "unit-src", name: "src", kind: "module", files: ["src/b.ts", "src/a.ts"], required_lenses: [] },
+        { unit_id: "unit-tests", name: "tests", kind: "test", files: ["tests/a.test.ts"], required_lenses: [] },
+      ],
+    },
     graph_bundle: {
       graphs: {
         imports: [{ from: "src/b.ts", to: "src/a.ts", kind: "import" }],
@@ -286,10 +296,96 @@ async function makeRepoRoot(): Promise<string> {
 }
 
 describe("charterPacketReadSet — the single-sourced read-set", () => {
-  it("is consensus members ∪ doc-intent files, path-sorted", () => {
+  it("is non-test unit files ∪ non-member doc-intent files, path-sorted within a unit", () => {
     const { memberPaths, docPaths } = charterPacketReadSet(makeBundle());
     expect(memberPaths).toEqual(["src/a.ts", "src/b.ts"]);
     expect(docPaths).toEqual(["README.md"]);
+  });
+
+  it("reads the non-test files of every unit, never the structure consensus", () => {
+    // The dogfood defect: a consensus of one test dyad left the stated,
+    // structural and revealed packets with no audited source at all. The read
+    // set is the unit manifest's non-test files, partitioned by unit (unit_id
+    // order, path order within a unit, a file listed once).
+    const bundle = makeBundle();
+    bundle.structure_decomposition = makeDegenerateStructure();
+    bundle.unit_manifest = {
+      units: [
+        { unit_id: "unit-tests", name: "tests", kind: "test", files: ["tests/a.test.ts", "tests/b.test.ts"], required_lenses: [] },
+        { unit_id: "unit-src", name: "src", kind: "module", files: ["src/b.ts", "src/a.ts"], required_lenses: [] },
+        { unit_id: "unit-api", name: "api", kind: "interface", files: ["src/api/route.ts", "src/a.ts"], required_lenses: [] },
+        { unit_id: "unit-scripts", name: "scripts", files: ["scripts/run.mjs"], required_lenses: [] },
+      ],
+    };
+    const { memberPaths, units } = charterPacketReadSet(bundle);
+    expect(memberPaths).toEqual([
+      "src/a.ts",
+      "src/api/route.ts",
+      "scripts/run.mjs",
+      "src/b.ts",
+    ]);
+    expect(units.map((unit) => [unit.unit_id, unit.files])).toEqual([
+      ["unit-api", ["src/a.ts", "src/api/route.ts"]],
+      ["unit-scripts", ["scripts/run.mjs"]],
+      ["unit-src", ["src/b.ts"]],
+    ]);
+  });
+
+  it("excludes test files PER FILE: a unit labelled test by its first file keeps its non-test files", () => {
+    // The unit builder stamps a unit's kind from the first file it sees. On the
+    // self-audit `.github/workflows` became a `test` unit because its first
+    // file is `audit-code-test-suite.yml`; a kind filter dropped every other
+    // workflow with it. The per-file classifier keeps them.
+    const bundle = makeBundle();
+    bundle.unit_manifest = {
+      units: [
+        {
+          unit_id: "github-workflows", name: "github-workflows", kind: "test",
+          files: [".github/workflows/audit-code-test-suite.yml", ".github/workflows/release.yml"],
+          required_lenses: [],
+        },
+        { unit_id: "unit-tests", name: "tests", kind: "test", files: ["tests/a.test.ts"], required_lenses: [] },
+        { unit_id: "unit-src", name: "src", kind: "module", files: ["src/a.ts", "src/a.spec.ts"], required_lenses: [] },
+      ],
+    };
+    const { units, memberPaths } = charterPacketReadSet(bundle);
+    expect(units.map((unit) => [unit.unit_id, unit.files])).toEqual([
+      ["github-workflows", [".github/workflows/release.yml"]],
+      ["unit-src", ["src/a.ts"]],
+    ]);
+    expect(memberPaths).toEqual([".github/workflows/release.yml", "src/a.ts"]);
+  });
+
+  it("lists a doc-intent file that is also a member once, as a member", () => {
+    const bundle = makeBundle();
+    bundle.file_disposition!.files.push({ path: "src/notes.txt", status: "included" });
+    bundle.unit_manifest!.units[0]!.files.push("src/notes.txt");
+    const { memberPaths, docPaths } = charterPacketReadSet(bundle);
+    expect(memberPaths).toContain("src/notes.txt");
+    expect(docPaths).toEqual(["README.md"]);
+  });
+
+  it("reads only PROSE as stated testimony — a doc_only fixture, log or license is not a doc", () => {
+    // Disposition marks examples/fixtures, licenses and anything under docs/
+    // `doc_only` ("not auditable code"), which is not the same claim as "states
+    // what the project is for". Reading every doc_only file filled a dogfood
+    // stated packet with fixture JSON, JSONL logs and baseline files.
+    const bundle = makeBundle();
+    bundle.file_disposition = {
+      files: [
+        ...bundle.file_disposition!.files,
+        { path: "docs/guide.md", status: "doc_only" },
+        { path: "docs/.size-baseline.json", status: "doc_only" },
+        { path: "tests/fixtures/run.token-usage.jsonl", status: "doc_only" },
+        { path: "tests/fixtures/contract-matrix.json", status: "doc_only" },
+        { path: "examples/audit_state.example.json", status: "doc_only" },
+        { path: "LICENSE", status: "doc_only" },
+      ],
+    };
+    expect(charterPacketReadSet(bundle).docPaths).toEqual([
+      "README.md",
+      "docs/guide.md",
+    ]);
   });
 });
 
@@ -313,7 +409,9 @@ describe("materializeCharterPacket — blindness is a property of the input", ()
       bundle: makeBundle(),
       kind: "structural",
     });
-    expect(markdown).toContain("src/a.ts");
+    expect(markdown).toContain(
+      ["unit-src — src (module)", "  src/a.ts (100 bytes)", "  src/b.ts (100 bytes)"].join("\n"),
+    );
     expect(markdown).toContain("src/b.ts → src/a.ts");
     expect(markdown).toContain("export function alpha(): number {");
     expect(markdown).not.toContain(CODE_BODY_MARKER);
@@ -511,6 +609,25 @@ describe("materializeCharterPacket — provenance a lane copies (T3)", () => {
     // be trimmed or the stripped quote would no longer match the file.
     expect(markdown).toMatch(new RegExp(`1\\|\\s+${COMMENT_MARKER}`));
     expect(markdown).toContain("lines 1");
+  });
+
+  it("renders one manifest line per excerpt, so the manifest does not outweigh the evidence", async () => {
+    // Pretty-printing every line run as a four-line object made the manifest
+    // of a dogfood stated packet 425 KB of its 3 MB: a prose file skips its
+    // blank lines, so its runs number in the hundreds. The runs are the same
+    // data either way; only the layout changes.
+    const root = await makeRepoRoot();
+    const { markdown, excerpts } = await materializeCharterPacket({
+      root,
+      bundle: makeBundle(),
+      kind: "stated",
+    });
+    const start = markdown.indexOf("```json");
+    const block = markdown.slice(start + 7, markdown.indexOf("```", start + 7));
+    const rowLines = block.split("\n").filter((line) => line.includes('"excerpt_id"'));
+    expect(rowLines).toHaveLength(excerpts.length);
+    for (const line of rowLines) expect(line).toContain('"line_runs":[{"start":');
+    expect(manifestOf(markdown).excerpts).toHaveLength(excerpts.length);
   });
 
   it("numbers a structural declaration against the UNSTRIPPED file", async () => {

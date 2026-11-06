@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/audit-frontier.test.ts
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/intent-checkpoint.test.ts, tests/audit/semantic-review-step.test.ts
 import { hashContent, stableStringify, findingReEmissionKey } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditTask, Finding } from "../types.js";
@@ -10,6 +10,18 @@ import { resolveIntentLensSelection } from "./lensSelection.js";
 import { lineCountForPath } from "./lineCounts.js";
 
 const ARCHITECTURE_DISCOVERY_TAG = "architecture_discovery";
+
+/**
+ * Where the architecture lens is reviewed — the one statement of it. No file
+ * category requires the lens (`LENS_MAP` in `unitBuilder.ts`), so per-file
+ * inspection never carries it: the design review, the charter and the
+ * discovery follow-ups minted below do. Told to the operator when choosing the
+ * lens and again at the review pause, so an inspection workload with no
+ * architecture item never reads as a dropped lens.
+ */
+export const ARCHITECTURE_REVIEW_SCOPE =
+  "reviewed whole-system by the design review, the charter and architecture-discovery follow-ups, " +
+  "not by a blanket per-file inspection sweep";
 const QUESTION_DEPENDENCY_TAG = "requires_question:";
 
 /** Evidence-gathering is independent of unresolved interpretation questions. */

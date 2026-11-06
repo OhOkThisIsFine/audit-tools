@@ -375,14 +375,41 @@ function crossRefPaths(a: LaneGoalNode, b: LaneGoalNode): string[] {
 
 // ── Step 3: the comparison submission → correspondences + differences ──────────
 
-const CorrespondenceInputSchema = z
+/** The fewest members a kept (confirmed, widened or added) correspondence names. */
+export const CORRESPONDENCE_MIN_MEMBERS = 2;
+
+const KeptCorrespondenceInputSchema = z
   .object({
     candidate_id: z.string().min(1).optional(),
-    verdict: z.enum(["confirm", "reject", "widen"]),
-    members: z.array(CorrespondenceMemberSchema).min(2),
+    verdict: z.enum(["confirm", "widen"]),
+    members: z.array(CorrespondenceMemberSchema).min(CORRESPONDENCE_MIN_MEMBERS),
     evidence: z.array(CharterProvenanceSchema).default([]),
   })
   .strict();
+
+/**
+ * A `reject` names the tool candidate it refuses and nothing else is read:
+ * `assembleComparison` drops a rejected entry before it looks at `members` or
+ * `evidence`. Requiring a member set here demanded data the tool discards, and
+ * a reader that sent the natural `{ candidate_id, verdict }` lost the whole
+ * submission to a `members` minimum. `candidate_id` is required, because a
+ * reject that names no candidate refuses nothing. A copied member set or
+ * evidence list is still accepted (and still ignored), so a reader that
+ * repeats the candidate is not refused for it.
+ */
+const RejectedCorrespondenceInputSchema = z
+  .object({
+    candidate_id: z.string().min(1),
+    verdict: z.literal("reject"),
+    members: z.array(CorrespondenceMemberSchema).optional(),
+    evidence: z.array(CharterProvenanceSchema).optional(),
+  })
+  .strict();
+
+const CorrespondenceInputSchema = z.discriminatedUnion("verdict", [
+  KeptCorrespondenceInputSchema,
+  RejectedCorrespondenceInputSchema,
+]);
 
 /**
  * The account minimum is CONDITIONAL on the dimension (owner, 2026-09-17), not flat.

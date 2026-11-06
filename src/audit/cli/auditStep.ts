@@ -2,7 +2,7 @@ import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { ensureRunSourceRoot, resolveRunSince } from "../io/runSnapshot.js";
 import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./reviewSubmission.js";
 import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import { access } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -15,10 +15,9 @@ import {
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
   ClarificationAnswersSubmissionSchema,
-  repoPathUniverse,
-  systemicChallengeSchema,
   type SystemicChallengeSubmission,
 } from "audit-tools/shared";
+import { systemicChallengeSchemaForBundle } from "../orchestrator/systemicChallengeExecutor.js";
 import {
   loadArtifactBundle,
   writeCoreArtifacts,
@@ -298,9 +297,7 @@ async function executeAdvance(
       )
     : undefined;
   const systemicChallenge = options.systemicChallengePath
-    ? (systemicChallengeSchema(
-        repoPathUniverse(bundle.repo_manifest),
-      ).parse(
+    ? (systemicChallengeSchemaForBundle(bundle).parse(
         await readAuditReviewSubmission<unknown>(options.systemicChallengePath, options.artifactsDir, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []), () => currentAuditReviewInputRevision(sourceRoot, bundle, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []))),
       ) as SystemicChallengeSubmission)
     : undefined;

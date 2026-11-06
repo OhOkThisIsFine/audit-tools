@@ -3,7 +3,7 @@ import type { Finding, UnitManifest } from "../types.js";
 import type { GraphBundle, CriticalFlowManifest, RiskRegister } from "audit-tools/shared";
 import { compareCodeUnits } from "audit-tools/shared";
 import { leadSourceHash, stampLeadLineage } from "./leadLineage.js";
-import type { DesignAssessment } from "../types/designAssessment.js";
+import type { DesignAssessment, DesignLeadCategory } from "../types/designAssessment.js";
 import { allGraphEdges, deriveGraphSignals, type GraphSignals } from "./graphSignals.js";
 import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
 import { hasDuplicatedBlock, isComplexityHotspot } from "./analyzers/complexityDuplication.js";
@@ -28,7 +28,12 @@ function createFindingIdGenerator(): () => string {
 interface LeadEmission {
   producer: string;
   signal: unknown;
-  findings: Array<Omit<Finding, "lead_lineage">>;
+  /**
+   * `category` is narrowed to `DesignLeadCategory`: a producer cannot emit a
+   * category the design-review prompts do not list as one a confirming reader
+   * may keep.
+   */
+  findings: Array<Omit<Finding, "lead_lineage" | "category"> & { category: DesignLeadCategory }>;
 }
 
 function stampEmission(emission: LeadEmission): Finding[] {

@@ -270,6 +270,39 @@ describe("buildStructureDecomposition + executor — end to end", () => {
     expect(Array.isArray(decomposition.findings)).toBe(true);
   });
 
+  it("reads only PROSE as doc intent — a doc_only fixture naming code files forms no doc group", async () => {
+    // Disposition gives `doc_only` to fixtures and logs too; one that lists
+    // file paths would otherwise group unrelated code as "a doc names them".
+    const read: string[] = [];
+    const contents: Record<string, string> = {
+      "docs/guide.md": "No paths here.",
+      "tests/fixtures/paths.json": '["src/pay/charge.ts", "src/report/pdf.ts"]',
+    };
+    const decomposition = await buildStructureDecomposition({
+      root: "/repo",
+      repoManifest: bundle.repo_manifest,
+      disposition: {
+        files: [
+          ...bundle.file_disposition.files,
+          { path: "docs/guide.md", status: "doc_only" },
+          { path: "tests/fixtures/paths.json", status: "doc_only" },
+        ],
+      },
+      graphBundle: bundle.graph_bundle,
+      readFileText: async (abs) => {
+        const p = abs.replace(/\\/g, "/");
+        read.push(p);
+        const hit = Object.keys(contents).find((file) => p.endsWith(file));
+        return hit === undefined ? undefined : contents[hit];
+      },
+    });
+    expect(read.some((p) => p.endsWith("docs/guide.md"))).toBe(true);
+    expect(read.some((p) => p.endsWith("tests/fixtures/paths.json"))).toBe(false);
+    const allNodes = [...decomposition.consensus, ...decomposition.contested];
+    expect(allNodes.some((n) =>
+      n.members.includes("src/pay/charge.ts") && n.members.includes("src/report/pdf.ts"))).toBe(false);
+  });
+
   it("executor returns the uniform run result and updates the bundle", async () => {
     const result = await runStructureDecompositionExecutor(bundle);
     expect(result.artifacts_written).toEqual(["structure_decomposition.json"]);

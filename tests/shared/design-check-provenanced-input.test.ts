@@ -161,7 +161,7 @@ test("a review round receives the verified map as a bound file, provenanced as r
       settings: { conceptual_depth: "shallow", max_units: 5 },
     });
     const prompt = await readFile(dispatch.artifactPaths.conceptual_prompt!, "utf8");
-    const mapPath = dispatch.readPaths.find((path) => path.endsWith("review-call-site-map.md"));
+    const mapPath = dispatch.readPaths.find((path) => path.endsWith("review-call-site-map.target.md"));
     expect(mapPath, "the lane's read set must carry the map file").toBeDefined();
     // The map itself — both ends of the edge the round would otherwise re-grep —
     // is in the file the prompt names, not in the prompt.
@@ -213,16 +213,26 @@ test("a review round that disagrees with the map is told to say so and name what
 test("the systemic adversary — a review round — receives the same provenanced map", () => {
   // The audit's OWN review loop is where the ~135k-tokens-a-round rediscovery was
   // measured; a rule wired only into the design-check sweep leaves this lane
-  // paying the same cost with nothing to notice it.
+  // paying the same cost with nothing to notice it. The adversary's map covers
+  // UNCOVERED ground: a deterministic lead no banked finding names.
+  const base = reviewBundle();
+  const bundle: ArtifactBundle = {
+    ...base,
+    design_assessment: {
+      ...base.design_assessment!,
+      findings: [{ ...base.design_assessment!.contract_findings![0]!, id: "L-1", category: "complexity_hotspot" }],
+      contract_findings: [],
+    },
+  };
   const prompt = renderSecondOrderAdversaryPrompt({
     round: 2,
     metrics: { rollups: [], max_fan_out: 0, total_edges: 1, metric_covered_nodes: 0 },
     submissionPath: "/x/incoming/systemic-challenge.json",
-    bundle: reviewBundle(),
+    bundle,
     evidencePaths: [],
   });
-  const map = adversaryFileMapContext(reviewBundle());
-  expect(map.contextFile.text).toContain(TARGET_ANCHOR);
+  const map = adversaryFileMapContext(bundle);
+  expect(map.contextFiles.map((file) => file.text).join("\n")).toContain(TARGET_ANCHOR);
   expect(prompt).not.toContain(TARGET_ANCHOR);
   expect(prompt).toContain(map.summaryLines.join("\n"));
   expect(prompt).toMatch(/did NOT author/i);
@@ -257,7 +267,7 @@ test("a design-review round's map anchors its starting-point files, not the alph
     },
   };
   const prompt = renderConceptualReviewPrompt(bundle, { max_units: 1 });
-  const map = designReviewFileMapContext(bundle, { max_units: 1 }).contextFile.text;
+  const map = designReviewFileMapContext(bundle, { max_units: 1 }).contextFiles.map((file) => file.text).join("\n");
   expect(map).toContain("- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/f00.ts");
   expect(prompt).toMatch(/Scope: the files of the 1 starting-point unit\(s\) listed under "Starting points" in the review prompt — 1 file\(s\) under review/);
   // Not under review, so not anchored — however early it sorts.

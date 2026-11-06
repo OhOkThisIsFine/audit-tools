@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/analyzer-consent-offer.test.ts, tests/shared/review-independence.test.ts, tests/shared/prompts.test.ts
+// sites-pinned: tests/audit/analyzer-consent-offer.test.ts, tests/shared/review-independence.test.ts, tests/shared/prompts.test.ts, tests/audit/inspection-handoff-binding.test.ts
 import {
   DISPATCH_PROMPT_HANDOFF_NOTE,
   ANALYZER_SETTINGS,
@@ -121,6 +121,18 @@ export function nextStepCommand(root: string, artifactsDir: string): string {
     "--artifacts-dir",
     artifactsDir,
   ]);
+}
+
+/** The pre-ingest check of one result file, with its path left as a placeholder. */
+export function validateResultsCommand(root: string, artifactsDir: string): string {
+  return `${renderCommand([
+    ...cliInvocationTokens(),
+    "validate-results",
+    "--root",
+    root,
+    "--artifacts-dir",
+    artifactsDir,
+  ])} --results <result file>`;
 }
 
 export function renderEdgeReasoningDispatchPrompt(params: {

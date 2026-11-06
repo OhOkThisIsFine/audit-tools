@@ -241,6 +241,7 @@ export {
   CharterMergedLaneSchema,
   CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
+  CORRESPONDENCE_MIN_MEMBERS,
   CharterFidelitySubmissionSchema,
   assembleLaneGraph,
   proposeCorrespondences,

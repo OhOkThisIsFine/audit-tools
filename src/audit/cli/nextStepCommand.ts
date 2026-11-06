@@ -78,6 +78,7 @@ import { buildCharterFidelityPacket } from "../orchestrator/charterFidelityPacke
 import { renderCharterClarificationPrompt } from "./charterClarificationPrompt.js";
 import {
   adversaryFileMapContext,
+  systemicEvidencePaths,
   renderSecondOrderAdversaryPrompt,
 } from "../systemic/secondOrderAdversaryPrompt.js";
 import { aggregateMetricsDigest } from "../systemic/aggregateMetricsDigest.js";
@@ -259,7 +260,7 @@ async function prepareContractDispatch(opts: {
         promptFilename: "design-review-contract-prompt.md",
         // The prompt carries the call-site map's summary; the complete map is
         // this read-only, bound file.
-        generatedContext: [designReviewFileMapContext(opts.bundle, reviewOptions).contextFile],
+        generatedContext: designReviewFileMapContext(opts.bundle, reviewOptions).contextFiles,
         // No results-path section here: `materializeFanoutLanes` appends the one
         // canonical footer (bound path + the read-only-executor alternative) to
         // every lane prompt it writes.
@@ -276,12 +277,15 @@ async function prepareContractDispatch(opts: {
 
   return {
     instructionLine:
-      `**Contract review** (adversarial): in ${INDEPENDENT_CONTEXT}, read the prompt at the contract prompt path and write findings to the contract results path.`,
+      // The concrete paths are stated here, from the same values as
+      // `artifactPaths` below: the step markdown is what a host reads, and a
+      // path that lives only in current-step.json is a path it is never told.
+      `**Contract review** (adversarial): in ${INDEPENDENT_CONTEXT}, read the prompt at \`${promptPath}\` and write findings to \`${resultsPath}\`.`,
     artifactPaths: {
       contract_prompt: promptPath,
       contract_results: resultsPath,
     },
-    readPaths: [promptPath, ...fanout.lanes[0]!.generatedContextPaths],
+    readPaths: [promptPath, ...fanout.lanes[0]!.generatedContextPaths, opts.sourceRoot],
     writePaths: [resultsPath],
     shortfall: fanout.shortfall,
   };
@@ -581,6 +585,7 @@ function operatorHandoffBlock(
   };
 }
 
+// sites-pinned: tests/audit/audit-frontier.test.ts
 /** The host can progress inspection without handing its evidence to blind readers. */
 async function withReadyInspection(
   plan: AuditStepPlan,
@@ -600,6 +605,7 @@ async function withReadyInspection(
         ...plan.params.artifactPaths,
         host_workload: handoff.workload_path,
         host_result_map: handoff.result_map_path,
+        host_coherence_groups: handoff.coherence_groups_path,
         active_review_run: inspectionRun.review_run_path,
         pending_audit_tasks: inspectionRun.pending_audit_tasks_path,
       },
@@ -612,7 +618,10 @@ async function withReadyInspection(
       ].join("\n"),
       stopCondition: "Progress the independent ready workloads and call next-step as results arrive.",
       access: {
-        read_paths: [...(plan.params.access?.read_paths ?? []), handoff.workload_path, handoff.result_map_path, inspectionRun.pending_audit_tasks_path],
+        // The snapshot is where every inspection prompt sends its worker to read;
+        // the coherence groups are the scheduling facts beside the workload.
+        read_paths: [...(plan.params.access?.read_paths ?? []), handoff.workload_path, handoff.result_map_path,
+          inspectionRun.pending_audit_tasks_path, handoff.coherence_groups_path, ctx.sourceRoot],
         // Inspection workers own their workload item's bound result_path; those
         // sibling outputs do not widen this architectural step's write scope.
         write_paths: plan.params.access?.write_paths ?? [],
@@ -1274,7 +1283,7 @@ const emitCharterClarification = emissionRow<"charter_clarification">(
   },
 );
 
-// sites-pinned: tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/audit/systemic-round-identity.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 const emitSystemicChallenge = emissionRow<"systemic_challenge">(
   async ({ root, sourceRoot, artifactsDir }, result) => {
     // Phase E second-order adversary (loop-until-dry): the tool has opened the loop
@@ -1289,14 +1298,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
       lane,
     );
   const metrics = aggregateMetricsDigest(result.bundle);
-  const evidencePaths = [
-    ...(result.bundle.charter_register ? [join(artifactsDir, "charter_register.json")] : []),
-    ...(result.bundle.design_assessment ? [join(artifactsDir, "design_assessment.json")] : []),
-    ...(result.bundle.conceptual_review_adjudication ? [join(artifactsDir, "conceptual_review_adjudication.json")] : []),
-    ...(result.bundle.conceptual_review_adjudication?.contributors
-      .filter((contributor) => contributor.role === "perspective")
-      .map((contributor) => contributor.result_path) ?? []),
-  ];
+  const evidencePaths = systemicEvidencePaths(result.bundle, artifactsDir);
   const adversaryPrompt = renderSecondOrderAdversaryPrompt({
     round: (result.bundle.systemic_challenge?.rounds.length ?? 0) + 1,
     metrics,
@@ -1318,7 +1320,7 @@ const emitSystemicChallenge = emissionRow<"systemic_challenge">(
           fileCount: result.bundle.repo_manifest?.files.length ?? 0,
           ...SEMANTIC_REVIEW_DEMAND,
           contextPaths: evidencePaths,
-          generatedContext: [adversaryFileMapContext(result.bundle).contextFile],
+          generatedContext: adversaryFileMapContext(result.bundle).contextFiles,
           label: "Second-order adversary (improvement-seeking challenge)",
           promptFilename: "systemic-challenge-prompt.md",
           promptText: adversaryPrompt,

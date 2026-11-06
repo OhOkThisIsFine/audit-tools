@@ -62,7 +62,9 @@ describe("materializeFanoutLanes", () => {
         "beta_prompt",
         "beta_results",
       ]);
-      expect(fanout.readPaths).toEqual(fanout.pendingLanes.map((l) => l.promptPath));
+      // Plus the source root: every lane prompt tells its reader to verify against
+      // that snapshot, so the step grants it.
+      expect(fanout.readPaths).toEqual([...fanout.pendingLanes.map((l) => l.promptPath), artifactsDir]);
       expect(fanout.writePaths).toEqual(fanout.pendingLanes.map((l) => l.resultPath));
       // The bound path is tool-computed, never the lane's own spelling.
       for (const lane of fanout.lanes) {
@@ -96,8 +98,8 @@ describe("materializeFanoutLanes", () => {
         "STALE PRIOR PROMPT",
       );
       expect(await readFile(alphaSubmission, "utf8")).toBe('{"done":true}');
-      // Access paths instruct only the missing lane.
-      expect(fanout.readPaths).toEqual([join(promptDir, "beta-prompt.md")]);
+      // Access paths instruct only the missing lane (plus the granted source root).
+      expect(fanout.readPaths).toEqual([join(promptDir, "beta-prompt.md"), artifactsDir]);
       expect(fanout.writePaths).toEqual([laneSubmissionPath(artifactsDir, "beta")]);
       // The whole fan-out is still described for the step contract.
       expect(Object.keys(fanout.artifactPaths)).toHaveLength(4);

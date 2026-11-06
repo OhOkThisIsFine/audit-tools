@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import { compareCodeUnits, confidenceRank, severityRank } from "audit-tools/shared";
@@ -16,6 +16,37 @@ import {
   deriveUnitScopeDisposition,
   type UnitScopeDisposition,
 } from "./intentScopeDisposition.js";
+import { ReviewSubmissionEnvelopeSchema } from "audit-tools/shared";
+import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
+import { DesignLeadCategorySchema } from "../types/designAssessment.js";
+
+/**
+ * Where the judge's object sits, DERIVED from the two schemas that parse it.
+ * The judge lane is a bound review lane: its file is a review-submission
+ * envelope whose domain object travels in one key, and the judge schema is
+ * applied to that key's value. Saying "top-level" named the envelope's top
+ * level to a reader holding the envelope, so a judge could set `round_id`
+ * beside `result` — a placement the validator refuses. Typing the key against
+ * the envelope's shape means a renamed envelope key breaks the build here.
+ */
+const ENVELOPE_SHAPE = ReviewSubmissionEnvelopeSchema.innerType().shape;
+const ENVELOPE_RESULT_KEY: keyof typeof ENVELOPE_SHAPE = "result";
+const ENVELOPE_CONTRACT_VERSION = ENVELOPE_SHAPE.contract_version.value;
+const JUDGE_RESULT_KEYS = Object.keys(ConceptualJudgeSubmissionSchema.shape);
+const JUDGE_RESULT_PLACEMENTS = JUDGE_RESULT_KEYS
+  .map((key) => `\`${ENVELOPE_RESULT_KEY}.${key}\``)
+  .join(", ");
+
+/**
+ * The category a CONFIRMED structural lead keeps, rendered beside every pass's
+ * own category list from `DesignLeadCategorySchema` — the same set the lead
+ * producers are typed against. The lead list tells a reader to retain a
+ * confirmed lead's category so `mergeFindings` can match the confirmation; a
+ * permitted list without these categories made that instruction unobeyable.
+ */
+const LEAD_CATEGORY_RULE =
+  "A finding that confirms a structural lead listed above keeps that lead's category instead, one of: " +
+  `${DesignLeadCategorySchema.options.join(", ")}.`;
 
 export { deriveUnitScopeDisposition, type UnitScopeDisposition };
 
@@ -157,6 +188,8 @@ function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): Startin
 function startingPointReviewScope(points: StartingPoints): ReviewFileMapScope {
   return {
     files: points.entries.flatMap((entry) => entry.files),
+    // Sliced by the starting points themselves, in the order the prompt lists them.
+    units: points.entries.map((entry) => ({ unit_id: entry.unit_id, files: entry.files })),
     basis:
       `the files of the ${points.entries.length} starting-point unit(s) listed under ` +
       `"Starting points" in the review prompt`,
@@ -518,7 +551,7 @@ function findingsEnvelopeExample(
     "}",
     "```",
     "",
-    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${categories.join(", ")}. ` +
+    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${categories.join(", ")}. ${LEAD_CATEGORY_RULE} ` +
       "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
       "`affected_files` cites a real path from the file inventory above. Every finding is parsed against " +
       "this contract at ingestion, and a submission carrying one that fails is refused whole — not " +
@@ -618,15 +651,17 @@ function judgeEnvelopeExample(
     "}",
     "```",
     "",
-    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}. ` +
+    `Write the literal value, never the list of permitted ones. \`category\` is one of: ${CONCEPTUAL_FINDING_CATEGORIES.join(", ")}. ${LEAD_CATEGORY_RULE} ` +
       "`severity` is one of: critical, high, medium, low, info. `confidence` is one of: high, medium, low. " +
       "`disposition` is one of: retained, merged, rejected. `verification_status` is one of: " +
       "judge_confirmed, asserted, refuted_at_head. `affected_files` cites a real path from the file " +
       "inventory above.",
     "",
-    "All four top-level keys are REQUIRED and no others are permitted. The submission is parsed whole: " +
-      "a missing key, an extra key, or one finding that fails the contract refuses the entire merge " +
-      "round, and the round's work is lost.",
+    `This object is the value of \`${ENVELOPE_RESULT_KEY}\` in the ${ENVELOPE_CONTRACT_VERSION} envelope ` +
+      `stated at the end of this prompt — never a sibling of \`${ENVELOPE_RESULT_KEY}\`. Its ` +
+      `${JUDGE_RESULT_KEYS.length} keys ${JUDGE_RESULT_PLACEMENTS} are REQUIRED and no others are ` +
+      "permitted. The submission is parsed whole: a missing key, an extra key, or one finding that " +
+      "fails the contract refuses the entire merge round, and the round's work is lost.",
     "",
     "Do NOT supply `verification_status`, `evidence_lane` or `lead_lineage` ON A FINDING. The tool " +
       "derives all three at ingestion. The `verification_status` above belongs to a CANDIDATE " +
@@ -999,7 +1034,7 @@ export function renderConceptualJudgePrompt(
     "- **Account for every candidate.** A candidate is one perspective finding, identified as `<contributor_id>::<source finding id>`. Record exactly one `retained`, `merged`, or `rejected` disposition for every candidate. Retained/merged candidates name every final finding they feed; rejected candidates name none. State a 0-100 `modification_percent` estimating how much the source changed in the final result, plus a concrete transformation/rejection rationale.",
     "- **State what you verified, per candidate.** Every candidate carries a `verification_status`: `judge_confirmed` (you checked the named defect against the current code and it holds), `asserted` (you did not check), or `refuted_at_head` (you checked and it is absent or already fixed). A `judge_confirmed` or `refuted_at_head` candidate ALSO carries a `verification_note` saying what you checked and what you found; an `asserted` candidate must NOT carry one. `asserted` is the honest default — do not claim a check you did not perform.",
     "- **Attribute every final finding.** Allocate contributor shares totaling exactly 100%. Each contributor appears exactly once per final finding: when several of that contributor's candidates feed the same finding, put all their IDs in one `source_candidate_ids` array and allocate one combined share. Perspective shares cite their candidate IDs. Include exactly one explicit `design_review_conceptual` judge share (zero is allowed when the judge only selected unchanged work; positive when the judge added or materially synthesized content). State a rationale for every share.",
-    `- Set top-level \`round_id\` to exactly \`${roundId}\`. In the SAME top-level object as \`findings\`, include \`candidate_dispositions\` entries with \`candidate_id\`, \`contributor_id\`, \`source_finding_id\`, \`disposition\`, \`target_final_finding_ids\`, \`modification_percent\`, \`rationale\`, \`verification_status\`, and \`verification_note\` (only when the status is not \`asserted\`); and \`final_finding_shares\` entries with \`final_finding_id\` plus \`contributors\`, each carrying \`contributor_id\`, \`source_candidate_ids\`, \`contribution_percent\`, and \`rationale\`.`,
+    `- Set \`${ENVELOPE_RESULT_KEY}.round_id\` to exactly \`${roundId}\`. In the SAME \`${ENVELOPE_RESULT_KEY}\` object as \`${ENVELOPE_RESULT_KEY}.findings\`, include \`candidate_dispositions\` entries with \`candidate_id\`, \`contributor_id\`, \`source_finding_id\`, \`disposition\`, \`target_final_finding_ids\`, \`modification_percent\`, \`rationale\`, \`verification_status\`, and \`verification_note\` (only when the status is not \`asserted\`); and \`final_finding_shares\` entries with \`final_finding_id\` plus \`contributors\`, each carrying \`contributor_id\`, \`source_candidate_ids\`, \`contribution_percent\`, and \`rationale\`.`,
     ...conceptualOutputFormat(
       "Produce ONE merged, ranked object. Renumber finding IDs sequentially from DR-001.",
       judgeEnvelopeExample(

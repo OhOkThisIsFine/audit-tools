@@ -225,3 +225,36 @@ test(
     }
   },
 );
+
+test(
+  "design_review_parallel host prompt states every concrete lane prompt and results path it names",
+  { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
+  async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "audit-code-dr-paths-"));
+    const root = join(tempDir, "repo");
+    const artifactsDir = join(root, ".audit-tools/audit");
+    try {
+      await writeFixtureRepo(root);
+      await persistDesignReviewState(root, artifactsDir, { conceptualDone: false });
+
+      await cmdNextStep(["--root", root]);
+      const step: DesignReviewStep = JSON.parse(
+        await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
+      );
+      expect(step.step_kind).toBe("design_review_parallel");
+      // The markdown is what a host reads; a path that lives only in
+      // current-step.json is a path the instruction "read the prompt at the
+      // contract prompt path" never tells it.
+      const hostPrompt = (await readFile(step.prompt_path, "utf8")).replaceAll("\\", "/");
+      for (const key of ["contract_prompt", "contract_results", "conceptual_prompt", "conceptual_results"]) {
+        const path = step.artifact_paths[key];
+        expect(path, `artifact_paths.${key}`).toBeTruthy();
+        expect(hostPrompt, `the host prompt must state artifact_paths.${key}`).toContain(
+          path!.replaceAll("\\", "/"),
+        );
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  },
+);

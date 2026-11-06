@@ -2,7 +2,7 @@ import { preservesSourceIndexes } from "../orchestrator/executorRunners.js";
 import type { SpawnDeadline } from "../../shared/tooling/exec.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { decodeAuditReviewSubmission, readAuditReviewSubmission, currentAuditReviewInputRevision, auditLaneReviewRequirement, type CurrentReviewInputRevision } from "./reviewSubmission.js";
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/next-step-integrity-reintake.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/next-step-integrity-reintake.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 /**
  * Extracted helpers for the next-step command.
  *
@@ -51,8 +51,6 @@ import { markRunEnded } from "../io/rollover.js";
 import {
   auditReportPath,
   groundDesignFindings,
-  repoPathUniverse,
-  systemicChallengeSchema,
   laneAssetsDir,
   promotedAuditReportPath,
 } from "audit-tools/shared";
@@ -136,6 +134,7 @@ import {
 } from "../orchestrator/nextStep.js";
 import { isHostDelegationExecutor } from "../orchestrator/executors.js";
 import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
+import { systemicChallengeSchemaForBundle } from "../orchestrator/systemicChallengeExecutor.js";
 import { deriveObligationState } from "../orchestrator/obligationDerive.js";
 import { deriveAuditState } from "../orchestrator/state.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
@@ -2360,7 +2359,7 @@ export async function handleSystemicChallengeBranch(
       // quarantines the submission, appends the ledger event, and hands the
       // adversary a reason it can act on. Accepting it and deleting it in the
       // fold emptied the round, and an emptied round reads as a quiet one.
-      schema: systemicChallengeSchema(repoPathUniverse(bundle.repo_manifest)),
+      schema: systemicChallengeSchemaForBundle(bundle),
       apply: (_value, path, p, foldBundle, staged) =>
         runAuditStepUnlocked(
           {

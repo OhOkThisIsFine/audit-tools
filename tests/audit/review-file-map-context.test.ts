@@ -21,7 +21,8 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-const MAP_FILENAME = "review-call-site-map.md";
+/** The slice of the one starting-point unit, `target`. */
+const MAP_FILENAME = "review-call-site-map.target.md";
 /** The anchor the map file carries for the one starting-point file. */
 const TARGET_ANCHOR = "- **src/target.ts**\n  - referenced by: src/caller.ts";
 const LANE = GATE_LANES.design_review_conceptual;
@@ -179,20 +180,21 @@ test("a rewired call site re-stales a pending systemic round though its prompt s
       files: [...reviewBundle().repo_manifest!.files, { path: "src/other.ts", language: "typescript", size_bytes: 10 }],
     },
     graph_bundle: { graphs: { calls: [{ from: caller, to: "src/target.ts" }] } },
+    // A deterministic lead no banked finding names: the uncovered ground the
+    // systemic map anchors.
     design_assessment: {
       generated_at: "2026-01-01T00:00:00.000Z",
-      findings: [],
-      contract_findings: [{
-        id: "CR-001",
-        title: "target is serial",
-        category: "systemic_improvement",
-        severity: "medium",
+      findings: [{
+        id: "L-001",
+        title: "Complexity hotspot in target",
+        category: "complexity_hotspot",
+        severity: "low",
         confidence: "medium",
-        lens: "architecture",
-        summary: "target does the work serially",
-        evidence: ["`run` in src/target.ts does the work serially"],
+        lens: "maintainability",
+        summary: "target is complex",
         affected_files: [{ path: "src/target.ts" }],
       }],
+      contract_findings: [],
       contract_reviewed: true,
       conceptual_findings: [],
       conceptual_reviewed: true,

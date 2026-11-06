@@ -1,5 +1,5 @@
 import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
-// sites-pinned: tests/audit/host-handoff.test.ts
+// sites-pinned: tests/audit/host-handoff.test.ts, tests/audit/inspection-handoff-binding.test.ts
 // (the steward-lane verification contract: the lane-aware prompt, the one
 // optional envelope key, the refusal of that key on a lane whose contract never
 // asked for it, the enforcement of every property the prompt states, and the
@@ -9,7 +9,7 @@ import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
 import { sourceTreeInstruction } from "../../io/runSnapshot.js";
 import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { lensDefinition } from "../../types.js";
 
 import {
@@ -52,6 +52,7 @@ import {
   withFileLock,
   writeBlockedStepContract,
   writeJsonFile,
+  toPosixPath,
   type IngestionCheckId,
   type LaneDemand,
   type RunLogger,
@@ -83,7 +84,7 @@ import type {
   AuditHostIngestIssue,
   AuditIngestIssueCode,
 } from "../../validation/ingestIssueCodes.js";
-import { reviewWaveClosedPath } from "../../io/runArtifacts.js";
+import { hostCoherenceGroupsPath, reviewWaveClosedPath } from "../../io/runArtifacts.js";
 // The lane token itself is single-sourced where the steward lane is minted:
 // `LENS_VERIFICATION_TAG` (`orchestrator/selectiveDeepening/shared.ts`). Every
 // reader compiles against that one declaration, so a rename moves them together
@@ -93,6 +94,8 @@ import { reviewWaveClosedPath } from "../../io/runArtifacts.js";
 import {
   LENS_VERIFICATION_TAG,
 } from "../../orchestrator/selectiveDeepening/shared.js";
+import { buildTaskAffinityGraph } from "../../orchestrator/taskAffinityGraph.js";
+import { buildTaskCoherencePartition } from "../../orchestrator/partitionTaskGraph.js";
 
 // v1alpha2 (the emitted-lane demand ranking): each work item's `metadata`
 // carries the shared `demand` ranking (size / complexity / risk) beside its
@@ -116,7 +119,12 @@ import {
 // the result template, its identity values filled in by the tool, and the
 // prompt digest covers the text ABOVE that template. A v1alpha3 document refuses
 // closed as stale — the same `next-step` re-prepares it.
-const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha4" as const;
+//
+// v1alpha5 (the 0.55.15 self-audit): the prompt and its result template name
+// the result path ABSOLUTE, so the persisted template a work item is checked
+// against changed shape. A v1alpha4 document refuses closed as stale — the same
+// `next-step` re-prepares it.
+const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha5" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 
@@ -330,6 +338,8 @@ export interface PreparedAuditHostHandoff {
   readonly result_map: AuditHostResultMap;
   readonly workload_path: string;
   readonly result_map_path: string;
+  readonly coherence_groups: AuditHostCoherenceGroups;
+  readonly coherence_groups_path: string;
 }
 
 /**
@@ -767,9 +777,28 @@ function isVerificationLane(tags: readonly string[] | undefined): boolean {
  * identity values; the worker fills `file_coverage` and `findings`. The digest
  * it states is the digest of the prompt text ABOVE it (see `bindWorkerPrompt`).
  */
+/**
+ * The result path as a worker is told it: ABSOLUTE and forward-slashed. The
+ * persisted `result_path` is repository-relative (it is the binding's identity),
+ * and a relative path in a prompt resolves against whatever directory the
+ * worker runs in — a worker launched in its own directory wrote somewhere the
+ * ingest never reads. Stated absolute, the instruction is cwd-independent.
+ */
+function workerResultPath(root: string, resultPath: string): string {
+  // The drive letter is case-insensitive on every system that has one, so it is
+  // folded to ONE spelling: a run prepared as `c:/repo` and resumed as
+  // `C:/repo` must re-render the identical prompt, or its digest — and every
+  // result bound to it — would go stale for no change at all. A root that
+  // really moved still re-renders differently, and that binding failure is
+  // classified `workload_stale` (see `AuditHostBindingError`): the fold
+  // re-prepares under the new root.
+  return toPosixPath(resolve(root, resultPath)).replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
+}
+
 function renderResultTemplate(
   runId: string,
   workItemId: string,
+  /** Absolute, from {@link workerResultPath}. */
   resultPath: string,
   promptDigest: string,
 ): string {
@@ -845,11 +874,17 @@ function buildPrompt(
     // THE DESTINATION FIRST, on its own line. It used to be one field inside a
     // single long JSON blob, which buries the one fact a reader must not have to
     // search for: a result written anywhere else is never ingested.
-    `Write one JSON object to this exact path: ${resultPath}`,
+    // ABSOLUTE (`workerResultPath`): the worker's working directory is the
+    // host's choice, so no path here may depend on it.
+    `Write one JSON object to this exact absolute path: ${resultPath}`,
     // WHERE TO READ, stated rather than left to the host's working directory:
     // the run audits a frozen snapshot, and the live tree may have moved since
     // the run started. Line counts and cited text are checked against this tree.
     sourceTreeInstruction(sourceRoot),
+    // WHAT ELSE TO WRITE: nothing. Workers in the self-audit wrote scratch
+    // files to the OS temp directory and stalled on the permission prompt each
+    // one raised; the work needs no file but the result.
+    "Write no other file: no scratch, temporary or helper file anywhere. Both paths above are absolute and do not depend on your working directory.",
     // LANE-AWARE, because "review every listed file" is true of the base lane
     // and false of a steward under selective coverage — whose whole task is to
     // decide what is worth opening.
@@ -1080,11 +1115,12 @@ function buildWorkItem(
   task: AuditHostTask,
 ): AuditHostWorkItem {
   const resultPath = resultPathFor(paths, task.task_id);
+  const promptResultPath = workerResultPath(paths.root, resultPath);
   // The SAME path the caller writes the workload to, so a selective lane is told
   // where its surface actually is rather than where it is expected to be.
   const prompt = bindWorkerPrompt(
-    buildPrompt(task, resultPath, paths.workloadPath, boundarySourceRoot(paths)),
-    (digest) => renderResultTemplate(paths.runId, task.task_id, resultPath, digest),
+    buildPrompt(task, promptResultPath, paths.workloadPath, boundarySourceRoot(paths)),
+    (digest) => renderResultTemplate(paths.runId, task.task_id, promptResultPath, digest),
   );
   return {
     id: task.task_id,
@@ -1185,6 +1221,13 @@ export async function prepareAuditHostHandoff(params: {
   readonly tasks: readonly AuditHostTask[];
   /** Includes question-held work, so an empty ready frontier cannot close a live wave. */
   readonly pendingTaskCount?: number;
+  /**
+   * The published tasks' content-coherence groups
+   * ({@link buildAuditHostCoherenceGroups}). Written beside the workload under
+   * the SAME lock, so the two never describe different publishes. Absent, each
+   * item is its own group: no relationship was computed, and none is claimed.
+   */
+  readonly coherenceGroups?: readonly AuditHostCoherenceGroup[];
   /**
    * Threaded into the shared lock substrate so its heartbeat, timeout and
    * stale-lock-reclaim events are recorded rather than lost. Optional: a caller
@@ -1289,11 +1332,20 @@ export async function prepareAuditHostHandoff(params: {
     await writeAcceptedResults(paths, accepted);
     await writeJsonFile(paths.workloadPath, workload);
     await writeJsonFile(paths.resultMapPath, resultMap);
+    const coherenceGroups: AuditHostCoherenceGroups = {
+      contract_version: COHERENCE_GROUPS_CONTRACT_VERSION,
+      run_id: params.runId,
+      groups: coherenceGroupsFor(allWorkItems, params.coherenceGroups),
+    };
+    const coherenceGroupsPath = hostCoherenceGroupsPath(params.artifactsDir, params.runId);
+    await writeJsonFile(coherenceGroupsPath, coherenceGroups);
     return {
       workload,
       result_map: resultMap,
       workload_path: paths.workloadPath,
       result_map_path: paths.resultMapPath,
+      coherence_groups: coherenceGroups,
+      coherence_groups_path: coherenceGroupsPath,
     };
   });
 }
@@ -1311,7 +1363,7 @@ function isSurfaceFileMetrics(value: unknown): boolean {
   return AuditTaskSchema.shape.file_metrics.safeParse(value).success;
 }
 
-function parseWorkItem(value: unknown, runId: string): AuditHostWorkItem | null {
+function parseWorkItem(value: unknown, runId: string, root: string): AuditHostWorkItem | null {
   // `file_metrics` is the ONE optional scope key: a selective (steward) lane
   // carries it, every complete lane omits it. It is added to the expected set
   // only when the document supplies it, exactly as the result envelope treats
@@ -1344,7 +1396,12 @@ function parseWorkItem(value: unknown, runId: string): AuditHostWorkItem | null 
     typeof value.prompt.text !== "string" ||
     !workerPromptBindingHolds(
       { text: value.prompt.text, sha256: value.prompt.sha256 },
-      (digest) => renderResultTemplate(runId, value.id as string, value.result_path as string, digest),
+      (digest) => renderResultTemplate(
+        runId,
+        value.id as string,
+        workerResultPath(root, value.result_path as string),
+        digest,
+      ),
     ) ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, [
@@ -1441,7 +1498,7 @@ class StaleAuditHostTaskBindingsError extends Error {
   }
 }
 
-function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
+function parseWorkload(value: unknown, runId: string, root: string): AuditHostWorkload {
   // Envelope + all-items parsing is the CORE's scaffolding; the audit draw
   // selects only its own contract version and item parser.
   const envelope = parseWorkloadEnvelope(value, {
@@ -1467,7 +1524,7 @@ function parseWorkload(value: unknown, runId: string): AuditHostWorkload {
     throw bindingFailure("workload_binding", "Invalid audit host workload");
   }
   const workItems = parseAllWorkloadItems(envelope.rawItems, (raw) =>
-    parseWorkItem(raw, runId),
+    parseWorkItem(raw, runId, root),
   );
   if (workItems === null) {
     throw bindingFailure("workload_binding", "Invalid audit host work item");
@@ -1647,7 +1704,7 @@ export async function readPublishedAuditTaskIds(params: {
     let items: Map<string, AuditHostWorkItem>;
     let bindings: Map<string, AuditHostTaskBinding>;
     try {
-      const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId);
+      const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId, paths.root);
       const resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), paths.runId);
       bindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), paths.runId);
       items = validateHandoffBinding(paths, workload, resultMap, bindings);
@@ -2086,6 +2143,352 @@ function evictInvalidatedEntries(
   return { kept: { ...loaded, entries: kept }, issues };
 }
 
+/**
+ * The ONE judgment of one bound submission: read it at its bound path, parse
+ * the envelope against its binding, convert it, ground its cited text, and put
+ * it through the per-result validator. Ingestion ACCEPTS on `ok`; the
+ * read-only check ({@link checkAuditHostResult}) only reports — so a host that
+ * checks a result before ingestion is told exactly what ingestion would say.
+ */
+async function judgeAuditHostSubmission(params: {
+  readonly paths: ResolvedBoundaryPaths;
+  readonly entry: AuditHostResultMapEntry;
+  readonly item: AuditHostWorkItem;
+  readonly binding: AuditHostTaskBinding;
+  readonly seen: (resultId: string) => boolean;
+  readonly activeTaskIds: ReadonlySet<string>;
+  readonly auditTasks: readonly AuditTask[];
+  readonly lineIndex?: Record<string, number>;
+  readonly readSource: ReturnType<typeof createMemoizedSourceReader>;
+  /** Lazily enumerated: an empty-findings submission needs no git call. */
+  readonly knownPaths: () => Promise<ReadonlySet<string>>;
+}): Promise<
+  | { readonly ok: false; readonly issue: AuditHostIngestIssue }
+  | {
+      readonly ok: true;
+      readonly result: AuditHostResult;
+      readonly auditResult: AuditResult;
+      readonly warnings: readonly AuditHostValidationWarning[];
+    }
+> {
+  const { paths, entry, item, binding } = params;
+  const outcome = await scanBoundSubmission<AuditHostResult>({
+    root: paths.root,
+    artifactsDir: paths.artifactsDir,
+    workItemId: entry.work_item_id,
+    resultPath: entry.result_path,
+    parse: (value) => {
+      const parsed = parseHostResult(value, paths.runId, item, binding);
+      return parsed.ok ? { ok: true, parsed: parsed.result } : parsed;
+    },
+    resultId: (result) => result.result_id,
+    seen: params.seen,
+    messages: auditScanMessages(entry.work_item_id),
+  });
+  if (!outcome.ok) return { ok: false, issue: outcome.issue };
+  const result = outcome.parsed;
+  const converted = toAuditResult(result, binding);
+  if (!converted.ok) {
+    return {
+      ok: false,
+      issue: {
+        code: "submission_contract_invalid",
+        check: "result_schema",
+        message:
+          `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
+          `an AuditResult: ${converted.detail}`,
+        work_item_id: entry.work_item_id,
+        result_path: entry.result_path,
+      },
+    };
+  }
+
+  // S7 quote-and-verify: the tool re-reads each cited span from disk, stamps
+  // the verdict, and writes each entry's line numbers from where its quote
+  // occurs. It NEVER rejects — a quote that is absent or occurs more than
+  // once rides through as `ungrounded` and synthesis surfaces it under
+  // "Ungrounded Findings (not confirmed)"; refusing here would discard the
+  // whole submission over one bad citation. It mutates the CONVERTED copy
+  // only: `result` stays the host's submission, which `result_sha256` hashes.
+  // It runs BEFORE validation, so the derived span meets the same coverage
+  // rule here that the downstream batch gate applies: a span that rule would
+  // refuse is refused while the item can still be resubmitted, never
+  // accepted and then replayed into a failing gate on every later step.
+  for (const finding of converted.auditResult.findings) {
+    await groundFinding(boundarySourceRoot(paths), finding, params.readSource, await params.knownPaths());
+  }
+
+  // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
+  // contract (`FindingSchema` admits an evidence-less finding); these are the
+  // per-result rules the downstream batch gate applies, applied HERE so an
+  // error-severity issue never reaches the accepted pair. A rejected item is
+  // simply never in the ledger, so the corrected file at the same bound path
+  // is re-read on the next fold — acceptance used to be terminal instead, and
+  // a failed batch gate then wedged the run permanently.
+  //
+  // Orphans (task pruned by a re-plan) pass through UNVALIDATED with the same
+  // stderr notice the batch gate uses — never newly rejected: refusing one
+  // here would strand it outside the append-only ledger entirely.
+  if (!params.activeTaskIds.has(entry.work_item_id)) {
+    process.stderr.write(
+      `audit host-handoff ingest: result for '${entry.work_item_id}' is not in the ` +
+        `active task manifest (orphaned by re-planning); retained in the accepted pair ` +
+        `but skipped at the validation gate\n`,
+    );
+    return { ok: true, result, auditResult: converted.auditResult, warnings: [] };
+  }
+  const validationIssues = validateOneAuditResult(converted.auditResult, [...params.auditTasks], {
+    lineIndex: params.lineIndex,
+  });
+  const errors = validationIssues.filter((issue) => issue.severity === "error");
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      issue: {
+        code: "result_validation_failed",
+        check: "result_validation",
+        message:
+          `work item '${entry.work_item_id}' failed audit-results validation ` +
+          `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +
+          formatAuditResultIssues(errors),
+        work_item_id: entry.work_item_id,
+        result_path: entry.result_path,
+      },
+    };
+  }
+  // Warnings are NOT rejections: an accepted result never refused anything,
+  // so a warning must never reach the rejection-classified issue list — the
+  // ONE ledger recorder would otherwise record kind:'rejected' for a result
+  // that was accepted, manufacturing a repair story that never happened.
+  // They ride the separate advisory channel instead (rendered for the
+  // operator; never counted as a submission that could not be accepted).
+  const warnings = validationIssues
+    .filter((issue) => issue.severity === "warning")
+    .map(
+      (warning): AuditHostValidationWarning => ({
+        work_item_id: entry.work_item_id,
+        result_path: entry.result_path,
+        message: `${warning.message} (${warning.field})`,
+      }),
+    );
+  return { ok: true, result, auditResult: converted.auditResult, warnings };
+}
+
+/**
+ * The run's published binding set — workload, result map, task bindings — read
+ * and cross-checked, or the CLASSIFIED refusal ingestion reports for it. One
+ * reader for both doors, so the read-only check refuses a stale or corrupt set
+ * exactly as ingestion does, never as a stack. Infrastructure failures stay
+ * strict.
+ */
+async function readHandoffBindingSet(paths: ResolvedBoundaryPaths): Promise<
+  | {
+      readonly ok: true;
+      readonly resultMap: AuditHostResultMap;
+      readonly taskBindings: Map<string, AuditHostTaskBinding>;
+      readonly items: Map<string, AuditHostWorkItem>;
+    }
+  | { readonly ok: false; readonly refusal: AuditHostBindingError | StaleAuditHostWorkloadError | StaleAuditHostTaskBindingsError }
+> {
+  try {
+    const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId, paths.root);
+    const resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), paths.runId);
+    const taskBindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), paths.runId);
+    const items = validateHandoffBinding(paths, workload, resultMap, taskBindings);
+    return { ok: true, resultMap, taskBindings, items };
+  } catch (error) {
+    if (error instanceof StaleAuditHostWorkloadError ||
+        error instanceof StaleAuditHostTaskBindingsError ||
+        error instanceof AuditHostBindingError) return { ok: false, refusal: error };
+    if (isJsonParseError(error)) {
+      return { ok: false, refusal: new AuditHostBindingError("workload_binding", error.message) };
+    }
+    throw error;
+  }
+}
+
+/** What {@link checkAuditHostResult} reports about one result file. */
+export interface AuditHostResultCheck {
+  readonly run_id: string;
+  /** Absent when the run's binding set itself was refused: no item could be resolved. */
+  readonly work_item_id?: string;
+  /** Repository-relative, as the result map binds it; absent with `work_item_id`. */
+  readonly result_path?: string;
+  /** This binding is already on the accepted ledger; ingestion will not re-read it. */
+  readonly already_accepted: boolean;
+  /** Empty exactly when ingestion would accept the file as it stands. */
+  readonly issues: readonly AuditHostIngestIssue[];
+  readonly validation_warnings: readonly AuditHostValidationWarning[];
+}
+
+/**
+ * Judge one host result file by the rules ingestion applies, WITHOUT accepting
+ * it: nothing is written, no lock is held, the ledger is only read. The run is
+ * named by where the file lives (`<artifacts>/runs/<run id>/host-results/…`),
+ * and the file must be the bound result path of one of that run's work items.
+ */
+export async function checkAuditHostResult(params: {
+  readonly root: string;
+  readonly sourceRoot: string;
+  readonly artifactsDir: string;
+  readonly resultPath: string;
+  readonly auditTasks: readonly AuditTask[];
+  readonly lineIndex?: Record<string, number>;
+}): Promise<AuditHostResultCheck> {
+  const absolute = resolve(params.resultPath);
+  const segments = toPosixPath(relative(resolve(params.artifactsDir, "runs"), absolute)).split("/");
+  if (segments.length !== 3 || segments[1] !== "host-results" || segments[0] === "..") {
+    throw new Error(
+      `${toPosixPath(absolute)} is not a bound host result path. A semantic-review result is written at the ` +
+        "`result_path` its work item binds in the published host-workload.json, under " +
+        `${toPosixPath(join(resolve(params.artifactsDir), "runs", "<run id>", "host-results"))}/; ` +
+        "write it there and validate that file.",
+    );
+  }
+  const runId = segments[0]!;
+  const paths = resolveBoundaryPaths({
+    root: params.root,
+    sourceRoot: params.sourceRoot,
+    artifactsDir: params.artifactsDir,
+    runId,
+  });
+  let bindingSet: Awaited<ReturnType<typeof readHandoffBindingSet>>;
+  try {
+    bindingSet = await readHandoffBindingSet(paths);
+  } catch (error) {
+    if (!isFileMissingError(error)) throw error;
+    throw new Error(
+      `run ${runId} has no published workload (${toPosixPath(paths.workloadPath)} is missing); ` +
+        "run next-step to publish one, then write each result at the result_path it binds.",
+    );
+  }
+  if (!bindingSet.ok) {
+    // The SAME classified refusal ingestion reports for this binding set.
+    return {
+      run_id: runId,
+      already_accepted: false,
+      issues: [{ code: bindingSet.refusal.code, check: bindingSet.refusal.check, message: bindingSet.refusal.message }],
+      validation_warnings: [],
+    };
+  }
+  const { resultMap, taskBindings, items } = bindingSet;
+  const entry = resultMap.entries.find(
+    (candidate) => resolve(paths.root, candidate.result_path) === absolute,
+  );
+  const item = entry === undefined ? undefined : items.get(entry.work_item_id);
+  const binding = entry === undefined ? undefined : taskBindings.get(entry.work_item_id);
+  if (entry === undefined || item === undefined || binding === undefined) {
+    throw new Error(
+      `${toPosixPath(absolute)} is not the bound result path of any work item in run ${runId}. ` +
+        `Each work item in ${toPosixPath(paths.workloadPath)} names its own result_path; write the result there and validate that file.`,
+    );
+  }
+  const accepted = await loadAcceptedResults(paths.acceptedLedgerPath, runId);
+  const alreadyAccepted = accepted.entries.some(
+    (candidate) => bindingIdentity(candidate) === bindingIdentity(entry),
+  );
+  // An accepted binding's own id is not a duplicate of itself: the check judges
+  // the bytes, and says separately that ingestion will not re-read them.
+  const otherIds = new Set(
+    accepted.entries
+      .filter((candidate) => candidate.work_item_id !== entry.work_item_id)
+      .map((candidate) => candidate.result_id),
+  );
+  let knownPaths: ReadonlySet<string> | undefined;
+  const judged = await judgeAuditHostSubmission({
+    paths,
+    entry,
+    item,
+    binding,
+    seen: (resultId) => otherIds.has(resultId),
+    activeTaskIds: new Set(params.auditTasks.map((task) => task.task_id)),
+    auditTasks: params.auditTasks,
+    lineIndex: params.lineIndex,
+    readSource: createMemoizedSourceReader(),
+    knownPaths: async () => (knownPaths ??= await enumerateTrackedFilePaths(boundarySourceRoot(paths))),
+  });
+  return {
+    run_id: runId,
+    work_item_id: entry.work_item_id,
+    result_path: entry.result_path,
+    already_accepted: alreadyAccepted,
+    issues: judged.ok ? [] : [judged.issue],
+    validation_warnings: judged.ok ? judged.warnings : [],
+  };
+}
+
+/** The set-level scheduling facts beside a published workload. */
+const COHERENCE_GROUPS_CONTRACT_VERSION = "audit-host-coherence-groups/v1alpha1" as const;
+
+export interface AuditHostCoherenceGroup {
+  /** The lowest work-item id in the group: content-derived. */
+  readonly id: string;
+  readonly work_item_ids: readonly string[];
+  /** Sum of the members' local token estimates. */
+  readonly token_estimate: number;
+}
+
+export interface AuditHostCoherenceGroups {
+  readonly contract_version: typeof COHERENCE_GROUPS_CONTRACT_VERSION;
+  readonly run_id: string;
+  readonly groups: readonly AuditHostCoherenceGroup[];
+}
+
+/**
+ * The groups to publish: the caller's, which must partition EXACTLY the
+ * published items (a group naming an unpublished item, or an item in no group,
+ * would describe a different publish), or one singleton per item.
+ */
+function coherenceGroupsFor(
+  items: readonly AuditHostWorkItem[],
+  supplied: readonly AuditHostCoherenceGroup[] | undefined,
+): readonly AuditHostCoherenceGroup[] {
+  if (supplied === undefined) {
+    return items.map((item) => ({
+      id: item.id,
+      work_item_ids: [item.id],
+      token_estimate: item.metadata.token_estimate,
+    }));
+  }
+  const members = supplied.flatMap((group) => group.work_item_ids).sort(compareCodeUnits);
+  const published = items.map((item) => item.id);
+  if (stableStringify(members) !== stableStringify(published)) {
+    throw new Error("audit host coherence groups do not partition the published work items exactly");
+  }
+  return supplied;
+}
+
+/**
+ * Content-coherence groups over the work items a wave PUBLISHES: the shared
+ * task-draw partition (`buildTaskCoherencePartition`) of the affinity graph
+ * built from exactly those tasks. Items in one group share files, a unit, a
+ * flow, a directory or graph adjacency, so one lane taking them together reads
+ * each file once.
+ *
+ * SET-LEVEL, deliberately, and never a field on a work item: a group is a
+ * property of the whole published set, so on an item it would rewrite that
+ * item whenever a peer is added or accepted — and an unchanged published item
+ * must re-publish byte-identical. Metadata only: order, grouping and
+ * parallelism stay the host's choice.
+ */
+export function buildAuditHostCoherenceGroups(
+  tasks: readonly AuditTask[],
+  graphBundle: ArtifactBundle["graph_bundle"],
+): readonly AuditHostCoherenceGroup[] {
+  const partition = tasks.length === 0
+    ? { packets: [] }
+    : buildTaskCoherencePartition(
+        buildTaskAffinityGraph(tasks, graphBundle === undefined ? {} : { graphBundle }),
+      );
+  const groups = partition.packets
+    .map((packet) => {
+      const ids = [...packet.task_ids].sort(compareCodeUnits);
+      return { id: ids[0]!, work_item_ids: ids, token_estimate: packet.token_estimate };
+    })
+    .sort((left, right) => compareCodeUnits(left.id, right.id));
+  return groups;
+}
+
 export async function ingestAuditHostResults(params: {
   readonly root: string;
   /** The run's frozen snapshot root: cited text is grounded against it. */
@@ -2159,25 +2562,9 @@ export async function ingestAuditHostResults(params: {
       raw_issues: [...evictionIssues(), error],
       validation_warnings: [],
     });
-    let workload: AuditHostWorkload;
-    let resultMap: AuditHostResultMap;
-    let taskBindings: Map<string, AuditHostTaskBinding>;
-    let items: Map<string, AuditHostWorkItem>;
-    try {
-      workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), params.runId);
-      resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), params.runId);
-      taskBindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), params.runId);
-      items = validateHandoffBinding(paths, workload, resultMap, taskBindings);
-    } catch (error) {
-      if (error instanceof StaleAuditHostWorkloadError ||
-          error instanceof StaleAuditHostTaskBindingsError ||
-          error instanceof AuditHostBindingError) return stale(error);
-      if (isJsonParseError(error)) {
-        return stale(new AuditHostBindingError("workload_binding", error.message));
-      }
-      // Infrastructure failures and corrupt accepted ledgers remain strict.
-      throw error;
-    }
+    const bindingSet = await readHandoffBindingSet(paths);
+    if (!bindingSet.ok) return stale(bindingSet.refusal);
+    const { resultMap, taskBindings, items } = bindingSet;
     const acceptedBindings = new Set(accepted.entries.map(bindingIdentity));
     const resultIds = new Set(accepted.entries.map((entry) => entry.result_id));
     const additions: AcceptedResultEntry[] = [];
@@ -2195,111 +2582,26 @@ export async function ingestAuditHostResults(params: {
       const item = items.get(entry.work_item_id);
       const binding = taskBindings.get(entry.work_item_id);
       if (item === undefined || binding === undefined) continue;
-      const outcome = await scanBoundSubmission<AuditHostResult>({
-        root: paths.root,
-        artifactsDir: paths.artifactsDir,
-        workItemId: entry.work_item_id,
-        resultPath: entry.result_path,
-        parse: (value) => {
-          const parsed = parseHostResult(value, params.runId, item, binding);
-          return parsed.ok ? { ok: true, parsed: parsed.result } : parsed;
-        },
-        resultId: (result) => result.result_id,
-        // CHECK only. The id is consumed further down, after conversion,
-        // validation and grounding — a result refused there must stay re-submittable.
+      const judged = await judgeAuditHostSubmission({
+        paths,
+        entry,
+        item,
+        binding,
+        // CHECK only. The id is consumed below, after the judgment — a result
+        // refused there must stay re-submittable.
         seen: (resultId) => resultIds.has(resultId),
-        messages: auditScanMessages(entry.work_item_id),
+        activeTaskIds,
+        auditTasks: params.auditTasks,
+        lineIndex: params.lineIndex,
+        readSource,
+        knownPaths: async () => (knownPaths ??= await enumerateTrackedFilePaths(boundarySourceRoot(paths))),
       });
-      if (!outcome.ok) {
-        issues.push(outcome.issue);
+      if (!judged.ok) {
+        issues.push(judged.issue);
         continue;
       }
-      const result = outcome.parsed;
-      const converted = toAuditResult(result, binding);
-      if (!converted.ok) {
-        issues.push({
-          code: "submission_contract_invalid",
-          check: "result_schema",
-          message:
-            `work item '${entry.work_item_id}' submitted a result that does not convert to ` +
-            `an AuditResult: ${converted.detail}`,
-          work_item_id: entry.work_item_id,
-          result_path: entry.result_path,
-        });
-        continue;
-      }
-
-      // S7 quote-and-verify: the tool re-reads each cited span from disk, stamps
-      // the verdict, and writes each entry's line numbers from where its quote
-      // occurs. It NEVER rejects — a quote that is absent or occurs more than
-      // once rides through as `ungrounded` and synthesis surfaces it under
-      // "Ungrounded Findings (not confirmed)"; refusing here would discard the
-      // whole submission over one bad citation. It mutates the CONVERTED copy
-      // only: `result` stays the host's submission, which `result_sha256` hashes.
-      // It runs BEFORE validation, so the derived span meets the same coverage
-      // rule here that the downstream batch gate applies: a span that rule would
-      // refuse is refused while the item can still be resubmitted, never
-      // accepted and then replayed into a failing gate on every later step.
-      for (const finding of converted.auditResult.findings) {
-        knownPaths ??= await enumerateTrackedFilePaths(boundarySourceRoot(paths));
-        await groundFinding(boundarySourceRoot(paths), finding, readSource, knownPaths);
-      }
-
-      // VALIDATE BEFORE ACCEPT. The conversion above proves only the envelope
-      // contract (`FindingSchema` admits an evidence-less finding); these are the
-      // per-result rules the downstream batch gate applies, applied HERE so an
-      // error-severity issue never reaches the accepted pair. A rejected item is
-      // simply never in the ledger, so the corrected file at the same bound path
-      // is re-read on the next fold — acceptance used to be terminal instead, and
-      // a failed batch gate then wedged the run permanently.
-      //
-      // Orphans (task pruned by a re-plan) pass through UNVALIDATED with the same
-      // stderr notice the batch gate uses — never newly rejected: refusing one
-      // here would strand it outside the append-only ledger entirely.
-      if (!activeTaskIds.has(entry.work_item_id)) {
-        process.stderr.write(
-          `audit host-handoff ingest: result for '${entry.work_item_id}' is not in the ` +
-            `active task manifest (orphaned by re-planning); retained in the accepted pair ` +
-            `but skipped at the validation gate\n`,
-        );
-      } else {
-        const validationIssues = validateOneAuditResult(converted.auditResult, [
-          ...params.auditTasks,
-        ], {
-          lineIndex: params.lineIndex,
-        });
-        const errors = validationIssues.filter((issue) => issue.severity === "error");
-        if (errors.length > 0) {
-          issues.push({
-            code: "result_validation_failed",
-            check: "result_validation",
-            message:
-              `work item '${entry.work_item_id}' failed audit-results validation ` +
-              `(${errors.length} error(s)); fix the result file at its bound path and call next-step again: ` +
-              formatAuditResultIssues(errors),
-            work_item_id: entry.work_item_id,
-            result_path: entry.result_path,
-          });
-          continue;
-        }
-        // Warnings are NOT rejections: an accepted result never refused anything,
-        // so a warning must never reach the rejection-classified issue list — the
-        // ONE ledger recorder would otherwise record kind:'rejected' for a result
-        // that was accepted, manufacturing a repair story that never happened.
-        // They ride the separate advisory channel instead (rendered for the
-        // operator; never counted as a submission that could not be accepted).
-        validation_warnings.push(
-          ...validationIssues
-            .filter((issue) => issue.severity === "warning")
-            .map(
-              (warning): AuditHostValidationWarning => ({
-                work_item_id: entry.work_item_id,
-                result_path: entry.result_path,
-                message: `${warning.message} (${warning.field})`,
-              }),
-            ),
-        );
-      }
+      validation_warnings.push(...judged.warnings);
+      const { result, auditResult } = judged;
 
       resultIds.add(result.result_id);
       // construction-site: AuditResult
@@ -2311,7 +2613,7 @@ export async function ingestAuditHostResults(params: {
         result_id: result.result_id,
         result_sha256: contentSha256(result),
         result,
-        audit_result: converted.auditResult,
+        audit_result: auditResult,
       });
     }
 

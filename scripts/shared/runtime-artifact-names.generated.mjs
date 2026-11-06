@@ -57,6 +57,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "handoff-repair.json",
   "host-accepted-results-ledger.json",
   "host-accepted-results.json",
+  "host-coherence-groups.json",
   "host-result-map.json",
   "host-task-bindings.json",
   "host-workload.json",

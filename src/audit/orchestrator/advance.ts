@@ -106,6 +106,9 @@ const SLICE_PARTICIPANT_PRODUCERS: Readonly<Record<string, readonly string[]>> =
     "charter_fidelity_current",
   ],
   "structure_decomposition.json": ["structure_decomposition_current"],
+  // sites-pinned: tests/audit/advance-drain-loop.test.ts, tests/audit/charter-packets.test.ts
+  // The charter packets' unit partition; the structure pass writes it.
+  "unit_manifest.json": ["structure_artifacts"],
   "repo_manifest.json": ["repo_manifest"],
   // Written by the structure pass and again by graph enrichment.
   "graph_bundle.json": ["structure_artifacts", "graph_enrichment_current"],

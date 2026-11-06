@@ -45,7 +45,7 @@ function deepCeilingBundle(): ArtifactBundle {
     syntax_resolution_status: {},
     external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     external_analyzer_results: [{ tool: "eslint", results: [] }],
-    unit_manifest: { units: [] },
+    unit_manifest: { units: [{ unit_id: "src-a", name: "src-a", kind: "module", files: ["src/a.ts"], required_lenses: [] }] },
     surface_manifest: { surfaces: [] },
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [], fallback_required: false },

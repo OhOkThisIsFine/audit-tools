@@ -7,7 +7,10 @@
 // validates that submission against (mirrors the Phase-D
 // `ClarificationAnswersSubmission`). The findings carry their TRUE lens — the
 // adversary tags a test-parallelization finding `tests`/`performance`, an ops finding
-// `operability` — NEVER a hardcoded `architecture` label. The loop enforcement
+// `operability` — NEVER a hardcoded `architecture` label, and never refused because
+// that lens is outside the operator's selection: the selection is the round's
+// focus, stated in its prompt, not an admission filter (the design-review lanes'
+// rule since 7a624e00; owner decision 2026-11-05). The loop enforcement
 // (grounding, dedupe against prior rounds, convergence) is deterministic and lives
 // audit-side (src/audit/systemic/systemicChallengeLoop.ts).
 //

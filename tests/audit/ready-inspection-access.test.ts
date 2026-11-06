@@ -37,6 +37,10 @@ test("ready inspection keeps the architecture contract constant at 470 pending r
         ],
       },
       file_disposition: { files: [{ path: "README.md", status: "doc_only" }] },
+      // The charter read set is the unit partition's non-test files (R5).
+      unit_manifest: {
+        units: [{ unit_id: "source", name: "source", kind: "module", files: ["src/a.ts"], required_lenses: [] }],
+      },
       structure_decomposition: {
         generated_at: "2026-01-01T00:00:00Z", target: "structure", node_universe_size: 1,
         source_ids: [], consensus: [{ node_id: "source", members: ["src/a.ts"],
@@ -87,6 +91,9 @@ test("ready inspection keeps the architecture contract constant at 470 pending r
         ...ownStep.access!.read_paths,
         inspectionRun.host_workload_path, inspectionRun.host_result_map_path,
         inspectionRun.pending_audit_tasks_path,
+        // The coherence groups sit beside the workload; the source root is
+        // where every inspection prompt sends its worker to read.
+        join(runDir, "host-coherence-groups.json"), root,
       ].map(toPosixPath));
 
       const workload: AuditHostWorkload = JSON.parse(await readFile(inspectionRun.host_workload_path, "utf8"));

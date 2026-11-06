@@ -1212,8 +1212,8 @@ const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
 );
 type CharterRegister =
   import("../../src/audit/types/charterRegister.js").CharterRegister;
-type StructureDecomposition =
-  import("../../src/audit/types/structureDecomposition.js").StructureDecomposition;
+type UnitManifest =
+  import("../../src/audit/types.js").UnitManifest;
 type TaskAffinityGraph =
   import("../../src/audit/orchestrator/taskAffinityGraph.js").TaskAffinityGraph;
 
@@ -1240,28 +1240,19 @@ function captureStalenessRecords(run: () => void): Array<Record<string, unknown>
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+const ZZ = "tests/zz.test.ts";
+
 /**
  * A charter-layer bundle: the ONE registered slice-projected downstream
  * (`charter_register.json`) present over its projected upstreams, so the
  * transitive closure's slice-protected branch is reachable at all.
  */
 function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
-  const structure: StructureDecomposition = {
-    generated_at: "2026-07-23T00:00:00Z",
-    target: "structure",
-    node_universe_size: 5,
-    source_ids: ["source-a"],
-    consensus: [
-      {
-        node_id: "src/a.ts",
-        members: ["src/a.ts", "src/b.ts"],
-        agreed_across_source: 1,
-        stable_across_scale: 1,
-        contested: false,
-      },
+  const units: UnitManifest = {
+    units: [
+      { unit_id: "src", name: "src", kind: "module", files: ["src/a.ts", "src/b.ts"], required_lenses: [] },
+      { unit_id: "tests", name: "tests", kind: "test", files: [ZZ], required_lenses: [] },
     ],
-    contested: [],
-    findings: [],
   };
   const charter: CharterRegister = {
     schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
@@ -1278,19 +1269,20 @@ function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
       files: [
         { path: "src/a.ts", language: "ts", size_bytes: 10, hash: "hash-a" },
         { path: "src/b.ts", language: "ts", size_bytes: 20, hash: "hash-b" },
-        // Neither a consensus member nor a doc: its content churn moves
-        // repo_manifest's whole hash while leaving the charter slice fixed.
-        { path: "src/zz.ts", language: "ts", size_bytes: 9, hash: "hash-zz" },
+        // A test-unit file, neither a charter member nor a doc: its content
+        // churn moves repo_manifest's whole hash while leaving the charter
+        // slice fixed.
+        { path: ZZ, language: "ts", size_bytes: 9, hash: "hash-zz" },
       ],
     },
     file_disposition: {
       files: [
         { path: "src/a.ts", status: "included" },
         { path: "src/b.ts", status: "included" },
-        { path: "src/zz.ts", status: "included" },
+        { path: ZZ, status: "included" },
       ],
     },
-    structure_decomposition: structure,
+    unit_manifest: units,
     charter_register: charter,
     ...over,
   };
@@ -1298,7 +1290,7 @@ function makeCharterBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
 
 /**
  * Drive the fixture into the deferral state: an out-of-slice manifest churn
- * that stales `structure_decomposition.json` (whole-hash edge) while the
+ * that stales `unit_manifest.json` (whole-hash edge) while the
  * charter register's recorded slice for that edge is untouched — so the
  * closure reaches charter across a slice-projected edge from a
  * stale-and-PENDING upstream.
@@ -1314,14 +1306,14 @@ function makeDeferralFixture(): {
     [
       "repo_manifest.json",
       "file_disposition.json",
-      "structure_decomposition.json",
+      "unit_manifest.json",
       "charter_register.json",
     ],
   );
   // The recorded slice is what makes this edge slice-protected at all.
   expect(
     stamped.artifacts["charter_register.json"]!.dependency_slices![
-      "structure_decomposition.json"
+      "unit_manifest.json"
     ],
     "the fixture only exercises the slice branch if a slice was recorded",
   ).toBeDefined();
@@ -1331,11 +1323,11 @@ function makeDeferralFixture(): {
     repo_manifest: {
       ...base.repo_manifest!,
       files: base.repo_manifest!.files.map((file) =>
-        file.path === "src/zz.ts" ? { ...file, hash: "hash-zz-CHANGED" } : file,
+        file.path === ZZ ? { ...file, hash: "hash-zz-CHANGED" } : file,
       ),
     },
   };
-  // repo_manifest re-derives (listed) — structure_decomposition is now the
+  // repo_manifest re-derives (listed) — unit_manifest is now the
   // stale-and-pending upstream, and charter's recorded slice is unmoved.
   const manifest = computeArtifactMetadata(churned, stamped, [
     "repo_manifest.json",
@@ -1355,7 +1347,7 @@ test("CP-NODE-10 inv-4: a slice-protected deferral is reported on the result AND
   // The walk really did reach the slice-protected edge: the upstream is stale
   // and pending, and the downstream is present.
   expect(
-    stale.has("structure_decomposition.json"),
+    stale.has("unit_manifest.json"),
     "the fixture must present a stale-and-pending slice-projected upstream",
   ).toBe(true);
   expect(present(bundle, "charter_register.json")).toBe(true);
@@ -1387,21 +1379,18 @@ test("CP-NODE-10 inv-1: a deferred downstream is REACHED on a later call once it
   expect([...call1.deferred]).toContain("charter_register.json");
 
   // The pending upstream now re-derives, and its re-derivation MOVES the slice
-  // charter consumes (consensus membership changed).
+  // charter consumes (the partition of non-test files changed).
   const rederived: ArtifactBundle = {
     ...call1Bundle,
-    structure_decomposition: {
-      ...call1Bundle.structure_decomposition!,
-      consensus: [
-        {
-          ...call1Bundle.structure_decomposition!.consensus[0]!,
-          members: ["src/a.ts", "src/b.ts", "src/zz.ts"],
-        },
+    unit_manifest: {
+      units: [
+        { unit_id: "src", name: "src", kind: "module", files: ["src/a.ts"], required_lenses: [] },
+        { unit_id: "src-b", name: "src-b", kind: "module", files: ["src/b.ts"], required_lenses: [] },
       ],
     },
   };
   const restamped = computeArtifactMetadata(rederived, manifest, [
-    "structure_decomposition.json",
+    "unit_manifest.json",
   ]);
 
   // Call 2: the per-edge slice recompute decides what call 1 declined to decide.
@@ -1453,18 +1442,15 @@ test("CP-NODE-10 inv-1 (drain level): a deferral HOLDS the downstream back on th
   // The upstream re-derives and MOVES the slice the downstream consumes.
   const rederived: ArtifactBundle = {
     ...call1Bundle,
-    structure_decomposition: {
-      ...call1Bundle.structure_decomposition!,
-      consensus: [
-        {
-          ...call1Bundle.structure_decomposition!.consensus[0]!,
-          members: ["src/a.ts", "src/b.ts", "src/zz.ts"],
-        },
+    unit_manifest: {
+      units: [
+        { unit_id: "src", name: "src", kind: "module", files: ["src/a.ts"], required_lenses: [] },
+        { unit_id: "src-b", name: "src-b", kind: "module", files: ["src/b.ts"], required_lenses: [] },
       ],
     },
   };
   const restamped = computeArtifactMetadata(rederived, manifest, [
-    "structure_decomposition.json",
+    "unit_manifest.json",
   ]);
   const call2 = deriveAuditState(
     { ...rederived, artifact_metadata: restamped },

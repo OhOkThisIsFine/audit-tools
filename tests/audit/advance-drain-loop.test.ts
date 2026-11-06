@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFixtureRepo as writeSharedFixtureRepo } from "./helpers/fixture.mjs";
@@ -319,12 +319,12 @@ test("PRIORITY schedules every slice-projected upstream BEFORE its downstream", 
 
 test("a PRIORITY order that puts a slice-projected downstream first is REPORTED", () => {
   // Move the charter-extraction obligation (which writes the slice-projected
-  // downstream charter_register.json) ahead of the structure decomposition that
-  // one of its projected upstreams comes from. The deferred staleness decision
+  // downstream charter_register.json) ahead of the structure pass that writes
+  // its projected upstream unit_manifest.json. The deferred staleness decision
   // could then never fire before the downstream is selected.
   const reordered = PRIORITY.filter((id) => id !== "charter_extraction_current");
   reordered.splice(
-    reordered.indexOf("structure_decomposition_current"),
+    reordered.indexOf("structure_artifacts"),
     0,
     "charter_extraction_current",
   );
@@ -409,25 +409,22 @@ test("an executor throw surfaces as ExecutorFailure naming the ACTUAL failing ex
 
 
 // O22: exercise the real drain, not two manually sequenced state derivations.
-// Only the structure producer is controlled; metadata refresh, slice comparison,
-// downstream charter omission and shared-engine continuation remain production.
+// Only the unit partition the structure producer writes is controlled; metadata
+// refresh, slice comparison, downstream charter omission and shared-engine
+// continuation remain production. The deferred slice under test is the
+// register's unit-partition edge on unit_manifest.
 test.each([true, false])("a populated deferred slice is resolved within one drain (membership changes: %s)", async (changed) => {
   await withTempDir("advance-deferred-slice-", async (root) => {
     await writeFixtureRepo(root);
+    // A test-unit file: its content churn moves the manifest (so the unit
+    // manifest owes a regeneration) without moving the register's member/doc
+    // content slice — test units are not charter members.
+    const churned = "tests/session.test.ts";
+    await mkdir(join(root, "tests"), { recursive: true });
+    await writeFile(join(root, churned), "export {};\n");
     const initial = await advanceAudit({}, { root, analyzers: SKIP_ANALYZERS });
-    const member = "src/api/auth.ts";
-    const outside = "src/lib/session.ts";
     const prepared: ArtifactBundle = {
       ...initial.updated_bundle,
-      structure_decomposition: {
-        generated_at: "2026-07-23T00:00:00Z",
-        target: "structure",
-        node_universe_size: 2,
-        source_ids: ["call_import"],
-        consensus: [{ node_id: member, members: [member], agreed_across_source: 1,
-          stable_across_scale: 1, contested: false }],
-        contested: [], findings: [],
-      },
       intent_checkpoint: {
         schema_version: "intent-checkpoint/v1", confirmed_at: "2026-07-23T00:00:00Z",
         confirmed_by: "host", scope_summary: "fixture", intent_summary: "fixture",
@@ -449,33 +446,33 @@ test.each([true, false])("a populated deferred slice is resolved within one drai
       ...baseline,
       repo_manifest: {
         ...baseline.repo_manifest!,
-        files: baseline.repo_manifest!.files.map((file) => file.path === outside
+        files: baseline.repo_manifest!.files.map((file) => file.path === churned
           ? { ...file, hash: "unrelated-content-churn" } : file),
       },
     };
-    // All other producers are already current. Structure alone still owes a
-    // regeneration; charter's protected membership/content slices haven't moved.
+    // All other producers are already current. The unit manifest alone still
+    // owes a regeneration; the register's unit/content slices haven't moved.
     pending.artifact_metadata = computeArtifactMetadata(pending, baseline.artifact_metadata,
-      names.filter((name) => !["structure_decomposition.json", "charter_register.json"].includes(name)));
+      names.filter((name) => !["unit_manifest.json", "charter_register.json"].includes(name)));
     const before = computeStaleArtifacts(pending, { emit: false });
-    expect(before.has("structure_decomposition.json")).toBe(true);
+    expect(before.has("unit_manifest.json")).toBe(true);
     expect(before.has("charter_register.json")).toBe(false);
     expect([...before.deferred]).toContain("charter_register.json");
-    expect(decideNextStep(pending).selected_obligation).toBe("structure_decomposition_current");
+    expect(decideNextStep(pending).selected_obligation).toBe("structure_artifacts");
 
     const executions: string[] = [];
+    const realStructure = EXECUTOR_RUNNERS.structure_executor!;
     const realCharter = EXECUTOR_RUNNERS.charter_extraction_executor!;
-    const result = await withStubbedRunner("structure_decomposition_executor", async (bundle) => {
+    const result = await withStubbedRunner("structure_executor", async (...args) => {
       executions.push("structure");
-      return {
-        updated: { ...bundle, structure_decomposition: {
-          ...bundle.structure_decomposition!,
-          consensus: [{ ...bundle.structure_decomposition!.consensus[0]!,
-            members: changed ? [member, outside] : [member] }],
-        } },
-        artifacts_written: ["structure_decomposition.json"],
-        progress_summary: "Controlled structure regeneration",
-      };
+      const produced = await realStructure(...args);
+      if (!changed) return produced;
+      // Partition change among non-test files: session.ts also joins the auth
+      // unit, which sorts first, so the read set lists it there.
+      const units = produced.updated.unit_manifest!.units.map((unit) => unit.files.includes("src/api/auth.ts")
+        ? { ...unit, files: [...unit.files, "src/lib/session.ts"] } : unit);
+      return { ...produced, updated: { ...produced.updated,
+        unit_manifest: { ...produced.updated.unit_manifest!, units } } };
     }, () => withStubbedRunner("charter_extraction_executor", async (...args) => {
       executions.push("charter");
       expect(earlyDeferred(computeStaleArtifacts(args[0], { emit: false }).deferred)).toEqual([]);
@@ -486,7 +483,7 @@ test.each([true, false])("a populated deferred slice is resolved within one drai
     expect(result.artifacts_written.includes("charter_register.json")).toBe(changed);
     const after = computeStaleArtifacts(result.updated_bundle, { emit: false });
     expect(after.deferred.size).toBe(0);
-    expect(after.has("structure_decomposition.json")).toBe(false);
+    expect(after.has("unit_manifest.json")).toBe(false);
     expect(after.has("charter_register.json")).toBe(false);
   });
 });

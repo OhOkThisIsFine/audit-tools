@@ -738,3 +738,13 @@ test("present unbound design review returns to confirmation rather than downgrad
     expect(decideNextStep(bundle).selected_executor).toBe("intent_checkpoint_executor");
   }
 });
+
+await test("the architecture proposition states it is reviewed whole-system, never by a blanket per-file inspection sweep", async () => {
+  // Per-file inspection never carries the architecture lens (no file category
+  // requires it); the design review, the charter and the discovery follow-ups
+  // do. An operator who includes the lens must be told where it is reviewed, or
+  // a workload with no architecture item reads as a dropped lens.
+  const pre = await computeScopePreDigest(readyForIntentBundle(), "/repo");
+  const row = pre.lens_propositions.find((p) => p.lens === "architecture");
+  expect(row?.reason).toMatch(/whole-system.*design review.*not by a blanket per-file inspection sweep/u);
+});

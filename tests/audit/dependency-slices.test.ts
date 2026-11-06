@@ -76,6 +76,30 @@ function makeCharterRegister(over: Partial<CharterRegister> = {}): CharterRegist
   };
 }
 
+type Unit = NonNullable<ArtifactBundle["unit_manifest"]>["units"][number];
+
+/** A full-shape unit; the base fixture's one non-test unit holds the charter members. */
+function unit(over: Partial<Unit> = {}): Unit {
+  return {
+    unit_id: "unit-src",
+    name: "src",
+    kind: "module",
+    files: ["src/b.ts", "src/a.ts", "big/blob.ts"],
+    required_lenses: ["correctness"],
+    ...over,
+  };
+}
+
+/** `unit_manifest.json`: the source unit plus a test unit the charter never reads. */
+function makeUnitManifest(units: Unit[] = [unit()]): NonNullable<ArtifactBundle["unit_manifest"]> {
+  return {
+    units: [
+      ...units,
+      unit({ unit_id: "unit-tests", name: "tests", kind: "test", files: ["tests/zz.test.ts"] }),
+    ],
+  };
+}
+
 function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   return {
     repo_manifest: {
@@ -86,9 +110,9 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
         { path: "src/b.ts", language: "ts", size_bytes: 20, hash: "hash-b" },
         { path: "README.md", language: "md", size_bytes: 5, hash: "hash-doc" },
         { path: "big/blob.ts", language: "ts", size_bytes: 2_000_000 },
-        // A plain code file that is neither a consensus member nor a doc —
+        // A file of the TEST unit, so neither a charter member nor a doc —
         // its CONTENT churn is the out-of-slice case throughout this suite.
-        { path: "src/zz.ts", language: "ts", size_bytes: 9, hash: "hash-zz" },
+        { path: "tests/zz.test.ts", language: "ts", size_bytes: 9, hash: "hash-zz" },
       ],
     },
     file_disposition: {
@@ -97,9 +121,10 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
         { path: "src/b.ts", status: "included" },
         { path: "README.md", status: "doc_only" },
         { path: "big/blob.ts", status: "included" },
-        { path: "src/zz.ts", status: "included" },
+        { path: "tests/zz.test.ts", status: "included" },
       ],
     },
+    unit_manifest: makeUnitManifest(),
     structure_decomposition: makeStructureDecomposition(),
     ...over,
   };
@@ -125,13 +150,18 @@ test("the registry is contract-pinned: charter_register's three edges, charter_c
   // graph_bundle joined at design resolution 4: the STRUCTURAL channel's packet
   // embeds member-member dependency edges, so enrichment-merged edges must
   // re-stale the register (sliced to the member-member set the packet renders).
+  // unit_manifest replaced structure_decomposition when the members became the
+  // non-test units: no register producer reads the decomposition any more.
   expect(
     Object.keys(DEPENDENCY_SLICE_PROJECTIONS["charter_register.json"]!).sort(),
   ).toEqual([
     "graph_bundle.json",
     "repo_manifest.json",
-    "structure_decomposition.json",
+    "unit_manifest.json",
   ]);
+  expect(ARTIFACT_DEPENDS_ON_MAP["charter_register.json"]).not.toContain(
+    "structure_decomposition.json",
+  );
   expect(
     hasDependencySliceProjection("charter_register.json", "intent_checkpoint.json"),
   ).toBe(false);
@@ -168,7 +198,7 @@ test("graph slice fires on a member-member edge change, ignores outside-member a
       withGraph({
         imports: [
           { from: "src/a.ts", to: "src/b.ts", kind: "import" },
-          { from: "src/a.ts", to: "src/zz.ts", kind: "import" },
+          { from: "src/a.ts", to: "tests/zz.test.ts", kind: "import" },
         ],
       }),
     ),
@@ -197,7 +227,7 @@ test("repo slice ignores non-member/non-doc CONTENT churn; fires on member conte
   zzChurned.repo_manifest = {
     ...base.repo_manifest!,
     files: base.repo_manifest!.files.map((f) =>
-      f.path === "src/zz.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f,
+      f.path === "tests/zz.test.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f,
     ),
   };
   expect(hash(zzChurned)).toBe(baseHash);
@@ -216,7 +246,7 @@ test("repo slice ignores non-member/non-doc CONTENT churn; fires on member conte
   const removed = makeBundle();
   removed.repo_manifest = {
     ...base.repo_manifest!,
-    files: base.repo_manifest!.files.filter((f) => f.path !== "src/zz.ts"),
+    files: base.repo_manifest!.files.filter((f) => f.path !== "tests/zz.test.ts"),
   };
   expect(hash(removed)).not.toBe(baseHash);
 
@@ -251,45 +281,47 @@ test("repo slice ignores non-member/non-doc CONTENT churn; fires on member conte
   expect(hash(bigChanged)).not.toBe(baseHash);
 
   // Membership changed (cross-artifact sensitivity).
-  const membership = makeBundle();
-  membership.structure_decomposition = makeStructureDecomposition({
-    consensus: [consensusNode({ members: ["src/a.ts"] })],
+  const membership = makeBundle({
+    unit_manifest: makeUnitManifest([unit({ files: ["src/a.ts"] })]),
   });
   expect(hash(membership)).not.toBe(baseHash);
 });
 
-test("structure slice ignores score churn, fires on membership; member order is canonical", () => {
-  const base = makeBundle();
+test("unit slice ignores risk/lens churn and test units, fires on membership; manifest order is canonical", () => {
   const hash = (bundle: ArtifactBundle) =>
-    computeDependencySliceHash(
-      "charter_register.json",
-      "structure_decomposition.json",
-      bundle,
-    );
-  const baseHash = hash(base);
+    computeDependencySliceHash("charter_register.json", "unit_manifest.json", bundle);
+  const baseHash = hash(makeBundle());
 
-  const scoresOnly = makeBundle();
-  scoresOnly.structure_decomposition = makeStructureDecomposition({
-    consensus: [consensusNode({ agreed_across_source: 0.5, stable_across_scale: 0.25 })],
-    contested: [
-      consensusNode({
-        node_id: "noise",
-        members: [],
-        agreed_across_source: 0,
-        stable_across_scale: 0,
-        contested: true,
-      }),
+  // Fields no packet reads: risk score, lenses, critical flows.
+  expect(
+    hash(makeBundle({
+      unit_manifest: makeUnitManifest([
+        unit({ risk_score: 9, required_lenses: ["security"], critical_flows: ["login"] }),
+      ]),
+    })),
+  ).toBe(baseHash);
+  // A test unit's membership is outside the read set.
+  const testChurn = makeBundle();
+  testChurn.unit_manifest = {
+    units: [
+      unit(),
+      unit({ unit_id: "unit-tests", name: "tests", kind: "test", files: ["tests/zz.test.ts", "tests/new.test.ts"] }),
     ],
-  });
-  // Contested nodes are deliberately outside the slice: the charter path
-  // grounds ONLY on consensus, so a contested-only change does not re-fire.
-  expect(hash(scoresOnly)).toBe(baseHash);
+  };
+  expect(hash(testChurn)).toBe(baseHash);
+  // Array and file order are not content: the slice is the canonical partition.
+  expect(
+    hash(makeBundle({
+      unit_manifest: { units: [...makeUnitManifest().units].reverse().map((u) => ({ ...u, files: [...u.files].reverse() })) },
+    })),
+  ).toBe(baseHash);
 
-  const reordered = makeBundle();
-  reordered.structure_decomposition = makeStructureDecomposition({
-    consensus: [consensusNode({ members: ["big/blob.ts", "src/a.ts", "src/b.ts"] })],
-  });
-  expect(hash(reordered)).toBe(baseHash);
+  // Membership, unit identity and the unit's rendered kind/name all move it.
+  expect(hash(makeBundle({ unit_manifest: makeUnitManifest([unit({ files: ["src/a.ts"] })]) }))).not.toBe(baseHash);
+  expect(hash(makeBundle({ unit_manifest: makeUnitManifest([unit({ unit_id: "unit-core" })]) }))).not.toBe(baseHash);
+  expect(hash(makeBundle({ unit_manifest: makeUnitManifest([unit({ kind: "interface" })]) }))).not.toBe(baseHash);
+  // A test file joining the source unit is excluded per file → no fire.
+  expect(hash(makeBundle({ unit_manifest: makeUnitManifest([unit({ files: [...unit().files, "src/a.test.ts"] })]) }))).toBe(baseHash);
 });
 
 test("a throwing projection returns the error sentinel; buildDependencySlices skips it", () => {
@@ -301,13 +333,13 @@ test("a throwing projection returns the error sentinel; buildDependencySlices sk
   malformed.structure_decomposition = { consensus: [{ node_id: "x" }] };
   expect(
     computeDependencySliceHash(
-      "charter_register.json",
+      "charter_clarification.json",
       "structure_decomposition.json",
       malformed,
     ),
   ).toBe(SLICE_PROJECTION_ERROR);
   const slices = buildDependencySlices(
-    "charter_register.json",
+    "charter_clarification.json",
     ["structure_decomposition.json"],
     malformed,
   );
@@ -335,14 +367,14 @@ test("staleness: a slice-recorded charter edge ignores out-of-slice manifest chu
     [
       "repo_manifest.json",
       "file_disposition.json",
-      "structure_decomposition.json",
+      "unit_manifest.json",
       "intent_checkpoint.json",
       "charter_register.json",
     ],
   );
   const entry = manifest.artifacts["charter_register.json"]!;
   expect(entry.dependency_slices!["repo_manifest.json"]).toBeDefined();
-  expect(entry.dependency_slices!["structure_decomposition.json"]).toBeDefined();
+  expect(entry.dependency_slices!["unit_manifest.json"]).toBeDefined();
   expect(entry.dependency_slices!["intent_checkpoint.json"]).toBeUndefined();
 
   // Out-of-slice churn: the non-member/non-doc file's CONTENT hash moves with
@@ -355,7 +387,7 @@ test("staleness: a slice-recorded charter edge ignores out-of-slice manifest chu
     repo_manifest: {
       ...bundle.repo_manifest!,
       files: bundle.repo_manifest!.files.map((f) =>
-        f.path === "src/zz.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f,
+        f.path === "tests/zz.test.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f,
       ),
     },
   };
@@ -423,6 +455,7 @@ test("staleness: charter_clarification's manifest edge ignores content churn, fi
     [
       "repo_manifest.json",
       "file_disposition.json",
+      "unit_manifest.json",
       "structure_decomposition.json",
       "intent_checkpoint.json",
       "charter_register.json",
@@ -453,15 +486,15 @@ test("staleness: charter_clarification's manifest edge ignores content churn, fi
     });
   const baseSlice = sliceOf(base);
   expect(sliceOf(base.map((f) => ({ ...f, hash: `${f.hash ?? ""}-CHANGED` })))).toBe(baseSlice);
-  expect(sliceOf(base.filter((f) => f.path !== "src/zz.ts"))).not.toBe(baseSlice);
+  expect(sliceOf(base.filter((f) => f.path !== "tests/zz.test.ts"))).not.toBe(baseSlice);
   expect(
-    sliceOf(base.map((f) => (f.path === "src/zz.ts" ? { ...f, path: "src/renamed.ts" } : f))),
+    sliceOf(base.map((f) => (f.path === "tests/zz.test.ts" ? { ...f, path: "src/renamed.ts" } : f))),
   ).not.toBe(baseSlice);
 
   // Content churn on a non-member, path set unchanged: the whole-artifact edge
   // re-fired clarification here; the path slice does not.
   const churned = staleAfter(
-    base.map((f) => (f.path === "src/zz.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f)),
+    base.map((f) => (f.path === "tests/zz.test.ts" ? { ...f, hash: "hash-zz-CHANGED" } : f)),
   );
   expect(churned.has("charter_clarification.json")).toBe(false);
 
@@ -545,28 +578,26 @@ test("deferred fire: propagation skip + upstream re-derive with CHANGED membersh
     [
       "repo_manifest.json",
       "file_disposition.json",
-      "structure_decomposition.json",
+      "unit_manifest.json",
       "charter_register.json",
     ],
   );
 
-  // Phase 1: membership CHANGES on disk but structure_decomposition has not
-  // been restamped as a listed re-derive yet — the direct slice compare on
-  // charter's structure edge already fires (recorded membership ≠ current).
+  // Phase 1: membership CHANGES on disk but unit_manifest has not been
+  // restamped as a listed re-derive yet — the direct slice compare on
+  // charter's unit edge already fires (recorded membership ≠ current).
   const membershipChanged: ArtifactBundle = {
     ...bundle,
     artifact_metadata: manifest,
-    structure_decomposition: makeStructureDecomposition({
-      consensus: [consensusNode({ members: ["src/a.ts"] })],
-    }),
+    unit_manifest: makeUnitManifest([unit({ files: ["src/a.ts"] })]),
   };
   const staleNow = computeStaleArtifacts(membershipChanged, { emit: false });
   expect(staleNow.has("charter_register.json")).toBe(true);
 
-  // Phase 2: after structure re-derives (listed restamp), charter STILL fires
+  // Phase 2: after the units re-derive (listed restamp), charter STILL fires
   // until its own listed re-derive records the new slices — then it clears.
   const restamped = computeArtifactMetadata(membershipChanged, manifest, [
-    "structure_decomposition.json",
+    "unit_manifest.json",
   ]);
   const staleAfterUpstream = computeStaleArtifacts(
     { ...membershipChanged, artifact_metadata: restamped },
@@ -596,7 +627,7 @@ test("metadata: an unlisted mismatch-restamp preserves recorded slices verbatim"
     [
       "repo_manifest.json",
       "file_disposition.json",
-      "structure_decomposition.json",
+      "unit_manifest.json",
       "charter_register.json",
     ],
   );
@@ -607,9 +638,7 @@ test("metadata: an unlisted mismatch-restamp preserves recorded slices verbatim"
   const mutated: ArtifactBundle = {
     ...bundle,
     charter_register: { ...bundle.charter_register!, comparison_pending: true },
-    structure_decomposition: makeStructureDecomposition({
-      consensus: [consensusNode({ members: ["src/a.ts"] })],
-    }),
+    unit_manifest: makeUnitManifest([unit({ files: ["src/a.ts"] })]),
   };
   const second = computeArtifactMetadata(mutated, first, []);
   expect(second.artifacts["charter_register.json"]!.dependency_slices).toEqual(
@@ -775,10 +804,10 @@ test("recovery: a cascade over COMPLETED work names what invalidated it", () => 
   expect(recovery!.rederiving).toBe(2);
 });
 
-// The cascade head is a property of the ROUTE, not of the artifact alone. Both
-// stale artifacts below reach `repo_manifest.json` by a different route — one
-// directly, one through `structure_decomposition.json` — while the shared
-// upstream itself takes the direct route to the same head. A head computed
+// The cascade head is a property of the ROUTE, not of the artifact alone.
+// `charter_clarification.json` reaches `repo_manifest.json` by two routes — one
+// through `charter_register.json`, one through `structure_decomposition.json` —
+// while the shared upstream itself takes the direct route to the same head. A head computed
 // while walking one route must therefore never be reused as the answer for a
 // node reached by another: the walk carries a per-branch `seen`, so
 // "is this node a head" is decided against the path that reached it.
@@ -794,6 +823,7 @@ test("recovery: a shared upstream reached by two routes names the head per route
     intent_checkpoint: { checkpoints: [] },
     file_disposition: { files: [] },
     graph_bundle: { nodes: [], edges: [] },
+    unit_manifest: { units: [] },
   } as unknown as ArtifactBundle;
   // Every upstream in the topology is PRESENT except `tooling_manifest.json`
   // (the map-declared root, rebuilt every call and never persisted), so it —
@@ -805,13 +835,13 @@ test("recovery: a shared upstream reached by two routes names the head per route
     "repo_manifest.json",
   ]);
 
+  const dependsOn = (name: string): readonly string[] =>
+    (ARTIFACT_DEPENDS_ON_MAP as Readonly<Record<string, readonly string[]>>)[name] ?? [];
   expect(
-    (ARTIFACT_DEPENDS_ON_MAP["charter_clarification.json"] ?? []).includes(
-      "charter_register.json",
-    ) &&
-      (ARTIFACT_DEPENDS_ON_MAP["charter_register.json"] ?? []).includes(
-        "structure_decomposition.json",
-      ),
+    dependsOn("charter_clarification.json").includes("charter_register.json") &&
+      dependsOn("charter_clarification.json").includes("structure_decomposition.json") &&
+      dependsOn("charter_register.json").includes("repo_manifest.json") &&
+      dependsOn("structure_decomposition.json").includes("repo_manifest.json"),
     "the fixture really does reach the shared upstream by two routes",
   ).toBe(true);
 

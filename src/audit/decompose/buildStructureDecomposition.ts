@@ -22,15 +22,22 @@ import { detectNonColocalization } from "./findings.js";
 const DOC_EXTENSION = /\.(md|markdown|adoc|rst|txt)$/i;
 
 /**
- * The pipeline's ONE definition of a prose/doc-intent file: `doc_only`-statused
- * OR doc-extensioned, and not excluded/binary. Single-sourced here because two
- * consumers must agree exactly: the decomposition's doc-group universe below,
- * and the charter dependency-slice projection (`dependencySlices.ts`), whose
- * doc set under-stales charter extraction if it is ever narrower than this.
+ * The pipeline's ONE definition of a prose/doc-intent file: doc-extensioned
+ * (prose), and not excluded/binary. Single-sourced here because its consumers
+ * must agree exactly: the decomposition's doc-group universe below, the docs
+ * digest, and the charter packet read-set (`charterPacketReadSet`), from which
+ * the charter dependency slice derives.
+ *
+ * `doc_only` status alone does NOT make a file prose: disposition gives that
+ * status to everything it judges "not auditable code" — examples and fixtures
+ * (JSON, JSONL logs, harness `.ts`), licenses, and any file under a `docs/`
+ * segment (baseline JSON included). Those state no intent, and admitting them
+ * filled a dogfood stated packet with fixture data.
  */
+// sites-pinned: tests/audit/charter-packets.test.ts
 export function isDocIntentFile(path: string, status: string): boolean {
   if (status === "excluded" || status === "binary") return false;
-  return status === "doc_only" || DOC_EXTENSION.test(path.replace(/\\/g, "/"));
+  return DOC_EXTENSION.test(path.replace(/\\/g, "/"));
 }
 /** Threshold at which an intent source's partitions collapse into boundary groups. */
 const INTENT_BOUNDARY_FRACTION = 0.5;
@@ -65,8 +72,10 @@ function partitionGroups(partition: Partition): string[][] {
 export async function buildStructureDecomposition(
   params: BuildStructureDecompositionParams,
 ): Promise<StructureDecomposition> {
-  // In-scope code universe = disposition-included files; doc files (prose intent)
-  // are the doc_only status plus markdown/asciidoc/rst by extension.
+  // sites-pinned: tests/audit/structure-decomposition.test.ts
+  // In-scope code universe = disposition-included files; doc files (prose
+  // intent) are the `isDocIntentFile` set — prose by extension, whatever the
+  // status, so a doc_only fixture or log never names files into a doc group.
   const universe: string[] = [];
   const docFiles: string[] = [];
   for (const item of params.disposition.files) {

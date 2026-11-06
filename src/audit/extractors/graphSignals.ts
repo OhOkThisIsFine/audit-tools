@@ -126,6 +126,18 @@ function isValidGraphEdge(edge: unknown): edge is GraphEdge {
   );
 }
 
+// sites-pinned: tests/audit/review-evidence-right-sizing.test.ts, tests/audit/git-history-mining.test.ts
+/**
+ * Whether a graph bucket holds dependency edges — a file that references
+ * another. `routes` is not an edge list, and `co_change` is temporal coupling
+ * (files changed in the same commits), not a dependency. The ONE predicate
+ * {@link allGraphEdges} and the review call-site map both read, so the map
+ * never calls a co-changed file a caller.
+ */
+export function isDependencyEdgeBucket(key: string): boolean {
+  return key !== "routes" && key !== GIT_CO_CHANGE_CATEGORY;
+}
+
 /**
  * Flatten every edge bucket of a graph bundle into one edge list. `routes` is
  * excluded (it is a `{path,handler,method}` shape, not a `from`/`to` edge); the
@@ -137,7 +149,7 @@ function isValidGraphEdge(edge: unknown): edge is GraphEdge {
 export function allGraphEdges(graphBundle: GraphBundle): GraphEdge[] {
   const edges: GraphEdge[] = [];
   for (const [key, value] of Object.entries(graphBundle.graphs)) {
-    if (key === "routes" || key === GIT_CO_CHANGE_CATEGORY || !Array.isArray(value)) {
+    if (!isDependencyEdgeBucket(key) || !Array.isArray(value)) {
       continue;
     }
     for (const edge of value) {

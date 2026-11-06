@@ -14,8 +14,8 @@
  * consuming path reads — narrower under-stales (the dangerous direction: a real
  * change that never re-fires). `charter_register.json` has TWO producers and
  * the slices cover the union of their verified consumption:
- * charterExtractionExecutor / charterExtractionPrompt read
- * `consensus[*].{node_id, members}` + member/doc file content (via
+ * charterExtractionExecutor / charterExtractionPrompt read the non-test files
+ * of the `unit_manifest` partition (`charterPacketReadSet`) + member/doc file content (via
  * `repo_manifest.files[].hash`), and charterFidelityExecutor grounds the
  * difference findings against the COMPLETE `files[].path` set
  * (`groundDesignFindings`).
@@ -23,10 +23,10 @@
  * more — the contract test pins the current slice content.
  *
  * Projections take the WHOLE bundle (not just the upstream) because a slice can
- * be cross-artifact: the member-file slice of `repo_manifest` needs the
- * consensus membership from `structure_decomposition` to know which files
- * matter. A membership change therefore moves the slice on BOTH edges — the
- * over-fire direction, which is safe.
+ * be cross-artifact: the member-file slice of `repo_manifest` needs the unit
+ * partition from `unit_manifest` to know which files matter. A membership
+ * change therefore moves the slice on BOTH edges — the over-fire direction,
+ * which is safe.
  */
 import { contentSha256 } from "../../shared/submission/hostHandoffCore.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -49,7 +49,22 @@ type SliceProjection = (bundle: ArtifactBundle) => unknown;
  */
 export const SLICE_PROJECTION_ERROR = "slice-projection-error";
 
-/** `consensus[*].{node_id, members}` — the membership scaffold charters ground on. */
+/**
+ * The `unit_manifest` surface the charter packets read: the unit partition of
+ * the non-test files (`unit_id`, `name`, `kind`, files) exactly as
+ * `charterPacketReadSet` draws it — single-sourced, so the packet and its
+ * staleness edge cannot drift. A unit's `risk_score`, `required_lenses` or
+ * `critical_flows` churn never re-fires the expensive extraction; a test file
+ * joining or leaving a unit never does either.
+ */
+function charterUnitPartitionSlice(bundle: ArtifactBundle): unknown {
+  return charterPacketReadSet(bundle).units;
+}
+
+/**
+ * `consensus[*].{node_id, members}` — the membership scaffold the clarification
+ * report groups its questions by (`placeInSubsystem`).
+ */
 function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
   return (bundle.structure_decomposition?.consensus ?? [])
     .map((node) => ({
@@ -66,9 +81,10 @@ function consensusMembershipSlice(bundle: ArtifactBundle): unknown {
  *    DERIVED from `charterPacketReadSet` (the packet materializer's own
  *    read-set function, `charterPackets.ts`), the single home of "what does
  *    charter extraction read" (design-check resolution-4 constraint 6: the
- *    slice and the packets can never drift). That set is consensus MEMBER
- *    paths (every channel is a projection of member content) plus every
- *    doc-intent path (the stated channel's doc universe). The content proxy is
+ *    slice and the packets can never drift). That set is the MEMBER paths —
+ *    the non-test files of the unit partition (every channel is a projection
+ *    of member content) — plus every doc-intent path that is not a member (the
+ *    stated channel's doc universe). The content proxy is
  *    the manifest hash, falling back to a size marker for legacy or explicitly
  *    unhashed manifests. Production intake hashes oversized files too.
  *  - `paths`: the COMPLETE sorted path list, content-free. The register's
@@ -177,7 +193,7 @@ export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
   Record<string, Partial<Record<string, SliceProjection>>>
 > = {
   "charter_register.json": {
-    "structure_decomposition.json": consensusMembershipSlice,
+    "unit_manifest.json": charterUnitPartitionSlice,
     "repo_manifest.json": charterReadFileSlice,
     "graph_bundle.json": charterGraphEdgeSlice,
   },

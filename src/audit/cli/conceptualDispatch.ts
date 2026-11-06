@@ -2,7 +2,7 @@ import { resolveDesignReviewChoices } from "../orchestrator/designReviewTask.js"
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, renderFanoutExecutionLines } from "../../shared/prompts.js";
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/conceptual-independent-guidance.test.ts
+// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/conceptual-independent-guidance.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import {
   type DesignReviewBinding,
   type IntentCheckpoint,
@@ -259,7 +259,7 @@ export async function prepareConceptualDispatch(opts: {
   // same starting points, so the shallow reviewer — or every perspective and
   // the judge — reads the same read-only, bound map file; each prompt carries
   // only its summary.
-  const fileMapContext = [designReviewFileMapContext(bundle, reviewOptions).contextFile];
+  const fileMapContext = designReviewFileMapContext(bundle, reviewOptions).contextFiles;
   // A round that is about to be superseded — by a re-review, or by a switch to
   // the shallow pass — will never be ingested, so this is the last moment its
   // perspectives' dispatch rows can be closed with what they actually
@@ -302,13 +302,15 @@ export async function prepareConceptualDispatch(opts: {
       instructionLines: [
         ...(settings.ignored_review_notice ? [settings.ignored_review_notice] : []),
         ...(settings.reuse_notice ? [settings.reuse_notice] : []),
-        `**Conceptual review** (generative): in ${INDEPENDENT_CONTEXT}, read the prompt at the conceptual prompt path and write findings to the conceptual results path.`,
+        // Concrete paths, from the same values as `artifactPaths` below — the
+        // step markdown must name what it tells the host to read and write.
+        `**Conceptual review** (generative): in ${INDEPENDENT_CONTEXT}, read the prompt at \`${conceptualPromptPath}\` and write findings to \`${conceptualResultsPath}\`.`,
       ],
       artifactPaths: {
         conceptual_prompt: conceptualPromptPath,
         conceptual_results: conceptualResultsPath,
       },
-      readPaths: [conceptualPromptPath, ...mapPaths],
+      readPaths: [conceptualPromptPath, ...mapPaths, opts.sourceRoot],
       writePaths: [conceptualResultsPath],
       shortfall: fanout.shortfall,
     };
@@ -482,7 +484,7 @@ export async function prepareConceptualDispatch(opts: {
             `_${deliveredCount} of ${total} perspective lane(s) already delivered a submission this round — reusing that output, not re-executing them._`,
           ]
         : []),
-      // sites-pinned: tests/audit/conceptual-independent-guidance.test.ts, tests/audit/conceptual-perspective-round-identity.test.ts, tests/audit/conceptual-reuse-notice.test.ts
+      // sites-pinned: tests/audit/conceptual-independent-guidance.test.ts, tests/audit/conceptual-perspective-round-identity.test.ts, tests/audit/conceptual-reuse-notice.test.ts, tests/audit/review-evidence-right-sizing.test.ts
       ...(pendingCount > 0
         ? [
             `1. Execute ${pendingCount === total ? `these ${total}` : `these ${pendingCount} still-pending`} independent perspective lane(s) in parallel where possible, otherwise sequentially in independent contexts. Each lane reviews only through its own value system and must NOT see the others' output:`,
@@ -511,6 +513,8 @@ export async function prepareConceptualDispatch(opts: {
       ...perspectivePrompts.map((f) => f.resultsPath),
       judgePromptPath,
       ...new Set(fanout.lanes.flatMap((lane) => lane.generatedContextPaths)),
+      // The snapshot every prompt tells its reader to verify against.
+      opts.sourceRoot,
     ],
     writePaths: [
       ...perspectivePrompts.map((f) => f.resultsPath),

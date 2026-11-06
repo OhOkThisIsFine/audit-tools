@@ -1,12 +1,13 @@
-// sites-pinned: tests/audit/host-handoff.test.ts
+// sites-pinned: tests/audit/host-handoff.test.ts, tests/audit/inspection-handoff-binding.test.ts, tests/audit/semantic-review-step.test.ts
 // (the steward-lane verification
 // contract — `toAuditHostTask` is where the lane tags were being dropped, so this is
 // the site whose revert makes the prompt branch unreachable)
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import {
   linkFrictionRunIds,
   readJsonFile,
+  toPosixPath,
 } from "audit-tools/shared";
 
 import { AUDIT_FRICTION_RUN_ID } from "../orchestrator/nextStep.js";
@@ -21,11 +22,16 @@ import {
 } from "../validation/ingestIssueCodes.js";
 import { renderIngestReportLines } from "audit-tools/shared";
 import {
+  buildAuditHostCoherenceGroups,
   prepareAuditHostHandoff,
   toAuditHostTask,
+  type AuditHostCoherenceGroups,
   type AuditHostValidationWarning,
+  type AuditHostWorkload,
 } from "./dispatch/hostHandoff.js";
-import { nextStepCommand } from "./prompts.js";
+import { nextStepCommand, validateResultsCommand } from "./prompts.js";
+import { ARCHITECTURE_REVIEW_SCOPE } from "../orchestrator/architectureDiscovery.js";
+import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import { writeCurrentStep } from "./steps.js";
 
 
@@ -83,6 +89,10 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
     runId: activeReviewRun.run_id,
     tasks: tasks.map((task) => toAuditHostTask(task, params.bundle.repo_manifest)),
     pendingTaskCount: pendingTasks.length,
+    // Grouped over exactly the tasks this wave publishes, so a group never
+    // names work that is already done; the handoff writes them beside the
+    // workload, under the workload's own lock, never into a work item.
+    coherenceGroups: buildAuditHostCoherenceGroups(tasks, params.bundle.graph_bundle),
   });
   // Name this round's runs on the audit friction record, which is keyed by a fixed
   // literal and so on its own names no run at all (semantics: `FrictionRunLinks`). Each
@@ -100,7 +110,12 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
   const resultPaths = handoff.workload.work_items.map((item) =>
     resolve(root, item.result_path),
   );
-  return { handoff, completedTaskIds, resultPaths, continueCommand };
+  return {
+    handoff,
+    completedTaskIds,
+    resultPaths,
+    continueCommand,
+  };
 }
 
 export async function renderSemanticReviewStep(params: SemanticReviewStepParams): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
@@ -134,6 +149,7 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
     artifactPaths: {
       host_workload: handoff.workload_path,
       host_result_map: handoff.result_map_path,
+      host_coherence_groups: handoff.coherence_groups_path,
       active_review_run: activeReviewRun.review_run_path,
       pending_audit_tasks: activeReviewRun.pending_audit_tasks_path,
     },
@@ -157,6 +173,11 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
       "1. Follow its prompt.",
       "2. Write the result JSON at its bound `result_path`.",
       "",
+      ...workerAccessLines(params.sourceRoot, handoff.workload_path),
+      ...schedulingLines(handoff.workload, handoff.coherence_groups, handoff.coherence_groups_path),
+      ...lensScopeLines(params.bundle, handoff.workload),
+      `To check one result file before ingestion, by the rules ingestion applies: ${validateResultsCommand(root, artifactsDir)}`,
+      "",
       `When the results are written, run: ${continueCommand}`,
       "",
     ].join("\n"),
@@ -165,8 +186,61 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
         handoff.workload_path,
         handoff.result_map_path,
         activeReviewRun.pending_audit_tasks_path,
+        handoff.coherence_groups_path,
+        // Every work-item prompt sends its worker here to read source; a grant
+        // that omits it makes each worker stop on a permission prompt.
+        params.sourceRoot,
       ],
       write_paths: resultPaths,
     },
   });
+}
+
+/**
+ * What a worker touches, stated once for the host that launches it: every path
+ * in a work-item prompt is absolute, so a worker may run in any directory, and
+ * these two directories are all it needs.
+ */
+function workerAccessLines(sourceRoot: string, workloadPath: string): string[] {
+  return [
+    "Every path in a work-item prompt is absolute, so a worker may run in any working directory. " +
+      "A worker reads only the run's source snapshot and writes only its own result file:",
+    `- read: ${toPosixPath(sourceRoot)}`,
+    `- write: ${toPosixPath(join(dirname(workloadPath), "host-results"))}`,
+    "",
+  ];
+}
+
+/**
+ * The deterministic facts a host schedules by — counts, the local size
+ * estimate, the content-coherence groups. Facts only: which backend runs an
+ * item, in what order, and how many at once is the host's choice.
+ */
+function schedulingLines(
+  workload: AuditHostWorkload,
+  coherence: AuditHostCoherenceGroups,
+  coherencePath: string,
+): string[] {
+  const items = workload.work_items;
+  if (items.length === 0) return [];
+  const tokens = items.reduce((sum, item) => sum + item.metadata.token_estimate, 0);
+  return [
+    `The workload holds ${String(items.length)} independent work item(s), about ${String(tokens)} tokens of source by the local estimate, ` +
+      `in ${String(coherence.groups.length)} content-coherence group(s) listed at ${toPosixPath(coherencePath)}. ` +
+      "Items in one group share files, a unit, a flow, a directory or graph adjacency, so one worker taking them together reads each file once; " +
+      "each item's `metadata.token_estimate` and `metadata.demand` size it. Every item is independent: order, grouping and parallelism are yours.",
+    "",
+  ];
+}
+
+/**
+ * A lens the operator selected that no work item carries, said out loud. The
+ * architecture lens is the standing case: it is reviewed whole-system, so its
+ * absence from per-file inspection is by design, not a dropped lens.
+ */
+function lensScopeLines(bundle: ArtifactBundle, workload: AuditHostWorkload): string[] {
+  const selected = resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection);
+  const inEffect = selected === undefined || selected.includes("architecture");
+  if (!inEffect || workload.work_items.some((item) => item.lens === "architecture")) return [];
+  return [`The architecture lens is ${ARCHITECTURE_REVIEW_SCOPE}, so no work item in the workload carries it.`, ""];
 }

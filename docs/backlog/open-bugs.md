@@ -19,8 +19,6 @@
 
 - **Inspection coverage claims are accepted on the host's word (2026-10-05, medium).** A Sonnet batch claimed full coverage of two files it never opened, and the contract checks accepted it; `file_coverage` is checked for line counts only. **Property:** an accepted result's coverage of a file is backed by evidence the tool checks against that file's content, so an unread file cannot pass as covered.
 
-- **Charter packets are sized by accident, not by the charter question (2026-10-05, medium).** The structural and revealed packets held only the two `projectTestAdmission` test files of 1,244 files, while the stated packet was 3.3 MB (215 excerpts) and both stated lanes read only the core documents. **Property:** each charter packet holds a bounded, content-selected sample of the files its question covers, and its size is bounded.
-
 - **A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).** `attest-loop-core-review.mjs` refused first on sites-pinned, then on the generated backlog index, and the sites-pinned leg names one file per run; each fix changed the tree, so one loop-core commit needed four full suites. `npm run staged:legs` before the first suite finds both. **Property:** one gate run reports every refusal it would raise for the staged tree.
 
 - **`SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).** `src/shared/io/schemaVersion.ts` always says "Delete <artifact> from the artifacts directory to regenerate it", but `throwOnSchemaVersionMismatch` is the path for costly or authored state that is not discarded. **Property:** the message for a non-regenerable artifact names a migration or preservation route, never deletion.

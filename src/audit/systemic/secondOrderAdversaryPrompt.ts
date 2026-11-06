@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/audit/systemic-evidence-projection.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 // Phase E — SECOND-ORDER ADVERSARY prompt (host_delegation).
 //
 // The adversary is a SEPARATE agent and receives the evidence the earlier
@@ -6,13 +6,17 @@
 // never a substitute for charters, candidate dispositions, prior findings, and
 // direct repository/source verification.
 
+import { join } from "node:path";
+
 import {
   FindingConfidenceSchema,
   FindingSeveritySchema,
   LENSES,
+  compareCodeUnits,
 } from "audit-tools/shared";
 
 import type { ArtifactBundle } from "../io/artifacts.js";
+import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import type { Finding } from "../types.js";
 import type { AggregateMetricsDigest } from "./aggregateMetricsDigest.js";
 import {
@@ -22,6 +26,7 @@ import {
 import {
   buildReviewFileMap,
   reviewFileMapContext,
+  unitOwnership,
   type ReviewFileMapContext,
   type ReviewFileMapScope,
   type ReviewFileMap,
@@ -44,28 +49,37 @@ function priorFindings(bundle: ArtifactBundle): Finding[] {
 }
 
 /**
- * What this round is pointed at: the files the banked findings implicate and the
- * files the charter register's goal nodes cover — the two places this prompt
- * names repository files as under challenge. The call-site map anchors exactly
- * these, completely, so the round does not re-derive their call sites.
+ * What this round is pointed at: UNCOVERED ground. The round is told (covered
+ * themes, below) to depart from every component a banked finding names, so recon
+ * for those components is recon for ground it must leave. The map instead anchors
+ * the files the run's deterministic leads (`design_assessment.findings`) name and
+ * no banked finding does — each with its leads inline, so the round reads the
+ * leads where it reads the call sites — and its index lists EVERY unit with how
+ * much of it is covered and how many uncovered leads it holds. The covered files
+ * stay a plain list (`renderCoveredThemes`).
  */
 function adversaryReviewScope(
   bundle: ArtifactBundle,
   bankedFindings: readonly Finding[],
 ): ReviewFileMapScope {
-  const findingFiles = bankedFindings.flatMap((finding) =>
-    finding.affected_files.map((entry) => entry.path),
-  );
-  const register = bundle.charter_register;
-  const charterFiles =
-    register && register.status !== "omitted"
-      ? register.lanes.flatMap((lane) => lane.nodes.flatMap((node) => node.files ?? []))
-      : [];
+  const covered = new Set(summarizeCoveredThemes(bankedFindings).files);
+  const notes = new Map<string, Set<string>>();
+  for (const lead of bundle.design_assessment?.findings ?? []) {
+    for (const entry of lead.affected_files) {
+      const path = entry.path?.trim();
+      if (!path || covered.has(path)) continue;
+      (notes.get(path) ?? notes.set(path, new Set()).get(path)!).add(
+        `[${lead.category}/${lead.severity}] ${lead.title}`,
+      );
+    }
+  }
   return {
-    files: [...findingFiles, ...charterFiles],
+    files: [...notes.keys()],
+    units: (bundle.unit_manifest?.units ?? []).map((unit) => ({ unit_id: unit.unit_id, files: unit.files })),
+    notes: new Map([...notes].map(([path, set]) => [path, [...set].sort(compareCodeUnits)])),
     basis:
-      "the files the banked findings implicate and the files the charter register's goal " +
-      "nodes cover (both projected below)",
+      "the files the run's deterministic leads name that NO banked finding names — the ground this " +
+      "round has not covered; each anchor carries its leads",
   };
 }
 
@@ -73,13 +87,62 @@ function adversaryFileMap(bundle: ArtifactBundle, bankedFindings: readonly Findi
   return buildReviewFileMap(bundle, adversaryReviewScope(bundle, bankedFindings));
 }
 
+function adversaryFileMapContextFor(
+  bundle: ArtifactBundle,
+  bankedFindings: readonly Finding[],
+  fileMap: ReviewFileMap,
+): ReviewFileMapContext {
+  const covered = summarizeCoveredThemes(bankedFindings).files;
+  // The same owner the map's slices use (the scope's units, first claim wins),
+  // so a file two units list is counted as covered once, where it is sliced.
+  const owner = unitOwnership(adversaryReviewScope(bundle, bankedFindings).units ?? []);
+  const leadCount = new Map(fileMap.anchors.map((anchor) => [anchor.path, anchor.notes.length]));
+  return reviewFileMapContext(fileMap, {
+    columns: [
+      {
+        header: "covered files (banked)",
+        cell: (unitId) => String(covered.filter((file) => (owner.get(file) ?? null) === unitId).length),
+      },
+      {
+        header: "uncovered leads",
+        cell: (unitId) => {
+          const slice = fileMap.slices.find((entry) => entry.unit_id === unitId);
+          return String((slice?.files ?? []).reduce((sum, file) => sum + (leadCount.get(file) ?? 0), 0));
+        },
+      },
+    ],
+  });
+}
+
 /**
- * The call-site map a systemic challenge round receives: the summary its prompt
- * carries and the read-only context file its emission site passes to the lane
+ * The call-site map a systemic challenge round receives: the index its prompt
+ * carries and the read-only slice files its emission site passes to the lane
  * materializer. The same build `renderSecondOrderAdversaryPrompt` summarizes.
  */
 export function adversaryFileMapContext(bundle: ArtifactBundle): ReviewFileMapContext {
-  return reviewFileMapContext(adversaryFileMap(bundle, priorFindings(bundle)));
+  const banked = priorFindings(bundle);
+  return adversaryFileMapContextFor(bundle, banked, adversaryFileMap(bundle, banked));
+}
+
+/**
+ * The raw artifacts a systemic round is GRANTED as reference. Each is already
+ * projected into the prompt (charter register, adjudication) or into the map
+ * slices (the deterministic leads), so none is required reading.
+ * `design_assessment.json` is deliberately absent: 445 KB in the 0.55.15 dogfood
+ * run, nearly all metric leads, and every part a round needs is already in the
+ * prompt (the banked contract/conceptual findings) or in the slices (the leads
+ * on uncovered ground).
+ */
+export function systemicEvidencePaths(bundle: ArtifactBundle, artifactsDir: string): string[] {
+  return [
+    ...(bundle.charter_register ? [join(artifactsDir, "charter_register.json")] : []),
+    ...(bundle.conceptual_review_adjudication
+      ? [join(artifactsDir, "conceptual_review_adjudication.json")]
+      : []),
+    ...(bundle.conceptual_review_adjudication?.contributors
+      .filter((contributor) => contributor.role === "perspective")
+      .map((contributor) => contributor.result_path) ?? []),
+  ];
 }
 
 function renderPriorFindings(findings: readonly Finding[]): string[] {
@@ -246,10 +309,28 @@ function examplePath(bundle: ArtifactBundle, fileMap: ReviewFileMap): string {
 }
 
 /**
- * Render one systemic challenge round. `evidencePaths` are also granted in the
- * host step's read set; the prompt names them so the adversary can inspect the
- * full perspective artifacts and persisted judge adjudication rather than
- * reasoning from counts.
+ * The round's lens FOCUS: the operator's confirmed selection
+ * (`resolveIntentLensSelection`, the one resolution every draw reads), or
+ * `undefined` when none was expressed. It is focus, not admission — a finding
+ * keeps its TRUE lens, as the design-review lanes have since 7a624e00 (owner
+ * decision, 2026-11-05), so the closed vocabulary stays the whole lens set. The
+ * example echoes a selected lens: an example teaches by being copied, and it
+ * used to teach `performance` to runs that excluded it.
+ */
+function lensFocus(bundle: ArtifactBundle): {
+  selected: readonly string[] | undefined;
+  example: string;
+} {
+  const selected = resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection);
+  const pool = selected ?? LENSES;
+  const example = pool.includes("architecture") ? "architecture" : pool[0] ?? "architecture";
+  return { selected, example };
+}
+
+/**
+ * Render one systemic challenge round. `evidencePaths` are granted in the host
+ * step's read set as REFERENCE (`systemicEvidencePaths`); the prompt carries
+ * their projections, so the round opens one only to check a specific claim.
  */
 export function renderSecondOrderAdversaryPrompt(opts: {
   round: number;
@@ -266,6 +347,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
   const evidencePaths = [...new Set(opts.evidencePaths)].sort();
   const fileMap = adversaryFileMap(opts.bundle, bankedFindings);
   const exampleFilePath = examplePath(opts.bundle, fileMap);
+  const lenses = lensFocus(opts.bundle);
 
   return [
     "# Design review — systemic improvement-seeking challenge (second-order adversary)",
@@ -284,16 +366,22 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "- What **assumption went unquestioned**?",
     "- Is there a **categorically better approach** for a whole subsystem?",
     "",
-    "## Required evidence files",
+    "## What this prompt already digests, and the reference artifacts behind it",
     "",
-    "Read these full artifacts before concluding the round. They include the charter register, persisted conceptual judge/adjudication record, and every current-round perspective result:",
+    "This prompt carries the evidence the round needs, pre-digested: the charter register's " +
+      "stated-purpose/goal/delta projection, the conceptual adjudication's contributors and " +
+      "dispositions, every banked finding, and the covered themes — all below — and the " +
+      "deterministic leads on uncovered ground, inside the call-site map slices. Do NOT read the raw " +
+      "artifacts whole. They are granted as REFERENCE: open one only to check a specific claim a " +
+      "projection raises, and read only the part that claim needs." +
+      (evidencePaths.length > 0 ? "" : " No reference artifact exists for this run."),
     ...evidencePaths.map((path) => `- \`${path}\``),
     "",
-    "## Prior verified recon — read this BEFORE re-deriving anything",
+    "## Prior verified recon — uncovered ground, read the slices you need BEFORE re-deriving anything",
     "",
-    // The summary only: the complete map reaches the lane as a read-only context
-    // file its emission site binds (`adversaryFileMapContext`).
-    ...reviewFileMapContext(fileMap).summaryLines,
+    // The index only: the slices reach the lane as read-only context files its
+    // emission site binds (`adversaryFileMapContext`).
+    ...adversaryFileMapContextFor(opts.bundle, bankedFindings, fileMap).summaryLines,
     "## Stated-purpose / goal / delta projection",
     "",
     "Treat a triangulated purpose as a lead. Preserve disagreement, and inspect the full artifact when the projection raises a question:",
@@ -321,9 +409,9 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Repository/source verification (required)",
     "",
-    "Use the repository and the strongest structural tools available. The call-site map file is " +
-      "your starting recon — verify the sites it names and the claims you build on them, rather " +
-      "than rebuilding it. For every proposed improvement, inspect exact source sites, trace " +
+    "Use the repository and the strongest structural tools available. The call-site map slices are " +
+      "your starting recon for uncovered ground — verify the sites your improvements build on, " +
+      "rather than rebuilding the map. For every proposed improvement, inspect exact source sites, trace " +
       "relevant callers and callees in both directions, and verify the affected paths. Before any " +
       "negative or exhaustive claim, check structural-index coverage/freshness and directly read " +
       "every reported gap. If equivalent symbol search, bidirectional tracing, exact snippets, or " +
@@ -337,9 +425,15 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Lens and evidence (required)",
     "",
-    "- Tag each finding with the lens it genuinely belongs to. Test parallelization is `tests` or " +
-      "`performance`; operational simplification is `operability`. Do not default everything to " +
-      "`architecture`.",
+    "- Tag each finding with the lens it genuinely belongs to, from the closed `lens` list below. " +
+      "Do not default everything to `architecture`.",
+    ...(lenses.selected !== undefined
+      ? [
+          `- The operator selected these lenses for this audit: ${lenses.selected.join(", ")}. ` +
+            "Spend this round there. A finding that genuinely belongs to another lens is still " +
+            "filed under the lens it belongs to — never relabelled into a selected one.",
+        ]
+      : []),
     "- Every finding needs at least one `evidence` entry: write down what your source verification " +
       "actually found. A finding submitted without one is REFUSED.",
     "- Cite SYMBOLS, not line numbers — a function, type, or exported name, with the file that " +
@@ -349,7 +443,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "## Grounding — every improvement names a real file (required)",
     "",
     "Each finding's `affected_files` must name at least one file THIS repository holds, written " +
-      "repo-relative and spelled as the call-site map file spells it. A submission carrying an " +
+      "repo-relative and spelled as the call-site map slices and the manifest spell it. A submission carrying an " +
       "improvement that names no such file is REFUSED as a whole, and the refusal names the " +
       "finding: correct the path and resubmit. An improvement pointing at nothing cannot be " +
       "verified, dispatched, or remediated.",
@@ -394,7 +488,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     '    "category": "systemic_improvement",',
     '    "severity": "medium",',
     '    "confidence": "high",',
-    '    "lens": "performance",',
+    `    "lens": ${JSON.stringify(lenses.example)},`,
     '    "summary": "<what to do, why it is better, which axis it departs on, and source verification>",',
     '    "evidence": ["<symbol you read, the file holding it, and what you found there>"],',
     `    "affected_files": [{ "path": ${JSON.stringify(exampleFilePath)} }]`,

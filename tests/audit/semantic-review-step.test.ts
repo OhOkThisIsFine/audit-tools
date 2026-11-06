@@ -355,3 +355,23 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     ).not.toMatch(/[A-Za-z]:\\/u);
   });
 });
+
+describe("a selected lens with no per-file work item", () => {
+  it("says where the architecture lens is reviewed when the operator selected it", async () => {
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
+    const step = await renderSemanticReviewStep({
+      root,
+      sourceRoot: root,
+      artifactsDir,
+      activeReviewRun,
+      bundle: {
+        ...bundle,
+        intent_checkpoint: {
+          lens_selection: { include: ["architecture"] },
+        } as unknown as ArtifactBundle["intent_checkpoint"],
+      },
+    });
+    const prompt = await readFile(step.prompt_path, "utf8");
+    expect(prompt).toMatch(/architecture lens is reviewed whole-system/u);
+  });
+});

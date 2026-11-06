@@ -1,4 +1,29 @@
+import { z } from "zod";
 import type { Finding } from "../types.js";
+
+// sites-pinned: tests/audit/prompt-contract-dogfood-defects.test.ts
+/**
+ * The categories the deterministic design-assessment producers stamp on their
+ * LEADS (`src/audit/extractors/designAssessment.ts`). One home: each producer's
+ * emission is typed against it, and the design-review prompts render the
+ * categories a confirming reader may keep from it. A reader told "keep the
+ * lead's category" while the permitted list named only the pass's own
+ * categories dropped confirmed import cycles rather than break either rule.
+ */
+export const DesignLeadCategorySchema = z.enum([
+  "architectural_seam",
+  "code_duplication",
+  "complexity_hotspot",
+  "dependency_cycle",
+  "flow_gap",
+  "hidden_coupling",
+  "hub_module",
+  "monolith_unit",
+  "orphan_units",
+  "risk_concentration",
+  "unit_fragmentation",
+]);
+export type DesignLeadCategory = z.infer<typeof DesignLeadCategorySchema>;
 
 /**
  * A design-review submission that was refused — its top-level shape did not

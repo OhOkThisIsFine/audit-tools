@@ -47,6 +47,25 @@ await test("buildDocsDigest selects the doc universe via the single doc predicat
   expect(digest.omitted_paths).toBeUndefined();
 });
 
+await test("buildDocsDigest reads only PROSE: a doc_only fixture or log states no purpose", async () => {
+  const digest = await buildDocsDigest({
+    root: "/repo",
+    disposition: disposition([
+      { path: "README.md", status: "doc_only" },
+      { path: "docs/.size-baseline.json", status: "doc_only" },
+      { path: "examples/state.example.json", status: "doc_only" },
+      { path: "tests/fixtures/run.jsonl", status: "doc_only" },
+    ]),
+    readFileText: readerFor({
+      "README.md": "# Fixture\n\nAudits codebases.",
+      "docs/.size-baseline.json": '{"bytes": 1}',
+      "examples/state.example.json": '{"status": "active"}',
+      "tests/fixtures/run.jsonl": '{"event": 1}',
+    }),
+  });
+  expect(digest.docs.map((d) => d.path)).toEqual(["README.md"]);
+});
+
 await test("buildDocsDigest leaves license files out: legal text is not the repository's purpose", async () => {
   const digest = await buildDocsDigest({
     root: "/repo",

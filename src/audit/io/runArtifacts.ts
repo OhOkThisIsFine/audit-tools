@@ -126,6 +126,16 @@ export function reviewWaveClosedPath(artifactsDir: string, runId: string): strin
   return join(getRunPaths(artifactsDir, runId).runDir, REVIEW_WAVE_CLOSED_FILENAME);
 }
 
+// sites-pinned: tests/audit/inspection-handoff-binding.test.ts
+/**
+ * The published wave's content-coherence groups — scheduling facts for the
+ * host, rewritten with each publish and read by nothing in the tool. Inside the
+ * run directory for the same reason as the wave marker above.
+ */
+export function hostCoherenceGroupsPath(artifactsDir: string, runId: string): string {
+  return join(getRunPaths(artifactsDir, runId).runDir, "host-coherence-groups.json");
+}
+
 /**
  * The WAVE's own identity — the digest half of every review run id, and the
  * generation's whole fingerprint. It is deliberately a function of the

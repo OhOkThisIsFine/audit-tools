@@ -116,18 +116,21 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "graph_bundle.json",
   ],
   // Phase C conceptual design-review: the charter LAYER (three lane goal DAGs,
-  // correspondences, differences, fidelity). Depends on the Phase-B consensus
-  // scaffold (the members each lane reads), the confirmed intent checkpoint (the
-  // ceiling/consent dial that gates its depth), repo_manifest (every lane packet
-  // is a projection of member/doc content — its per-file hashes re-stale this
-  // transitively), and graph_bundle (the STRUCTURAL lane's packet embeds the
-  // dependency edges among members, and analyzer
-  // enrichment can merge new edges with NO file-content change — without this
-  // edge that would under-stale; design resolution 4). Charters live in this
-  // OUTPUT artifact, never back on the checkpoint it depends on, so there is no
-  // cycle.
+  // correspondences, differences, fidelity). Depends on unit_manifest (the
+  // non-test files of its units ARE the members each lane reads,
+  // `charterPacketReadSet`), the
+  // confirmed intent checkpoint (the ceiling/consent dial that gates its depth),
+  // repo_manifest (every lane packet is a projection of member/doc content — its
+  // per-file hashes re-stale this transitively), and graph_bundle (the
+  // STRUCTURAL lane's packet embeds the dependency edges among members, and
+  // analyzer enrichment can merge new edges with NO file-content change —
+  // without this edge that would under-stale; design resolution 4). No
+  // structure_decomposition edge: no charter_register producer reads it.
+  // Charters live in this OUTPUT artifact, never back on the checkpoint it
+  // depends on, so there is no cycle.
+  // sites-pinned: tests/audit/dependency-slices.test.ts
   "charter_register.json": [
-    "structure_decomposition.json",
+    "unit_manifest.json",
     "intent_checkpoint.json",
     "repo_manifest.json",
     "graph_bundle.json",
@@ -138,8 +141,8 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
   // and repo_manifest (a source-content change re-stales the register transitively).
   // It also reads structure_decomposition directly: each difference's report
   // grouping key is the consensus unit its files overlap most (`placeInSubsystem`),
-  // so the edge is declared here rather than left to ride the register's own
-  // decomposition edge (sliced to consensus membership, dependencySlices.ts).
+  // so the edge is declared here (sliced to consensus membership,
+  // dependencySlices.ts); the register itself has no decomposition edge.
   // Deterministic: the loop assembles from the register, so re-running is idempotent.
   // sites-pinned: tests/audit/dependency-slices.test.ts
   "charter_clarification.json": [

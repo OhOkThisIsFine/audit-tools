@@ -14,7 +14,8 @@ import {
 } from "../../src/audit/systemic/secondOrderAdversaryPrompt.js";
 import {
   buildReviewFileMap,
-  renderReviewFileMap,
+  reviewFileMapContext,
+  type ReviewFileMap,
   type ReviewFileMapScope,
 } from "../../src/audit/systemic/reviewFileMap.js";
 // Through the published subpath, not the source path: importing the source
@@ -1112,11 +1113,12 @@ describe("renderSecondOrderAdversaryPrompt", () => {
       graph_bundle: {
         graphs: { imports: [{ from: "src/a.ts", to: "src/b.ts" }] },
       },
-      // The banked finding is what points this round at `src/b.ts`.
+      // A deterministic lead no banked finding names is what points this round
+      // at `src/b.ts` — uncovered ground.
       design_assessment: {
         generated_at: "2026-01-01T00:00:00.000Z",
-        findings: [],
-        contract_findings: [mkFinding("CR-001", "architecture", "b is serial", ["src/b.ts"])],
+        findings: [{ ...mkFinding("L-001", "maintainability", "b is complex", ["src/b.ts"]), category: "complexity_hotspot" }],
+        contract_findings: [],
         contract_reviewed: true,
         conceptual_findings: [],
         conceptual_reviewed: true,
@@ -1134,7 +1136,7 @@ describe("renderSecondOrderAdversaryPrompt", () => {
     // tokens a round, 2026-07-19): the file under challenge, with its caller —
     // in the read-only context file, with only its summary in the prompt.
     const map = adversaryFileMapContext(bundle);
-    expect(map.contextFile.text).toContain("- **src/b.ts**\n  - referenced by: src/a.ts");
+    expect(map.contextFiles.map((file) => file.text).join("\n")).toContain("- **src/b.ts**\n  - referenced by: src/a.ts");
     expect(prompt).not.toContain("- **src/b.ts**");
     expect(prompt).toContain(map.summaryLines.join("\n"));
     expect(prompt).toMatch(/1 anchored with their complete caller and callee lists/);
@@ -1174,6 +1176,12 @@ describe("buildReviewFileMap", () => {
     files: (bundle.repo_manifest?.files ?? []).map((file) => file.path),
     basis: "every authored file",
   });
+
+  /** Everything a lane can read of one map: the prompt's index and every slice. */
+  const renderAll = (map: ReviewFileMap): string => {
+    const context = reviewFileMapContext(map);
+    return [...context.summaryLines, ...context.contextFiles.map((file) => file.text)].join("\n");
+  };
 
   test("reads the graph in BOTH directions and orders by path, not iteration order", () => {
     const map = buildReviewFileMap(mapBundle, everyFile(mapBundle));
@@ -1231,34 +1239,43 @@ describe("buildReviewFileMap", () => {
     const map = buildReviewFileMap(wideBundle, { files: ["src/hub.ts"], basis: "the hub" });
     expect(map.anchors).toHaveLength(1);
     expect(map.anchors[0].callers).toEqual(wideFiles);
-    const rendered = renderReviewFileMap(map).join("\n");
+    const rendered = renderAll(map);
     expect(rendered).toContain(`  - referenced by: ${wideFiles.join(", ")}`);
     expect(rendered).not.toMatch(/more not listed/i);
   });
 
   test("STATES the scope and the files outside it, so an unanchored file is not read as unconnected", () => {
-    const rendered = renderReviewFileMap(
+    const rendered = renderAll(
       buildReviewFileMap(wideBundle, { files: ["src/hub.ts"], basis: "the hub" }),
-    ).join("\n");
+    );
     expect(rendered).toMatch(/Scope: the hub — 1 file\(s\) under review/);
     expect(rendered).toMatch(/70 other authored file\(s\) lie outside this scope and are not anchored/);
     expect(rendered).toMatch(/outside this map, not unconnected/);
   });
 
-  test("the adversary's map anchors the files its banked findings implicate", () => {
+  test("the adversary's map anchors UNCOVERED ground: deterministic leads no banked finding names", () => {
+    // The round is told to DEPART from every component a banked finding names
+    // (covered themes), so recon for those components is recon for ground it
+    // must leave. The map anchors the deterministic leads it has not covered.
+    const lead = { ...mkFinding("L-1", "maintainability", "f65 is complex", ["src/f65.ts"]), category: "complexity_hotspot" };
+    const coveredLead = { ...mkFinding("L-2", "maintainability", "f10 is complex", ["src/f10.ts"]), category: "complexity_hotspot" };
     const bundle: ArtifactBundle = {
       ...wideBundle,
       design_assessment: {
         generated_at: "2026-01-01T00:00:00.000Z",
-        findings: [],
-        contract_findings: [mkFinding("CR-001", "architecture", "f65 is serial", ["src/f65.ts"])],
+        findings: [lead, coveredLead],
+        contract_findings: [mkFinding("CR-001", "architecture", "f10 is serial", ["src/f10.ts"])],
         contract_reviewed: true,
         conceptual_findings: [],
         conceptual_reviewed: true,
       },
     };
-    const map = adversaryFileMapContext(bundle).contextFile.text;
-    expect(map).toContain("- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/hub.ts");
+    const map = adversaryFileMapContext(bundle).contextFiles.map((file) => file.text).join("\n");
+    expect(map).toContain(
+      "- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/hub.ts\n  - lead: [complexity_hotspot/medium] f65 is complex",
+    );
+    // Covered by banked CR-001: a plain list in the prompt, never anchored.
+    expect(map).not.toContain("- **src/f10.ts**");
     // A file nothing names is not anchored merely because it sorts first.
     expect(map).not.toContain("- **src/f00.ts**");
   });
@@ -1269,8 +1286,8 @@ describe("buildReviewFileMap", () => {
     // review round then treats an extraction gap as "nothing depends on this".
     const map = buildReviewFileMap(mapBundle, everyFile(mapBundle));
     expect(map.files_without_edges).toBe(1);
-    const rendered = renderReviewFileMap(map).join("\n");
-    expect(rendered).toMatch(/1 authored file\(s\) carry no graph edge and are NOT listed/);
+    const rendered = renderAll(map);
+    expect(rendered).toMatch(/1 carry no graph edge \(an absent edge is a gap in this extraction/);
   });
 
   test("the edge-less statement accompanies the NO RECON branch too", () => {
@@ -1278,14 +1295,14 @@ describe("buildReviewFileMap", () => {
     // different one: no anchor at all was built, so EVERY in-scope file is
     // edge-less and the count is the scope's file count.
     const bare: ArtifactBundle = { repo_manifest: mapBundle.repo_manifest };
-    const rendered = renderReviewFileMap(buildReviewFileMap(bare, everyFile(bare))).join("\n");
+    const rendered = renderAll(buildReviewFileMap(bare, everyFile(bare)));
     expect(rendered).toMatch(/NO\s+RECON/i);
-    expect(rendered).toMatch(/3 authored file\(s\) carry no graph edge and are NOT listed/);
+    expect(rendered).toMatch(/3 carry no graph edge \(an absent edge is a gap in this extraction/);
   });
 
   test("an absent graph reads as NO RECON, never as 'everything is unconnected'", () => {
     const bare: ArtifactBundle = { repo_manifest: mapBundle.repo_manifest };
-    const rendered = renderReviewFileMap(buildReviewFileMap(bare, everyFile(bare))).join("\n");
+    const rendered = renderAll(buildReviewFileMap(bare, everyFile(bare)));
     expect(rendered).toMatch(/NO\s+RECON/i);
     expect(rendered).toMatch(/not evidence that no caller exists/i);
   });

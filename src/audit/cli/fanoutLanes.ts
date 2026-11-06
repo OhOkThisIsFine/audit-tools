@@ -2,7 +2,7 @@ import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { auditLaneReviewRequirement } from "./reviewSubmission.js";
 import { bindWorkerPrompt } from "../../shared/submission/workerPromptBinding.js";
 import { hashContent } from "../../shared/hash.js";
-// sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts, tests/audit/review-file-map-context.test.ts
+// sites-pinned: tests/shared/prompt-capability.test.ts, tests/audit/synthesis-narrative-prompt.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 //
 // This module is the SECOND prompt-writing boundary in the tool (writeStepContract
 // is the first): every lane prompt file on disk is written here, so the path form
@@ -139,7 +139,7 @@ export interface MaterializedFanout {
   pendingLanes: MaterializedFanoutLane[];
   /** `<id>_prompt` / `<id>_results` entries for the step contract. */
   artifactPaths: Record<string, string>;
-  /** Pending lanes' prompt paths (step `access.read_paths`). */
+  /** Pending lanes' prompt and context paths plus the source root (step `access.read_paths`). */
   readPaths: string[];
   /** Pending lanes' bound submission paths (step `access.write_paths`). */
   writePaths: string[];
@@ -415,7 +415,9 @@ export async function materializeFanoutLanes(params: {
     lanes,
     pendingLanes,
     artifactPaths,
-    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? []), ...lanes.flatMap(lane => lane.generatedContextPaths)])],
+    // The source root is granted too: every lane prompt's footer tells its reader to verify against
+    // that snapshot, so a lane told to check source must hold the read on it.
+    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? []), ...lanes.flatMap(lane => lane.generatedContextPaths), params.sourceRoot])],
     writePaths: pendingLanes.map((lane) => lane.resultPath),
     shortfall,
   };

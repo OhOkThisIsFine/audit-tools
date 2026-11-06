@@ -57,7 +57,7 @@ different analyzer version can classify files differently).
 | `conceptual_review_adjudication.json` | `design_assessment.json` |
 | `docs_digest.json` | `repo_manifest.json`, `file_disposition.json` |
 | `structure_decomposition.json` | `repo_manifest.json`, `file_disposition.json`, `graph_bundle.json` |
-| `charter_register.json` | `structure_decomposition.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
+| `charter_register.json` | `unit_manifest.json`, `intent_checkpoint.json`, `repo_manifest.json`, `graph_bundle.json` |
 | `charter_clarification.json` | `charter_register.json`, `intent_checkpoint.json`, `repo_manifest.json`, `structure_decomposition.json` |
 | `systemic_challenge.json` | `charter_register.json`, `conceptual_review_adjudication.json`, `intent_checkpoint.json`, `repo_manifest.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-2 -->

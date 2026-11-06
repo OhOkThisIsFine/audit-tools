@@ -23,6 +23,7 @@ import {
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
 import { isMandatoryLens } from "./lensSelection.js";
+import { ARCHITECTURE_REVIEW_SCOPE } from "./architectureDiscovery.js";
 import { compareCodeUnits, LENSES } from "audit-tools/shared";
 
 /**
@@ -417,8 +418,8 @@ function buildLensPropositions(
       case "architecture":
         propositions.push(
           hasNetworkSurface || isMultiModule
-            ? include(lens, "network-surface units and/or multi-module structure")
-            : exclude(lens, "single small module; limited structural surface"),
+            ? include(lens, `network-surface units and/or multi-module structure; ${ARCHITECTURE_REVIEW_SCOPE}`)
+            : exclude(lens, `single small module; limited structural surface; ${ARCHITECTURE_REVIEW_SCOPE}`),
         );
         break;
       case "tests":

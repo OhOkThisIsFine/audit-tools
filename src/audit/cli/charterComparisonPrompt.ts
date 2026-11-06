@@ -1,7 +1,7 @@
 // sites-pinned: tests/audit/charter-current-context.test.ts, tests/shared/prompt-renders-its-contract.test.ts, tests/audit/charter-emit-order.test.ts
 import { hashContent } from "../../shared/hash.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { CharterProvenanceSchema } from "audit-tools/shared";
+import { CharterProvenanceSchema, CORRESPONDENCE_MIN_MEMBERS } from "audit-tools/shared";
 import type { CorrespondenceCandidate } from "audit-tools/shared";
 
 /** The provenance-kind alternation, DERIVED from the schema at render time. */
@@ -45,6 +45,9 @@ export function renderCharterComparisonPrompt(
         return `- \`${c.candidate_id}\` — ${a!.kind}:\`${a!.node_ids.join(",")}\` ↔ ${b!.kind}:\`${b!.node_ids.join(",")}\` (basis: ${basis})`;
       })
     : ["- (the tool found no candidates — add any correspondence you can evidence, or affirm the empty result described under **Output**)"];
+  // The reject example names a REAL candidate when there is one, so a copied
+  // entry refuses a candidate this round knows.
+  const rejectExampleId = candidates[0]?.candidate_id ?? "cand-0000000000";
 
   return [
     "# Design review — charter comparison",
@@ -79,6 +82,10 @@ export function renderCharterComparisonPrompt(
     "- `widen` — the pairing is right but incomplete. List the FULL member set you mean, including the",
     "  nodes the candidate already named: the tool builds the correspondence from your `members` and",
     "  never from the candidate, so a member you leave out is a member you drop.",
+    "",
+    "Entry shape per verdict:",
+    `- \`confirm\` and \`widen\` carry \`verdict\` and \`members\` (at least ${CORRESPONDENCE_MIN_MEMBERS} entries, as in the example under **Output**), plus \`candidate_id\` when the entry answers a tool candidate.`,
+    `- \`reject\` carries only the candidate it refuses, exactly: \`${JSON.stringify({ candidate_id: rejectExampleId, verdict: "reject" })}\`. It needs no \`members\` or \`evidence\`.`,
     "",
     "Rules:",
     "- A correspondence may join one node to one node, several nodes, or a connected subgraph on the other side.",

@@ -32,22 +32,10 @@ function bundleWith(overrides: ArtifactBundle = {}): ArtifactBundle {
         { path: "src/b.ts", language: "typescript", size_bytes: 100 },
       ],
     },
-    structure_decomposition: {
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "structure",
-      node_universe_size: 2,
-      source_ids: ["call_import"],
-      consensus: [
-        {
-          node_id: "src/a.ts",
-          members: ["src/a.ts", "src/b.ts"],
-          agreed_across_source: 1,
-          stable_across_scale: 1,
-          contested: false,
-        },
+    unit_manifest: {
+      units: [
+        { unit_id: "src", name: "src", kind: "module", files: ["src/a.ts", "src/b.ts"], required_lenses: [] },
       ],
-      contested: [],
-      findings: [],
     },
     ...overrides,
   };

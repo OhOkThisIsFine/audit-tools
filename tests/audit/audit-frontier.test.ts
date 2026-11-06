@@ -456,6 +456,21 @@ test("a changed source revision explicitly refuses the old prompt-bound result",
   });
 });
 
+test("a ready inspection step grants the snapshot its prompts read and the coherence groups beside its workload", async () => {
+  const { readRunSourceRoot } = await import("../../src/audit/io/runSnapshot.js");
+  await withTempRepo(async (root) => {
+    const initial = await startConcurrentAudit(root);
+    expect(initial.workload.work_items.length).toBeGreaterThan(0);
+    const sourceRoot = await readRunSourceRoot(root, initial.artifactsDir);
+    // The step contract prints paths forward-slashed; compare in that one spelling.
+    const posix = (path: string) => path.replace(/\\/g, "/");
+    const readPaths: string[] = (initial.step.access?.read_paths ?? []).map(posix);
+    expect(readPaths).toContain(posix(sourceRoot));
+    expect(initial.step.artifact_paths.host_coherence_groups).toEqual(expect.any(String));
+    expect(readPaths).toContain(posix(initial.step.artifact_paths.host_coherence_groups));
+  });
+});
+
 test("an existing same-question finding follow-up is reused without mutating its binding", async () => {
   const { architectureDiscoveryTasks } = await import("../../src/audit/orchestrator/architectureDiscovery.js");
   const { buildFindingFollowupTask } = await import("../../src/audit/orchestrator/selectiveDeepening/findingFollowup.js");

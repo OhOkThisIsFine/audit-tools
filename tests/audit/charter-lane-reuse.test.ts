@@ -9,13 +9,16 @@ import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 // bodies), so only `stated` is re-authored and the other two lanes are carried.
 import { test, expect } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { writeCoreArtifacts, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { charterExtractionKindsForCeiling } from "../../src/audit/cli/charterExtractionPrompt.js";
 import { charterExtractionLane, charterExtractionPacketFilename, laneSubmissionPath } from "../../src/audit/cli/laneSubmissions.js";
 import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
+import { buildRepoManifestFromFs } from "../../src/audit/extractors/fsIntake.js";
+import { buildFileDisposition } from "../../src/audit/extractors/disposition.js";
+import { buildUnitManifest } from "../../src/audit/orchestrator/unitBuilder.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { walkStepsUntilTerminal } from "./helpers/step-driver.js";
 
@@ -23,27 +26,31 @@ const SOURCE_V1 = "// intent\nexport const alpha = 1;\n";
 // Same length, different comment: only the `stated` packet moves.
 const SOURCE_V2 = "// intens\nexport const alpha = 1;\n";
 
-function deepCeilingBundle(): ArtifactBundle {
+/**
+ * The intake-derived upstreams, produced by the production builders over the
+ * fixture tree — hashed, every file present, the unit partition the builder
+ * draws. A comment edit is then noticed the way a real run notices it (the
+ * integrity check re-runs intake, the manifest hash moves the register's
+ * read-file slice) and every re-derived upstream matches what the fixture
+ * pinned, so only the packet the edit touches can move.
+ */
+async function intakeOf(root: string): Promise<Pick<ArtifactBundle, "repo_manifest" | "file_disposition" | "unit_manifest">> {
+  const repoManifest = await buildRepoManifestFromFs({ root, name: basename(root), hash_files: true });
+  const disposition = await buildFileDisposition(repoManifest, { root });
   return {
-    repo_manifest: {
-      repository: { name: "fixture" },
-      generated_at: "2026-01-01T00:00:00.000Z",
-      files: [
-        { path: "src/a.ts", language: "typescript", size_bytes: SOURCE_V1.length, hash: "v1" },
-        { path: "README.md", language: "markdown", size_bytes: 100, hash: "readme" },
-      ],
-    },
-    file_disposition: {
-      files: [
-        { path: "src/a.ts", status: "included" },
-        { path: "README.md", status: "doc_only" },
-      ],
-    },
+    repo_manifest: repoManifest,
+    file_disposition: disposition,
+    unit_manifest: buildUnitManifest(repoManifest, disposition),
+  };
+}
+
+function deepCeilingBundle(intake: Awaited<ReturnType<typeof intakeOf>>): ArtifactBundle {
+  return {
+    ...intake,
     auto_fixes_applied: {},
     syntax_resolution_status: {},
     external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
     external_analyzer_results: [{ tool: "eslint", results: [] }],
-    unit_manifest: { units: [] },
     surface_manifest: { surfaces: [] },
     graph_bundle: { graphs: {} },
     critical_flows: { flows: [], fallback_required: false },
@@ -115,7 +122,7 @@ async function firstExtraction(root: string, artifactsDir: string): Promise<Regi
   await writeFile(join(root, "README.md"), "# Fixture\n\nprose.\n", "utf8");
   await writeFile(join(root, "src", "a.ts"), SOURCE_V1, "utf8");
   await mkdir(artifactsDir, { recursive: true });
-  const completed = captureCompletedDesignReviews(deepCeilingBundle());
+  const completed = captureCompletedDesignReviews(deepCeilingBundle(await intakeOf(root)));
   await writeCoreArtifacts(artifactsDir, completed);
   await persistDesignReviewSnapshots(artifactsDir, completed);
 
@@ -136,10 +143,9 @@ async function readRegister(artifactsDir: string): Promise<Register> {
 }
 
 /**
- * Make ONLY the register stale by moving its recorded read-file slice — the
- * property under test is what a stale register's re-extraction asks for, not
- * how intake notices an edit (a manifest rewrite would also re-derive the
- * fixture's hand-written upstream artifacts).
+ * Make ONLY the register stale by moving its recorded read-file slice, for the
+ * case with no source edit at all: what a stale register whose packets are all
+ * unchanged re-asks for.
  */
 async function staleTheRegister(artifactsDir: string): Promise<void> {
   const metadataPath = join(artifactsDir, "artifact_metadata.json");
@@ -171,10 +177,11 @@ test("a later extraction re-authors only the lanes whose packet changed and carr
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await firstExtraction(root, artifactsDir);
 
-    // The run reads its frozen snapshot: the comment edit lands there.
+    // The run reads its frozen snapshot: the comment edit lands there. Nothing
+    // else is touched — the integrity check notices the edit, intake re-runs,
+    // and the manifest hash moves the register's read-file slice.
     const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
     await writeFile(join(sourceRoot, "src", "a.ts"), SOURCE_V2, "utf8");
-    await staleTheRegister(artifactsDir);
 
     const second = await walkTo(root, artifactsDir, ["charter_extraction"], "re-extraction");
     // Only the `stated` lane is asked for again (the step may carry other host
