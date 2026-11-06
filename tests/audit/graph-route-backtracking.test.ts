@@ -1,4 +1,4 @@
-import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
+import { runAfterReadyWithDeadline } from "../helpers/spawn.mjs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -48,26 +48,28 @@ import {
  */
 
 describe("framework route extraction is linear on adversarial input", () => {
-  it("scans growing route objects in a bounded subprocess and preserves their paths", () => {
+  it("scans growing route objects in a bounded subprocess and preserves their paths", async () => {
     // A hard process ceiling bounds regressions without 60ms scheduler-sensitive
     // assertions. The former unbounded lazy-import gap exceeds this ceiling at
     // 200k markers; the bounded extractor handles all three sizes comfortably.
-    const script = `
+    // The ceiling times the scans only, never the child's start.
+    const result = await runAfterReadyWithDeadline({
+      imports: `
       import assert from 'node:assert/strict';
       import { extractFrameworkRouteEvidence } from './src/audit/extractors/graphRoutes.ts';
+      `,
+      body: `
       for (const size of [50000, 100000, 200000]) {
         const source = "const routes: Routes = [{path: 'far', " + 'loadChildren:'.repeat(size) + '}];';
         const result = extractFrameworkRouteEvidence('src/app/routes.ts', source, new Map());
         assert.deepEqual(result.routes, [{path:'/far', handler:'src/app/routes.ts'}]);
         assert.deepEqual(result.calls, []);
       }
-    `;
-    const result = spawnSync(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", script], {
-      cwd: process.cwd(), encoding: "utf8", timeout: 8000,
-    });
-    expect(result.error, result.stderr).toBeUndefined();
+    `,
+    }, 8000);
+    expect(result.timedOut, result.stderr).toBe(false);
     expect(result.status, result.stderr).toBe(0);
-  }, 12000);
+  });
 
   it("still resolves a real lazy import inside the bounded window", () => {
     // The correction must not cost the shape it exists to read: a genuine
@@ -126,28 +128,29 @@ describe("framework route extraction is linear on adversarial input", () => {
  * quadratic scanners exceed the ceiling; the linear scans have ample headroom.
  * Unlike a millisecond doubling ratio, the ceiling tolerates CI scheduling noise.
  */
-function expectBoundedBindingScan(marker: string): void {
-  const script = `
+async function expectBoundedBindingScan(marker: string): Promise<void> {
+  const result = await runAfterReadyWithDeadline({
+    imports: `
     import assert from 'node:assert/strict';
     import { extractRegisteredRouteEvidence } from './src/audit/extractors/graphRoutes.ts';
+    `,
+    body: `
     for (const size of [100000, 200000, 400000]) {
       const source = 'export const routes = 0;\\n' + ${JSON.stringify(marker)}.repeat(size);
       const result = extractRegisteredRouteEvidence('src/app/routes.ts', source, new Map());
       assert.deepEqual(result.routes, []);
       assert.deepEqual(result.calls, []);
     }
-  `;
-  const result = spawnSync(process.execPath, ["--import", "tsx/esm", "--input-type=module", "-e", script], {
-    cwd: process.cwd(), encoding: "utf8", timeout: 8000,
-  });
-  expect(result.error, result.stderr).toBeUndefined();
+  `,
+  }, 8000);
+  expect(result.timedOut, result.stderr).toBe(false);
   expect(result.status, result.stderr).toBe(0);
 }
 
 describe("the import-binding clause scan is linear on adversarial input", () => {
-  it("scans a marker run with no completing `from` without quadratic backtracking", () => {
-    expectBoundedBindingScan("import ");
-  }, 12000);
+  it("scans a marker run with no completing `from` without quadratic backtracking", async () => {
+    await expectBoundedBindingScan("import ");
+  });
 
   it("still reads every binding a well-formed clause declares", () => {
     // The scan must not cost the shapes it exists to read.
@@ -175,9 +178,9 @@ describe("the import-binding clause scan is linear on adversarial input", () => 
 });
 
 describe("the destructuring-require scan is linear on adversarial input", () => {
-  it("scans a marker run with no closing brace without quadratic backtracking", () => {
-    expectBoundedBindingScan("const { ");
-  }, 12000);
+  it("scans a marker run with no closing brace without quadratic backtracking", async () => {
+    await expectBoundedBindingScan("const { ");
+  });
 
   it("still reads every destructured require binding", () => {
     const source = [

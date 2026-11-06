@@ -45,6 +45,7 @@ export {
   spawnHidden,
   execFileHidden,
   runBounded,
+  runAfterReadyWithDeadline,
   CLI_CALL_DEADLINE_MS,
 } from "./trackedSpawn.ts";
 

@@ -489,3 +489,69 @@ export function runBounded(
     });
   });
 }
+
+export interface ReadyBoundedResult {
+  status: number | null;
+  stderr: string;
+  /** The deadline fired after the ready line and the child was killed. */
+  timedOut: boolean;
+}
+
+const SCAN_READY_LINE = "__scan_ready__";
+
+/**
+ * Run a module script under a deadline that times its WORK, never its start.
+ *
+ * A linearity probe runs its scan in a child so that a quadratic regression is
+ * KILLED at a ceiling (cb63ca70), not left to stall the worker. A deadline
+ * around the whole child also times the `tsx` start and the TypeScript
+ * transform of everything the script imports. Under a 16-worker full suite that
+ * start alone passed the 8s ceiling: three full runs in a row on 2026-11-06,
+ * while each file passed alone. The ceiling then tested machine load, not the
+ * scan.
+ *
+ * So the script is two parts. `imports` holds its static imports; the child
+ * prints a ready line once they have loaded, and the deadline starts THERE.
+ * `body` is the timed work. A child that never prints the line is bounded by
+ * the test's own timeout, which vitest owns.
+ */
+export function runAfterReadyWithDeadline(
+  script: { imports: string; body: string },
+  deadlineMs: number,
+): Promise<ReadyBoundedResult> {
+  const source =
+    `${script.imports}\n` +
+    `process.stdout.write(${JSON.stringify(`${SCAN_READY_LINE}\n`)});\n` +
+    script.body;
+  return new Promise<ReadyBoundedResult>((resolve) => {
+    const child = spawnHidden(
+      process.execPath,
+      ["--import", "tsx/esm", "--input-type=module", "-e", source],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    let deadline: NodeJS.Timeout | undefined;
+    let timedOut = false;
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+      if (deadline === undefined && stdout.includes(SCAN_READY_LINE)) {
+        deadline = setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, deadlineMs);
+      }
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      if (deadline !== undefined) clearTimeout(deadline);
+      resolve({ status: null, stderr: `${stderr}\nspawn failed: ${error.message}`, timedOut });
+    });
+    child.on("close", (code) => {
+      if (deadline !== undefined) clearTimeout(deadline);
+      resolve({ status: code, stderr, timedOut });
+    });
+  });
+}
