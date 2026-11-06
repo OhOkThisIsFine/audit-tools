@@ -124,7 +124,12 @@ import { buildTaskCoherencePartition } from "../../orchestrator/partitionTaskGra
 // the result path ABSOLUTE, so the persisted template a work item is checked
 // against changed shape. A v1alpha4 document refuses closed as stale — the same
 // `next-step` re-prepares it.
-const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha5" as const;
+//
+// v1alpha6 (decision 5 of the 2026-11-06 dogfood audit): each fact stated once.
+// The template no longer names the path (line 2 of the body does), and its
+// wording depends on the lane, so the persisted template changed shape again. A
+// v1alpha5 document refuses closed as stale — the same `next-step` re-prepares it.
+const WORKLOAD_CONTRACT_VERSION = "audit-host-workload/v1alpha6" as const;
 const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 
@@ -795,12 +800,18 @@ function workerResultPath(root: string, resultPath: string): string {
   return toPosixPath(resolve(root, resultPath)).replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
 }
 
+/**
+ * The tail every work-item prompt ends with. The destination is NOT repeated
+ * here: line 2 of the body states it, once (decision 5, cut C1). The base lane's
+ * key set is stated by the template itself ("Keep exactly these keys", cut C2);
+ * the steward lane adds `verification`, so its body keeps the result-contract
+ * line and its tail does not claim an exact key set.
+ */
 function renderResultTemplate(
   runId: string,
   workItemId: string,
-  /** Absolute, from {@link workerResultPath}. */
-  resultPath: string,
   promptDigest: string,
+  verificationLane: boolean,
 ): string {
   const template = {
     contract_version: RESULT_CONTRACT_VERSION,
@@ -812,7 +823,9 @@ function renderResultTemplate(
     findings: [],
   };
   return [
-    `When you finish, write this JSON to \`${resultPath}\`. Keep the five identity values as they are. Fill in \`file_coverage\` and \`findings\`:`,
+    verificationLane
+      ? "When you finish, write this JSON to the path on line 2. Keep the five identity values as they are. Fill in `file_coverage` and `findings`:"
+      : "When you finish, write this JSON to the path on line 2. Keep exactly these keys, and keep the five identity values as they are. Fill in `file_coverage` and `findings`:",
     "```json",
     JSON.stringify(template, null, 2),
     "```",
@@ -851,16 +864,6 @@ function buildPrompt(
   // DIGEST a function of the surface's size. The list and its per-file metrics
   // ride the workload the tool already writes, and the prompt names where.
   const selective = task.coverage_policy === "selective";
-  const assignment = stableStringify({
-    ...(selective
-      ? { surface_file_count: task.file_paths.length }
-      : { file_line_counts: task.file_line_counts, files: task.file_paths }),
-    lens: task.lens,
-    pass_id: task.pass_id,
-    rationale: task.rationale,
-    task_id: task.task_id,
-    unit_id: task.unit_id,
-  });
   // LANE-AWARE, because the two lanes' contracts genuinely differ: the steward
   // lane is INSTRUCTED (by its task rationale) to return verification metadata,
   // and the base lane is not. Rendering one envelope sentence for both would
@@ -869,6 +872,19 @@ function buildPrompt(
   // demands. The ask and the envelope are the same fact, so they are stated
   // from the same predicate.
   const verificationLane = isVerificationLane(task.tags);
+  // Each fact once (decision 5): `file_line_counts` already names every file
+  // (cut C3), and the base lane's reader uses neither `task_id` (the template's
+  // `work_item_id`) nor `pass_id` (`pass:<lens>`) (cut C4). The steward keeps
+  // both: each of its `verification.followup_tasks` entries must carry them.
+  const assignment = stableStringify({
+    ...(selective
+      ? { surface_file_count: task.file_paths.length }
+      : { file_line_counts: task.file_line_counts }),
+    lens: task.lens,
+    ...(verificationLane ? { pass_id: task.pass_id, task_id: task.task_id } : {}),
+    rationale: task.rationale,
+    unit_id: task.unit_id,
+  });
   return [
     "Perform the bounded semantic audit work item below.",
     // THE DESTINATION FIRST, on its own line. It used to be one field inside a
@@ -876,7 +892,7 @@ function buildPrompt(
     // search for: a result written anywhere else is never ingested.
     // ABSOLUTE (`workerResultPath`): the worker's working directory is the
     // host's choice, so no path here may depend on it.
-    `Write one JSON object to this exact absolute path: ${resultPath}`,
+    destinationLine(resultPath),
     // WHERE TO READ, stated rather than left to the host's working directory:
     // the run audits a frozen snapshot, and the live tree may have moved since
     // the run started. Line counts and cited text are checked against this tree.
@@ -901,23 +917,35 @@ function buildPrompt(
     assignment,
     "```",
     ...lensGuidanceLines(task.lens),
-    verificationLane
-      // `verification` is REQUIRED on this lane, and the prompt states ONE rule.
-      // It used to say "exactly … and verification" and then call the field
-      // optional, which is a contradiction a reader cannot obey both halves of.
-      // Required is the honest reading: a steward returns `findings: []`, so a
-      // steward with no `verification` carries no answer at all and is
-      // indistinguishable from a lane that failed.
-      ? "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, and verification in addition to contract_version. On this lane verification is REQUIRED."
-      : "Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, and findings in addition to contract_version.",
+    // `verification` is REQUIRED on the steward lane, and the prompt states ONE
+    // rule. It used to say "exactly … and verification" and then call the field
+    // optional, which is a contradiction a reader cannot obey both halves of.
+    // Required is the honest reading: a steward returns `findings: []`, so a
+    // steward with no `verification` carries no answer at all and is
+    // indistinguishable from a lane that failed. The base lane has no such
+    // line: its template states the exact key set (decision 5, cut C2).
+    ...(verificationLane
+      ? ["Result contract: audit-host-result/v1alpha1 with exactly result_id, run_id, work_item_id, prompt_sha256, file_coverage, findings, and verification in addition to contract_version. On this lane verification is REQUIRED."]
+      : []),
     "Each file_coverage entry must contain exactly path, reviewed_lines, and total_lines.",
     // The finding contract is CARRIED, not referenced: it is rendered from the
     // very schema ingestion enforces, so a host never has to remember or fetch it.
     ...findingContractPromptLines(),
-    "Do not supply a `grounding` field on any finding — grounding is computed by the tool at ingest by re-reading your cited quoted_text from disk, and a supplied one rejects the whole submission.",
+    "Never supply a `grounding` field: the tool computes it at ingest from your quoted_text.",
     ...(verificationLane ? verificationContractPromptLines() : []),
+    // Stated ONCE, last, so it covers every rule above it (decision 5, cut C7).
+    "A result that breaks any rule above is rejected whole.",
   ].join("\n");
 }
+
+/** Line 2 of every work-item prompt: the one statement of the absolute destination. */
+function destinationLine(absoluteResultPath: string): string {
+  return `Write one JSON object to this exact absolute path: ${absoluteResultPath}`;
+}
+
+/** The first line of the steward's verification contract; only a steward body holds it. */
+const VERIFICATION_CONTRACT_LEAD =
+  "This work item is a LENS STEWARD VERIFICATION task, so it must also carry a `verification` object.";
 
 /**
  * The `verification` contract rendered into a steward-lane work item's prompt.
@@ -931,7 +959,7 @@ function buildPrompt(
  */
 function verificationContractPromptLines(): readonly string[] {
   return [
-    "This work item is a LENS STEWARD VERIFICATION task, so it must also carry a `verification` object.",
+    VERIFICATION_CONTRACT_LEAD,
     `verification must contain exactly ${VERIFICATION_CONTRACT_KEYS.join(", ")} — all ${String(VERIFICATION_CONTRACT_KEYS.length)}, with no extra key: verified and needs_followup are booleans, concerns, coverage_concerns and confidence_concerns are arrays of non-empty strings (a genuine "nothing to report" is an empty array, not an omitted field), selection_rationale is a non-empty string, and followup_tasks is an array of objects.`,
     "verification.selection_rationale states how you chose which surface files to open and which to leave: name the signals you followed and say what you decided was not worth opening. A file you did not open is not a coverage failure, but an unexplained choice is.",
     `Each verification.followup_tasks entry must contain exactly ${VERIFICATION_FOLLOWUP_KEYS.join(", ")} — all ${String(VERIFICATION_FOLLOWUP_KEYS.length)}, with no extra key: file_paths is a non-empty array of non-empty repo-relative strings, each naming a file on THIS work item's assigned surface (scope.files) — a file you did not open is still on the surface and may be named; lens must be the lens of THIS task; task_id, unit_id, pass_id and rationale must be non-empty strings.`,
@@ -1120,7 +1148,7 @@ function buildWorkItem(
   // where its surface actually is rather than where it is expected to be.
   const prompt = bindWorkerPrompt(
     buildPrompt(task, promptResultPath, paths.workloadPath, boundarySourceRoot(paths)),
-    (digest) => renderResultTemplate(paths.runId, task.task_id, promptResultPath, digest),
+    (digest) => renderResultTemplate(paths.runId, task.task_id, digest, isVerificationLane(task.tags)),
   );
   return {
     id: task.task_id,
@@ -1396,13 +1424,22 @@ function parseWorkItem(value: unknown, runId: string, root: string): AuditHostWo
     typeof value.prompt.text !== "string" ||
     !workerPromptBindingHolds(
       { text: value.prompt.text, sha256: value.prompt.sha256 },
+      // The lane is read from the digest-bound BODY: only a steward body states
+      // the verification contract, and the body cannot change without the digest.
       (digest) => renderResultTemplate(
         runId,
         value.id as string,
-        workerResultPath(root, value.result_path as string),
         digest,
+        // A WHOLE line: a rationale is free text inside the assignment JSON, so a
+        // substring match would let it flip the lane.
+        (value.prompt as { text: string }).text.split("\n").includes(VERIFICATION_CONTRACT_LEAD),
       ),
     ) ||
+    // Line 2 states the absolute destination under the root the workload was
+    // prepared at. Re-derived under the CURRENT root, a root that really moved
+    // no longer matches, and the workload is refused as stale (see
+    // `workerResultPath`) rather than sending readers to the old tree.
+    value.prompt.text.split("\n")[1] !== destinationLine(workerResultPath(root, value.result_path)) ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, [
       "files",

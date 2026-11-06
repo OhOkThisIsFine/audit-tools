@@ -19,7 +19,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   AUDIT_FINDING_QUOTE_OR_DECLARATION_RULE,
   CONFIDENCES,
-  LENSES,
   SEVERITIES,
   compareCodeUnits,
 } from "audit-tools/shared";
@@ -61,6 +60,19 @@ function describeField(node: SchemaNode | undefined): string {
   return typeof node.type === "string" ? node.type : "value";
 }
 
+/**
+ * The finding schema the prompt describes: the worker schema less two optional
+ * fields, each omitted for its own reason. The prompt-contract registry checks
+ * the prompt against THIS object, so the omission is one statement, not two.
+ * - `lens`: the `finding_lens_matches_task` rule states it whole (cut C7).
+ * - `analyzer_provenance`: the field is copied from an injected lead's
+ *   provenance object, and no work-item prompt delivers one (cut C5; the
+ *   missing injection is D15 of the 2026-11-06 dogfood audit). Asking every
+ *   reader for it asks for a value it cannot have.
+ */
+// sites-pinned: tests/shared/prompt-renders-its-contract.test.ts, tests/audit/finding-contract-vocab-line.test.ts
+export const PROMPTED_FINDING_SCHEMA = WorkerFindingSchema.omit({ lens: true, analyzer_provenance: true });
+
 let renderedContract: readonly string[] | undefined;
 
 /**
@@ -74,7 +86,7 @@ let renderedContract: readonly string[] | undefined;
  */
 export function findingContractPromptLines(): readonly string[] {
   if (renderedContract !== undefined) return renderedContract;
-  const schema = zodToJsonSchema(WorkerFindingSchema, {
+  const schema = zodToJsonSchema(PROMPTED_FINDING_SCHEMA, {
     $refStrategy: "none",
     target: "jsonSchema7",
   }) as SchemaNode;
@@ -97,31 +109,29 @@ export function findingContractPromptLines(): readonly string[] {
     )
     .map(([name]) => name)
     .sort();
-  const nonEmptyLine = (names: readonly string[]): string =>
-    `Finding contract — ${names.join(", ")} ` +
-    `${names.every((name) => required.includes(name)) ? "must be non-empty" : "must be non-empty when supplied"} ` +
-    "(an empty value rejects the submission).";
+  // ONE non-empty line (decision 5, cut C7): the required fields, then the
+  // optional ones "when supplied". The whole-rejection consequence is stated
+  // once, at the end of the work-item prompt, not on each line.
+  const requiredNonEmpty = nonEmptyFields.filter((name) => required.includes(name));
+  const optionalNonEmpty = nonEmptyFields.filter((name) => !required.includes(name));
+  const nonEmptyClauses = [
+    ...(requiredNonEmpty.length > 0 ? [requiredNonEmpty.join(", ")] : []),
+    ...(optionalNonEmpty.length > 0 ? [`when supplied: ${optionalNonEmpty.join(", ")}`] : []),
+  ];
   const lines: string[] = [
     "Finding contract — every entry of `findings` must carry these required fields: " +
       required
         .map((name) => `${name} (${describeField(properties[name])})`)
         .join(", ") +
       ".",
-    ...[
-      nonEmptyFields.filter((name) => required.includes(name)),
-      nonEmptyFields.filter((name) => !required.includes(name)),
-    ]
-      .filter((names) => names.length > 0)
-      .map((names) => nonEmptyLine(names)),
-    "These fields are JSON arrays whenever present, never a bare string or object: " +
-      arrayFields.join(", ") +
-      ". A finding that fails this contract rejects the whole submission.",
-    // `lens` is an OPTIONAL finding field (the enclosing AuditResult supplies
-    // the default), so its vocabulary clause is scoped to findings that supply
-    // one — stated two lines above as "lens is optional" — while severity and
-    // confidence are required on every finding. Still derived: the value list
-    // comes from LENSES, never a hand-typed copy.
-    `Closed vocabularies — severity must be one of ${SEVERITIES.join("|")}; confidence one of ${CONFIDENCES.join("|")}; lens, when supplied, one of ${LENSES.join("|")}.`,
+    ...(nonEmptyClauses.length > 0 ? [`Must be non-empty: ${nonEmptyClauses.join("; ")}.`] : []),
+    "JSON arrays when present, never a bare string or object: " + arrayFields.join(", ") + ".",
+    // Severity and confidence are required on every finding. The lens has no
+    // vocabulary clause: the lens rule below ("match the assigned task lens, or
+    // omit it") leaves exactly one valid value, so a list of eleven would only
+    // invite a wrong one (cut C7). Still derived: the lists come from the
+    // shared vocabularies, never a hand-typed copy.
+    `Closed vocabularies — severity must be one of ${SEVERITIES.join("|")}; confidence one of ${CONFIDENCES.join("|")}.`,
     ...optionalFields
       .filter(([, node]) => typeof node.description === "string")
       .map(

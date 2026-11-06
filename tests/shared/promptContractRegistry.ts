@@ -9,8 +9,7 @@ import { renderCharterComparisonPrompt } from "../../src/audit/cli/charterCompar
 import { renderCharterFidelityPrompt } from "../../src/audit/cli/charterFidelityPrompt.js";
 import { renderCharterKindLanePrompt } from "../../src/audit/cli/charterExtractionPrompt.js";
 import { renderIntentEquivalencePrompt } from "../../src/audit/cli/nextStepCommand.js";
-import { findingContractPromptLines } from "../../src/audit/contracts/findingContractPrompt.js";
-import { WorkerFindingSchema } from "../../src/audit/contracts/workerSchemas.js";
+import { PROMPTED_FINDING_SCHEMA, findingContractPromptLines } from "../../src/audit/contracts/findingContractPrompt.js";
 import { renderConceptualJudgePrompt } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { ConceptualJudgeSubmissionSchema } from "../../src/audit/types/conceptualAdjudication.js";
 import { renderCriticalFlowFallbackPrompt } from "../../src/audit/reporting/criticalFlowFallbackPrompt.js";
@@ -338,7 +337,7 @@ export const promptContractRegistry: readonly PromptContractRegistryRow[] = [
     builder: "findingContractPromptLines",
     file: "src/audit/contracts/findingContractPrompt.ts",
     disposition: "derived",
-    schema: { name: "WorkerFindingSchema", file: "src/audit/contracts/workerSchemas.ts", object: WorkerFindingSchema },
+    schema: { name: "PROMPTED_FINDING_SCHEMA", file: "src/audit/contracts/findingContractPrompt.ts", object: PROMPTED_FINDING_SCHEMA },
     render: () => findingContractPromptLines().join("\n"),
   },
   {

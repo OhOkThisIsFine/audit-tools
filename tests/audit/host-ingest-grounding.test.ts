@@ -346,7 +346,7 @@ describe(FAILURE_SIGNATURE, () => {
     const published = await publishOneWorkItem();
     expect(published.item.prompt.text).toMatch(/grounding/u);
     expect(published.item.prompt.text).toMatch(
-      /Do not supply a `grounding` field/u,
+      /Never supply a `grounding` field/u,
     );
   });
 });

@@ -592,6 +592,22 @@
         "src/remediate/steps/nextStep.ts": "e2fa29818ab9631581e8f53fce0f8be614908d03",
         "src/shared/submission/ingestReport.ts": "50399210ffdbd5498f817ace659c6667d1b55a28"
       }
+    },
+    "e3f8dec1bdfb8e7c": {
+      "reviewed_by": "opencode-xhigh:ses_e4d6790b0ffedBJke2t8kBIj41",
+      "attester_class": "agent",
+      "checked": "decision 5 prompt cuts C1-C5,C7: workload contract bumped to audit-host-workload/v1alpha6; steward lead matched as a whole line; PROMPTED_FINDING_SCHEMA omits lens and analyzer_provenance; ingestion still validates the full WorkerFindingSchema; full suite green on the staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "3391ef28dbec5d181772aad25d7cbe03ad9efb9f",
+        "ran_at": "2026-11-06T23:00:04.642Z"
+      },
+      "attested_at": "2026-11-06T23:00:12.716Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "184bb3c6e2779f6ed0f1d4f300d3d0f361305457"
+      }
     }
   },
   "entries": {
@@ -620,7 +636,7 @@
       "review": "491762bb82302829"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "e3f8dec1bdfb8e7c"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"

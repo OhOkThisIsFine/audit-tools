@@ -284,11 +284,14 @@ describe(FAILURE_SIGNATURE, () => {
     expect(constrained).toContain("reproduction");
     expect(constrained).toContain("related_findings");
     expect(constrained).toContain("category");
+    // One line states every min(1) field (decision 5, cut C7).
+    const nonEmptyLine = prompt.split("\n").find((line) => line.startsWith("Must be non-empty:"));
+    expect(nonEmptyLine, "the prompt must carry the non-empty line").toBeDefined();
     for (const field of constrained) {
       expect(
-        contractBlock,
+        nonEmptyLine,
         `the prompt must state that '${field}' is non-empty — it carries a min(1) constraint`,
-      ).toMatch(new RegExp(`${field}[^\\n]*non-empty`, "u"));
+      ).toMatch(new RegExp(`\\b${field}\\b`, "u"));
     }
 
     // Line numbers are tool-owned: the prompt says the reviewer never sends them

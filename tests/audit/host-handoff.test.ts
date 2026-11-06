@@ -2,6 +2,7 @@ import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { createHash } from "node:crypto";
 import {
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -84,7 +85,7 @@ interface HostWorkItem {
 }
 
 interface HostWorkload {
-  readonly contract_version: "audit-host-workload/v1alpha5";
+  readonly contract_version: "audit-host-workload/v1alpha6";
   readonly run_id: string;
   readonly work_items: readonly HostWorkItem[];
 }
@@ -582,7 +583,7 @@ describe(FAILURE_SIGNATURE, () => {
       tasks,
     });
     expect(first.workload.contract_version).toBe(
-      "audit-host-workload/v1alpha5",
+      "audit-host-workload/v1alpha6",
     );
     expect(first.result_map.contract_version).toBe(
       "audit-host-result-map/v1alpha1",
@@ -939,7 +940,7 @@ describe(FAILURE_SIGNATURE, () => {
     // It names BOTH versions — the one found and the one this build mints — and
     // the one repair, so the host is not left to infer any of the three.
     expect(refusal!.message).toContain("audit-host-workload/v1alpha1");
-    expect(refusal!.message).toContain("audit-host-workload/v1alpha5");
+    expect(refusal!.message).toContain("audit-host-workload/v1alpha6");
     expect(refusal!.message).toContain("re-prepare");
 
     // RUN-SCOPED, deliberately: the refusal is about the workload DOCUMENT, not
@@ -1968,7 +1969,7 @@ describe("prompt 20: tool-filled result template (audit draw)", () => {
         ),
       ],
     });
-    expect(prepared.workload.contract_version).toBe("audit-host-workload/v1alpha5");
+    expect(prepared.workload.contract_version).toBe("audit-host-workload/v1alpha6");
     for (const item of prepared.workload.work_items) {
       const text = item.prompt.text;
       const at = text.indexOf(TEMPLATE_LEAD);
@@ -1984,7 +1985,163 @@ describe("prompt 20: tool-filled result template (audit draw)", () => {
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,
       });
-      expect(text.slice(at)).toContain(item.result_path);
+      // The template points at line 2, which states the absolute destination.
+      expect(text.slice(at)).toContain("write this JSON to the path on line 2");
+      expect(text.split("\n")[1]).toMatch(
+        new RegExp(`^Write one JSON object to this exact absolute path: .*${item.result_path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u"),
+      );
     }
+  });
+});
+
+/**
+ * Decision 5 of the 2026-11-06 dogfood audit (owner-approved cuts C1-C5, C7;
+ * record docs/reviews/work-item-prompt-overhead-2026-11-06.md): each fact of a
+ * base-lane work-item prompt is stated once. The steward lane keeps what its
+ * `verification.followup_tasks` contract needs: `task_id`, `pass_id` and its
+ * result-contract line.
+ */
+describe("decision 5: a work-item prompt states each fact once", () => {
+  const STEWARD_TAGS = ["selective_deepening", LENS_VERIFICATION_TAG];
+
+  async function publishBaseAndSteward() {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-prompt-once-"));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    const prepared = await boundary.prepareAuditHostHandoff({
+      root,
+      sourceRoot: root,
+      artifactsDir: join(root, ".audit-tools", "audit"),
+      runId: "audit-prompt-once",
+      tasks: [
+        task("audit-base", "correctness", "src/a.ts", { size: "small", complexity: "standard", risk: "medium" }, 1200),
+        task("audit-steward", "correctness", "src/a.ts", { size: "small", complexity: "standard", risk: "medium" }, 1200, STEWARD_TAGS),
+      ],
+    });
+    const byId = (id: string) => prepared.workload.work_items.find((item) => item.id === id)!.prompt.text;
+    return { base: byId("audit-base"), steward: byId("audit-steward") };
+  }
+
+  function assignmentOf(text: string): Record<string, unknown> {
+    const match = /Assignment:\n```json\n([\s\S]*?)\n```/u.exec(text);
+    expect(match, "the prompt must carry its assignment block").not.toBeNull();
+    return JSON.parse(match![1]!) as Record<string, unknown>;
+  }
+
+  it("C1: states the absolute result path exactly once", async () => {
+    const { base, steward } = await publishBaseAndSteward();
+    for (const text of [base, steward]) {
+      const destination = /^Write one JSON object to this exact absolute path: (.+)$/mu.exec(text)![1]!;
+      expect(text.split(destination).length - 1).toBe(1);
+    }
+  });
+
+  it("C2: the base lane carries no result-contract key list; the steward lane keeps its line", async () => {
+    const { base, steward } = await publishBaseAndSteward();
+    expect(base).not.toContain("Result contract:");
+    expect(base).toContain("Keep exactly these keys");
+    expect(steward).toMatch(/^Result contract: .*verification.*REQUIRED/mu);
+    expect(steward).not.toContain("Keep exactly these keys");
+  });
+
+  it("C3/C4: the base assignment drops `files`, `task_id` and `pass_id`; the steward keeps `task_id` and `pass_id`", async () => {
+    const { base, steward } = await publishBaseAndSteward();
+    expect(Object.keys(assignmentOf(base)).sort()).toEqual(["file_line_counts", "lens", "rationale", "unit_id"]);
+    expect(assignmentOf(steward)).toMatchObject({ task_id: "audit-steward", pass_id: "pass:correctness" });
+  });
+
+  it("C5: no prompt asks for analyzer_provenance, because no work item delivers a lead's provenance object", async () => {
+    const { base, steward } = await publishBaseAndSteward();
+    expect(base).not.toContain("analyzer_provenance");
+    expect(steward).not.toContain("analyzer_provenance");
+  });
+
+  it("C7: the contract states the lens rule once and the whole-rejection rule once, at the end", async () => {
+    const { base, steward } = await publishBaseAndSteward();
+    for (const text of [base, steward]) {
+      const body = text.slice(0, text.indexOf("\n\nWhen you finish"));
+      expect(body).not.toMatch(/lens is optional/u);
+      expect(body).not.toMatch(/lens, when supplied, one of/u);
+      expect(body).toContain("Each finding's lens must match the assigned task lens");
+      expect(body.match(/rejected whole|rejects the whole submission/gu)).toEqual(["rejected whole"]);
+      expect(body.trimEnd().endsWith("A result that breaks any rule above is rejected whole.")).toBe(true);
+      expect(body).toContain("Must be non-empty: affected_files, category, evidence; when supplied: related_findings, reproduction.");
+      expect(body).toContain("Never supply a `grounding` field: the tool computes it at ingest from your quoted_text.");
+    }
+  });
+
+  // C1 took the absolute path out of the template, which the binding check
+  // re-renders under the CURRENT root. Line 2 of the digest-bound body still
+  // states that path, so a workload read under a root that really moved must
+  // still be refused: its readers were told to write under the old root.
+  it("C1 keeps the moved-root refusal: a workload read under another root fails its binding", async () => {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), "audit-root-moved-"));
+    const moved = await mkdtemp(join(tmpdir(), "audit-root-moved-to-"));
+    cleanupRoots.push(root, moved);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    const runId = "audit-root-moved";
+    const tasks = [task("audit-base", "correctness", "src/a.ts", { size: "small", complexity: "standard", risk: "medium" }, 1200)];
+    await boundary.prepareAuditHostHandoff({
+      root,
+      sourceRoot: root,
+      artifactsDir: join(root, ".audit-tools", "audit"),
+      runId,
+      tasks,
+    });
+    await cp(root, moved, { recursive: true });
+    const ingest = (at: string) =>
+      boundary.ingestAuditHostResults({
+        pendingTaskIds: new Set(),
+        root: at,
+        sourceRoot: at,
+        artifactsDir: join(at, ".audit-tools", "audit"),
+        runId,
+        auditTasks: tasks,
+      });
+    // Control: under its own root the workload binds.
+    expect((await ingest(root)).issues.filter((issue) => issue.check === "workload_binding")).toEqual([]);
+    const summary = await ingest(moved);
+    expect(
+      summary.issues.filter((issue) => issue.check === "workload_binding"),
+      JSON.stringify(summary.issues),
+    ).not.toEqual([]);
+  });
+
+  async function publishOne(rationale: string, runId: string) {
+    const boundary = await loadBoundary();
+    const root = await mkdtemp(join(tmpdir(), `${runId}-`));
+    cleanupRoots.push(root);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "a.ts"), "one\ntwo\n", "utf8");
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const tasks = [{ ...task("audit-base", "correctness", "src/a.ts", { size: "small", complexity: "standard", risk: "medium" }, 1200), rationale }];
+    await boundary.prepareAuditHostHandoff({ root, sourceRoot: root, artifactsDir, runId, tasks });
+    const ingest = () =>
+      boundary.ingestAuditHostResults({ pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: tasks });
+    return { ingest, workloadPath: join(artifactsDir, "runs", runId, "host-workload.json") };
+  }
+
+  // The lane decides which template the binding check re-renders. A rationale is
+  // free text (a steward follow-up's is host-authored) and lands inside the
+  // assignment JSON, so the lane is read from a WHOLE body line, never a substring.
+  it("a base-lane rationale that quotes the steward lead still binds", async () => {
+    const lead = "This work item is a LENS STEWARD VERIFICATION task, so it must also carry a `verification` object.";
+    const { ingest } = await publishOne(`Follow up. ${lead}`, "audit-lead-in-rationale");
+    expect((await ingest()).issues.filter((issue) => issue.check === "workload_binding")).toEqual([]);
+  });
+
+  // Decision 5 changed the persisted template's shape, so a document minted by
+  // the build before it cannot be re-derived: it must refuse as STALE (the
+  // classified refusal that names the repair), not as a generic invalid item.
+  it("a v1alpha5 workload refuses closed as stale", async () => {
+    const { ingest, workloadPath } = await publishOne("Review src/a.ts", "audit-v1alpha5-stale");
+    const workload = JSON.parse(await readFile(workloadPath, "utf8")) as Record<string, unknown>;
+    await writeFile(workloadPath, JSON.stringify({ ...workload, contract_version: "audit-host-workload/v1alpha5" }), "utf8");
+    const summary = await ingest();
+    expect(summary.issues.map((issue) => issue.code), JSON.stringify(summary.issues)).toContain("workload_stale");
   });
 });
