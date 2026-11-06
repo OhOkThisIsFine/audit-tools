@@ -312,7 +312,11 @@ test("real Git config helpers stay disabled while inspection returns useful outp
     expect(log.output).toContain("signed-looking fixture");
     expect(existsSync(marker)).toBe(false);
   } finally { rmSync(root, { recursive: true, force: true }); }
-}, 20_000);
+  // No per-test cap: the body runs about twenty sequential git processes, so
+  // its time grows with machine load. A 20s cap here failed twice under the
+  // full suite on 2026-11-06 and passed alone; the global testTimeout bounds a
+  // run that never ends.
+});
 
 // ── internal gate idempotence (invariants[2]) ───────────────────────────────
 // runAllowlistedReadOnlyCommand now enforces isAllowedAnchorCommand on itself,
