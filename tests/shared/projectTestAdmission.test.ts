@@ -191,4 +191,8 @@ test("timeout stops an admitted npm child and grandchild before returning", asyn
       if (!cleanupObserved) await delay(Math.max(0, 9500 - (Date.now() - started)));
     }
   });
-}, 15000);
+  // No per-test cap: the loop above lengthens its own deadline by each attempt's
+  // measured start-up, so a fixed cap re-imposes the bound it removes. A 15s cap
+  // here failed twice under full-suite load on 2026-11-06 and passed alone; the
+  // global testTimeout bounds a run that never converges.
+});
