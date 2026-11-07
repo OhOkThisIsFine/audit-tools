@@ -2,15 +2,23 @@
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { getArtifactsDir, getFlag } from "./args.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { validateAuditArguments, type AuditArgumentContract } from "./argumentContract.js";
+
+export const EXPLAIN_TASK_ARGUMENTS: AuditArgumentContract = {
+  values: ["--task-id"], positionals: 1,
+};
 
 export async function cmdExplainTask(argv: string[]): Promise<void> {
-  const artifactsDir = getArtifactsDir(argv);
-  const delimiter = argv.indexOf("--");
-  const taskId = getFlag(argv, "--task-id") ?? (delimiter >= 0 ? argv[delimiter + 1] : argv[3]);
+  const args = argv.slice(3);
+  const positionals = validateAuditArguments("explain-task", args, EXPLAIN_TASK_ARGUMENTS);
+  const delimiter = args.indexOf("--");
+  const options = delimiter < 0 ? args : args.slice(0, delimiter);
+  const taskId = getFlag(options, "--task-id") ?? positionals[0];
   if (!taskId) {
     throw new Error("explain-task requires <task_id> or --task-id <task_id>");
   }
 
+  const artifactsDir = getArtifactsDir(options);
   const bundle = await loadArtifactBundle(artifactsDir);
   const task =
     [...(bundle.audit_tasks ?? []), ...(bundle.requeue_tasks ?? [])].find(

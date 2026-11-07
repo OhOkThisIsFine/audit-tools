@@ -15,10 +15,11 @@ export function auditArgumentNames(contract: AuditArgumentContract): string[] {
   return [...COMMON_VALUES, ...(contract.values ?? []), ...(contract.switches ?? []), "--help", "-h"];
 }
 
-export function validateAuditArguments(command: string, args: readonly string[], contract: AuditArgumentContract): void {
+/** Validate options and return only positional arguments, respecting option values and `--`. */
+export function validateAuditArguments(command: string, args: readonly string[], contract: AuditArgumentContract): string[] {
   const values = new Set<string>([...COMMON_VALUES, ...(contract.values ?? [])]);
   const switches = new Set(["--help", "-h", ...(contract.switches ?? [])]);
-  let positionalCount = 0;
+  const positionals: string[] = [];
   let positionalOnly = false;
   for (let index = 0; index < args.length; index++) {
     const token = args[index]!;
@@ -37,8 +38,12 @@ export function validateAuditArguments(command: string, args: readonly string[],
         const value = args[++index];
         if (!value || value.startsWith("--")) throw new Error(`${command}: ${name} requires a value; use ${name}=<value> for a value beginning with --.`);
       }
-    } else if (++positionalCount > (contract.positionals ?? 0)) {
-      throw new Error(`${command}: unexpected positional argument ${token}.`);
+    } else {
+      positionals.push(token);
+      if (positionals.length > (contract.positionals ?? 0)) {
+        throw new Error(`${command}: unexpected positional argument ${token}.`);
+      }
     }
   }
+  return positionals;
 }

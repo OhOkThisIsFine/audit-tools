@@ -24,7 +24,7 @@ import { cmdImportExternalAnalyzer } from "./cli/importExternalAnalyzerCommand.j
 import { cmdIntake } from "./cli/intakeCommand.js";
 import { cmdPlan } from "./cli/planCommand.js";
 import { cmdIngestResults } from "./cli/ingestResultsCommand.js";
-import { cmdExplainTask } from "./cli/explainTaskCommand.js";
+import { cmdExplainTask, EXPLAIN_TASK_ARGUMENTS } from "./cli/explainTaskCommand.js";
 import { cmdUpdateRuntimeValidation } from "./cli/updateRuntimeValidationCommand.js";
 import { cmdValidate } from "./cli/validateCommand.js";
 import { cmdValidateResults } from "./cli/validateResultsCommand.js";
@@ -81,7 +81,7 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["intake", cmdIntake, {}],
   ["plan", cmdPlan, { values: ["--since"] }],
   ["ingest-results", cmdIngestResults, { values: ["--results", "--batch-results"], acceptsSemanticResults: true }],
-  ["explain-task", cmdExplainTask, { values: ["--task-id"], positionals: 1 }],
+  ["explain-task", cmdExplainTask, EXPLAIN_TASK_ARGUMENTS],
   ["update-runtime-validation", cmdUpdateRuntimeValidation, { values: ["--updates"], acceptsSemanticResults: true }],
   ["validate", cmdValidate, {}],
   ["validate-results", cmdValidateResults, { values: ["--results"] }],
