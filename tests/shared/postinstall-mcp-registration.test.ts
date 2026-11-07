@@ -143,6 +143,37 @@ test("postinstall reads a Codex entry with its keys in another order as unchange
   }
 });
 
+// A clone's own `npm install` runs this postinstall too, so the first entry a
+// Codex config gets can point at a clone or a lap worktree. A later install
+// (the global one) must move that entry to its own launch: kept, it breaks
+// when the worktree is removed. Only an entry of this package's launch shape
+// (`<node> <dir>/<tool>.mjs mcp`) is ours; anything else is the user's.
+test("postinstall moves a Codex entry an earlier install of this package wrote to its own launch", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-tools-mcp-home-"));
+  try {
+    const codexPath = join(homeDir, ".codex", "config.toml");
+    await mkdir(dirname(codexPath), { recursive: true });
+    const staleArgs = [join(homeDir, "old-worktree", "audit-code.mjs"), "mcp"];
+    const before = '# my own comment\nmodel = "x"\n\n';
+    const after = '\n# trailing comment\n[mcp_servers.other]\ncommand = "other"\n';
+    const seed =
+      `${before}[mcp_servers.audit-code]\ncommand = ${JSON.stringify(process.execPath)}\n` +
+      `args = ${JSON.stringify(staleArgs)}\n${after}`;
+    await writeFile(codexPath, seed, "utf8");
+    const output = await runPostinstall(homeDir);
+    expect(output).not.toContain("kept the Codex MCP server entry");
+    const codex = await readFile(codexPath, "utf8");
+    expect(codex.startsWith(before)).toBe(true);
+    expect(codex).toContain(after);
+    const servers = (parseToml(codex) as { mcp_servers: Record<string, unknown> }).mcp_servers;
+    expect(servers["audit-code"]).toEqual(expectedLaunch("audit-code"));
+    expect(servers.other).toEqual({ command: "other" });
+    expect(servers["remediate-code"]).toEqual(expectedLaunch("remediate-code"));
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
 test("postinstall leaves a Codex entry the user changed by hand alone", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "audit-tools-mcp-home-"));
   try {

@@ -93,18 +93,68 @@ export function mergeOpenCodeMcpServer(existingMcp, toolName, launch) {
 }
 
 /**
- * Append this tool's `[mcp_servers.<tool>]` table to the Codex config. The
+ * True when a Codex entry has this package's launch shape,
+ * `{command, args: [<dir>/<tool>.mjs, "mcp"]}` and nothing else: an install of
+ * this package wrote it (a clone's own `npm install` runs this postinstall
+ * too, so the entry can point at a clone or a removed lap worktree). Any other
+ * entry is the user's.
+ */
+function isOwnCodexLaunch(entry, toolName) {
+  const args = entry.args;
+  return (
+    Object.keys(entry).length === 2 &&
+    typeof entry.command === "string" &&
+    Array.isArray(args) &&
+    args.length === 2 &&
+    args[1] === "mcp" &&
+    typeof args[0] === "string" &&
+    args[0].split(/[\\/]/).pop() === `${toolName}.mjs`
+  );
+}
+
+/** A parsed TOML value as JSON with sorted object keys: key order and prototype do not count. */
+function canonicalJson(value) {
+  return JSON.stringify(value, (_key, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]))
+      : item,
+  );
+}
+
+/**
+ * Replace the text of the `[mcp_servers.<tool>]` table: from its header line to
+ * the next table header, less the blank and comment lines just before that
+ * header (they introduce the next table). Undefined when no such header line
+ * exists (for example a dotted-key or inline form).
+ */
+function replaceCodexTable(text, toolName, table) {
+  const lines = text.split(/(?<=\n)/);
+  const name = toolName.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+  const header = new RegExp(`^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:"${name}"|'${name}'|${name})\\s*\\]\\s*(?:#.*)?\\r?\\n?$`);
+  const start = lines.findIndex((line) => header.test(line));
+  if (start < 0) return undefined;
+  let end = start + 1;
+  while (end < lines.length && !/^\s*\[/.test(lines[end])) end++;
+  while (end > start + 1 && /^\s*(?:#.*)?\r?\n?$/.test(lines[end - 1])) end--;
+  return [...lines.slice(0, start), table, ...lines.slice(end)].join("");
+}
+
+/**
+ * Register this tool's `[mcp_servers.<tool>]` table in the Codex config. The
  * user's file is never re-serialized (that would drop their comments and
- * layout): an absent entry is appended as text, an identical one is left, and
- * a different one is the user's edit and is left too, with a note.
+ * layout): an absent entry is appended as text, an identical one is left, an
+ * entry of this package's own launch shape at another path is replaced in
+ * place (an earlier install of this package wrote it), and any other entry is
+ * the user's edit and is left, with a note.
  *
- * The file is written only when the COMPOSED text still parses. An appended
- * table cannot extend an inline `mcp_servers = { ... }` (TOML closes inline
- * tables), and a file that does not parse today cannot be judged at all: both
- * return "manual" and leave the file as it is, never making it invalid and
- * never failing the install over a user's own config.
+ * The file is written only when the COMPOSED text parses to exactly the old
+ * config plus this one entry. An appended table cannot extend an inline
+ * `mcp_servers = { ... }` (TOML closes inline tables), and a file that does not
+ * parse today cannot be judged at all: each returns "manual" and leaves the
+ * file as it is, never making it invalid and never failing the install over a
+ * user's own config.
  *
- * @returns {"installed" | "unchanged" | "kept" | "manual"}
+ * @returns {"installed" | "replaced" | "unchanged" | "kept" | "manual"}
  */
 function registerCodexMcpServer(path, toolName, launch) {
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -118,6 +168,11 @@ function registerCodexMcpServer(path, toolName, launch) {
   const current = parsesAs(existing);
   if (current === undefined) return "manual";
   const entry = objectValue(objectValue(current.mcp_servers)[toolName]);
+  const rawTable = stringifyToml({ mcp_servers: { [toolName]: launch } });
+  const table = rawTable.endsWith("\n") ? rawTable : `${rawTable}\n`;
+  let next;
+  /** @type {"installed" | "replaced"} */
+  let action;
   if (Object.keys(entry).length > 0) {
     // Compare by field, not by serialized text: the same entry with its keys in
     // another order is unchanged, not an edit to report as kept.
@@ -125,19 +180,26 @@ function registerCodexMcpServer(path, toolName, launch) {
       Object.keys(entry).length === 2 &&
       entry.command === launch.command &&
       JSON.stringify(entry.args) === JSON.stringify(launch.args);
-    return sameLaunch ? "unchanged" : "kept";
+    if (sameLaunch) return "unchanged";
+    if (!isOwnCodexLaunch(entry, toolName)) return "kept";
+    next = replaceCodexTable(existing, toolName, table);
+    if (next === undefined) return "manual";
+    action = "replaced";
+  } else {
+    const separator = existing === "" || existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
+    next = `${existing}${separator}${table}`;
+    action = "installed";
   }
-  const table = stringifyToml({ mcp_servers: { [toolName]: launch } });
-  const separator = existing === "" || existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
-  const next = `${existing}${separator}${table}${table.endsWith("\n") ? "" : "\n"}`;
-  if (parsesAs(next) === undefined) return "manual";
+  const composed = parsesAs(next);
+  const expected = { ...current, mcp_servers: { ...objectValue(current.mcp_servers), [toolName]: launch } };
+  if (composed === undefined || canonicalJson(composed) !== canonicalJson(expected)) return "manual";
   mkdirSync(dirname(path), { recursive: true });
   // The user's own config: temp-then-rename, so a crash mid-write leaves the
   // old file whole instead of a truncated one.
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, next, "utf8");
   renameSync(temp, path);
-  return "installed";
+  return action;
 }
 
 /**
@@ -172,8 +234,9 @@ export function installMcpServerRegistrations({ toolName, homeDir, launch, claud
         );
       } else if (action === "manual") {
         console.log(
-          `${toolName}: left ${path} unchanged — appending the ${label} table would not parse there ` +
-            `(an inline mcp_servers table, or a file that does not parse today). Add it by hand: ` +
+          `${toolName}: left ${path} unchanged — writing the ${label} table there would not parse to the old ` +
+            `config plus this entry (an inline mcp_servers table, a dotted-key entry, or a file that does not ` +
+            `parse today). Add it by hand: ` +
             `[mcp_servers.${toolName}] command = ${JSON.stringify(launch.command)} args = ${JSON.stringify(launch.args)}`,
         );
       } else {
