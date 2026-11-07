@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ObligationStateSchema } from "audit-tools/shared";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -71,6 +72,31 @@ test("cmdStatus emits valid JSON with audit_state fields when audit_state.json i
     expect(summary.missing).toBe(1);
     expect(summary.stale).toBe(0);
     expect(summary.blocked).toBe(0);
+    expect(summary.not_applicable).toBe(0);
+  });
+});
+
+test("cmdStatus counts every obligation state and preserves the obligation total", async () => {
+  await withTempDir(async (artifactsDir) => {
+    const obligations = ObligationStateSchema.options.flatMap((state, index) =>
+      Array.from({ length: index + 1 }, (_, occurrence) => ({
+        id: `${state}-${occurrence}`,
+        state,
+      })),
+    );
+    await writeFile(
+      join(artifactsDir, "audit_state.json"),
+      JSON.stringify({ status: "active", obligations }),
+    );
+
+    const result = await runStatus(artifactsDir);
+    expect(result.exitCode).toBe(0);
+    const summary: Record<string, number> = JSON.parse(result.stdout).obligations_summary;
+    expect(Object.keys(summary).sort()).toEqual([...ObligationStateSchema.options].sort());
+    for (const [index, state] of ObligationStateSchema.options.entries()) {
+      expect(summary[state]).toBe(index + 1);
+    }
+    expect(Object.values(summary).reduce((sum, count) => sum + count, 0)).toBe(obligations.length);
   });
 });
 

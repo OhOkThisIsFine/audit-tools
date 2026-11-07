@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
-import type { AuditState } from "../types/auditState.js";
+import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
@@ -27,12 +27,14 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   }
 
   // Build obligations summary: count by state
-  const obligationStates: Record<string, number> = {
+  // sites-pinned: tests/audit/status-command.test.ts
+  const obligationStates: Record<ObligationState, number> = {
     missing: 0,
     present: 0,
     stale: 0,
     blocked: 0,
     satisfied: 0,
+    not_applicable: 0,
   };
   for (const obligation of auditState.obligations ?? []) {
     const state = obligation.state;
