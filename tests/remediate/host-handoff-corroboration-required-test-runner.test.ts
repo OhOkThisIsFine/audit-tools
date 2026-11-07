@@ -135,7 +135,7 @@ describe("remediation host handoff repository corroboration", () => {
     ]);
     expect(refused.issues[0]!.message).toContain("timed out");
     expect(refused.issues[0]!.message).toContain("partial suite output");
-  }, 60_000);
+  });
 
   it("reports a genuine red under required_test_failed, not the timeout code", async () => {
     const value = await fixture({ requiredTest: 'node -e "process.exit(1)"' });

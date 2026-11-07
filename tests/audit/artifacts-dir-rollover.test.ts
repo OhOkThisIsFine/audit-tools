@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { buildTerminalStep } from "../../src/audit/cli/nextStepHelpers.js";
@@ -23,7 +22,7 @@ import {
 // working dir survives completion, and the next run reuses every derived
 // artifact whose inputs did not change — so only the edited file is reviewed
 // again — while inheriting nothing that belongs to the previous run.
-test("the next audit reviews only what changed since the completed one", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("the next audit reviews only what changed since the completed one", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
     await advanceToDispatchReady(root);

@@ -27,7 +27,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import { ANALYZER_DENIAL_REASONS } from "../../src/shared/analyzers/acquisitionEngine.js";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
 import {
   callNextStep,
@@ -80,7 +79,6 @@ describe("shared CLI fixtures record the operator decline before any CLI call", 
 
 test(
   "the fold refuses every default acquired analyzer against a fixture repo",
-  { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
   async () => {
     await withCompletionRepo(async (root) => {
       const artifactsDir = join(root, ".audit-tools/audit");

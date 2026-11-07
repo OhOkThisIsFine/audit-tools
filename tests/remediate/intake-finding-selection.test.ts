@@ -59,13 +59,13 @@ test("--input severity and explicit finding IDs form a union with intact canonic
   const resumed = await decideNextStep({ root: REPO_DIR, input: sourcePath() });
   expect(resumed.step_kind).toBe("synthesize_intake");
   expect((await projected()).findings.map((finding) => finding.id)).toEqual(selected.findings.map((finding) => finding.id));
-}, 40000);
+});
 
 test("unknown IDs refuse even when severity would select valid findings", () => {
   const result = cli("--severity", "high", "--finding-id", "UNKNOWN-ID");
   expect(result.status).not.toBe(0);
   expect(result.stderr + result.stdout).toMatch(/unknown.*finding|finding.*unknown/i);
-}, 40000);
+});
 
 test("an empty validated selection produces explicit no-work before synthesis", async () => {
   const result = cli("--severity", "critical");
@@ -74,7 +74,7 @@ test("an empty validated selection produces explicit no-work before synthesis", 
   expect(step.step_kind).toBe("zero_documentable_findings");
   expect(step.status).toBe("complete");
   expect((await projected()).findings).toEqual([]);
-}, 40000);
+});
 
 test("other scope exclusions still intersect a selected explicit ID", async () => {
   expect(cli("--severity", "high", "--finding-id", id("beta")).status).toBe(0);
@@ -92,7 +92,7 @@ test("other scope exclusions still intersect a selected explicit ID", async () =
   const filter = JSON.parse(await readFile(join(ARTIFACTS_DIR, "review_filter_dispositions.json"), "utf8"));
   expect(filter.droppedByCheckpoint).toContain(id("beta"));
   expect(filter.originals.map((finding: { id: string }) => finding.id).sort()).toEqual([id("alpha"), id("beta")].sort());
-}, 40000);
+});
 
 
 for (const change of ["selectors", "source"] as const) {
@@ -104,14 +104,14 @@ for (const change of ["selectors", "source"] as const) {
     const step = await decideNextStep({ root: REPO_DIR, ...(change === "selectors" ? { severity: ["low"] } : {}) });
     expect(step.step_kind).toBe("input_conflict");
     expect(await readFile(join(ARTIFACTS_DIR, "intake", "selected-audit-findings.json"), "utf8")).toBe(before);
-  }, 40000);
+  });
 }
 
 test("unknown severities refuse even alongside a valid explicit finding", () => {
   const result = cli("--severity", "urgent", "--finding-id", id("alpha"));
   expect(result.status).not.toBe(0);
   expect(result.stderr + result.stdout).toMatch(/severity|enum/i);
-}, 40000);
+});
 
 test("selecting every finding preserves original narrative", async () => {
   const result = cli("--severity", "high", "--severity", "low");
@@ -119,7 +119,7 @@ test("selecting every finding preserves original narrative", async () => {
   const selected = await projected();
   expect(selected.top_risks).toEqual(report.top_risks);
   expect(selected.executive_summary).toEqual(report.executive_summary);
-}, 40000);
+});
 
 
 test("a later explicitly confirmed severity filter can narrow the native union", async () => {
@@ -143,7 +143,7 @@ test("a later explicitly confirmed severity filter can narrow the native union",
   }
   const filter = JSON.parse(await readFile(join(ARTIFACTS_DIR, "review_filter_dispositions.json"), "utf8"));
   expect(filter.droppedByCheckpoint).toContain(id("beta"));
-}, 40000);
+});
 
 
 test("source drift while intake synthesis is in flight preserves the earlier selected report", async () => {
@@ -155,4 +155,4 @@ test("source drift while intake synthesis is in flight preserves the earlier sel
   expect(step.step_kind).toBe("input_conflict");
   expect(await readFile(selectedPath, "utf8")).toBe(before);
   expect(await readFile(step.prompt_path, "utf8")).toContain("A bare resume cannot accept changed source evidence");
-}, 40000);
+});

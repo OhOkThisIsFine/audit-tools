@@ -289,7 +289,7 @@ describe("the landing-gate close leg", () => {
         }
       }
     }
-  }, 40000);
+  });
 
   it("reports a gate that could not be spawned as RED, never as a silent pass", async () => {
     // R3: "a gate that could not run is not silently green." A refusal is the

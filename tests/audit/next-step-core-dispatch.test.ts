@@ -1,13 +1,12 @@
 import { test, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   advancePastDesignReview,
   withTempRepo,
 } from "./helpers/next-step-harness.js";
 
-test.concurrent("next-step publishes a provider-neutral semantic-review workload", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step publishes a provider-neutral semantic-review workload", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     const currentStep = JSON.parse(

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 const { GATE_LANES, laneSubmissionPath } = await import(
   "../../src/audit/cli/laneSubmissions.js"
@@ -12,7 +11,7 @@ const { submissionsDir } = await import(
   "../../src/shared/io/auditToolsPaths.js"
 );
 
-test.concurrent("next-step emits present_report for a complete audit", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step emits present_report for a complete audit", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });
@@ -65,7 +64,7 @@ test.concurrent("next-step emits present_report for a complete audit", { timeout
   });
 });
 
-test.concurrent("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step proposes an analyzer install, then proceeds after a skip decision is recorded", async () => {
   await withTempRepo(async (root) => {
     // The fixture has a .ts file but no local `typescript`. Pin an isolated,
     // empty analyzer cache so `typescript` resolves "absent" deterministically —
@@ -162,7 +161,7 @@ test.concurrent("next-step proposes an analyzer install, then proceeds after a s
 // step instead of throwing.
 // ---------------------------------------------------------------------------
 
-test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("a fatal next-step exit overwrites the stale step with a blocked step naming the cause", async () => {
   const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");

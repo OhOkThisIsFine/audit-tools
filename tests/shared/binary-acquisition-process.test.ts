@@ -45,7 +45,7 @@ test("two real cooperative processes share one checksum and payload fetch", asyn
     expect(results.map(result => result.status).sort()).toEqual(["cached", "downloaded"]);
     expect(results[0].command).toBe(results[1].command); expect(count).toBe(2);
   } finally { first.child.kill(); second.child.kill(); rmSync(root, { recursive: true, force: true }); }
-}, 15000);
+});
 test("unrelated identity proceeds while another process holds its acquisition lock", async () => {
   const root = mkdtempSync(join(tmpdir(), "binary-independent-"));
   let held!: [ChildProcess, Message];
@@ -62,4 +62,4 @@ test("unrelated identity proceeds while another process holds its acquisition lo
     reply(...held);
     expect((await first.result).status).toBe("downloaded");
   } finally { first.child.kill(); second?.child.kill(); rmSync(root, { recursive: true, force: true }); }
-}, 15000);
+});

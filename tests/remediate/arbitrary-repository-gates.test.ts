@@ -75,4 +75,4 @@ test("real npm commands run in the target repository and recover from a failing 
   rmSync(join(root, "fail"));
   expect((await runToolOwnedFinalGate(root)).passed).toBe(true);
   expect(readFileSync(join(root, "commands.log"), "utf8")).toBe("build\ntypecheck\nlint\nbuild\ntypecheck\nlint\ntest\n");
-}, 30_000);
+});

@@ -4,7 +4,6 @@
 import { test, expect } from "vitest";
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   withTempRepo,
   advanceToDispatchReady,
@@ -16,7 +15,7 @@ import {
 
 const { toPromptPathToken } = await import("audit-tools/shared");
 
-test("next-step presents the rendered report instead of a run-limit block", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("next-step presents the rendered report instead of a run-limit block", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await advanceToDispatchReady(root);

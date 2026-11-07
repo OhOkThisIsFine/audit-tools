@@ -4,7 +4,6 @@
 import { test, expect } from "vitest";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   withTempRepo,
   advanceToDispatchReady,
@@ -13,7 +12,7 @@ import {
   callIngestResults,
 } from "./helpers/completion-harness.js";
 
-test("ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("ingest-results accepts a directory of batch result files and next-step still collapses to audit-report.md", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await advanceToDispatchReady(root);

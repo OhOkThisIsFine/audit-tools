@@ -1028,7 +1028,7 @@ describe(RED_SIGNATURE, () => {
     expect((trace.components as string[][]).length).toBe(3000);
     const digest = hashArtifactValue("audit-findings.json", trace);
     expect(digest).toMatch(/^[0-9a-f]{64}$/u);
-  }, 120_000);
+  });
 
   it("bounds refinement cost on one large eligible component", async () => {
     const core = await loadCore();
@@ -1078,7 +1078,7 @@ describe(RED_SIGNATURE, () => {
     expect(components.flat()).toHaveLength(800);
     expect(new Set(components.flat()).size).toBe(800);
     expect(elapsedMs, `refinement of an 800-member component took ${elapsedMs.toFixed(0)}ms`).toBeLessThan(5_000);
-  }, 120_000);
+  });
 
 
   it("deletes every local membership and backend-fit surface", async () => {

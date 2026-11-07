@@ -4,7 +4,6 @@ import { expect, test } from "vitest";
 import { discoverRepoRoot } from "../../wrapper/repo-root.mjs";
 import { runEnsurePhase, withTempRepo } from "../../scripts/audit/smoke-audit-flow.mjs";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { runWrapper } from "./helpers/wrapper-harness.js";
 
 test("the real smoke fixture owns its repository root even under another repository", async () => {
@@ -25,4 +24,4 @@ test("the real smoke fixture owns its repository root even under another reposit
       log: { step() {}, elapsed() {} },
     });
   });
-}, HEAVY_AUDIT_TEST_TIMEOUT_MS);
+});

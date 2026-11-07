@@ -425,7 +425,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (`.audit-tools-profile/vitest-history.ndjson`) — until it was split over
   `tests/audit/helpers/completion-harness.ts` (2026-08-07, wall-clock brief T4); the fragments are still
   among the slowest files in the suite. The CLI handlers are imported and called directly rather than subprocess-spawned, and
-  `HEAVY_AUDIT_TEST_TIMEOUT_MS = 300_000` is a PER-TEST timeout, so a long wall is the shape of the
+  no test has a time cap (`tests/shared/no-fixed-test-caps.test.ts`), so a long wall is the shape of the
   workload. **Confirmed, do not re-chase:** production
   does NOT redundantly re-extract on an unchanged repo. `repo_manifest` *specifically* is presence-gated
   (`src/audit/orchestrator/state.ts` — `has(bundle.repo_manifest) ? "satisfied" : "missing"`), so its sole
@@ -461,8 +461,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   missing, stale, or carries a mismatched run token. `node:assert/strict` is still permitted as an
   assertion lib (runs under vitest) for the control-flow assertions
   (`assert.throws`/`rejects`/`doesNotThrow`/`doesNotReject`) that have no clean `expect` equivalent; value
-  assertions are `expect`. Vitest `testTimeout` is raised to 120s in `vitest.config.ts`
-  because audit integration tests spawn real subprocesses.
+  assertions are `expect`. Vitest runs every test and hook with no time limit (`testTimeout: 0` in
+  `vitest.config.ts`); a hung test stops at the CI job limit.
 
 - **Don't mask the test exit code with a REDIRECT.** `npm test > out; echo done` reports the *trailing*
   command's exit, not the suite's — and piping through `grep`/`rm` in the same Bash call races the output

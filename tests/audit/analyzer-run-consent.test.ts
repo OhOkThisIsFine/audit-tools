@@ -111,7 +111,7 @@ test("real folds retain dry-run and consent across separate continuation paramet
     await expect(runDeterministicForNextStep({ ...base, externalAcquisition: { enabled: true } })).rejects.toThrow("stop at formatter boundary");
     expect(seen).toEqual([{ enabled: true, dryRun: true }, { enabled: true, dryRun: true }]);
   } finally { EXECUTOR_RUNNERS.auto_fix_executor = original!; await rm(root, { recursive: true, force: true }); }
-}, 60_000);
+});
 
 test("late formatting opt-in reruns the formatter obligation once, not on every continuation", async () => {
   const root = await mkdtemp(join(tmpdir(), "run-consent-late-format-"));
@@ -130,4 +130,4 @@ test("late formatting opt-in reruns the formatter obligation once, not on every 
     await runDeterministicForNextStep({ ...base, autoFix: { enabled: true } });
     expect(seen).toEqual([{ enabled: false, dryRun: false }, { enabled: true, dryRun: false }]);
   } finally { EXECUTOR_RUNNERS.auto_fix_executor = original!; await rm(root, { recursive: true, force: true }); }
-}, 60_000);
+});

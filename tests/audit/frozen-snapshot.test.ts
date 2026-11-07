@@ -42,7 +42,7 @@ test.each(["git", "non-git"])("a live edit during a run leaves the run's inputs 
     expect(after.repo_manifest?.files.find((file) => file.path === "src/api/auth.ts")?.hash).toBe(atStart);
     expect(after.repo_manifest).toEqual(before.repo_manifest);
   });
-}, 120_000);
+});
 
 // The host side of the same property: a work item names the snapshot, and its
 // result is judged (line counts, cited text) against the snapshot — so a live
@@ -72,7 +72,7 @@ test("a host result measured against the snapshot is accepted after the live fil
       analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
     expect((await loadArtifactBundle(artifactsDir)).audit_results?.length).toBeGreaterThan(0);
   });
-}, 120_000);
+});
 
 // The standalone validator judges a result by the same frozen tree: a live edit
 // after run start does not turn an honest snapshot-measured result into an error.
@@ -93,7 +93,7 @@ test("validate-results measures line counts against the run's snapshot", async (
     const report = JSON.parse(stdout) as { issues: Array<{ severity: string; message: string }> };
     expect(report.issues.filter((issue) => /line/i.test(issue.message))).toEqual([]);
   });
-}, 120_000);
+});
 
 test("cleanup removes the run's snapshot with its artifacts dir", async () => {
   await withTempRepo(async (root) => {
@@ -104,4 +104,4 @@ test("cleanup removes the run's snapshot with its artifacts dir", async () => {
     expect((await cleanupStaleArtifactsDir(artifactsDir, { force: true, repositoryRoot: root })).action).toBe("deleted");
     expect(existsSync(sourceRoot)).toBe(false);
   });
-}, 120_000);
+});

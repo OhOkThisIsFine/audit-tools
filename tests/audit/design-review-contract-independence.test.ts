@@ -22,7 +22,6 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
@@ -118,7 +117,6 @@ async function persistDesignReviewState(
 
 test(
   "solo design_review_contract dispatches an advance-free worker packet instead of reviewing inline",
-  { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
   async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "audit-code-dr-contract-"));
     const root = join(tempDir, "repo");
@@ -186,7 +184,6 @@ test(
 
 test(
   "parallel design_review dispatch keeps the same contract-packet shape (both branches share one preparer)",
-  { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
   async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "audit-code-dr-parallel-"));
     const root = join(tempDir, "repo");
@@ -228,7 +225,6 @@ test(
 
 test(
   "design_review_parallel host prompt states every concrete lane prompt and results path it names",
-  { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
   async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "audit-code-dr-paths-"));
     const root = join(tempDir, "repo");

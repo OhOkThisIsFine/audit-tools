@@ -88,7 +88,7 @@ describe("cooperative phase mutex", () => {
 
     // Recovered, not bounced: the dead lock was removed and the advance ran.
     expect(step.step_kind).not.toBe("phase_busy");
-  }, 30_000);
+  });
 
   it("still yields phase_busy for a FRESH lock — the steal never widens to a live peer", async () => {
     // The other half, and the one that keeps the recovery from becoming a

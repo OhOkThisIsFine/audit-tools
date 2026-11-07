@@ -26,7 +26,6 @@ import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 import { countLines } from "../../src/audit/cli/args.js";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 interface WorkItem {
   id: string;
@@ -49,7 +48,7 @@ async function exists(path: string): Promise<boolean> {
   return stat(path).then(() => true, () => false);
 }
 
-test("submit writes a judged result to its bound path byte-exact, and refuses one ingestion would refuse", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("submit writes a judged result to its bound path byte-exact, and refuses one ingestion would refuse", async () => {
   await withTempRepo(async (root) => {
     await writeFile(
       join(root, "src", "api", "auth.ts"),
@@ -127,7 +126,7 @@ test("submit writes a judged result to its bound path byte-exact, and refuses on
   });
 });
 
-test("the built `audit-code mcp` process serves submit_result over clean stdio and writes the bound path", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("the built `audit-code mcp` process serves submit_result over clean stdio and writes the bound path", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     expect(step.step_kind).toBe("dispatch_review");
@@ -183,7 +182,7 @@ test("the built `audit-code mcp` process serves submit_result over clean stdio a
   });
 });
 
-test("submit refuses a work item the current run does not publish, and writes nothing", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("submit refuses a work item the current run does not publish, and writes nothing", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     expect(step.step_kind).toBe("dispatch_review");

@@ -1,12 +1,5 @@
-import { test, expect, vi } from "vitest";
+import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-
-// Heavy spawn suite: real subprocess round-trips (install/ensure/verify-install
-// wrapper invocations), and the cases are `concurrent`, so under a full-suite
-// run they contend with siblings. Single-sourced ceiling — see
-// tests/helpers/heavy-timeout.mjs for the rationale.
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
-vi.setConfig({ testTimeout: HEAVY_AUDIT_TEST_TIMEOUT_MS });
 import { mkdir, stat, writeFile, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import {

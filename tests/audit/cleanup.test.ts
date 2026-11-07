@@ -18,7 +18,6 @@ import { captureConsole } from "./helpers/captureConsole.mjs";
 import { withTempDir } from "./helpers/withTempDir.mjs";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -668,7 +667,7 @@ test("cmdCleanup: complete with work left — exitCode=1, JSON action=skipped, r
 // tests/audit/next-step-core-report.test.ts (promotion + pending-friction-triage
 // steps both require that dir to survive next-step entry).
 
-test("next-step clears a stale not_started artifacts dir before the fresh run", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("next-step clears a stale not_started artifacts dir before the fresh run", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await writeFile(
@@ -695,7 +694,7 @@ test("next-step clears a stale not_started artifacts dir before the fresh run", 
   });
 });
 
-test("next-step sweeps a complete dir whose promotion has nothing left to do", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("next-step sweeps a complete dir whose promotion has nothing left to do", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await plantFullyPromotedCompleteRun(artifactsDir);

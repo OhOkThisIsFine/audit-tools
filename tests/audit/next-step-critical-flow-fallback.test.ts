@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { writeFixtureRepo } from "./helpers/fixture.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import type { CriticalFlow } from "audit-tools/shared";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
@@ -81,7 +80,7 @@ async function persistFallbackState(
   );
 }
 
-test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step emits a host critical-flow fallback step, then persists + satisfies on the host submission", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -157,7 +156,7 @@ test.concurrent("next-step emits a host critical-flow fallback step, then persis
   }
 });
 
-test.concurrent("next-step does not re-ask the critical-flow fallback once a submission is present", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("next-step does not re-ask the critical-flow fallback once a submission is present", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-once-"));
   const root = join(tempDir, "repo");
   const artifactsDir = join(root, ".audit-tools/audit");
@@ -191,7 +190,7 @@ test.concurrent("next-step does not re-ask the critical-flow fallback once a sub
   }
 });
 
-test.concurrent("structure merges the host critical-flow submission into critical_flows in place", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test.concurrent("structure merges the host critical-flow submission into critical_flows in place", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "audit-code-cff-merge-"));
   const root = join(tempDir, "repo");
   try {

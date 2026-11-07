@@ -4,7 +4,6 @@
 import { test, expect } from "vitest";
 import { writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import {
   withTempRepo,
   advanceToDispatchReady,
@@ -14,7 +13,7 @@ import {
   nextStepUntilPresentReport,
 } from "./helpers/completion-harness.js";
 
-test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     const step = await advanceToDispatchReady(root);

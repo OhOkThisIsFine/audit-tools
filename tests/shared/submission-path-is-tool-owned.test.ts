@@ -62,7 +62,6 @@ import {
   type AuditHostTask,
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { writeFixtureRepo } from "../audit/helpers/fixture.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
@@ -141,7 +140,6 @@ async function persistSoloDesignReviewState(root: string, artifactsDir: string):
 describe("the submission path is tool-owned", () => {
   it(
     "a driven design-review emission renders no submission filename into any host-facing prompt",
-    { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS },
     async () => {
       const tempDir = await mkdtemp(join(tmpdir(), "p25-submission-path-"));
       const root = join(tempDir, "repo");

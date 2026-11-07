@@ -99,7 +99,7 @@ describe("StateStore", () => {
     await expect(store.saveState({ status: "pending" })).rejects.toThrow(
       /Timed out acquiring lock/i,
     );
-  }, 35_000);
+  });
 
   it("reclaims a stale lock file (mtime-based staleness)", async () => {
     const lockFile = join(TEST_DIR, "state.lock");

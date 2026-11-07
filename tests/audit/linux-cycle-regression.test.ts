@@ -31,7 +31,6 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWrapper } from "./helpers/run-wrapper.mjs";
-import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 import { declineDefaultAcquiredAnalyzers } from "../helpers/analyzerConsentFixture.js";
 const { GATE_LANES } = await import(
   "../../src/audit/cli/laneSubmissions.js"
@@ -81,7 +80,7 @@ const TERMINAL_KINDS = new Set([
 ]);
 
 const MAX_PAUSES = 8;
-test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
+test("regression: floor-only first next-step never false-cycles to blocked (Linux CI repro)", async () => {
   await withFloorOnlyRepo(async (root, env) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     

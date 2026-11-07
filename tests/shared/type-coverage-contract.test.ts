@@ -105,4 +105,4 @@ test.skipIf(!toolsRoot)("pinned CLI honors observe-only flags despite project wr
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-}, 120_000);
+});

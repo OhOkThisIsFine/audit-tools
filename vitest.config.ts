@@ -38,11 +38,13 @@ export default defineConfig({
     // ledger under .audit-tools-profile/ and a CI job-summary table. Profiling the
     // suite is a standing feature, not an opt-in flag.
     reporters: ["default", "./scripts/shared/vitest-timing-reporter.mjs"],
-    // Audit integration tests spawn real subprocesses (audit-code CLI round-trips)
-    // and can run for well over a minute; node:test had no per-test timeout, so
-    // the ceiling is generous. Remediate/shared unit tests finish far under it.
-    testTimeout: 120000,
-    hookTimeout: 60000,
+    // No time limit on a test or a hook (owner decision, 2026-11-07). A fixed cap
+    // was a number nobody measured, and under full-suite load it fired on correct
+    // tests. A hung test stops at the CI job limit (`timeout-minutes`).
+    // tests/shared/no-fixed-test-caps.test.ts keeps these at 0 and refuses a
+    // per-test cap.
+    testTimeout: 0,
+    hookTimeout: 0,
     exclude: [
       ...configDefaults.exclude,
       ".audit-artifacts/**",

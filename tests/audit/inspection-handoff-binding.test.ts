@@ -127,7 +127,7 @@ test("validate-results judges a host result by the rules ingestion applies, and 
     const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as { entries: unknown[] };
     expect(ledger.entries).toEqual([]);
   });
-}, 120_000);
+});
 
 test("every path a work item names is absolute, granted, and the only file it may write", async () => {
   await withTempRepo(async (root) => {
@@ -152,7 +152,7 @@ test("every path a work item names is absolute, granted, and the only file it ma
     const prompt = await readFile(step.prompt_path, "utf8");
     expect(prompt).toContain(posix(sourceRoot));
   });
-}, 120_000);
+});
 
 test("the published wave's content-coherence groups sit beside the workload, and the step states the scheduling facts", async () => {
   await withTempRepo(async (root) => {
@@ -183,7 +183,7 @@ test("the published wave's content-coherence groups sit beside the workload, and
     expect(prompt).toContain(`content-coherence group(s) listed at ${posix(groupsPath!)}`);
     expect(prompt).toMatch(/order, grouping and parallelism are yours/u);
   });
-}, 120_000);
+});
 
 async function validate(root: string, path: string) {
   const before = process.exitCode;
@@ -264,7 +264,7 @@ test("validate-results and ingestion agree, refuse unbound paths with a remedy, 
     expect(staleCheck.issues.map((issue) => issue.code)).toEqual(["workload_stale"]);
     expect(staleIngest.issues.map((issue) => issue.code)).toContain("workload_stale");
   });
-}, 120_000);
+});
 
 test("a run resumed under a differently spelled root re-binds or refuses as classified stale, never as a throw", async () => {
   const base = await mkdtemp(join(tmpdir(), "audit-root-spelling-"));
@@ -321,7 +321,7 @@ test("a run resumed under a differently spelled root re-binds or refuses as clas
   } finally {
     await rm(base, { recursive: true, force: true });
   }
-}, 120_000);
+});
 
 const SPELLING_TASK: AuditTask = {
   task_id: "spelling-task",

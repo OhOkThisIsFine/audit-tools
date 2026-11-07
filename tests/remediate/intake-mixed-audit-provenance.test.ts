@@ -83,7 +83,7 @@ for (const selected of [false, true]) {
     const resumed = await decideNextStep({ root: REPO_DIR });
     expect(resumed.status).toBe("blocked");
     expect(await readFile(resumed.prompt_path, "utf8")).toContain("changed or disappeared");
-  }, 40000);
+  });
 }
 
 test("mixed review decline keeps guidance bound without restoring the original audit source", async () => {

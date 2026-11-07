@@ -105,4 +105,4 @@ test("a fold failure names the obligation that threw, not the fold's first", asy
     EXECUTOR_RUNNERS[FAILING_EXECUTOR] = original!;
     await rm(workspace, { recursive: true, force: true });
   }
-}, 120_000);
+});
