@@ -27,6 +27,7 @@ import { REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_VERSION } from "../.
 import { writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import { createNextStepHarness, makePlanningState } from "./helpers/nextStepHarness.js";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
+import { HEAVY_AUDIT_TEST_TIMEOUT_MS } from "../helpers/heavy-timeout.mjs";
 
 const harness = createNextStepHarness(".test-result-submit");
 const { REPO_DIR, ARTIFACTS_DIR, saveState, resetTestRepo, cleanupTestRepo } = harness;
@@ -91,7 +92,7 @@ function landedResult(item: BoundItem, promptSha256: string): Record<string, unk
   };
 }
 
-test("submit writes a judged result to its bound path byte-exact, and refuses one the contract refuses", async () => {
+test("submit writes a judged result to its bound path byte-exact, and refuses one the contract refuses", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   const item = await persistRunnableState();
   const boundPath = join(REPO_DIR, item.result_path);
 
@@ -121,7 +122,7 @@ test("submit writes a judged result to its bound path byte-exact, and refuses on
   expect(await readFile(boundPath, "utf8")).toBe(bytes);
 });
 
-test("submit refuses a work item the current run does not publish, and writes nothing", async () => {
+test("submit refuses a work item the current run does not publish, and writes nothing", { timeout: HEAVY_AUDIT_TEST_TIMEOUT_MS }, async () => {
   await persistRunnableState();
   await expect(
     submitRemediationWorkItemResult({
