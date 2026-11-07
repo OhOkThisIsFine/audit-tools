@@ -331,22 +331,6 @@
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
       }
     },
-    "449e8cec966d2361": {
-      "reviewed_by": "claude-session:7e4d0c11 (author self-review; owner chose the wording)",
-      "attester_class": "agent",
-      "checked": "line 2 text equals the owner-approved option A; workload check re-derives line 2 via destinationLine so old workloads go stale; 4 tests red on old text, green on new; full suite 656 passed",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "1ecc4ff19479301e718ebb08959b34fb2dc2d9a4",
-        "ran_at": "2026-11-07T01:57:31.927Z"
-      },
-      "attested_at": "2026-11-07T01:57:47.533Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "5014f4ffc1d3e682d954e55a526649636441f63c"
-      }
-    },
     "491762bb82302829": {
       "reviewed_by": "independent-sonnet-reviewer-subagent",
       "attester_class": "agent",
@@ -466,6 +450,24 @@
         "src/remediate/steps/dispatch/hostCorroboration.ts": "186399ba8fc976952f3aaeb2bfffc3be5ba00566",
         "src/remediate/steps/dispatch/hostHandoff.ts": "db0674ae8c063a91c0978e7c168cb9020f9b3536",
         "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
+      }
+    },
+    "9ae8f3b83f558bae": {
+      "reviewed_by": "claude-session:7e4d0c11 (author self-review; owner chose the wording)",
+      "attester_class": "agent",
+      "checked": "remediate template lead and no-edit line equal owner-approved option A; workerPromptPath moved verbatim to shared core, both draws import it; registry declared-gap row; lane test caps removed except STUCK; 4 tests red on old text; full suite 656 passed",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "00c80004e5278e185ca1a91b5c27e23418f790f0",
+        "ran_at": "2026-11-07T02:57:51.168Z"
+      },
+      "attested_at": "2026-11-07T02:58:03.705Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "8c85ada46e0d40418ffd33e49f47da294d092e05",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "c7feaad2952372f10ecba83e6df9df9ae28fa371",
+        "src/shared/submission/hostHandoffCore.ts": "acc2336b1fa419dc1539a90d74b95b8531eb0bf8"
       }
     },
     "9bc59db653647a3a": {
@@ -655,7 +657,7 @@
       "review": "491762bb82302829"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "449e8cec966d2361"
+      "review": "9ae8f3b83f558bae"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -1015,7 +1017,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "e501ffc69df5ac27"
+      "review": "9ae8f3b83f558bae"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "beb774a606887b42"
@@ -1051,7 +1053,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/hostHandoffCore.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "9ae8f3b83f558bae"
     },
     "src/shared/submission/hostResultOutcomes.ts": {
       "baseline": "7b79934e86baf378"

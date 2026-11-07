@@ -377,7 +377,7 @@ function resultShape(
 }
 
 /** The lead line of the result template every worker prompt ends with. */
-const TEMPLATE_LEAD = "When HEAD contains your commit, write this JSON to";
+const TEMPLATE_LEAD = "When HEAD contains your commit, submit this JSON";
 
 /**
  * A worker prompt split into the BODY the digest covers and the first JSON
@@ -1969,6 +1969,23 @@ describe("prompt 20: tool-filled result template and slim landed result", () => 
       });
       expect(item.prompt.text).toContain(item.result_path);
       expect(item.prompt.text).not.toMatch(/frontier|later dependency level|digest/iu);
+    }
+  });
+
+  it("states one delivery rule: the submit_result tool first, a file-write tool without it, never a shell", async () => {
+    // Owner decision 2026-11-07 (the remediate twin of audit line 2): a result
+    // written through a shell can lose a backslash, and the tool checks a
+    // submitted result before it writes the bound file.
+    const { root, handoff } = await prepareFixture();
+    const workerRoot = resolve(root).replaceAll("\\", "/").replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
+    for (const item of handoff.workload.work_items) {
+      const text = item.prompt.text;
+      expect(text).toContain(
+        `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerRoot}, work_item_id: ${item.id}). ` +
+        `If you do not have that tool, write it with a file-write tool to \`${item.result_path}\`. Do not write it through a shell.`,
+      );
+      expect(text).toContain("If no edit should land, submit this JSON instead.");
+      expect(text).not.toContain("write this JSON to");
     }
   });
 

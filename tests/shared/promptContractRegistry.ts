@@ -189,6 +189,7 @@ const reconciliationGapRows: PromptContractRegistryRow[] = [
   ["normalizePromptBodyPaths", "src/shared/tooling/exec.ts", "path normalizer applied to an already-rendered prompt body by writeStepContract — states no contract of its own"],
   ["bindWorkerPrompt", "src/shared/submission/workerPromptBinding.ts", "joins a draw's prompt body to the result template that draw renders — each draw's buildPrompt row carries the contract"],
   ["workerPromptBindingHolds", "src/shared/submission/workerPromptBinding.ts", "predicate over a persisted prompt's binding matched by the prompt-name scan — renders no prompt"],
+  ["workerPromptPath", "src/shared/submission/hostHandoffCore.ts", "path helper matched by the prompt-name scan — states a path absolute in a prompt, no rendered output contract"],
 ].map(([builder, file, gapReason]) => ({
   builder,
   file,

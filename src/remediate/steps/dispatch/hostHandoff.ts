@@ -40,6 +40,7 @@ import {
   hasExactKeys,
   identityFailureDiagnostic,
   hostHandoffResultPath,
+  workerPromptPath,
   idsAreStrictlyAscending,
   isCommit,
   isGitRepo,
@@ -642,8 +643,16 @@ function buildPrompt(item: {
  * fills the identity values from the body digest; the worker changes only the
  * marked values. The decision form follows for an item where no edit should
  * land.
+ *
+ * The delivery rule is the audit draw's line 2 (owner decision, 2026-11-07):
+ * the submit_result tool first, because it checks the result before it writes
+ * the bound file, so the lead states the root and the work-item id the tool
+ * needs. The file path stays as the fallback for a host without the tool. A
+ * shell is excluded by name: a result written through a shell can lose a
+ * backslash.
  */
 function renderResultTemplate(item: {
+  readonly root: string;
   readonly runId: string;
   readonly blockId: string;
   readonly resultPath: string;
@@ -671,13 +680,14 @@ function renderResultTemplate(item: {
     outcome: "<one of the three forms below>",
   };
   return [
-    `When HEAD contains your commit, write this JSON to \`${item.resultPath}\`. Change only the ${item.obligationIds.length > 0 ? "marked values" : "marked value"}:`,
+    `When HEAD contains your commit, submit this JSON with the submit_result tool (root: ${workerPromptPath(item.root, ".")}, work_item_id: ${item.blockId}). ` +
+    `If you do not have that tool, write it with a file-write tool to \`${item.resultPath}\`. Do not write it through a shell. Change only the ${item.obligationIds.length > 0 ? "marked values" : "marked value"}:`,
     "",
     "```json",
     JSON.stringify(landed, null, 2),
     "```",
     "",
-    `If no edit should land, write this JSON to \`${item.resultPath}\` instead. Replace \`outcome\` with one of the three forms below:`,
+    `If no edit should land, submit this JSON instead. Replace \`outcome\` with one of the three forms below:`,
     "",
     "```json",
     JSON.stringify(decision, null, 2),
@@ -781,7 +791,7 @@ function buildWorkItem(
       ...(item.clarification_context ? { clarification_context: item.clarification_context } : {}),
       ...(item.failure_context ? { failure_context: item.failure_context } : {}),
     }, baselineCommit, resultPath, hasLandingGates: discoverLandingGates(paths.root).length > 0,
-  }), promptDigest => renderResultTemplate({ runId, blockId: unit.id, resultPath, obligationIds, promptDigest }));
+  }), promptDigest => renderResultTemplate({ root: paths.root, runId, blockId: unit.id, resultPath, obligationIds, promptDigest }));
   const tokenEstimate = estimateTokensFromBytes(Buffer.byteLength(prompt.text, "utf8"));
   return {
     id: unit.id, source_finding_ids: [...unit.source_finding_ids],

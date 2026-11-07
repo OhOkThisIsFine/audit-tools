@@ -18,6 +18,7 @@
 // (index → hostHandoffCore → index) that check:depgraph refuses.
 import { compareCodeUnits } from "../compareCodeUnits.js";
 import { hashContent } from "../hash.js";
+import { toPosixPath } from "../paths.js";
 import { stableStringify } from "../stableStringify.js";
 import { isRecord } from "../validation/basic.js";
 import {
@@ -171,6 +172,25 @@ export function hostHandoffResultPath(
     { root: paths.root, submissionDir: paths.resultDir },
     id,
   );
+}
+
+/**
+ * A path as a worker prompt states it: ABSOLUTE and forward-slashed. Both draws
+ * use this one rule. A persisted `result_path` is repository-relative (it is the
+ * binding's identity), and a relative path in a prompt resolves against whatever
+ * directory the worker runs in — a worker launched in its own directory wrote
+ * somewhere the ingest never reads. Stated absolute, the instruction is
+ * cwd-independent. `relativePath` "." states the root itself, which the
+ * submit_result tool takes.
+ */
+export function workerPromptPath(root: string, relativePath: string): string {
+  // The drive letter is case-insensitive on every system that has one, so it is
+  // folded to ONE spelling: a run prepared as `c:/repo` and resumed as
+  // `C:/repo` must re-render the identical prompt, or its digest — and every
+  // result bound to it — would go stale for no change at all. A root that
+  // really moved still re-renders differently, and the draw's binding check
+  // refuses that workload as stale and prepares it again under the new root.
+  return toPosixPath(resolve(root, relativePath)).replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
 }
 
 /** Content digest of one prompt text — the binding between ask and answer. */

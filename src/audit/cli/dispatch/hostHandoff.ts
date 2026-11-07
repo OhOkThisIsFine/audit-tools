@@ -25,6 +25,7 @@ import {
   firstDuplicateIdentity,
   hasExactKeys,
   hostHandoffResultPath,
+  workerPromptPath,
   identityFailureDiagnostic,
   isFileMissingError,
   isJsonParseError,
@@ -778,28 +779,6 @@ function isVerificationLane(tags: readonly string[] | undefined): boolean {
   return tags?.includes(LENS_VERIFICATION_TAG) ?? false;
 }
 
-/**
- * The result template every audit worker prompt ends with. The tool fills the
- * identity values; the worker fills `file_coverage` and `findings`. The digest
- * it states is the digest of the prompt text ABOVE it (see `bindWorkerPrompt`).
- */
-/**
- * The result path as a worker is told it: ABSOLUTE and forward-slashed. The
- * persisted `result_path` is repository-relative (it is the binding's identity),
- * and a relative path in a prompt resolves against whatever directory the
- * worker runs in — a worker launched in its own directory wrote somewhere the
- * ingest never reads. Stated absolute, the instruction is cwd-independent.
- */
-function workerResultPath(root: string, resultPath: string): string {
-  // The drive letter is case-insensitive on every system that has one, so it is
-  // folded to ONE spelling: a run prepared as `c:/repo` and resumed as
-  // `C:/repo` must re-render the identical prompt, or its digest — and every
-  // result bound to it — would go stale for no change at all. A root that
-  // really moved still re-renders differently, and that binding failure is
-  // classified `workload_stale` (see `AuditHostBindingError`): the fold
-  // re-prepares under the new root.
-  return toPosixPath(resolve(root, resultPath)).replace(/^[a-z](?=:)/u, (letter) => letter.toUpperCase());
-}
 
 /**
  * The tail every work-item prompt ends with. The destination is NOT repeated
@@ -891,7 +870,7 @@ function buildPrompt(
     // THE DESTINATION FIRST, on its own line. It used to be one field inside a
     // single long JSON blob, which buries the one fact a reader must not have to
     // search for: a result written anywhere else is never ingested.
-    // ABSOLUTE (`workerResultPath`): the worker's working directory is the
+    // ABSOLUTE (`workerPromptPath`): the worker's working directory is the
     // host's choice, so no path here may depend on it.
     destination,
     // WHERE TO READ, stated rather than left to the host's working directory:
@@ -949,8 +928,8 @@ function buildPrompt(
  */
 function destinationLine(root: string, workItemId: string, resultPath: string): string {
   return (
-    `Submit one JSON object with the submit_result tool (root: ${workerResultPath(root, ".")}, work_item_id: ${workItemId}). ` +
-    `If you do not have that tool, write the object with a file-write tool to this exact absolute path: ${workerResultPath(root, resultPath)}. ` +
+    `Submit one JSON object with the submit_result tool (root: ${workerPromptPath(root, ".")}, work_item_id: ${workItemId}). ` +
+    `If you do not have that tool, write the object with a file-write tool to this exact absolute path: ${workerPromptPath(root, resultPath)}. ` +
     "Do not write it through a shell."
   );
 }
@@ -1454,7 +1433,7 @@ function parseWorkItem(value: unknown, runId: string, root: string): AuditHostWo
     // Line 2 states the absolute destination under the root the workload was
     // prepared at. Re-derived under the CURRENT root, a root that really moved
     // no longer matches, and the workload is refused as stale (see
-    // `workerResultPath`) rather than sending readers to the old tree.
+    // `workerPromptPath`) rather than sending readers to the old tree.
     value.prompt.text.split("\n")[1] !== destinationLine(root, value.id as string, value.result_path) ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, [

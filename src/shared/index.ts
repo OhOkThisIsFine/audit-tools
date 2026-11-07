@@ -675,6 +675,7 @@ export {
   firstFailedIdentityComponent,
   hasExactKeys,
   hostHandoffResultPath,
+  workerPromptPath,
   IDENTITY_COMPONENTS,
   identityFailureDiagnostic,
   idsAreStrictlyAscending,

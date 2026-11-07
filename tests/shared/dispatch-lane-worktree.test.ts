@@ -26,6 +26,15 @@ import {
 
 const HELPER = resolve(__dirname, "../../scripts/shared/mcp-dispatch-lane.mjs");
 
+/**
+ * No job deadline. The lane requires `timeoutMs`, and no test here except the
+ * STUCK case is about a time-out. A fixed 5 s cap made the fake job report
+ * `timed_out` under full-suite load (observed twice on 2026-11-07), a false red.
+ * `Infinity` never passes `Date.now() >= deadline`, and each wait still uses
+ * the lane's own `MAX_WAIT_SECONDS`.
+ */
+const NO_DEADLINE = Number.POSITIVE_INFINITY;
+
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -168,7 +177,7 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
     const container = laneWorktreeContainer(top);
     const { lane, fires } = fakeLane(top);
     try {
-      const r = await lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: top });
+      const r = await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: top });
       expect(r.status).toBe("completed");
     } finally {
       await lane.close();
@@ -188,7 +197,7 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
     const top = makeRepo(join(tmp(), "repos"));
     const { lane, fires } = fakeLane(top);
     try {
-      await lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: join(top, "sub") });
+      await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: join(top, "sub") });
     } finally {
       await lane.close();
     }
@@ -203,11 +212,11 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
     const container = laneWorktreeContainer(top);
     const { lane, fires } = fakeLane(top);
     try {
-      const failed = await lane.dispatch("FAIL", { timeoutMs: 5_000, mode: "agent", cwd: top });
+      const failed = await lane.dispatch("FAIL", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: top });
       expect(failed.status).toBe("failed");
       const timedOut = await lane.dispatch("STUCK", { timeoutMs: 60, mode: "agent", cwd: top });
       expect(timedOut.status).toBe("timed_out");
-      await expect(lane.dispatch("DIE", { timeoutMs: 5_000, mode: "agent", cwd: top })).rejects.toThrow(DispatchLaneError);
+      await expect(lane.dispatch("DIE", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: top })).rejects.toThrow(DispatchLaneError);
     } finally {
       await lane.close();
     }
@@ -231,7 +240,7 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
     const lapBefore = gitState(lap);
     const { lane, fires } = fakeLane(lap);
     try {
-      await lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: lap });
+      await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: lap });
     } finally {
       await lane.close();
     }
@@ -250,7 +259,7 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
     const top = makeRepo(join(outer, "repos"));
     const { lane, fires } = fakeLane(top);
     try {
-      await expect(lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: top })).rejects.toThrow(
+      await expect(lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: top })).rejects.toThrow(
         /nested worktree breaks/,
       );
     } finally {
@@ -270,7 +279,7 @@ describe("a repository-reading dispatch runs in a worktree the helper owns", () 
       child,
       `import { openDispatchLane } from ${JSON.stringify(pathToFileURL(HELPER).href)};
 const lane = openDispatchLane({ command: process.execPath, args: ${JSON.stringify([bridge.script, bridge.log])}, onStderr: () => {} });
-await lane.dispatch("STUCK", { timeoutMs: 600_000, mode: "agent", cwd: ${JSON.stringify(top)} });
+await lane.dispatch("STUCK", { timeoutMs: Infinity, mode: "agent", cwd: ${JSON.stringify(top)} });
 `,
     );
     const proc = spawnHidden(process.execPath, [child], { stdio: ["ignore", "pipe", "pipe"] });
@@ -283,7 +292,7 @@ await lane.dispatch("STUCK", { timeoutMs: 600_000, mode: "agent", cwd: ${JSON.st
 
     const { lane, fires } = fakeLane(top);
     try {
-      await lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: top });
+      await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: top });
     } finally {
       await lane.close();
     }
@@ -298,8 +307,8 @@ await lane.dispatch("STUCK", { timeoutMs: 600_000, mode: "agent", cwd: ${JSON.st
     const snapshot = tmp();
     const { lane, fires } = fakeLane(top);
     try {
-      await lane.dispatch("OK", { timeoutMs: 5_000, cwd: top });
-      await lane.dispatch("OK", { timeoutMs: 5_000, mode: "agent", cwd: snapshot });
+      await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, cwd: top });
+      await lane.dispatch("OK", { timeoutMs: NO_DEADLINE, mode: "agent", cwd: snapshot });
     } finally {
       await lane.close();
     }
