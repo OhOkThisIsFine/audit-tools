@@ -6,9 +6,49 @@ import { dirname, join, resolve, sep } from "node:path";
 import { AUDIT_TOOLS_CALLER_CWD_ENV } from "audit-tools/shared";
 
 const {
+  DIRECT_CLI_DEFAULTS,
   getArtifactsDir,
   getRootDir,
+  getTimeoutMs,
+  normalizePositiveInteger,
+  parsePositiveIntegerFlag,
 } = await import("../../src/audit/cli/args.js");
+
+test.each([Number.MIN_VALUE, 0.5, 1 - Number.EPSILON])(
+  "positive integer normalization rejects sub-unit value %s",
+  (value) => {
+    expect(normalizePositiveInteger(value)).toBeUndefined();
+  },
+);
+
+test.each([undefined, null, "1", true, 0, -1, NaN, Infinity, -Infinity])(
+  "positive integer normalization rejects invalid value %s",
+  (value) => {
+    expect(normalizePositiveInteger(value)).toBeUndefined();
+  },
+);
+
+test.each([[1, 1], [1.5, 1], [1200.9, 1200]])(
+  "positive integer normalization floors %s to %s",
+  (value, expected) => {
+    expect(normalizePositiveInteger(value)).toBe(expected);
+  },
+);
+
+test.each([["--timeout", "0.5"], ["--timeout=0.5"]])(
+  "sub-unit timeout falls back instead of creating an immediate deadline: %j",
+  (...argv) => {
+    expect(getTimeoutMs(argv)).toBe(DIRECT_CLI_DEFAULTS.timeoutMs);
+    expect(parsePositiveIntegerFlag(argv, "--timeout")).toBeUndefined();
+  },
+);
+
+test.each([["--timeout", "1.5"], ["--timeout=1.5"]])(
+  "valid fractional timeout retains floor behavior: %j",
+  (...argv) => {
+    expect(getTimeoutMs(argv)).toBe(1);
+  },
+);
 
 const ARGS_SOURCE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
