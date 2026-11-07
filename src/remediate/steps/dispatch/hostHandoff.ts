@@ -65,6 +65,7 @@ import {
   stringArray,
   stableStringify,
   writeJsonFile,
+  writeTextFile,
   type FindingSeverity,
   type HostHandoffPaths,
   type IngestionCheckId,
@@ -949,6 +950,84 @@ export async function hasBoundRemediationSubmission(params: {
     // Unreadable or invalid bindings are not evidence of a continuation.
   }
   return false;
+}
+
+/** What `submit` reports for one work item. */
+export interface RemediationSubmitReport {
+  readonly run_id: string;
+  readonly work_item_id: string;
+  readonly result_path: string;
+  readonly written: boolean;
+  readonly issues: readonly SubmissionIssue[];
+}
+
+/**
+ * Judge one work item's result and, only when the per-result contract accepts
+ * it, write it byte-exact to the item's bound path (decision 4, 2026-11-06).
+ *
+ * The judgment is the shared scan ingestion runs, over the in-memory `source`
+ * instead of a file read, with this draw's own `parseResult`. It is the part of
+ * ingestion that reads the document alone. The commit corroboration, the write
+ * scope and the required-test rerun read the tree, so they stay at ingestion.
+ *
+ * A caller error throws (no implementing run, an id the current workload does
+ * not publish, an item already settled); a document the contract refuses
+ * returns its issues and writes nothing.
+ */
+export async function submitRemediationHostResult(params: {
+  readonly root: string;
+  readonly artifactsDir: string;
+  readonly runId: string;
+  readonly state: unknown;
+  readonly workItemId: string;
+  readonly source: string;
+}): Promise<RemediationSubmitReport> {
+  const state = parseCurrentState(params.state);
+  if (!state?.host_handoff) {
+    throw new Error(
+      "no remediation run is implementing with a published workload — call `remediate-code next-step` for the current step",
+    );
+  }
+  const paths = resolveBoundaryPaths(params);
+  const read = await readSubmissionDocument(paths.workloadPath);
+  const workload = read.kind === "value" ? parseWorkload(read.value, paths, params.runId, state) : null;
+  if (!workload) {
+    throw new Error(
+      `the workload of run ${params.runId} is missing or no longer matches its binding — call \`remediate-code next-step\` for the current step`,
+    );
+  }
+  const workItem = workload.work_items.find((item) => item.id === params.workItemId);
+  if (workItem === undefined) {
+    throw new Error(
+      `'${params.workItemId}' is not a work item of the current run ${params.runId}: pass the work-item id your prompt names`,
+    );
+  }
+  if (state.items[workItem.id]?.status !== "pending") {
+    throw new Error(
+      `work item '${workItem.id}' is no longer pending (status ${state.items[workItem.id]?.status ?? "unknown"}), so the run takes no result for it`,
+    );
+  }
+  const scan = await scanBoundSubmission<AcceptedHostResult>({
+    root: paths.root,
+    artifactsDir: paths.artifactsDir,
+    workItemId: workItem.id,
+    resultPath: workItem.result_path,
+    source: params.source,
+    parse: (value) => {
+      const result = parseResult(value, params.runId, workItem);
+      return result.ok ? { ok: true, parsed: result } : { ok: false, check: result.check, detail: result.reason };
+    },
+    resultId: (result) => result.result.result_id,
+    seen: () => false,
+    messages: remediationScanMessages,
+  });
+  const report = { run_id: params.runId, work_item_id: workItem.id, result_path: workItem.result_path };
+  if (!scan.ok) return { ...report, written: false, issues: [scan.issue] };
+  await writeTextFile(
+    resolveContainedPath(paths.root, workItem.result_path, `result path for ${workItem.id}`),
+    params.source,
+  );
+  return { ...report, written: true, issues: [] };
 }
 
 type ParsedHostResult =

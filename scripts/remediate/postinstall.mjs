@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/postinstall-mcp-registration.test.ts, tests/audit/postinstall-contract.test.ts
 // The remediate-code host-install entry.
 //
 // What this file owns: the REMEDIATE-CODE HALF OF THE PLAN — the OpenCode
@@ -21,11 +22,16 @@ import {
   runInstalls,
   installOpenCodeGlobalConfig,
   installAntigravityPlugin,
+  installClaudeDesktopPlugin,
+  installMcpServerRegistrations,
+  mcpServerLaunch,
+  mergeOpenCodeMcpServer,
   finishPostinstall,
 } from "../shared/install-host-assets.mjs";
 import {
   HOST_ASSET_PLANS,
   PKG_ROOT,
+  planClaudePluginDir,
   planInstalls,
   planOpenCodeCommand,
   planOpenCodeConfigPath,
@@ -183,13 +189,18 @@ function mergeOpenCodeGlobalConfig(existing, promptBody) {
       ...objectValue(parsed.command),
       [TOOL]: planOpenCodeCommand(PLAN, promptBody),
     },
+    mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(PKG_ROOT, TOOL)),
     permission: renderOpenCodeGlobalPermissionConfig(parsed.permission),
     agent: {
       ...agent,
       [PLAN.agentName]: {
         ...existingRemediator,
         description: PLAN.agentDescription,
-        permission: renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
+        permission: {
+          ...renderOpenCodeAgentPermissionConfig(existingRemediator.permission),
+          // OpenCode names an MCP tool `<server>_<tool>`: this allows submit_result.
+          [`${TOOL}_*`]: "allow",
+        },
       },
     },
   };
@@ -245,6 +256,38 @@ installAntigravityPlugin(
     pluginName: TOOL,
     pluginVersion: PLAN.pluginVersion === "packageVersion" ? packageVersion : PLAN.pluginVersion,
     skillSource,
+  },
+  counts,
+);
+
+// The Claude plugin carries the MCP server declaration (`.mcp.json`), so this
+// tool gets one the same way audit-code does.
+installClaudeDesktopPlugin(
+  {
+    toolName: TOOL,
+    pluginDir: planClaudePluginDir(PLAN),
+    manifest: {
+      name: TOOL,
+      description: PLAN.description,
+      version: packageVersion,
+      author: { name: "audit-tools", url: "https://github.com/OhOkThisIsFine/audit-tools" },
+      homepage: "https://github.com/OhOkThisIsFine/audit-tools",
+      repository: "https://github.com/OhOkThisIsFine/audit-tools",
+      license: "MIT",
+      keywords: ["remediation", "code-fix", "orchestration"],
+    },
+    commandContent: PLAN.stripFrontmatter ? Buffer.from(promptBody, "utf8") : promptSource,
+    skillContent: skillSource,
+  },
+  counts,
+);
+
+installMcpServerRegistrations(
+  {
+    toolName: TOOL,
+    homeDir: homedir(),
+    launch: mcpServerLaunch(PKG_ROOT, TOOL),
+    claudePluginDir: planClaudePluginDir(PLAN),
   },
   counts,
 );

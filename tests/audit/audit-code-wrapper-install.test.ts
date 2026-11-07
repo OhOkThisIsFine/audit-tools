@@ -136,7 +136,8 @@ const repoLocalHostCases: RepoLocalHostCase[] = [
       // The installed loader reaches third-party repositories: it carries no
       // audit-tools development wrapper (open-bugs 2026-10-01, O03).
       expect(vscodeAgent).not.toMatch(/node audit-code\.mjs/);
-      // The MCP surface was removed: install no longer writes .vscode/mcp.json.
+      // The repo-local install writes no MCP config: the package postinstall
+      // registers the submit server per host (tests/shared/postinstall-mcp-registration.test.ts).
       await assert.rejects(() => stat(join(root, ".vscode", "mcp.json")));
       expect(await readFile(paths.installGuidePath, "utf8")).toMatch(/## VS Code/);
     },
@@ -199,8 +200,9 @@ test.concurrent("repo-local host install writes shared manifest and cleanup beha
     expect(installedPromptContent).toBe(promptContent);
     expect((await readFile(join(root, ".audit-code", "install", "SKILL.md"), "utf8"))
         .replace(/\r\n/g, "\n")).toBe(skillContent.replace(/\r\n/g, "\n"));
-    // The MCP surface was removed: install must not write the MCP server
-    // launcher or the Claude Desktop bundle.
+    // The repo-local install writes no MCP launcher (the retired repo-local
+    // server) and no Claude Desktop bundle; the package postinstall registers
+    // the submit server per host.
     await assert.rejects(() =>
       stat(join(root, ".audit-code", "install", "run-mcp-server.mjs")),
     );
@@ -371,8 +373,8 @@ test.concurrent("audit-code installer merges existing host config instead of clo
     expect(opencodeConfig.agent.auditor.permission.bash["git log*"]).toBe("allow");
     expect(opencodeConfig.agent.auditor.permission.edit["docs/notes.md"]).toBe("allow");
 
-    // The MCP surface was removed: install no longer touches .vscode/mcp.json,
-    // so a pre-existing file is left untouched and no auditor server is injected.
+    // The repo-local install never touches .vscode/mcp.json, so a pre-existing
+    // file is left untouched and no server is injected into it.
     const vscodeConfig = JSON.parse(
       await readFile(join(root, ".vscode", "mcp.json"), "utf8"),
     );

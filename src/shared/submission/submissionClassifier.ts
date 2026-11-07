@@ -105,6 +105,16 @@ export async function readSubmissionDocument(
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+  return parseSubmissionSource(source);
+}
+
+/**
+ * Classify submitted text that is already in memory — the `submit` route, which
+ * receives the document instead of reading a bound path. The ONE parse both
+ * routes share, so a document refused as malformed is refused with the same
+ * detail whichever way it arrived.
+ */
+export function parseSubmissionSource(source: string): SubmissionReadOutcome {
   try {
     // Some editors write one UTF-8 byte-order mark before an otherwise valid
     // JSON document. Accept that encoding marker at the parser boundary only;

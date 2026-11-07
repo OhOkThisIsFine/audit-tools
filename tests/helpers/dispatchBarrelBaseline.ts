@@ -19,5 +19,6 @@ export const DISPATCH_BARREL_EXPORTS = [
   "remediationIssueRemedy",
   "remediationSubmissionBinding",
   "severityRiskWeight",
+  "submitRemediationHostResult",
   "workloadBindingIdentity",
 ] as const;

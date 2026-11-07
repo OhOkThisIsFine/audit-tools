@@ -502,7 +502,8 @@ export async function runEnsurePhase({ runCommand, auditCodeCommand, root, log }
 }
 
 // `install` + `verify-install`: every generated host surface, and the negative
-// assertions for the removed MCP / Claude Desktop / legacy Codex surfaces.
+// assertions for the retired repo-local MCP launcher, Claude Desktop bundle and
+// legacy Codex surfaces (the package postinstall registers the submit server).
 //
 // `expectedPromptSourcePath` is the only per-smoke input: the linked smoke
 // compares the installed prompt against the repo's own copy, the packaged smoke
@@ -551,7 +552,7 @@ export async function runInstallPhase({
   assert.equal(installedHost.installed_prompt_path, installedPromptPath);
   assert.equal(installedHost.install_guide_path, installGuidePath);
   assert.equal(installedHost.install_manifest_path, installManifestPath);
-  // The MCP surface was removed: install no longer emits an MCP server launcher.
+  // The repo-local install emits no MCP server launcher.
   assert.equal(installedHost.mcp_server_launcher_path, undefined);
   assert.equal(installedHost.slash_command_surfaces.vscode_prompt, vscodePromptPath);
   assert.equal(installedHost.slash_command_surfaces.opencode_config, opencodeConfigPath);
@@ -614,8 +615,8 @@ export async function runInstallPhase({
   await assert.rejects(() => stat(legacyCodexPromptPath));
   await assert.rejects(() => stat(legacyCodexOpenAiAgentPath));
   assert.match(await readFile(agentsPath, "utf8"), /When the user enters `\/audit-code`/);
-  // The MCP surface was removed: install must not write the MCP server launcher
-  // or the Claude Desktop bundle.
+  // The repo-local install writes neither the retired MCP launcher nor the
+  // Claude Desktop bundle.
   await assert.rejects(() => stat(join(root, ".audit-code", "install", "run-mcp-server.mjs")));
   await assert.rejects(() => stat(join(root, ".audit-code", "install", "claude-desktop")));
   assert.equal(installedHost.unsupported_hosts.length, 0);

@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 124 entr(y/ies) indexed.
+> and at commit). 125 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -70,6 +70,7 @@
 - `forward-tracks.md:30` — Deterministic analyzers: own-vs-acquire engine.
 - `forward-tracks.md:45` — Shared orchestration retains deliberate consumer policies.
 - `forward-tracks.md:48` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:50` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
 
 ### [`deferred.md`](backlog/deferred.md)
 

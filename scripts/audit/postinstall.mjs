@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/postinstall-mcp-registration.test.ts, tests/audit/postinstall-contract.test.ts
 // The audit-code host-install entry.
 //
 // What this file owns: the AUDIT-CODE HALF OF THE PLAN — the OpenCode permission
@@ -21,6 +22,9 @@ import {
   installOpenCodeGlobalConfig,
   installAntigravityPlugin,
   installClaudeDesktopPlugin,
+  installMcpServerRegistrations,
+  mcpServerLaunch,
+  mergeOpenCodeMcpServer,
   finishPostinstall,
 } from '../shared/install-host-assets.mjs';
 import {
@@ -72,8 +76,6 @@ const OPENCODE_AUDIT_BASH_PERMISSION = {
   '*audit-code.mjs* ensure*': 'allow',
   '*audit-code.mjs* next-step*': 'allow',
   '*audit-code.mjs* validate*': 'allow',
-  'node* .audit-code/install/run-mcp-server.mjs*': 'allow',
-  'node* ./.audit-code/install/run-mcp-server.mjs*': 'allow',
   'git status*': 'allow',
   'git diff*': 'allow',
   'grep *': 'allow',
@@ -193,7 +195,7 @@ function renderOpenCodePermissionConfig() {
 }
 
 const opencodeCommandTemplateFile = join(pkgRoot, 'skills', 'audit-code', 'opencode-command-template.txt');
-const OPENCODE_MCP_COMMAND_TEMPLATE = readFileSync(opencodeCommandTemplateFile, 'utf8').replace(/\r\n/g, '\n').trim();
+const OPENCODE_COMMAND_TEMPLATE = readFileSync(opencodeCommandTemplateFile, 'utf8').replace(/\r\n/g, '\n').trim();
 
 function mergeOpenCodeGlobalConfig(existing) {
   const parsed = existing ? JSON.parse(existing) : {};
@@ -206,9 +208,10 @@ function mergeOpenCodeGlobalConfig(existing) {
         ? parsed.command
         : {}),
       // The command ENTRY comes from the plan; only the template is this tool's
-      // (an MCP-server invocation rather than the prompt body).
-      [TOOL]: planOpenCodeCommand(PLAN, OPENCODE_MCP_COMMAND_TEMPLATE),
+      // (a standalone next-step instruction rather than the prompt body).
+      [TOOL]: planOpenCodeCommand(PLAN, OPENCODE_COMMAND_TEMPLATE),
     },
+    mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(pkgRoot, TOOL)),
     permission: mergeOpenCodeGlobalPermissionConfig(parsed.permission, auditPermission),
     agent: {
       ...(parsed.agent && typeof parsed.agent === 'object' && !Array.isArray(parsed.agent)
@@ -219,7 +222,8 @@ function mergeOpenCodeGlobalConfig(existing) {
         description: PLAN.agentDescription,
         permission: {
           ...mergeOpenCodeAgentPermissionConfig(existingAuditor.permission, auditPermission),
-          'auditor_*': 'allow',
+          // OpenCode names an MCP tool `<server>_<tool>`: this allows submit_result.
+          [`${TOOL}_*`]: 'allow',
           question: 'allow',
           task: 'allow',
         },
@@ -261,7 +265,7 @@ installOpenCodeGlobalConfig(
     buildMerged: (existing) => mergeOpenCodeGlobalConfig(existing),
     label: 'OpenCode config',
     manualInstructions: [
-      `  To install manually, add the mcp.auditor and command["audit-code"] entries to:`,
+      `  To install manually, add the mcp.servers["audit-code"] and command["audit-code"] entries to:`,
       `    ${opencodeGlobalConfig}`,
     ],
   },
@@ -300,6 +304,16 @@ installClaudeDesktopPlugin(
     },
     commandContent: promptSource,
     skillContent: skillSource,
+  },
+  counts,
+);
+
+installMcpServerRegistrations(
+  {
+    toolName: TOOL,
+    homeDir: homedir(),
+    launch: mcpServerLaunch(pkgRoot, TOOL),
+    claudePluginDir: planClaudePluginDir(PLAN),
   },
   counts,
 );

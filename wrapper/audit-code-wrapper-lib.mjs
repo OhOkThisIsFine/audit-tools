@@ -255,7 +255,9 @@ function printHelp({ usageName, preferredEntrypoint }) {
     // per-verb help cannot disagree. They were hand-restated here and had
     // already drifted from it on two of the four.
     ...installerVerbSummaries('/audit-code'),
-    '- mcp starts the local stdio MCP server for repo-local IDE integrations',
+    // sites-pinned: none — help text; it asserts no behaviour
+    '- mcp serves the submit-only MCP tool (submit_result) over stdio',
+    '- submit --work-item ID --from FILE checks one work item result and writes it to its bound path only when it passes',
     '- validate checks the current artifact bundle and canonical session intent and exits non-zero when issues exist',
     '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
     '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
@@ -305,41 +307,6 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   await run(nodeExecutable(), [distEntry, commandName, ...commandArgs], {
     env: { ...process.env, ...selfInvocationEnv() },
   });
-}
-
-async function runDistCommandInline(commandName, argv, { ensureArtifactsDir = false } = {}) {
-  const commandArgs = [...argv];
-  // Same discovery as runDistCommand — the two paths must not answer "which
-  // repository is this?" differently.
-  const rootValue = resolveWrapperRoot(getFlag(commandArgs, '--root'));
-  const artifactsDir = resolve(getFlag(commandArgs, '--artifacts-dir') ?? join(rootValue, '.audit-tools', 'audit'));
-
-  setFlag(commandArgs, '--root', rootValue);
-  setFlag(commandArgs, '--artifacts-dir', artifactsDir);
-
-  // Gate the mkdir behind the same ensureArtifactsDir flag as runDistCommand so
-  // "the artifacts directory is created only for designated stateful commands"
-  // holds on this path too (CE-001); mcp is a designated stateful command and
-  // opts in explicitly at its call site.
-  if (ensureArtifactsDir) {
-    await mkdir(artifactsDir, { recursive: true });
-  }
-  await ensureBuilt();
-
-  // Propagate the invocation hint into this (long-lived) server process so it
-  // and the wrapper subprocesses it spawns emit continuation commands that
-  // match how the backend was launched. Safe here: this path is only the `mcp`
-  // server, not a shared/test process.
-  Object.assign(process.env, selfInvocationEnv());
-
-  // Import the module that exports runCli (dist/cli.js). dist/index.js has no
-  // exports — it is the bare entrypoint that runs `runCli(process.argv)` as an
-  // import side effect — so importing it here both fails to provide runCli and
-  // double-starts the command from this process's argv.
-  const distCliEntry = join(repoRoot, 'dist', 'cli.js');
-  const distUrl = new URL(`file:///${distCliEntry.replace(/\\/g, '/')}`);
-  const cli = await import(distUrl.href);
-  await cli.runCli([process.execPath, distCliEntry, commandName, ...commandArgs]);
 }
 
 /** @param {{usageName: string, argv?: string[], preferredEntrypoint?: string}} options */
@@ -393,19 +360,15 @@ export async function runAuditCodeWrapper({
     return;
   }
 
-  // Commands that need special wrapper handling stay explicit:
-  //  - `mcp` runs INLINE (dist/index.js's import side effect would double-start
-  //    the command; only dist/cli.js's runCli export is safe to import here).
-  //  - the artifact-dir-bootstrapping commands pass { ensureArtifactsDir: true }
-  //    because they may be the FIRST call in a fresh repo and must create the
-  //    run directory before dist reads it.
+  // Commands that need special wrapper handling stay explicit: the
+  // artifact-dir-bootstrapping commands pass { ensureArtifactsDir: true }
+  // because they may be the FIRST call in a fresh repo and must create the run
+  // directory before dist reads it. `mcp` needs no branch: the child inherits
+  // stdio and ensureBuilt writes to stderr, so the forwarded server's stdout
+  // stays the protocol stream.
   const commandArgv = argv.slice(1);
   // Help is informational: it must not create the artifacts directory.
   const ensureArtifactsDir = !commandArgv.some((arg) => arg === '--help' || arg === '-h');
-  if (argv[0] === 'mcp') {
-    await runDistCommandInline('mcp', commandArgv, { ensureArtifactsDir });
-    return;
-  }
 
   if (argv[0] === 'next-step') {
     await runDistCommand('next-step', commandArgv, { ensureArtifactsDir });

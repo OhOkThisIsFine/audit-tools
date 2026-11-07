@@ -69,6 +69,8 @@ const cmdModuleMap = [
   ["score-audit", "scoreAuditCommand.js", "cmdScoreAudit"],
   ["recover-submission", "recoverSubmissionCommand.js", "cmdRecoverSubmission"],
   ["unaccept-results", "unacceptResultsCommand.js", "cmdUnacceptResults"],
+  ["submit", "submitCommand.js", "cmdSubmit"],
+  ["mcp", "submitCommand.js", "cmdMcp"],
 ];
 
 for (const [, moduleFile, exportName] of cmdModuleMap) {

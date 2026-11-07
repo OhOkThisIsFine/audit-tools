@@ -46,3 +46,16 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
 
 
 - **The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).** `scripts/release-and-publish.mjs` ends at registry visibility; global reinstall, the allowed postinstall lifecycle scripts and both binary smokes live in `.claude/skills/ship/SKILL.md` as instructions an agent must remember and execute — the host-remembering shape the auditor-agnostic rule bans, applied to the project's own pipeline-ownership rule. There is also no single resumable record spanning the phases, so a stall part-way is recovered by hand. **Property:** one idempotent command owns gated ref verification, exactly-once tag/release/publish creation, delayed release observation, registry verification, reinstall with allowed lifecycle scripts, and smoke checks of both global binaries and the installed host assets — resuming only its observation and completion phases and never retrying a destructive creation. The observation half already has its own entry (the await-run timeout shorter than a release-event delivery delay); fix it inside this command rather than beside it. YAML critical-path profiling moves out of release correctness into best-effort reporting.
+
+- **Structured MCP submission beyond work-item results (owner, 2026-11-06).** The submit-only MCP
+  server covers work-item results in both draws. Other candidates where one structured call removes
+  a shell-escaping risk or a step the host must remember: the audit gate-lane submissions in
+  `GATE_LANES` (`src/audit/cli/laneSubmissions.ts` — the charter lanes, `synthesis_narrative`, both
+  design-review lanes, `edge_reasoning`, `critical_flow_fallback`, `intent_equivalence`,
+  `systemic_challenge`); the operator answers `analyzer_consent` and `analyzer_decisions`, which stay
+  per run ([[per-run-choices-are-never-persisted]]); and the remediate conformance-review results
+  (`contractConformanceReview.ts`) and triage and clarification answers. **Property:** each candidate
+  judges its argument with the SAME validator its file route uses and writes the bound path; none
+  returns a step or a prompt (no second copy of the next-step contract, a80cb74f). **Open:** whether
+  a host's sub-agents receive the parent's MCP tools is unverified for every host, so the file route
+  stays first-class for each candidate.

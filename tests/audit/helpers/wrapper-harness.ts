@@ -335,7 +335,7 @@ export function assertSharedHostInstallResponse(
   expect(parsed.installed_prompt_path).toBe(paths.installedPromptPath);
   expect(parsed.install_guide_path).toBe(paths.installGuidePath);
   expect(parsed.install_manifest_path).toBe(paths.installManifestPath);
-  // The MCP surface was removed: install no longer emits an MCP server launcher.
+  // The repo-local install emits no MCP server launcher; the package postinstall registers the submit server.
   expect(parsed.mcp_server_launcher_path).toBe(undefined);
   expect(parsed.slash_command_surfaces.vscode_prompt).toBe(paths.vscodePromptPath);
   expect(parsed.slash_command_surfaces.opencode_config).toBe(paths.opencodeConfigPath);

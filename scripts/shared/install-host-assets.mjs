@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/postinstall-mcp-registration.test.ts, tests/audit/postinstall-contract.test.ts
 // Shared postinstall driver for the audit-code and remediate-code host-asset
 // deployers (scripts/audit/postinstall.mjs, scripts/remediate/postinstall.mjs).
 //
@@ -10,7 +11,8 @@
 // config-merge functions locally — those differ in exact merge behavior
 // between audit-code and remediate-code and must not be forced into parity.
 import { dirname, join } from "node:path";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 /**
  * Read a source file that is required for the install to proceed at all
@@ -52,6 +54,137 @@ export function writeGeneratedFile(path, content) {
 /** Coerce an unknown value to a plain object (non-array). */
 export function objectValue(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+/**
+ * The ONE stdio launch of a bin's submit-only MCP server (decision 4,
+ * 2026-11-06). Absolute node plus the package's own entry script, never the
+ * bare bin name: a host that spawns without a shell cannot run the Windows
+ * `.cmd` shim npm installs, and an absolute path needs no PATH lookup. Each
+ * reinstall rewrites it, so a moved package or a new node is picked up then.
+ *
+ * @param {string} pkgRoot
+ * @param {string} toolName
+ * @returns {{command: string, args: string[]}}
+ */
+export function mcpServerLaunch(pkgRoot, toolName) {
+  return { command: process.execPath, args: [join(pkgRoot, `${toolName}.mjs`), "mcp"] };
+}
+
+/**
+ * The OpenCode `mcp` object with this tool's server registered under
+ * `mcp.servers` (the current schema; the flat `mcp.<name>` form is deprecated).
+ * The retired repo-local server's flat `auditor` entry is removed only when it
+ * still launches that server, so a user's own entry of that name survives.
+ */
+export function mergeOpenCodeMcpServer(existingMcp, toolName, launch) {
+  const mcp = { ...objectValue(existingMcp) };
+  const stale = objectValue(mcp.auditor).command;
+  if (Array.isArray(stale) && stale.some((part) => String(part).includes("run-mcp-server"))) {
+    delete mcp.auditor;
+  }
+  return {
+    ...mcp,
+    servers: {
+      ...objectValue(mcp.servers),
+      [toolName]: { type: "local", command: [launch.command, ...launch.args] },
+    },
+  };
+}
+
+/**
+ * Append this tool's `[mcp_servers.<tool>]` table to the Codex config. The
+ * user's file is never re-serialized (that would drop their comments and
+ * layout): an absent entry is appended as text, an identical one is left, and
+ * a different one is the user's edit and is left too, with a note.
+ *
+ * The file is written only when the COMPOSED text still parses. An appended
+ * table cannot extend an inline `mcp_servers = { ... }` (TOML closes inline
+ * tables), and a file that does not parse today cannot be judged at all: both
+ * return "manual" and leave the file as it is, never making it invalid and
+ * never failing the install over a user's own config.
+ *
+ * @returns {"installed" | "unchanged" | "kept" | "manual"}
+ */
+function registerCodexMcpServer(path, toolName, launch) {
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const parsesAs = (text) => {
+    try {
+      return parseToml(text);
+    } catch {
+      return undefined;
+    }
+  };
+  const current = parsesAs(existing);
+  if (current === undefined) return "manual";
+  const entry = objectValue(objectValue(current.mcp_servers)[toolName]);
+  if (Object.keys(entry).length > 0) {
+    // Compare by field, not by serialized text: the same entry with its keys in
+    // another order is unchanged, not an edit to report as kept.
+    const sameLaunch =
+      Object.keys(entry).length === 2 &&
+      entry.command === launch.command &&
+      JSON.stringify(entry.args) === JSON.stringify(launch.args);
+    return sameLaunch ? "unchanged" : "kept";
+  }
+  const table = stringifyToml({ mcp_servers: { [toolName]: launch } });
+  const separator = existing === "" || existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
+  const next = `${existing}${separator}${table}${table.endsWith("\n") ? "" : "\n"}`;
+  if (parsesAs(next) === undefined) return "manual";
+  mkdirSync(dirname(path), { recursive: true });
+  // The user's own config: temp-then-rename, so a crash mid-write leaves the
+  // old file whole instead of a truncated one.
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, next, "utf8");
+  renameSync(temp, path);
+  return "installed";
+}
+
+/**
+ * Register a bin's submit-only MCP server with the hosts whose format each
+ * keeps in a file this package owns or appends to: the tool's Claude plugin
+ * (`.mcp.json`), its Antigravity plugin (`mcp_config.json`) and the Codex
+ * config. OpenCode is registered inside each tool's merged global config
+ * (`mergeOpenCodeMcpServer`). Each host is its own counted step.
+ *
+ * @param {{toolName: string, homeDir: string, launch: {command: string, args: string[]}, claudePluginDir: string}} options
+ * @param {{succeeded: number, failed: number}} counts
+ */
+export function installMcpServerRegistrations({ toolName, homeDir, launch, claudePluginDir }, counts) {
+  const declaration = Buffer.from(JSON.stringify({ mcpServers: { [toolName]: launch } }, null, 2) + "\n");
+  /** @type {Array<[string, string, (path: string) => string]>} */
+  const steps = [
+    ["Claude plugin MCP server", join(claudePluginDir, ".mcp.json"), (path) => writeGeneratedFile(path, declaration)],
+    [
+      "Antigravity plugin MCP server",
+      join(homeDir, ".gemini", "config", "plugins", toolName, "mcp_config.json"),
+      (path) => writeGeneratedFile(path, declaration),
+    ],
+    ["Codex MCP server", join(homeDir, ".codex", "config.toml"), (path) => registerCodexMcpServer(path, toolName, launch)],
+  ];
+  for (const [label, path, install] of steps) {
+    try {
+      const action = install(path);
+      if (action === "kept") {
+        console.log(
+          `${toolName}: kept the ${label} entry you edited in ${path}; the launch this release would write is ` +
+            `${JSON.stringify(launch)}`,
+        );
+      } else if (action === "manual") {
+        console.log(
+          `${toolName}: left ${path} unchanged — appending the ${label} table would not parse there ` +
+            `(an inline mcp_servers table, or a file that does not parse today). Add it by hand: ` +
+            `[mcp_servers.${toolName}] command = ${JSON.stringify(launch.command)} args = ${JSON.stringify(launch.args)}`,
+        );
+      } else {
+        console.log(`${toolName}: ${action} ${label} at ${path}`);
+      }
+      counts.succeeded++;
+    } catch (err) {
+      console.warn(`${toolName}: could not register the ${label} at ${path} (${/** @type {any} */ (err).message})`);
+      counts.failed++;
+    }
+  }
 }
 
 /** Strip YAML frontmatter from a text file, returning only the body. */

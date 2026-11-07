@@ -427,6 +427,19 @@ existing-coverage check — none of these duplicates a current test.
 > write to a tool-owned, expected-set-recorded name; (3) migration is ATOMIC and the paused
 > dogfood lap re-runs on the new scheme (deterministic artifacts survive; only dispatched-but-
 > uningested work repeats). Consequence: the P25 build now precedes the lap resume.
+>
+> **AMENDED by the owner, 2026-11-06 (dogfood decision 4), answer (2) only:** work-item results get
+> a normal-path submit, in two forms. (a) A submit-only MCP tool, `submit_result`, served by
+> `audit-code mcp` / `remediate-code mcp` and registered per host by the package postinstall: the
+> result travels as a structured argument, so no shell stands in the path. (b) The file route
+> `<bin> submit --work-item <id> --from <file>`, for a host whose sub-agents lack the parent's MCP
+> tools. R3's trap does not return: the reader still writes the result with its file tool, and only
+> an id and a path pass the shell — no payload on argv or stdin, so neither R3's quoting loop nor
+> R4's command-line cap applies. Both forms judge with the rules ingestion applies and write the
+> bound path only on acceptance. The measured defect behind the amendment: a backslash in a quoted
+> line was lost on its way through a shell (`docs/reviews/dogfood-audit-2026-11-06.md`).
+> `recover-submission` stays the operator's rescue and keeps its `recovered_by_hand` record. Gate
+> lanes keep the file-at-a-tool-owned-name path; extending the tool to them is a forward track.
 
 1. **The re-scope itself.** `sol-9` says "remove the guessable path from both orchestrators' host
    handoff". That surface was created today and already does this (R1), while the measured drift is on

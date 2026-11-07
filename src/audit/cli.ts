@@ -28,6 +28,7 @@ import { cmdExplainTask } from "./cli/explainTaskCommand.js";
 import { cmdUpdateRuntimeValidation } from "./cli/updateRuntimeValidationCommand.js";
 import { cmdValidate } from "./cli/validateCommand.js";
 import { cmdValidateResults } from "./cli/validateResultsCommand.js";
+import { cmdMcp, cmdSubmit } from "./cli/submitCommand.js";
 import { cmdRequeue } from "./cli/requeueCommand.js";
 import { cmdSynthesize } from "./cli/synthesizeCommand.js";
 import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
@@ -64,7 +65,7 @@ export const cliTestUtils = {
  * caller's true cwd arrives via AUDIT_TOOLS_CALLER_CWD (stamped by the
  * wrapper, scrubbed from provider spawns).
  */
-const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set();
+const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set(["submit", "mcp"]);
 
 /**
  * The ONE route table for the audit CLI. Each row is [verb, handler]; the
@@ -84,6 +85,8 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["update-runtime-validation", cmdUpdateRuntimeValidation, { values: ["--updates"], acceptsSemanticResults: true }],
   ["validate", cmdValidate, {}],
   ["validate-results", cmdValidateResults, { values: ["--results"] }],
+  ["submit", cmdSubmit, { values: ["--work-item", "--from"] }],
+  ["mcp", cmdMcp, {}],
   ["requeue", cmdRequeue, {}],
   ["synthesize", cmdSynthesize, {}],
   ["force-synthesis", cmdForceSynthesis, {}],

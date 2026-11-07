@@ -51,6 +51,7 @@ import {
   groundFinding,
   withFileLock,
   writeBlockedStepContract,
+  writeTextFile,
   writeJsonFile,
   toPosixPath,
   type IngestionCheckId,
@@ -1723,20 +1724,30 @@ function validateHandoffBinding(
   return items;
 }
 
+/**
+ * The run the current-review-run pointer names, or `undefined` when there is
+ * no usable pointer. The pointer schema accepts strings; only the existing
+ * run-id grammar may authorize a directory segment, so an unusable pointer is
+ * not publication.
+ */
+async function readActiveRunId(artifactsDir: string): Promise<string | undefined> {
+  let run;
+  try { run = ActiveReviewRunSchema.safeParse(await readJsonFile<unknown>(join(artifactsDir, "dispatch", CURRENT_TASK_FILENAME))); }
+  catch (error) { if (isFileMissingError(error) || isJsonParseError(error)) return undefined; throw error; }
+  if (!run.success) return undefined;
+  try { assertSubmissionRunId(run.data.run_id); }
+  catch { return undefined; }
+  return run.data.run_id;
+}
+
 /** Snapshot current publication under its existing lock; release before planning. */
 export async function readPublishedAuditTaskIds(params: {
   root: string; sourceRoot: string; artifactsDir: string; tasks: readonly AuditTask[];
   manifest: ArtifactBundle["repo_manifest"]; lineIndex: Readonly<Record<string, number>>; logger?: RunLogger;
 }): Promise<ReadonlySet<string>> {
-  let run;
-  try { run = ActiveReviewRunSchema.safeParse(await readJsonFile<unknown>(join(params.artifactsDir, "dispatch", CURRENT_TASK_FILENAME))); }
-  catch (error) { if (isFileMissingError(error) || isJsonParseError(error)) return new Set(); throw error; }
-  if (!run.success) return new Set();
-  // The pointer schema accepts strings; only the existing run-id grammar may
-  // authorize a directory segment. An unusable pointer is not publication.
-  try { assertSubmissionRunId(run.data.run_id); }
-  catch { return new Set(); }
-  const paths = resolveBoundaryPaths({ root: params.root, sourceRoot: params.sourceRoot, artifactsDir: params.artifactsDir, runId: run.data.run_id });
+  const runId = await readActiveRunId(params.artifactsDir);
+  if (runId === undefined) return new Set();
+  const paths = resolveBoundaryPaths({ root: params.root, sourceRoot: params.sourceRoot, artifactsDir: params.artifactsDir, runId });
   return withAcceptedResultsLock(paths, params.logger, async () => {
     let items: Map<string, AuditHostWorkItem>;
     let bindings: Map<string, AuditHostTaskBinding>;
@@ -2199,6 +2210,8 @@ async function judgeAuditHostSubmission(params: {
   readonly readSource: ReturnType<typeof createMemoizedSourceReader>;
   /** Lazily enumerated: an empty-findings submission needs no git call. */
   readonly knownPaths: () => Promise<ReadonlySet<string>>;
+  /** The submitted text when `submit` holds it; absent, the bound path is read. */
+  readonly source?: string;
 }): Promise<
   | { readonly ok: false; readonly issue: AuditHostIngestIssue }
   | {
@@ -2221,6 +2234,7 @@ async function judgeAuditHostSubmission(params: {
     resultId: (result) => result.result_id,
     seen: params.seen,
     messages: auditScanMessages(entry.work_item_id),
+    source: params.source,
   });
   if (!outcome.ok) return { ok: false, issue: outcome.issue };
   const result = outcome.parsed;
@@ -2408,19 +2422,45 @@ export async function checkAuditHostResult(params: {
       validation_warnings: [],
     };
   }
-  const { resultMap, taskBindings, items } = bindingSet;
-  const entry = resultMap.entries.find(
+  const entry = bindingSet.resultMap.entries.find(
     (candidate) => resolve(paths.root, candidate.result_path) === absolute,
   );
-  const item = entry === undefined ? undefined : items.get(entry.work_item_id);
-  const binding = entry === undefined ? undefined : taskBindings.get(entry.work_item_id);
-  if (entry === undefined || item === undefined || binding === undefined) {
+  if (entry === undefined) {
     throw new Error(
       `${toPosixPath(absolute)} is not the bound result path of any work item in run ${runId}. ` +
         `Each work item in ${toPosixPath(paths.workloadPath)} names its own result_path; write the result there and validate that file.`,
     );
   }
-  const accepted = await loadAcceptedResults(paths.acceptedLedgerPath, runId);
+  const judged = await judgeBoundEntry({ ...params, paths, bindingSet, entry });
+  return checkReport(runId, entry, judged);
+}
+
+/**
+ * The judgment both doors share once a run's binding set and one of its entries
+ * are resolved: the ledger read, the duplicate predicate, and the ONE
+ * submission judgment. `source` carries `submit`'s in-memory document.
+ */
+async function judgeBoundEntry(params: {
+  readonly paths: ResolvedBoundaryPaths;
+  readonly bindingSet: Extract<Awaited<ReturnType<typeof readHandoffBindingSet>>, { ok: true }>;
+  readonly entry: AuditHostResultMapEntry;
+  readonly auditTasks: readonly AuditTask[];
+  readonly lineIndex?: Record<string, number>;
+  readonly source?: string;
+}): Promise<{
+  readonly alreadyAccepted: boolean;
+  readonly judged: Awaited<ReturnType<typeof judgeAuditHostSubmission>>;
+}> {
+  const { paths, bindingSet, entry } = params;
+  const item = bindingSet.items.get(entry.work_item_id);
+  const binding = bindingSet.taskBindings.get(entry.work_item_id);
+  if (item === undefined || binding === undefined) {
+    throw new Error(
+      `work item '${entry.work_item_id}' has a result path in run ${paths.runId} but no work item or task binding; ` +
+        "run next-step to publish a current workload.",
+    );
+  }
+  const accepted = await loadAcceptedResults(paths.acceptedLedgerPath, paths.runId);
   const alreadyAccepted = accepted.entries.some(
     (candidate) => bindingIdentity(candidate) === bindingIdentity(entry),
   );
@@ -2443,7 +2483,16 @@ export async function checkAuditHostResult(params: {
     lineIndex: params.lineIndex,
     readSource: createMemoizedSourceReader(),
     knownPaths: async () => (knownPaths ??= await enumerateTrackedFilePaths(boundarySourceRoot(paths))),
+    source: params.source,
   });
+  return { alreadyAccepted, judged };
+}
+
+function checkReport(
+  runId: string,
+  entry: AuditHostResultMapEntry,
+  { alreadyAccepted, judged }: Awaited<ReturnType<typeof judgeBoundEntry>>,
+): AuditHostResultCheck {
   return {
     run_id: runId,
     work_item_id: entry.work_item_id,
@@ -2452,6 +2501,69 @@ export async function checkAuditHostResult(params: {
     issues: judged.ok ? [] : [judged.issue],
     validation_warnings: judged.ok ? judged.warnings : [],
   };
+}
+
+/**
+ * Judge a submitted result for one work item of the CURRENT run and, only when
+ * ingestion would accept it, write it atomically to that item's bound result
+ * path (decision 4, 2026-11-06). The reader never names a path: the tool
+ * derives it from the work-item id. A refused result writes nothing, and the
+ * report carries the same refusal ingestion would give, so the reader fixes
+ * the document and submits again. No lock is held: the write is the one a
+ * reader made before, and the next-step fold still ingests the file under the
+ * artifact-tree lock. Bindings are read on every call, never cached, so an item
+ * a re-plan retired fails with the classified refusal.
+ */
+export async function submitAuditHostResult(params: {
+  readonly root: string;
+  readonly sourceRoot: string;
+  readonly artifactsDir: string;
+  readonly workItemId: string;
+  /** The submitted document's text, written byte-exact when it is accepted. */
+  readonly source: string;
+  readonly auditTasks: readonly AuditTask[];
+  readonly lineIndex?: Record<string, number>;
+}): Promise<AuditHostResultCheck> {
+  const runId = await readActiveRunId(params.artifactsDir);
+  if (runId === undefined) {
+    throw new Error(
+      "no audit run has published a workload (the current-review-run pointer is missing or unusable); " +
+        "run next-step to publish one, then submit each result by its work-item id.",
+    );
+  }
+  const paths = resolveBoundaryPaths({
+    root: params.root,
+    sourceRoot: params.sourceRoot,
+    artifactsDir: params.artifactsDir,
+    runId,
+  });
+  const bindingSet = await readHandoffBindingSet(paths);
+  if (!bindingSet.ok) {
+    return {
+      run_id: runId,
+      already_accepted: false,
+      issues: [{ code: bindingSet.refusal.code, check: bindingSet.refusal.check, message: bindingSet.refusal.message }],
+      validation_warnings: [],
+    };
+  }
+  const entry = bindingSet.resultMap.entries.find((candidate) => candidate.work_item_id === params.workItemId);
+  if (entry === undefined) {
+    throw new Error(
+      `'${params.workItemId}' is not a work item of the current run ${runId}. ` +
+        `Submit with the work-item id your prompt names; the run's items are listed in ${toPosixPath(paths.workloadPath)}.`,
+    );
+  }
+  const judgment = await judgeBoundEntry({ ...params, paths, bindingSet, entry });
+  if (judgment.alreadyAccepted) {
+    throw new Error(
+      `work item '${entry.work_item_id}' is already accepted in run ${runId}, and ingestion does not read an accepted result again. ` +
+        `To replace it, run \`audit-code unaccept-results --work-item ${entry.work_item_id}\` first, then submit again.`,
+    );
+  }
+  if (judgment.judged.ok) {
+    await writeTextFile(resolveContainedPath(paths.root, entry.result_path, `result path for ${entry.work_item_id}`), params.source);
+  }
+  return checkReport(runId, entry, judgment);
 }
 
 /** The set-level scheduling facts beside a published workload. */

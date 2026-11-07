@@ -593,20 +593,23 @@
         "src/shared/submission/ingestReport.ts": "50399210ffdbd5498f817ace659c6667d1b55a28"
       }
     },
-    "e3f8dec1bdfb8e7c": {
-      "reviewed_by": "opencode-xhigh:ses_e4d6790b0ffedBJke2t8kBIj41",
+    "e501ffc69df5ac27": {
+      "reviewed_by": "opencode-xhigh:ses_e4cb59193ffe400czQt94djQRT",
       "attester_class": "agent",
-      "checked": "decision 5 prompt cuts C1-C5,C7: workload contract bumped to audit-host-workload/v1alpha6; steward lead matched as a whole line; PROMPTED_FINDING_SCHEMA omits lens and analyzer_provenance; ingestion still validates the full WorkerFindingSchema; full suite green on the staged tree",
+      "checked": "submit route and MCP submit_result run the same per-document judgment as ingestion (shared scan, identity walk, result_id derived); bound-path containment and already-accepted refusal; checkAuditHostResult refactor unchanged for validate-results; MCP stdout stays clean; Codex TOML append parse-verified, now atomic with field compare; Windows paths and BOM. Full suite green on the staged tree.",
       "verdict": "clear",
       "override": null,
       "tests_ran": {
         "scope": "full-suite",
-        "tree": "3391ef28dbec5d181772aad25d7cbe03ad9efb9f",
-        "ran_at": "2026-11-06T23:00:04.642Z"
+        "tree": "28e6f872cb9c7e251d503778deb289b296fb5d5b",
+        "ran_at": "2026-11-07T00:48:51.386Z"
       },
-      "attested_at": "2026-11-06T23:00:12.716Z",
+      "attested_at": "2026-11-07T00:49:03.172Z",
       "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "184bb3c6e2779f6ed0f1d4f300d3d0f361305457"
+        "src/audit/cli/dispatch/hostHandoff.ts": "e5f2c4a6ac4b4285ea9d6cfafe2c545db3f8823d",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "efb36fe01a910316bcf724a67a60b564d01c33c4",
+        "src/shared/submission/submissionClassifier.ts": "391f7192742366d2aa86df2198538a1f8d1cfc95",
+        "src/shared/submission/submissionScan.ts": "86726d05792322664bb576d0f9ca6b901888d175"
       }
     }
   },
@@ -636,7 +639,7 @@
       "review": "491762bb82302829"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "e3f8dec1bdfb8e7c"
+      "review": "e501ffc69df5ac27"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -996,7 +999,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "e501ffc69df5ac27"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "beb774a606887b42"
@@ -1044,7 +1047,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/submissionClassifier.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "e501ffc69df5ac27"
     },
     "src/shared/submission/submissionIdentity.ts": {
       "baseline": "7b79934e86baf378"
@@ -1053,7 +1056,7 @@
       "review": "c2fa0250dd9f5ee5"
     },
     "src/shared/submission/submissionScan.ts": {
-      "review": "c2fa0250dd9f5ee5"
+      "review": "e501ffc69df5ac27"
     },
     "src/shared/submission/workerPromptBinding.ts": {
       "baseline": "7b79934e86baf378"

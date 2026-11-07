@@ -130,6 +130,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "commander": "^13.0.0",
     "koffi": "3.3.3",
     "smol-toml": "^1.9.0",

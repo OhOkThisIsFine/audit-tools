@@ -1,4 +1,5 @@
 // <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
+// sites-pinned: tests/audit/result-submit.test.ts, tests/remediate/result-submit.test.ts
 /**
  * The ONE per-item host-submission scan both ingests draw from.
  *
@@ -30,6 +31,7 @@
 // re-exports this module, so importing the barrel here would close a cycle
 // (index → submissionScan → index) that check:depgraph refuses.
 import {
+  parseSubmissionSource,
   readSubmissionDocument,
   type SubmissionIssue,
 } from "./submissionClassifier.js";
@@ -87,6 +89,13 @@ export async function scanBoundSubmission<TParsed>(params: {
   /** Caller-owned predicate; seeding and consume timing stay per-draw. */
   readonly seen: (resultId: string) => boolean;
   readonly messages: SubmissionScanMessages;
+  /**
+   * The submitted text, when the caller holds it instead of the bound path
+   * (`submit`, which writes the bound path only after this scan accepts). The
+   * bound path is still resolved and contained, so a submission is judged
+   * against the same boundary either way.
+   */
+  readonly source?: string;
 }): Promise<SubmissionScanOutcome<TParsed>> {
   const locators = {
     work_item_id: params.workItemId,
@@ -102,7 +111,10 @@ export async function scanBoundSubmission<TParsed>(params: {
   // and root containment alone would admit any other tracked file in the repo.
   resolveContainedPath(params.artifactsDir, absolutePath, label);
 
-  const read = await readSubmissionDocument(absolutePath);
+  // sites-pinned: tests/audit/result-submit.test.ts, tests/remediate/result-submit.test.ts
+  const read = params.source === undefined
+    ? await readSubmissionDocument(absolutePath)
+    : parseSubmissionSource(params.source);
   if (read.kind === "missing") {
     return {
       ok: false,

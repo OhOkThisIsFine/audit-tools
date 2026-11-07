@@ -65,6 +65,7 @@ test("every remediate-code command declaring --root leaves it defaultless", () =
     "recover-ingest",
     "recover-submission",
     "resume",
+    "submit",
     "validate-artifact",
     "validate-artifacts",
   ]);

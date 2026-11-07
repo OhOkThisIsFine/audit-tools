@@ -23,6 +23,7 @@ import {
   runWithBlockedStepBackstop,
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
+import { submitRemediationWorkItemResult } from "./steps/submitResult.js";
 import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./steps/dispatch/hostContracts.js";
 
@@ -65,6 +66,8 @@ const ROOT_OPTION_DESCRIPTION =
  * context (backlog "shared-state clobber from node context", live 2026-07-22).
  */
 const WORKER_SAFE_COMMANDS: ReadonlySet<string> = new Set([
+  "submit",
+  "mcp",
   "validate-artifacts",
   "validate-artifact",
   "validate",
@@ -350,6 +353,55 @@ program
     const { result, exitCode } = await runValidateArtifactAction(options);
     console.log(JSON.stringify(result, null, 2));
     process.exit(exitCode);
+  });
+
+program
+  .command("submit")
+  .description(
+    "Submit one work item's result: the tool judges it and, only when the contract accepts it, writes it to the item's bound path",
+  )
+  .option("--root <path>", ROOT_OPTION_DESCRIPTION)
+  .option(
+    "--artifacts-dir <path>",
+    "Artifacts directory",
+    ".audit-tools/remediation",
+  )
+  .requiredOption("--work-item <id>", "The work-item id your prompt names")
+  .requiredOption("--from <path>", "Any file that holds the result JSON you wrote with your file tool")
+  .action(async (options) => {
+    // The normal lane, unlike recover-submission: no run id to pass (the run's
+    // own state names it) and no recovered_by_hand record. Only an id and a
+    // path pass the shell, so no payload is escaped.
+    const root = resolveRootOption(options.root);
+    const report = await submitRemediationWorkItemResult({
+      root,
+      artifactsDir: resolveArtifactsDirOption(root, options.artifactsDir),
+      workItemId: options.workItem,
+      source: readFileSync(resolve(options.from), "utf8"),
+    });
+    console.log(JSON.stringify({ submitted_from: resolve(options.from), ...report }, null, 2));
+    process.exit(report.written ? 0 : 1);
+  });
+
+program
+  .command("mcp")
+  .description("Serve the submit-only MCP tool (submit_result) over stdio")
+  .action(async () => {
+    // Imported here so no other command loads the MCP SDK. The paths resolve
+    // exactly as --root / --artifacts-dir resolve for `submit`.
+    const submitServer = await import("audit-tools/shared/mcp/submitServer");
+    await submitServer.serveSubmitMcpOverStdio({
+      name: "remediate-code",
+      submit: async (request) => {
+        const root = resolveRootOption(request.root);
+        return submitRemediationWorkItemResult({
+          root,
+          artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? ".audit-tools/remediation"),
+          workItemId: request.workItemId,
+          source: request.source,
+        });
+      },
+    });
   });
 
 program
