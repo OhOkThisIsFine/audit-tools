@@ -825,8 +825,8 @@ function renderResultTemplate(
   };
   return [
     verificationLane
-      ? "When you finish, write this JSON to the path on line 2. Keep the five identity values as they are. Fill in `file_coverage` and `findings`:"
-      : "When you finish, write this JSON to the path on line 2. Keep exactly these keys, and keep the five identity values as they are. Fill in `file_coverage` and `findings`:",
+      ? "When you finish, submit this JSON as line 2 says. Keep the five identity values as they are. Fill in `file_coverage` and `findings`:"
+      : "When you finish, submit this JSON as line 2 says. Keep exactly these keys, and keep the five identity values as they are. Fill in `file_coverage` and `findings`:",
     "```json",
     JSON.stringify(template, null, 2),
     "```",
@@ -855,7 +855,7 @@ function lensGuidanceLines(lens: string): string[] {
 
 function buildPrompt(
   task: AuditHostTask,
-  resultPath: string,
+  destination: string,
   workloadPath: string,
   sourceRoot: string,
 ): string {
@@ -893,7 +893,7 @@ function buildPrompt(
     // search for: a result written anywhere else is never ingested.
     // ABSOLUTE (`workerResultPath`): the worker's working directory is the
     // host's choice, so no path here may depend on it.
-    destinationLine(resultPath),
+    destination,
     // WHERE TO READ, stated rather than left to the host's working directory:
     // the run audits a frozen snapshot, and the live tree may have moved since
     // the run started. Line counts and cited text are checked against this tree.
@@ -939,9 +939,20 @@ function buildPrompt(
   ].join("\n");
 }
 
-/** Line 2 of every work-item prompt: the one statement of the absolute destination. */
-function destinationLine(absoluteResultPath: string): string {
-  return `Write one JSON object to this exact absolute path: ${absoluteResultPath}`;
+/**
+ * Line 2 of every work-item prompt: how the result reaches the tool, and the one
+ * statement of the absolute destination (owner decision, 2026-11-07). The
+ * submit tool comes first because it checks the result before it writes it, and
+ * it needs the root and the work-item id, so the line states both. The file path
+ * stays as the fallback for a host without the tool. A shell is excluded by
+ * name: the dogfood audit lost a backslash in a quoted span that way.
+ */
+function destinationLine(root: string, workItemId: string, resultPath: string): string {
+  return (
+    `Submit one JSON object with the submit_result tool (root: ${workerResultPath(root, ".")}, work_item_id: ${workItemId}). ` +
+    `If you do not have that tool, write the object with a file-write tool to this exact absolute path: ${workerResultPath(root, resultPath)}. ` +
+    "Do not write it through a shell."
+  );
 }
 
 /** The first line of the steward's verification contract; only a steward body holds it. */
@@ -1144,11 +1155,15 @@ function buildWorkItem(
   task: AuditHostTask,
 ): AuditHostWorkItem {
   const resultPath = resultPathFor(paths, task.task_id);
-  const promptResultPath = workerResultPath(paths.root, resultPath);
   // The SAME path the caller writes the workload to, so a selective lane is told
   // where its surface actually is rather than where it is expected to be.
   const prompt = bindWorkerPrompt(
-    buildPrompt(task, promptResultPath, paths.workloadPath, boundarySourceRoot(paths)),
+    buildPrompt(
+      task,
+      destinationLine(paths.root, task.task_id, resultPath),
+      paths.workloadPath,
+      boundarySourceRoot(paths),
+    ),
     (digest) => renderResultTemplate(paths.runId, task.task_id, digest, isVerificationLane(task.tags)),
   );
   return {
@@ -1440,7 +1455,7 @@ function parseWorkItem(value: unknown, runId: string, root: string): AuditHostWo
     // prepared at. Re-derived under the CURRENT root, a root that really moved
     // no longer matches, and the workload is refused as stale (see
     // `workerResultPath`) rather than sending readers to the old tree.
-    value.prompt.text.split("\n")[1] !== destinationLine(workerResultPath(root, value.result_path)) ||
+    value.prompt.text.split("\n")[1] !== destinationLine(root, value.id as string, value.result_path) ||
     !isRecord(value.scope) ||
     !hasExactKeys(value.scope, [
       "files",

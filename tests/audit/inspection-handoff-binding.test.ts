@@ -135,10 +135,16 @@ test("every path a work item names is absolute, granted, and the only file it ma
     expect(workload.work_items.length).toBeGreaterThan(0);
     for (const item of workload.work_items) {
       const absolute = posix(resolve(root, item.result_path));
-      // Line 2 names the absolute path once; the closing template points back to it (cut C1).
-      expect(item.prompt.text.split("\n")[1]).toBe(`Write one JSON object to this exact absolute path: ${absolute}`);
+      // Line 2 names the submit tool with the root and work-item id it needs,
+      // then the absolute path once as the fallback; the closing template
+      // points back to it (cut C1; owner decision on line 2, 2026-11-07).
+      expect(item.prompt.text.split("\n")[1]).toBe(
+        `Submit one JSON object with the submit_result tool (root: ${posix(resolve(root))}, work_item_id: ${item.id}). ` +
+          `If you do not have that tool, write the object with a file-write tool to this exact absolute path: ${absolute}. ` +
+          "Do not write it through a shell.",
+      );
       expect(item.prompt.text.split(absolute).length - 1).toBe(1);
-      expect(item.prompt.text).toContain("write this JSON to the path on line 2");
+      expect(item.prompt.text).toContain("submit this JSON as line 2 says");
       expect(item.prompt.text).toMatch(/Write no other file/u);
     }
     // The step grants what the prompts send a worker to read.

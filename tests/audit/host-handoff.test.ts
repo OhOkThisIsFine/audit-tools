@@ -612,7 +612,7 @@ describe(FAILURE_SIGNATURE, () => {
       expect(item.prompt.text.length).toBeGreaterThan(0);
       // The digest covers the BODY: the text above the result template the
       // prompt ends with (prompt 20).
-      const templateAt = item.prompt.text.indexOf("\n\nWhen you finish, write this JSON to");
+      const templateAt = item.prompt.text.indexOf("\n\nWhen you finish, submit this JSON");
       expect(templateAt).toBeGreaterThan(0);
       expect(item.prompt.sha256).toBe(sha256(item.prompt.text.slice(0, templateAt)));
       expect(item.scope.files).toEqual([...source.file_paths].sort());
@@ -1944,7 +1944,7 @@ describe(FAILURE_SIGNATURE, () => {
  * shared helper the remediate draw uses. The digest covers the text above it.
  */
 describe("prompt 20: tool-filled result template (audit draw)", () => {
-  const TEMPLATE_LEAD = "When you finish, write this JSON to";
+  const TEMPLATE_LEAD = "When you finish, submit this JSON";
 
   it("ends each worker prompt with a template whose identity values the tool filled in", async () => {
     const boundary = await loadBoundary();
@@ -1985,10 +1985,16 @@ describe("prompt 20: tool-filled result template (audit draw)", () => {
         work_item_id: item.id,
         prompt_sha256: item.prompt.sha256,
       });
-      // The template points at line 2, which states the absolute destination.
-      expect(text.slice(at)).toContain("write this JSON to the path on line 2");
+      // The template points at line 2, which names the submit tool first and
+      // the absolute destination as the fallback (owner decision, 2026-11-07).
+      expect(text.slice(at)).toContain("submit this JSON as line 2 says");
       expect(text.split("\n")[1]).toMatch(
-        new RegExp(`^Write one JSON object to this exact absolute path: .*${item.result_path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "u"),
+        new RegExp(
+          `^Submit one JSON object with the submit_result tool \\(root: .+, work_item_id: ${item.id}\\)\\. ` +
+            "If you do not have that tool, write the object with a file-write tool to this exact absolute path: " +
+            `.*${item.result_path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\. Do not write it through a shell\\.$`,
+          "u",
+        ),
       );
     }
   });
@@ -2033,7 +2039,7 @@ describe("decision 5: a work-item prompt states each fact once", () => {
   it("C1: states the absolute result path exactly once", async () => {
     const { base, steward } = await publishBaseAndSteward();
     for (const text of [base, steward]) {
-      const destination = /^Write one JSON object to this exact absolute path: (.+)$/mu.exec(text)![1]!;
+      const destination = /exact absolute path: (.+)\. Do not write it through a shell\.$/mu.exec(text)![1]!;
       expect(text.split(destination).length - 1).toBe(1);
     }
   });
