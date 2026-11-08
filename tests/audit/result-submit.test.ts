@@ -163,6 +163,17 @@ test("the built `audit-code mcp` process serves submit_result over clean stdio a
       const gateReport = JSON.parse((gate.content as Array<{ text: string }>)[0]!.text);
       expect(gateReport.written).toBe(true);
       expect(JSON.parse(await readFile(gateReport.path, "utf8"))).toEqual({ themes: [], executive_summary: "Transport intact" });
+      const flowGate = await client.callTool({ name: "submit_gate", arguments: {
+        root, lane: "critical_flow_fallback", result: { flows: [] },
+      } });
+      expect(flowGate.isError).not.toBe(true);
+      const flowReport = JSON.parse((flowGate.content as Array<{ text: string }>)[0]!.text);
+      expect(flowReport.written).toBe(true);
+      const { laneSubmissionPath } = await import("../../src/audit/cli/laneSubmissions.js");
+      expect(flowReport.path).toBe(laneSubmissionPath(artifactsDir, "critical_flow_fallback"));
+      const { tryConsumeSubmission } = await import("../../src/audit/cli/nextStepHelpers.js");
+      expect(await tryConsumeSubmission(artifactsDir, "critical_flow_fallback"))
+        .toMatchObject({ status: "ok", value: { flows: [] } });
       const call = await client.callTool({
         name: "submit_result",
         arguments: {

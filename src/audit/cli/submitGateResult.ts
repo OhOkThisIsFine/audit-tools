@@ -4,12 +4,12 @@ import { GATE_LANES, laneSubmissionPath } from "./laneSubmissions.js";
 import { laneSubmissionValidator } from "./laneValidators.js";
 import { auditLaneReviewRequirement } from "./reviewSubmission.js";
 
-/** Only ordinary synthesis is supported; independent lanes retain their existing binding-aware route. */
-export const SUPPORTED_GATE_SUBMISSIONS = [GATE_LANES.synthesis_narrative] as const;
+/** Only these schema-only ordinary lanes are supported; other lanes retain their existing routes. */
+export const SUPPORTED_GATE_SUBMISSIONS = [GATE_LANES.synthesis_narrative, GATE_LANES.critical_flow_fallback] as const;
 
 export async function submitGateResult(params: { artifactsDir: string; lane: string; source: string }) {
-  if (params.lane !== GATE_LANES.synthesis_narrative || auditLaneReviewRequirement(params.lane) !== "ordinary") {
-    return { written: false, issues: [{ code: "unsupported_lane", message: "Only synthesis_narrative gate submission is supported." }] };
+  if (!SUPPORTED_GATE_SUBMISSIONS.some(lane => lane === params.lane) || auditLaneReviewRequirement(params.lane) !== "ordinary") {
+    return { written: false, issues: [{ code: "unsupported_lane", message: `Only ${SUPPORTED_GATE_SUBMISSIONS.join(", ")} gate submissions are supported.` }] };
   }
   let value: unknown;
   try { value = JSON.parse(params.source); }
