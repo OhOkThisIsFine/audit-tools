@@ -25,7 +25,7 @@ import {
   prepareAuditHostHandoff,
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
 import { runAuditStep } from "../../src/audit/cli/auditStep.js";
-import { recordHostResultOutcomes, readSubmissionLedger } from "audit-tools/shared";
+import { contentSha256, recordHostResultOutcomes, readSubmissionLedger } from "audit-tools/shared";
 import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 import type { AuditTask } from "../../src/audit/types.js";
 
@@ -287,6 +287,11 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     );
     expect(forItem.map((entry) => entry.code)).toEqual(["result_validation_failed"]);
     expect(forItem[0]?.message).toMatch(/accepted earlier/u);
+    await recordHostResultOutcomes(ctx.artifactsDir, RUN_ID, {
+      issues: grown.raw_issues,
+      acceptedIds: grown.completed_work_item_ids,
+    });
+    expect((await readSubmissionLedger(ctx.artifactsDir)).at(-1)?.kind).toBe("rejected");
     const pair = await ctx.acceptedPair();
     expect(pair.ledgerEntries).toEqual([]);
 
@@ -309,6 +314,56 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
         auditResultsData: [...grown.accepted_results],
       }),
     ).resolves.toBeDefined();
+  });
+
+  it.each([false, true])("partial withdrawal keeps a surviving item accepted (stale bindings: %s)", async (staleBindings) => {
+    const ctx = await setup();
+    await ctx.writeResult(VALID_FINDING);
+    expect((await ctx.ingest()).accepted_count).toBe(1);
+    const runDir = join(ctx.artifactsDir, "runs", RUN_ID);
+    const ledgerPath = join(runDir, "host-accepted-results-ledger.json");
+    const ledger = JSON.parse(await readFile(ledgerPath, "utf8")) as {
+      entries: { result_id: string; prompt_sha256: string; result_sha256: string; result: Record<string, unknown>; audit_result: { lens: string } }[];
+    };
+    const original = ledger.entries[0]!;
+    // A previous binding for this same item has become invalid, while the
+    // current accepted binding still validates. Only the old entry is removed.
+    const oldResult = { ...original.result, result_id: "older-result", prompt_sha256: "a".repeat(64) };
+    ledger.entries.push({
+      ...original,
+      result: oldResult,
+      result_sha256: contentSha256(oldResult),
+      result_id: "older-result",
+      prompt_sha256: "a".repeat(64),
+      audit_result: { ...original.audit_result, lens: "security" },
+    });
+    await writeFile(ledgerPath, JSON.stringify(ledger), "utf8");
+    if (staleBindings) {
+      await writeFile(join(runDir, "host-task-bindings.json"), "{ not json", "utf8");
+    }
+    const ingested = await ingestAuditHostResults({
+      root: ctx.root,
+      sourceRoot: ctx.root,
+      artifactsDir: ctx.artifactsDir,
+      runId: RUN_ID,
+      auditTasks: [AUDIT_TASK],
+      lineIndex: { "src/a.ts": 2 },
+      pendingTaskIds: new Set([AUDIT_TASK.task_id]),
+    });
+    expect(ingested.accepted_count).toBe(0);
+    expect(ingested.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
+    const pair = await ctx.acceptedPair();
+    expect(pair.ledgerEntries).toEqual([original]);
+    expect(pair.results).toEqual([original.audit_result]);
+    expect(ingested.raw_issues.filter((issue) => issue.work_item_id === AUDIT_TASK.task_id)).toEqual([]);
+    if (staleBindings) expect(ingested.raw_issues.length).toBeGreaterThan(0);
+    await recordHostResultOutcomes(ctx.artifactsDir, RUN_ID, {
+      issues: ingested.raw_issues,
+      acceptedIds: ingested.completed_work_item_ids,
+    });
+    expect((await readSubmissionLedger(ctx.artifactsDir)).filter(
+      (event) => event.submission_id === AUDIT_TASK.task_id && event.kind === "rejected",
+    )).toEqual([]);
   });
 
   it("an evicted item whose bound file is valid is accepted again in the same ingest, with no issue", async () => {

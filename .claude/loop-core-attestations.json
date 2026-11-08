@@ -404,6 +404,22 @@
         "src/remediate/steps/nextStep.ts": "ff51f23d56ce740f2336376719461bc1dfe55984"
       }
     },
+    "7a05408bec080eda": {
+      "reviewed_by": "dot-parent-independent-review",
+      "attester_class": "agent",
+      "checked": "Independent plan and code review approved survivor-aware diagnostic filtering in normal and stale returns while keeping invalid-entry persistence unfiltered. Red-green regressions verify both accepted-pair files and total-withdrawal rejection; source/test typechecks pass. Official npm test: 8496 passed, 0 failed, 38 skipped; runner accepted 21 reporter RPC timeouts as transport-only.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "491e438e36024a70f15961a341511d53fb74e730",
+        "ran_at": "2026-11-08T06:26:06.999Z"
+      },
+      "attested_at": "2026-11-08T06:26:13.428Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "a70f6d46a3047edb25cf559435c619098ced9c36"
+      }
+    },
     "8aa0d48e64560f2e": {
       "reviewed_by": "claude-sonnet-5-5-charter-subagent",
       "attester_class": "agent",
@@ -657,7 +673,7 @@
       "review": "491762bb82302829"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "9ae8f3b83f558bae"
+      "review": "7a05408bec080eda"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"

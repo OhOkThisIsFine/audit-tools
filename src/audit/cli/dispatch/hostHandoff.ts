@@ -2672,9 +2672,14 @@ export async function ingestAuditHostResults(params: {
     const eviction = evictInvalidatedEntries(loaded, params);
     if (eviction.issues.size > 0) await writeAcceptedResults(paths, eviction.kept);
     const accepted = eviction.kept;
+    // Withdrawal removes an entry, not necessarily the whole work item. A
+    // surviving accepted binding keeps the item complete, including when stale
+    // handoff metadata makes us return before judging new submissions.
+    const survivingItemIds = new Set(accepted.entries.map((entry) => entry.work_item_id));
     const evictionIssues = (excluded: ReadonlySet<string> = new Set()) =>
       [...eviction.issues.values()].filter(
-        (issue) => !excluded.has(issue.work_item_id ?? ""),
+        (issue) => !survivingItemIds.has(issue.work_item_id ?? "") &&
+          !excluded.has(issue.work_item_id ?? ""),
       );
     // A STALE persisted document is refused as a CLASSIFIED ISSUE, never as a
     // throw. These are the refusals with a named repair — re-prepare, which this
