@@ -1,4 +1,5 @@
 import { conformanceReviewPaths } from "../../src/remediate/steps/dispatch/contractConformanceReview.js";
+import { submitRemediationGateResult } from "../../src/remediate/steps/submitGateResult.js";
 import { assertSuccessfulConformance, reopenStaleTriageSuccesses, triageEvidenceContext } from "../../src/remediate/phases/triageConformance.js";
 import { runClosePhase, buildRemediationOutcomesReport, cleanupTempBranchesAndArtifacts } from "../../src/remediate/phases/close.js";
 import { runTriagePhase } from "../../src/remediate/phases/triage.js";
@@ -237,6 +238,30 @@ describe("independent conformance admission and captured verification evidence",
     }));
   }
   describe("opt-in independent contract conformance lifecycle", () => {
+    it.each(["implementation", "triage"])("structured admission feeds the actual %s conformance consumer", async source => {
+      const value = await conformanceFixture();
+      const state: RemediationState = boundState(value);
+      if (source === "triage") {
+        state.items!.B1.status = "blocked";
+        delete state.host_handoff;
+        await runTriagePhase(state, { root: value.root, artifactsDir: value.artifactsDir });
+      } else {
+        await writeConformanceResult(value);
+        expect((await ingestConformance(value)).accepted_count).toBe(0);
+      }
+      await new StateStore(value.artifactsDir).saveState(state);
+      const paths = conformanceReviewPaths(value.artifactsDir, value.runId, value.item.id);
+      const request = JSON.parse(await readFile(paths.request, "utf8"));
+      const response = { ...request.response_template, summary: "Independent source and test review",
+        declaration: { mode: "independent", reason: "Separate context without author reasoning" } };
+      expect(await submitRemediationGateResult({ artifactsDir: value.artifactsDir,
+        lane: "conformance_review", workItemId: value.item.id, source: JSON.stringify(response) })).toMatchObject({ written: true, path: paths.response });
+      if (source === "triage") {
+        const accepted = await runTriagePhase(state, { root: value.root, artifactsDir: value.artifactsDir });
+        expect(accepted.items!.B1.status).toBe("resolved_no_change");
+        expect(accepted.items!.B1.conformance_review).toBeDefined();
+      } else expect((await ingestConformance(value)).accepted_count).toBe(1);
+    });
     it("a bound independent pass allows ordinary mechanical acceptance", async () => {
       const value = await conformanceFixture(); await writeConformanceResult(value);
       expect((await ingestConformance(value)).accepted_count).toBe(0);

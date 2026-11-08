@@ -33,6 +33,7 @@ export interface GateSubmitToolRequest {
   readonly root: string;
   readonly artifactsDir: string | undefined;
   readonly lane: string;
+  readonly workItemId?: string;
   readonly source: string;
 }
 
@@ -96,11 +97,12 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
       root: z.string().describe("Absolute repository root named by the prompt"),
       artifacts_dir: z.string().optional(),
       lane: z.enum(gate.lanes),
+      work_item_id: z.string().optional().describe("Work-item id, required for item-bound gate lanes"),
       result: z.union([z.record(z.unknown()), z.array(z.unknown())]),
     },
   }, async args => {
     try {
-      const report = await gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, source: JSON.stringify(args.result, null, 2) });
+      const report = await gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, ...(args.work_item_id === undefined ? {} : { workItemId: args.work_item_id }), source: JSON.stringify(args.result, null, 2) });
       return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }], ...(report.written ? {} : { isError: true }) };
     } catch (error) {
       return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }], isError: true };

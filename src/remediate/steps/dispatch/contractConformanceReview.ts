@@ -24,6 +24,18 @@ const ConformanceResponseSchema = z.object({
 }).strict();
 
 const digest = (value: unknown): string => hashContent(stableStringify(value));
+
+/** Shared admission checks; success policy and freshness belong to the consumer. */
+export function parseConformanceResponse(value: unknown, binding: string) {
+  const parsed = ConformanceResponseSchema.safeParse(value);
+  return parsed.success && parsed.data.binding === binding ? parsed.data : null;
+}
+
+export function conformanceObligationsMatch(review: { obligations: readonly { obligation_id: string }[] }, expected: readonly string[]): boolean {
+  const ids = review.obligations.map(entry => entry.obligation_id);
+  return ids.length === new Set(ids).size && ids.length === expected.length && ids.every(id => expected.includes(id));
+}
+
 export function conformanceReviewPaths(artifactsDir: string, runId: string, itemId: string): { request: string; response: string } {
   const stem = digest({ run_id: runId, work_item_id: itemId });
   const dir = join(artifactsDir, "conformance-review");
@@ -120,15 +132,13 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
     code, work_item_id: params.itemId, result_path: paths.response, review_request_path: paths.request, message,
   } });
   const raw = await readSubmissionDocument(paths.response);
-  const response = ConformanceResponseSchema.safeParse(raw.kind === "value" ? raw.value : undefined);
-  if (!response.success || response.data.binding !== binding) {
+  const review = parseConformanceResponse(raw.kind === "value" ? raw.value : undefined, binding);
+  if (!review) {
     return issue("conformance_review_required", `Independent contract conformance review required for ${params.itemId}. Read ${paths.request}; write the bound response to ${paths.response}. A missing, invalid or stale review cannot authorize acceptance.`);
   }
-  const review = response.data;
   const independence = reviewIndependenceIssue("independent", review.declaration);
   if (independence) return issue("conformance_review_unavailable", independence);
-  const ids = review.obligations.map(entry => entry.obligation_id);
-  if (ids.length !== new Set(ids).size || ids.length !== params.obligationIds.length || ids.some(id => !params.obligationIds.includes(id))) {
+  if (!conformanceObligationsMatch(review, params.obligationIds)) {
     return issue("conformance_review_required", "The review must assess every bound obligation exactly once, with no extra ids; correct the review response.");
   }
   if (review.verdict !== "pass" || review.obligations.some(entry => entry.verdict !== "satisfied")) {
@@ -136,7 +146,7 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
   }
   // Preserve the independently supplied review as history; adapter freshness guards
   // still decide whether this review can authorize a state transition.
-  await writeJsonFile(join(params.artifactsDir, "conformance-review", "subjects", `${binding}.review.json`), response.data);
+  await writeJsonFile(join(params.artifactsDir, "conformance-review", "subjects", `${binding}.review.json`), review);
   return { ok: true, receipt: AcceptedConformanceReviewSchema.parse({
     requirement: "independent", binding, review: review.declaration, summary: review.summary.slice(0, 2000),
   }) };

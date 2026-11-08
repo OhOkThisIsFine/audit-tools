@@ -395,12 +395,13 @@ program
       name: "remediate-code",
       gateSubmission: {
         lanes: SUPPORTED_REMEDIATION_GATE_SUBMISSIONS,
-        description: "Submit the user's triage decisions as a JSON object, or clarification answers as a bare JSON array. Obtain the user's decisions first; never infer decisions or answers. Clarification entries name unit_id, action (clarified, reject_finding, defer), and rationale (required for clarified); answers cannot widen plan scope. Validates and writes the bound submission without advancing the workflow. Run next-step afterward.",
+        description: "Submit triage decisions as an object, clarification answers as a bare array, or conformance_review as the bound review object with work_item_id. For triage and clarification: Obtain the user's decisions first; never infer decisions or answers. Clarification entries name unit_id, action (clarified, reject_finding, defer), and rationale (required for clarified); answers cannot widen plan scope. Conformance reviews require an independent context; report unavailable honestly when none exists. Validates and writes the bound submission without advancing or accepting work. Run next-step afterward.",
         submit: async request => {
           const root = resolveRootOption(request.root);
           return submitRemediationGateResult({
             artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? ".audit-tools/remediation"),
             lane: request.lane,
+            workItemId: request.workItemId,
             source: request.source,
           });
         },

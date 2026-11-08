@@ -172,23 +172,6 @@
         "src/audit/orchestrator/state.ts": "3dc42abe6fffb668b49ef89cde9e6d32cf67c375"
       }
     },
-    "2db6d216d6520425": {
-      "reviewed_by": "/root/triage_conformance/w2_design_refute",
-      "attester_class": "agent",
-      "checked": "Independently reviewed actual combined W2 W1 W5 source: opted-in blocked-triage success bypass, persistent working-tree test and independent-review binding, stale terminal backstop, archive-before-cleanup failure preservation, and intact W5 landed-file ownership. Actual original bypass and cleanup-loss red tests; final combined controls and shared-constant/containment adapter controls passed. Genuine no-argv full suite passed 7062 tests on exact staged tree 9c2c84bb9d3ec85cfbd5c978010b93640c6e53b0.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "9c2c84bb9d3ec85cfbd5c978010b93640c6e53b0",
-        "ran_at": "2026-10-05T21:46:49.418Z"
-      },
-      "attested_at": "2026-10-05T21:47:39.423Z",
-      "vouches": {
-        "src/remediate/steps/dispatch/contractConformanceReview.ts": "028fe8b2691705367e4ff7c98a36d6b46263eea4",
-        "src/remediate/steps/nextStep.ts": "fca40e3e8b27e83b64ef9a992a1a11cc2558dfbe"
-      }
-    },
     "2fd8f3fd2058e9bd": {
       "reviewed_by": "agy-refuter-ad01283c,opus-review-afb5c9845dc6f6e1e",
       "attester_class": "agent",
@@ -624,6 +607,22 @@
         "src/audit/orchestrator/taskBuilder.ts": "afc16a8824f8b8df4bc4473c2eb202d1a70ce5d8"
       }
     },
+    "c5d180afc57e5c00": {
+      "reviewed_by": "/root/advance_audit_overnight",
+      "attester_class": "agent",
+      "checked": "Independent review of conformance MCP admission: shared response validation, identity and obligation binding, negative feedback, independence-first consumer policy, unchanged freshness and history. Guard regressions and official suite passed.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "20b537e9fb3b6b199110032294441a02bc18c8ee",
+        "ran_at": "2026-11-08T14:35:29.939Z"
+      },
+      "attested_at": "2026-11-08T14:35:40.265Z",
+      "vouches": {
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "11327dade3187d0f261ec276ed7096331de0ba89"
+      }
+    },
     "d7acd796ff113751": {
       "reviewed_by": "opus-subagent-dc6-review,opus-subagent-dc6-delta-review",
       "attester_class": "agent",
@@ -1040,7 +1039,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "review": "2db6d216d6520425"
+      "review": "c5d180afc57e5c00"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
       "review": "beb774a606887b42"

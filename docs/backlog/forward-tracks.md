@@ -53,9 +53,11 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   which accepts the object/array file forms; the other delivered lanes retain their own object
   schemas. All preserve file-route validation semantics. **Remaining:** charter,
   design-review and systemic-challenge lanes; operator answers (`analyzer_decisions` persists
-  repository analyzer settings, while `analyzer_consent` records current-run consent); and
-  remediate conformance-review results. Remediate `submit_gate` supports operator triage
-  decisions and mid-run clarification answers through their existing file validators. Clarification
+  repository analyzer settings, while `analyzer_consent` records current-run consent).
+  Remediate `submit_gate` supports operator triage decisions, mid-run clarification answers,
+  and item-bound conformance reviews through their existing file validators. Negative review
+  feedback is admitted without authorizing success; existing consumers retain freshness and
+  independence checks. Clarification
   answers retain the strict bare-array shape and current paused-unit set. The remaining routes
   are not implemented. **Property:** each route uses the SAME validator as its file route and
   writes the bound path; none returns a step or prompt or advances the workflow. **Open:** whether
