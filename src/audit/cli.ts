@@ -101,7 +101,9 @@ export const COMMAND_ROUTES: ReadonlyArray<
 async function main(argv: string[]): Promise<void> {
   const command = argv[2] ?? "sample-run";
   const route = COMMAND_ROUTES.find(([verb]) => verb === command);
-  if (argv.slice(2).some((arg) => arg === "--help" || arg === "-h")) {
+  const delimiter = argv.indexOf("--", 2);
+  const helpArgs = argv.slice(2, delimiter < 0 ? undefined : delimiter);
+  if (helpArgs.some((arg) => arg === "--help" || arg === "-h")) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
     if (route) console.log(`Options: ${auditArgumentNames(route[2]).join(", ")}`);
     console.log(

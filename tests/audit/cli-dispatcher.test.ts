@@ -87,3 +87,22 @@ test("every routed verb pairs with exactly one module row", () => {
   const paired = cmdModuleMap.map(([verb]) => verb).sort();
   expect(paired).toEqual(routed);
 });
+
+test.each(["--help", "-h"])("help-looking positionals after -- do not bypass validation: %s", async flag => {
+  const result = await captureConsole(() => runCli([process.execPath, "cli.js", "status", "--", flag]));
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain(`unexpected positional argument ${flag}`);
+  expect(result.stdout).not.toContain("Usage:");
+});
+
+test.each(["--help", "-h"])("help before -- still displays command help: %s", async flag => {
+  const result = await captureConsole(() => runCli([process.execPath, "cli.js", "status", flag, "--", "literal"]));
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("Usage: audit-code status");
+});
+
+test.each(["--help", "-h"])("top-level help remains available: %s", async flag => {
+  const result = await captureConsole(() => runCli([process.execPath, "cli.js", flag]));
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("Usage: audit-code <command>");
+});
