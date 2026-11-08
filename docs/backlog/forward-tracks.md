@@ -54,7 +54,8 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   schemas. All preserve file-route validation semantics. **Remaining:** charter,
   design-review and systemic-challenge lanes; operator answers (`analyzer_decisions` persists
   repository analyzer settings, while `analyzer_consent` records current-run consent); and
-  remediate conformance-review results, triage and clarification answers. These structured routes
+  remediate conformance-review results and clarification answers. Remediate `submit_gate`
+  supports operator triage decisions through the existing file validator. The remaining routes
   are not implemented. **Property:** each route uses the SAME validator as its file route and
   writes the bound path; none returns a step or prompt or advances the workflow. **Open:** whether
   sub-agents inherit the parent's MCP tools remains unverified across hosts, so file routes stay

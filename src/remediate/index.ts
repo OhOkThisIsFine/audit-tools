@@ -24,6 +24,7 @@ import {
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
 import { submitRemediationWorkItemResult } from "./steps/submitResult.js";
+import { submitRemediationGateResult, SUPPORTED_REMEDIATION_GATE_SUBMISSIONS } from "./steps/submitGateResult.js";
 import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./steps/dispatch/hostContracts.js";
 
@@ -385,13 +386,25 @@ program
 
 program
   .command("mcp")
-  .description("Serve the submit-only MCP tool (submit_result) over stdio")
+  .description("Serve submit-only MCP tools (submit_result, submit_gate) over stdio")
   .action(async () => {
     // Imported here so no other command loads the MCP SDK. The paths resolve
     // exactly as --root / --artifacts-dir resolve for `submit`.
     const submitServer = await import("audit-tools/shared/mcp/submitServer");
     await submitServer.serveSubmitMcpOverStdio({
       name: "remediate-code",
+      gateSubmission: {
+        lanes: SUPPORTED_REMEDIATION_GATE_SUBMISSIONS,
+        description: "Submit the user's triage decisions as a JSON object. Obtain the user's decisions first; never infer retry, ignore or halt. Validates and writes the bound triage submission without advancing the workflow. Run next-step afterward.",
+        submit: async request => {
+          const root = resolveRootOption(request.root);
+          return submitRemediationGateResult({
+            artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? ".audit-tools/remediation"),
+            lane: request.lane,
+            source: request.source,
+          });
+        },
+      },
       submit: async (request) => {
         const root = resolveRootOption(request.root);
         return submitRemediationWorkItemResult({

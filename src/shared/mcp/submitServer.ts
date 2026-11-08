@@ -41,6 +41,7 @@ export interface SubmitServerOptions {
   readonly version: string;
   readonly gateSubmission?: {
     readonly lanes: readonly [string, ...string[]];
+    readonly description?: string;
     readonly submit: (request: GateSubmitToolRequest) => Promise<{ readonly written: boolean }>;
   };
   readonly submit: (request: SubmitToolRequest) => Promise<{ readonly written: boolean }>;
@@ -90,7 +91,7 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
   // sites-pinned: tests/audit/gate-submit.test.ts
   const gate = options.gateSubmission;
   if (gate) server.registerTool("submit_gate", {
-    description: "Submit a supported gate result as a JSON object or array, as required by its lane. Validates and writes its bound submission path; does not advance the audit. Run next-step afterward.",
+    description: gate.description ?? "Submit a supported gate result as a JSON object or array, as required by its lane. Validates and writes its bound submission path; does not advance the workflow. Run next-step afterward.",
     inputSchema: {
       root: z.string().describe("Absolute repository root named by the prompt"),
       artifacts_dir: z.string().optional(),

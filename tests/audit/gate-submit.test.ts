@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createSubmitMcpServer } from "../../src/shared/mcp/submitServer.js";
 
-// The audit callback is optional: remediation retains the existing one-tool surface.
+// Gate submission is opt-in: callers without a callback retain the one-tool surface.
 test("optional gate transport preserves objects and rejects lanes outside its declared surface", async () => {
   const seen: unknown[] = [];
   const server = createSubmitMcpServer({ name: "audit-code", version: "test", submit: async () => ({ written: true }),
