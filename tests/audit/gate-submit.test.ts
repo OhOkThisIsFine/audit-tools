@@ -185,6 +185,125 @@ test("intent consumer still rejects a checkpoint change after successful submiss
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { fileURLToPath } from "node:url";
 
+import { handleGraphEnrichmentBranch } from "../../src/audit/cli/nextStepHelpers.js";
+import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
+import { runGraphEnrichmentExecutor } from "../../src/audit/orchestrator/graphEnrichmentExecutor.js";
+
+test("edge gate preserves tolerant file shapes and refuses invalid replacements", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "edge-gate-shapes-"));
+  const lane = GATE_LANES.edge_reasoning;
+  const rewrites = [{ from: "a.ts", to: "b.ts", reason: 'Keep \\s and "quotes"' }];
+  try {
+    const path = laneSubmissionPath(artifactsDir, lane);
+    for (const result of [rewrites, { rewrites }, { alternate: rewrites }, [], { rewrites: [] }]) {
+      expect(await submitGateResult({ artifactsDir, lane, source: JSON.stringify(result) }))
+        .toMatchObject({ written: true, path, issues: [] });
+      const bytes = await readFile(path, "utf8");
+      for (const source of ['{', 'null', '42', '"text"', '{}', '{"rewrites":{}}',
+        '{"rewrites":[],"other":[]}', '{"rewrites":[],"review":{}}']) {
+        expect((await submitGateResult({ artifactsDir, lane, source })).written).toBe(false);
+        expect(await readFile(path, "utf8")).toBe(bytes);
+      }
+      expect(await tryConsumeSubmission(artifactsDir, lane)).toMatchObject({ status: "ok", value: result });
+    }
+    for (const lane of [GATE_LANES.synthesis_narrative, GATE_LANES.critical_flow_fallback, GATE_LANES.intent_equivalence]) {
+      expect((await submitGateResult({ artifactsDir, lane, source: '[]' })).written).toBe(false);
+    }
+  } finally { await rm(artifactsDir, { recursive: true, force: true }); }
+});
+
+test("submitted edge rewrites retain the consumer flag and executor graph limits", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "edge-gate-consumer-"));
+  const lane = GATE_LANES.edge_reasoning;
+  const reason = 'Keep \\s and "quotes"';
+  const rewrites = [
+    { from: "a.ts", to: "b.ts", kind: "heuristic", reason, confidence: 1, direction: "undirected" },
+    { from: "a.ts", to: "b.ts", reason: "duplicate must not replace first" },
+    { from: "a.ts", to: "c.ts", reason: "high confidence must not change" },
+    { from: "unknown.ts", to: "b.ts", reason: "must not add an edge" },
+    null, { from: "a.ts", to: "b.ts", reason: 42 },
+  ];
+  try {
+    for (const result of [rewrites, { rewrites }, { alternate: rewrites }]) {
+      const bundle: ArtifactBundle = {
+        repo_manifest: { repository: { name: "fixture" }, generated_at: "2026-11-08T00:00:00Z", files: [] },
+        file_disposition: { files: [] },
+        graph_bundle: { graphs: { imports: [
+          { from: "a.ts", to: "b.ts", kind: "heuristic", confidence: 0.2, direction: "directed", reason: "old" },
+          { from: "a.ts", to: "c.ts", kind: "import", confidence: 0.95, direction: "directed", reason: "import" },
+        ], calls: [], references: [] } },
+      };
+      const expected = structuredClone(bundle.graph_bundle!);
+      expected.graphs.imports![0]!.reason = reason;
+      expect((await submitGateResult({ artifactsDir, lane, source: JSON.stringify(result) })).written).toBe(true);
+      const path = laneSubmissionPath(artifactsDir, lane);
+      const bytes = await readFile(path, "utf8");
+      const params = { root: artifactsDir, sourceRoot: artifactsDir, artifactsDir, graphLlmEdgeReasoning: false };
+      const state = { status: "active" as const, obligations: [] };
+      const tx = createFoldTransaction();
+      let executions = 0;
+      const deps: NonNullable<Parameters<typeof handleGraphEnrichmentBranch>[5]> = {
+        unresolvedAnalyzers: () => [],
+        runStep: async (options, carried) => {
+          executions++;
+          expect(options.preferredExecutor).toBe("graph_enrichment_executor");
+          const applied = await runGraphEnrichmentExecutor(carried, {
+            root: artifactsDir, registry: [], llmEdgeReasoning: options.graphLlmEdgeReasoning,
+            edgeReasoning: options.edgeReasoningResults,
+          });
+          return { audit_state: state, selected_obligation: null, selected_executor: "graph_enrichment_executor",
+            progress_made: true, artifacts_written: applied.artifacts_written, progress_summary: "",
+            next_likely_step: null, updated_bundle: applied.updated };
+        },
+      };
+      expect(await handleGraphEnrichmentBranch(params, bundle, state, { value: undefined }, tx, deps))
+        .toMatchObject({ action: "fallthrough" });
+      expect(executions).toBe(0);
+      expect(await readFile(path, "utf8")).toBe(bytes);
+      const branch = await handleGraphEnrichmentBranch({ ...params, graphLlmEdgeReasoning: true }, bundle, state, { value: undefined }, tx, deps);
+      expect(executions).toBe(1);
+      expect(branch).toMatchObject({ action: "continue", bundle: { graph_bundle: expected } });
+      if (branch.action !== "continue") throw new Error("Expected applied edge reasoning");
+      expect(branch.bundle.graph_bundle).toEqual(expected);
+      expect(tx.staged).toHaveLength(1);
+      expect(tx.staged[0]!.applied).toBe(true);
+    }
+  } finally { await rm(artifactsDir, { recursive: true, force: true }); }
+});
+
+test("built MCP edge gate round-trips arrays and wrappers without weakening other lanes", async () => {
+  const artifactsDir = await mkdtemp(join(tmpdir(), "edge-gate-mcp-"));
+  const client = new Client({ name: "edge-test-host", version: "test" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [fileURLToPath(new URL("../../dist/audit/cli.js", import.meta.url)), "mcp"],
+    env: process.env as Record<string, string>, stderr: "pipe",
+  });
+  try {
+    await client.connect(transport);
+    const args = { root: artifactsDir, artifacts_dir: artifactsDir, lane: GATE_LANES.edge_reasoning };
+    const rewrites = [{ from: "a.ts", to: "b.ts", reason: 'Keep \\s and "quotes"' }];
+    const path = laneSubmissionPath(artifactsDir, args.lane);
+    for (const result of [rewrites, { rewrites }, { alternate: rewrites }, []]) {
+      expect((await client.callTool({ name: "submit_gate", arguments: { ...args, result } })).isError).not.toBe(true);
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual(result);
+    }
+    const bytes = await readFile(path, "utf8");
+    for (const result of [{ rewrites: [], other: [] }, { rewrites: [], review: {} }, null, 42]) {
+      expect((await client.callTool({ name: "submit_gate", arguments: { ...args, result } })).isError).toBe(true);
+      expect(await readFile(path, "utf8")).toBe(bytes);
+    }
+    for (const lane of [GATE_LANES.analyzer_consent, GATE_LANES.analyzer_decisions, GATE_LANES.design_review_contract]) {
+      expect((await client.callTool({ name: "submit_gate", arguments: { ...args, lane, result: {} } })).isError).toBe(true);
+    }
+    expect((await client.callTool({ name: "submit_gate", arguments: { ...args, lane: GATE_LANES.synthesis_narrative, result: [] } })).isError).toBe(true);
+    expect((await client.callTool({ name: "submit_result", arguments: { root: artifactsDir, work_item_id: "fixture", result: [] } })).isError).toBe(true);
+  } finally {
+    await client.close(); await transport.close();
+    await rm(artifactsDir, { recursive: true, force: true });
+  }
+});
+
 test("built MCP submit_gate admits the live intent pair and reports stale pairs as errors", async () => {
   const artifactsDir = await mkdtemp(join(tmpdir(), "intent-gate-mcp-"));
   const client = new Client({ name: "intent-test-host", version: "test" });

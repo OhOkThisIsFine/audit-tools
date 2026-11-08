@@ -7,7 +7,7 @@ import { loadArtifactBundle } from "../io/artifacts.js";
 import { deriveIntentEquivalenceStatus, type IntentEquivalenceVerdictSubmission } from "../orchestrator/intentEquivalenceExecutor.js";
 
 /** Ordinary lanes with complete admission checks; other lanes retain their existing routes. */
-export const SUPPORTED_GATE_SUBMISSIONS = [GATE_LANES.synthesis_narrative, GATE_LANES.critical_flow_fallback, GATE_LANES.intent_equivalence] as const;
+export const SUPPORTED_GATE_SUBMISSIONS = [GATE_LANES.synthesis_narrative, GATE_LANES.critical_flow_fallback, GATE_LANES.intent_equivalence, GATE_LANES.edge_reasoning] as const;
 
 export async function submitGateResult(params: { artifactsDir: string; lane: string; source: string }) {
   if (!SUPPORTED_GATE_SUBMISSIONS.some(lane => lane === params.lane) || auditLaneReviewRequirement(params.lane) !== "ordinary") {

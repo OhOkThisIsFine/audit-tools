@@ -90,12 +90,12 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
   // sites-pinned: tests/audit/gate-submit.test.ts
   const gate = options.gateSubmission;
   if (gate) server.registerTool("submit_gate", {
-    description: "Submit a supported gate result as a JSON object. Validates and writes its bound submission path; does not advance the audit. Run next-step afterward.",
+    description: "Submit a supported gate result as a JSON object or array, as required by its lane. Validates and writes its bound submission path; does not advance the audit. Run next-step afterward.",
     inputSchema: {
       root: z.string().describe("Absolute repository root named by the prompt"),
       artifacts_dir: z.string().optional(),
       lane: z.enum(gate.lanes),
-      result: z.record(z.unknown()),
+      result: z.union([z.record(z.unknown()), z.array(z.unknown())]),
     },
   }, async args => {
     try {
