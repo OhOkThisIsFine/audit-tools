@@ -591,6 +591,22 @@
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
       }
     },
+    "c4f7b1b9139e16d8": {
+      "reviewed_by": "review_clarification_mcp_support",
+      "attester_class": "agent",
+      "checked": "Independent native source review and16 passing actual MCP tests: strict shared parser, fixed path, unchanged consumer replay and scope fences; author42 focused and official8539 passed full suite.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "09b72aa70d07cc5f05e8c5ca8ea3bcb89bb85f3e",
+        "ran_at": "2026-11-08T13:04:12.687Z"
+      },
+      "attested_at": "2026-11-08T13:04:29.126Z",
+      "vouches": {
+        "src/remediate/steps/nextStep.ts": "31958511c4365d7106f184f95c2f39670413548f"
+      }
+    },
     "c50e7ede07ea40a4": {
       "reviewed_by": "/root/chat_batch_final_candidate_review",
       "attester_class": "agent",
@@ -1042,7 +1058,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "c4f7b1b9139e16d8"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "8aa0d48e64560f2e"
