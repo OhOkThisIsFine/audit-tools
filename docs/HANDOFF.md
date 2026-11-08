@@ -5,6 +5,13 @@
 
 ## Current state
 
+Local candidate `fix/explain-task-positionals` has eight reviewed commits through `b5ab2c81`.
+Its code tree `cd1865f8` passed the official full suite: 8,494 passed, 0 failed, 38 skipped;
+the gate accepted seven reporter RPC timeouts. This establishes local qualification only,
+not publication or global installation. Assistant GitHub network access was denied; no remote
+publication was attempted. The remaining structured MCP routes are in
+[`forward-tracks.md`](backlog/forward-tracks.md).
+
 Release metadata is in [package.json](../package.json); publication and global-install evidence
 is in project memory (`memory: release-state`). GitHub branch protection on `main` requires the `checks`
 status check (strict) and binds admins, so work lands with `npm run land` (a pull request, then a
