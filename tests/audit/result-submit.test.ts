@@ -155,7 +155,14 @@ test("the built `audit-code mcp` process serves submit_result over clean stdio a
     await client.connect(transport);
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["submit_result"]);
+      expect(tools.map((tool) => tool.name)).toEqual(["submit_result", "submit_gate"]);
+      const gate = await client.callTool({ name: "submit_gate", arguments: {
+        root, lane: "synthesis_narrative", result: { themes: [], executive_summary: "Transport intact" },
+      } });
+      expect(gate.isError).not.toBe(true);
+      const gateReport = JSON.parse((gate.content as Array<{ text: string }>)[0]!.text);
+      expect(gateReport.written).toBe(true);
+      expect(JSON.parse(await readFile(gateReport.path, "utf8"))).toEqual({ themes: [], executive_summary: "Transport intact" });
       const call = await client.callTool({
         name: "submit_result",
         arguments: {

@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/result-submit.test.ts
+import { submitGateResult, SUPPORTED_GATE_SUBMISSIONS } from "./submitGateResult.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadArtifactBundle } from "../io/artifacts.js";
@@ -41,6 +42,14 @@ export async function cmdMcp(_argv: string[]): Promise<void> {
   const submitServer = await import("audit-tools/shared/mcp/submitServer");
   await submitServer.serveSubmitMcpOverStdio({
     name: "audit-code",
+    // sites-pinned: tests/audit/result-submit.test.ts
+    gateSubmission: {
+      lanes: SUPPORTED_GATE_SUBMISSIONS,
+      submit: async request => {
+        const argv = ["--root", request.root, ...(request.artifactsDir === undefined ? [] : ["--artifacts-dir", request.artifactsDir])];
+        return submitGateResult({ artifactsDir: getArtifactsDir(argv), lane: request.lane, source: request.source });
+      },
+    },
     submit: async (request) => {
       const argv = ["--root", request.root, ...(request.artifactsDir === undefined ? [] : ["--artifacts-dir", request.artifactsDir])];
       const check = await submitWorkItemResult({

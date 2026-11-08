@@ -1,8 +1,8 @@
-// sites-pinned: tests/shared/submit-mcp-server.test.ts, tests/audit/result-submit.test.ts
+// sites-pinned: tests/shared/submit-mcp-server.test.ts, tests/audit/result-submit.test.ts, tests/audit/gate-submit.test.ts
 /**
  * The submit-only MCP server both bins serve (decision 4, 2026-11-06).
  *
- * ONE tool, `submit_result`. A reader passes its result as a structured
+ * `submit_result`, plus optional bin-owned gate submission. A reader passes its result as a structured
  * object, so no shell and no escaping stand between the reader and the bound
  * path — the defect class the dogfood audit measured (a backslash in a quote
  * lost on its way through a shell). The server returns no step and no prompt:
@@ -29,9 +29,20 @@ export interface SubmitToolRequest {
   readonly source: string;
 }
 
+export interface GateSubmitToolRequest {
+  readonly root: string;
+  readonly artifactsDir: string | undefined;
+  readonly lane: string;
+  readonly source: string;
+}
+
 export interface SubmitServerOptions {
   readonly name: string;
   readonly version: string;
+  readonly gateSubmission?: {
+    readonly lanes: readonly [string, ...string[]];
+    readonly submit: (request: GateSubmitToolRequest) => Promise<{ readonly written: boolean }>;
+  };
   readonly submit: (request: SubmitToolRequest) => Promise<{ readonly written: boolean }>;
 }
 
@@ -76,6 +87,24 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
       }
     },
   );
+  // sites-pinned: tests/audit/gate-submit.test.ts
+  const gate = options.gateSubmission;
+  if (gate) server.registerTool("submit_gate", {
+    description: "Submit a supported gate result as a JSON object. Validates and writes its bound submission path; does not advance the audit. Run next-step afterward.",
+    inputSchema: {
+      root: z.string().describe("Absolute repository root named by the prompt"),
+      artifacts_dir: z.string().optional(),
+      lane: z.enum(gate.lanes),
+      result: z.record(z.unknown()),
+    },
+  }, async args => {
+    try {
+      const report = await gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, source: JSON.stringify(args.result, null, 2) });
+      return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }], ...(report.written ? {} : { isError: true }) };
+    } catch (error) {
+      return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }], isError: true };
+    }
+  });
   return server;
 }
 
