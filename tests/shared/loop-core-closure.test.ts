@@ -41,6 +41,124 @@ function fixtureTree(files: Record<string, string>): string {
   return root;
 }
 
+test.each(["./nested", "./nested/index.js", "./nested/index.ts", "./nested/index.mjs"])(
+  "importer and capability graphs both resolve %s",
+  (specifier) => {
+    const root = fixtureTree({
+      "src/core.ts": `import { value } from "${specifier}"; export { value };`,
+      "src/nested/index.ts": 'import { readFileSync } from "node:fs"; export const value = readFileSync;',
+    });
+    try {
+      const modules = collectSourceModules(root);
+      const importers = buildImporterGraph(root, modules);
+      expect(importers.get("src/nested/index.ts")).toEqual(new Set(["src/core.ts"]));
+      expect(evaluateClosure({
+        modules, importers, isLoopCorePath: (path: string) => path === "src/core.ts", declared: new Map(),
+      }).undeclared).toEqual([{ module: "src/nested/index.ts", importers: ["src/core.ts"] }]);
+      expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([
+        expect.objectContaining({ module: "src/core.ts", actual: "reads-only" }),
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("resolution prefers a sibling file and ignores missing imports", () => {
+  const root = fixtureTree({
+    "src/core.ts": 'import { value } from "./nested"; import { absent } from "./missing"; export { value, absent };',
+    "src/nested.ts": "export const value = 1;",
+    "src/nested/index.ts": 'import { readFileSync } from "node:fs"; export const value = readFileSync;',
+  });
+  try {
+    const importers = buildImporterGraph(root, collectSourceModules(root));
+    expect([...importers]).toEqual([["src/nested.ts", new Set(["src/core.ts"])]]);
+    expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an absent explicit TypeScript file never falls back to a same-named directory", () => {
+  const root = fixtureTree({
+    "src/core.ts": 'import { value } from "./missing.ts"; export { value };',
+    "src/missing/index.ts": 'import "node:fs"; export const value = 1;',
+  });
+  try {
+    expect(buildImporterGraph(root, collectSourceModules(root)).size).toBe(0);
+    expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("package directory imports affect capability claims but not private importer reach", () => {
+  const root = fixtureTree({
+    "src/core.ts": 'import { value } from "audit-tools/shared/nested"; export { value };',
+    "src/shared/nested/index.ts": 'import { readFileSync } from "node:fs"; export const value = readFileSync;',
+  });
+  try {
+    expect(buildImporterGraph(root, collectSourceModules(root)).size).toBe(0);
+    expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([
+      expect.objectContaining({ module: "src/core.ts", actual: "reads-only" }),
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  'import type { Stats } from "node:fs";',
+  'export type { Stats } from "node:fs";',
+  'import { type Stats } from "node:fs";',
+  'export { type Stats } from "node:fs";',
+  'import type * as fs from "node:fs";',
+  'export type * from "node:fs";',
+  'import type { Value } from "./io.js";',
+  '// import { readFileSync } from "node:fs";',
+  `const text = 'from "node:fs"';`,
+])("erased type dependencies and text do not imply runtime I/O: %s", (source) => {
+  const root = fixtureTree({
+    "src/core.ts": source,
+    "src/io.ts": 'import { readFileSync } from "node:fs"; export const value = readFileSync;',
+  });
+  try {
+    expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([]);
+    if (source === 'import type { Value } from "./io.js";') {
+      expect(buildImporterGraph(root, collectSourceModules(root)).get("src/io.ts"))
+        .toEqual(new Set(["src/core.ts"]));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  'import fs from "node:fs";',
+  'import * as fs from "node:fs";',
+  'import { type Stats, readFileSync } from "node:fs";',
+  'import "node:fs";',
+  'export * from "node:fs";',
+  'export * as fs from "node:fs";',
+  'export { type Stats, readFileSync } from "node:fs";',
+  'import { value } from "audit-tools/shared";',
+  'import type { Value } from "./io.js"; import "./io.js";',
+])("runtime imports and reexports retain I/O reach: %s", (source) => {
+  const root = fixtureTree({
+    "src/core.ts": source,
+    "src/io.ts": 'import "node:fs";',
+    "src/shared/index.ts": 'export * from "./io.js";',
+    "src/shared/io.ts": 'import "node:fs";',
+  });
+  try {
+    expect(checkDeclaredClaims(root, new Map([["src/core.ts", "pure"]]))).toEqual([
+      expect.objectContaining({ module: "src/core.ts", actual: "reads-only" }),
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 const CORE = new Set(["core/step.ts", "core/helpers.ts"]);
 const fakeIsCore = (p: string) => CORE.has(p);
 

@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/loop-core-closure.test.ts
 // The loop-core set's REACH, as a property of the code rather than of whoever
 // last refactored it.
 //
@@ -25,6 +26,7 @@
 // true is itself an error: the list cannot rot quietly.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import ts from "typescript";
 
 /** Repo-relative, forward-slashed. The whole module speaks this one form. */
 function rel(root, file) {
@@ -68,11 +70,8 @@ export function buildImporterGraph(root, modules) {
   for (const module of modules) {
     const text = readFileSync(join(root, module), "utf8");
     for (const match of text.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
-      // Emitted ESM imports carry the `.js` extension the `.ts` source compiles to.
-      const spec = match[1].replace(/\.js$/, ".ts");
-      const resolved = resolve(dirname(join(root, module)), spec);
-      const target = rel(root, resolved.endsWith(".ts") ? resolved : `${resolved}.ts`);
-      if (!known.has(target)) continue;
+      const target = resolveSpecifier(root, module, match[1], known);
+      if (target === null) continue;
       const existing = importers.get(target);
       if (existing) existing.add(module);
       else importers.set(target, new Set([module]));
@@ -130,28 +129,45 @@ const MUTATING_CALL =
 /** The claim names, in strength order — for validation and for error text. */
 export const CLOSURE_CLAIMS = ['pure', 'reads-only', 'mutates'];
 
-/** Every module specifier of one source file, both forms. */
-function specifiersOf(text) {
+/** Runtime imports/re-exports only; erased type dependencies carry no I/O. */
+function runtimeSpecifiersOf(text) {
+  const source = ts.createSourceFile("module.ts", text, ts.ScriptTarget.Latest, true);
   const out = [];
-  for (const m of text.matchAll(/from\s+["'](\.[^"']+)["']/g)) out.push({ kind: 'relative', spec: m[1] });
-  for (const m of text.matchAll(/from\s+["'](audit-tools\/shared(?:\/[^"']+)?)["']/g)) {
-    out.push({ kind: 'package', spec: m[1] });
+  for (const statement of source.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      if (clause?.isTypeOnly) continue;
+      const bindings = clause?.namedBindings;
+      if (!clause?.name && bindings && ts.isNamedImports(bindings) &&
+          bindings.elements.length > 0 && bindings.elements.every((entry) => entry.isTypeOnly)) continue;
+    } else if (ts.isExportDeclaration(statement)) {
+      if (statement.isTypeOnly) continue;
+      const clause = statement.exportClause;
+      if (clause && ts.isNamedExports(clause) && clause.elements.length > 0 &&
+          clause.elements.every((entry) => entry.isTypeOnly)) continue;
+    } else {
+      continue;
+    }
+    if (statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
+      out.push(statement.moduleSpecifier.text);
+    }
   }
   return out;
 }
 
 /** Resolve one specifier to a repo-relative module path that is in `known`, or null. */
-function resolveSpecifier(root, from, spec) {
+function resolveSpecifier(root, from, spec, known) {
   const base = spec.startsWith('audit-tools/shared')
     ? `src/shared/${spec.slice('audit-tools/shared'.length).replace(/^\//, '')}`
     : null;
   const raw = base !== null ? base : spec;
   const abs = base !== null ? join(root, raw) : resolve(dirname(join(root, from)), raw);
-  const trimmed = abs.replace(/\.js$/, '').replace(/\.mjs$/, '');
-  for (const candidate of [`${trimmed}.ts`, `${trimmed}/index.ts`]) {
+  const trimmed = abs.replace(/\.(?:mjs|js|ts)$/, '');
+  const candidates = abs.endsWith('.ts') ? [abs] : [`${trimmed}.ts`, `${trimmed}/index.ts`];
+  for (const candidate of candidates) {
     if (candidate.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/'))) {
       const r = rel(root, candidate);
-      if (r) return r;
+      if (known.has(r)) return r;
     }
   }
   return null;
@@ -171,11 +187,15 @@ export function checkDeclaredClaims(root, declared) {
   const known = new Set(modules);
   /** @type {Map<string, string[]>} */
   const edges = new Map();
+  const runtimeSpecifiers = new Map();
   for (const module of modules) {
     const text = readFileSync(join(root, module), 'utf8');
     const targets = [];
-    for (const { spec } of specifiersOf(text)) {
-      const target = resolveSpecifier(root, module, spec);
+    const specs = runtimeSpecifiersOf(text);
+    runtimeSpecifiers.set(module, specs);
+    for (const spec of specs) {
+      if (!spec.startsWith('.') && !/^audit-tools\/shared(?:\/|$)/.test(spec)) continue;
+      const target = resolveSpecifier(root, module, spec, known);
       if (target && target !== module && known.has(target)) targets.push(target);
     }
     edges.set(module, targets);
@@ -214,8 +234,7 @@ export function checkDeclaredClaims(root, declared) {
     }
     const closure = closureOf(module);
     const ioModules = closure.filter((m) => {
-      const t = readFileSync(join(root, m), 'utf8');
-      return [...t.matchAll(/from\s+["'](node:[^"']+)["']/g)].some((x) => IO_BUILTINS.test(x[1]));
+      return (runtimeSpecifiers.get(m) ?? []).some((spec) => IO_BUILTINS.test(spec));
     });
     const mutates = MUTATING_CALL.test(text);
 

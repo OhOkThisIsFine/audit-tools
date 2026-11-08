@@ -48,19 +48,19 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   // These are the CONTENT work an orchestrator step dispatches to. They compute
   // and return; they do not persist workflow state, own a write boundary, or
   // decide what happens next — which is what the loop-core set governs.
-  { module: "src/audit/clarification/dials.ts", claim: "pure", reason: "clarification dial arithmetic; pure, no persisted state" },
-  { module: "src/audit/clarification/partition.ts", claim: "pure", reason: "clarification partitioning; pure, no persisted state" },
-  { module: "src/audit/clarification/riskGate.ts", claim: "pure", reason: "clarification risk thresholding; pure, no persisted state" },
+  { module: "src/audit/clarification/dials.ts", claim: "reads-only", reason: "clarification dial arithmetic; voiQueue reaches the runtime shared barrel and its I/O modules, but this module persists no state" },
+  { module: "src/audit/clarification/partition.ts", claim: "reads-only", reason: "clarification partitioning; runtime shared helpers reach I/O modules through the barrel, but this module persists no state" },
+  { module: "src/audit/clarification/riskGate.ts", claim: "reads-only", reason: "clarification risk thresholding; runtime riskGateClarification reaches I/O modules through the shared barrel, but this module persists no state" },
   { module: "src/audit/contracts/findingContractPrompt.ts", claim: "reads-only", reason: "prompt text for the finding contract; the prompt builder reads templates and returns text — no state, no write boundary" },
   { module: "src/audit/coverage.ts", claim: "pure", reason: "coverage arithmetic over an already-loaded bundle" },
   { module: "src/audit/extractors/analyzers/registry.ts", claim: "reads-only", reason: "re-export of the shared analyzer candidate registry; the installed-binary probe reads the disk, and the registry itself persists nothing" },
   { module: "src/audit/extractors/bucketing.ts", claim: "pure", reason: "unit bucketing; content-derived, no persisted state" },
-  { module: "src/audit/extractors/designAssessment.ts", claim: "pure", reason: "design-assessment extraction; the executor owns the write" },
+  { module: "src/audit/extractors/designAssessment.ts", claim: "reads-only", reason: "design-assessment extraction; runtime shared helpers reach I/O modules through the barrel, while the executor owns the write" },
   { module: "src/audit/extractors/docsDigest.ts", claim: "reads-only", reason: "docs digest extraction; it reads the docs tree and the executor owns the write" },
   { module: "src/audit/extractors/fsIntake.ts", claim: "reads-only", reason: "filesystem intake extraction; it reads the audited tree and the executor owns the write" },
   { module: "src/audit/extractors/ignore.ts", claim: "reads-only", reason: "ignore-rule parsing; it reads ignore files and returns rules" },
-  { module: "src/audit/extractors/risk.ts", claim: "pure", reason: "risk-signal extraction over already-loaded inputs; the executor owns the write" },
-  { module: "src/audit/systemic/systemicChallengeLoop.ts", claim: "pure", reason: "the systemic challenge round FOLD — it grounds, namespaces, dedupes and blast-ranks one round's submitted improvements and returns the register; `systemicChallengeExecutor.ts` owns the write, the round counter and the convergence decision. It became closure-visible only when the adversary prompt stopped naming SYSTEMIC_FINDING_ID_PREFIX (owner review 2026-09-17, prompt 12: id-namespacing is tooling internals the reader cannot act on), which removed its one non-core importer" },
+  { module: "src/audit/extractors/risk.ts", claim: "reads-only", reason: "risk-signal extraction over already-loaded inputs; runtime compareCodeUnits reaches I/O modules through the shared barrel, while the executor owns the write" },
+  { module: "src/audit/systemic/systemicChallengeLoop.ts", claim: "reads-only", reason: "runtime shared helpers reach I/O modules through the barrel; this module performs no writes. the systemic challenge round FOLD — it grounds, namespaces, dedupes and blast-ranks one round's submitted improvements and returns the register; `systemicChallengeExecutor.ts` owns the write, the round counter and the convergence decision. It became closure-visible only when the adversary prompt stopped naming SYSTEMIC_FINDING_ID_PREFIX (owner review 2026-09-17, prompt 12: id-namespacing is tooling internals the reader cannot act on), which removed its one non-core importer" },
 
   { module: "src/shared/graph/orderedReachability.ts", claim: "pure", reason: "generic ordered graph reachability over caller-owned sets and a supplied edge predicate; no I/O or persisted workflow state" },
 
@@ -69,12 +69,12 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   // `steps/nextStep.ts` are the loop-core boundary, and these are the bodies
   // they call.
   { module: "src/remediate/findingFilter.ts", claim: "reads-only", reason: "finding filtering; it reads findings input and returns a filter result" },
-  { module: "src/remediate/intent/intentOrdering.ts", claim: "pure", reason: "intent ordering; pure" },
+  { module: "src/remediate/intent/intentOrdering.ts", claim: "reads-only", reason: "intent ordering; runtime severityRank reaches I/O modules through the shared barrel, but this module performs no writes" },
   { module: "src/remediate/phases/close.ts", claim: "mutates", reason: "closing-action bodies; it WRITES closing artifacts and removes the artifacts dir on promotion, but the STEP MACHINE owns the transition and the directory — close.ts executes a close it was handed, it does not decide that the run is closing or where its artifacts live (options.artifactsDir is caller-supplied throughout)" },
   { module: "src/remediate/phases/triage.ts", claim: "mutates", reason: "triage decision bodies; it WRITES triage_batch.json / triage-outcome.json and renames quarantined files, all under a caller-supplied options.artifactsDir — the step machine owns the transition and the location" },
   { module: "src/remediate/review/autonomousGate.ts", claim: "pure", reason: "autonomous-review gating predicate; pure" },
   { module: "src/remediate/steps/intakeResolver.ts", claim: "reads-only", reason: "intake resolution; it reads intake artifacts and returns the resolution — the step machine owns the transition" },
-  { module: "src/remediate/steps/sessionConfigLoad.ts", claim: "pure", reason: "session-config shaping; pure over an already-loaded config — the step machine owns the read and the transition" },
+  { module: "src/remediate/steps/sessionConfigLoad.ts", claim: "reads-only", reason: "session-config adapter; loadSessionIntent reads repository session intent, while the step machine owns the transition and this module performs no writes" },
 ];
 
 /**
