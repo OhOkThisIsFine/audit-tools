@@ -31,7 +31,7 @@
 //     [--verdict clear|concerns] [--override "<reason>"] \
 //     [--include-unvouched <path>]...
 //
-//   --reviewed-by     reviewer id (default: git user.name)
+//   --reviewed-by     reviewer id, supplied at most once (default: git user.name)
 //   --attester-class  REQUIRED; who is RUNNING this attestation — `agent` when any
 //                     AI agent/session issues it (even relaying a human's words),
 //                     `human` only when a person types this command themselves
@@ -99,7 +99,10 @@ const argv = process.argv.slice(2);
 const flags = {};
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
-  if (a === '--reviewed-by') flags.reviewedBy = argv[++i];
+  if (a === '--reviewed-by') {
+    if (Object.hasOwn(flags, 'reviewedBy')) fail('--reviewed-by may only be supplied once');
+    flags.reviewedBy = argv[++i];
+  }
   else if (a === '--attester-class') flags.attesterClass = argv[++i];
   else if (a === '--checked') flags.checked = argv[++i];
   else if (a === '--verdict') flags.verdict = argv[++i];

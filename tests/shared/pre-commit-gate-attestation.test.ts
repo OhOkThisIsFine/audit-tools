@@ -113,6 +113,22 @@ describe("an attestation requires the full suite green on the staged tree (2026-
 });
 
 describe("pre-commit gate: bypass scoping, attester class, destination-keyed concerns", () => {
+  test.each(["first-reviewer", "second-reviewer"])("repeated --reviewed-by (%s) is refused before either review record is written", (secondReviewer) => {
+    stageLoopCoreFile();
+    const stagedBefore = g("write-tree").stdout.trim();
+    const result = runAttest([
+      "--reviewed-by", "first-reviewer",
+      "--reviewed-by", secondReviewer,
+      "--attester-class", "agent",
+      "--checked", "checked the staged loop-core change end to end",
+    ]);
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stderr).toContain("--reviewed-by may only be supplied once");
+    expect(existsSync(join(repo, ".claude", "loop-core-attestations.json"))).toBe(false);
+    expect(existsSync(join(repo, ".claude", "loop-core-review"))).toBe(false);
+    expect(g("write-tree").stdout.trim()).toBe(stagedBefore);
+  });
+
   test("sibling-statement core.hooksPath override is rejected (scoping regression)", () => {
     // The override is armed in a statement that carries no `commit`, so a
     // commit-sub-command-scoped check never scans it — must match whole-command.
