@@ -68,7 +68,8 @@ export interface RunTrackedResult {
   cleanup?: OwnedProcessCleanup;
 }
 
-const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn"]);
+// sites-pinned: tests/shared/maven-command-discovery.test.ts
+const SHELL_SHIM_COMMANDS = new Set(["npm", "npx", "pnpm", "yarn", "mvn"]);
 
 /**
  * Bare command names whose PATH resolution is WRONG on Windows, mapped to their
@@ -440,7 +441,7 @@ export function coerceJsonObjectArg<T extends Record<string, unknown>>(
 }
 
 /**
- * On Windows, package-manager shims (`npm`/`npx`/`pnpm`/`yarn`) are `.cmd`
+ * On Windows, package/build-tool shims (`npm`/`npx`/`pnpm`/`yarn`/`mvn`) are `.cmd`
  * batch files that `spawn` cannot launch without a shell. Map them to their
  * `.cmd` form so the batch-wrapping path below applies. Anything already
  * carrying an executable extension is returned unchanged.

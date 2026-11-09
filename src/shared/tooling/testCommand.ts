@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/testCommand.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
+// sites-pinned: tests/shared/testCommand.test.ts, tests/shared/maven-command-discovery.test.ts, tests/shared/command-discovery-integration.test.ts, tests/remediate/arbitrary-repository-gates.test.ts
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -19,14 +19,13 @@ export interface ProjectCommands {
 // npm script names, in preference order, for each command role.
 //
 // ⚠ THIS VOCABULARY IS `package.json` SCRIPTS ONLY. A repository whose build
-// system is not npm — Cargo, Make, Gradle, a bare shell script — declares none
+// system is not npm - Cargo, Make, Gradle, a bare shell script - declares none
 // of these names, so `pickScript` finds nothing and the role is ABSENT from
 // `discoverProjectCommands`' result. That is the honest answer for these roles
 // (there is no portable way to read another ecosystem's target names), but it
-// means "no e2e/build/lint command" is a statement about `package.json`, not
-// about whether the repository has one. `discoverProjectCommands` does fall
-// through to Go and Python for the TEST role alone (see its own doc comment);
-// no other role has a non-npm arm.
+// means a missing npm role is not a statement about whether the repository
+// has one. Discovery also uses native test/build defaults where a supported
+// project manifest declares the ecosystem (see its own doc comment).
 //
 // Ordering is significant: pickScript() returns the FIRST match, so entries
 // earlier in the list win over later ones.
@@ -74,12 +73,13 @@ function readPackageScripts(root: string): Record<string, string> | null {
   const packageJsonPath = join(root, "package.json");
   if (!existsSync(packageJsonPath)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
-      scripts?: Record<string, string>;
-    };
-    return parsed && typeof parsed === "object" && parsed.scripts
-      ? parsed.scripts
-      : {};
+    const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const scripts = (parsed as { scripts?: unknown }).scripts;
+    if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) return {};
+    // Manifests are input, not typed code. Keep usable declarations without
+    // letting one malformed value crash discovery or hide valid sibling roles.
+    return Object.fromEntries(Object.entries(scripts).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   } catch {
     // Unreadable / malformed package.json: treat as a non-Node project.
     return null;
@@ -150,9 +150,11 @@ export function isValidExecutableCommand(
  *
  * Node detection (package.json) takes precedence for e2e/build/lint. The test
  * command prefers `npm test`, but — matching the auditor's prior behavior —
- * falls through to Go (`go test ./...`) then Python (`python -m pytest`) when
- * package.json has no usable `test` script or is absent. Absent roles are
- * omitted from the result.
+ * falls through to Go (`go test ./...`), Python (`python -m pytest`), then
+ * Cargo (`cargo test`), then Maven (`mvn test`) when package.json has no usable
+ * `test` script or is absent. Go, Cargo and Maven also supply a build when no
+ * npm build was declared.
+ * Absent roles are omitted from the result.
  */
 export function discoverProjectCommands(root: string): ProjectCommands {
   const result: ProjectCommands = {};
@@ -188,6 +190,16 @@ export function discoverProjectCommands(root: string): ProjectCommands {
         result.test = ["python", "-m", "pytest"];
       }
     }
+  }
+
+  if (!result.test && existsSync(join(root, "Cargo.toml"))) {
+    result.test = ["cargo", "test"];
+    if (!result.build) result.build = ["cargo", "build"];
+  }
+
+  if (!result.test && existsSync(join(root, "pom.xml"))) {
+    result.test = ["mvn", "test"];
+    if (!result.build) result.build = ["mvn", "compile"];
   }
 
   return result;

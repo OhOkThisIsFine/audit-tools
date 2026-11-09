@@ -192,21 +192,16 @@ test("inv-2: the reverse direction also re-extracts — a content-ful entry is n
   expect(bundle, "the content-free build must equal a clean content-free build").toEqual(buildGraphBundle(m, undefined, {}));
 });
 
-test("inv-2: a cache written under an older key format self-invalidates (fail-safe re-extract)", () => {
+test.each(["bare-hash", "v14"])("inv-2: an older cache key %s self-invalidates (fail-safe re-extract)", (legacyFormat) => {
   const m = manifest([file(A, { hash: "ha" }), file(B, { hash: "hb" })]);
   const contents = baseContents();
   const { cache } = incrementalBuild(m, contents, undefined);
 
-  // The pre-fix format keyed entries on the bare content hash.
-  const legacy: GraphEdgeCache = {
-    path_lookup_hash: cache.path_lookup_hash,
-    entries: {
-      [B]: {
-        content_key: "hb",
-        contribution: { imports: [], calls: [], references: [{ from: B, to: "SENTINEL-LEGACY", kind: "reference", confidence: 1 }], heuristics: [], routes: [] },
-      },
-    },
-  };
+  // Both the original bare hash and the preceding parser's version are stale.
+  const legacy: GraphEdgeCache = structuredClone(cache);
+  legacy.entries[B].content_key = legacyFormat === "bare-hash"
+    ? "hb" : legacy.entries[B].content_key.replace(/^[^:]+:/, "v14:");
+  legacy.entries[B].contribution.references.push({ from: B, to: "SENTINEL-LEGACY", kind: "reference", confidence: 1 });
   const { bundle } = incrementalBuild(m, contents, legacy);
   const refs = bundle.graphs?.references ?? [];
   expect(!refs.some((e) => e.to === "SENTINEL-LEGACY"), "an entry keyed in the old format must never be replayed").toBeTruthy();
@@ -345,6 +340,7 @@ test("inv-2: a cache entry with non-object metrics re-extracts instead of persis
 // per-file contribution.
 const __dirname_cache = dirname(fileURLToPath(import.meta.url));
 const EXTRACTORS_DIR = resolve(__dirname_cache, "..", "..", "src", "audit", "extractors");
+const PARSING_DIR = resolve(EXTRACTORS_DIR, "..", "..", "shared", "parsing");
 
 /** Every relative import/export specifier a module names. */
 function relativeSpecifiers(source: string): string[] {
@@ -370,7 +366,7 @@ function resolveExtractorModule(fromFile: string, specifier: string): string | u
 /**
  * Every module whose behavior a cached PerFileGraphContribution depends on,
  * DERIVED — graph.ts's transitive relative-import closure, restricted to the
- * extractors tree.
+ * extractors tree and the shared parsers that feed those extractors.
  *
  * A hand-enumerated list is the trap this test exists to prevent, one level up:
  * it silently missed `pathPatterns.ts` (whose `isTestPath` /
@@ -382,6 +378,7 @@ function resolveExtractorModule(fromFile: string, specifier: string): string | u
  */
 function cachedContributionModules(): string[] {
   const extractorsRoot = `${EXTRACTORS_DIR}${sep}`;
+  const parsingRoot = `${PARSING_DIR}${sep}`;
   const seen = new Set<string>();
   const queue = [join(EXTRACTORS_DIR, "graph.ts")];
 
@@ -391,10 +388,9 @@ function cachedContributionModules(): string[] {
     seen.add(current);
     for (const specifier of relativeSpecifiers(readFileSync(current, "utf8"))) {
       const resolved = resolveExtractorModule(current, specifier);
-      // Restricted to src/audit/extractors/**: shared contracts and the audit
-      // types live under their own gates, and pulling them in would make this
-      // pin fire on edits that cannot change a cached contribution.
-      if (!resolved || !resolved.startsWith(extractorsRoot)) continue;
+      // Shared parsers also determine cached edges. Shared contracts and audit
+      // types remain outside this pin: their own gates cover those shapes.
+      if (!resolved || !(resolved.startsWith(extractorsRoot) || resolved.startsWith(parsingRoot))) continue;
       if (!seen.has(resolved)) queue.push(resolved);
     }
   }
@@ -404,6 +400,8 @@ function cachedContributionModules(): string[] {
 }
 
 test("inv-2: the pinned module set is DERIVED from graph.ts's import closure, not remembered", () => {
+  expect(cachedContributionModules(), "the shared TOML parser determines cached manifest edges")
+    .toContain(join(PARSING_DIR, "toml.ts"));
   const modules = cachedContributionModules().map(
     (modulePath) => modulePath.replace(/\\/g, "/").split("/src/audit/extractors/")[1],
   );
@@ -451,8 +449,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("bd156136b81bfb90bdc9f70151d61f85373780dce09327287c422a2474c9e374");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v14");
+  ).toBe("2c8b887d85f748abf631435348259d38d17f33ba9496447279018c9c41564516");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v15");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {

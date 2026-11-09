@@ -623,6 +623,27 @@
         "src/remediate/steps/dispatch/contractConformanceReview.ts": "11327dade3187d0f261ec276ed7096331de0ba89"
       }
     },
+    "d261aef2988bbeb5": {
+      "reviewed_by": "review_mcp_route_integration; review_discovery_integration; review_compact_review_steps",
+      "attester_class": "agent",
+      "checked": "Reviewed cross-lane MCP rejection and byte preservation, charter request-ID and omit guards, artifact-lock ownership and stale contract binding races, no state advance during admission, semantic directory grants versus bound result filenames, shared TOML parsing and graph-cache invalidation. Exercised actual MCP subprocess routes and existing consumers; old v14 cache sentinel reproduced red before v15 fix; reviewed command precedence and malformed npm fallbacks.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "5bc3f3743b87ebb14cc8ed83ee28bb8865563f6a",
+        "ran_at": "2026-11-09T02:31:42.885Z"
+      },
+      "attested_at": "2026-11-09T02:31:53.761Z",
+      "vouches": {
+        "src/audit/cli/charterClarificationPrompt.ts": "7f7daf1488a9cc0db7f8c37666a2ee583fe2e169",
+        "src/audit/cli/fanoutLanes.ts": "3d159b2d98575a0e133b697da7abc1168ae25b12",
+        "src/audit/cli/laneValidators.ts": "5f2e52e65b8ed31daca9d94ff66a0ac6c3b99c1f",
+        "src/audit/cli/nextStepHelpers.ts": "e27185ceb97b6d49c432605b6e24c795a8bc7958",
+        "src/audit/cli/semanticReviewStep.ts": "f28a17abd9d9669d7f012876c3000da59782d730",
+        "src/audit/orchestrator/charterClarificationExecutor.ts": "6c3b4d2e36d35925b04c1f9f1159d27696bd9db3"
+      }
+    },
     "d7acd796ff113751": {
       "reviewed_by": "opus-subagent-dc6-review,opus-subagent-dc6-delta-review",
       "attester_class": "agent",
@@ -673,7 +694,7 @@
       "review": "4318b8e7432c3e06"
     },
     "src/audit/cli/charterClarificationPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/charterExtractionPrompt.ts": {
       "review": "8aa0d48e64560f2e"
@@ -694,7 +715,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
@@ -703,19 +724,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/laneValidators.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/nextStepCommand.ts": {
       "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/prompts.ts": {
       "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/semanticReviewStep.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/io/rollover.ts": {
       "review": "be526ca9e4e1d631"
@@ -748,7 +769,7 @@
       "review": "be526ca9e4e1d631"
     },
     "src/audit/orchestrator/charterClarificationExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "d261aef2988bbeb5"
     },
     "src/audit/orchestrator/charterComparisonExecutor.ts": {
       "baseline": "7b79934e86baf378"

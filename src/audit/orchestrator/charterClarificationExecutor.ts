@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/charter-clarification.test.ts
+// sites-pinned: tests/audit/charter-clarification.test.ts, tests/audit/charter-clarification-submit.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type { CharterClarificationRegister } from "../types/charterClarification.js";
@@ -51,12 +51,12 @@ export function resolveClarificationAttention(
  * read the validation issue; a refusal keeps the queue open and the staged
  * payload rescuable through `recover-submission`.
  *
- * THIS BOUNDARY owns the check because it is the first one holding both halves:
- * the asked queue lives in the bundle and the gate never sees it. The prompt
+ * The executor and structured submission admission share this check because both
+ * hold the asked queue; the shape-only lane schema cannot see it. The prompt
  * states the rule (`charterClarificationPrompt`) and this enforces it, so a host
  * that obeys the prompt exactly is never refused here.
  */
-function refuseUnaskedRequestIds(
+export function refuseUnaskedRequestIds(
   answers: ClarificationAnswersSubmission,
   asked: readonly CharterDifferenceQuestion[],
 ): void {

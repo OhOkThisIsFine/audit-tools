@@ -1,7 +1,7 @@
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath, isPyprojectPath } from "../graphPathUtils.js";
-import { parseTomlSafe, asTomlTable } from "./toml.js";
+import { parseTomlSafe, asTomlTable } from "../../../shared/parsing/toml.js";
 import { manifestStringArray } from "./workspace.js";
 
 export const PYPROJECT_TESTPATHS_LINK_CONFIDENCE = 0.85;

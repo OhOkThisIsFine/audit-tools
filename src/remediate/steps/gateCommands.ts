@@ -1,5 +1,5 @@
 import { admitRemediationDirtyBaseline } from "../state/dirtyBaseline.js";
-// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts
+// sites-pinned: tests/remediate/arbitrary-repository-gates.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/shared/maven-command-discovery.test.ts, tests/shared/command-discovery-integration.test.ts
 import { isFileMissingError } from "../../shared/io/json.js";
 import { hashContent } from "../../shared/hash.js";
 import { discoverProjectCommands } from "../../shared/tooling/testCommand.js";
@@ -571,7 +571,7 @@ export function toolOwnedFinalGateCommands(root: string, testCommand?: string[])
 /** Cache identity includes declarations even when the worktree probe cannot see ignored files. */
 export function finalGateBinding(root: string, testCommand?: string[]): string {
   const canonicalRoot = realpathSync(root);
-  const declarations = ["package.json", "go.mod", "pyproject.toml", "pytest.ini"].map((name) => {
+  const declarations = ["package.json", "go.mod", "pyproject.toml", "pytest.ini", "Cargo.toml", "pom.xml"].map((name) => {
     try { return [name, readFileSync(join(canonicalRoot, name), "utf8")]; }
     catch (error) {
       if (isFileMissingError(error)) return [name, null];

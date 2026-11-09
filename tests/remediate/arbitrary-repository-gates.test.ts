@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { discoverProjectCommands } from "../../src/shared/tooling/testCommand.js";
 import { runToolOwnedFinalGate } from "../../src/remediate/steps/finalGate.js";
 const roots: string[] = [];
-function repo(scripts: Record<string, string> = {}): string {
+function repo(scripts: Record<string, unknown> = {}): string {
   const root = mkdtempSync(join(tmpdir(), "arbitrary-gates-")); roots.push(root);
   writeFileSync(join(root, "package.json"), JSON.stringify({ scripts })); return root;
 }
@@ -21,6 +21,32 @@ test("arbitrary npm repositories execute all declared verification roles in orde
 test("absence of executable project gates never authorizes completion", async () => {
   const gate = await runToolOwnedFinalGate(repo(), { runner: () => { throw Error("must not spawn"); } });
   expect(gate.passed).toBe(false);
+});
+test("malformed script values cannot authorize final-gate completion", async () => {
+  const gate = await runToolOwnedFinalGate(repo({ test: 42, build: {}, lint: true, typecheck: [] }), {
+    runner: () => { throw Error("must not spawn malformed declarations"); },
+  });
+  expect(gate.passed).toBe(false);
+  expect(gate.results).toEqual([]);
+});
+
+test.each([0, 1])("Cargo commands reach the final gate and preserve test exit code %i", async (testStatus) => {
+  const root = repo();
+  writeFileSync(join(root, "Cargo.toml"), '[package]\nname = "example"\nversion = "0.1.0"\n');
+  const calls: { argv: string[]; cwd: string }[] = [];
+  const gate = await runToolOwnedFinalGate(root, {
+    runner: (argv, cwd) => {
+      calls.push({ argv, cwd });
+      return { status: argv[1] === "test" ? testStatus : 0 };
+    },
+  });
+  expect(calls).toEqual([
+    { argv: ["cargo", "build"], cwd: root },
+    { argv: ["cargo", "test"], cwd: root },
+  ]);
+  expect(gate.passed).toBe(testStatus === 0);
+  expect(gate.scoped_out).toBe(false);
+  expect(gate.outcome).toBe("executed");
 });
 test("a planned terminal operation that refused admission cannot report a passing floor", async () => {
   const gate = await runToolOwnedFinalGate(repo({ test: "test" }), {
@@ -62,6 +88,16 @@ test("changed declarations invalidate cached green even with the same tree id", 
   await writeFinalGateVerdict(root, { scope: "phase 1", tree: "same-tree", binding, passed: true, scoped_out: false, outcome: "executed", results: [] });
   expect(await readFinalGateVerdict(root, "phase 1", "same-tree", binding)).toBeDefined();
   writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "node new.mjs" } }));
+  expect(await readFinalGateVerdict(root, "phase 1", "same-tree", finalGateBinding(root))).toBeUndefined();
+});
+
+test("changed Cargo declarations invalidate cached green even with the same tree id", async () => {
+  const root = repo();
+  writeFileSync(join(root, "Cargo.toml"), '[workspace]\nmembers = ["one"]\n');
+  const binding = finalGateBinding(root);
+  await writeFinalGateVerdict(root, { scope: "phase 1", tree: "same-tree", binding, passed: true, scoped_out: false, outcome: "executed", results: [] });
+  expect(await readFinalGateVerdict(root, "phase 1", "same-tree", binding)).toBeDefined();
+  writeFileSync(join(root, "Cargo.toml"), '[workspace]\nmembers = ["two"]\n');
   expect(await readFinalGateVerdict(root, "phase 1", "same-tree", finalGateBinding(root))).toBeUndefined();
 });
 

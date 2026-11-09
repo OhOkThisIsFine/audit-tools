@@ -1,12 +1,12 @@
 import { expect, test } from "vitest";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
-import { parseTomlSafe, asTomlTable } from "../../src/audit/extractors/graphManifestEdges/toml.js";
+import { parseTomlSafe, asTomlTable } from "../../src/shared/parsing/toml.js";
 
 // The parser is synchronous: an in-worker timeout cannot interrupt its loop.
 // Each hostile/scaling case runs in one owned Node child, with an OS deadline
 // and SIGKILL, and spawnSync waits for that direct child to be reaped.
 function parserChild(body: string, timeout = 10_000): string {
-  const moduleUrl = new URL("../../dist/audit/extractors/graphManifestEdges/toml.js", import.meta.url).href;
+  const moduleUrl = new URL("../../dist/shared/parsing/toml.js", import.meta.url).href;
   const child = spawnSyncHidden(process.execPath, ["--input-type=module", "-e",
     `import assert from 'node:assert/strict'; import { parseTomlSafe } from ${JSON.stringify(moduleUrl)}; ${body}`],
   { encoding: "utf8", timeout, killSignal: "SIGKILL", maxBuffer: 1024 * 1024 });
@@ -66,4 +66,10 @@ test("TOML tables preserve prototype-shaped keys without polluting Object.protot
   expect(asTomlTable(null)).toBeUndefined();
   expect(asTomlTable([])).toBeUndefined();
   expect(parseTomlSafe("a = =")).toEqual({});
+});
+
+test("TOML temporal scalar values are not tables", () => {
+  const parsed = parseTomlSafe('date = 1979-05-27\ntime = 07:32:00\nlocal = 1979-05-27T07:32:00\noffset = 1979-05-27T07:32:00Z\n');
+  expect(Object.keys(parsed)).toEqual(["date", "time", "local", "offset"]);
+  for (const value of Object.values(parsed)) expect(asTomlTable(value)).toBeUndefined();
 });

@@ -15,7 +15,6 @@
 - **The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).** `.claude/hooks/session-start-guards.mjs` runs `git rev-list --count HEAD..<remote>/main` in `ROOT` (`CLAUDE_PROJECT_DIR`), so a session in a linked worktree that is level with main still reads "N commit(s) BEHIND — sync before writing code" (false twice in one lap; `git log HEAD..origin/main` was empty). The same file already reads the payload `cwd` for its worktree checks. **Property:** the warning counts the HEAD of the tree the session works in.
 
 
-- **A step contract lists every pending result path (2026-10-05, medium).** The prompt half is fixed: the wait section is a count, and a carried report follows the step's own task. The step JSON still grows with the run: in the paused 2026-10-05 run each `current-step.json` holds 100–126 KB, almost all `access.write_paths` (470 result paths from the ready-inspection workload). **Property:** a step contract's size is bounded by its own task, not by the run's pending-work count; the write grant covers the bound results without one entry per pending item.
 
 - **Inspection coverage claims are accepted on the host's word (2026-10-05, medium).** A Sonnet batch claimed full coverage of two files it never opened, and the contract checks accepted it; `file_coverage` is checked for line counts only. **Property:** an accepted result's coverage of a file is backed by evidence the tool checks against that file's content, so an unread file cannot pass as covered.
 

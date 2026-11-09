@@ -51,8 +51,11 @@ current HEAD before deleting it. [[orphan-modules-are-invisible-to-both-knip-mod
   `submit_result` covers both draws. Audit `submit_gate` supports `synthesis_narrative`,
   `critical_flow_fallback`, `intent_equivalence` (the current pending pair), and `edge_reasoning`,
   which accepts the object/array file forms; the other delivered lanes retain their own object
-  schemas. All preserve file-route validation semantics. **Remaining:** charter,
-  design-review and systemic-challenge lanes; operator answers (`analyzer_decisions` persists
+  schemas. Audit charter clarification also accepts partial or empty operator answers,
+  reusing the file schema and asked-request check without applying answers. Bound design-contract
+  reviews retain the independent-review declaration, live input checks and finding validation.
+  **Remaining:** charter reviews, conceptual design-review and systemic-challenge lanes;
+  operator answers (`analyzer_decisions` persists
   repository analyzer settings, while `analyzer_consent` records current-run consent).
   Remediate `submit_gate` supports operator triage decisions, mid-run clarification answers,
   and item-bound conformance reviews through their existing file validators. Negative review

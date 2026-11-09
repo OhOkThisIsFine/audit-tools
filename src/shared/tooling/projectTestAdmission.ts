@@ -14,11 +14,11 @@ import { resolveExecArgv, stripAuditToolsControlEnv } from "./exec.js";
  * trust surface from the model-authored anchor commands `allowlistedExec.ts`
  * gates: the command here is never model-authored — it is PRODUCED by
  * {@link discoverProjectCommands} from the repository's own project files
- * (package.json / go.mod / pyproject.toml). So admission is anchored to
+ * (package.json / go.mod / pyproject.toml / Cargo.toml / pom.xml). So admission is anchored to
  * discovery itself, not to a static per-executable flag table: a command is
  * admitted iff it is EXACTLY the `.test` vector `discoverProjectCommands(root)`
  * emits for `root` right now (`['npm','test']` / `['go','test','./...']` /
- * `['python','-m','pytest']`). Anything discovery did not emit is refused —
+ * `['python','-m','pytest']` / `['cargo','test']` / `['mvn','test']`). Anything discovery did not emit is refused -
  * including a superficially similar command carrying extra flags.
  *
  * This is a SECOND, separately-owned admission mechanism (invariants[0] in

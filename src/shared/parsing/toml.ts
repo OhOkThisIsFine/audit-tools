@@ -1,7 +1,8 @@
+// sites-pinned: tests/audit/graph-manifest-toml.test.ts, tests/audit/graph-manifest-edges.test.ts, tests/shared/repoConventions.test.ts
 import { parse as parseToml } from "smol-toml";
 
 /**
- * Vetted-parser TOML helpers for the manifest-edge extractors. Replaces the
+ * Vetted-parser TOML helpers for manifest inspection. Replaces the
  * prior hand-rolled line scanner, which only understood `[section]` headers +
  * single-key arrays and silently dropped dotted-key (`workspace.members = …`),
  * inline-table (`workspace = { members = … }`), quoted-key, and multi-line
@@ -9,8 +10,8 @@ import { parse as parseToml } from "smol-toml";
  * (A5+A11). `smol-toml` is a pure-JS, TOML 1.0-compliant parser, so every
  * spelling resolves to the same object shape.
  *
- * All helpers degrade to empty on malformed input: the graph builder treats a
- * manifest it cannot parse as declaring no edges, and must never throw.
+ * All helpers degrade to empty on malformed input: a manifest that cannot be
+ * parsed supplies no graph edges or repository-convention facts.
  */
 
 /** Parse TOML, degrading to an empty object on malformed input (never throws). */
@@ -27,9 +28,11 @@ export function parseTomlSafe(content: string): Record<string, unknown> {
 
 /** A nested object value (table) by key, or undefined when absent / not a table. */
 export function asTomlTable(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  // TOML date/time scalars are objects too, but only records are tables.
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === null || prototype === Object.prototype
+    ? (value as Record<string, unknown>) : undefined;
 }
 
 /** The top-level TOML table for `key`, parsing `content` once. */

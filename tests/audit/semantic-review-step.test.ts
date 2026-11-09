@@ -1,5 +1,5 @@
 import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -128,10 +128,51 @@ describe("renderSemanticReviewStep zero-adapter host handoff", () => {
       "task-b",
       "task-c",
     ]);
-    expect(step.access?.write_paths).toHaveLength(taskCount);
+    expect(step.access?.write_paths).toEqual([
+      join(artifactsDir, "runs", activeReviewRun.run_id, "host-results").replace(/\\/g, "/"),
+    ]);
     expect(workload.work_items.every((item) => !item.result_path.startsWith(root))).toBe(
       true,
     );
+  });
+
+  it("keeps the step write grant constant as the bound review workload grows", async () => {
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture();
+    const small = await renderSemanticReviewStep({ root, sourceRoot: root, artifactsDir, activeReviewRun, bundle });
+    const template = bundle.audit_tasks![0]!;
+    const tasks = Array.from({ length: 470 }, (_, index) => ({ ...template, task_id: `task-${index}` }));
+    bundle.audit_tasks = tasks;
+    await writeFile(activeReviewRun.pending_audit_tasks_path!, JSON.stringify(tasks));
+
+    const large = await renderSemanticReviewStep({ root, sourceRoot: root, artifactsDir, activeReviewRun, bundle });
+    expect(large.progress?.pending_tasks).toBe(tasks.length);
+    expect(large.access?.write_paths).toHaveLength(1);
+    expect(large.access).toEqual(small.access);
+    // Only the progress counts and summary grow; the orchestration contract
+    // carries no per-item filenames or other workload-sized metadata.
+    expect({ ...large, progress: small.progress }).toEqual(small);
+    const grant = join(artifactsDir, "runs", activeReviewRun.run_id, "host-results");
+    expect(large.access?.write_paths).toEqual([grant.replace(/\\/g, "/")]);
+    const workload = JSON.parse(await readFile(large.artifact_paths.host_workload!, "utf8")) as {
+      work_items: { result_path: string; prompt: { text: string } }[];
+    };
+    expect(workload.work_items).toHaveLength(tasks.length);
+    for (const item of workload.work_items) {
+      const resultPath = resolve(root, item.result_path);
+      expect(dirname(resultPath)).toBe(grant);
+      expect(item.prompt.text).toContain(resultPath.replace(/\\/g, "/"));
+      expect(item.prompt.text).toContain("Write no other file");
+    }
+    const prompt = await readFile(large.prompt_path, "utf8");
+    expect(prompt).toContain(`- write: ${grant.replace(/\\/g, "/")}`);
+  });
+
+  it("grants no result writes when the review workload is empty", async () => {
+    const { root, artifactsDir, activeReviewRun, bundle } = await fixture(["task-a", "task-b", "task-c"]);
+    const step = await renderSemanticReviewStep({ root, sourceRoot: root, artifactsDir, activeReviewRun, bundle });
+    expect(step.progress?.pending_tasks).toBe(0);
+    expect(step.access?.write_paths).toEqual([]);
+    expect(await readFile(step.prompt_path, "utf8")).not.toContain("- write:");
   });
 
   it("states each emitted lane's demand, and nothing execution-shaped", async () => {

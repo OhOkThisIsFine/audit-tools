@@ -43,6 +43,16 @@ test("admits the exact go-test vector discovery emits for a Go project", async (
   });
 });
 
+test("Cargo admission requires the exact discovered test command", async () => {
+  await withTempDir(async (dir) => {
+    expect(isAdmittedProjectTestCommand(["cargo", "test"], dir)).toBe(false);
+    await writeFile(join(dir, "Cargo.toml"), '[workspace]\nmembers = []\n');
+    expect(isAdmittedProjectTestCommand(["cargo", "test"], dir)).toBe(true);
+    expect(isAdmittedProjectTestCommand(["cargo", "test", "--workspace"], dir)).toBe(false);
+    expect(isAdmittedProjectTestCommand(["cargo", "build"], dir)).toBe(false);
+  });
+});
+
 test("admits the exact pytest vector discovery emits for a Python project", async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, "pyproject.toml"), "[project]\nname='x'\n", "utf8");

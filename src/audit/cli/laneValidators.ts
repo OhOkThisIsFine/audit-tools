@@ -33,7 +33,7 @@ import {
   type SubmissionIssue,
 } from "audit-tools/shared";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
-import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
+import { ConceptualJudgeSubmissionSchema, suppliedToolVerdictIssue } from "../types/conceptualAdjudication.js";
 import {
   CONCEPTUAL_PERSPECTIVE_LANE_PREFIX,
   SYSTEMIC_CHALLENGE_LANE_PREFIX,
@@ -80,6 +80,29 @@ export function unwrapSubmissionArray(
     }
   }
   return { ok: false, reason: describeSubmissionShapeMismatch(value) };
+}
+
+/** The same item parse and tool-verdict refusal at file consumption and structured admission. */
+export function parseSubmissionArrayItems(
+  items: readonly unknown[],
+  itemSchema: ZodTypeAny,
+): { ok: true; array: unknown[] } | { ok: false; reason: string } {
+  // Check before parsing: the schema omits tool-owned verdicts, which would
+  // otherwise be stripped silently instead of naming the forbidden field.
+  const supplied = suppliedToolVerdictIssue(items);
+  const accepted: unknown[] = [];
+  const failures: string[] = [];
+  for (const [index, item] of items.entries()) {
+    const parsed = itemSchema.safeParse(item);
+    if (parsed.success) accepted.push(parsed.data);
+    else {
+      for (const issue of parsed.error.issues) {
+        failures.push(`findings[${index}].${issue.path.join(".") || "(root)"}: ${issue.message}`);
+      }
+    }
+  }
+  const reason = supplied ?? (failures.length > 0 ? failures.join("; ") : null);
+  return reason === null ? { ok: true, array: accepted } : { ok: false, reason };
 }
 
 /**

@@ -15,6 +15,7 @@
  */
 
 import { test, expect } from "vitest";
+import ts from "typescript";
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,45 @@ async function sourceFiles(dir: string = SRC_ROOT): Promise<string[]> {
 function repoRelative(absolute: string): string {
   return absolute.slice(REPO_ROOT.length + 1).replaceAll("\\", "/");
 }
+
+function missingStoppedFoldDescription(source: string): boolean {
+  const calls = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression;
+      if (ts.isIdentifier(callee)) calls.add(callee.text);
+      else if (ts.isPropertyAccessExpression(callee)) calls.add(callee.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  // Call syntax excludes comments, string contents and declarations. Names
+  // retain the existing guard's scope; this is not symbol-binding analysis.
+  visit(ts.createSourceFile("fold.ts", source, ts.ScriptTarget.Latest, true));
+  return (calls.has("advance") || calls.has("advanceObligations")) && !calls.has("describeStoppedFold");
+}
+
+test.each([
+  ["comment", "// advance(state)\n/* advanceObligations(state) */"],
+  ["string", 'const note = "advance(state)";'],
+  ["regular expression", "const pattern = /advance(state)/;"],
+  ["template", "const note = `advanceObligations(state)`;"],
+  ["declaration", "function advance(state: State) { return state; }"],
+])("the fold-call guard ignores %s text", (_kind, source) => {
+  expect(missingStoppedFoldDescription(source)).toBe(false);
+});
+
+test.each([
+  "await advance(state);",
+  "await advanceObligations(state);",
+  "await engine.advance(state);",
+  "await advance<State>(state);",
+  "const note = `result: ${advance(state)}`;",
+  "await advance(state); // describeStoppedFold(outcome)",
+  'await advance(state); const note = "describeStoppedFold(outcome)";',
+])("the fold-call guard requires a real describer call: %s", (source) => {
+  expect(missingStoppedFoldDescription(source)).toBe(true);
+  expect(missingStoppedFoldDescription(`${source}\ndescribeStoppedFold(outcome);`)).toBe(false);
+});
 
 test("the engine states the bound, and the audit cap DERIVES from it", () => {
   expect(deriveEngineBound(MAX_DRAIN_STEPS)).toBe(
@@ -121,12 +161,9 @@ test("every fold that drives the engine routes its non-convergence through the O
   const offenders: string[] = [];
   for (const file of await sourceFiles()) {
     const source = await readFile(file, "utf8");
-    // Files that DRIVE the engine — the shared entry point, or its alias.
-    const drivesEngine = /(?:await\s+)?\b(?:advance|advanceObligations)\s*\(/.test(source);
     // The engine module itself DEFINES both; it is not a consumer of them.
     const isEngineItself = repoRelative(file) === "src/shared/engine/obligationEngine.ts";
-    if (!drivesEngine || isEngineItself) continue;
-    if (!/\bdescribeStoppedFold\s*\(/.test(source)) offenders.push(repoRelative(file));
+    if (!isEngineItself && missingStoppedFoldDescription(source)) offenders.push(repoRelative(file));
   }
   expect(
     offenders,

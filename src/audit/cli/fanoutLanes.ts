@@ -25,6 +25,8 @@ import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
 import { sourceTreeInstruction } from "../io/runSnapshot.js";
 
 import {
+  AUDIT_GATE_SUBMISSION_SCOPE,
+  GATE_LANES,
   laneSubmissionPath,
   laneSubmissionId,
   recordDispatchedLanes,
@@ -341,6 +343,10 @@ export async function materializeFanoutLanes(params: {
       JSON.stringify({ contract_version: "review-submission/v1", prompt_sha256: digest, review: { mode: "independent", reason: "Explain how this context was independent of the author." }, result: {} }, null, 2),
       "```",
       "Review modes are independent, degraded, unavailable. This lane requires independent; degraded or unavailable cannot satisfy it.",
+      ...(spec.id === GATE_LANES.design_review_contract && params.runId === AUDIT_GATE_SUBMISSION_SCOPE ? [
+        `If the audit-code submit_gate MCP tool is available, submit with ${JSON.stringify({ root: toPromptPathToken(params.sourceRoot), artifacts_dir: toPromptPathToken(params.artifactsDir), lane: spec.id })} and put the entire review envelope above in the tool's result argument. The tool writes the bound path; do not also write it yourself.`,
+        "If independent review is unavailable, use the file route above to record the unavailable declaration; structured submission refuses it without replacing prior output.",
+      ] : []),
     ].join("\n"));
     const promptText = bound.text;
     const promptPath = requirement === "ordinary" ? join(promptDir, spec.promptFilename) : join(promptDir, "prompts", bound.sha256, spec.promptFilename);

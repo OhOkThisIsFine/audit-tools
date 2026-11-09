@@ -65,6 +65,7 @@ import {
   LANE_SUBMISSION_SCHEMAS,
   charterLaneSchema,
   describeSubmissionShapeMismatch,
+  parseSubmissionArrayItems,
   unwrapSubmissionArray,
 } from "./laneValidators.js";
 import type { ZodError, ZodTypeAny } from "zod";
@@ -985,36 +986,18 @@ export async function consumeArraySubmission<T>(
   const { value, path } = incoming;
   const unwrapped = unwrapSubmissionArray(value);
   if (unwrapped.ok && itemSchema) {
-    // BEFORE the schema parse, deliberately — the same ordering, and the same
-    // reason, as the judge door above: the item schema OMITS the tool-owned
-    // verdicts, so a supplied value is stripped silently and the host is taught
-    // nothing. Name the field instead.
-    const supplied = suppliedToolVerdictIssue(unwrapped.array);
-    // Item by item, not `z.array(itemSchema)`, so the reason names the element
-    // the host must fix — `findings[2].severity`, never a bare `2.severity`.
-    const accepted: unknown[] = [];
-    const failures: string[] = [];
-    for (const [index, item] of unwrapped.array.entries()) {
-      const parsed = itemSchema.safeParse(item);
-      if (parsed.success) accepted.push(parsed.data);
-      else {
-        for (const issue of parsed.error.issues) {
-          failures.push(`findings[${index}].${issue.path.join(".") || "(root)"}: ${issue.message}`);
-        }
-      }
-    }
-    const reason = supplied ?? (failures.length > 0 ? failures.join("; ") : null);
-    if (reason !== null) {
+    const parsed = parseSubmissionArrayItems(unwrapped.array, itemSchema);
+    if (!parsed.ok) {
       const quarantinePath = await quarantineMisshapedSubmission(
         artifactsDir,
         path,
         lane,
-        reason,
+        parsed.reason,
         { includeRepairSource: true, issueCode: "submission_contract_invalid" },
       );
-      return { status: "quarantined", quarantinePath, lane, reason };
+      return { status: "quarantined", quarantinePath, lane, reason: parsed.reason };
     }
-    return { status: "ok", value: accepted as T[], path };
+    return { status: "ok", value: parsed.array as T[], path };
   }
   if (unwrapped.ok) {
     return { status: "ok", value: unwrapped.array as T[], path };

@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 125 entr(y/ies) indexed.
+> and at commit). 124 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -32,17 +32,16 @@
 - `open-bugs.md:11` — The merge-routing check measures incoming paths from `CLAUDE_PROJECT_DIR`, not the checkout the command runs in (2026-10-09, medium).
 - `open-bugs.md:13` — The nightly routine has no check for a checkout stale enough to make its own review meaningless (2026-10-20, medium, friction: tool_should_decide).
 - `open-bugs.md:15` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
-- `open-bugs.md:18` — A step contract lists every pending result path (2026-10-05, medium).
-- `open-bugs.md:20` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
-- `open-bugs.md:22` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
-- `open-bugs.md:24` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
-- `open-bugs.md:26` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
-- `open-bugs.md:28` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:31` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:33` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:41` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:48` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:56` — Bounded audit refactors still require implementation and exact-tree qualification.
+- `open-bugs.md:19` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
+- `open-bugs.md:21` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
+- `open-bugs.md:23` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
+- `open-bugs.md:25` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
+- `open-bugs.md:27` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:30` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:32` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:40` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:47` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:55` — Bounded audit refactors still require implementation and exact-tree qualification.
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
@@ -58,7 +57,7 @@
 - `minor-bugs.md:32` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
 - `minor-bugs.md:34` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
 - `minor-bugs.md:36` — The stale-main guard reports a sync that already happened (2026-10-05, low).
-- `minor-bugs.md:38` — Test-command discovery knows only npm, Go and pytest (2026-10-06, low).
+- `minor-bugs.md:38` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
 - `minor-bugs.md:40` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)

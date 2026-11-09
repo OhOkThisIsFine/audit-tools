@@ -2,11 +2,10 @@
 // (the steward-lane verification
 // contract — `toAuditHostTask` is where the lane tags were being dropped, so this is
 // the site whose revert makes the prompt branch unreachable)
-import { dirname, join, resolve } from "node:path";
-
 import {
   linkFrictionRunIds,
   readJsonFile,
+  resolveHostHandoffPaths,
   toPosixPath,
 } from "audit-tools/shared";
 
@@ -107,20 +106,19 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
     "audit-code",
   );
   const continueCommand = nextStepCommand(root, artifactsDir);
-  const resultPaths = handoff.workload.work_items.map((item) =>
-    resolve(root, item.result_path),
-  );
+  const { resultDir } = resolveHostHandoffPaths({ root, artifactsDir, runId: activeReviewRun.run_id });
   return {
     handoff,
     completedTaskIds,
-    resultPaths,
+    resultDir,
     continueCommand,
   };
 }
 
 export async function renderSemanticReviewStep(params: SemanticReviewStepParams): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
-  const { handoff, completedTaskIds, resultPaths, continueCommand } = await prepareSemanticReviewWorkload(params);
+  const { handoff, completedTaskIds, resultDir, continueCommand } = await prepareSemanticReviewWorkload(params);
+  const hasWork = handoff.workload.work_items.length > 0;
   const issues = params.ingestIssues ?? [];
   const validationWarnings = params.validationWarnings ?? [];
 
@@ -173,7 +171,7 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
       "1. Follow its prompt.",
       "2. Write the result JSON at its bound `result_path`.",
       "",
-      ...workerAccessLines(params.sourceRoot, handoff.workload_path),
+      ...(hasWork ? workerAccessLines(params.sourceRoot, resultDir) : []),
       ...schedulingLines(handoff.workload, handoff.coherence_groups, handoff.coherence_groups_path),
       ...lensScopeLines(params.bundle, handoff.workload),
       `To check one result file before ingestion, by the rules ingestion applies: ${validateResultsCommand(root, artifactsDir)}`,
@@ -191,7 +189,10 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
         // that omits it makes each worker stop on a permission prompt.
         params.sourceRoot,
       ],
-      write_paths: resultPaths,
+      // The dedicated output directory is the host's grant; each work item's
+      // prompt and the ingestion boundary still require its exact bound file.
+      // Do not duplicate every pending filename in this orchestration envelope.
+      write_paths: hasWork ? [resultDir] : [],
     },
   });
 }
@@ -201,12 +202,12 @@ export async function renderSemanticReviewStep(params: SemanticReviewStepParams)
  * in a work-item prompt is absolute, so a worker may run in any directory, and
  * these two directories are all it needs.
  */
-function workerAccessLines(sourceRoot: string, workloadPath: string): string[] {
+function workerAccessLines(sourceRoot: string, resultDir: string): string[] {
   return [
     "Every path in a work-item prompt is absolute, so a worker may run in any working directory. " +
       "A worker reads only the run's source snapshot and writes only its own result file:",
     `- read: ${toPosixPath(sourceRoot)}`,
-    `- write: ${toPosixPath(join(dirname(workloadPath), "host-results"))}`,
+    `- write: ${toPosixPath(resultDir)}`,
     "",
   ];
 }

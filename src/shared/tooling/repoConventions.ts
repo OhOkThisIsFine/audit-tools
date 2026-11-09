@@ -1,6 +1,8 @@
+// sites-pinned: tests/shared/repoConventions.test.ts
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { scanStringAware } from "../parsing/stringAwareScanner.js";
+import { parseTomlSafe, asTomlTable } from "../parsing/toml.js";
 
 /**
  * Lightweight, deterministic detection of a repository's house style so the
@@ -95,16 +97,17 @@ function detectPythonConventions(
   root: string,
   conventions: RepoConventions,
 ): void {
-  const pyproject = readText(join(root, "pyproject.toml")) ?? "";
-  if (/\[tool\.black\]/.test(pyproject)) conventions.formatter = "black";
-  else if (/\[tool\.ruff(?:\.format)?\]/.test(pyproject)) conventions.formatter = "ruff";
+  const tool = asTomlTable(parseTomlSafe(readText(join(root, "pyproject.toml")) ?? "").tool);
+  const ruff = asTomlTable(tool?.ruff);
+  if (asTomlTable(tool?.black)) conventions.formatter = "black";
+  else if (ruff) conventions.formatter = "ruff";
 
-  if (/\[tool\.ruff\b/.test(pyproject)) conventions.linter = "ruff";
-  else if (existsSync(join(root, ".flake8")) || /\[tool\.flake8\]/.test(pyproject))
+  if (ruff) conventions.linter = "ruff";
+  else if (existsSync(join(root, ".flake8")) || asTomlTable(tool?.flake8))
     conventions.linter = "flake8";
 
   if (
-    /\[tool\.pytest/.test(pyproject) ||
+    asTomlTable(tool?.pytest) ||
     existsSync(join(root, "pytest.ini")) ||
     existsSync(join(root, "conftest.py"))
   ) {

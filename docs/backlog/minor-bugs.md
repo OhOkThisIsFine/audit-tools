@@ -35,7 +35,7 @@
 
 - **The stale-main guard reports a sync that already happened (2026-10-05, low).** `session-start-guards.mjs` writes `.claude/hooks/.state/stale-main.json` once at session start; `tool-input-guard.mjs` refuses the first source edit from that marker without counting again, so a session that pulled after start was told "HEAD is 13 commits behind" when HEAD equalled `origin/main`. **Property:** the edit-time refusal recounts `HEAD..<remote>/main` and fires only when it is still positive.
 
-- **Test-command discovery knows only npm, Go and pytest (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); every other ecosystem reaches the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
+- **Test-command discovery lacks some ecosystem declarations (2026-10-06, low).** `discoverProjectCommands` (`src/shared/tooling/testCommand.ts`); repositories using unsupported build systems such as Gradle or Make still reach the final gate's "Verification command required" pause. **Property:** discovery reads a declared command for any ecosystem with one, without a per-ecosystem fork in planning.
 
 - **DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low,
   accepted).** The pair SHIPPED; its mechanism record is the single home —

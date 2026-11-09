@@ -7,7 +7,7 @@ const { stripJsonComments, removeTrailingJsonCommas, parseJsoncObject } =
 const { parseYamlSafe: parseYamlSafeRaw, collectYamlStringScalars } =
   await import("../../src/audit/extractors/graphManifestEdges/yaml.js");
 const { parseTomlSafe } =
-  await import("../../src/audit/extractors/graphManifestEdges/toml.js");
+  await import("../../src/shared/parsing/toml.js");
 const { manifestStringArray } =
   await import("../../src/audit/extractors/graphManifestEdges/workspace.js");
 const { stripGoLineComment, splitGoWorkspaceSpecifiers } =
