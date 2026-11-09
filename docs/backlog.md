@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 124 entr(y/ies) indexed.
+> and at commit). 123 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -56,9 +56,8 @@
 - `minor-bugs.md:30` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
 - `minor-bugs.md:32` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
 - `minor-bugs.md:34` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
-- `minor-bugs.md:36` — The stale-main guard reports a sync that already happened (2026-10-05, low).
-- `minor-bugs.md:38` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
-- `minor-bugs.md:40` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:36` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
+- `minor-bugs.md:38` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

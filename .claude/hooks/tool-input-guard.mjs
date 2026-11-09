@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/hook-trap-guards.test.ts
 // PreToolUse guard on Edit / Write / Agent — the traps that live in a tool's
 // INPUT rather than in a shell command.
 //
@@ -10,6 +11,7 @@
 //   2. Agent `isolation: "worktree"` on a dispatch node  (Agent)
 //   3. Stale-main deny-once before the first source edit  (Edit|Write)
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, relative, isAbsolute } from 'node:path';
 import { resolveWithinRoot } from '../../scripts/shared/primitives.mjs';
 
@@ -156,9 +158,27 @@ if (inProject(filePath) && SOURCE_EDIT.test(relPath)) {
     } catch {
       /* ignore */
     }
-    if (marker && Number(marker.behind) > 0) {
+    // Startup evidence may be stale after a sync. It requests a fresh local
+    // check, not a refusal; unreadable Git evidence follows this hook's fail-open policy.
+    let behind = 0;
+    if (marker && Number(marker.behind) > 0 && typeof marker.remote === 'string' && marker.remote.trim()) {
+      try {
+        const count = spawnSync('git', ['rev-list', '--count', `HEAD..${marker.remote}/main`, '--'], {
+          cwd: ROOT,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 5_000,
+          windowsHide: true,
+        });
+        const value = (count.stdout ?? '').trim();
+        if (count.status === 0 && /^\d+$/.test(value)) behind = Number(value);
+      } catch {
+        /* invalid marker / unavailable git: no current evidence to refuse */
+      }
+    }
+    if (Number.isSafeInteger(behind) && behind > 0) {
       block(
-        `tool-input guard: HEAD is ${marker.behind} commit(s) BEHIND ${marker.remote}/main — refusing the first ` +
+        `tool-input guard: HEAD is ${behind} commit(s) BEHIND ${marker.remote}/main — refusing the first ` +
           `source edit of this lap.\n` +
           'A lap branched from stale main once re-implemented an entire commit that had already landed, and built ' +
           'the next stage blind to a design section it did not have.\n' +

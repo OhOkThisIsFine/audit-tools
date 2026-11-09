@@ -9,7 +9,7 @@
 // the same contract Claude Code uses. Exit 2 = blocked, exit 0 = allowed.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -1324,8 +1324,8 @@ describe('shell-trap-guard: destructive restore (silently discards unstaged work
 //
 // This binds ONE hook rather than flipping `runHook`'s default, and the asymmetry is
 // load-bearing:
-//   * tool-input-guard.mjs spawns NO git. Its only uses of ROOT are `inProject()` path
-//     containment and the marker path, so a temp root is exactly equivalent.
+//   * tool-input-guard.mjs checks Git only for a positive stale-main marker.
+//     Its marker-free cases need only path containment; stale-main cases use a temp Git repo.
 //   * shell-trap-guard.mjs resolves the repo family with `git rev-parse --git-common-dir`
 //     at `cwd: ROOT` (line ~579) and documents itself FAIL-OPEN — no git answer means the
 //     lane-refusal rule STANDS DOWN. Measured 2026-08-30 with one payload and two roots:
@@ -1351,6 +1351,50 @@ function runInputGuard(
 ): { code: number | null; stderr: string } {
   return runHook(INPUT_GUARD, payload, { root, env });
 }
+
+function seedStaleInputGuardRepo(root: string): (...args: string[]) => void {
+  const git = (...args: string[]) => {
+    const result = spawnSyncHidden('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+    expect(result.status, result.stderr).toBe(0);
+  };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@example.com');
+  writeFileSync(join(root, 'seed.txt'), 'initial\n');
+  git('add', '--', 'seed.txt');
+  git('commit', '--no-gpg-sign', '-qm', 'initial');
+  writeFileSync(join(root, 'seed.txt'), 'upstream\n');
+  git('add', '--', 'seed.txt');
+  git('commit', '--no-gpg-sign', '-qm', 'upstream');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  git('switch', '-q', '-c', 'stale', 'HEAD~1');
+  return git;
+}
+
+describe('tool-input-guard: stale-main evidence is recounted before refusal', () => {
+  it.each(['synced', 'still-behind', 'missing-ref', 'invalid-remote'])('%s checkout uses current Git evidence', (state) => {
+    const root = mkdtempSync(join(tmpdir(), 'input-guard-recount-'));
+    try {
+      const git = seedStaleInputGuardRepo(root);
+      const markerPath = join(root, '.claude', 'hooks', '.state', 'stale-main.json');
+      mkdirSync(join(root, '.claude', 'hooks', '.state'), { recursive: true });
+      writeFileSync(markerPath, JSON.stringify({ behind: 99, remote: state === 'invalid-remote' ? null : 'origin' }));
+      if (state === 'synced') git('merge', '--ff-only', 'origin/main');
+      if (state === 'missing-ref') git('update-ref', '-d', 'refs/remotes/origin/main');
+      const payload = {
+        tool_name: 'Write',
+        tool_input: { file_path: join(root, 'src/new.ts'), content: 'export const ready = true;\n' },
+      };
+      const result = runInputGuard(payload, { root });
+      expect(result.code).toBe(state === 'still-behind' ? 2 : 0);
+      if (state === 'still-behind') expect(result.stderr).toContain('HEAD is 1 commit(s) BEHIND origin/main');
+      expect(existsSync(markerPath)).toBe(false);
+      expect(runInputGuard(payload, { root }).code, 'the existing interruption remains deny-once').toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('tool-input-guard: raw control byte at write time', () => {
   // Built with String.fromCharCode, never a backslash-u escape: the escape
@@ -1434,6 +1478,7 @@ describe('tool-input-guard cases never aim a source path at the live repository'
   it('rule 3 reads the marker from the invocation root, not from the real repository', () => {
     const root = mkdtempSync(join(tmpdir(), 'input-guard-marker-'));
     try {
+      seedStaleInputGuardRepo(root);
       mkdirSync(join(root, '.claude', 'hooks', '.state'), { recursive: true });
       writeFileSync(
         join(root, '.claude', 'hooks', '.state', 'stale-main.json'),
