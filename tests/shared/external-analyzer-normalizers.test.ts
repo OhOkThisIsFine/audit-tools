@@ -7,9 +7,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { normalizeGenericExternalResults } from "../../src/shared/analyzers/normalizeExternal.js";
-import { normalizeClippyJson, parseClippy } from "../../src/shared/analyzers/clippy.js";
-import { normalizeRubocopJson, parseRubocop } from "../../src/shared/analyzers/rubocop.js";
+import { parseClippy } from "../../src/shared/analyzers/clippy.js";
+import { clippyCandidate, rubocopCandidate } from "../../src/shared/analyzers/candidates.js";
+import { readParseOutcome } from "../../src/shared/analyzers/types.js";
+import type { ExternalAnalyzerCandidate } from "../../src/shared/analyzers/acquisitionEngine.js";
 import { VALID_SEVERITIES } from "../../src/shared/types/lens.js";
+
+/**
+ * The production normalization path (acquisitionEngine): the candidate's own parser,
+ * then the shared normalizer with the repository root. Both tools echo ABSOLUTE
+ * paths, so the root is what makes the persisted path repo-relative.
+ */
+function normalizeVia(candidate: ExternalAnalyzerCandidate, stdout: string, repoRoot?: string) {
+  return normalizeGenericExternalResults(candidate.id, readParseOutcome(candidate.parse(stdout)).items, { repoRoot });
+}
 
 test("normalizeGenericExternalResults maps absent severity to 'info' (COR-0a17639f)", () => {
   const result = normalizeGenericExternalResults("my-tool", [
@@ -43,8 +54,8 @@ const CLIPPY_STREAM = [
   }),
 ].join("\n");
 
-test("normalizeClippyJson maps clippy severities and validates through the generic seam", () => {
-  const normalized = normalizeClippyJson(CLIPPY_STREAM);
+test("clippy maps clippy severities and validates through the generic seam", () => {
+  const normalized = normalizeVia(clippyCandidate, CLIPPY_STREAM);
   expect(normalized.tool).toBe("clippy");
   expect(normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule }))).toEqual([
       { severity: "high", path: "src/lib.rs", rule: "E0308" },
@@ -55,9 +66,9 @@ test("normalizeClippyJson maps clippy severities and validates through the gener
   }
 });
 
-test("normalizeClippyJson downgrades malformed input to an empty result set (no throw)", () => {
+test("clippy downgrades malformed input to an empty result set (no throw)", () => {
   for (const bad of ["", "not json", "{}", "garbage\nmore garbage"]) {
-    const normalized = normalizeClippyJson(bad);
+    const normalized = normalizeVia(clippyCandidate, bad);
     expect(normalized.tool).toBe("clippy");
     expect(normalized.results).toEqual([]);
   }
@@ -76,8 +87,8 @@ const RUBOCOP_REPORT = JSON.stringify({
   ],
 });
 
-test("normalizeRubocopJson maps rubocop severities (fatal→high, convention→low) through the generic seam", () => {
-  const normalized = normalizeRubocopJson(RUBOCOP_REPORT);
+test("rubocop maps rubocop severities (fatal→high, convention→low) through the generic seam", () => {
+  const normalized = normalizeVia(rubocopCandidate, RUBOCOP_REPORT);
   expect(normalized.tool).toBe("rubocop");
   expect(normalized.results.map((r) => ({ severity: r.severity, path: r.path, rule: r.rule, line_start: r.line_start }))).toEqual([
       { severity: "high", path: "app/foo.rb", rule: "Lint/Fatal", line_start: 2 },
@@ -88,13 +99,13 @@ test("normalizeRubocopJson maps rubocop severities (fatal→high, convention→l
   }
 });
 
-test("normalizeRubocopJson downgrades malformed input to an empty result set (no throw)", () => {
+test("rubocop downgrades malformed input to an empty result set (no throw)", () => {
   for (const bad of ["", "not json", "{}", JSON.stringify({ files: "nope" })]) {
-    const normalized = normalizeRubocopJson(bad);
+    const normalized = normalizeVia(rubocopCandidate, bad);
     expect(normalized.tool).toBe("rubocop");
     expect(normalized.results).toEqual([]);
   }
-  expect(parseRubocop("not json")).toEqual([]);
+  expect(readParseOutcome(rubocopCandidate.parse("not json")).items).toEqual([]);
 });
 
 test("normalizeGenericExternalResults maps native severity aliases onto schema enum (COR-0a17639f)", () => {
@@ -124,7 +135,7 @@ test("normalizeGenericExternalResults maps native severity aliases onto schema e
 // pass the root persists a machine-specific path — un-joinable against every
 // repo-relative consumer, and unreadable by the provenance reader
 // (`join(root, "/abs/path")` names nothing).
-test("normalizeClippyJson rebases absolute paths onto the repo root", () => {
+test("clippy rebases absolute paths onto the repo root", () => {
   const root = join(tmpdir(), "adapter-rebase-repo");
   const stdout = JSON.stringify({
     reason: "compiler-message",
@@ -135,16 +146,16 @@ test("normalizeClippyJson rebases absolute paths onto the repo root", () => {
       spans: [{ file_name: join(root, "src", "lib.rs"), line_start: 3, line_end: 3, is_primary: true }],
     },
   });
-  const normalized = normalizeClippyJson(stdout, root);
+  const normalized = normalizeVia(clippyCandidate, stdout, root);
   expect(
     normalized.results[0].path,
     "an absolute path in the persisted artifact is machine-specific and never joins",
   ).toBe("src/lib.rs");
 });
 
-test("normalizeRubocopJson rebases absolute paths onto the repo root", () => {
+test("rubocop rebases absolute paths onto the repo root", () => {
   const root = join(tmpdir(), "adapter-rebase-rubocop");
-  const normalized = normalizeRubocopJson(
+  const normalized = normalizeVia(rubocopCandidate,
     JSON.stringify({
       files: [
         {
@@ -165,7 +176,7 @@ test("a path outside the repo root is left as reported, never silently rewritten
   // repo-relative identity for it would be a lie about what it reported.
   const root = join(tmpdir(), "adapter-rebase-inside");
   const outside = join(tmpdir(), "adapter-rebase-outside", "lib.rs");
-  const normalized = normalizeClippyJson(
+  const normalized = normalizeVia(clippyCandidate,
     JSON.stringify({
       reason: "compiler-message",
       message: {

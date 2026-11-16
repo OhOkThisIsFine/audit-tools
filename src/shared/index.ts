@@ -943,7 +943,6 @@ export {
   STALE_LOCK_MS,
   isTransientPermissionContention,
 } from "./io/fileLock.js";
-export { canonicalizeFilePath } from "./io/pathIdentity.js";
 
 // IO: canonical `.audit-tools/` path layout (single source for both CLIs)
 export {
@@ -1437,7 +1436,6 @@ export {
   parseLizard,
 } from "./analyzers/candidates.js";
 export { parseClippy } from "./analyzers/clippy.js";
-export { parseRubocop } from "./analyzers/rubocop.js";
 
 export { ReviewRequirementSchema, ReviewDeclarationSchema, reviewIndependenceIssue } from "./types/reviewIndependence.js";
 export type { ReviewRequirement, ReviewDeclaration } from "./types/reviewIndependence.js";

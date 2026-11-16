@@ -43,7 +43,6 @@ is deleted too.
 | INV-RSM-STATE-COMPLETE | Persisted remediation state contains every field implied by its status. | `src/remediate/state/store.ts`; `src/remediate/phases/triage.ts` |
 | INV-S04 | Verbatim free-form intent is never copied into a host workload or output; only interpreted signals cross the boundary. | `src/shared/intent/freeFormIntentInterpreter.ts`; `src/shared/intent/pathScope.ts` |
 | INV-SCC | Portable run-id path encoding and live-holder file-lock freshness. | `src/shared/io/frictionCapture.ts`; `src/shared/io/fileLock.ts`; `src/shared/friction/triage.ts` |
-| INV-SOO | Canonical physical-file identity for ownership and overlap checks. | `src/shared/io/pathIdentity.ts` |
 | INV-SSF | Sync-spawn fold safety: child processes reachable while a lock or fold is held use the asynchronous tracked runner with a positive deadline, so event-loop heartbeats continue and hung children are bounded. | `runTrackedAsync` in `src/shared/tooling/exec.ts`; `git` in `src/shared/git.ts`; `enumerateTrackedFilePaths` in `src/remediate/phases/grounding.ts` |
 | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
 | INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostCorroboration.ts` |

@@ -1,9 +1,7 @@
 import type {
   ExternalAnalyzerParsedItem,
   ExternalAnalyzerParseReport,
-  ExternalAnalyzerResults,
 } from "./types.js";
-import { normalizeGenericExternalResults } from "./normalizeExternal.js";
 
 /**
  * rubocop `--format json` emits a single JSON document:
@@ -114,31 +112,4 @@ export function parseRubocopOutcome(stdout: string): ExternalAnalyzerParseReport
     }
   }
   return { items };
-}
-
-/**
- * The item-list view of {@link parseRubocopOutcome}, for the audit/adapters
- * normalization seam, which consumes items and reports coverage elsewhere. One
- * implementation, two views — never two parsers that can drift.
- */
-export function parseRubocop(stdout: string): ExternalAnalyzerParsedItem[] {
-  return parseRubocopOutcome(stdout).items;
-}
-
-/**
- * Dedicated severity adapter: route rubocop's parsed items through the shared
- * generic normalizer so its output matches the exact ExternalAnalyzerResults
- * contract every other analyzer emits.
- *
- * `repoRoot` is threaded through for the same reason as its clippy twin: the
- * candidate hands the tool the ABSOLUTE repository root as its target, so
- * rubocop echoes absolute paths back and an adapter that drops the root
- * persists a machine-specific path. Optional because a caller normalizing
- * already-relative input has nothing to rebase.
- */
-export function normalizeRubocopJson(
-  stdout: string,
-  repoRoot?: string,
-): ExternalAnalyzerResults {
-  return normalizeGenericExternalResults("rubocop", parseRubocop(stdout), { repoRoot });
 }

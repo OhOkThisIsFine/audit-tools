@@ -31,12 +31,6 @@ the work that would make it a plain cleanup.
   byte-identical to the private `edgeSignature` in `src/audit/extractors/graph.ts`; one copy goes.
   Blocker: exporting it edits `graph.ts`, the root of the same digest-pinned closure. **Unblock:**
   export it and update the digest pin, as above.
-- **P02 — `normalizeClippyJson`, `normalizeRubocopJson` and `canonicalizeFilePath`.** Gain: three
-  exports with no production caller go. Blocker: only tests call them, and P02 treated a test-only
-  export as an owner decision. **Unblock:** point those tests at the production entry (for example
-  `parseClippy`) and delete the exports. P03 applied the project philosophy ("delete legacy rather
-  than carry it") to dead contract fields in `executorResult.ts`; check whether these exports are
-  the same case or a deliberate test seam before you delete them.
 - **P01 — `persistAnalyzerConsent`.** Blocker: the shared fixture creators of ten test files call
   it. **Unblock:** move those fixtures to the production write path first; then the function can
   be simplified or removed.
