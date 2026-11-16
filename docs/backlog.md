@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 123 entr(y/ies) indexed.
+> and at commit). 128 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -42,6 +42,11 @@
 - `open-bugs.md:40` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
 - `open-bugs.md:47` — Selective-deepening convergence — live validation env-bound.
 - `open-bugs.md:55` — Bounded audit refactors still require implementation and exact-tree qualification.
+- `open-bugs.md:57` — Confirmed scope leaks beyond planning (2026-11-15, medium).
+- `open-bugs.md:59` — Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).
+- `open-bugs.md:61` — Audit and remediation paths have multiple sources (2026-11-15, medium).
+- `open-bugs.md:63` — Incidental inputs restart the systemic challenge (2026-11-15, medium).
+- `open-bugs.md:65` — Isolated dependency installs repoint regular host launchers (2026-11-15, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
