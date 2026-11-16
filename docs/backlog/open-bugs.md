@@ -52,8 +52,6 @@
   that every `deepening:*` task converges in bounded rounds and the audit reaches synthesis without
   `force-synthesis`.
 
-- **Bounded audit refactors still require implementation and exact-tree qualification.** Follow the [finalized plan](../reviews/audit-final-refactor-plan.md) and [qualification record](../reviews/audit-refactor-qualification-2026-10-14.md); source review alone does not close the accepted defects or authorize release.
-
 - **Confirmed scope leaks beyond planning (2026-11-15, medium).** Late runtime validation produced 63 follow-ups, 52 touching explicitly excluded paths; the scoped runtime fix is staged, not landed. **Property:** one confirmed scope governs planning, analyzer coverage, reviewer submissions, deepening, synthesis and final output. Reject out-of-scope evidence and keep withdrawn findings withdrawn across re-ingestion, requeue, resume and synthesis.
 
 - **Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).** **Property:** calibrate each analyzer against the checkout, scope and tool configuration; preflight prerequisites; reuse coverage-compatible imported reports without rerunning the scan or reissuing prompts, and dispatch each normalized lead once. Distinguish failed, partial, skipped and verified-clean coverage. Remediation rechecks use comparable inputs and disclose changed coverage rather than claiming a clean result.

@@ -78,9 +78,11 @@ gate, so the local preflight is a quick fast-fail, not the full run.
      allowed**, the deferred-postinstall check, and both binary smokes (`audit-code --version` +
      `remediate-code --version`). MODULE_NOT_FOUND = dangling npm-link junction to a deleted worktree.
   Nothing destructive is ever retried; every observation phase is idempotent and safe to re-enter.
-- That workflow runs parallel jobs: `gate` runs `npm run verify:checks`, the authoritative gate
-  defined in `package.json`, plus a `test` matrix (vitest sharded 4 ways) — and only the `publish` job
-  (`needs: [gate, test]`)
+- That workflow first runs `validate-source` (`scripts/shared/verify-release-source.mjs`), which checks
+  the event commit and passes it on as the commit every later job checks out. Then it runs parallel
+  jobs: `gate` runs `npm run verify:checks`, the authoritative gate defined in `package.json`, plus a
+  `test` matrix (vitest sharded 4 ways) — and only the `publish` job
+  (`needs: [validate-source, gate, test]`)
   uploads. **Trusted publishing is configured + working** — no tokens, no local bootstrap.
 - CRLF trap: the clean-tree guard fails from a CRLF worktree → renormalize to LF first.
 - The smokes pack ONE tarball; Windows-flaky on temp-dir EPERM/EBUSY — re-run a smoke before calling it a regression.
@@ -99,8 +101,8 @@ gate, so the local preflight is a quick fast-fail, not the full run.
 
 `.github/workflows/publish-package.yml`. Triggered by publishing a GitHub Release (tagged `vX.Y.Z`) or
 manual `workflow_dispatch`. Uses npm Trusted Publishing (OIDC) — no tokens. Pre-release (`-` in version)
-→ `next` dist-tag, else `latest`. CI: parallel `gate` (`verify:checks`) and `test` (4-way sharded
-`vitest run`) jobs → `publish` (needs both). The `publish` job requests `id-token: write` for the npm
+→ `next` dist-tag, else `latest`. CI: `validate-source` (the release source commit) → parallel `gate`
+(`verify:checks`) and `test` (4-way sharded `vitest run`) jobs → `publish` (needs all three). The `publish` job requests `id-token: write` for the npm
 OIDC exchange, pins the Node + npm versions declared in the workflow, rebuilds `dist/` for packing,
 previews the tarball with `npm pack --dry-run`, publishes with public access + provenance, verifies the
 published version resolves from the registry, and uploads `*-npm-logs` artifacts on failure.

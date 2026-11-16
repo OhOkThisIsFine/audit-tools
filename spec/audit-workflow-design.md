@@ -363,7 +363,7 @@ synthesis narrative.
 
 ---
 
-## Synthesis narrative (always runs)
+## Synthesis narrative (always evaluated, content optional)
 
 `synthesis_narrative_current` is a `host_delegation` executor. It always emits
 bounded host work when narrative judgment is required; an explicit omitted

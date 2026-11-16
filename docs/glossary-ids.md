@@ -20,7 +20,6 @@ is deleted too.
 |---|---|---|
 | INV-B3 | Repository-path grounding, including dotfile paths and unambiguous basename resolution. | `src/shared/validation/findingGrounding.ts`; `src/remediate/phases/grounding.ts` |
 | INV-CC | Idempotent, sole-writer intent guidance bootstrap. | `src/shared/intake/guidanceBootstrap.ts` |
-| INV-CDI-EXPLICIT-NODE-FIELDS | A charter delta carries its subsystem identity as explicit `node_id`/`goal_node_id` fields rather than encoded inside `delta_id`, so `delta_id` stays an opaque identity no consumer needs to parse. | `src/shared/decompose/charterExtraction.ts` |
 | INV-CK | Deterministic identity, idempotency, and content keys. | `src/shared/contentKey.ts`; `src/shared/stableStringify.ts` |
 | INV-COVERAGE | Per-module remediation coverage joins preserve every owned finding's terminal outcome, verification evidence, and producing-module attribution; run close also reports planned findings missing from state. | `runClosePhase` in `src/remediate/phases/close.ts`; `RemediationItemState.recorded_by_module` in `src/remediate/state/types.ts`; `RemediationOutcomeRecord.recorded_by_module` in `src/shared/types/remediationOutcome.ts` |
 | INV-DA | Analyzer deletion signals remain advisory and never authorize unattended deletion. | `src/remediate/review/autonomousGate.ts` |
@@ -47,7 +46,7 @@ is deleted too.
 | INV-SOO | Canonical physical-file identity for ownership and overlap checks. | `src/shared/io/pathIdentity.ts` |
 | INV-SSF | Sync-spawn fold safety: child processes reachable while a lock or fold is held use the asynchronous tracked runner with a positive deadline, so event-loop heartbeats continue and hung children are bounded. | `runTrackedAsync` in `src/shared/tooling/exec.ts`; `git` in `src/shared/git.ts`; `enumerateTrackedFilePaths` in `src/remediate/phases/grounding.ts` |
 | INV-SSP-DEFERRED-SET-REPORTED | `computeStaleArtifacts` returns the stale set together with an explicit deferred set naming every downstream held behind a slice projection, and the emitted consolidated staleness record names them — an omission is red. | `src/audit/orchestrator/staleness.ts` |
-| INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostHandoff.ts` |
+| INV-WTS | Landed-node ancestry probe: a landed node's commit must be an ancestor of the ref it claims to have landed on. | `src/remediate/steps/dispatch/hostCorroboration.ts` |
 
 The replacement executable-plan contract has no separate obligation, module-contract, or
 interface-definition graph. Scoped positive/negative assertions are enforced by

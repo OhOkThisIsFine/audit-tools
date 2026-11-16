@@ -58,4 +58,4 @@
   exists for it; if the choice is ever genuinely undecidable, the cheap move is edge attribution +
   cost on the existing staleness record, not a second classifier.
 
-- **Audit refactor native qualification awaits the serialized validation lane.** The [qualification record](../reviews/audit-refactor-qualification-2026-10-14.md) separates accepted source patches from pending native gates, offline pipx/Lizard smoke and excluded work. Close only with exact-final-tree evidence; preserve platform and live-run limitations.
+- **Audit refactor native qualification awaits the serialized validation lane.** The bounded refactors follow the [finalized plan](../reviews/audit-final-refactor-plan.md). The [qualification record](../reviews/audit-refactor-qualification-2026-10-14.md) separates accepted source patches from pending native gates, offline pipx/Lizard smoke and excluded work. Source review alone does not close the accepted defects or authorize release. Close only with exact-final-tree evidence; preserve platform and live-run limitations.
