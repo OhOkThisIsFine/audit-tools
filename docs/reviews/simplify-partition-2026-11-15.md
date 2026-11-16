@@ -72,10 +72,13 @@ P01 skips, each with its reason:
   there (arrays accepted; the narrowed type rejects the cast).
 - O(g^2) dedupe pair precompute, parallel git spawns, ledger batch append, lazy obligation derive,
   `gitTrackedPaths` on the `git.ts` transport: each changes error, lock or ordering behavior.
-- `isRecord` in `parsing/toml.ts`: identical output, but the file is in the import closure that
-  the `GRAPH_EDGE_CACHE_KEY_VERSION` pin in `tests/audit/graph-edge-cache.test.ts` hashes, so the
-  edit would force a cache-key bump that drops every cached graph contribution for no change.
-  P02 and P06 meet the same pin for any file in that closure.
+- `isRecord` in `parsing/toml.ts`: identical output, but the file is in the import closure whose
+  content `tests/audit/graph-edge-cache.test.ts` hashes, so the edit reds the digest pin. A
+  two-line gain did not justify a pin move. P02 and P06 meet the same pin for any file in that
+  closure. The failure text says to bump `GRAPH_EDGE_CACHE_KEY_VERSION`, but a behavior-identical
+  edit needs only the digest pin update; a bump drops every cached graph contribution and is right
+  only when extraction output changes (`docs/backlog/durable-traps.md`, "A COMMENT-only edit to a
+  graph extractor").
 - Public barrel narrowing (unused exported types, `lensOutcome`): an owner decision.
 - `classifyRead` delegation, a private `runGit` wrapper, an artifact-freshness policy table: small
   gain, part of it in loop-core.
