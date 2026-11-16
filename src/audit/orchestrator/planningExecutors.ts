@@ -283,8 +283,10 @@ export async function runPlanningExecutor(
     ...pendingRequeueTasks.map(freezeEstimates),
     // Reconciliation must not drop unrelated in-flight verification work.
     ...(bundle.audit_tasks ?? []).filter((task) => task.tags?.includes(DEEPENING_TAG) &&
-      !isArchitectureDiscoveryTask(task) && task.file_paths.every((path) =>
-        coverage.files.some((file) => file.path === path && file.audit_status !== "excluded"))).map(freezeEstimates),
+      !isArchitectureDiscoveryTask(task) && task.file_paths.every((path) => {
+        const file = liveCoverage.get(path);
+        return file !== undefined && file.audit_status !== "excluded";
+      })).map(freezeEstimates),
     ...architectureDiscoveryTasks({ ...bundle, coverage_matrix: coverage }, lineIndex).map(freezeEstimates),
   ]);
 

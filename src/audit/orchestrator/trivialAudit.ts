@@ -1,11 +1,13 @@
+// sites-pinned: tests/audit/trivial-audit.test.ts
 import type { CoverageMatrix } from "../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import { toPosixPath } from "audit-tools/shared";
 import { isUnmeasuredLineCount } from "../cli/lineIndex.js";
 
 const TRIVIAL_DOTFILES = new Set([".gitignore", ".gitattributes"]);
 
 function basename(path: string): string {
-  const normalized = path.replaceAll("\\", "/");
+  const normalized = toPosixPath(path);
   const parts = normalized.split("/");
   return parts[parts.length - 1] ?? normalized;
 }

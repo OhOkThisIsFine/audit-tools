@@ -283,22 +283,20 @@ export function deriveAuditState(
     ),
   );
 
+  // sites-pinned: tests/audit/charter-emit-order.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/priority-chain-invariants.test.ts
   // Phase C conceptual design-review — the charter LAYER. Runs after the intent
   // checkpoint (it needs the confirmed ceiling) and before the design-review
   // passes. Satisfied when charter_register.json exists + is fresh w.r.t. its deps
   // (unit_manifest / intent_checkpoint / repo_manifest / graph_bundle). At a shallow
   // ceiling the executor writes an omitted register in one step, so this never
-  // blocks the default (conversation-first) path.
-  obligations.push(
-    obligation(
-      "charter_extraction_current",
-      staleOrSatisfied(
-        staleArtifacts,
-        ["charter_register.json"],
-        has(bundle.charter_register),
-      ),
-    ),
+  // blocks the default (conversation-first) path. The same exists+fresh check is
+  // the base of the comparison and fidelity follow-ups below.
+  const charterRegisterBase = staleOrSatisfied(
+    staleArtifacts,
+    ["charter_register.json"],
+    has(bundle.charter_register),
   );
+  obligations.push(obligation("charter_extraction_current", charterRegisterBase));
 
   // Phase C.2 conceptual design-review — the INDEPENDENT delta-mining pass. Runs
   // after charter extraction (it reads the assembled charters) and before the
@@ -309,11 +307,7 @@ export function deriveAuditState(
   // (or found no subsystems) `deltas_pending` is never set → this self-satisfies,
   // never blocking the default (conversation-first) path — mirrors
   // charter_extraction_current.
-  const charterFollowUpBase = staleOrSatisfied(
-    staleArtifacts,
-    ["charter_register.json"],
-    has(bundle.charter_register),
-  );
+  const charterFollowUpBase = charterRegisterBase;
   // Steps 2–3 (the comparison reader) and step 4 (the fidelity lane) of the
   // charter layer each stay unmet while the register flags them pending; when
   // extraction omitted (or produced no node) neither flag is ever set → both
@@ -558,16 +552,9 @@ export function deriveAuditState(
     ),
   );
 
-  // Intake begins with the repository manifest. Provider/model routing is owned by
-  // the dispatch broker and is not an audit lifecycle artifact.
-  let status: AuditTopLevelStatus;
-  if (!has(bundle.repo_manifest)) {
-    status = "not_started";
-  } else if (obligations.some((o) => o.state === "blocked")) {
-    status = "blocked";
-  } else {
-    status = "active";
-  }
+  // Intake begins with the repository manifest. No obligation above derives a
+  // `blocked` state, so a started audit is `active` until it is complete.
+  let status: AuditTopLevelStatus = has(bundle.repo_manifest) ? "active" : "not_started";
 
   const incomplete = obligations.some(
     (o) => o.state === "missing" || o.state === "stale",

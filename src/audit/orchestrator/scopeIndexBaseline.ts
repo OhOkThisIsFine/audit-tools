@@ -44,7 +44,6 @@ import {
   normalizeRepoPath,
 } from "audit-tools/shared";
 import type { RepoManifest } from "../types.js";
-import { toPosixPath } from "audit-tools/shared";
 
 /**
  * Probe the live git index for the audited candidate set and return a stable
@@ -66,7 +65,7 @@ export async function probeScopeIndexKey(
 
   const tracked = new Set(result.paths.map(normalizeRepoPath));
   const trackedCandidates = candidatePaths
-    .map((path) => normalizeRepoPath(toPosixPath(path)))
+    .map((path) => normalizeRepoPath(path))
     .filter((path) => tracked.has(path))
     .sort();
   return hashContent(trackedCandidates.join("\n"));

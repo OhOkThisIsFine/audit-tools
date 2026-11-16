@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/dedupe-tasks.test.ts, tests/audit/field-trial-remediation.test.ts
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildRequeueTasks } from "./requeue.js";
 import { buildFlowRequeueTasks } from "./flowRequeue.js";
@@ -5,35 +6,25 @@ import type { CoverageMatrix } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
 
-export function dedupeTasks<T extends { task_id: string }>(tasks: T[]): T[] {
+/** Keep the first item for each key, in input order. */
+function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
   const seen = new Set<string>();
-  const deduped: T[] = [];
-  for (const task of tasks) {
-    if (seen.has(task.task_id)) {
-      continue;
-    }
-    seen.add(task.task_id);
-    deduped.push(task);
-  }
-  return deduped;
+  return items.filter((item) => {
+    const k = key(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+export function dedupeTasks<T extends { task_id: string }>(tasks: T[]): T[] {
+  return dedupeBy(tasks, (task) => task.task_id);
 }
 
 function dedupeByScope<T extends { lens: string; file_paths: string[] }>(
   tasks: T[],
 ): T[] {
-  const seen = new Set<string>();
-  const deduped: T[] = [];
-
-  for (const task of tasks) {
-    const signature = `${task.lens}:${[...task.file_paths].sort().join(",")}`;
-    if (seen.has(signature)) {
-      continue;
-    }
-    seen.add(signature);
-    deduped.push(task);
-  }
-
-  return deduped;
+  return dedupeBy(tasks, (task) => `${task.lens}:${[...task.file_paths].sort().join(",")}`);
 }
 
 export function buildRequeuePayload(

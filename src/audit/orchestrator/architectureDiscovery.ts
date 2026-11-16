@@ -1,8 +1,8 @@
 // sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/intent-checkpoint.test.ts, tests/audit/semantic-review-step.test.ts
 import { hashContent, stableStringify, findingReEmissionKey } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import type { AuditTask, Finding } from "../types.js";
-import { DEEPENING_TAG, taskIdFor, sanitizeSegment } from "./selectiveDeepening/shared.js";
+import type { AuditResult, AuditTask, Finding } from "../types.js";
+import { DEEPENING_TAG, taskIdFor, sanitizeSegment, uniqueSorted } from "./selectiveDeepening/shared.js";
 import { computeStaleResultTaskIds } from "./resultBaseline.js";
 import { selectCurrentResults } from "./ledger.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
@@ -24,17 +24,23 @@ export const ARCHITECTURE_REVIEW_SCOPE =
   "not by a blanket per-file inspection sweep";
 const QUESTION_DEPENDENCY_TAG = "requires_question:";
 
-/** Evidence-gathering is independent of unresolved interpretation questions. */
-export function inspectionTaskHeld(task: AuditTask, bundle: ArtifactBundle): boolean {
+/**
+ * Evidence-gathering is independent of unresolved interpretation questions.
+ * Returns the held-task test for one bundle, so the unanswered-question set is
+ * built once per partition rather than once per task.
+ */
+export function inspectionTaskHeldIn(bundle: ArtifactBundle): (task: AuditTask) => boolean {
   const unanswered = new Set((bundle.charter_clarification?.asked ?? [])
     .filter((question) => question.answer === undefined).map((question) => question.request_id));
-  return (task.tags ?? []).some((tag) => tag.startsWith(QUESTION_DEPENDENCY_TAG) &&
+  return (task) => (task.tags ?? []).some((tag) => tag.startsWith(QUESTION_DEPENDENCY_TAG) &&
     unanswered.has(tag.slice(QUESTION_DEPENDENCY_TAG.length)));
 }
 
 /** Current accepted discoveries may originate in any work family. Semantic identity prevents echoes. */
-function inspectionDiscoveries(bundle: Pick<ArtifactBundle, "audit_tasks" | "audit_results" | "artifact_metadata">): Finding[] {
-  const results = selectCurrentResults(bundle.audit_results ?? []);
+function inspectionDiscoveries(
+  bundle: Pick<ArtifactBundle, "audit_tasks" | "artifact_metadata">,
+  results: AuditResult[],
+): Finding[] {
   const stale = computeStaleResultTaskIds(results, bundle.audit_tasks ?? [], bundle.artifact_metadata?.result_baselines);
   return results.filter((result) => !stale.has(result.task_id))
     .flatMap((result) => result.findings)
@@ -44,11 +50,11 @@ function inspectionDiscoveries(bundle: Pick<ArtifactBundle, "audit_tasks" | "aud
 
 function architectureDiscoveryKey(finding: Finding): string {
   return hashContent(stableStringify({ identity: findingReEmissionKey(finding),
-    paths: [...new Set(finding.affected_files.map((file) => file.path))].sort() }), { length: 16 });
+    paths: uniqueSorted(finding.affected_files.map((file) => file.path)) }), { length: 16 });
 }
 
 /** Reuse the same already-bound verification question; never rewrite an issued task. */
-function existingFindingFollowups(bundle: ArtifactBundle): Map<string, AuditTask> {
+function existingFindingFollowups(bundle: ArtifactBundle, currentResults: AuditResult[]): Map<string, AuditTask> {
   const candidates = new Map<string, AuditTask>();
   const coordinate = (source: string, finding: string, lens: string, paths: readonly string[]) =>
     stableStringify([source, finding, lens, [...paths].sort()]);
@@ -62,7 +68,7 @@ function existingFindingFollowups(bundle: ArtifactBundle): Map<string, AuditTask
     }
   }
   const byDiscovery = new Map<string, AuditTask>();
-  for (const result of selectCurrentResults(bundle.audit_results ?? [])) {
+  for (const result of currentResults) {
     for (const finding of result.findings) {
       const task = candidates.get(coordinate(`source_task:${sanitizeSegment(result.task_id)}`,
         `finding:${sanitizeSegment(finding.id)}`, finding.lens,
@@ -83,15 +89,16 @@ export function charterQuestionFiles(bundle: Pick<ArtifactBundle, "charter_regis
   const register = bundle.charter_register;
   const difference = register?.differences.find((item) => item.difference_id === differenceId);
   const correspondence = register?.correspondences.find((item) => item.correspondence_id === difference?.correspondence_id);
-  return [...new Set((correspondence?.members ?? []).flatMap((member) =>
+  return uniqueSorted((correspondence?.members ?? []).flatMap((member) =>
     register?.lanes.find((lane) => lane.kind === member.kind)?.nodes
-      .filter((node) => member.node_ids.includes(node.node_id)).flatMap((node) => node.files ?? []) ?? []))].sort();
+      .filter((node) => member.node_ids.includes(node.node_id)).flatMap((node) => node.files ?? []) ?? []));
 }
 
 /** Concrete unverified discoveries earn bounded follow-up, never another full audit. */
 export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Record<string, number> = {}): AuditTask[] {
   const selected = resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection);
   const allowsLens = (lens: string) => selected === undefined || selected.includes(lens);
+  const currentResults = selectCurrentResults(bundle.audit_results ?? []);
   const sourceHashes = new Map((bundle.repo_manifest?.files ?? []).map((file) => [file.path, file.hash ?? "unversioned"]));
   const admitted = new Set(sourceHashes.keys());
   const coverage = new Map((bundle.coverage_matrix?.files ?? []).map((file) => [file.path, file]));
@@ -102,11 +109,11 @@ export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Re
     ...(bundle.design_assessment?.conceptual_findings ?? []),
     ...(bundle.charter_register?.findings ?? []),
     ...(bundle.systemic_challenge?.findings ?? []),
-    ...inspectionDiscoveries(bundle).filter((finding) => finding.systemic === true ||
+    ...inspectionDiscoveries(bundle, currentResults).filter((finding) => finding.systemic === true ||
       new Set(finding.affected_files.map((file) => file.path)).size > 1),
   ];
   const tasks = new Map<string, AuditTask>();
-  const existingFollowups = existingFindingFollowups(bundle);
+  const existingFollowups = existingFindingFollowups(bundle, currentResults);
   const existingDiscoveryIds = new Set((bundle.audit_tasks ?? []).filter(isArchitectureDiscoveryTask).map((task) => task.task_id));
   const make = (id: string, paths: string[], lens: string, rationale: string, tags: string[]): AuditTask => ({
     task_id: id, unit_id: `discovery:${id}`, pass_id: "deepening:architecture", lens,
@@ -119,7 +126,7 @@ export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Re
     if (!allowsLens(finding.lens)) continue;
     if (finding.verification_status === "judge_confirmed" || finding.verification_status === "refuted_at_head") continue;
     if (finding.severity !== "critical" && finding.severity !== "high" && finding.confidence !== "low") continue;
-    const paths = [...new Set(finding.affected_files.map((location) => location.path).filter(inScope))].sort();
+    const paths = uniqueSorted(finding.affected_files.map((location) => location.path).filter(inScope));
     if (paths.length === 0) continue;
     const signature = architectureDiscoveryKey(finding);
     const id = taskIdFor("architecture", [signature]);
@@ -183,7 +190,7 @@ export function withArchitectureFollowupEvidence(bundle: ArtifactBundle): Artifa
       result.idempotency_key !== undefined && baselines?.[result.idempotency_key] !== undefined &&
       task.file_paths.every((path) => hashes.get(path) !== undefined && task.inputs?.[`source:${path}`] === hashes.get(path));
   }).map((result) => [result.task_id, result]));
-  const existingFollowups = existingFindingFollowups(bundle);
+  const existingFollowups = existingFindingFollowups(bundle, results);
   const attach = (finding: Finding): Finding => {
     const key = architectureDiscoveryKey(finding);
     const result = current.get(taskIdFor("architecture", [key])) ??

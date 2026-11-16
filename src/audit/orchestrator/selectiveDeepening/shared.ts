@@ -48,18 +48,6 @@ export const CONFIDENCE_RANK: Record<Finding["confidence"], number> =
     number
   >;
 
-export function priorityRank(priority: AuditTask["priority"]): number {
-  switch (priority) {
-    case "high":
-      return 3;
-    case "medium":
-      return 2;
-    case "low":
-    default:
-      return 1;
-  }
-}
-
 export interface BuildSelectiveDeepeningTaskOptions {
   existingTasks?: AuditTask[];
   results: AuditResult[];

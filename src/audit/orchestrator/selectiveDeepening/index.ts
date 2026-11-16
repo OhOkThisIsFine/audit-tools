@@ -5,8 +5,8 @@ import {
   SEVERITY_RANK,
   intersects,
   isDeepeningTask,
-  priorityRank,
 } from "./shared.js";
+import { priorityRank } from "../auditTaskUtils.js";
 import { buildFindingFollowupTask, findingContexts } from "./findingFollowup.js";
 import { buildConflictFollowupTask, coalescedConflictGroups } from "./conflict.js";
 import {

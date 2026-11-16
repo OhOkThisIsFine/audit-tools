@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/analyzer-seam.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import type {
@@ -9,6 +10,7 @@ import type {
 import { installToCache, resolveAnalyzerDep, compareCodeUnits } from "audit-tools/shared";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
+import { uniqueSortedRoutes } from "../extractors/graphRoutes.js";
 import { mergeAnalyzerEdges } from "../extractors/analyzers/merge.js";
 import { ANALYZER_REGISTRY } from "../extractors/analyzers/registry.js";
 import type {
@@ -69,23 +71,6 @@ function settingFor(
   id: string,
 ): AnalyzerSetting {
   return analyzers?.[id] ?? "auto";
-}
-
-function routeSignature(route: RouteEdge): string {
-  return `${route.method ?? ""}\0${route.path}\0${route.handler}`;
-}
-
-function mergeRoutes(floor: RouteEdge[], analyzer: RouteEdge[]): RouteEdge[] {
-  const deduped = new Map<string, RouteEdge>();
-  for (const route of [...floor, ...analyzer]) {
-    deduped.set(routeSignature(route), route);
-  }
-  return [...deduped.values()].sort(
-    (a, b) =>
-      compareCodeUnits(a.path, b.path) ||
-      compareCodeUnits(a.handler, b.handler) ||
-      compareCodeUnits(a.method ?? "", b.method ?? ""),
-  );
 }
 
 interface RunResolution {
@@ -159,7 +144,7 @@ function buildEnrichedGraph(
       calls: mergeAnalyzerEdges(floor.graphs.calls ?? [], bucketEdges.calls),
       references: mergeAnalyzerEdges(floor.graphs.references ?? [], bucketEdges.references),
       ...(routeEdges.length > 0
-        ? { routes: mergeRoutes(floor.graphs.routes ?? [], routeEdges) }
+        ? { routes: uniqueSortedRoutes([...(floor.graphs.routes ?? []), ...routeEdges]) }
         : {}),
     },
     // Union with the floor's provenance — the floor may already carry analyzers

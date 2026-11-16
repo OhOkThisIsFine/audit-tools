@@ -1,3 +1,5 @@
+// sites-pinned: tests/audit/result-ingestion.test.ts
+import { isRecord } from "audit-tools/shared";
 import { applyFileCoverage } from "../coverage.js";
 import type {
   AuditResult,
@@ -74,10 +76,7 @@ export function partitionOrphanedAuditResults(
   const orphanedTaskIds: string[] = [];
   const retained = results.filter((entry) => {
     const taskId =
-      entry && typeof entry === "object" && !Array.isArray(entry) &&
-      typeof (entry as { task_id?: unknown }).task_id === "string"
-        ? (entry as { task_id: string }).task_id
-        : undefined;
+      isRecord(entry) && typeof entry.task_id === "string" ? entry.task_id : undefined;
     if (taskId !== undefined && !activeTaskIds.has(taskId)) {
       orphanedTaskIds.push(taskId);
       return false;

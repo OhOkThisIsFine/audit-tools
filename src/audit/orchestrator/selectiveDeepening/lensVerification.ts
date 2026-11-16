@@ -16,10 +16,10 @@ import {
 
 
   priorityLabel,
-  priorityRank,
   taskIdFor,
   uniqueSorted,
 } from "./shared.js";
+import { priorityRank } from "../auditTaskUtils.js";
 
 /** Score boost for files touched by a critical-flow task — highest semantic signal. */
 const SCORE_CRITICAL_FLOW = 6;

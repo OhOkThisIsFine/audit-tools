@@ -89,6 +89,29 @@ function requireRoot(root: string | undefined, executorName: string): string {
 }
 
 /**
+ * What both synthesis executors read from disk. The runner owns the artifacts
+ * dir and the repository root, so it reads the packet-retention index and what
+ * the audit read (`readAuditReadState`) here, and the synthesis executors stay
+ * synchronous.
+ */
+async function synthesisReadInputs(
+  bundle: ArtifactBundle,
+  options: AdvanceAuditOptions,
+): Promise<Parameters<typeof runSynthesisExecutor>[2]> {
+  return {
+    auditRead: options.root
+      ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
+          excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
+        })
+      : null,
+    sizeIndex: options.sizeIndex,
+    packetArchive: options.artifactsDir
+      ? await readCharterPacketIndex(options.artifactsDir)
+      : [],
+  };
+}
+
+/**
  * Executor-id → runner. The single source of dispatch (A3 step 4 slice 2a):
  * `advanceAudit`'s scan path and its `preferredExecutor` forced path both dispatch
  * through this map, replacing the hand `switch` and the registry⇄switch sync
@@ -113,14 +136,14 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
   // consumed, pair-bound host verdict.
   intent_equivalence_executor: async (bundle, { options }) =>
     runIntentEquivalenceResolve(bundle, options.intentEquivalenceVerdict),
-  // root is intentionally optional: present → buildGraphBundleFromFs, absent →
-  // manifest-only buildGraphBundle.
   external_analyzer_acquisition_executor: async (bundle, { options }) =>
     runExternalAnalyzerAcquisitionExecutor(
       bundle,
       options.root,
       options.externalAcquisition,
     ),
+  // root is intentionally optional: present → buildGraphBundleFromFs, absent →
+  // manifest-only buildGraphBundle.
   structure_executor: async (bundle, { options }) =>
     runStructureExecutor(bundle, options.root),
   critical_flow_fallback_executor: async (bundle, { options }) =>
@@ -194,37 +217,16 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
       bundle,
       requireRoot(options.root, "runtime_validation_executor"),
     ),
-  // The runner owns the artifacts dir and the repository root, so it reads the
-  // packet-retention index and what the audit read (`readAuditReadState`) here
-  // and the synthesis executors stay synchronous. The PRIOR report's value is
-  // handed in so a re-synthesis over an unchanged tree keeps it byte-identical
-  // and does not re-stale the narrative pass.
+  // The PRIOR report's `audit_read` is handed in so a re-synthesis over an
+  // unchanged tree keeps it byte-identical and does not re-stale the narrative
+  // pass.
   synthesis_executor: async (bundle, { options }) =>
-    runSynthesisExecutor(bundle, options.auditResults, {
-      auditRead: options.root
-        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
-            excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
-          })
-        : null,
-      sizeIndex: options.sizeIndex,
-      packetArchive: options.artifactsDir
-        ? await readCharterPacketIndex(options.artifactsDir)
-        : [],
-    }),
+    runSynthesisExecutor(bundle, options.auditResults, await synthesisReadInputs(bundle, options)),
+  // The narrative executor reads `auditRead` only on the fallback where no base
+  // report exists yet; a persisted report's own `audit_read` rides through
+  // `applyNarrative` untouched.
   synthesis_narrative_executor: async (bundle, { options }) =>
-    runSynthesisNarrativeExecutor(bundle, options.narrativeResults, {
-      // Read only on the fallback where no base report exists yet; a persisted
-      // report's own `audit_read` rides through `applyNarrative` untouched.
-      auditRead: options.root
-        ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
-            excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
-          })
-        : null,
-      sizeIndex: options.sizeIndex,
-      packetArchive: options.artifactsDir
-        ? await readCharterPacketIndex(options.artifactsDir)
-        : [],
-    }),
+    runSynthesisNarrativeExecutor(bundle, options.narrativeResults, await synthesisReadInputs(bundle, options)),
   runtime_validation_update_executor: async (bundle, { options }) => {
     if (!options.runtimeValidationUpdates) {
       throw new Error(

@@ -314,6 +314,43 @@
         "src/audit/systemic/secondOrderAdversaryPrompt.ts": "85f1803f76714c1fccd8651fa34baf6d3704d4fc"
       }
     },
+    "42e42270e8c264c9": {
+      "reviewed_by": "claude-opus-5-5 review subagent",
+      "attester_class": "agent",
+      "checked": "Independent read-only review of the P03 simplify diff, item by item, for behavior change: staleness hash memo and throw order, artifactMetadata carry rule, advance host-step constructor and DrainCtx, ingestion affinity build removal, architectureDiscovery result selection, liveCoverage, route dedupe, sensitive-lens set, priorityRank twin, state.ts blocked branch, synthesis inputs. Verdict: no behavior change; one wrong pin fixed. Full suite green on the staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "564e843a221d61a204b658b9bd6d3565e33df6db",
+        "ran_at": "2026-11-16T19:19:56.575Z"
+      },
+      "attested_at": "2026-11-16T19:20:04.561Z",
+      "vouches": {
+        "src/audit/orchestrator/advance.ts": "d2306e0df855c1f375f9c2c5da16a86ef527f48a",
+        "src/audit/orchestrator/architectureDiscovery.ts": "3add0e6d1cc9fab5684251c1692a7c2b7dc346a4",
+        "src/audit/orchestrator/artifactMetadata.ts": "992b0a1eeb22bbecc5d4d27478a1a48a5b22f7e8",
+        "src/audit/orchestrator/auditTaskUtils.ts": "41dbb577b2b780f722ae3e9c6e6d9e5cd1e4ea30",
+        "src/audit/orchestrator/executorRunners.ts": "c5e0cd7072398c90ae659d0f17634e58a2161b4f",
+        "src/audit/orchestrator/fileIntegrity.ts": "561668983ee2e03f33f90680d9989c1b8e77fb2d",
+        "src/audit/orchestrator/flowRequeue.ts": "43e1af11bdbe57be3d411dbf23a2773710a49eb9",
+        "src/audit/orchestrator/graphEnrichmentExecutor.ts": "f192a55ed1860de9caff0b3265c764e6686aeada",
+        "src/audit/orchestrator/ingestionExecutors.ts": "c9276de2d83004b648cb3998ea23e8bcb37e8f96",
+        "src/audit/orchestrator/pendingTasks.ts": "d5e3fec34c456160ea9d43fa820e6bdcc3bee726",
+        "src/audit/orchestrator/planningExecutors.ts": "e5b2912f89da713137ac6a953f626f6b9577e165",
+        "src/audit/orchestrator/requeue.ts": "3851cb1b02aa7a7197e25ef19fe971df7ef39d81",
+        "src/audit/orchestrator/requeueCommand.ts": "d2b2b4b808a05b1b9c535204b0605797eed8ec1a",
+        "src/audit/orchestrator/resultIngestion.ts": "076de1cd55878ddb50d8b67f3e2691b56cf743ab",
+        "src/audit/orchestrator/scopeIndexBaseline.ts": "bff2f88732cda1bbf52d435442de11857d6af251",
+        "src/audit/orchestrator/selectiveDeepening/index.ts": "8b7673953f290c85a1d56a08948ea49cfba7d60e",
+        "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": "20e810b03f1432f2b069ce35d7efb9bc44c28288",
+        "src/audit/orchestrator/selectiveDeepening/shared.ts": "ca0dd73e6e57113142889b7b8a78b4910941dbd1",
+        "src/audit/orchestrator/staleness.ts": "c1b2b6d796ebec866af4953be4e1fb3f0f8bff18",
+        "src/audit/orchestrator/state.ts": "3c0e09a8aa79cf59c875265fff2b643f33dc2b13",
+        "src/audit/orchestrator/taskBuilder.ts": "57005048b924769b93dc00ea29c1c51f82d91bbe",
+        "src/audit/orchestrator/trivialAudit.ts": "17dede75347e88933a08a0d38daf7b3952a667f8"
+      }
+    },
     "4318b8e7432c3e06": {
       "reviewed_by": "claude-opus-5-5-review-subagent",
       "attester_class": "agent",
@@ -505,25 +542,6 @@
         "src/audit/orchestrator/nextStep.ts": "52c68f098ce18e3b515385638c51e8fe4cfed5be",
         "src/audit/orchestrator/staleness.ts": "9fc14544c1c18f7254d6366b51b62b0e819cb437",
         "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
-      }
-    },
-    "b3148880827e283a": {
-      "reviewed_by": "Independent Chat cache-boundary review relayed by source thread 01a11009-2946-7430-9357-b90afaad902d",
-      "attester_class": "agent",
-      "checked": "Independent Chat review traced the exact eight source-read-only executors for stale-index reuse. Unknown and tool-backed dispatches invalidate on success and exceptions, including partial writes. Real formatter success and partial failure preserve fresh planning; the persisted fold matches forced rescans with at least two fewer line scans. Local Windows unfiltered npm test qualified the exact content.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "e2214abd1bd7a45953a79586f5fd76e153a3086f",
-        "ran_at": "2026-10-18T09:33:08.385Z"
-      },
-      "attested_at": "2026-10-18T09:45:54.751Z",
-      "vouches": {
-        "src/audit/cli/nextStepHelpers.ts": "fe7693e61feaa5c83677704f85385fdbdf6bcde2",
-        "src/audit/orchestrator/advance.ts": "3e4be5fb16f4e218bf0dbee67b79225ed71033df",
-        "src/audit/orchestrator/executorRunners.ts": "836b0e7ec3d633724706ce7319f30be9e694867d",
-        "src/audit/orchestrator/scopeIndexBaseline.ts": "f1dd9b6b0ee04c9d56a9d32a7b994618d0a9ca3a"
       }
     },
     "be526ca9e4e1d631": {
@@ -786,19 +804,19 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
-      "review": "132b243de694e051"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/auditTaskUtils.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
       "review": "be526ca9e4e1d631"
@@ -855,13 +873,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "b3148880827e283a"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "9bc59db653647a3a"
     },
     "src/audit/orchestrator/fileIntegrity.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/flowCoverage.ts": {
       "baseline": "7b79934e86baf378"
@@ -870,7 +888,7 @@
       "review": "c50e7ede07ea40a4"
     },
     "src/audit/orchestrator/flowRequeue.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/gitHistoryBaseline.ts": {
       "baseline": "7b79934e86baf378"
@@ -879,13 +897,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/graphEnrichmentExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/hostInputPause.ts": {
       "review": "c2fa0250dd9f5ee5"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "132b243de694e051"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -930,19 +948,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/pendingTasks.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/planning.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/planningExecutors.ts": {
-      "review": "132b243de694e051"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/requeue.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/requeueCommand.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/requeueFold.ts": {
       "baseline": "7b79934e86baf378"
@@ -954,7 +972,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/resultIngestion.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/reviewPacketGraph.ts": {
       "baseline": "7b79934e86baf378"
@@ -990,7 +1008,7 @@
       "review": "6cd8a9eb36e60d5d"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
-      "review": "b3148880827e283a"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
       "review": "92a14c6e9e3ff056"
@@ -1002,25 +1020,25 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/selectiveDeepening/index.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/selectiveDeepening/shared.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/staleness.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "review": "32765e3dafb89abf"
@@ -1038,10 +1056,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/taskBuilder.ts": {
-      "review": "c50e7ede07ea40a4"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/trivialAudit.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/unitBuilder.ts": {
       "review": "677face55f9a5a77"

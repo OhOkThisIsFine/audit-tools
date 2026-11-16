@@ -1,16 +1,16 @@
+// sites-pinned: tests/audit/orchestrator-remediation.test.ts
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { AuditTask, CoverageMatrix } from "../types.js";
 import { buildRequeueTargets } from "../coverage.js";
 import { getExternalSignalPaths } from "./requeueUtils.js";
+import { SENSITIVE_LENSES } from "./auditTaskUtils.js";
 
 function taskPriority(
   hasExternalSignal: boolean,
   lens: string,
 ): "high" | "medium" | "low" {
   if (hasExternalSignal) return "high";
-  if (lens === "security" || lens === "data_integrity" || lens === "reliability") {
-    return "medium";
-  }
+  if (SENSITIVE_LENSES.has(lens)) return "medium";
   return "low";
 }
 

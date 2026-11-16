@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/coverage-element-baseline.test.ts, tests/audit/intent-equivalence-executor.test.ts, tests/audit/advance-drain-loop.test.ts
 import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,
@@ -11,6 +12,7 @@ import { hashContent } from "../../shared/hash.js";
 import { stableStringify } from "../../shared/stableStringify.js";
 import { buildDependencySlices } from "./dependencySlices.js";
 import { computeGateVersion } from "./intentCheckpointGate.js";
+import { isMetadataManifestCurrent } from "./resultBaseline.js";
 
 // The canonical "X depends on Y" table (ARC-cebe3421). computeArtifactMetadata
 // records each artifact's upstream dependency revisions, so it reads the
@@ -124,10 +126,7 @@ export function computeArtifactMetadata(
   // baselines (if any) cannot be safely interpreted. Treat it as absent for
   // reuse/carry-forward so every artifact is recomputed fresh and every element
   // fails safe to re-derive. The output is always stamped F1-current.
-  const previousIsCurrent =
-    typeof previous?.metadata_schema_version === "number" &&
-    previous.metadata_schema_version >= METADATA_SCHEMA_VERSION;
-  const usablePrevious = previousIsCurrent ? previous : undefined;
+  const usablePrevious = isMetadataManifestCurrent(previous) ? previous : undefined;
   // Enumerate the FULL DAG artifact universe (not just those that depend on
   // something): a pure-input artifact (scope.json, intent_checkpoint.json, …)
   // must still get a metadata entry so its dependents can compare revisions.
@@ -147,12 +146,16 @@ export function computeArtifactMetadata(
   // once. Prefer the bundle manifest's copy (the executor commits onto
   // `run.updated`'s manifest this same advance) over the pre-executor previous.
   const bundleMetadata = bundle.artifact_metadata;
-  const bundleIsCurrent =
-    typeof bundleMetadata?.metadata_schema_version === "number" &&
-    bundleMetadata.metadata_schema_version >= METADATA_SCHEMA_VERSION;
-  const carriedIntentBaseline =
-    (bundleIsCurrent ? bundleMetadata?.intent_baseline : undefined) ??
-    usablePrevious?.intent_baseline;
+  const bundleIsCurrent = isMetadataManifestCurrent(bundleMetadata);
+  // The CE-007 carry rule for every manifest-level store, stated once: the
+  // bundle manifest's copy when that manifest is F1-current, else the
+  // pre-executor `usablePrevious` copy, else nothing. Each key falls back on
+  // its own.
+  const carried = <K extends keyof ArtifactMetadataManifest>(
+    key: K,
+  ): ArtifactMetadataManifest[K] | undefined =>
+    (bundleIsCurrent ? bundleMetadata?.[key] : undefined) ?? usablePrevious?.[key];
+  const carriedIntentBaseline = carried("intent_baseline");
   const intentRevisionAuthority =
     carriedIntentBaseline &&
     carriedIntentBaseline.gate_version === computeGateVersion()
@@ -160,7 +163,6 @@ export function computeArtifactMetadata(
       : undefined;
 
   for (const artifactName of orderedArtifacts) {
-    if (artifactName === "artifact_metadata.json") continue;
     const value = getArtifactValue(bundle, artifactName);
     if (value === undefined || value === null) continue;
 
@@ -251,9 +253,7 @@ export function computeArtifactMetadata(
   // baselines onto the *bundle's* manifest (run.updated), so prefer those over
   // the pre-executor `usablePrevious` — but only when the bundle manifest is
   // itself F1-current (same CE-007 gate); otherwise fall back, then drop.
-  const carriedBaselines =
-    (bundleIsCurrent ? bundleMetadata?.result_baselines : undefined) ??
-    usablePrevious?.result_baselines;
+  const carriedBaselines = carried("result_baselines");
   if (carriedBaselines) {
     manifest.result_baselines = carriedBaselines;
   }
@@ -261,9 +261,7 @@ export function computeArtifactMetadata(
   // result baselines (CE-007: only from an F1-current store; prefer the bundle's
   // freshly-recorded set over the pre-executor `usablePrevious`). Dropping an
   // old-shape store makes every coverage element fail safe to re-audit.
-  const carriedCoverageBaselines =
-    (bundleIsCurrent ? bundleMetadata?.coverage_element_baselines : undefined) ??
-    usablePrevious?.coverage_element_baselines;
+  const carriedCoverageBaselines = carried("coverage_element_baselines");
   if (carriedCoverageBaselines) {
     manifest.coverage_element_baselines = carriedCoverageBaselines;
   }
@@ -272,9 +270,7 @@ export function computeArtifactMetadata(
   // — the structure executor stamps it on run.updated — over the pre-executor
   // `usablePrevious`). Dropping an old-shape baseline makes the next structure
   // run re-mine git history (fail-safe).
-  const carriedGitHistoryBaseline =
-    (bundleIsCurrent ? bundleMetadata?.git_history_baseline : undefined) ??
-    usablePrevious?.git_history_baseline;
+  const carriedGitHistoryBaseline = carried("git_history_baseline");
   if (carriedGitHistoryBaseline) {
     manifest.git_history_baseline = carriedGitHistoryBaseline;
   }

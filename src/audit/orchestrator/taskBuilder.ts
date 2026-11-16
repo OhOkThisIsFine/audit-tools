@@ -9,7 +9,7 @@ import type { CriticalFlowManifest } from "audit-tools/shared";
 import { chunkByBudget, compareCodeUnits, hashContent, stableStringify } from "audit-tools/shared";
 import { claimFlowReviewBlocks } from "./flowPlanning.js";
 import { isTrivialAuditPath } from "./trivialAudit.js";
-import { LENS_ORDER, priorityRank } from "./auditTaskUtils.js";
+import { LENS_ORDER, SENSITIVE_LENSES, priorityRank } from "./auditTaskUtils.js";
 import {
   isTestPath,
   normalizeExtractorPath,
@@ -68,10 +68,7 @@ function taskPriority(
       lens === "security" || lens === "reliability" || lens === "correctness"
         ? "high"
         : "medium";
-  } else if (
-    hasExternalSignal &&
-    (lens === "security" || lens === "data_integrity" || lens === "reliability")
-  ) {
+  } else if (hasExternalSignal && SENSITIVE_LENSES.has(lens)) {
     base = "high";
   } else if (hasExternalSignal) {
     base = "medium";

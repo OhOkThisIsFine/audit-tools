@@ -1,4 +1,5 @@
-import { hashContent, checkFileIntegrityRecords } from "audit-tools/shared";
+// sites-pinned: tests/audit/fs-intake.test.ts, tests/audit/observability-signals.test.ts
+import { hashContent, checkFileIntegrityRecords, isFileMissingError } from "audit-tools/shared";
 import { readFile } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { existsSync } from "node:fs";
@@ -36,8 +37,8 @@ export async function checkFileIntegrity(
       try {
         return { kind: "ok", hash: await hashFile(absolute) };
       } catch (err) {
+        if (isFileMissingError(err)) return { kind: "missing" };
         const code = (err as NodeJS.ErrnoException).code;
-        if (code === "ENOENT") return { kind: "missing" };
         process.stderr.write(
           JSON.stringify({
             kind: "file_integrity_io_error",

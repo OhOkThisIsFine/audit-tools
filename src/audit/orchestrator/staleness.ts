@@ -24,6 +24,32 @@ function computeContentHash(
   return hashArtifactValue(artifactName, value);
 }
 
+type ContentHashLookup = (artifactName: string) => string | undefined;
+
+/**
+ * `computeContentHash` memoized for ONE staleness pass over ONE bundle. A DAG
+ * upstream feeds every dependent edge plus the presence pass (`repo_manifest`
+ * alone has ~20 dependents), and each call canonicalizes and hashes the whole
+ * artifact. A canonicalizer throw is memoized too and rethrown, so each caller
+ * still sees exactly the throw it saw before.
+ */
+function memoizedContentHash(bundle: ArtifactBundle): ContentHashLookup {
+  const memo = new Map<string, { hash: string | undefined } | { error: unknown }>();
+  return (artifactName) => {
+    let entry = memo.get(artifactName);
+    if (!entry) {
+      try {
+        entry = { hash: computeContentHash(artifactName, bundle) };
+      } catch (error) {
+        entry = { error };
+      }
+      memo.set(artifactName, entry);
+    }
+    if ("error" in entry) throw entry.error;
+    return entry.hash;
+  };
+}
+
 // The canonical "X depends on Y" table (ARC-cebe3421) — same single source of
 // truth computeArtifactMetadata records against.
 const ARTIFACT_DEPENDENCIES_MAP: Partial<Record<string, string[]>> =
@@ -153,6 +179,7 @@ function classifyArtifactPresence(
   bundle: ArtifactBundle,
   metadata: NonNullable<ArtifactBundle["artifact_metadata"]>,
   artifactName: string,
+  contentHash: ContentHashLookup,
 ): ArtifactPresence {
   if (!present(bundle, artifactName)) return "absent";
   const entry = metadata.artifacts[artifactName];
@@ -170,7 +197,7 @@ function classifyArtifactPresence(
   // producer, where a malformed body IS an error).
   let currentHash: string | undefined;
   try {
-    currentHash = computeContentHash(artifactName, bundle);
+    currentHash = contentHash(artifactName);
   } catch {
     return "partial";
   }
@@ -385,6 +412,7 @@ export function computeStaleArtifacts(
   // the caller and named in the emitted record (INV-SSP-DEFERRED-SET-REPORTED).
   const deferred = new Set<string>();
   const metadata = bundle.artifact_metadata;
+  const contentHash = memoizedContentHash(bundle);
 
   // Metadata-migration fail-safe (CE-007): an old-shape (pre-F1) manifest —
   // present but absent/older `metadata_schema_version`, or that would not decode
@@ -464,16 +492,15 @@ export function computeStaleArtifacts(
           continue;
         }
 
+        // The upstream is present here (an absent one `continue`d above), so
+        // a present upstream with no metadata entry has nothing to compare.
         const dependencyEntry = metadata.artifacts[dependencyName];
         if (!dependencyEntry) {
-          if (present(bundle, dependencyName) || recordedRevision > 0) {
-            isStale = true;
-            break;
-          }
-          continue;
+          isStale = true;
+          break;
         }
 
-        const currentHash = computeContentHash(dependencyName, bundle);
+        const currentHash = contentHash(dependencyName);
         if (
           !currentHash ||
           dependencyEntry.content_hash !== currentHash ||
@@ -518,7 +545,7 @@ export function computeStaleArtifacts(
       // absent-path fail-safe below, which is the behaviour it always had.
       const presence = HOST_APPENDED_ARTIFACTS.has(artifactName)
         ? "intact"
-        : classifyArtifactPresence(bundle, metadata, artifactName);
+        : classifyArtifactPresence(bundle, metadata, artifactName, contentHash);
       if (presence === "partial") {
         stale.add(artifactName);
         continue;
@@ -527,9 +554,8 @@ export function computeStaleArtifacts(
       // tooling_manifest.json is an OPTIONAL probe: its absence is the normal
       // case, never an upstream that vanished.
       // ORDERING: the `partial` branch above runs FIRST, so this exemption only
-      // ever sees `absent` — a tooling_manifest classified `partial` would be
-      // staled before reaching here, inert today only because it declares no
-      // upstreams and so short-circuits as `intact` at the leaf gate.
+      // ever sees `absent` — a tooling_manifest classified `partial` is staled
+      // before it reaches here.
       if (artifactName === "tooling_manifest.json") continue;
       for (const downstream of ARTIFACT_DEPENDENTS_MAP[artifactName] ?? []) {
         const hasMetadataEntry = Boolean(metadata.artifacts[downstream]);

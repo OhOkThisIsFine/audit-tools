@@ -27,6 +27,13 @@ export function priorityRank(priority: AuditTask["priority"]): number {
   }
 }
 
+/** The lenses whose findings carry the most risk; every priority rule reads this set. */
+export const SENSITIVE_LENSES: ReadonlySet<string> = new Set([
+  "security",
+  "data_integrity",
+  "reliability",
+]);
+
 /**
  * Deterministic seed for a task's provider-neutral audit-risk estimate in
  * [0,1]. Derived from the same signals the (legacy) model-tier hint used —
@@ -36,8 +43,6 @@ export function priorityRank(priority: AuditTask["priority"]): number {
  * never a model/provider decision. See
  * spec/audit-workflow-design.md.
  */
-const SENSITIVE_LENSES = new Set(["security", "data_integrity", "reliability"]);
-
 export function computeRiskEstimate(task: AuditTask): number {
   const base =
     task.priority === "high" ? 0.7 : task.priority === "medium" ? 0.4 : 0.15;
@@ -55,8 +60,8 @@ export function computeRiskEstimate(task: AuditTask): number {
   }
   if (tags.includes(LENS_VERIFICATION_TAG)) bonus += 0.1;
   if (SENSITIVE_LENSES.has(task.lens)) bonus += 0.1;
-  const score = base + bonus;
-  return score < 0 ? 0 : score > 1 ? 1 : score;
+  // Every addend is non-negative, so only the upper bound can bind.
+  return Math.min(base + bonus, 1);
 }
 
 export function sortLenses(lenses: Iterable<string>): string[] {

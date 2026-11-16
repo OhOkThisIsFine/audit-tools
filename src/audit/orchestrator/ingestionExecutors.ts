@@ -205,6 +205,8 @@ export function runResultIngestionExecutor(
         updateAuditTaskStatuses(canonicalLiveTasks, mergedResults) ?? [],
       )
     : undefined;
+  // No affinity graph is built here: nothing before `finalBundle` reads it, and
+  // `reviewTaskArtifacts` rebuilds it there from the final task set.
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
     coverage_matrix: updatedCoverageMatrix,
@@ -213,11 +215,6 @@ export function runResultIngestionExecutor(
     runtime_validation_report: runtimeValidationReport,
     audit_results: mergedResults,
     audit_tasks: completedAuditTasks,
-    task_affinity_graph: completedAuditTasks
-      ? buildTaskAffinityGraph(completedAuditTasks, {
-          graphBundle: bundle.graph_bundle,
-        })
-      : bundle.task_affinity_graph,
     audit_report: undefined,
   };
   const selectiveDeepening = applySelectiveDeepening({

@@ -349,13 +349,6 @@ function createCorrelationId(): string {
 }
 
 /**
- * Execute exactly ONE bounded audit step: derive state, pick the highest-priority
- * obligation (or the forced `preferredExecutor`), dispatch its runner, recompute
- * metadata + state, and return the advance result WITHOUT persisting. All internal
- * state derivations run with `emitStaleness: false` — the caller (`advanceAudit`)
- * emits a single consolidated staleness record for the whole drain at the boundary.
- */
-/**
  * au-4 (2026-08-05 friction): a long next-step derivation (>120s observed,
  * >300s on the 2026-08-06 re-test) emitted no progress signal, silently blowing
  * caller timeouts — same class as the silent stale-artifact re-extraction
@@ -398,6 +391,12 @@ export function startAdvanceHeartbeat(
 }
 
 /**
+ * Execute exactly ONE bounded audit step: derive state, pick the highest-priority
+ * obligation (or the forced `preferredExecutor`), dispatch its runner, recompute
+ * metadata + state, and return the advance result WITHOUT persisting. All internal
+ * state derivations run with `emitStaleness: false` — the caller (`advanceAudit`)
+ * emits a single consolidated staleness record for the whole drain at the boundary.
+ *
  * Exported as the FORCED SINGLE-STEP primitive (CX-02): the unified `next-step`
  * fold dispatches exactly one bounded step per obligation execution through
  * this, and every submission-apply forces one executor through it. It never
@@ -462,21 +461,7 @@ export async function runSingleAdvanceStep(
       note: selectedExecutor,
       duration_ms: Date.now() - executorStartedAt,
     });
-    const state = deriveAuditState(bundle, {
-      emitStaleness: false,
-    });
-    state.last_executor = selectedExecutor;
-    state.last_obligation = selectedObligation ?? undefined;
-    return {
-      audit_state: state,
-      selected_obligation: selectedObligation,
-      selected_executor: selectedExecutor,
-      progress_made: false,
-      artifacts_written: ["audit_state.json"],
-      progress_summary: `Executor ${selectedExecutor} is selected and requires its bound host step.`,
-      next_likely_step: selectedObligation,
-      updated_bundle: { ...bundle, audit_state: state },
-    };
+    return boundHostStepResult(bundle, selectedExecutor, selectedObligation);
   }
 
   let run: ExecutorRunResult;
@@ -632,11 +617,11 @@ interface DrainCtx {
   options: AdvanceAuditOptions;
   policyInputs: ObligationPolicyInputs;
   /** First-seen-order-deduplicated artifact list accumulated across the whole drain. */
-  artifactsAcc: { value: string[] };
+  artifacts: string[];
   /** Each dispatched step's own `progress_summary`, joined with "\n" at merge time. */
-  summaryAcc: { value: string[] };
+  summaries: string[];
   /** The last merged dispatch result; null until the first dispatch lands. */
-  lastMergedRef: { value: AdvanceAuditResult | null };
+  lastMerged: AdvanceAuditResult | null;
 }
 
 type DrainObligation = ObligationDef<ArtifactBundle, DrainCtx, AdvanceAuditResult>;
@@ -652,27 +637,23 @@ function mergeDrainStep(
   result: AdvanceAuditResult,
   ctx: DrainCtx,
 ): AdvanceAuditResult {
-  ctx.artifactsAcc.value = dedupeInOrder([
-    ...ctx.artifactsAcc.value,
-    ...result.artifacts_written,
-  ]);
-  ctx.summaryAcc.value.push(result.progress_summary);
+  // A Set keeps first-insertion order, so this dedupes in first-seen order.
+  ctx.artifacts = [...new Set([...ctx.artifacts, ...result.artifacts_written])];
+  ctx.summaries.push(result.progress_summary);
   return {
     ...result,
-    artifacts_written: ctx.artifactsAcc.value,
-    progress_summary: ctx.summaryAcc.value.join("\n"),
+    artifacts_written: ctx.artifacts,
+    progress_summary: ctx.summaries.join("\n"),
   };
 }
 
 /**
- * The "Executor <id> is selected and requires its bound host step." result —
- * the plan draw's ENTRY-at-a-boundary output (output shape 2). Byte-compatible
- * with the no-runner branch of `runSingleAdvanceStep`, which produces the same
- * shape for a boundary whose executor has no deterministic runner; this
- * constructor exists for the CORRECTED case — a boundary whose executor HAS a
- * runner (a hybrid's live host branch), where HEAD used to dispatch that
- * runner once before detecting the pause, and the classified draw halts
- * BEFORE the dispatch instead.
+ * The plan draw's ENTRY-at-a-boundary output (output shape 2). It exists for
+ * the CORRECTED case — a boundary whose executor HAS a runner (a hybrid's live
+ * host branch), where HEAD used to dispatch that runner once before detecting
+ * the pause, and the classified draw halts BEFORE the dispatch instead. A
+ * boundary whose executor has no deterministic runner reaches the same result
+ * through the no-runner branch of `runSingleAdvanceStep`.
  */
 function hostBoundaryHandoffResult(
   bundle: ArtifactBundle,
@@ -683,9 +664,23 @@ function hostBoundaryHandoffResult(
 ): AdvanceAuditResult {
   const log = options.runLogger ?? RunLogger.disabled();
   logObligationSelection(log, createCorrelationId(), selectedObligation, reason);
+  return boundHostStepResult(bundle, selectedExecutor, selectedObligation);
+}
+
+/**
+ * The "Executor <id> is selected and requires its bound host step." result,
+ * the one constructor for both of its producers: the no-runner branch of
+ * `runSingleAdvanceStep` and `hostBoundaryHandoffResult`. Each caller does its
+ * own logging first.
+ */
+function boundHostStepResult(
+  bundle: ArtifactBundle,
+  selectedExecutor: string,
+  selectedObligation: string | null,
+): AdvanceAuditResult {
   const state = deriveAuditState(bundle, { emitStaleness: false });
   state.last_executor = selectedExecutor;
-  state.last_obligation = selectedObligation;
+  state.last_obligation = selectedObligation ?? undefined;
   return {
     audit_state: state,
     selected_obligation: selectedObligation,
@@ -728,8 +723,8 @@ async function runPlanDrawStep(
     advanceHasRunner,
   );
   if (branch.branch !== "deterministic") {
-    if (ctx.lastMergedRef.value) {
-      return { kind: "emit", step: ctx.lastMergedRef.value };
+    if (ctx.lastMerged) {
+      return { kind: "emit", step: ctx.lastMerged };
     }
     const executor = EXECUTOR_BY_OBLIGATION.get(id);
     if (executor && advanceHasRunner(executor.id)) {
@@ -747,7 +742,7 @@ async function runPlanDrawStep(
   }
   const result = await runSingleAdvanceStep(bundle, ctx.options);
   const merged = mergeDrainStep(result, ctx);
-  ctx.lastMergedRef.value = merged;
+  ctx.lastMerged = merged;
   if (!result.progress_made) {
     return { kind: "emit", step: merged };
   }
@@ -834,9 +829,9 @@ async function advanceAuditInner(
         narrativeEnabled: options.narrativeEnabled,
         submissionProbe: options.submissionProbe,
       },
-      artifactsAcc: { value: [] },
-      summaryAcc: { value: [] },
-      lastMergedRef: { value: null },
+      artifacts: [],
+      summaries: [],
+      lastMerged: null,
     };
     // Per-call derivation memo (see deriveObligationState) — created fresh here
     // so no state can leak across advanceAudit calls.
@@ -858,11 +853,11 @@ async function advanceAuditInner(
     );
     if (outcome.step) {
       result = outcome.step;
-    } else if (outcome.stopped === "budget" && ctx.lastMergedRef.value) {
+    } else if (outcome.stopped === "budget" && ctx.lastMerged) {
       // The pacing cap: resumable, never non-convergence. The accumulated last
       // result is the halt payload — the same value the pre-CX-02 drain emitted
       // when its slot counter reached the cap.
-      result = ctx.lastMergedRef.value;
+      result = ctx.lastMerged;
     } else {
       // Every PRIORITY obligation was already satisfied on entry (e.g. a fully
       // complete bundle, or nothing missing/stale) — no `execute` ever ran, so
@@ -937,16 +932,4 @@ async function advanceAuditInner(
   );
 
   return result;
-}
-
-/** Deduplicate a string array preserving first-seen order. */
-function dedupeInOrder(values: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    seen.add(value);
-    out.push(value);
-  }
-  return out;
 }

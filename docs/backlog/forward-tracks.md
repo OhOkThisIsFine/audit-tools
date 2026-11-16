@@ -8,7 +8,7 @@
 
 ## Open tracks
 
-- **Simplify sweep, parts P02–P12.** A quality-only `/simplify` pass, one part per chat, over the
+- **Simplify sweep, parts P04–P12.** A quality-only `/simplify` pass, one part per chat, over the
   disjoint partition in
   [`simplify-partition-2026-11-15.md`](../reviews/simplify-partition-2026-11-15.md). Each part
   reads its leads in that record first, and its landing sets its row to `landed`. Remove this entry

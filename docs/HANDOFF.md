@@ -5,8 +5,8 @@
 
 ## Current state
 
-`main` carries simplify parts P01 (shared contracts, `49a42916`) and P02 (shared infrastructure,
-`cec41197`) on top of release v0.55.20. The owner chose to release the parts later, together, so
+`main` carries simplify parts P01 (shared contracts, `49a42916`), P02 (shared infrastructure,
+`cec41197`) and P03 (audit orchestrator core) on top of release v0.55.20. The owner chose to release the parts later, together, so
 the published package is v0.55.20.
 The remaining structured MCP routes are in [`forward-tracks.md`](backlog/forward-tracks.md).
 
@@ -29,7 +29,7 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the simplify sweep, parts P03–P12, one part per chat, landed one at a time. Each part reads
+Next: the simplify sweep, parts P04–P12, one part per chat, landed one at a time. Each part reads
 its row and *Leads and skips* in the
 [partition record](reviews/simplify-partition-2026-11-15.md) first.
 Also open: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
