@@ -3,7 +3,7 @@
     "date": "2026-10-31",
     "head": "bbf5f194f492983b6a43698a12fa88574c88e212"
   },
-  "count": 8,
+  "count": 4,
   "items": [
     {
       "id": "leg2-comment-shape-enumeration-check-2026-10-21",
@@ -17,39 +17,6 @@
       }
     },
     {
-      "id": "leg1-synthesis-narrative-always-runs-header-2026-10-23",
-      "leg": "docs",
-      "path": "spec/audit-workflow-design.md",
-      "title": "spec/audit-workflow-design.md: fix or clarify the \"Synthesis narrative (always runs)\" header, which contradicts its own body and the code",
-      "subject_key": "ea994a4b1389d0da",
-      "nights_open": 9,
-      "target": {
-        "path": "spec/audit-workflow-design.md"
-      }
-    },
-    {
-      "id": "leg1-open-bugs-checkout-staleness-narrative-trim-2026-10-23",
-      "leg": "docs",
-      "path": "docs/backlog/open-bugs.md",
-      "title": "docs/backlog/open-bugs.md: trim the checkout-staleness entry's dated narrative, keeping only its still-open Property",
-      "subject_key": "135ae2a4fa2e1db8",
-      "nights_open": 9,
-      "target": {
-        "path": "docs/backlog/open-bugs.md"
-      }
-    },
-    {
-      "id": "leg1-docset-condensation-qualification-triple-pointer-2026-10-23",
-      "leg": "docs",
-      "path": "docs/backlog/deferred.md",
-      "title": "Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct?",
-      "subject_key": "fcdc9f3b916e7bc6",
-      "nights_open": 9,
-      "target": {
-        "path": "docs/backlog/deferred.md"
-      }
-    },
-    {
       "id": "leg3-p70-stale-main-reads-wrong-checkout-2026-10-23",
       "leg": "solutions",
       "path": ".claude/hooks/session-start-guards.mjs",
@@ -58,17 +25,6 @@
       "nights_open": 9,
       "target": {
         "path": ".claude/hooks/session-start-guards.mjs"
-      }
-    },
-    {
-      "id": "leg1-dirty-wip-mixed-verdict-2026-10-24",
-      "leg": "docs",
-      "path": "docs/backlog/minor-bugs.md",
-      "title": "4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong",
-      "subject_key": "677de498e4000bb3",
-      "nights_open": 8,
-      "target": {
-        "path": "docs/backlog/minor-bugs.md"
       }
     },
     {
