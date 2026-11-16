@@ -5,12 +5,9 @@
 
 ## Current state
 
-Local candidate `fix/explain-task-positionals` has eight reviewed commits through `b5ab2c81`.
-Its code tree `cd1865f8` passed the official full suite: 8,494 passed, 0 failed, 38 skipped;
-the gate accepted seven reporter RPC timeouts. This establishes local qualification only,
-not publication or global installation. Assistant GitHub network access was denied; no remote
-publication was attempted. The remaining structured MCP routes are in
-[`forward-tracks.md`](backlog/forward-tracks.md).
+`main` carries simplify part P01 (shared contracts, `49a42916`) on top of release v0.55.20. The
+owner chose to release P01 later, together with later parts, so the published package is v0.55.20.
+The remaining structured MCP routes are in [`forward-tracks.md`](backlog/forward-tracks.md).
 
 Release metadata is in [package.json](../package.json); publication and global-install evidence
 is in project memory (`memory: release-state`). GitHub branch protection on `main` requires the `checks`
@@ -31,7 +28,10 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
+Next: the simplify sweep, parts P02–P12, one part per chat, landed one at a time. Each part reads
+its row and *Leads and skips* in the
+[partition record](reviews/simplify-partition-2026-11-15.md) first.
+Also open: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
 [qualification record](reviews/audit-refactor-qualification-2026-10-14.md) for scope and remaining gates.
 No commit, publication or release acceptance is established. The owner discarded the paused
 2026-10-05 dogfood run (2026-10-09); a new dogfood run is the owner's call and would use 0.55.6.
