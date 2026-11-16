@@ -24,28 +24,29 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 129 entr(y/ies) indexed.
+> and at commit). 130 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
 - `open-bugs.md:9` — Audit/shared tests time out under full-suite load and pass alone (2026-10-08, medium).
 - `open-bugs.md:11` — The merge-routing check measures incoming paths from `CLAUDE_PROJECT_DIR`, not the checkout the command runs in (2026-10-09, medium).
-- `open-bugs.md:13` — The nightly routine has no check for a checkout stale enough to make its own review meaningless (2026-10-20, medium, friction: tool_should_decide).
-- `open-bugs.md:15` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
-- `open-bugs.md:19` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
-- `open-bugs.md:21` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
-- `open-bugs.md:23` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
-- `open-bugs.md:25` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
-- `open-bugs.md:27` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
-- `open-bugs.md:30` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
-- `open-bugs.md:32` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
-- `open-bugs.md:40` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
-- `open-bugs.md:47` — Selective-deepening convergence — live validation env-bound.
-- `open-bugs.md:55` — Confirmed scope leaks beyond planning (2026-11-15, medium).
-- `open-bugs.md:57` — Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).
-- `open-bugs.md:59` — Audit and remediation paths have multiple sources (2026-11-15, medium).
-- `open-bugs.md:61` — Incidental inputs restart the systemic challenge (2026-11-15, medium).
-- `open-bugs.md:63` — Isolated dependency installs repoint regular host launchers (2026-11-15, medium).
+- `open-bugs.md:13` — The merge-routing check refuses to fast-forward a checkout to commits the remote already holds (2026-11-16, medium, friction: tool_should_decide).
+- `open-bugs.md:15` — The nightly routine has no check for a checkout stale enough to make its own review meaningless (2026-10-20, medium, friction: tool_should_decide).
+- `open-bugs.md:17` — The session-start "commits BEHIND origin/main" warning measures the main checkout, not the session's worktree (2026-10-06, medium).
+- `open-bugs.md:21` — Inspection coverage claims are accepted on the host's word (2026-10-05, medium).
+- `open-bugs.md:23` — A commit gate reports its refusals one class at a time (2026-10-05, medium, friction: tool_should_decide).
+- `open-bugs.md:25` — `SchemaVersionMismatchError` tells the operator to delete state it cannot regenerate (2026-10-06, medium).
+- `open-bugs.md:27` — `check-backlog-budget --update-baseline` grandfathers new violators (2026-10-06, medium).
+- `open-bugs.md:29` — The attestation gate judges an edit to itself with the edited copy (2026-10-04, medium).
+- `open-bugs.md:32` — The constitutional-doc commit gate refuses a diff confined to a generated region (2026-10-04, low, friction: tool_should_decide).
+- `open-bugs.md:34` — A code comment that states a workflow SHAPE or a prose ENUMERATION is checked by nothing (2026-08-31, medium, friction: tool_should_decide).
+- `open-bugs.md:42` — The TASK draw's coherence eligibility is still disjunctive and has never been measured for collapse (2026-08-19, medium).
+- `open-bugs.md:49` — Selective-deepening convergence — live validation env-bound.
+- `open-bugs.md:57` — Confirmed scope leaks beyond planning (2026-11-15, medium).
+- `open-bugs.md:59` — Analyzer evidence lacks a comparable coverage record (2026-11-15, medium).
+- `open-bugs.md:61` — Audit and remediation paths have multiple sources (2026-11-15, medium).
+- `open-bugs.md:63` — Incidental inputs restart the systemic challenge (2026-11-15, medium).
+- `open-bugs.md:65` — Isolated dependency installs repoint regular host launchers (2026-11-15, medium).
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
