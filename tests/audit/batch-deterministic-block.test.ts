@@ -110,16 +110,14 @@ test("runDeterministicForNextStep advances through all deterministic obligations
     // (4) The bundle must have repo_manifest (confirms intake ran).
     expect(bundle.repo_manifest, "repo_manifest must be present after deterministic block").toBeTruthy();
 
-    // (5) No agent obligation (audit_tasks_completed) should be pending yet —
-    //     planning hasn't run (it comes after intent_checkpoint). design_review_completed
-    //     and planning_artifacts obligations naturally appear as "missing" here because
-    //     they are downstream of intent_checkpoint, which is what we just halted at.
-    const agentObl = state.obligations.find(
-      (o) =>
-        (o.state === "missing" || o.state === "stale") &&
-        o.id === "audit_tasks_completed",
-    );
-    expect(agentObl, `audit_tasks_completed obligation should not be pending before intent checkpoint; found: ${JSON.stringify(agentObl)}`).toBe(undefined);
+    // (5) Planning has not run (it comes after intent_checkpoint), so no audit
+    //     task exists and audit_tasks_completed is "missing" — like
+    //     design_review_completed and planning_artifacts, which are also
+    //     downstream of the intent_checkpoint halt. It must never read as
+    //     satisfied before a task was planned.
+    const agentObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
+    expect(agentObl?.state, `audit_tasks_completed must be missing before planning; found: ${JSON.stringify(agentObl)}`).toBe("missing");
+    expect(bundle.audit_tasks, "planning must not have run before the intent checkpoint").toBeUndefined();
 
     // (6) intent_checkpoint_current must be missing (it's the obligation the call halted at).
     const intentObl = state.obligations.find((o) => o.id === "intent_checkpoint_current");

@@ -748,6 +748,22 @@
         "src/shared/submission/ingestReport.ts": "50399210ffdbd5498f817ace659c6667d1b55a28"
       }
     },
+    "ddfc58268ca5a92e": {
+      "reviewed_by": "claude-opus-5-5",
+      "attester_class": "agent",
+      "checked": "state.ts emits audit_tasks_completed missing when audit_tasks absent; new emission test red before fix (2 fails), green after; batch-deterministic-block step 5 updated; lane-gate pin test green; full suite 8628 passed 0 failed; design-check AGY run dbc30e25 found no retirement collision",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e2694b207fbc95b91ed6ed40c1c9ccdae9c0c19b",
+        "ran_at": "2026-11-16T20:52:23.771Z"
+      },
+      "attested_at": "2026-11-16T20:52:35.054Z",
+      "vouches": {
+        "src/audit/orchestrator/state.ts": "d53560f89388783a046dc4d6b225b629029ee52b"
+      }
+    },
     "e501ffc69df5ac27": {
       "reviewed_by": "opencode-xhigh:ses_e4cb59193ffe400czQt94djQRT",
       "attester_class": "agent",
@@ -1070,7 +1086,7 @@
       "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/state.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "ddfc58268ca5a92e"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
       "review": "32765e3dafb89abf"

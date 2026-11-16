@@ -63,11 +63,12 @@ real change, not a cleanup.
 
 - **P03 — a PRIORITY-keyed derivation table for `deriveAuditState`** in
   `src/audit/orchestrator/state.ts`. About twelve rows have the same
-  `obligation(id, staleOrSatisfied(stale, [artifact], has(bundle.x)))` shape. **The open property
-  this would close:** an obligation id that `deriveAuditState` does not emit reads as satisfied in
-  `deriveObligationState`, and no test reconciles the emitted ids against `PRIORITY`. A
-  `Record<PriorityId, Derivation>` with `PRIORITY` declared `as const` makes a missing row a type
-  error. A smaller first step: one test that the emitted ids equal `PRIORITY`.
+  `obligation(id, staleOrSatisfied(stale, [artifact], has(bundle.x)))` shape. The open property
+  (an id that `deriveAuditState` does not emit reads as satisfied in `deriveObligationState`) is
+  now held by `tests/audit/obligation-emission-covers-priority.test.ts`, which found and closed
+  the one gap (`audit_tasks_completed` on a bundle with no task plan). What remains is the shape
+  gain: a `Record<PriorityId, Derivation>` with `PRIORITY` declared `as const` makes a missing
+  row a type error for every bundle, not only for the bundles that test builds.
 - **P03 — flags on `LIFECYCLE_PRODUCTIONS`** in `src/audit/orchestrator/executors.ts`
   (restamped every advance, host-appended, optional probe). Today the same artifacts are named in
   three places: that list, the always-updated list in `advance.ts` (which holds a

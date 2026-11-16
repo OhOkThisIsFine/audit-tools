@@ -283,7 +283,7 @@ export function deriveAuditState(
     ),
   );
 
-  // sites-pinned: tests/audit/charter-emit-order.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/priority-chain-invariants.test.ts
+  // sites-pinned: tests/audit/charter-emit-order.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/priority-chain-invariants.test.ts, tests/audit/obligation-emission-covers-priority.test.ts
   // Phase C conceptual design-review — the charter LAYER. Runs after the intent
   // checkpoint (it needs the confirmed ceiling) and before the design-review
   // passes. Satisfied when charter_register.json exists + is fresh w.r.t. its deps
@@ -480,9 +480,14 @@ export function deriveAuditState(
   const { pendingTasks } = derivePendingTaskPartition(bundle);
   const hasPendingAuditTasks = pendingTasks.length > 0;
 
-  if (hasPendingAuditTasks) {
+  // Emitted on EVERY bundle, like each other PRIORITY id. An absent task plan
+  // is "missing": no audit task has run, so no result exists. Omission is not
+  // neutral — `deriveObligationState` reads an id it cannot find as
+  // "satisfied", so a silent skip here claimed the audit was done before
+  // planning had run (pinned by obligation-emission-covers-priority.test.ts).
+  if (hasPendingAuditTasks || !has(bundle.audit_tasks)) {
     obligations.push(obligation("audit_tasks_completed", "missing"));
-  } else if (has(bundle.audit_tasks)) {
+  } else {
     obligations.push(obligation("audit_tasks_completed", "satisfied"));
   }
 
