@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/content-key-seam.test.ts
 /**
  * The shared content-key seam (O2 ↔ F1) — the SOLE definition of the workflow's
  * derived keys (INV-CK-1). O2's append-only results ledger (re-association +
@@ -59,6 +60,7 @@ import { randomUUID } from "node:crypto";
 import { hashContent } from "./hash.js";
 
 import { stableStringify } from "./stableStringify.js";
+import { toPosixPath } from "./paths.js";
 import { normalizeForMetadataHash } from "./artifactFreshness.js";
 
 /** Coordinate that groups results: {unit_id, lens, pass_id}. */
@@ -215,7 +217,7 @@ export function canonicalSplitDiscriminator(component: string | undefined): stri
   if (typeof component !== 'string') return '';
   const trimmed = component.trim();
   if (trimmed.length === 0) return '';
-  return trimmed.replace(/\\/g, '/');
+  return toPosixPath(trimmed);
 }
 
 /**

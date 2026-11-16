@@ -94,3 +94,16 @@ export function confidenceRank(confidence: FindingConfidence): number {
 export function severityCompare(a: FindingSeverity, b: FindingSeverity): number {
   return severityRank(b) - severityRank(a);
 }
+
+// sites-pinned: tests/audit/finding-ranks.test.ts
+/**
+ * The most severe of `severities`, or `info` (the floor of the scale) when there
+ * are none. Single-sources the "highest severity in a group" reduce.
+ */
+export function maxSeverity(severities: Iterable<FindingSeverity>): FindingSeverity {
+  let highest: FindingSeverity = "info";
+  for (const severity of severities) {
+    if (severityRank(severity) > severityRank(highest)) highest = severity;
+  }
+  return highest;
+}

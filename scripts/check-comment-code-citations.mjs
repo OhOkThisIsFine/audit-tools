@@ -5,8 +5,8 @@
 //
 // WHY THIS EXISTS. Docs were gated and comments were gated by nothing, so a
 // comment could name a symbol or a file the code had renamed or deleted and
-// every gate stayed green — the 2026-08-31 finding: `src/shared/continuityScore.ts`'s
-// header claimed audit re-exported its scorer and biased packet ORDERING with it,
+// every gate stayed green — the 2026-08-31 finding: the header of the (since
+// deleted) shared continuityScore module claimed audit re-exported its scorer and biased packet ORDERING with it,
 // long after that wiring was gone, and a doc comment named a "combined" pass that
 // existed nowhere. Both were found by a lane reading code to check a DOC, weeks
 // after the fact.

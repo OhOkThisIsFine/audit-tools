@@ -17,6 +17,7 @@
  */
 
 import type { Finding, FindingLocation } from "./types/finding.js";
+import { normalizeRepoRelPath } from "./paths.js";
 
 /**
  * The stable semantic fields a finding's identity may be derived from.
@@ -40,13 +41,14 @@ export interface FindingIdentityFields {
   title?: string;
 }
 
-/** Separator-normalized (always `/`), case-folded, repo-relative path. */
+/**
+ * Separator-normalized (always `/`), case-folded, repo-relative path. The one
+ * case-folding path normalizer: `findingGrounding`'s `normalizeRepoPath`
+ * delegates here. INV-B3-1 (strip a leading `./` only, never the dot of a
+ * dotfile-directory segment) is owned by `normalizeRepoRelPath`.
+ */
 export function normalizeAnchorPath(path: string | undefined): string {
-  return (path ?? "")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/^\.\//, "")
-    .toLowerCase();
+  return normalizeRepoRelPath((path ?? "").trim()).toLowerCase();
 }
 
 /**

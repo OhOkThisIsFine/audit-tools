@@ -915,26 +915,13 @@ export function upsertFindingByIdentity(merged: Map<string, Finding>, finding: F
     return;
   }
 
-  mergePrimaryLeadLineage(existing, finding);
+  absorbFinding(existing, finding, { mergeGrounding: true, sortAffectedFiles: true });
   if (severityRank(finding.severity) > severityRank(existing.severity)) {
     existing.severity = finding.severity;
   }
   if (confidenceRank(finding.confidence) > confidenceRank(existing.confidence)) {
     existing.confidence = finding.confidence;
   }
-  existing.systemic = Boolean(existing.systemic || finding.systemic);
-  existing.grounding = mergeGrounding(existing.grounding, finding.grounding);
-  existing.verification_status = mergeVerificationStatus(
-    existing.verification_status,
-    finding.verification_status,
-  );
   existing.impact = existing.impact ?? finding.impact;
   existing.likelihood = existing.likelihood ?? finding.likelihood;
-  existing.summary =
-    existing.summary.length >= finding.summary.length ? existing.summary : finding.summary;
-
-  mergeAffectedFiles(existing, finding, true);
-  existing.evidence = [
-    ...new Set([...(existing.evidence ?? []), ...(finding.evidence ?? [])]),
-  ];
 }

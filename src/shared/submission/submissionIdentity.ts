@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/submission-path-is-tool-owned.test.ts
 /**
  * The ONE tool-owned submission path rule.
  *
@@ -16,6 +17,7 @@ import { resolveWithinRoot } from "../io/pathContainment.js";
 
 import { hashContent } from "../hash.js";
 import { stableStringify } from "../stableStringify.js";
+import { toPosixPath } from "../paths.js";
 
 /**
  * Where submissions live for one draw: the repository root a bound path is
@@ -130,7 +132,7 @@ export function repoRelativePath(
   label: string,
 ): string {
   const contained = resolveContainedPath(root, absolutePath, label);
-  const rel = relative(resolve(root), contained).replaceAll("\\", "/");
+  const rel = toPosixPath(relative(resolve(root), contained));
   if (rel.length === 0) {
     throw new Error(`${label} must identify a path beneath the repository root`);
   }

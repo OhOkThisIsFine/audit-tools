@@ -27,6 +27,9 @@ import { readFile } from "node:fs/promises";
 import { resolveContainedSourcePath } from "../io/sourcePath.js";
 import { readRecursiveTrackedPaths } from "../gitTrackedPaths.js";
 import type { Finding, FindingGrounding } from "../types/finding.js";
+import { normalizeAnchorPath } from "../findingIdentitySignature.js";
+import { isFileMissingError } from "../io/json.js";
+import { toPosixPath } from "../paths.js";
 
 /** Normalize text for content-matching: drop CR, collapse whitespace, trim. */
 export function normalizeForMatch(text: string): string {
@@ -40,7 +43,8 @@ export function normalizeForMatch(text: string): string {
  * The single path normalizer (drift-plan P7) shared by the conceptual-review
  * grounding and any other consumer that matches a cited `affected_files` path
  * against a repo manifest. (Quote-and-verify resolves a cited path against the
- * filesystem instead, so it does not lowercase — see `groundFinding`.)
+ * filesystem instead, so it does not lowercase — see `groundFinding`.) The body
+ * delegates to `normalizeAnchorPath`, the one case-folding normalizer.
  *
  * INV-B3-1: strips a leading `./` ONLY — it must NEVER strip the leading dot of a
  * dotfile-directory segment (`.claude/…`, `.github/…`). The regex is anchored to
@@ -49,7 +53,7 @@ export function normalizeForMatch(text: string): string {
  * `git ls-files` form by exact membership).
  */
 export function normalizeRepoPath(p: string): string {
-  return p.trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+  return normalizeAnchorPath(p);
 }
 
 /**
@@ -83,7 +87,7 @@ export function resolveBasenameToTrackedPath(
   basename: string,
   knownPaths: ReadonlySet<string>,
 ): string | undefined {
-  const target = basename.trim().replace(/\\/g, "/");
+  const target = toPosixPath(basename.trim());
   if (target.length === 0 || target.includes("/")) return undefined;
   const targetLower = target.toLowerCase();
   let match: string | undefined;
@@ -129,7 +133,7 @@ export async function enumerateTrackedFilePaths(
   const result = await readRecursiveTrackedPaths(root);
   if (!result.ok) return known;
   for (const entry of result.paths) {
-    known.add(entry.replace(/\\/g, "/"));
+    known.add(toPosixPath(entry));
   }
   return known;
 }
@@ -251,7 +255,7 @@ export function resolveCitedPath(
       lstatSync(resolve(root, trimmed));
       return undefined;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return undefined;
+      if (!isFileMissingError(error)) return undefined;
     }
     const tracked = resolveBasenameToTrackedPath(trimmed, corpus);
     if (tracked) {

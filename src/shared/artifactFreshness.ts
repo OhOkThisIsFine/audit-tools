@@ -1,6 +1,8 @@
+// sites-pinned: tests/audit/staleness.test.ts
 import { contentSha256 } from "./submission/hostHandoffCore.js";
 
 import { compareCodeUnits } from "./compareCodeUnits.js";
+import { isRecord } from "./validation/basic.js";
 import { canonicalizeAffinityArtifactValue } from "./affinityArtifacts.js";
 import { DESIGN_REVIEW_PROVENANCE_FIELDS } from "./types/intentCheckpoint.js";
 
@@ -89,11 +91,11 @@ function stripFields(
   );
   for (const [parent, children] of nested) {
     const value = stripped[parent];
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    if (!isRecord(value)) {
       continue;
     }
     stripped[parent] = Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).filter(
+      Object.entries(value).filter(
         ([key]) => !children.has(key),
       ),
     );
@@ -146,10 +148,10 @@ export function normalizeForMetadataHash(
   artifactName: string,
   value: unknown,
 ): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return value;
   }
-  let record = value as Record<string, unknown>;
+  let record = value;
   const nonSemantic = NON_SEMANTIC_FIELDS_BY_ARTIFACT[artifactName];
   if (nonSemantic) {
     record = stripFields(record, nonSemantic);

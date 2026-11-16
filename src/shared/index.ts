@@ -70,7 +70,6 @@ export { deriveAccessMemoryFromEvents } from "./accessMemory.js";
 export { normalizeGraphPath, collectGraphEdges } from "./graph/graphPaths.js";
 export { findCyclicComponents, findFirstCycleWitness } from "./graph/directedCycles.js";
 export { edgeConfidence } from "./graph/edgeConfidence.js";
-export { computeContinuityScores, continuityMassForPaths } from "./continuityScore.js";
 export type {
   FindingSeverity,
   FindingConfidence,
@@ -860,9 +859,7 @@ export {
 export {
   isGitRepo,
   gitRefExists,
-  changedFiles,
   readChangedFiles,
-  fileCommits,
   fileContentAtRef,
   headCommit,
   readAuditReadState,

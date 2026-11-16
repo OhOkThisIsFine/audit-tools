@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/work-blocks.test.ts
 import type { Finding, UnitManifest } from "../types.js";
 import type {
   CriticalFlowManifest,
@@ -19,7 +20,7 @@ import {
 } from "../../shared/decompose/contentCoherence.js";
 import { deriveWorkBlockSeams } from "../../shared/decompose/workBlockSeams.js";
 import { toPosixPath } from "../../shared/paths.js";
-import { severityRank } from "audit-tools/shared";
+import { deriveWorkBlockFacts } from "../../shared/validation/findingsReport.js";
 
 export type { WorkBlock } from "audit-tools/shared";
 
@@ -283,33 +284,22 @@ export function buildWorkBlockPartition(
   const sizes = canonicalSizeIndex(params.sizeIndex);
   const blocks = coherenceTrace.components.map((findingIds, index) => {
     const findings = findingIds.map((findingId) => findingById.get(findingId)!);
-    const coordination = findings.some((finding) => finding.systemic === true);
-    const maxSeverity = [...findings].sort(
-      (left, right) =>
-        severityRank(right.severity) - severityRank(left.severity) ||
-        compareCodeUnits(left.id, right.id),
-    )[0]!.severity;
-    const ownedFiles = stableStrings(
-      findings.flatMap((finding) =>
-        finding.affected_files.map((file) => toPosixPath(file.path)),
-      ),
-    );
+    const facts = deriveWorkBlockFacts(findings);
+    const coordination = facts.role === "coordination";
     const block: WorkBlock = {
       id: `block-${index + 1}`,
       finding_ids: [...findingIds],
       unit_ids: stableStrings(
         findings.flatMap((finding) => unitsByFinding.get(finding.id) ?? []),
       ),
-      owned_files: ownedFiles,
-      role: coordination ? "coordination" : "implementation",
-      max_severity: maxSeverity,
+      ...facts,
       rationale: coordination
         ? `Canonical coherence component with ${findings.length} finding(s); systemic scope is presented as coordination work.`
         : `Canonical coherence component with ${findings.length} finding(s).`,
       depends_on: [],
       token_estimate: advisoryTokenEstimate(
         findings.length,
-        ownedFiles,
+        facts.owned_files,
         sizes,
       ),
     };

@@ -61,14 +61,14 @@
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:15` — Track 2.5 — keep production-orphan detection beside knip.
+- `forward-tracks.md:20` — Track 2.5 — keep production-orphan detection beside knip.
 
 ### [`forward-tracks.md — Forward tracks`](backlog/forward-tracks.md)
 
-- `forward-tracks.md:30` — Deterministic analyzers: own-vs-acquire engine.
-- `forward-tracks.md:45` — Shared orchestration retains deliberate consumer policies.
-- `forward-tracks.md:48` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
-- `forward-tracks.md:50` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
+- `forward-tracks.md:35` — Deterministic analyzers: own-vs-acquire engine.
+- `forward-tracks.md:50` — Shared orchestration retains deliberate consumer policies.
+- `forward-tracks.md:53` — The ship pipeline stops before the steps that finish it, and the remainder is agent prose (2026-08-27, from the philosophy audit).
+- `forward-tracks.md:55` — Structured MCP submission beyond work-item results (owner, 2026-11-06).
 
 ### [`deferred.md`](backlog/deferred.md)
 

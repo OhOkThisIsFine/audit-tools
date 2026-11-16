@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/finding-similarity.test.ts
 /**
  * Text/file-similarity primitives for the fuzzy ("similar enough to merge")
  * dedup tier. Byte-identical copies of these four helpers lived in both
@@ -38,26 +39,25 @@ export function contentWords(text: string): Set<string> {
  * punctuation-stripped word sets of `a` and `b`.
  */
 export function wordJaccard(a: string, b: string): number {
-  const sa = contentWords(a);
-  const sb = contentWords(b);
+  return jaccard(contentWords(a), contentWords(b));
+}
+
+/** Jaccard overlap (0..1) of two sets; 0 when both are empty. */
+function jaccard<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): number {
   let intersection = 0;
-  for (const w of sa) {
-    if (sb.has(w)) intersection++;
+  for (const item of a) {
+    if (b.has(item)) intersection++;
   }
-  const union = sa.size + sb.size - intersection;
+  const union = a.size + b.size - intersection;
   return union === 0 ? 0 : intersection / union;
 }
 
 /** Jaccard overlap (0..1) of two findings' affected-file path sets. */
 export function filePathOverlap(a: Finding, b: Finding): number {
-  const setA = new Set(a.affected_files.map((f) => f.path));
-  const setB = new Set(b.affected_files.map((f) => f.path));
-  let intersection = 0;
-  for (const path of setA) {
-    if (setB.has(path)) intersection++;
-  }
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
+  return jaccard(
+    new Set(a.affected_files.map((f) => f.path)),
+    new Set(b.affected_files.map((f) => f.path)),
+  );
 }
 
 /** A finding's primary (first-listed) affected-file path, or "" when none. */

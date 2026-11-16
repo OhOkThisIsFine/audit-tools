@@ -152,6 +152,25 @@
     }
   },
   "reviews": {
+    "0c6c1b84455cdb39": {
+      "reviewed_by": "opus-subagent-p01-submission-review",
+      "attester_class": "agent",
+      "checked": "errorMessage, isFileMissingError, toPosixPath and isRecord substitutions in handRecovery, submissionClassifier, submissionIdentity and submissionLedger compared site by site against the helper source (all IDENTICAL for reachable inputs); no new import cycle; sites-pinned tests exist and call the changed functions; full suite green on the staged tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "d1a9e6bb55aba57cd0ec7f4685cf2ae834df7ee9",
+        "ran_at": "2026-11-16T07:20:43.908Z"
+      },
+      "attested_at": "2026-11-16T07:20:48.226Z",
+      "vouches": {
+        "src/shared/submission/handRecovery.ts": "9a1657335f5f6c3ba2bb549000527240506fd1e3",
+        "src/shared/submission/submissionClassifier.ts": "99e89c7c418a28993f33578a3565f21222ce6675",
+        "src/shared/submission/submissionIdentity.ts": "82e53ed6cc38c640d2de3c8b7350092c36d07a97",
+        "src/shared/submission/submissionLedger.ts": "27569dfd185f7e17e1d60c34b2c164f8a75b1c46"
+      }
+    },
     "132b243de694e051": {
       "reviewed_by": "runtime_review",
       "attester_class": "agent",
@@ -1102,7 +1121,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/handRecovery.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/hostHandoffCore.ts": {
       "review": "9ae8f3b83f558bae"
@@ -1117,13 +1136,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/shared/submission/submissionClassifier.ts": {
-      "review": "e501ffc69df5ac27"
+      "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionIdentity.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionLedger.ts": {
-      "review": "c2fa0250dd9f5ee5"
+      "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionScan.ts": {
       "review": "e501ffc69df5ac27"

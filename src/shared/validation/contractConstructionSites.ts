@@ -72,6 +72,8 @@
 //   Each site of this file is pinned by the named tests; `npm run check:sites-pinned`
 //   derives the sites from the staged diff and refuses an unbound one.
 
+import { normalizeRepoRelPath } from "../paths.js";
+
 /** The marker a producer carries at each construction site. */
 export const SITE_MARKER = "construction-site";
 
@@ -90,7 +92,7 @@ export const SITE_EXEMPTION_MARKER = "contract-construction-sites";
  * package (it runs pre-build).
  */
 export function isProducerPath(relPath: string): boolean {
-  const p = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const p = normalizeRepoRelPath(relPath);
   if (p.startsWith("tests/")) return false;
   if (p.startsWith(".claude/")) return false;
   if (p.startsWith("src/shared/types/contractPropertyShapes")) return false;

@@ -5,6 +5,7 @@ import { FileDispositionStatusSchema } from "./disposition.js";
 import { CeilingSchema } from "./charter.js";
 import { CLOSING_ACTIONS } from "./closingActions.js";
 import { readOptionalJsonFile } from "../io/json.js";
+import { isRecord } from "../validation/basic.js";
 
 /**
  * Remediate-only finding filters. One schema for the confirmed checkpoint and
@@ -459,10 +460,10 @@ export interface LenientIntentCheckpointRead {
 function parseIntentCheckpointLenient(raw: unknown): LenientIntentCheckpointRead {
   const wholesale = IntentCheckpointSchema.safeParse(raw);
   if (wholesale.success) return { checkpoint: wholesale.data, rejected: [] };
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+  if (!isRecord(raw)) {
     return { checkpoint: undefined, rejected: [] };
   }
-  const record = raw as Record<string, unknown>;
+  const record = raw;
   // Drop each top-level key the schema complained about, then retry. One pass is
   // enough: dropping a key cannot make a DIFFERENT key's value valid or invalid,
   // so the second parse either succeeds or fails on keys that were already

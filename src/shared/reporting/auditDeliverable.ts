@@ -15,10 +15,13 @@ import type {
   AuditFindingsSummary,
   AuditRead,
   Finding,
-  FindingSeverity,
   WorkBlock,
 } from "../types/finding.js";
-import { AUDIT_FINDINGS_CONTRACT_VERSION } from "../validation/findingsReport.js";
+import {
+  AUDIT_FINDINGS_CONTRACT_VERSION,
+  deriveWorkBlockFacts,
+} from "../validation/findingsReport.js";
+import { SEVERITIES } from "../types/lens.js";
 import { renderFindingBlockLines } from "./findingDisplay.js";
 import { countBy } from "../countBy.js";
 import {
@@ -31,19 +34,17 @@ import {
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
 } from "../tokens.js";
 
-const SEVERITY_KEYS: FindingSeverity[] = ["critical", "high", "medium", "low", "info"];
-
 /**
  * Every severity key is present (zero-filled) even when no finding carries
  * it — unlike the plain `countBy` result, which only has keys for severities
- * that actually occur. Insertion order is SEVERITY_KEYS' order: spreading
+ * that actually occur. Insertion order is SEVERITIES' order: spreading
  * `counts` over the zero-filled base only overwrites existing keys' values,
  * it never reorders or appends (severity is a closed enum, so `counts` can
- * never introduce a key absent from SEVERITY_KEYS).
+ * never introduce a key absent from SEVERITIES).
  */
 function severityBreakdown(findings: readonly Finding[]): Record<string, number> {
   const zeroed: Record<string, number> = {};
-  for (const key of SEVERITY_KEYS) zeroed[key] = 0;
+  for (const key of SEVERITIES) zeroed[key] = 0;
   const counts = countBy(findings, (f) => f.severity);
   return { ...zeroed, ...counts };
 }
@@ -83,28 +84,11 @@ export function buildAuditFindingsDeliverable(
   const findingById = new Map(findings.map((finding) => [finding.id, finding]));
   const blocks: WorkBlock[] = coherenceTrace.components.map((ids, index) => {
     const members = ids.map((id) => findingById.get(id)!);
-    const maxSeverity = members.reduce<FindingSeverity>(
-      (highest, finding) =>
-        SEVERITY_KEYS.indexOf(finding.severity) < SEVERITY_KEYS.indexOf(highest)
-          ? finding.severity
-          : highest,
-      "info",
-    );
     return {
       id: `block-${index + 1}`,
       finding_ids: [...ids],
       unit_ids: [],
-      owned_files: [
-        ...new Set(
-          members.flatMap((finding) =>
-            finding.affected_files.map((file) => file.path.replace(/\\/gu, "/")),
-          ),
-        ),
-      ].sort(),
-      role: members.some((finding) => finding.systemic === true)
-        ? "coordination"
-        : "implementation",
-      max_severity: maxSeverity,
+      ...deriveWorkBlockFacts(members),
       rationale: `Canonical coherence component with ${members.length} finding(s).`,
       depends_on: [],
       token_estimate:

@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { appendNdjsonFile } from "../io/json.js";
+import { isRecord } from "../validation/basic.js";
 import { siblingLockPath } from "../io/lockedJsonStore.js";
 import { withFileLock } from "../io/fileLock.js";
 import { discardOnSchemaVersionMismatch } from "../io/schemaVersion.js";
@@ -278,10 +279,10 @@ const SUBMISSION_LEDGER_EVENT_STRING_FIELDS = [
 export function validateSubmissionLedgerEvent(
   value: unknown,
 ): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return { ok: false, reason: "the line is not a JSON object" };
   }
-  const record = value as Record<string, unknown>;
+  const record = value;
   for (const field of SUBMISSION_LEDGER_EVENT_REQUIRED_FIELDS) {
     if (typeof record[field] !== "string" || (record[field] as string).length === 0) {
       return { ok: false, reason: `"${field}" is missing or not a non-empty string` };

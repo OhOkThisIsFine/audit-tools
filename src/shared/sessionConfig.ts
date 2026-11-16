@@ -1,7 +1,8 @@
+// sites-pinned: tests/shared/session-intent.test.ts
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { errorMessage } from "./io/json.js";
+import { errorMessage, isFileMissingError } from "./io/json.js";
 import { assertWithinRoot } from "./io/pathContainment.js";
 import { formatSchemaFailure } from "./validation/schemaFailure.js";
 
@@ -32,16 +33,6 @@ function resolveIntentPath(repositoryRoot: string): string {
   });
 }
 
-function isMissingFileError(
-  error: unknown,
-): error is NodeJS.ErrnoException & { code: "ENOENT" } {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
-}
-
 /**
  * Load the one provider-neutral repository session intent.
  *
@@ -59,7 +50,7 @@ export async function loadSessionIntent(
   try {
     contents = await readFile(configPath, "utf8");
   } catch (error) {
-    if (isMissingFileError(error)) {
+    if (isFileMissingError(error)) {
       return {
         status: "not_configured",
         intent: SessionIntentV1Schema.parse({}),

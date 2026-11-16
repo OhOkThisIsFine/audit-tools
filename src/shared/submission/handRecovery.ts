@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/hand-recovery-uses-the-same-validator.test.ts
 /**
  * Hand recovery — the ONLY place a human hand may re-land a submission.
  *
@@ -16,6 +17,7 @@
 import { readFile, unlink } from "node:fs/promises";
 
 import {
+  errorMessage,
   readOptionalJsonFile,
   writeFileAtomic,
   writeJsonFile,
@@ -197,7 +199,7 @@ export async function recoverSubmission(
     // that never drifted. That is precisely the distinguishability the ledger
     // exists to guarantee, so the write is rolled back and the operator keeps a
     // failed rescue they can retry rather than a silent falsification.
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = errorMessage(error);
     try {
       // RESTORE-OR-DELETE, decided by what was captured above. Deleting is the
       // right rollback for exactly one case — nothing was there — and it was

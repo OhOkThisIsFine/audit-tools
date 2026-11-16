@@ -15,11 +15,12 @@ import {
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import { toPosixPath } from "../paths.js";
 import {
   lensCoverageEntryContradictsCount,
   reprojectLensCoverage,
 } from "../reporting/lensCoverage.js";
-import { severityRank } from "../types/lens.js";
+import { maxSeverity } from "../types/lens.js";
 import type { ValidationIssue } from "./basic.js";
 import { isRecord, pushValidationIssue } from "./basic.js";
 
@@ -59,6 +60,8 @@ export interface ApprovedFindingsProjection {
 
 interface Inspection {
   issues: ValidationIssue[];
+  /** The schema-parsed report, present exactly when `projection` is. */
+  report?: AuditFindingsReport;
   projection?: ApprovedFindingsProjection;
 }
 
@@ -266,9 +269,7 @@ function buildProjection(
       }
     }
     if (blockFindings.length > 0) {
-      const expectedMax = blockFindings.reduce((highest, finding) =>
-        severityRank(finding.severity) > severityRank(highest.severity) ? finding : highest,
-      ).severity;
+      const expectedMax = maxSeverity(blockFindings.map((finding) => finding.severity));
       if (block.max_severity !== expectedMax) {
         pushValidationIssue(
           issues,
@@ -471,7 +472,7 @@ function inspectAuditFindingsReport(value: unknown, path = ""): Inspection {
     }
     return { issues };
   }
-  return { issues, projection: buildProjection(parsed.data, path, issues) };
+  return { issues, report: parsed.data, projection: buildProjection(parsed.data, path, issues) };
 }
 
 export function validateAuditFindingsReport(
@@ -482,15 +483,27 @@ export function validateAuditFindingsReport(
 }
 
 export function projectApprovedFindings(value: unknown): ApprovedFindingsProjection {
+  return inspectOrThrow(value).projection;
+}
+
+/** Inspect `value` and refuse it on any error-severity issue; the parsed report and its projection. */
+function inspectOrThrow(value: unknown): {
+  report: AuditFindingsReport;
+  projection: ApprovedFindingsProjection;
+} {
   const inspection = inspectAuditFindingsReport(value);
   const errors = inspection.issues.filter((issue) => issue.severity === "error");
-  if (errors.length > 0 || inspection.projection === undefined) {
+  if (
+    errors.length > 0 ||
+    inspection.projection === undefined ||
+    inspection.report === undefined
+  ) {
     const detail = errors
       .map((issue) => `${issue.path || "<root>"}: ${issue.message}`)
       .join("; ");
     throw new TypeError(`Invalid AuditFindingsReport: ${detail}`);
   }
-  return inspection.projection;
+  return { report: inspection.report, projection: inspection.projection };
 }
 
 function projectedBreakdown(
@@ -511,6 +524,27 @@ function stableUnique(values: readonly string[]): string[] {
 }
 
 /**
+ * The work-block facts that its member findings decide: the sorted unique POSIX
+ * paths they cite, `coordination` when any member is systemic, and the highest
+ * member severity. The one rule for every block producer.
+ */
+export function deriveWorkBlockFacts(
+  members: readonly Finding[],
+): Pick<WorkBlock, "owned_files" | "role" | "max_severity"> {
+  return {
+    owned_files: stableUnique(
+      members.flatMap((finding) =>
+        finding.affected_files.map((file) => toPosixPath(file.path)),
+      ),
+    ),
+    role: members.some((finding) => finding.systemic === true)
+      ? "coordination"
+      : "implementation",
+    max_severity: maxSeverity(members.map((finding) => finding.severity)),
+  };
+}
+
+/**
  * Project a validated audit report onto an approved finding subset without
  * recomputing its canonical content-coherence membership.
  *
@@ -526,8 +560,7 @@ export function projectAuditFindingsReportSubset(
   selectedFindings: readonly Finding[],
 ): AuditFindingsReport {
   // Validate fail-closed before inspecting or copying any report fields.
-  const originalProjection = projectApprovedFindings(value);
-  const report = AuditFindingsReportSchema.parse(value);
+  const { report, projection: originalProjection } = inspectOrThrow(value);
   const originalIds = new Set(
     originalProjection.findings.map((finding) => finding.id),
   );
@@ -559,11 +592,6 @@ export function projectAuditFindingsReportSubset(
       if (findingIds.length === 0) return [];
       const originalBlock = report.work_blocks[index]!;
       const members = findingIds.map((id) => selectedById.get(id)!);
-      const maxSeverity = members.reduce((highest, finding) =>
-        severityRank(finding.severity) > severityRank(highest.severity)
-          ? finding
-          : highest,
-      ).severity;
       return [{
         component: findingIds,
         block: {
@@ -574,17 +602,7 @@ export function projectAuditFindingsReportSubset(
               (id) => normalizedById.get(id)?.unit_ids ?? [],
             ),
           ),
-          owned_files: stableUnique(
-            members.flatMap((finding) =>
-              finding.affected_files.map((location) =>
-                location.path.replace(/\\/gu, "/"),
-              ),
-            ),
-          ),
-          role: members.some((finding) => finding.systemic === true)
-            ? "coordination" as const
-            : "implementation" as const,
-          max_severity: maxSeverity,
+          ...deriveWorkBlockFacts(members),
           rationale: `Canonical coherence subset retaining ${members.length} approved finding(s) from ${originalBlock.id}.`,
           depends_on: originalBlock.depends_on,
         },

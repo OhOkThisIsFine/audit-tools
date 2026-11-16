@@ -15,6 +15,7 @@
  * than pulling its vocabulary in here — see `RemediationIssueCode`.
  */
 import { readFile } from "node:fs/promises";
+import { errorMessage, isFileMissingError } from "../io/json.js";
 import type { IngestionCheckId } from "./ingestionChecks.js";
 
 export const SUBMISSION_ISSUE_CODES = [
@@ -97,12 +98,12 @@ export async function readSubmissionDocument(
   try {
     source = await readFile(absolutePath, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (isFileMissingError(error)) {
       return { kind: "missing" };
     }
     return {
       kind: "malformed",
-      detail: error instanceof Error ? error.message : String(error),
+      detail: errorMessage(error),
     };
   }
   return parseSubmissionSource(source);
@@ -125,7 +126,7 @@ export function parseSubmissionSource(source: string): SubmissionReadOutcome {
   } catch (error) {
     return {
       kind: "malformed",
-      detail: error instanceof Error ? error.message : String(error),
+      detail: errorMessage(error),
     };
   }
 }

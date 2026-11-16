@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/agent-reflections.test.ts
 // Agent meta-audit reflections: a canonical, opt-in feedback channel shared by
 // both orchestrators. Workers may append one reflection per task/item (NDJSON)
 // to `agent-feedback.jsonl` in the run's artifacts dir — shape single-sourced by
@@ -10,6 +11,8 @@
 import { z } from "zod";
 import { severityRank } from "./types/lens.js";
 import { compareCodeUnits } from "./compareCodeUnits.js";
+import { countBy } from "./countBy.js";
+import { isRecord } from "./validation/basic.js";
 
 export const ReflectionClaritySchema = z.enum([
   "clear",
@@ -44,8 +47,6 @@ export type AgentReflection = z.infer<typeof AgentReflectionSchema>;
 /** Canonical worker-appended feedback file name, relative to an artifacts dir. */
 export const AGENT_FEEDBACK_FILENAME = "agent-feedback.jsonl";
 
-const CLARITY_VALUES = new Set<ReflectionClarity>(ReflectionClaritySchema.options);
-const SEVERITY_VALUES = new Set<ReflectionSeverity>(ReflectionSeveritySchema.options);
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -122,35 +123,31 @@ export function parseReflectionsNdjson(text: string): ReflectionParseResult {
       discard(line, "not_json");
       continue;
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isRecord(parsed)) {
       discard(line, "not_an_object");
       continue;
     }
 
-    const record = parsed as Record<string, unknown>;
+    const record = parsed;
     if (typeof record.task_id !== "string" || record.task_id.length === 0) {
       discard(line, "missing_task_id");
       continue;
     }
-    if (
-      typeof record.instruction_clarity !== "string" ||
-      !CLARITY_VALUES.has(record.instruction_clarity as ReflectionClarity)
-    ) {
+    const clarity = ReflectionClaritySchema.safeParse(record.instruction_clarity);
+    if (!clarity.success) {
       discard(line, "missing_or_invalid_instruction_clarity");
       continue;
     }
-    if (
-      typeof record.severity !== "string" ||
-      !SEVERITY_VALUES.has(record.severity as ReflectionSeverity)
-    ) {
+    const severity = ReflectionSeveritySchema.safeParse(record.severity);
+    if (!severity.success) {
       discard(line, "missing_or_invalid_severity");
       continue;
     }
 
     const reflection: AgentReflection = {
       task_id: record.task_id,
-      instruction_clarity: record.instruction_clarity as ReflectionClarity,
-      severity: record.severity as ReflectionSeverity,
+      instruction_clarity: clarity.data,
+      severity: severity.data,
     };
     if (typeof record.lens === "string") reflection.lens = record.lens;
     if (isStringArray(record.ambiguities)) reflection.ambiguities = record.ambiguities;
@@ -177,11 +174,7 @@ export function reportDiscardedReflections(
   source: string,
 ): void {
   if (discarded.length === 0) return;
-  const byReason = new Map<ReflectionDiscardReason, number>();
-  for (const entry of discarded) {
-    byReason.set(entry.reason, (byReason.get(entry.reason) ?? 0) + 1);
-  }
-  const summary = [...byReason.entries()]
+  const summary = Object.entries(countBy(discarded, (entry) => entry.reason))
     .sort(([a], [b]) => compareCodeUnits(a, b))
     .map(([reason, count]) => `${reason}=${String(count)}`)
     .join(" ");

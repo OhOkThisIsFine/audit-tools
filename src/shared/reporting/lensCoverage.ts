@@ -85,14 +85,13 @@ export function deriveLensCoverage(params: {
     .filter((lens) => !selected.has(lens))
     .sort(compareCodeUnits);
   for (const lens of unselected) {
-    const findingsCount = counts.get(lens)!;
     entries.push({
       lens,
       selected: false,
-      findings_count: findingsCount,
-      // A lens nobody selected that nonetheless produced findings is
-      // `findings`; it cannot be `clean`, because nothing asked for it.
-      outcome: findingsCount > 0 ? "findings" : "not_run",
+      findings_count: counts.get(lens)!,
+      // Every key of `counts` has at least one finding, so a lens nobody
+      // selected is `findings`; it cannot be `clean`, because nothing asked for it.
+      outcome: "findings",
     });
   }
   return entries;

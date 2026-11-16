@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { errorMessage } from "../io/json.js";
 
 /** What the server hands the bin's submit core. Resolution of the paths is the bin's. */
 export interface SubmitToolRequest {
@@ -53,6 +54,19 @@ const SUBMIT_TOOL_DESCRIPTION =
   "The tool checks it with the rules ingestion applies and writes it to the item's bound path only when it passes. " +
   "On an error, correct the result and call this tool again.";
 
+/** One tool reply: the report as JSON (an error when nothing was written), or the thrown message. */
+async function toolReply(run: () => Promise<{ readonly written: boolean }>) {
+  try {
+    const report = await run();
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }],
+      ...(report.written ? {} : { isError: true }),
+    };
+  } catch (error) {
+    return { content: [{ type: "text" as const, text: errorMessage(error) }], isError: true };
+  }
+}
+
 export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
   const server = new McpServer({ name: options.name, version: options.version });
   server.registerTool(
@@ -69,25 +83,15 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
         result: z.record(z.unknown()).describe("The result document, as a JSON object"),
       },
     },
-    async (args) => {
-      try {
-        const report = await options.submit({
+    (args) =>
+      toolReply(() =>
+        options.submit({
           root: args.root,
           artifactsDir: args.artifacts_dir,
           workItemId: args.work_item_id,
           source: JSON.stringify(args.result, null, 2),
-        });
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }],
-          ...(report.written ? {} : { isError: true }),
-        };
-      } catch (error) {
-        return {
-          content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }],
-          isError: true,
-        };
-      }
-    },
+        }),
+      ),
   );
   // sites-pinned: tests/audit/gate-submit.test.ts
   const gate = options.gateSubmission;
@@ -100,14 +104,7 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
       work_item_id: z.string().optional().describe("Work-item id, required for item-bound gate lanes"),
       result: z.union([z.record(z.unknown()), z.array(z.unknown())]),
     },
-  }, async args => {
-    try {
-      const report = await gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, ...(args.work_item_id === undefined ? {} : { workItemId: args.work_item_id }), source: JSON.stringify(args.result, null, 2) });
-      return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }], ...(report.written ? {} : { isError: true }) };
-    } catch (error) {
-      return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : String(error) }], isError: true };
-    }
-  });
+  }, args => toolReply(() => gate.submit({ root: args.root, artifactsDir: args.artifacts_dir, lane: args.lane, ...(args.work_item_id === undefined ? {} : { workItemId: args.work_item_id }), source: JSON.stringify(args.result, null, 2) })));
   return server;
 }
 

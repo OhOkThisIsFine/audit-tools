@@ -31,7 +31,7 @@ test("an oversized single item is isolated into its own chunk without any specia
   // The natural flush-gate (current.length > 0 before checking budget) means a
   // single item over budget is never flushed against itself — it always lands
   // alone — and the item AFTER it triggers the flush of the oversized-alone
-  // chunk. No `isolateAlone` option needed for this to hold.
+  // chunk. No special option is needed for this to hold.
   expect(chunkByBudget([1, 50, 1], { costOf: sumCost, budget: 10 })).toEqual([
     [1],
     [50],
@@ -59,47 +59,3 @@ test("maxItems=0 disables the count check (budget-only)", () => {
   ).toEqual([[1, 1, 1]]);
 });
 
-test("isolateAlone immediately isolates a flagged item, bypassing the normal candidate check", () => {
-  // Item "BIG" is flagged regardless of its own cost; a normal accumulate
-  // would have merged it (cost 1 fits easily), but isolateAlone forces it
-  // into its own chunk and flushes whatever was accumulating first.
-  const items = ["a", "b", "BIG", "c"];
-  const costOf = (candidate: string[]) => candidate.length; // cheap, would never overflow alone
-  const result = chunkByBudget(items, {
-    costOf,
-    budget: 100,
-    isolateAlone: (item) => item === "BIG",
-  });
-  expect(result).toEqual([["a", "b"], ["BIG"], ["c"]]);
-});
-
-test("onIsolate and onBeforeFlush fire with the expected info", () => {
-  const isolateEvents: number[] = [];
-  const flushEvents: number[] = [];
-  chunkByBudget([1, 50, 1], {
-    costOf: sumCost,
-    budget: 10,
-    isolateAlone: (item) => item === 50,
-    onIsolate: (item) => isolateEvents.push(item),
-    onBeforeFlush: (info) => flushEvents.push(info.item),
-  });
-  expect(isolateEvents).toEqual([50]);
-  // The item right after the isolated 50 (the trailing 1) still triggers the
-  // normal flush path, since chunkByBudget resets `current` after isolating.
-  expect(flushEvents).toEqual([]);
-});
-
-test("onBeforeFlush reports whether the count or budget check tripped", () => {
-  const reasons: Array<{ wouldExceedCount: boolean; wouldExceedBudget: boolean }> = [];
-  chunkByBudget([1, 1, 1], {
-    costOf: sumCost,
-    budget: 1000,
-    maxItems: 1,
-    onBeforeFlush: (info) =>
-      reasons.push({ wouldExceedCount: info.wouldExceedCount, wouldExceedBudget: info.wouldExceedBudget }),
-  });
-  expect(reasons).toEqual([
-    { wouldExceedCount: true, wouldExceedBudget: false },
-    { wouldExceedCount: true, wouldExceedBudget: false },
-  ]);
-});

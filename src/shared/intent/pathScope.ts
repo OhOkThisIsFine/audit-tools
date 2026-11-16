@@ -1,19 +1,16 @@
 // sites-pinned: tests/audit/f1.test.ts, tests/remediate/checkpoint-filter.test.ts
 import type { IntentCheckpoint } from "../types/intentCheckpoint.js";
+import { toPosixPath } from "../paths.js";
 
 /**
  * Shared path matching and structured scope policy. Review and write scope both
  * honor explicit exclusions; only write scope honors `must_not_touch` globs.
  * All matching is case-sensitive and OS-agnostic (separators normalized to "/").
  */
-function normalize(p: string): string {
-  return p.replace(/\\/g, "/");
-}
-
 /** Exact path or directory-prefix match (e.g. "src/api" matches "src/api/x.ts"). */
 export function pathMatchesPrefix(filePath: string, entryPath: string): boolean {
-  const f = normalize(filePath);
-  const p = normalize(entryPath).replace(/\/+$/, "");
+  const f = toPosixPath(filePath);
+  const p = toPosixPath(entryPath).replace(/\/+$/, "");
   if (!p) return false;
   return f === p || f.startsWith(`${p}/`);
 }
@@ -40,6 +37,9 @@ function translateGlobSegment(segment: string): string {
   return re;
 }
 
+/** Compiled regex per normalized wildcard glob, so each glob compiles once. */
+const globRegexCache = new Map<string, RegExp>();
+
 /**
  * Minimal glob match supporting `*` (within a segment), `**` (across
  * segments, matching ZERO or more whole path segments — conventional glob
@@ -54,12 +54,21 @@ function translateGlobSegment(segment: string): string {
  * COR-ef7a209d-2) — not only paths with an intermediate directory.
  */
 export function globMatches(filePath: string, glob: string): boolean {
-  const f = normalize(filePath);
-  const g = normalize(glob);
+  const f = toPosixPath(filePath);
+  const g = toPosixPath(glob);
   if (!g.includes("*") && !g.includes("?")) {
     return pathMatchesPrefix(f, g);
   }
+  let regex = globRegexCache.get(g);
+  if (regex === undefined) {
+    regex = compileGlob(g);
+    globRegexCache.set(g, regex);
+  }
+  return regex.test(f);
+}
 
+/** Translate a normalized glob that holds a wildcard to its anchored regex. */
+function compileGlob(g: string): RegExp {
   const segments = g.split("/");
   const pieces: string[] = [];
   for (let i = 0; i < segments.length; i++) {
@@ -84,7 +93,7 @@ export function globMatches(filePath: string, glob: string): boolean {
     }
     pieces.push(translateGlobSegment(segment));
   }
-  return new RegExp(`^${pieces.join("")}$`).test(f);
+  return new RegExp(`^${pieces.join("")}$`);
 }
 
 /**
