@@ -2559,21 +2559,27 @@
     "answer": "1. Reword the header",
     "subject": "spec/audit-workflow-design.md: fix or clarify the \"Synthesis narrative (always runs)\" header, which contradicts its own body and the code",
     "path": "spec/audit-workflow-design.md",
-    "decided_at": "2026-11-16T20:06:36.537Z"
+    "decided_at": "2026-11-16T20:06:36.537Z",
+    "completed_at": "2026-11-16T20:18:07.485Z",
+    "completed_ref": "bea86c87"
   },
   "fcdc9f3b916e7bc6": {
     "disposition": "settled",
     "answer": "1. Same item — merge to one home (keep the deferred.md entry, delete the open-bugs.md copy)",
     "subject": "Doc-set condensation: three backlog/handoff homes point at the audit-refactor-qualification blocker — same item filed three times, or genuinely distinct?",
     "path": "docs/backlog/deferred.md",
-    "decided_at": "2026-11-16T20:06:36.782Z"
+    "decided_at": "2026-11-16T20:06:36.782Z",
+    "completed_at": "2026-11-16T20:18:07.547Z",
+    "completed_ref": "bea86c87"
   },
   "677de498e4000bb3": {
     "disposition": "settled",
     "answer": "Other: the WIP is gone (main checkout clean 2026-11-16) and none of it landed. Re-author the three verified-correct edits (ship SKILL.md validate-source job; glossary-ids.md INV-WTS path and the stale INV-CDI-EXPLICIT-NODE-FIELDS row; the two finished forward-tracks.md entries). Keep the minor-bugs.md tool-input-guard entry: that bug is still live.",
     "subject": "4-file uncommitted WIP has blocked leg-1's clean-tree gate for 2 nights — 3 of 4 edits verified correct, 1 is wrong",
     "path": "docs/backlog/minor-bugs.md",
-    "decided_at": "2026-11-16T20:06:37.027Z"
+    "decided_at": "2026-11-16T20:06:37.027Z",
+    "completed_at": "2026-11-16T20:18:07.607Z",
+    "completed_ref": "bea86c87"
   },
   "135ae2a4fa2e1db8": {
     "disposition": "settled",
