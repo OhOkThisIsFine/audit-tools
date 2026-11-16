@@ -16,7 +16,8 @@
   `spawnSync` deadline; the submodule case of `tests/audit/scope-index-staleness.test.ts` hits the
   30 s test timeout. Two full runs passed, then four failed in a row (4–9 cases, file time 30 s →
   400 s); both files pass alone, and clean `1fae5792` fails the same way, so the cause is machine
-  state, not a tree. `%TEMP%` holds 1.48M directories; each run adds ~670 under each
+  state, not a tree. `%TEMP%` held 1.48M directories; deleting the 1.43M older than 7 days restored
+  a green run (the gate file fell from 400 s to 24 s). Each run still adds ~670 under each
   `audit-tools-test-{state,analyzer-cache,binary-cache}` prefix and never removes them.
   **Property:** a test's child deadline comes from a measurement under full-suite load, and a test
   removes the temp directories it creates.

@@ -51,19 +51,19 @@
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
 - `minor-bugs.md:14` — Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).
-- `minor-bugs.md:24` — A partial withdrawal reports a complete item as rejected (2026-10-06, low).
-- `minor-bugs.md:26` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
-- `minor-bugs.md:28` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
-- `minor-bugs.md:30` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
-- `minor-bugs.md:32` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
-- `minor-bugs.md:34` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
-- `minor-bugs.md:36` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
-- `minor-bugs.md:38` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
-- `minor-bugs.md:40` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
-- `minor-bugs.md:42` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
-- `minor-bugs.md:44` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
-- `minor-bugs.md:46` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
-- `minor-bugs.md:48` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:25` — A partial withdrawal reports a complete item as rejected (2026-10-06, low).
+- `minor-bugs.md:27` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
+- `minor-bugs.md:29` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
+- `minor-bugs.md:31` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
+- `minor-bugs.md:33` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
+- `minor-bugs.md:35` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
+- `minor-bugs.md:37` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
+- `minor-bugs.md:39` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
+- `minor-bugs.md:41` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
+- `minor-bugs.md:43` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
+- `minor-bugs.md:45` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
+- `minor-bugs.md:47` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
+- `minor-bugs.md:49` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 
