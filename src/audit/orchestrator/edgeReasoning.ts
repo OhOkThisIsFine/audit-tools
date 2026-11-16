@@ -1,5 +1,6 @@
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 import { hashContent, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
+import { edgeSignature } from "../extractors/graph.js";
 
 /**
  * Phase 4B — optional, bounded edge-reasoning pass.
@@ -46,10 +47,6 @@ export interface EdgeReasoningOptions {
 export interface EdgeReasoningSummary {
   rewritten: number;
   candidates: number;
-}
-
-function edgeSignature(edge: GraphEdge): string {
-  return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
 }
 
 /**

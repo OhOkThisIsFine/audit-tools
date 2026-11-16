@@ -206,7 +206,8 @@ export function buildPathLookup(
   );
 }
 
-function edgeSignature(edge: GraphEdge): string {
+/** The identity of an edge: its endpoints and kind. Two edges with one signature are one edge. */
+export function edgeSignature(edge: GraphEdge): string {
   return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
 }
 

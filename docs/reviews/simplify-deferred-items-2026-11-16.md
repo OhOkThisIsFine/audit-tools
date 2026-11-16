@@ -20,17 +20,6 @@ the work that would make it a plain cleanup.
 
 ## 1. Blocked by a test or a test pin (a test change unblocks it)
 
-- **P01 — `isRecord` in `src/shared/parsing/toml.ts`.** Gain: one shared predicate instead of an
-  inline copy; identical output. Blocker: the file is in the import closure whose content
-  `tests/audit/graph-edge-cache.test.ts` hashes, so any edit reds the digest pin. **Unblock:**
-  update the digest pin in the same commit. Do NOT bump `GRAPH_EDGE_CACHE_KEY_VERSION`: a bump
-  drops every cached graph contribution and is right only when extraction output changes
-  (`docs/backlog/durable-traps.md`, "A COMMENT-only edit to a graph extractor"). Every P02 and P06
-  edit inside that closure meets the same pin.
-- **P03 — `edgeSignature` in `src/audit/orchestrator/edgeReasoning.ts`.** Gain: it is
-  byte-identical to the private `edgeSignature` in `src/audit/extractors/graph.ts`; one copy goes.
-  Blocker: exporting it edits `graph.ts`, the root of the same digest-pinned closure. **Unblock:**
-  export it and update the digest pin, as above.
 - **P01 — `persistAnalyzerConsent`.** Blocker: the shared fixture creators of ten test files call
   it. **Unblock:** move those fixtures to the production write path first; then the function can
   be simplified or removed.

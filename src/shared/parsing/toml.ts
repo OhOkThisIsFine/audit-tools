@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/graph-manifest-toml.test.ts, tests/audit/graph-manifest-edges.test.ts, tests/shared/repoConventions.test.ts
 import { parse as parseToml } from "smol-toml";
+import { isRecord } from "../validation/basic.js";
 
 /**
  * Vetted-parser TOML helpers for manifest inspection. Replaces the
@@ -18,9 +19,7 @@ import { parse as parseToml } from "smol-toml";
 export function parseTomlSafe(content: string): Record<string, unknown> {
   try {
     const parsed = parseToml(content);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    return isRecord(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -28,7 +27,7 @@ export function parseTomlSafe(content: string): Record<string, unknown> {
 
 /** A nested object value (table) by key, or undefined when absent / not a table. */
 export function asTomlTable(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!isRecord(value)) return undefined;
   // TOML date/time scalars are objects too, but only records are tables.
   const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === null || prototype === Object.prototype
