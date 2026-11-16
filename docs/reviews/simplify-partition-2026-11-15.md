@@ -17,8 +17,10 @@ whole codebase, one part per chat. Base: `494d10df` (v0.55.20).
 - Each chat works in its own worktree and lands through the normal gate. Its landing commit sets
   the row's Status to `landed` (a commit cannot name its own hash: `git log -L` on the row finds
   it). Parts land one at a time; a later part rebases onto the earlier landings.
-- Each landing adds its skips and its leads for later parts to *Leads and skips* below. A later
-  chat reads the leads for its own part first.
+- Each landing adds its leads for later parts to *Leads and skips* below, and its skips (what it
+  chose not to do, why, and what would unblock it) to
+  [`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md). A later chat
+  reads the leads for its own part first.
 
 ## Parts
 
@@ -60,26 +62,9 @@ Leads for later parts (not fixed, not verified as defects):
 - **Any part:** `countBy` builds its counts on a plain `{}`, so a key such as `constructor` reads an
   inherited value. P01 kept the `Map` counters for custom lens names for that reason.
 
-P01 skips, each with its reason:
-
-- `findingGrounding` quote and citation memo: needs a second per-pass object next to the exported
-  `SourceReader` (an API change in other parts), and nothing measures the cost.
-- `persistAnalyzerConsent`: the shared fixture creators of ten test files call it.
-- `aggregateReflections` zero-init from the enum options: needs a cast for no gain.
-- `isLegacyDraftCheckpoint` and one `submissionLedger` record check: `isRecord` is not identical
-  there (arrays accepted; the narrowed type rejects the cast).
-- O(g^2) dedupe pair precompute, parallel git spawns, ledger batch append, lazy obligation derive,
-  `gitTrackedPaths` on the `git.ts` transport: each changes error, lock or ordering behavior.
-- `isRecord` in `parsing/toml.ts`: identical output, but the file is in the import closure whose
-  content `tests/audit/graph-edge-cache.test.ts` hashes, so the edit reds the digest pin. A
-  two-line gain did not justify a pin move. P02 and P06 meet the same pin for any file in that
-  closure. The failure text says to bump `GRAPH_EDGE_CACHE_KEY_VERSION`, but a behavior-identical
-  edit needs only the digest pin update; a bump drops every cached graph contribution and is right
-  only when extraction output changes (`docs/backlog/durable-traps.md`, "A COMMENT-only edit to a
-  graph extractor").
-- Public barrel narrowing (unused exported types, `lensOutcome`): an owner decision.
-- `classifyRead` delegation, a private `runGit` wrapper, an artifact-freshness policy table: small
-  gain, part of it in loop-core.
+P01 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each.
 
 ### From P02
 
@@ -95,17 +80,9 @@ Leads for later parts (not fixed, not verified as defects):
 - **Any part:** `package.json` is read by more than one reader in `tooling/`. A single reader must
   keep the array-valued edge in `repoConventions.ts`.
 
-P02 skips, each with its reason:
-
-- `normalizeClippyJson` and `normalizeRubocopJson`: only tests call them. Removal is an owner
-  decision on test-only exports, as is `canonicalizeFilePath`.
-- `resolveBinaryCandidates` in parallel and a split of `runExternalAnalyzer`: each changes the
-  spawn order or the error order.
-- `lockedJsonMutate` in `io/fileLock.ts`: lock-critical, and a test pins the snapshot behavior.
-- `Map` lookups in `charterExtraction.ts` and `charterClarification.ts`, a composite triage key, a
-  `Set` in `frictionRecord.ts`, a `GO_OS_NAMES` table: the inputs are small, and nothing measures
-  a cost.
-- Hoisting `scaledDegree` in `decompose/modularity.ts`: it moves which input throws first.
+P02 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each.
 
 ### From P03
 
@@ -137,43 +114,12 @@ Leads for later parts (not fixed, not verified as defects):
 - **Shared:** `chunkByTaskBudget` → `src/shared/chunkByBudget.ts` re-reduces the growing chunk for
   every item (O(n^2) per block).
 
-P03 skips and design leads, each with its reason:
+P03 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each.
 
-- A PRIORITY-keyed derivation table for `deriveAuditState`: a design change in loop-core. The
-  open property it would close: an obligation id that `deriveAuditState` does not emit reads as
-  satisfied in `deriveObligationState`, and no test reconciles the emitted ids against PRIORITY.
-- Deriving `SLICE_PARTICIPANT_PRODUCERS` from `EXECUTOR_REGISTRY[].produces`: the map is declared
-  on purpose, and the derived value adds `file_disposition` as a producer of `repo_manifest.json`.
-- A `laneGate` constructor for six `POLICY_CLASSIFIERS` rows: the two reviewers disagreed on
-  whether check order and error text stay the same.
-- `LIFECYCLE_PRODUCTIONS` flags and a `source_read_only` field on `ExecutorDefinition`: registry
-  shape changes across several files.
-- The unreachable missing-executor arms in `nextStep.ts` and `obligationPolicy.ts`: fail-closed
-  guards behind a load-time assertion.
-- The `ARTIFACT_DEPENDENCIES_MAP` aliases in `staleness.ts` and `artifactMetadata.ts`: each widens
-  the literal key type of `ARTIFACT_DEPENDS_ON_MAP` for string lookups.
-- The `artifact_metadata.json` filters over `ALL_DAG_ARTIFACTS` and `ARTIFACT_DEPENDS_ON_MAP`:
-  they guard declared data, and removal moves an unchecked invariant into the map. Only the
-  filter that local dataflow makes dead was removed.
-- The appended deepening path in result ingestion builds an affinity graph and plan metrics that
-  `finalBundle` overwrites; the same path is live for the runtime-validation executors, so a
-  conditional would add more than it removes.
-- One `finishRuntimeValidation` helper for the identical endings of the two runtime-validation
-  executors: `scripts/shared/executor-write-sites.mjs` reads each executor's artifact literals
-  from its own function body, so the helper reds
-  `executor-artifact-production-declaration.test.ts`. Pointing both rows at the helper would
-  lose the per-executor attribution the extractor exists for.
-- `hasPackageJsonEslintConfig` → `readPackageJson`: exports a private reader of another executor
-  for a few lines.
-- `dedupeBy` in `syntaxResolutionExecutor.ts`: a one-off keyed loop in another file.
-- Reuse skips: the three `taskPriority` rules differ on purpose (`requeueUtils.ts`);
-  `resolveFromPath` and `resolveRuntimeValidationSpawnCommand` change spawn resolution;
-  `errorMessage` changes the text for a thrown `null` or a stack; `edgeSignature` lives in the
-  digest-pinned `extractors/graph.ts`; `structuredClone` keeps `undefined` fields.
-- Efficiency skips: two `interpretFreeFormIntentForAudit` calls, two coverage-element baseline
-  reads, nested runtime-task scans and small `includes` lists: small inputs, no measured cost.
-- Coverage gap: the efficiency reviewer did not read `scope.ts`, `structureExecutors.ts`,
-  `syntaxResolutionExecutor.ts`, `graphEnrichmentExecutor.ts`, `autoFixExecutor.ts`,
-  `unitBuilder.ts`, `runtimeCommand.ts`, `coverageElementBaseline.ts`, `runtimeValidation.ts`,
-  `flowPlanning.ts`, `edgeReasoning.ts`, `synthesisExecutors.ts`, `executors.ts` and
-  `localCommands.ts` line by line. The other three angles covered them.
+P03 coverage gap: the efficiency reviewer did not read `scope.ts`, `structureExecutors.ts`,
+`syntaxResolutionExecutor.ts`, `graphEnrichmentExecutor.ts`, `autoFixExecutor.ts`,
+`unitBuilder.ts`, `runtimeCommand.ts`, `coverageElementBaseline.ts`, `runtimeValidation.ts`,
+`flowPlanning.ts`, `edgeReasoning.ts`, `synthesisExecutors.ts`, `executors.ts` and
+`localCommands.ts` line by line. The other three angles covered them.

@@ -11,8 +11,10 @@
 - **Simplify sweep, parts P04–P12.** A quality-only `/simplify` pass, one part per chat, over the
   disjoint partition in
   [`simplify-partition-2026-11-15.md`](../reviews/simplify-partition-2026-11-15.md). Each part
-  reads its leads in that record first, and its landing sets its row to `landed`. Remove this entry
-  when every row is landed.
+  reads its leads in that record first, and its landing sets its row to `landed`. What a part chose
+  not to do, and what would unblock it, is in
+  [`simplify-deferred-items-2026-11-16.md`](../reviews/simplify-deferred-items-2026-11-16.md).
+  Remove this entry when every row is landed.
 - **Governance consolidation retains explicit scope limits.** The executable gate catalog, backlog corpus, document pins, shared vocabulary, outcome evaluation and graph reachability are consolidated. Snapshot retention stays consumer-specific. A validation-receipt cache and a universal execution/mutation-certification gate are deliberately omitted without demonstrated value. Source-to-test declarations provide navigation, not behavioral proof. Remaining specific test-replica claims require independent evidence rather than another generic certification subsystem.
 
 
