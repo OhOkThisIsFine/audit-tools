@@ -11,6 +11,13 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **A stopped `npm test` leaves its vitest tree alive on Windows (2026-11-16, low).** The host
+  stopped a background `npm test`; `run-vitest-gate.mjs` (which runs vitest through `spawnSync`)
+  and its vitest workers kept running, because Windows does not end child processes with their
+  parent. The next `npm run build` then refused (`guard-no-suite-running.mjs`: "1 vitest run(s) …
+  in flight") until `taskkill /PID <gate pid> /T /F`. **Property:** when the process that started a
+  suite ends, the suite's process tree ends with it.
+
 - **Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).**
   `runGateCase` (`tests/shared/vitest-gate-false-red.test.ts`) gives its child gate a 10 s
   `spawnSync` deadline; the submodule case of `tests/audit/scope-index-staleness.test.ts` hits the

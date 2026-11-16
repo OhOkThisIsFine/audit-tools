@@ -24,7 +24,7 @@
 > Titles are each entry's own bold lead-in, verbatim, so this index restates nothing and cannot
 > drift. **Line numbers move under every edit** — regenerate rather than hand-patching them:
 > `node scripts/shared/generate-backlog-index.mjs` (`--check` gates it in `verify:checks`
-> and at commit). 128 entr(y/ies) indexed.
+> and at commit). 129 entr(y/ies) indexed.
 
 ### [`open-bugs.md`](backlog/open-bugs.md)
 
@@ -49,20 +49,21 @@
 
 ### [`minor-bugs.md`](backlog/minor-bugs.md)
 
-- `minor-bugs.md:14` — Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).
-- `minor-bugs.md:25` — A partial withdrawal reports a complete item as rejected (2026-10-06, low).
-- `minor-bugs.md:27` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
-- `minor-bugs.md:29` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
-- `minor-bugs.md:31` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
-- `minor-bugs.md:33` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
-- `minor-bugs.md:35` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
-- `minor-bugs.md:37` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
-- `minor-bugs.md:39` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
-- `minor-bugs.md:41` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
-- `minor-bugs.md:43` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
-- `minor-bugs.md:45` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
-- `minor-bugs.md:47` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
-- `minor-bugs.md:49` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
+- `minor-bugs.md:14` — A stopped `npm test` leaves its vitest tree alive on Windows (2026-11-16, low).
+- `minor-bugs.md:21` — Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).
+- `minor-bugs.md:32` — A partial withdrawal reports a complete item as rejected (2026-10-06, low).
+- `minor-bugs.md:34` — Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).
+- `minor-bugs.md:36` — The lock heartbeat only logs a stolen lock (2026-10-06, low).
+- `minor-bugs.md:38` — `explain-task` takes the first token after the verb as the task id (2026-10-06, low).
+- `minor-bugs.md:40` — A fractional positive-integer flag becomes 0 (2026-10-06, low).
+- `minor-bugs.md:42` — `status` drops `not_applicable` obligations from its summary (2026-10-06, low).
+- `minor-bugs.md:44` — `loopCoreClosure.mjs` drops directory imports from the importer graph (2026-10-06, low).
+- `minor-bugs.md:46` — The vitest shard duration baseline is stale, so duration sharding is off (2026-10-06, low).
+- `minor-bugs.md:48` — `bounded-call-single-source.test.ts` matches `advance(` in raw text (2026-10-05, low).
+- `minor-bugs.md:50` — A repeated `--reviewed-by` keeps only its last value (2026-10-05, low).
+- `minor-bugs.md:52` — The repo tool-input guard took a plain worktree sub-agent for an audit node (2026-10-05, low).
+- `minor-bugs.md:54` — Test-command discovery lacks some ecosystem declarations (2026-10-06, low).
+- `minor-bugs.md:56` — DD-9 + charter slice-staleness — residual only, revisit on live evidence (2026-07-23, low, accepted).
 
 ### [`forward-tracks.md — Open tracks`](backlog/forward-tracks.md)
 

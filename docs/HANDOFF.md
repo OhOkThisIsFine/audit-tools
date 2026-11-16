@@ -6,8 +6,10 @@
 ## Current state
 
 `main` carries simplify parts P01 (shared contracts, `49a42916`), P02 (shared infrastructure,
-`cec41197`) and P03 (audit orchestrator core) on top of release v0.55.20. The owner chose to release the parts later, together, so
-the published package is v0.55.20.
+`cec41197`) and P03 (audit orchestrator core) on top of release v0.55.20, plus the withheld
+P01–P03 items the 2026-11-16 lap judged worth doing. The items it skipped stay in the
+[deferred record](reviews/simplify-deferred-items-2026-11-16.md). The owner chose to release the
+parts later, together, so the published package is v0.55.20.
 The remaining structured MCP routes are in [`forward-tracks.md`](backlog/forward-tracks.md).
 
 Release metadata is in [package.json](../package.json); publication and global-install evidence
