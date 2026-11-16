@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { RuntimeValidationTask } from "../../src/audit/types/runtimeValidation.js";
-import type { LogEntry, ExecutorRunResult } from "../../src/audit/orchestrator/executorResult.js";
 
 const { checkFileIntegrity } = await import("../../src/audit/orchestrator/fileIntegrity.js");
 const { normalizeGenericExternalResults } = await import("../../src/shared/analyzers/normalizeExternal.js");
@@ -252,44 +251,6 @@ test("runCommand error event summary includes the OS error message", async () =>
   expect(result.status).toBe("inconclusive");
   expect(result.summary.length > 0, "summary is non-empty").toBeTruthy();
   expect(result.summary.includes("__audit_code_nonexistent_42__"), "summary embeds the command name").toBeTruthy();
-});
-
-// ── ExecutorRunResult structured observability fields (OBS-d202e206) ──────────
-// These are runtime-shape checks: verify the optional fields are accepted by
-// constructing plain objects and checking they satisfy the expected structure.
-
-test("ExecutorRunResult accepts log_entries with all severity levels", async () => {
-  const entries: LogEntry[] = [
-    { severity: "debug", message: "debug msg", timestamp_ms: 1 },
-    { severity: "info", message: "info msg", timestamp_ms: 2 },
-    { severity: "warn", message: "warn msg", timestamp_ms: 3 },
-    { severity: "error", message: "error msg", timestamp_ms: 4, context: { task_id: "t1", run_id: "r1" } },
-  ];
-  for (const e of entries) {
-    expect(typeof e.severity === "string", "severity is a string").toBeTruthy();
-    expect(typeof e.message === "string", "message is a string").toBeTruthy();
-    expect(typeof e.timestamp_ms === "number", "timestamp_ms is a number").toBeTruthy();
-  }
-  // LogEntry with a context object satisfies the type.
-  const withCtx = entries[3];
-  expect(withCtx.context !== undefined, "context is present").toBeTruthy();
-  expect(withCtx.context?.task_id).toBe("t1");
-});
-
-test("ExecutorRunResult accepts optional step_duration_ms and degraded fields", async () => {
-  // A minimal valid result omitting optional fields.
-  const minimal: ExecutorRunResult = { updated: {}, artifacts_written: [], progress_summary: "ok" };
-  expect(minimal.step_duration_ms === undefined, "step_duration_ms is optional").toBeTruthy();
-  expect(minimal.degraded === undefined, "degraded is optional").toBeTruthy();
-
-  // With the new fields populated.
-  const full = { ...minimal, step_duration_ms: 0, degraded: false };
-  expect(full.step_duration_ms).toBe(0);
-  expect(full.degraded).toBe(false);
-
-  // degraded: true is valid.
-  const partial = { ...minimal, degraded: true };
-  expect(partial.degraded).toBe(true);
 });
 
 // ── runRuntimeValidationExecutor: deduplication counters in progress_summary (OBS-24ba5c5e) ──

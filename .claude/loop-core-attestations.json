@@ -544,6 +544,22 @@
         "src/audit/orchestrator/state.ts": "6ec224b5b7932f433202ad071d2418cde8b1621b"
       }
     },
+    "ad938761f1a24d50": {
+      "reviewed_by": "claude-opus-5-5 session; field deletion checked by repo-wide grep and the closeout auditor",
+      "attester_class": "agent",
+      "checked": "Deleted four ExecutorRunResult fields (log_entries, LogEntry, step_duration_ms, degraded). Repo-wide grep over src, tests, scripts, schemas, spec and docs found no producer or reader outside the type file and two type-only tests; the independent closeout auditor confirmed no src reader. Full suite green on the staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "2b92a41ee294d8c9fa4414c6209c3dc919830478",
+        "ran_at": "2026-11-16T19:36:59.412Z"
+      },
+      "attested_at": "2026-11-16T19:37:04.712Z",
+      "vouches": {
+        "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
+      }
+    },
     "be526ca9e4e1d631": {
       "reviewed_by": "Codex Windows qualification",
       "attester_class": "agent",
@@ -870,7 +886,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/executorResult.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "ad938761f1a24d50"
     },
     "src/audit/orchestrator/executorRunners.ts": {
       "review": "42e42270e8c264c9"

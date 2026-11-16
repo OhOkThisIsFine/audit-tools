@@ -113,6 +113,12 @@ Cross-part touches: `selectiveDeepening/shared.ts` (P04) lost its byte-identical
 `selectiveDeepening/index.ts` and `lensVerification.ts` (P04) now import it from
 `auditTaskUtils.ts`.
 
+A follow-up commit deleted `log_entries`, `LogEntry`, `step_duration_ms` and `degraded` from
+`executorResult.ts`: no executor set them and nothing in `src/` read them, and their doc comments
+told machine consumers to read them. The two type-only tests in
+`tests/audit/observability-signals.test.ts` went with them. Settled by the philosophy brief
+("delete legacy rather than carry it"); a dead field on a contract is not a test seam.
+
 Leads for later parts (not fixed, not verified as defects):
 
 - **P04:** `IMPORTANT_LENS_VERIFICATION_LENSES` in `selectiveDeepening/shared.ts` is the same set
@@ -144,9 +150,6 @@ P03 skips and design leads, each with its reason:
   shape changes across several files.
 - The unreachable missing-executor arms in `nextStep.ts` and `obligationPolicy.ts`: fail-closed
   guards behind a load-time assertion.
-- `log_entries`, `LogEntry`, `step_duration_ms` and `degraded` in `executorResult.ts`: no producer
-  or reader in `src/`; only `tests/audit/observability-signals.test.ts` uses them. Owner decision,
-  as for the P02 test-only exports.
 - The `ARTIFACT_DEPENDENCIES_MAP` aliases in `staleness.ts` and `artifactMetadata.ts`: each widens
   the literal key type of `ARTIFACT_DEPENDS_ON_MAP` for string lookups.
 - The `artifact_metadata.json` filters over `ALL_DAG_ARTIFACTS` and `ARTIFACT_DEPENDS_ON_MAP`:
