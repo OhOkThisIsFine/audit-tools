@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { toPosixPath } from "../paths.js";
 import { isRecord } from "../validation/basic.js";
 import type { GraphBundle, GraphEdge } from "../types/graph.js";
 
@@ -12,10 +13,11 @@ import type { GraphBundle, GraphEdge } from "../types/graph.js";
  * continuity consumer.
  */
 
+// sites-pinned: tests/audit/graph-path-utils.test.ts
 /** Canonical repo-relative graph key: forward slashes, posix-normalized, no `./`. */
 export function normalizeGraphPath(path: string): string {
   return posix
-    .normalize(path.replace(/\\/g, "/"))
+    .normalize(toPosixPath(path))
     .replace(/^\.\//, "");
 }
 

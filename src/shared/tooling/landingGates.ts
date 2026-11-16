@@ -93,13 +93,13 @@ export interface LandingGateRole {
 /**
  * The declared landing-gate vocabulary.
  *
- * ORDER IS THE EMITTED ORDER, and the four roles are independent: a repo
+ * ORDER IS THE EMITTED ORDER, and the five roles are independent: a repo
  * declaring only `check:lint` contributes exactly one command. Sorted by role
- * name (deadcode, depgraph, guard, lint) as the array literal, so the emitted
+ * name (deadcode, depgraph, glossary, guard, lint) as the array literal, so the emitted
  * list is content-stable and a re-derivation cannot churn the workload digest
  * (CLAUDE.md, "Extractors emit stable, content-derived array order").
  *
- * `guard` is separate from the three cheap gates because it is the EXPENSIVE
+ * `guard` is separate from the four cheap gates because it is the EXPENSIVE
  * one: the repository's own cross-cutting test suite. It is here because a
  * guard suite is precisely the gate a module-scoped `targeted_commands` entry
  * cannot stand in for — `tests/shared/audit-tools-path-guard.test.ts` is the

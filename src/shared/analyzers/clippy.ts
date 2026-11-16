@@ -1,4 +1,4 @@
-import type { ExternalAnalyzerResults } from "./types.js";
+import type { ExternalAnalyzerParsedItem, ExternalAnalyzerResults } from "./types.js";
 import { normalizeGenericExternalResults } from "./normalizeExternal.js";
 
 /**
@@ -55,27 +55,10 @@ function primarySpan(spans: ClippySpan[] | undefined): ClippySpan | undefined {
  * item shape. Degrades to `[]` on empty/malformed input; individual unparseable
  * lines are skipped rather than throwing the whole parse.
  */
-export function parseClippy(stdout: string): Array<{
-  id?: string;
-  category?: string;
-  severity?: string;
-  path?: string;
-  line_start?: number;
-  line_end?: number;
-  summary?: string;
-  rule?: string;
-}> {
+// sites-pinned: tests/shared/analyzer-candidates.test.ts
+export function parseClippy(stdout: string): ExternalAnalyzerParsedItem[] {
   if (!stdout || stdout.trim().length === 0) return [];
-  const items: Array<{
-    id?: string;
-    category?: string;
-    severity?: string;
-    path?: string;
-    line_start?: number;
-    line_end?: number;
-    summary?: string;
-    rule?: string;
-  }> = [];
+  const items: ExternalAnalyzerParsedItem[] = [];
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line.length === 0) continue;

@@ -28,7 +28,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | Part | Rule (first match wins) | Files | Lines | Churn | Status |
 | --- | --- | ---: | ---: | ---: | --- |
 | P01 shared contracts | `src/shared/{types,validation,submission,intent,findings,steps,engine,mcp,reporting,parsing,reReview}/**` and the top-level files `src/shared/*` | 87 | 17,715 | 175 | landed |
-| P02 shared infrastructure | the rest of `src/shared/**` (`analyzers`, `tooling`, `io`, `decompose`, `friction`, `graph`, `observability`, `measurement`) | 58 | 15,569 | 66 | open |
+| P02 shared infrastructure | the rest of `src/shared/**` (`analyzers`, `tooling`, `io`, `decompose`, `friction`, `graph`, `observability`, `measurement`) | 58 | 15,569 | 66 | landed |
 | P03 audit orchestrator core | `src/audit/orchestrator/**` except the P04 names | 55 | 12,438 | 47 | open |
 | P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | open |
 | P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | open |
@@ -57,8 +57,6 @@ Leads for later parts (not fixed, not verified as defects):
   the artifact is now written but never read.
 - **P09:** in `closeVerifyAnalyzerLeads.ts`, the spread of `persistedAnalyzerPolicy.analyzer_consent`
   is always undefined, because `loadAnalyzerPolicy` strips the field. The `overrides` half is live.
-- **P02:** `graph/` and `tooling/` still hold inline backslash-to-slash replacements that
-  `toPosixPath` or `normalizeRepoRelPath` covers.
 - **Any part:** `countBy` builds its counts on a plain `{}`, so a key such as `constructor` reads an
   inherited value. P01 kept the `Map` counters for custom lens names for that reason.
 
@@ -82,3 +80,29 @@ P01 skips, each with its reason:
 - Public barrel narrowing (unused exported types, `lensOutcome`): an owner decision.
 - `classifyRead` delegation, a private `runGit` wrapper, an artifact-freshness policy table: small
   gain, part of it in loop-core.
+
+### From P02
+
+Cross-part touches: `src/shared/index.ts` lost the barrel line of the deleted
+`graph/directedCycles.ts`. That module had no consumer after commit 3f73d24f.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P05, P09:** about ten analyzer parsers repeat one "parse JSON, degrade to `[]`" prologue. A
+  shared `parseJsonPayload` needs each parser's degrade report kept, so it is a design change.
+- **P05, P09:** three callers supervise an owned process with the same term-then-kill sequence. One
+  `superviseOwnedProcess` helper would serve them, but the timing is lock-adjacent.
+- **Any part:** `package.json` is read by more than one reader in `tooling/`. A single reader must
+  keep the array-valued edge in `repoConventions.ts`.
+
+P02 skips, each with its reason:
+
+- `normalizeClippyJson` and `normalizeRubocopJson`: only tests call them. Removal is an owner
+  decision on test-only exports, as is `canonicalizeFilePath`.
+- `resolveBinaryCandidates` in parallel and a split of `runExternalAnalyzer`: each changes the
+  spawn order or the error order.
+- `lockedJsonMutate` in `io/fileLock.ts`: lock-critical, and a test pins the snapshot behavior.
+- `Map` lookups in `charterExtraction.ts` and `charterClarification.ts`, a composite triage key, a
+  `Set` in `frictionRecord.ts`, a `GO_OS_NAMES` table: the inputs are small, and nothing measures
+  a cost.
+- Hoisting `scaledDegree` in `decompose/modularity.ts`: it moves which input throws first.

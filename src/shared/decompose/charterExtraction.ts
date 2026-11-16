@@ -487,6 +487,13 @@ interface Route {
   severity: Finding["severity"];
 }
 
+/** Dimensions where the Stated lane alone disagreeing means the docs are stale. */
+const DOC_ROT_DIMENSIONS: ReadonlySet<CharterDifference["dimension"]> = new Set([
+  "purpose",
+  "scope",
+  "presence",
+]);
+
 /**
  * The design's routing table (step 5), keyed on `(dimension, relation, split)`.
  * The host never picks a route. Non-incompatible records route nowhere except a
@@ -512,26 +519,11 @@ export function routeDifference(input: {
   if (!split || split.kind === "three_way") {
     return { routed_to: "clarification", severity: "high" };
   }
-  const odd = split.odd;
-  switch (dimension) {
-    case "purpose":
-    case "scope":
-      return odd === "stated"
-        ? { routed_to: "remediator", severity: "low" }
-        : { routed_to: "clarification", severity: "medium" };
-    case "responsibility":
-    case "hierarchy":
-      return { routed_to: "clarification", severity: "medium" };
-    case "standing":
-    case "standard":
-      return { routed_to: "clarification", severity: "medium" };
-    case "presence":
-      return odd === "stated"
-        ? { routed_to: "remediator", severity: "low" }
-        : { routed_to: "clarification", severity: "medium" };
-    default:
-      return { routed_to: "clarification", severity: "medium" };
-  }
+  // A lone Stated lane on a dimension the docs own is doc rot for the remediator;
+  // every other two-against-one split needs the owner.
+  return split.odd === "stated" && DOC_ROT_DIMENSIONS.has(dimension)
+    ? { routed_to: "remediator", severity: "low" }
+    : { routed_to: "clarification", severity: "medium" };
 }
 
 /**

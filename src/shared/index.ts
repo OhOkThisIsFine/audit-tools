@@ -68,7 +68,6 @@ export {
 export type { AccessTouchEvent } from "./accessMemory.js";
 export { deriveAccessMemoryFromEvents } from "./accessMemory.js";
 export { normalizeGraphPath, collectGraphEdges } from "./graph/graphPaths.js";
-export { findCyclicComponents, findFirstCycleWitness } from "./graph/directedCycles.js";
 export { edgeConfidence } from "./graph/edgeConfidence.js";
 export type {
   FindingSeverity,

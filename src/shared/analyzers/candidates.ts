@@ -1195,7 +1195,7 @@ function parseLizard(stdout: string): ExternalAnalyzerParseReport {
     const param = parseInt(parts[3], 10);
     const file = parts[6] || "";
     const func = parts[7] || "unknown";
-    if (!file || isNaN(nloc) || isNaN(ccn) || isNaN(param)) {
+    if (!file) {
       droppedRows += 1;
       continue;
     }

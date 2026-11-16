@@ -1,5 +1,4 @@
-import type { FrictionItem } from "../io/frictionCapture.js";
-import type { FrictionCaptureArtifact } from "../io/frictionCapture.js";
+import type { FrictionCaptureArtifact, FrictionItem } from "../io/frictionCapture.js";
 import { captureFrictionEvent, type FrictionEvent } from "./captureFrictionEvent.js";
 import type { FrictionCategory } from "./frictionRecord.js";
 

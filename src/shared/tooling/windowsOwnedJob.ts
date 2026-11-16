@@ -32,7 +32,7 @@ export interface WindowsJobRuntime {
   exit(code: number): void;
 }
 
-export interface WindowsJobOwnership {
+interface WindowsJobOwnership {
   activeCount(): number;
   releaseEmpty(): void;
 }

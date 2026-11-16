@@ -18,15 +18,6 @@ import { dirname, join, resolve, sep } from "node:path";
  */
 
 /**
- * Canonical deliverable filenames shared by both halves of the pipeline. The
- * audit half renders `audit-report.md` (human) from `audit-findings.json`
- * (machine contract); the remediation half writes `remediation-report.md` /
- * `remediation-outcomes.json`. These live here, in exactly one place, so the
- * synthesis writer, the promote source/dest, the present_report prompt path,
- * and the remediation close writer cannot drift to different spellings — a
- * drift that previously surfaced as a promote-time ENOENT.
- */
-/**
  * The single literal directory name for the runtime artifact tree. Single-sourced
  * here so the path builders, the repo-root resolver (`resolveRepoRoot`), and the
  * nested-tree guard all agree on the one spelling.
@@ -41,6 +32,15 @@ export const AUDIT_TOOLS_DIRNAME = ".audit-tools";
  */
 export const WORKTREES_DIRNAME = "worktrees";
 
+/**
+ * Canonical deliverable filenames shared by both halves of the pipeline. The
+ * audit half renders `audit-report.md` (human) from `audit-findings.json`
+ * (machine contract); the remediation half writes `remediation-report.md` /
+ * `remediation-outcomes.json`. These live here, in exactly one place, so the
+ * synthesis writer, the promote source/dest, the present_report prompt path,
+ * and the remediation close writer cannot drift to different spellings — a
+ * drift that previously surfaced as a promote-time ENOENT.
+ */
 export const AUDIT_REPORT_FILENAME = "audit-report.md";
 export const AUDIT_FINDINGS_FILENAME = "audit-findings.json";
 export const REMEDIATION_REPORT_FILENAME = "remediation-report.md";
@@ -84,16 +84,6 @@ export function remediationArtifactsDir(root: string): string {
 /** Bounded captured output from tool-owned remediation required-test reruns. */
 export function remediationRequiredTestLogsDir(root: string): string {
   return join(remediationArtifactsDir(root), "required-test-logs");
-}
-
-/**
- * `<root>/.audit-tools/worktrees` — the gitignored home for tool-created git
- * worktrees (remediate's per-node implement worktrees; audit's disposable
- * review snapshots). Single-sourced so every worktree producer/sweeper agrees
- * on the one location.
- */
-export function auditToolsWorktreesDir(root: string): string {
-  return join(auditToolsDir(root), WORKTREES_DIRNAME);
 }
 
 /**

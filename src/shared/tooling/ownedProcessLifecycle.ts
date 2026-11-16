@@ -13,7 +13,7 @@ export interface OwnedProcessCleanup {
 
 /** One bound's TERM grace plus a finite hard-kill/capture-drain window. */
 export const OWNED_PROCESS_DRAIN_GRACE_MS = 1_000;
-export const OWNED_PROCESS_TERM_GRACE_MS = 2_000;
+const OWNED_PROCESS_TERM_GRACE_MS = 2_000;
 
 /** Shared referenced cleanup clock; callers retain their own error/capture contract. */
 export function beginOwnedProcessTermination(

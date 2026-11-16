@@ -107,6 +107,13 @@ export function isAdmittedProjectTestCommand(command: string[], root: string): b
   return isAdmittedProjectCommand(command, root, "test");
 }
 
+/** Spawn bounds shared by every admitted project-command role. */
+interface AdmittedRunOptions {
+  timeoutMs?: number;
+  maxCapturedOutput?: number;
+  sigkillGraceMs?: number;
+}
+
 /**
  * Run the repository's discovered test command under the gate. Refuses
  * anything discovery did not emit for `root` (never spawns a refused
@@ -119,11 +126,7 @@ export function isAdmittedProjectTestCommand(command: string[], root: string): b
 function runAdmittedProjectCommand(
   command: string[],
   root: string,
-  options: {
-    timeoutMs?: number;
-    maxCapturedOutput?: number;
-    sigkillGraceMs?: number;
-  } = {},
+  options: AdmittedRunOptions = {},
   role: "test" | "e2e" | "landing-gate" = "test",
 ): Promise<ProjectTestAdmissionOutcome> {
   if (!isAdmittedProjectCommand(command, root, role)) {
@@ -229,11 +232,7 @@ function runAdmittedProjectCommand(
 export function runAdmittedProjectTestCommand(
   command: string[],
   root: string,
-  options: {
-    timeoutMs?: number;
-    maxCapturedOutput?: number;
-    sigkillGraceMs?: number;
-  } = {},
+  options: AdmittedRunOptions = {},
 ): Promise<ProjectTestAdmissionOutcome> {
   return runAdmittedProjectCommand(command, root, options, "test");
 }
@@ -241,11 +240,7 @@ export function runAdmittedProjectTestCommand(
 export function runAdmittedProjectE2eCommand(
   command: string[],
   root: string,
-  options: {
-    timeoutMs?: number;
-    maxCapturedOutput?: number;
-    sigkillGraceMs?: number;
-  } = {},
+  options: AdmittedRunOptions = {},
 ): Promise<ProjectTestAdmissionOutcome> {
   return runAdmittedProjectCommand(command, root, options, "e2e");
 }
@@ -264,11 +259,7 @@ export function runAdmittedProjectE2eCommand(
 export function runAdmittedProjectLandingGateCommand(
   command: string[],
   root: string,
-  options: {
-    timeoutMs?: number;
-    maxCapturedOutput?: number;
-    sigkillGraceMs?: number;
-  } = {},
+  options: AdmittedRunOptions = {},
 ): Promise<ProjectTestAdmissionOutcome> {
   return runAdmittedProjectCommand(command, root, options, "landing-gate");
 }

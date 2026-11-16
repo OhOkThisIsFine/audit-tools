@@ -119,9 +119,11 @@ function splitPairKey(key: string): [string, string] {
 }
 
 /** Minimal deterministic union-find over string ids. */
+// sites-pinned: tests/shared/decompose.test.ts
 class UnionFind {
   private parent = new Map<string, string>();
 
+  /** Registers an unseen id as its own root, so `union` needs no separate add. */
   private find(x: string): string {
     let root = this.parent.get(x);
     if (root === undefined) {
@@ -134,10 +136,6 @@ class UnionFind {
       root = this.parent.get(root)!;
     }
     return root;
-  }
-
-  add(x: string): void {
-    if (!this.parent.has(x)) this.parent.set(x, x);
   }
 
   union(a: string, b: string): void {
@@ -210,10 +208,7 @@ export function clustersFromPartitions(
   const uf = new UnionFind();
   for (const [key, count] of counts) {
     if (count / total + 1e-12 >= minFraction) {
-      const [a, b] = splitPairKey(key);
-      uf.add(a);
-      uf.add(b);
-      uf.union(a, b);
+      uf.union(...splitPairKey(key));
     }
   }
   const groups = [...uf.groups().values()].filter((g) => g.length >= 2);
@@ -256,10 +251,7 @@ export function decompose(
   const uf = new UnionFind();
   for (const key of agreedSum.keys()) {
     if (agreedOf(key) + 1e-12 >= agreementThreshold) {
-      const [a, b] = splitPairKey(key);
-      uf.add(a);
-      uf.add(b);
-      uf.union(a, b);
+      uf.union(...splitPairKey(key));
     }
   }
 

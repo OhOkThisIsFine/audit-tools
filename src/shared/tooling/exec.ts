@@ -5,6 +5,7 @@
 import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 import { win32 } from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { toPosixPath } from "../paths.js";
 import { beginOwnedProcessTermination, spawnOwnedProcess, type OwnedProcessCleanup } from "./ownedProcessLifecycle.js";
 
 export { resolveExecutableFile, type ExecutableLookupOptions } from "./resolveExecutable.js";
@@ -342,7 +343,7 @@ function isPromptPathToken(value: string): boolean {
 }
 
 export function toPromptPathToken(value: string): string {
-  return isPromptPathToken(value) ? value.replace(/\\/g, "/") : value;
+  return isPromptPathToken(value) ? toPosixPath(value) : value;
 }
 
 /**
@@ -614,7 +615,7 @@ export function runTracked(
 
 /**
  * Async twin of {@link runTracked}: same argv resolution, control-env scrub, and
- * result shape, driven by {@link spawnHidden} instead of `spawnSync`. Analyzer
+ * result shape, driven by `spawnOwnedProcess` instead of `spawnSync`. Analyzer
  * acquisition runs HERE rather than on the synchronous runner because a
  * synchronous child blocks the event loop for the whole spawn — which starves
  * every `setInterval` liveness heartbeat in the process (the advance

@@ -18,6 +18,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { AUDIT_TOOLS_DIRNAME } from "../io/auditToolsPaths.js";
 import { withFileLock, FileLockTimeoutError } from "../io/fileLock.js";
+import { isFileMissingError } from "../io/json.js";
 import {
   resolveSpawnDeadline,
   resolveExecutableFile,
@@ -223,7 +224,7 @@ function verified(root: string, identity: Identity): string | null {
 }
 function exists(path: string): boolean {
   try { lstatSync(path); return true; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+  catch (error) { if (isFileMissingError(error)) return false; throw error; }
 }
 /** Reject every link/special entry, including unused ones, without following it. */
 function findExecutable(root: string, name: string): string | null {

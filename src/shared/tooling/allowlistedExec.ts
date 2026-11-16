@@ -34,6 +34,7 @@ import { devNull } from "node:os";
 import { stripAuditToolsControlEnv } from "./exec.js";
 import { resolveExecutableFile } from "./resolveExecutable.js";
 import { resolveWithinRoot } from "../io/pathContainment.js";
+import { toPosixPath } from "../paths.js";
 import { beginOwnedProcessTermination, spawnOwnedProcess, type OwnedProcessCleanup } from "./ownedProcessLifecycle.js";
 
 /** Default per-anchor wall-clock budget; a slower command is killed and inconclusive. */
@@ -71,6 +72,34 @@ interface ArgPolicy {
  *   - git:      handled separately — only read-only subcommands, and
  *               --output/-o (writes a file) is refused.
  */
+const RIPGREP_POLICY: ArgPolicy = {
+  flags: new Set([
+    "-i", "--ignore-case", "-S", "--smart-case", "-s", "--case-sensitive",
+    "-n", "--line-number", "-N", "--no-line-number", "-l",
+    "--files-with-matches", "--files-without-match", "-c", "--count",
+    "--count-matches", "-o", "--only-matching", "-w", "--word-regexp",
+    "-x", "--line-regexp", "-v", "--invert-match", "-F", "--fixed-strings",
+    "-e", "--regexp", "-A", "--after-context", "-B", "--before-context",
+    "-C", "--context", "-g", "--glob", "-t", "--type", "-T", "--type-not",
+    "--hidden", "--no-ignore", "--color", "--colors", "-H", "--with-filename",
+    "--no-filename", "--no-heading", "--heading", "-U", "--multiline",
+    "--multiline-dotall", "-P", "--pcre2", "--json", "--vimgrep", "-0",
+    "--null", "-m", "--max-count", "--max-depth", "--maxdepth", "--no-config",
+  ]),
+  allowPositionals: true,
+};
+
+const AST_GREP_POLICY: ArgPolicy = {
+  // Known editing flags are absent. Positional subcommands and configuration/
+  // native parser discovery remain separate review scopes.
+  flags: new Set([
+    "-p", "--pattern", "-l", "--lang", "--language", "--json", "--globs",
+    "-A", "--after", "-B", "--before", "-C", "--context", "--heading",
+    "--color", "--no-color", "-h", "--help",
+  ]),
+  allowPositionals: true,
+};
+
 const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>([
   [
     "grep",
@@ -90,45 +119,10 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
       allowPositionals: true,
     },
   ],
-  [
-    "rg",
-    {
-      flags: new Set([
-        "-i", "--ignore-case", "-S", "--smart-case", "-s", "--case-sensitive",
-        "-n", "--line-number", "-N", "--no-line-number", "-l",
-        "--files-with-matches", "--files-without-match", "-c", "--count",
-        "--count-matches", "-o", "--only-matching", "-w", "--word-regexp",
-        "-x", "--line-regexp", "-v", "--invert-match", "-F", "--fixed-strings",
-        "-e", "--regexp", "-A", "--after-context", "-B", "--before-context",
-        "-C", "--context", "-g", "--glob", "-t", "--type", "-T", "--type-not",
-        "--hidden", "--no-ignore", "--color", "--colors", "-H", "--with-filename",
-        "--no-filename", "--no-heading", "--heading", "-U", "--multiline",
-        "--multiline-dotall", "-P", "--pcre2", "--json", "--vimgrep", "-0",
-        "--null", "-m", "--max-count", "--max-depth", "--maxdepth", "--no-config",
-      ]),
-      allowPositionals: true,
-    },
-  ],
-  [
-    "ripgrep",
-    {
-      // alias spelling of rg — same read-only switch set.
-      flags: new Set([
-        "-i", "--ignore-case", "-S", "--smart-case", "-s", "--case-sensitive",
-        "-n", "--line-number", "-N", "--no-line-number", "-l",
-        "--files-with-matches", "--files-without-match", "-c", "--count",
-        "--count-matches", "-o", "--only-matching", "-w", "--word-regexp",
-        "-x", "--line-regexp", "-v", "--invert-match", "-F", "--fixed-strings",
-        "-e", "--regexp", "-A", "--after-context", "-B", "--before-context",
-        "-C", "--context", "-g", "--glob", "-t", "--type", "-T", "--type-not",
-        "--hidden", "--no-ignore", "--color", "--colors", "-H", "--with-filename",
-        "--no-filename", "--no-heading", "--heading", "-U", "--multiline",
-        "--multiline-dotall", "-P", "--pcre2", "--json", "--vimgrep", "-0",
-        "--null", "-m", "--max-count", "--max-depth", "--maxdepth", "--no-config",
-      ]),
-      allowPositionals: true,
-    },
-  ],
+  // `ripgrep` is an alias spelling of `rg`: one shared policy object, so the two
+  // spellings cannot drift apart.
+  ["rg", RIPGREP_POLICY],
+  ["ripgrep", RIPGREP_POLICY],
   [
     "findstr",
     {
@@ -152,31 +146,9 @@ const ARG_POLICIES: ReadonlyMap<string, ArgPolicy> = new Map<string, ArgPolicy>(
       allowPositionals: true,
     },
   ],
-  [
-    "ast-grep",
-    {
-      // Known editing flags are absent. Positional subcommands and configuration/
-      // native parser discovery remain separate review scopes.
-      flags: new Set([
-        "-p", "--pattern", "-l", "--lang", "--language", "--json", "--globs",
-        "-A", "--after", "-B", "--before", "-C", "--context", "--heading",
-        "--color", "--no-color", "-h", "--help",
-      ]),
-      allowPositionals: true,
-    },
-  ],
-  [
-    "sg",
-    {
-      // alias spelling of ast-grep — same read-only flag set.
-      flags: new Set([
-        "-p", "--pattern", "-l", "--lang", "--language", "--json", "--globs",
-        "-A", "--after", "-B", "--before", "-C", "--context", "--heading",
-        "--color", "--no-color", "-h", "--help",
-      ]),
-      allowPositionals: true,
-    },
-  ],
+  // `sg` is an alias spelling of `ast-grep`: one shared policy object.
+  ["ast-grep", AST_GREP_POLICY],
+  ["sg", AST_GREP_POLICY],
 ]);
 
 type GitValue = (value: string) => boolean;
@@ -228,9 +200,7 @@ export const ANCHOR_ALLOWLIST: ReadonlySet<string> = new Set([
 
 /** Bare executable name: strip any directory and a Windows .cmd/.bat/.exe suffix. */
 export function executableBaseName(token: string): string {
-  return token
-    .trim()
-    .replace(/\\/g, "/")
+  return toPosixPath(token.trim())
     .split("/")
     .pop()!
     .replace(/\.(cmd|bat|exe)$/i, "")

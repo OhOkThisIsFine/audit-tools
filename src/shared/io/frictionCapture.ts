@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { hashContent } from "../hash.js";
 import { cp, readdir } from "node:fs/promises";
-import { isFileMissingError, readOptionalJsonFile } from "./json.js";
+import { errorMessage, isFileMissingError, readOptionalJsonFile } from "./json.js";
 import { discardOnSchemaVersionMismatch } from "./schemaVersion.js";
 
 /**
@@ -287,6 +287,7 @@ export async function listFrictionRecordFilenames(artifactsDir: string): Promise
  * that must complete at any cost catches it and reads it as a shortfall (see the
  * audit promote walk's `friction Listing failed` leg).
  */
+// sites-pinned: tests/audit/seam-atomic-promote-findings.test.ts, tests/remediate/phase-close.test.ts
 export async function archiveFrictionRecords(params: {
   artifactsDir: string;
   destDir: string;
@@ -307,7 +308,7 @@ export async function archiveFrictionRecords(params: {
     } catch (error) {
       warn(
         `could not archive friction record ${name} to ${destination}: ` +
-          (error instanceof Error ? error.message : String(error)),
+          errorMessage(error),
       );
     }
   }

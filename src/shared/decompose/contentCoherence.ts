@@ -292,13 +292,9 @@ function normalizeItems(value: unknown): NormalizedContentCoherenceItem[] {
   return items.sort((left, right) => compareCodeUnits(left.id, right.id));
 }
 
-function canonicalPair(left: string, right: string): readonly [string, string] {
-  return compareCodeUnits(left, right) <= 0 ? [left, right] : [right, left];
-}
-
+// sites-pinned: tests/shared/content-coherence.test.ts
 function pairKey(left: string, right: string): string {
-  const pair = canonicalPair(left, right);
-  return `${pair[0]}\u0000${pair[1]}`;
+  return compareCodeUnits(left, right) <= 0 ? `${left}\u0000${right}` : `${right}\u0000${left}`;
 }
 
 function normalizeRelationshipEvidence(
@@ -466,11 +462,9 @@ function refineAtModularityPeak(
   const whole: Partition = new Map(
     members.map((id) => [id, members[0] ?? id] as const),
   );
-  // ONE adjacency built, two partitions scored against it. `louvain` has already
-  // built the same adjacency internally, so this is the third build of the same
-  // graph in this function; the cheap half of that is removed here, and the
-  // comparison is byte-identical because `modularityOf` is now exactly this
-  // function behind one `buildAdjacency` call.
+  // ONE adjacency built here, two partitions scored against it (`louvain` builds
+  // its own internally). The comparison is byte-identical to `modularityOf`,
+  // which is exactly this function behind one `buildAdjacency` call.
   const base = buildAdjacency(graph);
   if (
     modularityOfBase(base, proposed, MODULARITY_RESOLUTION) <=
@@ -597,15 +591,14 @@ export function buildContentCoherenceTrace(
       candidatesByRoot.set(root, bucket);
     }
   }
-  const merged = [...groups.entries()].map(
-    ([root, members]) => [root, members.sort(compareCodeUnits)] as const,
-  );
+  // Members arrive in id order (normalizeItems sorts), and refinement keeps that
+  // order; the per-component sort below is the one stated order guarantee.
   const components = (
     policy.refineAtModularityPeak
-      ? merged.flatMap(([root, members]) =>
+      ? [...groups].flatMap(([root, members]) =>
           refineAtModularityPeak(members, candidatesByRoot.get(root) ?? []),
         )
-      : merged.map(([, members]) => members)
+      : [...groups.values()]
   )
     .map((members) => [...members].sort(compareCodeUnits))
     .sort((left, right) =>

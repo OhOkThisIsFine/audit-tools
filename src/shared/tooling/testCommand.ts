@@ -111,7 +111,7 @@ function pickScript(
  * @param platform - The platform to check for; defaults to process.platform
  * @param pathEnv - Optional PATH string; defaults to process.env.PATH
  */
-export function isValidExecutableCommand(
+function isValidExecutableCommand(
   command: string,
   platform: NodeJS.Platform = process.platform,
   pathEnv: string = process.env.PATH ?? "",
@@ -124,8 +124,7 @@ export function isValidExecutableCommand(
   // On Windows, walk PATH to find the first executable matching the command name.
   // The Windows Store stub is zero-byte, so we reject the first hit if it's zero-byte.
   const exeName = `${command}.exe`;
-  const pathSeparator = platform === "win32" ? ";" : ":";
-  const pathEntries = pathEnv.split(pathSeparator).filter((p) => p.length > 0);
+  const pathEntries = pathEnv.split(";").filter((p) => p.length > 0);
 
   for (const pathDir of pathEntries) {
     const fullPath = join(pathDir, exeName);

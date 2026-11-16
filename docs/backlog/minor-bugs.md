@@ -11,6 +11,16 @@
 > A living to-do list, not a status log. Remove an entry once it ships; record durable
 > contracts and rationale in project memory or `CLAUDE.md`, never "where the code is today".
 
+- **Two git-spawning tests time out under full-suite load on this machine (2026-11-16, low).**
+  `runGateCase` (`tests/shared/vitest-gate-false-red.test.ts`) gives its child gate a 10 s
+  `spawnSync` deadline; the submodule case of `tests/audit/scope-index-staleness.test.ts` hits the
+  30 s test timeout. Two full runs passed, then four failed in a row (4–9 cases, file time 30 s →
+  400 s); both files pass alone, and clean `1fae5792` fails the same way, so the cause is machine
+  state, not a tree. `%TEMP%` holds 1.48M directories; each run adds ~670 under each
+  `audit-tools-test-{state,analyzer-cache,binary-cache}` prefix and never removes them.
+  **Property:** a test's child deadline comes from a measurement under full-suite load, and a test
+  removes the temp directories it creates.
+
 - **A partial withdrawal reports a complete item as rejected (2026-10-06, low).** The accepted pair can hold several entries for one work item. When `evictInvalidatedEntries` (`src/audit/cli/dispatch/hostHandoff.ts`) withdraws one entry and another still validates, the item stays complete, yet its withdrawal issue makes `recordHostResultOutcomes` record `rejected` as its last state. **Property:** an item's recorded state matches whether an accepted entry for it remains.
 
 - **Conceptual perspective lanes read only the head of the call-site map (2026-10-05, low).** In the dogfood run each perspective lane read the first part of the bound read-only call-site map and nothing made it read further. **Property:** a lane's use of the call-site map does not depend on the lane choosing to read past the head.

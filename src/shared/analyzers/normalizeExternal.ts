@@ -43,7 +43,8 @@ function normalizeExternalSeverity(value: string | undefined): SeverityEnum {
  * A path outside the repository root is left as-is: it is not repo-relative, and
  * silently rewriting it would invent an identity the tool never reported.
  */
-export function toRepoRelativeAnalyzerPath(
+// sites-pinned: tests/shared/external-analyzer-normalizers.test.ts
+function toRepoRelativeAnalyzerPath(
   repoRoot: string | undefined,
   rawPath: string,
 ): string {

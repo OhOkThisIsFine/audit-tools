@@ -663,6 +663,22 @@
         "src/audit/orchestrator/charterClarificationExecutor.ts": "6c3b4d2e36d35925b04c1f9f1159d27696bd9db3"
       }
     },
+    "d46e8dfc8b0eeb7e": {
+      "reviewed_by": "claude-session-8e20a4f7",
+      "attester_class": "agent",
+      "checked": "rootLogObservations.ts: two inline error-message ternaries replaced by the identical shared errorMessage helper; no control-flow, lock or ordering change; full suite green",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "b66f6ec24de94fe2ebb1eceef356554aba86595b",
+        "ran_at": "2026-11-16T17:01:58.207Z"
+      },
+      "attested_at": "2026-11-16T17:02:12.089Z",
+      "vouches": {
+        "src/shared/observability/rootLogObservations.ts": "c7497a421c8fa84a6b19c713bc0b0bfdc9ea6ef6"
+      }
+    },
     "d7acd796ff113751": {
       "reviewed_by": "opus-subagent-dc6-review,opus-subagent-dc6-delta-review",
       "attester_class": "agent",
@@ -1112,7 +1128,7 @@
       "review": "339be913c2e2c76d"
     },
     "src/shared/observability/rootLogObservations.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "d46e8dfc8b0eeb7e"
     },
     "src/shared/steps/stepEmissionScaffold.ts": {
       "baseline": "7b79934e86baf378"

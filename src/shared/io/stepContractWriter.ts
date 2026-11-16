@@ -5,7 +5,7 @@ import { AccessDeclarationSchema } from "../types/accessDeclaration.js";
 import { mkdir, writeFile, readFile, readdir, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stepsDir } from "./auditToolsPaths.js";
-import { writeJsonFile } from "./json.js";
+import { errorMessage, writeJsonFile } from "./json.js";
 import {
   normalizePromptBodyPaths,
   toPromptPathToken,
@@ -48,14 +48,17 @@ import {
  * another peer's prompt from a clobbered shared file.
  */
 export function currentStepPath(artifactsDir: string, agentId?: string): string {
-  const dir = agentId ? join(stepsDir(artifactsDir), agentId) : stepsDir(artifactsDir);
-  return join(dir, "current-step.json");
+  return join(stepSlotDir(artifactsDir, agentId), "current-step.json");
 }
 
 /** Path of `current-prompt.md` (shared with no `agentId`, per-agent with one). */
 export function currentPromptPath(artifactsDir: string, agentId?: string): string {
-  const dir = agentId ? join(stepsDir(artifactsDir), agentId) : stepsDir(artifactsDir);
-  return join(dir, "current-prompt.md");
+  return join(stepSlotDir(artifactsDir, agentId), "current-prompt.md");
+}
+
+/** The shared `steps/` dir with no `agentId`; the per-agent `steps/<agentId>/` slot with one. */
+function stepSlotDir(artifactsDir: string, agentId?: string): string {
+  return agentId ? join(stepsDir(artifactsDir), agentId) : stepsDir(artifactsDir);
 }
 
 /**
@@ -175,7 +178,7 @@ async function gcStaleAgentSlots(stepsDirPath: string, keepAgentId: string): Pro
             emitSlotGc({
               slot,
               reason: "unreadable_marker",
-              detail: error instanceof Error ? error.message : String(error),
+              detail: errorMessage(error),
             });
           }
         }),
@@ -184,7 +187,7 @@ async function gcStaleAgentSlots(stepsDirPath: string, keepAgentId: string): Pro
     emitSlotGc({
       slot: stepsDirPath,
       reason: "steps_dir_unreadable",
-      detail: error instanceof Error ? error.message : String(error),
+      detail: errorMessage(error),
     });
   }
 }
@@ -438,7 +441,7 @@ export async function runWithBlockedStepBackstop<T>(
   try {
     return await body();
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     try {
       await writeBlockedStep(reason);
     } catch {

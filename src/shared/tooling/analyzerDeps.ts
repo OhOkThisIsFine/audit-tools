@@ -101,6 +101,7 @@ function isInstalledPackage(packageDir: string): boolean {
   return existsSync(join(packageDir, "package.json"));
 }
 
+// sites-pinned: tests/shared/analyzerDeps.test.ts
 function findInCache(
   name: string,
   version: string | undefined,
@@ -116,7 +117,7 @@ function findInCache(
 
   // No version pinned: pick the highest-sorting matching cache entry that
   // actually contains an installed package. Deterministic via reverse sort.
-  const prefix = `${name.replace(/\//g, "+")}@`;
+  const prefix = cacheKey(name, "");
   let entries: string[];
   try {
     entries = readdirSync(cacheRoot);

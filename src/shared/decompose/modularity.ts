@@ -236,12 +236,6 @@ export function localMovingPassBudget(nodeCount: number): number {
   return Math.min(nodeCount + 8, MAX_LOCAL_MOVING_PASSES);
 }
 
-/** One level of the Louvain hierarchy: the community assignment per node. */
-interface Level {
-  /** node → community id (a representative node id). */
-  communityOf: Map<string, string>;
-}
-
 /**
  * The loop's SECOND stop condition, and the only seam in it.
  *
@@ -441,22 +435,13 @@ function canonicalizeCommunities(
  * Aggregate communities into super-nodes: the returned graph has one node per
  * community, with edge weights summed so that each super-node's degree equals
  * the total degree of its members (intra-community weight becomes a self-loop).
- * `members` maps each super-node back to the original node ids it contains.
  */
-function aggregate(
-  graph: AdjacencyGraph,
-  communityOf: Map<string, string>,
-): { graph: AdjacencyGraph; members: Map<string, string[]> } {
-  const members = new Map<string, string[]>();
-  for (const node of graph.nodes) {
-    const comm = communityOf.get(node)!;
-    const list = members.get(comm);
-    if (list) list.push(node);
-    else members.set(comm, [node]);
-  }
-
+// sites-pinned: tests/shared/decompose.test.ts
+function aggregate(graph: AdjacencyGraph, communityOf: Map<string, string>): AdjacencyGraph {
+  const superNodes = [...new Set(graph.nodes.map((node) => communityOf.get(node)!))].sort(
+    compareCodeUnits,
+  );
   const edges: Array<{ a: string; b: string; weight: number }> = [];
-  const superNodes = [...members.keys()].sort(compareCodeUnits);
   // Sum weights between/within communities. Each undirected pair is visited once
   // by iterating the symmetric adjacency and only taking a ≤ b (self included).
   for (const node of graph.nodes) {
@@ -471,10 +456,7 @@ function aggregate(
     }
   }
 
-  return {
-    graph: buildAdjacency({ nodes: superNodes, edges }),
-    members,
-  };
+  return buildAdjacency({ nodes: superNodes, edges });
 }
 
 /**
@@ -500,7 +482,8 @@ export function louvain(
 
   let current = base;
 
-  const levels: Level[] = [];
+  /** One community assignment per Louvain level: node → representative node id. */
+  const levels: Array<Map<string, string>> = [];
   let guard = 0;
   const maxLevels = base.nodes.length + 4;
   while (guard < maxLevels) {
@@ -512,12 +495,11 @@ export function louvain(
       levels.length,
     );
     const canonical = canonicalizeCommunities(communityOf);
-    levels.push({ communityOf: canonical });
+    levels.push(canonical);
     if (!moved) break;
-    const { graph: nextGraph, members } = aggregate(current, canonical);
+    const nextGraph = aggregate(current, canonical);
     if (nextGraph.nodes.length === current.nodes.length) break;
     current = nextGraph;
-    void members;
   }
 
   // Fold every level's assignment back down to the original nodes.
@@ -525,7 +507,7 @@ export function louvain(
   for (const node of base.nodes) {
     let community = node;
     for (const level of levels) {
-      community = level.communityOf.get(community) ?? community;
+      community = level.get(community) ?? community;
     }
     result.set(node, community);
   }

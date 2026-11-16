@@ -24,14 +24,6 @@ import { normalizeRepoPath } from "../validation/findingGrounding.js";
 
 // <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
 /**
- * One challenge round's submission from the second-order adversary agent: the
- * improvement findings it surfaced this round. An EMPTY `findings` array is the
- * loop-until-dry terminator — a round that surfaces nothing new converges the loop
- * (the review is done only when a round yields nothing, not when it first has an
- * answer). Findings carry their true lens; the deterministic loop grounds them,
- * dedupes them against prior rounds, and sets `systemic:true`.
- */
-/**
  * A systemic finding must carry evidence, and the refusal is the point.
  *
  * `FindingSchema` makes `evidence` optional, but that optionality is not a
@@ -88,6 +80,14 @@ const SystemicStopSchema = z
   })
   .strict();
 
+/**
+ * One challenge round's submission from the second-order adversary agent: the
+ * improvement findings it surfaced this round. An EMPTY `findings` array is the
+ * loop-until-dry terminator — a round that surfaces nothing new converges the loop
+ * (the review is done only when a round yields nothing, not when it first has an
+ * answer). Findings carry their true lens; the deterministic loop grounds them,
+ * dedupes them against prior rounds, and sets `systemic:true`.
+ */
 export const SystemicChallengeSubmissionSchema = z
   .object({
     findings: z.array(SystemicFindingSchema).default([]),

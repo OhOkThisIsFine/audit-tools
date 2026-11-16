@@ -3,6 +3,7 @@ import { opendir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { compareCodeUnits } from "../compareCodeUnits.js";
+import { errorMessage } from "../io/json.js";
 import { createLockedJsonStore, siblingLockPath, SKIP_WRITE } from "../io/lockedJsonStore.js";
 import { resolveSpawnDeadline, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../tooling/exec.js";
 import type { RunLogger } from "./runLog.js";
@@ -70,7 +71,7 @@ async function inventory(root: string, includeNonIgnored = false): Promise<Inven
     // cannot turn an already present log into a newly appeared name.
     return { status: "complete", names: [...new Set(includeNonIgnored ? candidates : names)].sort(compareCodeUnits) };
   } catch (error) {
-    return incomplete("unavailable", "io_unavailable", `root directory could not be inventoried: ${error instanceof Error ? error.message : String(error)}`);
+    return incomplete("unavailable", "io_unavailable", `root directory could not be inventoried: ${errorMessage(error)}`);
   }
 }
 
@@ -141,6 +142,6 @@ export async function recordHostRootLogBoundary(params: {
   } catch (error) {
     // A broken observation store cannot turn a successful acceptance into a
     // rejection. It also cannot be described as a clean inventory.
-    report(`ignored root log inventory unavailable: ${JSON.stringify(error instanceof Error ? error.message : String(error)).slice(0, 240)}`);
+    report(`ignored root log inventory unavailable: ${JSON.stringify(errorMessage(error)).slice(0, 240)}`);
   }
 }
