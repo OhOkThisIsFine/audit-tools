@@ -358,6 +358,22 @@ test("a slice participant whose producing obligation is absent from the order is
   ).toBe(true);
 });
 
+test("the producer set is DERIVED from EXECUTOR_REGISTRY: every executor that writes a participant counts", () => {
+  // intake_executor owns both repo_manifest and file_disposition, so
+  // file_disposition is a producer of repo_manifest.json too. A hand-kept map
+  // named only repo_manifest, and an order without file_disposition passed.
+  const withoutDisposition = PRIORITY.filter((id) => id !== "file_disposition");
+  const violations = findPriorityOrderingViolations(withoutDisposition);
+  expect(
+    violations.some(
+      (v) =>
+        (v.downstream === "repo_manifest.json" || v.upstream === "repo_manifest.json") &&
+        /"file_disposition" of repo_manifest\.json is absent/.test(v.reason),
+    ),
+    `the derived producer of repo_manifest.json must be scheduled: ${JSON.stringify(violations)}`,
+  ).toBe(true);
+});
+
 test("the drain re-derives obligation state at every transition (the memo is per-bundle identity)", () => {
   const cache = new WeakMap<ArtifactBundle, ReturnType<typeof decideNextStep>["state"]>();
   const derive = deriveObligationState("repo_manifest", cache);

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/source-read-only-executors.test.ts, tests/audit/lifecycle-production-flags.test.ts, tests/audit/advance-drain-loop.test.ts, tests/audit/executor-artifact-production-declaration.test.ts
 /**
  * How an executor relates to an artifact it writes.
  *
@@ -41,6 +41,13 @@ export interface ExecutorDefinition {
    * `LIFECYCLE_PRODUCTIONS` and `EXECUTOR_WRITE_SITES` are) — pinned by DECL-9.
    */
   produces: readonly ArtifactProduction[];
+  /**
+   * An AUDITED source-read-only runner: it may keep the fold's manifest-index
+   * memo (`preservesSourceIndexes`). An allowlist — absent means false, so a new
+   * runner and every command-backed runner drop the memo by default, even when
+   * a command reports failure after it changed source bytes.
+   */
+  source_read_only?: true;
 }
 
 /** An artifact written outside every executor, by the run lifecycle itself. */
@@ -51,6 +58,27 @@ export interface LifecycleProduction {
   writer: string;
   /** Why it is not an executor's output. */
   reason: string;
+  /**
+   * No executor lists it in `artifacts_written`, so every advance recomputes
+   * its metadata entry from live content: unchanged content keeps its
+   * revision, changed content bumps it once (`ALWAYS_UPDATED_ARTIFACTS`).
+   */
+  always_updated?: true;
+  /**
+   * Something other than its producer mutates its bytes, so its body runs
+   * ahead of its manifest record by design. Staleness exempts it from the
+   * `partial` verdict, which would re-fire its producer forever
+   * (`HOST_APPENDED_ARTIFACTS`). A deliberate, named statement — never a
+   * structural rule, because "mutated by something other than its producer"
+   * is not derivable from the dependency map.
+   */
+  host_appended?: true;
+  /**
+   * Absence is the normal case, never an upstream that vanished: staleness
+   * does not stale its dependents when it is absent
+   * (`OPTIONAL_PROBE_ARTIFACTS`).
+   */
+  optional_probe?: true;
 }
 
 /**
@@ -67,6 +95,8 @@ export const LIFECYCLE_PRODUCTIONS: readonly LifecycleProduction[] = [
     writer: "audit workers (append-only)",
     reason:
       "opt-in meta-audit reflections appended by whoever ran the task; treated as always-updated when metadata is computed",
+    always_updated: true,
+    host_appended: true,
   },
   {
     artifact: "artifact_metadata.json",
@@ -90,8 +120,22 @@ export const LIFECYCLE_PRODUCTIONS: readonly LifecycleProduction[] = [
     artifact: "tooling_manifest.json",
     writer: "the environment probe (src/audit/orchestrator/advance.ts)",
     reason: "probed from the host environment, not derived from any upstream artifact",
+    always_updated: true,
+    optional_probe: true,
   },
 ];
+
+const lifecycleArtifactsWith = (
+  flag: "always_updated" | "host_appended" | "optional_probe",
+): ReadonlySet<string> =>
+  new Set(LIFECYCLE_PRODUCTIONS.filter((entry) => entry[flag]).map((entry) => entry.artifact));
+
+/** Lifecycle artifacts whose metadata every advance recomputes from live content. */
+export const ALWAYS_UPDATED_ARTIFACTS = lifecycleArtifactsWith("always_updated");
+/** Lifecycle artifacts staleness exempts from the `partial` verdict. */
+export const HOST_APPENDED_ARTIFACTS = lifecycleArtifactsWith("host_appended");
+/** Lifecycle artifacts whose absence never stales a dependent. */
+export const OPTIONAL_PROBE_ARTIFACTS = lifecycleArtifactsWith("optional_probe");
 
 /**
  * Returns true when the executor identified by `id` is a host-delegation point
@@ -144,6 +188,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     // mirroring charter_extraction's emit-vs-run gating in nextStepHelpers.
     id: "intent_equivalence_executor",
     kind: "host_delegation",
+    source_read_only: true,
     obligation_ids: ["intent_equivalence_current"],
     produces: [],
   },
@@ -213,6 +258,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     // deterministic runner (the durable upstream input the structure phase merges).
     id: "critical_flow_fallback_executor",
     kind: "host_delegation",
+    source_read_only: true,
     obligation_ids: ["critical_flow_fallback_current"],
     produces: [
       {
@@ -243,6 +289,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "design_assessment_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: ["design_assessment_current"],
     produces: [
       {
@@ -254,6 +301,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "structure_decomposition_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: ["structure_decomposition_current"],
     produces: [
       {
@@ -265,6 +313,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "docs_digest_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: ["docs_digest_current"],
     produces: [
       {
@@ -425,6 +474,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
   {
     id: "result_ingestion_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: ["audit_results_ingested"],
     produces: [
       {
@@ -505,6 +555,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     // (imported runtime-validation evidence), never selected by the priority scan.
     id: "runtime_validation_update_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: [],
     produces: [
       {
@@ -576,6 +627,7 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     // (imported normalized external-analyzer results), never selected by the scan.
     id: "external_analyzer_import_executor",
     kind: "deterministic",
+    source_read_only: true,
     obligation_ids: [],
     produces: [
       {

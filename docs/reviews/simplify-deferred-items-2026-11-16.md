@@ -47,17 +47,6 @@ real change, not a cleanup.
   snapshot behavior.
 - **P02:** hoisting `scaledDegree` in `src/shared/decompose/modularity.ts`: it moves which input
   throws first.
-- **P03:** one `laneGate({lane, pendingReason, omits?, boundaryReason})` constructor for six rows
-  of `POLICY_CLASSIFIERS` in `src/audit/orchestrator/obligationPolicy.ts` (intent equivalence,
-  charter comparison, charter fidelity, charter clarification, systemic challenge, critical-flow
-  fallback). Gain: one shape instead of six copies. Blocker: two reviewers disagreed on whether
-  the check order and the error text stay the same. **Unblock:** a row-by-row comparison of
-  the branch order, then a test that pins each row's branches.
-- **P03:** derive `SLICE_PARTICIPANT_PRODUCERS` in `src/audit/orchestrator/advance.ts` from
-  `EXECUTOR_REGISTRY[].produces`. Gain: a hand-kept map goes. Blocker: the map is declared on
-  purpose, and the derived value adds `file_disposition` as a producer of `repo_manifest.json`
-  (one executor owns both), which moves that artifact's upstream index from 0 to 1.
-  **Unblock:** confirm `findPriorityOrderingViolations` and its tests accept the extra producer.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -69,14 +58,6 @@ real change, not a cleanup.
   the one gap (`audit_tasks_completed` on a bundle with no task plan). What remains is the shape
   gain: a `Record<PriorityId, Derivation>` with `PRIORITY` declared `as const` makes a missing
   row a type error for every bundle, not only for the bundles that test builds.
-- **P03 — flags on `LIFECYCLE_PRODUCTIONS`** in `src/audit/orchestrator/executors.ts`
-  (restamped every advance, host-appended, optional probe). Today the same artifacts are named in
-  three places: that list, the always-updated list in `advance.ts` (which holds a
-  `"tooling_manifest.json"` literal), and `HOST_APPENDED_ARTIFACTS` plus a `tooling_manifest.json`
-  branch in `staleness.ts`.
-- **P03 — a `source_read_only` field on `ExecutorDefinition`** instead of the separate
-  `SOURCE_READ_ONLY_EXECUTORS` set in `executorRunners.ts`. A typo there fails safe (it only
-  invalidates a cache), so the gain is one list fewer.
 - **P01 — `classifyRead` delegation, a private `runGit` wrapper, an artifact-freshness policy
   table.** Small gain; part of it is loop-core.
 - **P01 — public barrel narrowing** (unused exported types, `lensOutcome`): an owner decision on

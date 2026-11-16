@@ -403,6 +403,26 @@
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
       }
     },
+    "58a44ca3a3caea9d": {
+      "reviewed_by": "claude-opus-5-5",
+      "attester_class": "agent",
+      "checked": "B1 laneGate builds six POLICY_CLASSIFIERS rows; obligation-policy-lane-gates pin test unchanged and green. B2 SLICE_PARTICIPANT_PRODUCERS derived from EXECUTOR_REGISTRY produces; new advance-drain-loop test red on hand map, green after; live PRIORITY order holds. B3 source_read_only flag replaces SOURCE_READ_ONLY_EXECUTORS; pin test of 8 ids. B4 lifecycle flags drive ALWAYS_UPDATED/HOST_APPENDED/OPTIONAL_PROBE sets in advance.ts and staleness.ts; pin test. Generator reads true/false; DECL-7 extended. Full suite 8634 passed / 0 failed on the staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "cabe41bbf412f7c4b2cef5c4c02f27d6e4c0c295",
+        "ran_at": "2026-11-16T21:07:27.404Z"
+      },
+      "attested_at": "2026-11-16T21:07:36.627Z",
+      "vouches": {
+        "src/audit/orchestrator/advance.ts": "70c3a43b3a03bc69f09e3f7d3d9281443aa31ef5",
+        "src/audit/orchestrator/executorRunners.ts": "f8030a7e785716ef939505437e758ce30a2ee3d7",
+        "src/audit/orchestrator/executors.ts": "a3c578c5dc8df531e1fddf8a70a25ac39edb5f5a",
+        "src/audit/orchestrator/obligationPolicy.ts": "6f9a592d9dd7326fff4369ce82770060e3fa947f",
+        "src/audit/orchestrator/staleness.ts": "dc720ae7b488aa0a601399f76400bb595a932c7f"
+      }
+    },
     "6257346a73ffb600": {
       "reviewed_by": "AGY/gemini-3.8-flash-high/5072f699-00b5-4233-ad6d-9d8555b6bc99; Codex/orphan-assertion-and-generated-metadata-only",
       "attester_class": "agent",
@@ -852,7 +872,7 @@
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
@@ -921,10 +941,10 @@
       "review": "ad938761f1a24d50"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/executors.ts": {
-      "review": "9bc59db653647a3a"
+      "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/fileIntegrity.ts": {
       "review": "42e42270e8c264c9"
@@ -990,7 +1010,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/obligationPolicy.ts": {
-      "review": "2fd8f3fd2058e9bd"
+      "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/partitionTaskGraph.ts": {
       "baseline": "7b79934e86baf378"
@@ -1083,7 +1103,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/staleness.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/state.ts": {
       "review": "ddfc58268ca5a92e"

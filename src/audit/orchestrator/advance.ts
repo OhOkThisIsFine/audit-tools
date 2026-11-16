@@ -7,7 +7,11 @@ import { deriveObligationState } from "./obligationDerive.js";
 import { deriveAuditState } from "./state.js";
 import { computeArtifactMetadata } from "./artifactMetadata.js";
 import { EXECUTOR_RUNNERS, preservesSourceIndexes } from "./executorRunners.js";
-import { EXECUTOR_BY_OBLIGATION } from "./executors.js";
+import {
+  ALWAYS_UPDATED_ARTIFACTS,
+  EXECUTOR_BY_OBLIGATION,
+  EXECUTOR_REGISTRY,
+} from "./executors.js";
 import {
   classifyObligationBranch,
   type ObligationPolicyInputs,
@@ -23,7 +27,6 @@ import { isLateInputEdge } from "./dependencyMap.js";
 import { probeScopeIndexKeyCached, withScopeIndexKey } from "./scopeIndexBaseline.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
-  AGENT_FEEDBACK_FILENAME,
   RunLogger,
   advance as advanceObligations,
   describeStoppedFold,
@@ -92,31 +95,32 @@ export function engineMaxTransitions(cap: number = MAX_DRAIN_STEPS): number {
  * Every PRIORITY obligation whose executor can (re)write an artifact that takes
  * part in a registered dependency-slice projection.
  *
- * DECLARED DATA, RECONCILED — not a general artifact→obligation map and not a
- * list anyone is asked to remember to update: `findPriorityOrderingViolations`
- * REPORTS a projection participant that has no entry here, so registering a new
- * slice-projected edge without declaring its producers is a loud failure rather
- * than a silent hole in the guarantee.
+ * DERIVED from `EXECUTOR_REGISTRY[].produces` (every non-`side_channel` row),
+ * not kept by hand: the producer relation has one home, and a second list of
+ * the same facts drifts. An artifact that no executor produces gets NO entry,
+ * never an empty one, so `findPriorityOrderingViolations` REPORTS a projection
+ * participant without a producer instead of letting `Math.max()` of nothing
+ * pass it. An executor with no obligation (a preferred-only dispatch) adds
+ * nothing, because the drain never selects it.
  */
-const SLICE_PARTICIPANT_PRODUCERS: Readonly<Record<string, readonly string[]>> = {
-  // Written by the extraction pass and again by the independent delta-miner.
-  "charter_register.json": [
-    "charter_extraction_current",
-    "charter_comparison_current",
-    "charter_fidelity_current",
-  ],
-  "structure_decomposition.json": ["structure_decomposition_current"],
-  // sites-pinned: tests/audit/advance-drain-loop.test.ts, tests/audit/charter-packets.test.ts
-  // The charter packets' unit partition; the structure pass writes it.
-  "unit_manifest.json": ["structure_artifacts"],
-  "repo_manifest.json": ["repo_manifest"],
-  // Written by the structure pass and again by graph enrichment.
-  "graph_bundle.json": ["structure_artifacts", "graph_enrichment_current"],
-  // Planned wholesale, then rewritten by ingestion and runtime validation.
-  "audit_tasks.json": ["planning_artifacts", "audit_results_ingested", "runtime_validation_current"],
-  "charter_clarification.json": ["charter_clarification_current"],
-  "systemic_challenge.json": ["systemic_challenge_current"],
-};
+// sites-pinned: tests/audit/advance-drain-loop.test.ts, tests/audit/charter-packets.test.ts
+const SLICE_PARTICIPANT_PRODUCERS: ReadonlyMap<string, readonly string[]> = (() => {
+  const participants = new Set<string>();
+  for (const [downstream, upstreams] of Object.entries(DEPENDENCY_SLICE_PROJECTIONS)) {
+    participants.add(downstream);
+    for (const upstream of Object.keys(upstreams ?? {})) participants.add(upstream);
+  }
+  const producers = new Map<string, readonly string[]>();
+  for (const artifact of participants) {
+    const obligations = EXECUTOR_REGISTRY.filter((executor) =>
+      executor.produces.some(
+        (production) => production.artifact === artifact && production.role !== "side_channel",
+      ),
+    ).flatMap((executor) => executor.obligation_ids);
+    if (obligations.length > 0) producers.set(artifact, obligations);
+  }
+  return producers;
+})();
 
 export interface PriorityOrderingViolation {
   /** The slice-projected downstream artifact. */
@@ -138,9 +142,9 @@ export function findPriorityOrderingViolations(
 ): PriorityOrderingViolation[] {
   const violations: PriorityOrderingViolation[] = [];
   const positions = (artifact: string): number[] | string => {
-    const producers = SLICE_PARTICIPANT_PRODUCERS[artifact];
+    const producers = SLICE_PARTICIPANT_PRODUCERS.get(artifact);
     if (!producers) {
-      return `no producing obligation is declared for ${artifact} in SLICE_PARTICIPANT_PRODUCERS`;
+      return `no obligation-bearing executor in EXECUTOR_REGISTRY produces ${artifact}`;
     }
     const indexes: number[] = [];
     for (const producer of producers) {
@@ -501,9 +505,10 @@ export async function runSingleAdvanceStep(
     });
   }
 
-  // tooling_manifest.json and agent-feedback.jsonl are produced outside the
-  // executor loop (environment probe / worker appends), so no executor ever
-  // lists them in artifacts_written. Treat both as always-updated: their
+  // The `always_updated` lifecycle artifacts (tooling_manifest.json,
+  // agent-feedback.jsonl) are produced outside the executor loop (environment
+  // probe / worker appends), so no executor ever lists them in
+  // artifacts_written. Treat them as always-updated: their
   // metadata entries are recomputed from live content each advance — unchanged
   // content keeps its revision (no churn), changed content bumps it so
   // dependents re-stale exactly once instead of perpetually mismatching a
@@ -545,7 +550,7 @@ export async function runSingleAdvanceStep(
   const metadata = computeArtifactMetadata(
     probedBundle,
     bundle.artifact_metadata,
-    [...run.artifacts_written, "tooling_manifest.json", AGENT_FEEDBACK_FILENAME],
+    [...run.artifacts_written, ...ALWAYS_UPDATED_ARTIFACTS],
   );
   const metadataBundle = {
     ...probedBundle,

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts
+// sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/obligation-policy-lane-gates.test.ts
 /**
  * Per-obligation host-boundary POLICY — the pure "classify" half of the ONE
  * audit obligation registry (CX-02).
@@ -155,6 +155,31 @@ type Classifier = (
 ) => Promise<ObligationBranch>;
 
 /**
+ * One LANE-GATE row: probe its lane FIRST (a pending submission is
+ * `await_submission`, whatever the bundle says); else the deterministic omit
+ * arm when `omits` holds; else the host boundary. Probe-first is load-bearing:
+ * the full fold consumes a stray submission even where the gate would omit,
+ * and the plan draw must classify it the same way. `omits` is absent for a
+ * gate with no deterministic arm.
+ */
+interface LaneGate {
+  /** The submission lane, or how to read it off the bundle. */
+  lane: string | ((bundle: ArtifactBundle) => string);
+  pendingReason: string;
+  omits?: (bundle: ArtifactBundle) => boolean;
+  boundaryReason: string;
+}
+
+function laneGate(gate: LaneGate): Classifier {
+  return async (bundle, inputs) => {
+    const lane = typeof gate.lane === "string" ? gate.lane : gate.lane(bundle);
+    if (await probe(inputs, lane)) return awaitSubmission(lane, gate.pendingReason);
+    if (gate.omits?.(bundle)) return DETERMINISTIC;
+    return hostBoundary(gate.boundaryReason);
+  };
+}
+
+/**
  * The bespoke-policy ids whose classification cannot be read off the executor
  * registry — each mirrors its full-fold handler's branch ORDER exactly (e.g.
  * charter extraction checks its ceiling BEFORE its lanes, the omittable gates
@@ -177,17 +202,12 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
     );
   },
 
-  critical_flow_fallback_current: async (_bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.critical_flow_fallback)) {
-      return awaitSubmission(
-        GATE_LANES.critical_flow_fallback,
-        "a critical-flow fallback submission is pending",
-      );
-    }
-    return hostBoundary(
+  critical_flow_fallback_current: laneGate({
+    lane: GATE_LANES.critical_flow_fallback,
+    pendingReason: "a critical-flow fallback submission is pending",
+    boundaryReason:
       "deterministic flow inference fell below the confidence bar; the host authors the enrichment",
-    );
-  },
+  }),
 
   graph_enrichment_current: async (bundle, inputs) => {
     if (graphEnrichmentUnresolvedAnalyzers(bundle, inputs).length > 0) {
@@ -211,16 +231,12 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
     return DETERMINISTIC;
   },
 
-  intent_equivalence_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.intent_equivalence)) {
-      return awaitSubmission(
-        GATE_LANES.intent_equivalence,
-        "an intent-equivalence verdict submission is pending",
-      );
-    }
-    if (intentEquivalenceOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("a prose-only intent delta awaits the host judge");
-  },
+  intent_equivalence_current: laneGate({
+    lane: GATE_LANES.intent_equivalence,
+    pendingReason: "an intent-equivalence verdict submission is pending",
+    omits: intentEquivalenceOmits,
+    boundaryReason: "a prose-only intent delta awaits the host judge",
+  }),
 
   charter_extraction_current: async (bundle, inputs) => {
     if (charterExtractionOmits(bundle)) return DETERMINISTIC;
@@ -239,50 +255,33 @@ const POLICY_CLASSIFIERS: Readonly<Record<string, Classifier>> = {
     );
   },
 
-  charter_comparison_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.charter_comparison)) {
-      return awaitSubmission(
-        GATE_LANES.charter_comparison,
-        "a charter-comparison submission is pending",
-      );
-    }
-    if (charterComparisonOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("a comparison_pending register owes the comparison reader's turn");
-  },
+  charter_comparison_current: laneGate({
+    lane: GATE_LANES.charter_comparison,
+    pendingReason: "a charter-comparison submission is pending",
+    omits: charterComparisonOmits,
+    boundaryReason: "a comparison_pending register owes the comparison reader's turn",
+  }),
 
-  charter_fidelity_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.charter_fidelity)) {
-      return awaitSubmission(
-        GATE_LANES.charter_fidelity,
-        "a charter-fidelity submission is pending",
-      );
-    }
-    if (charterFidelityOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("a fidelity_pending register owes the fidelity lane's turn");
-  },
+  charter_fidelity_current: laneGate({
+    lane: GATE_LANES.charter_fidelity,
+    pendingReason: "a charter-fidelity submission is pending",
+    omits: charterFidelityOmits,
+    boundaryReason: "a fidelity_pending register owes the fidelity lane's turn",
+  }),
 
-  charter_clarification_current: async (bundle, inputs) => {
-    if (await probe(inputs, GATE_LANES.charter_clarification)) {
-      return awaitSubmission(
-        GATE_LANES.charter_clarification,
-        "a clarification-answers submission is pending",
-      );
-    }
-    if (charterClarificationOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("an interactive clarification queue awaits relay to the operator");
-  },
+  charter_clarification_current: laneGate({
+    lane: GATE_LANES.charter_clarification,
+    pendingReason: "a clarification-answers submission is pending",
+    omits: charterClarificationOmits,
+    boundaryReason: "an interactive clarification queue awaits relay to the operator",
+  }),
 
-  systemic_challenge_current: async (bundle, inputs) => {
-    const lane = systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []);
-    if (await probe(inputs, lane)) {
-      return awaitSubmission(
-        lane,
-        "a systemic-challenge round submission is pending",
-      );
-    }
-    if (systemicChallengeOmits(bundle)) return DETERMINISTIC;
-    return hostBoundary("an open challenge register awaits the next adversary round");
-  },
+  systemic_challenge_current: laneGate({
+    lane: (bundle) => systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []),
+    pendingReason: "a systemic-challenge round submission is pending",
+    omits: systemicChallengeOmits,
+    boundaryReason: "an open challenge register awaits the next adversary round",
+  }),
 
   synthesis_narrative_current: async (_bundle, inputs) => {
     if (await probe(inputs, GATE_LANES.synthesis_narrative)) {

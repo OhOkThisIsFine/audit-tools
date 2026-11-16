@@ -1,5 +1,6 @@
-// sites-pinned: tests/audit/staleness.test.ts, tests/audit/dependency-slices.test.ts, tests/audit/intent-checkpoint.test.ts
+// sites-pinned: tests/audit/staleness.test.ts, tests/audit/dependency-slices.test.ts, tests/audit/intent-checkpoint.test.ts, tests/audit/agent-feedback-reflections.test.ts
 import { propagateReachability } from "../../shared/graph/orderedReachability.js";
+import { HOST_APPENDED_ARTIFACTS, OPTIONAL_PROBE_ARTIFACTS } from "./executors.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { getArtifactValue } from "../io/artifacts.js";
 import {
@@ -205,27 +206,16 @@ function classifyArtifactPresence(
   return entry.content_hash === currentHash ? "intact" : "partial";
 }
 
-/**
- * Artifacts whose content an EXTERNAL writer appends to, so a body that does not
- * match the manifest's record is the normal state rather than a damaged one.
- *
- * This is the honest replacement for the deleted map-declared-leaf exemption,
- * and it is deliberately a named registry rather than a structural rule:
- * "declares no upstreams" was never the property that mattered (several leaves
- * are pipeline-produced and SHOULD be caught), and the property that does matter
- * — "this artifact is mutated by something other than its producing obligation"
- * — is not derivable from the dependency map at all. Naming the members is what
- * keeps the set from silently growing to cover whatever is inconvenient: a new
- * entry here is a deliberate statement that its producer does not own its bytes.
- *
- * `agent-feedback.jsonl` is the sole member: workers append opt-in reflections
- * to it after the pass that created it, so it stales only its DOWNSTREAM —
- * `agent-feedback-reflections.test.ts` pins that behaviour and this registry is
- * what makes it survive the leaf exemption's deletion.
- */
-const HOST_APPENDED_ARTIFACTS: ReadonlySet<string> = new Set([
-  "agent-feedback.jsonl",
-]);
+// `HOST_APPENDED_ARTIFACTS` — artifacts whose content an EXTERNAL writer appends
+// to, so a body that does not match the manifest's record is the normal state
+// rather than a damaged one — is the `host_appended` flag on
+// `LIFECYCLE_PRODUCTIONS` (./executors.ts). It replaces the deleted
+// map-declared-leaf exemption, and it stays a NAMED declaration rather than a
+// structural rule: "mutated by something other than its producing obligation" is
+// not derivable from the dependency map, and naming the members keeps the set
+// from silently growing. `agent-feedback.jsonl` is the sole member: workers
+// append opt-in reflections after the pass that created it, so it stales only
+// its DOWNSTREAM (pinned by `agent-feedback-reflections.test.ts`).
 
 /** Options controlling the staleness pass's observability side effect. */
 export interface StalenessOptions {
@@ -551,12 +541,12 @@ export function computeStaleArtifacts(
         continue;
       }
       if (presence === "intact") continue;
-      // tooling_manifest.json is an OPTIONAL probe: its absence is the normal
+      // An OPTIONAL probe (tooling_manifest.json): its absence is the normal
       // case, never an upstream that vanished.
       // ORDERING: the `partial` branch above runs FIRST, so this exemption only
-      // ever sees `absent` — a tooling_manifest classified `partial` is staled
+      // ever sees `absent` — an optional probe classified `partial` is staled
       // before it reaches here.
-      if (artifactName === "tooling_manifest.json") continue;
+      if (OPTIONAL_PROBE_ARTIFACTS.has(artifactName)) continue;
       for (const downstream of ARTIFACT_DEPENDENTS_MAP[artifactName] ?? []) {
         const hasMetadataEntry = Boolean(metadata.artifacts[downstream]);
         if (present(bundle, downstream) && !hasMetadataEntry) {

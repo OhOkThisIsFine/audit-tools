@@ -254,6 +254,31 @@ describe("executor→artifact production declaration", () => {
     expect(() =>
       parseProducerDeclaration(scratch('artifact: `repo_manifest.json`, role: "primary"')),
     ).toThrow(/property "artifact" is not a readable literal/);
+
+    // A registry flag is a `true` / `false` keyword: it parses as a boolean, so
+    // a flagged row renders. A flag named by an identifier still refuses.
+    const flagged = (flag: string) =>
+      [
+        "export const EXECUTOR_REGISTRY = [",
+        `  { id: "scratch_executor", source_read_only: ${flag}, produces: [] },`,
+        "];",
+        "export const LIFECYCLE_PRODUCTIONS = [",
+        '  { artifact: "audit_state.json", writer: "advanceAudit", reason: "lifecycle-written", host_appended: true },',
+        "];",
+        "",
+      ].join("\n");
+    expect(parseProducerDeclaration(flagged("true"))).toEqual({
+      executors: [{ id: "scratch_executor", source_read_only: true, produces: [] }],
+      lifecycle: [
+        { artifact: "audit_state.json", writer: "advanceAudit", reason: "lifecycle-written", host_appended: true },
+      ],
+    });
+    expect(parseProducerDeclaration(flagged("false")).executors[0]).toMatchObject({
+      source_read_only: false,
+    });
+    expect(() => parseProducerDeclaration(flagged("READ_ONLY"))).toThrow(
+      /property "source_read_only" is not a readable literal/,
+    );
   });
 
   it("DECL-9: every declaration array is in its documented content-derived order", () => {

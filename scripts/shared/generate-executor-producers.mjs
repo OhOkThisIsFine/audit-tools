@@ -55,7 +55,8 @@ function readArrayLiteral(sourceFile, name) {
   throw new Error(`could not find \`export const ${name}\` in ${SOURCE_FILE}`);
 }
 
-/** One object literal → a plain object of string / string[] / object[] values. */
+// sites-pinned: tests/audit/executor-artifact-production-declaration.test.ts
+/** One object literal → a plain object of string / boolean / string[] / object[] values. */
 function readObject(node, context) {
   if (!ts.isObjectLiteralExpression(node)) {
     throw new Error(`${context} contains a non-object element — refusing to guess its shape`);
@@ -68,6 +69,9 @@ function readObject(node, context) {
     const key = property.name.getText().replace(/^["']|["']$/g, "");
     const value = property.initializer;
     if (ts.isStringLiteral(value)) out[key] = value.text;
+    // A registry flag (`source_read_only: true`, `host_appended: true`).
+    else if (value.kind === ts.SyntaxKind.TrueKeyword) out[key] = true;
+    else if (value.kind === ts.SyntaxKind.FalseKeyword) out[key] = false;
     else if (ts.isArrayLiteralExpression(value)) {
       out[key] = value.elements.map((element) =>
         ts.isStringLiteral(element) ? element.text : readObject(element, context),
@@ -79,7 +83,7 @@ function readObject(node, context) {
       // header bans. Refuse instead, like the three refusals above.
       throw new Error(
         `${context} property "${key}" is not a readable literal — the render would silently ` +
-          `drop it. Accepted forms: a plain double- or single-quoted string, an array of such ` +
+          `drop it. Accepted forms: a plain double- or single-quoted string, true or false, an array of such ` +
           `strings, or an array of object literals whose properties are themselves such ` +
           `values. Anything else — a template literal, a ` +
           `concatenation, an identifier such as a *_FILENAME constant, a call — refuses; keep ` +
