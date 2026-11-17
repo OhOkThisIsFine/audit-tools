@@ -40,16 +40,6 @@ No commit, publication or release acceptance is established. The owner discarded
 2026-10-05 dogfood run (2026-10-09); a new dogfood run is the owner's call and would use 0.55.6.
 **Live owner decision:** none.
 
-<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
-
-- **4 nightly decisions are waiting.** Answer in [`nightly-inbox.md`](nightly-inbox.md); settled items disappear from this generated block.
-  - `leg2-comment-shape-enumeration-check-2026-10-21` — backlog spec: how should a comment stating a workflow SHAPE or prose ENUMERATION be mechanically checked?
-  - `leg3-p70-stale-main-reads-wrong-checkout-2026-10-23` — Leg-3 proposal P70: fix session-start-guards.mjs's stale-main check to read the session's own worktree, not CLAUDE_PROJECT_DIR
-  - `leg3-insights-commit-cadence-policy-2026-10-28` — Insights suggestion: adopt an auto-commit-on-green policy for laps, despite the harness's "only commit when asked" default?
-  - `leg3-insights-dispatch-idle-timeout-2026-10-28` — Insights suggestion: adopt a >10-minute idle-timeout for stalled dispatch lanes, or derive the threshold from measurement instead?
-
-<!-- END GENERATED LIVE STATUS -->
-
 <!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->
 
 > **This list is GENERATED from [`docs/backlog/`](backlog/) — do not hand-edit it.**

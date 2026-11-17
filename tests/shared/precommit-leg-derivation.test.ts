@@ -7,8 +7,7 @@
 // fewer is the defect class the derivation exists to end). The spawn-through-
 // the-real-hook smoke lives in pre-commit-gate-derived-legs.test.ts.
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { buildPreCommitLegs } from '../../scripts/shared/derived-file-preflight.mjs';
 import { GUARDS } from '../../scripts/guard-reach-data.mjs';
@@ -25,7 +24,7 @@ interface Leg {
   script: string;
   phase: 'main' | 'final';
   fix: string;
-  triggered(ctx: { root: string; staged: string[] }): boolean;
+  triggered(ctx: { staged: string[] }): boolean;
 }
 interface GuardRow {
   id: string;
@@ -35,22 +34,10 @@ interface GuardRow {
 }
 const guards = GUARDS as GuardRow[];
 
-// A root with NO nightly queue, so the handoff widening exercises only its
-// fixed predicate — the probe scans are queue-state-dependent and belong to
-// the module's own e2e coverage.
-const EMPTY_ROOT = mkdtempSync(join(tmpdir(), 'leg-derivation-'));
-process.on('exit', () => {
-  try {
-    rmSync(EMPTY_ROOT, { recursive: true, force: true });
-  } catch {
-    /* best-effort */
-  }
-});
-
 const legs = () => buildPreCommitLegs({ packageScripts: PACKAGE_SCRIPTS }) as Leg[];
 const triggeredIds = (staged: string[]) =>
   legs()
-    .filter((l) => l.triggered({ root: EMPTY_ROOT, staged }))
+    .filter((l) => l.triggered({ staged }))
     .map((l) => l.id);
 
 describe('leg-set membership follows the registry preCommit flags', () => {
@@ -108,12 +95,14 @@ describe('every retired hand-coded trigger is reproduced', () => {
   it('the HANDOFF fixed inputs fire check:handoff-roadmap (custom widening intact)', () => {
     for (const p of [
       'docs/HANDOFF.md',
-      '.audit-tools/nightly/open-items.json',
-      '.claude/nightly-decisions.json',
       'scripts/shared/generate-handoff-roadmap.mjs',
-      'scripts/nightly/items.mjs', // only reachable through the widening predicate
+      'docs/backlog/open-bugs.md', // only reachable through the widening predicate
     ]) {
       expect(triggeredIds([p]), `${p} must trigger the handoff leg`).toContain('check:handoff-roadmap');
+    }
+    // The retired nightly queue no longer feeds HANDOFF, so it must not fire the leg.
+    for (const p of ['.audit-tools/nightly/open-items.json', '.claude/nightly-decisions.json', 'scripts/nightly/items.mjs']) {
+      expect(triggeredIds([p]), `${p} must NOT trigger the handoff leg`).not.toContain('check:handoff-roadmap');
     }
   });
 

@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // sites-pinned: tests/shared/handoff-roadmap.test.ts
 //   The entry parsers' title/line/body shape and the generated blocks are pinned there.
-// Regenerate the generated sections of `docs/HANDOFF.md`:
-//   1. live nightly decisions from `.audit-tools/nightly/open-items.json`; and
-//   2. the ordered ROADMAP from the split backlog (`docs/backlog/*.md`).
+// Regenerate the generated section of `docs/HANDOFF.md`: the ordered ROADMAP
+// from the split backlog (`docs/backlog/*.md`).
 //
 // WHY THIS EXISTS. `docs/HANDOFF.md` is the ordered roadmap — its own header,
 // `docs/documentation-philosophy.md` and `docs/doc-review-guidelines.md` all say
@@ -43,8 +42,7 @@
 // `--check` also refuses the OBSERVED creep shapes in the hand-written region
 // (`HANDWRITTEN_CREEP_RULES` below), and write mode refuses to regenerate
 // around them: trim the hand-written line first, then rerun. A shape-catch,
-// not semantics — prose that avoids the shapes passes, and the nightly doc leg
-// stays the semantic backstop.
+// not semantics — prose that avoids the shapes passes.
 //
 //   node scripts/shared/generate-handoff-roadmap.mjs           # write
 //   node scripts/shared/generate-handoff-roadmap.mjs --check    # verify only
@@ -55,11 +53,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  OPEN_ITEMS_RELPATH,
-  partitionBySettled,
-  readDecisions,
-} from "../nightly/items.mjs";
 import { rebaseRelativeLinks } from "./rebase-relative-links.mjs";
 import { parseBacklogDocument } from "./backlog-entry-grammar.mjs";
 import { spliceGeneratedBlock as sharedSpliceGeneratedBlock } from "./generatedArtifacts.mjs";
@@ -69,15 +62,6 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const BEGIN_MARKER =
   "<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->";
 export const END_MARKER = "<!-- END GENERATED ROADMAP -->";
-export const LIVE_STATUS_BEGIN_MARKER =
-  "<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->";
-export const LIVE_STATUS_END_MARKER = "<!-- END GENERATED LIVE STATUS -->";
-const GENERATED_MARKERS = [
-  BEGIN_MARKER,
-  END_MARKER,
-  LIVE_STATUS_BEGIN_MARKER,
-  LIVE_STATUS_END_MARKER,
-];
 
 /** A bold title starting with this is hoisted to the top of the roadmap. */
 export const PIN_MARKER = "▶";
@@ -115,113 +99,6 @@ export const ROADMAP_SOURCES = [
 ];
 
 const collapse = (s) => s.replace(/\s+/g, " ").trim();
-const NIGHTLY_ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const escapeHtmlComments = (s) =>
-  s.replaceAll("<!--", "&lt;!--").replaceAll("-->", "--&gt;");
-
-/**
- * Read the unanswered persisted queue. Decisions are folded here because an
- * answer removes an item from the owner's queue immediately; waiting for the
- * next nightly run to rewrite open-items.json would leave HANDOFF falsely red.
- *
- * This uses the same presentation-time premise filtering as the inbox/session
- * surface, so HANDOFF never points at an item those surfaces have auto-closed.
- * The pre-commit gate derives the current probe-source paths from this same
- * persisted queue and runs parity when one changes.
- */
-export function readOpenNightlyItems(root) {
-  const queuePath = join(root, OPEN_ITEMS_RELPATH);
-  let state;
-  try {
-    state = JSON.parse(readFileSync(queuePath, "utf8"));
-  } catch (error) {
-    throw new Error(
-      `${OPEN_ITEMS_RELPATH} is missing or invalid JSON; refusing to render an empty HANDOFF queue ` +
-        `from unreadable state (${error instanceof Error ? error.message : String(error)}).`,
-    );
-  }
-  if (!state || typeof state !== "object" || !Array.isArray(state.items)) {
-    throw new Error(`${OPEN_ITEMS_RELPATH}: expected an object with an items array.`);
-  }
-  const ids = new Set();
-  const subjectKeys = new Set();
-  state.items.forEach((item, index) => {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      typeof item.id !== "string" ||
-      item.id.trim() === "" ||
-      item.id !== item.id.trim() ||
-      !NIGHTLY_ITEM_ID.test(item.id) ||
-      typeof item.title !== "string" ||
-      item.title.trim() === "" ||
-      typeof item.subject_key !== "string" ||
-      item.subject_key.trim() === "" ||
-      item.subject_key !== item.subject_key.trim()
-    ) {
-      throw new Error(
-        `${OPEN_ITEMS_RELPATH}: items[${index}] must carry a canonical id ` +
-          `([A-Za-z0-9._-]), plus non-empty string title and subject_key fields.`,
-      );
-    }
-    const id = item.id.trim();
-    const subjectKey = item.subject_key.trim();
-    if (ids.has(id)) {
-      throw new Error(`${OPEN_ITEMS_RELPATH}: duplicate item id "${id}".`);
-    }
-    if (subjectKeys.has(subjectKey)) {
-      throw new Error(
-        `${OPEN_ITEMS_RELPATH}: duplicate subject_key "${subjectKey}" would let one decision ` +
-          `hide multiple items.`,
-      );
-    }
-    ids.add(id);
-    subjectKeys.add(subjectKey);
-  });
-  return partitionBySettled(state.items, readDecisions(root), root).open;
-}
-
-/**
- * Render generated POINTERS into the full answering surface. Empty means only
- * generic live-status delimiters: HANDOFF contains no visible nightly text and
- * no nightly-specific source marker.
- */
-export function renderNightlyQueue(items) {
-  if (!Array.isArray(items)) {
-    throw new Error("renderNightlyQueue: items must be an array");
-  }
-  if (items.length === 0) {
-    return `${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`;
-  }
-
-  const pointers = items.map((item, index) => {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      typeof item.id !== "string" ||
-      item.id.trim() === "" ||
-      item.id !== item.id.trim() ||
-      !NIGHTLY_ITEM_ID.test(item.id) ||
-      typeof item.title !== "string" ||
-      item.title.trim() === ""
-    ) {
-      throw new Error(
-        `${OPEN_ITEMS_RELPATH}: items[${index}] must carry a canonical id ` +
-          `([A-Za-z0-9._-]) and a non-empty string title.`,
-      );
-    }
-    return `  - \`${item.id}\` — ${escapeHtmlComments(collapse(item.title))}`;
-  });
-  const count = items.length;
-  const waiting = count === 1 ? "decision is" : "decisions are";
-  return (
-    `${LIVE_STATUS_BEGIN_MARKER}\n\n` +
-    `- **${count} nightly ${waiting} waiting.** Answer in ` +
-    `[\`nightly-inbox.md\`](nightly-inbox.md); settled items disappear from this generated block.\n` +
-    `${pointers.join("\n")}\n\n` +
-    `${LIVE_STATUS_END_MARKER}`
-  );
-}
 
 /**
  * Pull the bold lead-in title out of an entry body. Entries in this backlog are
@@ -378,71 +255,22 @@ export function renderRoadmap(groups) {
   );
 }
 
-/** Replace one delimited block in HANDOFF, leaving all other bytes untouched. */
-function spliceHandoffBlock(handoffText, block, beginMarker, endMarker, label) {
-  return sharedSpliceGeneratedBlock(handoffText, block, {
-    begin: beginMarker,
-    end: endMarker,
-    target: `docs/HANDOFF.md (generated-${label})`,
-    validateBlock: true,
-    foreignMarkers: GENERATED_MARKERS,
-  });
-}
-
-/** Replace the live-status slot without touching the hand-written Live state. */
-export function spliceLiveStatus(handoffText, block) {
-  return spliceHandoffBlock(
-    handoffText,
-    block,
-    LIVE_STATUS_BEGIN_MARKER,
-    LIVE_STATUS_END_MARKER,
-    "live-status",
-  );
-}
-
 /** Replace the roadmap slot without touching the hand-written HANDOFF text. */
 export function spliceRoadmap(handoffText, block) {
-  return spliceHandoffBlock(handoffText, block, BEGIN_MARKER, END_MARKER, "roadmap");
-}
-
-/** Assert that the two generated slots occur once each and never nest/overlap. */
-export function assertGeneratedTopology(handoffText) {
-  const pairs = [
-    [LIVE_STATUS_BEGIN_MARKER, LIVE_STATUS_END_MARKER, "live-status"],
-    [BEGIN_MARKER, END_MARKER, "roadmap"],
-  ];
-  const ranges = pairs.map(([beginMarker, endMarker, label]) => {
-    const begin = handoffText.indexOf(beginMarker);
-    const end = handoffText.indexOf(endMarker);
-    if (
-      begin === -1 ||
-      end < begin ||
-      handoffText.indexOf(beginMarker, begin + beginMarker.length) !== -1 ||
-      handoffText.indexOf(endMarker, end + endMarker.length) !== -1
-    ) {
-      throw new Error(
-        `docs/HANDOFF.md must contain exactly one ordered generated-${label} marker pair.`,
-      );
-    }
-    return { begin, end: end + endMarker.length, label };
+  return sharedSpliceGeneratedBlock(handoffText, block, {
+    begin: BEGIN_MARKER,
+    end: END_MARKER,
+    target: "docs/HANDOFF.md (generated-roadmap)",
+    validateBlock: true,
   });
-  const [first, second] = ranges.sort((a, b) => a.begin - b.begin);
-  if (first.end > second.begin) {
-    throw new Error(
-      `docs/HANDOFF.md generated slots overlap (${first.label} contains ${second.label}); ` +
-        `restore two disjoint blocks.`,
-    );
-  }
-  return handoffText;
 }
 
 // ── hand-written creep heuristics (sol-5 / P30) ──────────────────────────────
 //
-// The hand-written region is everything OUTSIDE the two generated marker
-// ranges. The exclusion is mandatory, not tidy: nightly pointer titles and
-// lifted backlog titles legitimately carry dates and landing words (the
-// 2026-08-13 creep sat INSIDE the live-status block), so scanning generated
-// text would turn the gate red on its own output.
+// The hand-written region is everything OUTSIDE the generated marker range.
+// The exclusion is mandatory, not tidy: lifted backlog titles legitimately
+// carry dates and landing words, so scanning generated text would turn the
+// gate red on its own output.
 //
 // Every rule is grounded in an OBSERVED creep instance (removed in 03468b4a)
 // and tuned against the live HANDOFF's legitimate lines so the tree is green
@@ -523,10 +351,10 @@ export const HANDWRITTEN_CREEP_RULES = [
 // stopping catching anything.
 //
 // Not counted, deliberately: HTML comments (the `doc-citation-exempt` marker is
-// bookkeeping, not content) and everything inside the two generated ranges
-// (they are derived, and this bound is on the HAND-WRITTEN region — in the real
-// HANDOFF and in every fixture tree the markers fall under this heading, since
-// they carry no `##` of their own).
+// bookkeeping, not content) and everything inside the generated range (it is
+// derived, and this bound is on the HAND-WRITTEN region — in the real HANDOFF
+// and in every fixture tree the markers fall under this heading, since they
+// carry no `##` of their own).
 //
 // STATED UNCOVERED HALF: this is a budget, not a semantic test. A chronology
 // dense enough to fit inside ninety words passes, and so does a short section
@@ -539,21 +367,19 @@ export const IMMEDIATE_NEXT_HEADING = "## Immediate next";
 export const IMMEDIATE_NEXT_MAX_WORDS = 90;
 
 /**
- * Blank the two generated ranges LINE-PRESERVINGLY, so 1-based line numbers
- * still refer to the original text. Shared by the creep scan and the
- * Immediate-next bound: both are contracts on the HAND-WRITTEN region, and a
- * generated block that happened to sit under the `## Immediate next` heading
- * (which it does in every fixture tree, since the markers carry no `##` of
- * their own) must not be counted as hand-written prose.
+ * Blank the generated range LINE-PRESERVINGLY, so 1-based line numbers still
+ * refer to the original text. Shared by the creep scan and the Immediate-next
+ * bound: both are contracts on the HAND-WRITTEN region, and a generated block
+ * that happened to sit under the `## Immediate next` heading (which it does in
+ * every fixture tree, since the markers carry no `##` of their own) must not be
+ * counted as hand-written prose.
  */
 function blankGeneratedRanges(lines) {
-  for (const [beginMarker, endMarker] of GENERATED_RANGE_PAIRS) {
-    const begin = lines.findIndex((l) => l.includes(beginMarker));
-    if (begin === -1) continue;
-    const end = lines.findIndex((l, i) => i >= begin && l.includes(endMarker));
-    const stop = end === -1 ? lines.length - 1 : end;
-    for (let i = begin; i <= stop; i++) lines[i] = "";
-  }
+  const begin = lines.findIndex((l) => l.includes(BEGIN_MARKER));
+  if (begin === -1) return lines;
+  const end = lines.findIndex((l, i) => i >= begin && l.includes(END_MARKER));
+  const stop = end === -1 ? lines.length - 1 : end;
+  for (let i = begin; i <= stop; i++) lines[i] = "";
   return lines;
 }
 
@@ -577,7 +403,7 @@ function immediateNextSection(lines) {
 
 /**
  * The hand-written text of the Immediate-next section, with HTML comments
- * (which may span lines) and the two generated ranges removed. Returns null
+ * (which may span lines) and the generated range removed. Returns null
  * when the section heading is absent — the section is part of HANDOFF's
  * contract, so its absence is itself a refusal.
  */
@@ -650,21 +476,16 @@ function overrunReport(overrun) {
   );
 }
 
-const GENERATED_RANGE_PAIRS = [
-  [LIVE_STATUS_BEGIN_MARKER, LIVE_STATUS_END_MARKER],
-  [BEGIN_MARKER, END_MARKER],
-];
-
 /**
  * Scan the HAND-WRITTEN region for the banned creep shapes. Returns one
  * violation per matching (line, rule) with 1-based line numbers into the
- * ORIGINAL text: generated ranges are blanked line-preserving, never removed,
- * so a violation after a generated block still names its real line. Split is
+ * ORIGINAL text: the generated range is blanked line-preserving, never removed,
+ * so a violation after the generated block still names its real line. Split is
  * `/\r?\n/` and every rule matches per-line — a CRLF working copy must behave
  * exactly like the LF one in CI.
  *
- * Marker validation is not this function's job: callers splice/assert topology
- * first (the clearer error). An unterminated range is blanked to end-of-file —
+ * Marker validation is not this function's job: callers splice first (the
+ * clearer error). An unterminated range is blanked to end-of-file —
  * conservative, and unreachable from the CLI, which throws on broken markers
  * before this runs.
  */
@@ -705,42 +526,6 @@ function readSources(backlogDir) {
  * location, so the spawned CLI always targets the real repo). Returns the
  * process exit code; `out`/`err` receive what the CLI would print.
  */
-// The EMPTY-QUEUE PROJECTION contract, at the gate that already reads HANDOFF.
-//
-// `renderNightlyQueue([])` emits no visible text at all (an empty block is a
-// valid state and says so in an HTML comment). But the hand-written region can
-// assert the queue's state in prose, and nothing caught that: a hand-written
-// line using the banned word landed through a green pre-commit gate and green
-// targeted suites, and only a voluntary FULL-SUITE run caught it — which is
-// how tag v0.50.0 burned, exactly as the backlog entry predicted.
-//
-// WHY IT BELONGS HERE. The contract's subject is HANDOFF, and this generator is
-// the check HANDOFF's own trigger paths fire; that is the whole of the rule
-// "every live-tree doc contract runs in the gate leg its trigger paths fire".
-// `runGenerator` already assembles the projected text — it is `rendered` — so
-// the case needs no second renderer and no second reading of the tree.
-//
-// The projection is hypothetical BY DESIGN: it answers "if the queue emptied
-// tonight, would HANDOFF still claim otherwise?", which is a question about the
-// FIXED hand-written prose and is exactly the state the full-suite case
-// constructs. It therefore fires regardless of the queue's current size.
-//
-// Scope is the HAND-WRITTEN region: generated lines are DERIVED from the queue,
-// so they legitimately say "nightly" when there is a queue, and the contract is
-// about prose that survives the queue emptying. HTML comments are stripped
-// first — that is where the empty block declares itself.
-/**
- * @param {string} handoffText
- * @returns {boolean} whether the hand-written region claims a nightly state
- */
-export function hasHandwrittenNightlyClaim(handoffText) {
-  const emptyProjection = spliceRoadmap(
-    spliceLiveStatus(handoffText, renderNightlyQueue([])),
-    `${BEGIN_MARKER}\n${END_MARKER}`,
-  );
-  return /\bnightly\b/iu.test(emptyProjection.replace(/<!--[\s\S]*?-->/gu, ""));
-}
-
 export function runGenerator({
   root = repoRoot,
   check = false,
@@ -752,22 +537,12 @@ export function runGenerator({
   },
 } = {}) {
   const handoffPath = join(root, "docs", "HANDOFF.md");
-  const nightlyItems = readOpenNightlyItems(root);
-  const liveStatusBlock = renderNightlyQueue(nightlyItems);
   const roadmapBlock = renderRoadmap(collectRoadmap(readSources(join(root, "docs", "backlog"))));
   const current = readFileSync(handoffPath, "utf8");
-  const rendered = assertGeneratedTopology(
-    spliceRoadmap(
-      spliceLiveStatus(current, liveStatusBlock),
-      roadmapBlock,
-    ),
-  );
+  const rendered = spliceRoadmap(current, roadmapBlock);
   // Splicing above has validated the marker topology, so the creep scan's
   // range blanking cannot misfire on broken markers.
   const creep = findHandwrittenCreep(current);
-
-  // The empty-queue projection contract — see hasHandwrittenNightlyClaim.
-  const nightlyClaim = hasHandwrittenNightlyClaim(current);
   // ...and the Immediate-next length bound — see IMMEDIATE_NEXT_MAX_WORDS.
   const overrun = findImmediateNextOverrun(current);
 
@@ -776,31 +551,21 @@ export function runGenerator({
     // so one fix-and-retry lap surfaces every problem.
     if (creep.length > 0) err(creepReport(creep));
     if (overrun) err(overrunReport(overrun));
-    if (nightlyClaim) {
-      err(
-        `\ndocs/HANDOFF.md's HAND-WRITTEN region claims a nightly state.\n` +
-          `Projected against an EMPTY queue, the hand-written prose still says "nightly" — so the\n` +
-          `moment the queue empties, HANDOFF asserts a state that no longer holds. The generated\n` +
-          `blocks already track the queue on their own; the hand-written region must not restate it.\n` +
-          `Fix: delete or reword the hand-written line naming the nightly queue (regenerating cannot\n` +
-          `help — the line is not generated).\n\n`,
-      );
-    }
     if (current !== rendered) {
       err(
-        `\ndocs/HANDOFF.md's generated state is STALE — it no longer matches the nightly queue,\n` +
-          `decision ledger, and/or docs/backlog/. A stale generated block is a second, drifting\n` +
-          `home for state that already has an authoritative source.\n` +
+        `\ndocs/HANDOFF.md's generated state is STALE — it no longer matches docs/backlog/.\n` +
+          `A stale generated block is a second, drifting home for state that already has an\n` +
+          `authoritative source.\n` +
           `Fix: node scripts/shared/generate-handoff-roadmap.mjs\n\n`,
       );
       return 1;
     }
-    if (creep.length > 0 || nightlyClaim || overrun) return 1;
+    if (creep.length > 0 || overrun) return 1;
     const roadmapCount = (rendered.match(/^- .+ · \[`/gm) ?? []).length;
     out(
       `✓ handoff-roadmap: generated HANDOFF state matches its sources ` +
-        `(${nightlyItems.length} nightly pointer(s), ${roadmapCount} roadmap pointer(s)); ` +
-        `hand-written region carries no changelog creep, no nightly-queue claim, and an ` +
+        `(${roadmapCount} roadmap pointer(s)); ` +
+        `hand-written region carries no changelog creep, and an ` +
         `Immediate-next section within its ${IMMEDIATE_NEXT_MAX_WORDS}-word bound\n`,
     );
     return 0;
@@ -809,15 +574,6 @@ export function runGenerator({
   // The write path refuses on the same contract the check path does: a silent
   // regenerate would leave the offending hand-written line exactly where it was
   // while making the file otherwise green.
-  if (nightlyClaim) {
-    err(
-      `docs/HANDOFF.md's hand-written region claims a nightly state ` +
-        `(it still says "nightly" when projected against an EMPTY queue).\n` +
-        `refusing to write docs/HANDOFF.md until that line is trimmed — regenerating cannot fix it.\n`,
-    );
-    return 1;
-  }
-
   if (overrun) {
     err(overrunReport(overrun));
     err(`refusing to write docs/HANDOFF.md until the section above is cut to its bound.\n`);

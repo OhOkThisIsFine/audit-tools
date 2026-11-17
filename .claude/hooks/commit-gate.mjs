@@ -107,8 +107,7 @@ import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc
 // legs and triggers are DERIVED from the guard-reach registry
 // (scripts/guard-reach-data.mjs — plain-data ESM, importable pre-build), so
 // the attest preflight fires on exactly the staged sets this gate fires on, or
-// an attestation would bind to a tree this gate rejects. (The nightly queue
-// path and grep domain the handoff widening depends on ride along inside.)
+// an attestation would bind to a tree this gate rejects.
 import {
   buildPreCommitLegs,
   legRunnable,
@@ -407,7 +406,7 @@ function runGate(committedPaths) {
   }
   const derivedLegs = buildPreCommitLegs({ packageScripts: rootScripts });
   const judgeDerivedLeg = (leg) => {
-    if (!leg.triggered({ root, staged, git })) return null;
+    if (!leg.triggered({ staged })) return null;
     // The leg's KIND decides both halves: an npm-script gate leg is probed in
     // package.json, a subject-keyed pin leg is a test file probed on disk — and
     // run through the one vitest gate, not as a nonexistent npm script (which

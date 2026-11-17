@@ -1,8 +1,7 @@
 import { test, expect } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type {
   CapturedFrictionItem,
   FrictionCategory,
@@ -25,8 +24,6 @@ const { captureStepBoundaryFriction, stepBoundaryFrictionCategory } = await impo
 const { frictionCapturePath } = await import(
   "../../src/shared/io/frictionCapture.js"
 );
-
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 async function readRecord(dir: string, runId: string): Promise<TriagedFrictionArtifact> {
   return JSON.parse(await readFile(frictionCapturePath(dir, runId), "utf8"));
@@ -246,41 +243,6 @@ test("decideFrictionTriage: re-derive is idempotent and PRESERVES host-authored 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
-});
-
-// ── hook parity: the Stop-gate READS the shared vocabulary, never a copy ───────
-//
-// This test used to parse a literal array out of the hook and compare it to the
-// source tuple. That is a parity check between TWO copies — it can only ever
-// catch a drift AFTER someone has already written the second copy, and the
-// backlog entry (2026-08-27, "Three governance vocabularies are copied per
-// consumer") names exactly that shape. The property is single-sourcing: the hook
-// now IMPORTS the generated pre-build sibling, so there is no second copy to
-// drift. What is pinned here is that import — and that the generated sibling
-// itself equals the source tuple, which is `check:friction-categories`'s job.
-
-test("development closeout renderer IMPORTS the shared vocabulary rather than copying it", async () => {
-  const hookPath = join(HERE, "..", "..", "scripts", "closeout-sections-data.mjs");
-  const src = await readFile(hookPath, "utf8");
-  expect(
-    src,
-    "the hook must import the generated pre-build vocabulary — a literal here is the copy the " +
-      "single-source property forbids",
-  ).toContain('from "./shared/friction-categories.generated.mjs"');
-  expect(
-    /const FRICTION_CATEGORIES = \[/.test(src),
-    "no literal FRICTION_CATEGORIES array may survive in the hook",
-  ).toBe(false);
-});
-
-test("the development renderer's imported vocabulary is the same module the closeout renderer reads", async () => {
-  // One pre-build data module, two consumers: if the hook imported anything else
-  // (a fresh literal, a second generated file) the two could disagree about what
-  // a complete friction walk covers.
-  const { FRICTION_CATEGORIES: generated } = await import(
-    "../../scripts/shared/friction-categories.generated.mjs"
-  );
-  expect([...generated]).toEqual([...FRICTION_CATEGORIES]);
 });
 
 // ── INV-SCC-04 / COR-6fd1702f / TST-c0e7b3b3: single-encoding path derivation ──

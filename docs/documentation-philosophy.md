@@ -1,8 +1,8 @@
 # Documentation philosophy (canonical)
 
 The single source of truth for *what this repo's docs are for and how they're shaped*.
-Every doc, and every item inside a doc, is measured against this. The doc-review routine
-([`doc-review-guidelines.md`](doc-review-guidelines.md)) is the enforcement of this philosophy;
+Every doc, and every item inside a doc, is measured against this. The routing table
+([`doc-review-guidelines.md`](doc-review-guidelines.md)) says which check applies to each doc;
 this doc is the philosophy itself.
 
 ## The core principle
@@ -64,7 +64,5 @@ not just its contents:
 
 - **Mechanical (hard):** `scripts/check-doc-manifest.mjs` (in `verify:release`) fails the build if
   any tracked `*.md` anywhere in the repo isn't registered in the routing table — strays/dated docs can't merge.
-- **Routine (soft, nightly):** the doc-review routine reviews every doc against this philosophy on
-  the two perspectives defined in [`doc-review-guidelines.md`](doc-review-guidelines.md) — items
-  *within* a doc (fit + staleness) and the doc *set* (does each doc belong / can it be condensed).
-  Anything with judgment escalates to the owner; nothing condenses or retires a doc autonomously.
+- **Review (soft):** a doc review measures each doc against this philosophy. Anything with
+  judgment escalates to the owner; nothing condenses or retires a doc autonomously.

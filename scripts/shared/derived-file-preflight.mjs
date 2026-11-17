@@ -31,92 +31,26 @@
 // bound is stated in docs/backlog/durable-traps.md.
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { isGlob, globToRegExp } from '../check-doc-manifest.mjs';
 import { GUARDS, REACH, guardReach } from '../guard-reach-data.mjs';
-import { OPEN_ITEMS_RELPATH, PREMISE_GREP_PATHSPECS } from '../nightly/items.mjs';
 import { worktreeTree } from './worktree-tree.mjs';
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/^\.\//, '');
 
-// git helper — never throws; callers branch on `.ok`/`.status`. windowsHide:
-// a windowless parent spawning git pops a console window on win32 otherwise.
-function gitRun(root, args) {
-  const r = spawnSync('git', args, {
-    cwd: root,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  return { ok: r.status === 0, status: r.status, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
-}
-
 // HANDOFF generated-state parity: custom WIDENING predicate for the
-// check:handoff-roadmap leg — the current premise-probe sources and the two
-// staged-pickaxe scans are underivable from reach globs, so this predicate
-// stays hand-written and is OR-ed onto the derived trigger. Fires whenever the
-// staged set touches HANDOFF, a backlog source, the persisted nightly queue,
-// its decision ledger, a current premise-probe source, or the code that
-// projects those sources. Positive probes use repo-wide git-grep for
-// rename/move protection, so a staged pickaxe hit on a probe needle outside
-// probe.file can change a presentation-time verdict too — both scans ride the
-// staged snapshot.
-export function handoffStateTriggered({ root, staged, git = (args) => gitRun(root, args) }) {
-  const fixed = (p) => {
+// check:handoff-roadmap leg, OR-ed onto the derived trigger. Fires whenever the
+// staged set touches HANDOFF, a backlog source, or the code that projects the
+// backlog into HANDOFF.
+export function handoffStateTriggered({ staged }) {
+  return staged.some((p) => {
     const n = norm(p);
     return (
       n === 'docs/HANDOFF.md' ||
-      n === '.audit-tools/nightly/open-items.json' ||
-      n === '.claude/nightly-decisions.json' ||
       n === 'scripts/shared/generate-handoff-roadmap.mjs' ||
-      n === 'scripts/nightly/items.mjs' ||
       /^docs\/backlog\/[^/]+\.md$/.test(n)
     );
-  };
-  if (staged.some(fixed)) return true;
-
-  const probeSources = new Set();
-  const positiveNeedles = new Set();
-  try {
-    const queue = JSON.parse(readFileSync(join(root, OPEN_ITEMS_RELPATH), 'utf8'));
-    for (const item of Array.isArray(queue?.items) ? queue.items : []) {
-      for (const probe of Array.isArray(item?.premise_probes) ? item.premise_probes : []) {
-        if (typeof probe?.file === 'string' && probe.file.trim() !== '') {
-          probeSources.add(norm(probe.file));
-        }
-        if (typeof probe?.contains === 'string' && probe.contains.trim() !== '') {
-          // The evaluator's same longest-line needle, for staged pickaxe reach.
-          const needle = probe.contains
-            .split('\n')
-            .map((line) => line.trim())
-            .sort((a, b) => b.length - a.length)[0];
-          if (needle) positiveNeedles.add(needle);
-        }
-      }
-    }
-  } catch {
-    // Missing/malformed queue state is handled by the parity check when its own
-    // path is staged. A repo with no queue has no probe-source dependency.
-  }
-  for (const source of probeSources) {
-    const diff = git(['diff', '--cached', '--quiet', '--no-renames', '--', source]);
-    if (diff.status === 1 || !diff.ok) return true;
-  }
-  for (const needle of positiveNeedles) {
-    const diff = git([
-      'diff',
-      '--cached',
-      '--name-only',
-      '--no-renames',
-      `-S${needle}`,
-      '--',
-      ...PREMISE_GREP_PATHSPECS,
-    ]);
-    // A pickaxe failure cannot prove the dependency is unchanged; triggering
-    // the parity check is the safe, cheap fallback.
-    if (!diff.ok || diff.stdout.trim() !== '') return true;
-  }
-  return false;
+  });
 }
 
 // ── SUBJECT-KEYED pinning legs (T-pins) ──────────────────────────────────────
@@ -178,14 +112,12 @@ const PINS = new Map([
   ],
   ['src/shared/constitutionalDocPaths.ts', ['tests/shared/doc-manifest-gate.test.ts']],
   // Curated content pins: unlisted documents are unclaimed, not proven uncovered.
-  // the roadmap block is generated from `▶`-pinned backlog entries and the live nightly block renders nothing when the queue is empty; the closeout render reproduces it verbatim
+  // the roadmap block is generated from `▶`-pinned backlog entries; the closeout render reproduces it verbatim
   ["docs/HANDOFF.md",["tests/shared/handoff-roadmap.test.ts","tests/shared/closeout-render.test.ts"]],
   // README's Philosophy section is GENERATED from the brief's Product half, and the doc's citations are backticked so check:doc-code-citations can see them
   ["docs/project-philosophy.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/glossary-citations-backticked.test.ts"]],
   // every path-shaped token in a table row is backticked, so a deleted file cannot stay green in the citation gate
   ["docs/glossary-ids.md",["tests/shared/glossary-citations-backticked.test.ts"]],
-  // the routine's lane dispatch and the doc's approved lane swap are asserted together
-  ["docs/nightly-routine.md",["tests/shared/lane-dispatch.test.ts"]],
   // the seek index is GENERATED from docs/backlog/, and the size baseline is a ratchet
   ["docs/backlog.md",["tests/shared/backlog-index.test.ts","tests/shared/backlog-budget-unit.test.ts"]],
   // the routing table is RENDERED from scripts/doc-manifest-data.mjs and byte-compared
@@ -341,8 +273,8 @@ function implPathFrom(command) {
 /**
  * Derive the ordered pre-commit leg set from the guard-reach registry.
  *
- * Returns `[{ id, script, phase: 'main'|'final', fix, triggered({root, staged,
- * git?}) }]` — phase-'main' legs first, then phase-'final' (check:doc-links:
+ * Returns `[{ id, script, phase: 'main'|'final', fix, triggered({staged}) }]`
+ * — phase-'main' legs first, then phase-'final' (check:doc-links:
  * the broadest trigger must run AFTER every structural refusal or it masks
  * them), registry order within each phase. A leg's trigger:
  *   'always'        → true for every staged set.
@@ -380,16 +312,13 @@ export function buildPreCommitLegs({ guards = GUARDS, reach = REACH, packageScri
       script: g.impl,
       phase,
       fix,
-      triggered: ({ root, staged, git }) => {
+      triggered: ({ staged }) => {
         const hit = staged.some((s) => {
           const n = norm(s);
           return matchers.some((m) => (m.re ? m.re.test(n) : m.p === n));
         });
         if (hit) return true;
-        if (!widen) return false;
-        // Omit `git` when the caller did, so the widening's own default runner
-        // (which carries `.status` for the staged-pickaxe scans) kicks in.
-        return widen(git ? { root, staged, git } : { root, staged });
+        return widen ? widen({ staged }) : false;
       },
     });
   }
@@ -447,7 +376,7 @@ export function buildWriteTimeLegs(
       .map((guard) => [guard.id, guard.writeTime]),
   );
   return buildPreCommitLegs({ guards, reach, packageScripts })
-    .filter((leg) => writeTime.has(leg.id) && leg.triggered({ root, staged: [normalized] }))
+    .filter((leg) => writeTime.has(leg.id) && leg.triggered({ staged: [normalized] }))
     .map((leg) => ({ ...leg, maxMs: writeTime.get(leg.id)?.maxMs ?? 1000,
       args: writeTime.get(leg.id)?.args, deferredChecks: writeTime.get(leg.id)?.deferredChecks }));
 }
@@ -518,9 +447,9 @@ function readPackageScripts(root) {
  * leg judging a file the caller writes only after the preflight passes would
  * judge the tree before that write and refuse every run. An excluded leg is
  * announced in `skipped`, never silent.
- * @param {{root: string, staged: string[], stagedTree: string, git?: Function, exclude?: Record<string, string>}} options
+ * @param {{root: string, staged: string[], stagedTree: string, exclude?: Record<string, string>}} options
  */
-export function runDerivedFilePreflight({ root, staged, stagedTree, git, exclude = {} }) {
+export function runDerivedFilePreflight({ root, staged, stagedTree, exclude = {} }) {
   if (typeof stagedTree !== 'string' || stagedTree.trim() === '') {
     // The object judged must be the object bound. A caller that cannot name it
     // has no business receiving a verdict about it.
@@ -533,7 +462,7 @@ export function runDerivedFilePreflight({ root, staged, stagedTree, git, exclude
   const executed = [];
   const skipped = [];
   for (const leg of buildPreCommitLegs({ packageScripts: readPackageScripts(root) })) {
-    if (!leg.triggered(git ? { root, staged, git } : { root, staged })) continue;
+    if (!leg.triggered({ staged })) continue;
     if (Object.hasOwn(exclude, leg.id)) {
       skipped.push(`${leg.script} is not run by this preflight — ${exclude[leg.id]}`);
       continue;

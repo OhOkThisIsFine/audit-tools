@@ -29,8 +29,8 @@
 // invocation. More would multiply the 20-minute ceiling by the attempt count and
 // turn one dead entry into an hour of a nightly leg.
 //
-// COVERAGE STAMP IS A READ-VERBATIM CONTRACT. docs/nightly-routine.md reads
-// `<out>-coverage.json` by these exact field names: model, started_at,
+// COVERAGE STAMP IS A PERSISTED CONTRACT. `<out>-coverage.json` carries these
+// exact field names: model, started_at,
 // finished_at, aborted, total_entries, prior_classified, attempted,
 // classified, classified_total, errored, retried (+ caller counters via
 // `stampInit`). `classified` is triage-flavored but renaming a persisted field

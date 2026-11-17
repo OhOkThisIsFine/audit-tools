@@ -178,28 +178,6 @@ describe('the reported incident: a query flag must not perform the write', () =>
     expect(`${res.stdout}${res.stderr}`).toMatch(/nightly-decisions\.json/);
   });
 
-  it('scope-ledger refuses an unknown flag on a verb that writes the ledger', () => {
-    const cwd = emptyRoot();
-    const res = runScriptCli(NIGHTLY('scope-ledger.mjs'), ['stamp', 'docs/x.md', '--quiety'], cwd);
-    expect(res.status).toBe(USAGE_EXIT);
-    expect(res.stderr).toMatch(/unrecognized argument/i);
-    expect(existsSync(join(cwd, '.audit-tools', 'nightly', 'scope-ledger.json'))).toBe(false);
-  });
-
-  it('scope-ledger refuses an unknown VERB rather than defaulting to plan', () => {
-    const cwd = emptyRoot();
-    const res = runScriptCli(NIGHTLY('scope-ledger.mjs'), ['plna'], cwd);
-    expect(res.status).not.toBe(0);
-    expect(res.stderr).toMatch(/unknown verb/);
-  });
-
-  it('review-retirement-candidates refuses a bogus flag rather than enumerating', () => {
-    const cwd = emptyRoot();
-    const res = runScriptCli(NIGHTLY('review-retirement-candidates.mjs'), ['--retier'], cwd);
-    expect(res.status).toBe(USAGE_EXIT);
-    expect(res.stderr).toMatch(/unrecognized argument/i);
-  });
-
   it('answer.mjs refuses an undeclared flag in the answer tail rather than recording it', () => {
     // The tension: an answer is free prose that may begin with a dash, but a
     // mistyped flag in the tail must not be absorbed into the ledger as text.
@@ -287,7 +265,6 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/attest-constitutional-doc-change.mjs',
     'scripts/check-agents-region.mjs',
     'scripts/check-backlog-budget.mjs',
-    'scripts/check-backlog-friction-tags.mjs',
     'scripts/check-backlog-line-numbers.mjs',
     'scripts/check-backlog-status-tokens.mjs',
     'scripts/check-doc-code-citations.mjs',
@@ -313,7 +290,6 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/shared/generate-constitutional-doc-paths.mjs',
     'scripts/shared/generate-executor-producers.mjs',
     'scripts/shared/generate-filelock-export-surface.mjs',
-    'scripts/shared/generate-friction-categories.mjs',
     'scripts/shared/generate-handoff-roadmap.mjs',
     'scripts/shared/generate-ingestion-checks.mjs',
     'scripts/shared/generate-loop-core-patterns.mjs',

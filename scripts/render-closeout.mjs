@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // @generated-artifact runtime-state
+// sites-pinned: tests/shared/closeout-render.test.ts
 //
 // Renderer + refusal for the end-of-sprint hand-back.
 //
@@ -27,7 +28,6 @@
 // Input shape (JSON object, keys = section ids):
 //   { "verification": ["build + typecheck: green (abc1234)"],
 //     "cleanup": "none",
-//     "friction": { "ambiguous_direction": "none", ... },
 //     ... }
 // A value is a string, an array of strings (one bullet each), or "none".
 import { spawnSync } from 'node:child_process';
@@ -106,14 +106,7 @@ for (let i = 0; i < argv.length; i++) {
 function blankTemplate() {
   /** @type {Record<string, unknown>} */
   const out = {};
-  for (const s of CLOSEOUT_SECTIONS) {
-    if (s.bullets) {
-      /** @type {Record<string, string>} */
-      const b = {};
-      for (const bullet of s.bullets) b[bullet.id] = SILENT;
-      out[s.id] = b;
-    } else out[s.id] = s.required ? [''] : SILENT;
-  }
+  for (const s of CLOSEOUT_SECTIONS) out[s.id] = s.required ? [''] : SILENT;
   return out;
 }
 
@@ -259,34 +252,6 @@ for (const section of CLOSEOUT_SECTIONS) {
     continue;
   }
   const value = input[section.id];
-
-  if (section.bullets) {
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-      fail(`section "${section.id}" takes an object keyed by bullet id, one value per bullet`);
-    }
-    const unknownBullets = Object.keys(value).filter((k) => !/** @type {NonNullable<typeof section.bullets>} */ (section.bullets).some((b) => b.id === k));
-    if (unknownBullets.length > 0) {
-      fail(`section "${section.id}": unknown bullet(s) ${unknownBullets.join(', ')}`);
-    }
-    const lines = [];
-    for (const bullet of section.bullets) {
-      if (!(bullet.id in value)) {
-        missing.push(`${section.id}.${bullet.id} — ${bullet.label}`);
-        continue;
-      }
-      const bv = value[bullet.id];
-      if (isSilent(bv)) continue;
-      const bl = toLines(bv);
-      if (bl.length === 0) {
-        emptied.push({ id: `${section.id}.${bullet.id}`, required: !!bullet.required, prompt: bullet.label });
-        continue;
-      }
-      lines.push(`- ${bullet.label}: ${bl.join('; ')}`);
-    }
-    disposition[section.id] = lines.length > 0 ? 'content' : SILENT;
-    if (lines.length > 0) rendered.push({ section, lines });
-    continue;
-  }
 
   if (isSilent(value)) {
     if (section.required) {

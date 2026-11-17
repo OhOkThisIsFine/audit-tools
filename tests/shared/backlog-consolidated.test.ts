@@ -13,8 +13,8 @@ import { GUARDS } from '../../scripts/guard-reach-data.mjs';
 import { catalogGates } from '../../scripts/shared/verify-steps.mjs';
 
 describe('one executable backlog check', () => {
-  it('has one release and pre-commit registration for the four independent validators', () => {
-    const ids = ['check:backlog', 'check:backlog-budget', 'check:backlog-status', 'check:backlog-line-numbers', 'check:backlog-friction-tags'];
+  it('has one release and pre-commit registration for the three independent validators', () => {
+    const ids = ['check:backlog', 'check:backlog-budget', 'check:backlog-status', 'check:backlog-line-numbers'];
     expect(catalogGates().filter((g) => ids.includes(g.id)).map((g) => g.id)).toEqual(['check:backlog']);
     expect(GUARDS.filter((g) => ids.includes(g.id) && g.preCommit !== false).map((g) => g.id)).toEqual(['check:backlog']);
   });
@@ -28,7 +28,7 @@ function fixture(text: string): string {
   writeFileSync(join(root, 'docs/backlog/open-bugs.md'), text);
   return root;
 }
-const broken = '- **SHIPPED (friction: false_red).** see `src/a.ts:12` ' + 'x'.repeat(3000);
+const broken = '- **SHIPPED.** see `src/a.ts:12` ' + 'x'.repeat(3000);
 
 describe('shared corpus with independent refusal classes', () => {
   it('loads each source once and reports every applicable refusal on one entry', () => {
@@ -37,11 +37,11 @@ describe('shared corpus with independent refusal classes', () => {
     const corpus = loadBacklogCorpus(root, (path: string) => { reads++; return readFileSync(path, 'utf8'); });
     expect(reads).toBe(1);
     const result = evaluateBacklogCorpus(corpus, normalizeBaseline(null));
-    expect(new Set(result.diagnostics.map((d) => d.check))).toEqual(new Set(['budget/property', 'status', 'line-citation', 'friction']));
+    expect(new Set(result.diagnostics.map((d) => d.check))).toEqual(new Set(['budget/property', 'status', 'line-citation']));
     expect(reads).toBe(1);
     const cli = spawnSyncHidden(process.execPath, [fileURLToPath(new URL('../../scripts/check-backlog.mjs', import.meta.url)), '--root', root], { encoding: 'utf8' });
     expect(cli.status).toBe(1);
-    for (const check of ['budget/property', 'status', 'line-citation', 'friction']) expect(cli.stderr).toContain(`[backlog:${check}]`);
+    for (const check of ['budget/property', 'status', 'line-citation']) expect(cli.stderr).toContain(`[backlog:${check}]`);
   });
 
   it('preserves write-time scope and never reads or changes the deferred budget baseline', () => {
@@ -49,7 +49,7 @@ describe('shared corpus with independent refusal classes', () => {
     const baseline = join(root, 'docs/backlog/.size-baseline.json');
     writeFileSync(baseline, '{invalid');
     const result = runBacklogCheck(root, { writeTime: true });
-    expect(new Set(result.diagnostics.map((d) => d.check))).toEqual(new Set(['line-citation', 'friction']));
+    expect(new Set(result.diagnostics.map((d) => d.check))).toEqual(new Set(['line-citation']));
     expect(readFileSync(baseline, 'utf8')).toBe('{invalid');
     expect(() => runBacklogCheck(root)).toThrow('Cannot read backlog baseline');
   });

@@ -17,48 +17,11 @@
 // itself the message: a closeout with no Verification line is not reporting
 // "nothing to verify", it is reporting that nobody looked.
 
-import { FRICTION_CATEGORIES } from "./shared/friction-categories.generated.mjs";
-
-// Labels for the REAL friction categories. The IDS are the single-sourced
-// vocabulary (src/shared/friction/frictionRecord.ts, via its generated sibling
-// — this chain must run in a never-built checkout, so it cannot import
-// audit-tools/shared, which resolves dist/); only the presentation label lives
-// here, keyed by that vocabulary. A category
-// added there without a label here throws at load, so the two cannot drift
-// silently; a category removed there drops out of the bullets automatically.
-const FRICTION_CATEGORY_LABELS = {
-  ambiguous_direction:
-    'ambiguous_direction (instructions/docs/specs pointed the wrong way, or contradicted each other)',
-  tool_should_decide:
-    'tool_should_decide (a human/agent had to remember, notice, or decide something the tool should enforce)',
-  inefficient_feeding:
-    'inefficient_feeding (context/tokens wasted moving information in or out — re-derivation, dumps, re-loops)',
-};
-
-const frictionCategoryBullets = FRICTION_CATEGORIES.map((id) => {
-  const label = FRICTION_CATEGORY_LABELS[id];
-  if (!label) {
-    throw new Error(
-      `closeout-sections-data: no bullet label for friction category '${id}' — add one to FRICTION_CATEGORY_LABELS.`,
-    );
-  }
-  return { id, label };
-});
-
-/**
- * @typedef {object} Bullet
- * @property {string} id
- * @property {string} label rendered lead-in, before the value
- * @property {boolean} [required] this bullet may not be "none"
- */
-
 /**
  * @typedef {object} Section
  * @property {string} id
  * @property {string} heading rendered as `### <heading>`
  * @property {boolean} [required] section always renders; may not be "none"
- * @property {Bullet[]} [bullets] when present, the value is an object keyed by
- *   bullet id; the heading renders only if at least one bullet has content
  * @property {string} prompt what this section is for — shown in --help and in
  *   the refusal when its value is missing
  * @property {string} [requiresQuestion] a non-silent value here must contain a
@@ -109,19 +72,6 @@ export const CLOSEOUT_SECTIONS = [
     prompt:
       'dead code / orphaned helpers / stray debug·TODO removed, and any DELIBERATE intermediate ' +
       'state called out so it does not read as a bug',
-  },
-  {
-    id: 'friction',
-    heading: 'Friction this sprint',
-    prompt: 'friction hit this sprint, by category',
-    bullets: [
-      ...frictionCategoryBullets,
-      {
-        id: 'open_ended',
-        label: '**Open-ended (anything else that caused friction, fit no category above)**',
-      },
-      { id: 'logged_to', label: 'Logged to' },
-    ],
   },
   {
     id: 'docs',

@@ -4,10 +4,10 @@
 // resolveTriageModel's rosterSource and profile.mjs's spawnImpl: no spawn, no
 // network, every behavior reachable by injection.
 //
-// The coverage-stamp assertions pin a READ-VERBATIM contract:
-// docs/nightly-routine.md consumes `<out>-coverage.json` by exact field name
-// (model/attempted/classified/errored/aborted, plus the cumulative
-// classified_total family). Renaming a persisted field is not a rename.
+// The coverage-stamp assertions pin a PERSISTED contract: `<out>-coverage.json`
+// carries exact field names (model/attempted/classified/errored/aborted, plus
+// the cumulative classified_total family). Renaming a persisted field is not a
+// rename.
 import {
   existsSync,
   mkdirSync,

@@ -31,7 +31,6 @@ dist/
 # the pushed tree (scripts/shared/suiteGreenStamp.mjs). Tracked with its siblings
 # above — an untracked hook a settings.json references is a hook main cannot run.
 !.claude/hooks/push-gate.mjs
-!.claude/hooks/nightly-surface.mjs
 !.claude/hooks/shell-split.mjs
 !.claude/hooks/shell-trap-guard.mjs
 !.claude/hooks/tool-input-guard.mjs
@@ -47,9 +46,6 @@ dist/
 # verify-green ledger defers instead of answering. Tracked on purpose: a fresh
 # clone must carry the declaration, or that checkout gets the false red back.
 !.claude/green-mechanism.json
-# Declares the static-analysis tools the machine-wide nightly runner executes.
-# Tracked on purpose: the runner reads the main checkout.
-!.claude/static-analysis.json
 # Loop-core adversarial-review attestations — local, ephemeral, per-staged-tree-hash
 # state produced by attest-loop-core-review.mjs; never a tracked deliverable.
 .claude/loop-core-review/

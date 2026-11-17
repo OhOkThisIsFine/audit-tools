@@ -197,14 +197,7 @@ would never run: the global one shadows it.
 
 1. **Released-vs-local delta.** `git log --oneline "$(git describe --tags --abbrev=0 --match 'v*')"..HEAD`
    — any commit listed is un-released work on `main`; the lap plan states whether this lap ships it.
-2. **Ask the LEDGER what is open, never the snapshot.** `node scripts/nightly/answer.mjs --list`.
-   `.audit-tools/nightly/open-items.json` is a generated snapshot that outlives the answers that
-   settle it; only an id `--list` reports OPEN is a question.
-3. **Pose every open nightly question** to the owner with its options (AskUserQuestion; four per
-   call), never by naming the item or pointing at the inbox. Record each answer at once with
-   `node scripts/nightly/answer.mjs <ID> "<answer>"` — "leave it" is an answer; "skip" leaves it open
-   and is not re-asked this session. Never auto-apply an instruction-file edit or a leg-3 proposal.
-4. **Risk-tier the next item** before starting it (`docs/project-philosophy.md`, the A6 dial): one
+2. **Risk-tier the next item** before starting it (`docs/project-philosophy.md`, the A6 dial): one
    pipeline, depth scaled to the tier — full adversarial depth for loop-core work, leaner for a
    trivial mechanical cluster, never a separate lighter path.
 
@@ -302,7 +295,7 @@ would never run: the global one shadows it.
   (`npm run check:philosophy-brief -- --write`, gated in `verify:release`) and the
   `question-philosophy-gate` hook extracts the whole brief at runtime. Edit a conviction in the brief and
   both follow.
-- **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md) — the canonical philosophy the nightly maintenance routine's doc leg enforces ([`docs/nightly-routine.md`](docs/nightly-routine.md)).
+- **Docs capture durable concepts, not current state.** Timeless conceptual docs only. Exception: single handoff doc for immediate next steps. Full statement (one-home-per-concept, status-noise, condensation bias) in [`docs/documentation-philosophy.md`](docs/documentation-philosophy.md).
 - **audit-tools does NOT route — it reports task metadata and the HOST dispatches** (ZERO execution
   adapters, metadata only). The tool characterizes work — per-task risk,
   complexity, local token estimates, scope, lens — and partitions on **content coherence**; choosing
@@ -364,12 +357,9 @@ severity; re-tagging an entry moves it),
 [`durable-traps.md`](docs/backlog/durable-traps.md) (standing reference, not work). Add an entry when
 deferring; remove it when shipped.
 
-**Development policy stays in development.** The repository's sprint closeout owns
-mandatory friction reflection. Shipped audit/remediation workflows capture and
+**Development policy stays in development.** Shipped audit/remediation workflows capture and
 archive diagnostic events but do not make development attestations a prerequisite
 for completing work in a target repository.
-
-**Log friction the moment you hit it** — non-obvious traps, misbehaving tools, missing affordances, shell/env quirks. One line to `docs/backlog/open-bugs.md` if it's a fixable defect, or `docs/backlog/durable-traps.md` if it's a standing environment/tooling gotcha — before moving on. 30-second note now = fix a future session can pick up.
 
 **Entries carry a size budget** (`npm run check:backlog-budget`, in `verify:release`). Condense at
 write time: the mechanism and the open property belong in the entry, the story belongs in `git log`

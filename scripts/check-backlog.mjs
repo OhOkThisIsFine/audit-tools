@@ -10,7 +10,6 @@ import { parseBacklogDocument, findEntryBoundaryDamage, renderEntryBoundaryDamag
 import { evaluateBacklog, normalizeBaseline, headText } from './check-backlog-budget.mjs';
 import { findStatusMarkers } from './check-backlog-status-tokens.mjs';
 import { findLineNumberCitations } from './check-backlog-line-numbers.mjs';
-import { evaluateFrictionTags } from './check-backlog-friction-tags.mjs';
 
 /** Read each Markdown source exactly once; IO errors must propagate. */
 export function loadBacklogCorpus(root, readText = (path) => readFileSync(path, 'utf8')) {
@@ -42,8 +41,6 @@ export function evaluateBacklogCorpus(files, baseline, { writeTime = false } = {
       check: 'line-citation', message: `docs/backlog/${source.file}:${hit.line}:${hit.column} — ${hit.kind} \`${hit.span}\`\n      ${hit.source.trim().slice(0, 140)}`,
     });
   }
-  const friction = evaluateFrictionTags(corpus);
-  for (const message of friction.violations) diagnostics.push({ check: 'friction', message });
   return { diagnostics, files: files.length };
 }
 
@@ -73,7 +70,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (result.diagnostics.length) {
       console.error(result.diagnostics.map(({ check, message }) => `[backlog:${check}] ${message}`).join('\n\n'));
       process.exitCode = 1;
-    } else console.log(`✓ backlog: ${result.files} file(s) satisfy ${args.has('--write-time') ? 'line and friction' : 'budget/property, entry-boundary, status, line and friction'} checks`);
+    } else console.log(`✓ backlog: ${result.files} file(s) satisfy ${args.has('--write-time') ? 'line' : 'budget/property, entry-boundary, status and line'} checks`);
   } catch (error) {
     console.error(`[backlog:source] ${/** @type {Error} */ (error).message}`);
     process.exitCode = 1;

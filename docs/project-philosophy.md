@@ -68,12 +68,9 @@ Never hand-edit the generated README block.
 - Green at every commit, and every regression test is red-green validated before it is trusted.
 - End-of-sprint cleanup runs unprompted, and every remaining step is stated with the document it lives
   in — a step that lives only in chat is lost.
-- Docs capture durable concepts, not current state. Absence of a thing is not staleness. Semantic
-  document review scales to what changed — the changed documents, their declared dependents, and a
-  periodic sweep — never the whole corpus every pass. The end-of-sprint closeout does NOT scale: it
-  runs whole, every sprint.
+- Docs capture durable concepts, not current state. Absence of a thing is not staleness. The
+  end-of-sprint closeout does NOT scale: it runs whole, every sprint.
 - Front-load the broad prior-art search before authoring anything — narrow scope is the top churn driver.
-- Log friction the moment you hit it, in all its categories, without being asked.
 - A disambiguation pass leaves an item fully specified or unchanged. Do not silently defer based on
   an assumption that a problem is rare; ground that judgment in operational evidence and the owner's direction.
 
@@ -99,7 +96,7 @@ The A/B labels remain navigation references for existing project guidance, not s
 | B3: atomic replacement, green commits and shared primitives | [`CLAUDE.md`](../CLAUDE.md), Conventions & invariants |
 | B4: full end-of-sprint cleanup | [`CLAUDE.md`](../CLAUDE.md), Conventions & invariants, and the repository closeout renderer |
 | B5: durable documentation with one home per fact | [`Documentation philosophy`](documentation-philosophy.md) |
-| B6: complete disambiguation and friction records | [`Disambiguation workflow`](../.claude/skills/disambiguate-backlog/SKILL.md); [`CLAUDE.md`](../CLAUDE.md), Known friction & deferred fixes |
+| B6: complete disambiguation records | [`Disambiguation workflow`](../.claude/skills/disambiguate-backlog/SKILL.md); [`CLAUDE.md`](../CLAUDE.md), Known friction & deferred fixes |
 
 A product principle and its development consequence use the same home. In particular, one core/two
 draws and enforcing correctness in tooling do not need a second bridge section.

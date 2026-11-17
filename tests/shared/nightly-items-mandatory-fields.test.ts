@@ -6,7 +6,7 @@
 // plain-terms block only when eli5 is truthy). A named requirement is not a
 // refusal. Lives under tests/ because vitest excludes `.claude/**` and the
 // other nightly tests already sit here.
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
@@ -115,7 +115,7 @@ describe('writeOpenItems refuses an item that cannot be ANSWERED (P32)', () => {
 // The identity field everything downstream keys on (2026-08-14, re-hit
 // 2026-08-19). `writeOpenItems` validated probes exhaustively and never checked
 // `subject_key` — the field the durable-answer mechanism, the carry-forward and
-// the HANDOFF generator all read — so a missing key was persisted here and the
+// the inbox all read — so a missing key was persisted here and the
 // refusal landed two steps later as a BLOCKED COMMIT naming `items[N]` and
 // HANDOFF rather than the malformed item.
 describe('writeOpenItems DERIVES or REFUSES subject_key at write', () => {
@@ -145,7 +145,7 @@ describe('writeOpenItems DERIVES or REFUSES subject_key at write', () => {
     );
   });
 
-  it('refuses a missing title at write too — the HANDOFF generator would otherwise block the commit', () => {
+  it('refuses a missing title at write too — the inbox would otherwise show a bare id', () => {
     const bare = item();
     delete bare.title;
     expect(() => writeOpenItems(root, { items: [bare] })).toThrow(/title/);
@@ -221,76 +221,5 @@ describe('the queue index is enumerable in one bounded read', () => {
     writeOpenItems(root, { items: [item()] });
     expect(readFileSync(join(root, OPEN_ITEMS_INDEX_RELPATH), 'utf8')).not.toMatch(/generated_at/);
     expect(readOpenItemsIndex(root).run).toEqual(readOpenItems(root).run);
-  });
-});
-
-// A run that writes the queue must leave `check:handoff-roadmap` green
-// (2026-08-20). The generated LIVE STATUS block derives from the queue and the
-// ledger, and the nightly run contract did not list regenerating it, so the
-// desync was caught only afterwards by the closeout gate.
-describe('writing the queue refreshes the generated HANDOFF state', () => {
-  /**
-   * A minimal HANDOFF: both generated marker pairs, the `## Immediate next` section the
-   * write path requires, and the backlog sources.
-   */
-  function seedHandoff(): string {
-    mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
-    writeFileSync(
-      join(root, 'docs', 'backlog', 'open-bugs.md'),
-      '# Open bugs\n\n- **An entry that is not pinned.**\n',
-      'utf8',
-    );
-    writeFileSync(
-      join(root, 'docs', 'backlog', 'forward-tracks.md'),
-      '# Forward tracks\n\n## Open tracks\n\n## Forward tracks\n',
-      'utf8',
-    );
-    writeFileSync(join(root, 'docs', 'backlog', 'deferred.md'), '# Deferred\n', 'utf8');
-    const path = join(root, 'docs', 'HANDOFF.md');
-    writeFileSync(
-      path,
-      [
-        '# Handoff',
-        '',
-        '<!-- BEGIN GENERATED LIVE STATUS — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
-        '<!-- END GENERATED LIVE STATUS -->',
-        '',
-        '<!-- BEGIN GENERATED ROADMAP — scripts/shared/generate-handoff-roadmap.mjs — DO NOT EDIT BY HAND -->',
-        '<!-- END GENERATED ROADMAP -->',
-        '',
-        '## Immediate next',
-        '',
-        'None.',
-        '',
-      ].join('\n'),
-      'utf8',
-    );
-    return path;
-  }
-
-  it('regenerates docs/HANDOFF.md live status in the same write, so the gate stays green', () => {
-    const path = seedHandoff();
-    writeOpenItems(root, { items: [item()] });
-    const handoff = readFileSync(path, 'utf8');
-    expect(handoff).toMatch(/DOC-1/);
-    expect(handoff).toMatch(/1 nightly decision is waiting/);
-  });
-
-  it('a later queue write REMOVES an item the ledger has since settled', () => {
-    // The desync shape from 2026-08-20: the block is generated, then the queue
-    // changes. Because the write regenerates, the block follows in one step.
-    const path = seedHandoff();
-    writeOpenItems(root, { items: [item()] });
-    expect(readFileSync(path, 'utf8')).toMatch(/DOC-1/);
-    recordDecision(root, subjectKey(ITEM_PATH, SUBJECT), { answer: 'done', disposition: 'settled' });
-    writeOpenItems(root, { items: [item()] });
-    expect(readFileSync(path, 'utf8')).not.toMatch(/DOC-1/);
-  });
-
-  it('is silent, not fatal, when the root has no HANDOFF to regenerate', () => {
-    // A test fixture with no docs/HANDOFF.md: the queue write is the durable
-    // act and must still succeed; the gate is what reports a stale block.
-    expect(() => writeOpenItems(root, { items: [item()] })).not.toThrow();
-    expect(readOpenItems(root).items).toHaveLength(1);
   });
 });

@@ -48,9 +48,9 @@ export function compareCodeUnits(left, right) {
  * carries a bare `.slice(0, N)` literal on a hash result.
  *
  * `options.algorithm` defaults to sha256. It exists for the ids whose values are
- * ALREADY PERSISTED: the nightly `subject_key` and scope-ledger `item_hash` are
- * sha1 and are written into a tracked artifact, so "upgrade the algorithm" is a
- * rewrite of every id in that file, not a cleanup. Naming the algorithm here
+ * ALREADY PERSISTED: the nightly `subject_key` is sha1 and is written into a
+ * tracked artifact, so "upgrade the algorithm" is a rewrite of every id in that
+ * file, not a cleanup. Naming the algorithm here
  * routes those sites through the one home without churning persisted state.
  */
 export function hashContent(content, options = {}) {

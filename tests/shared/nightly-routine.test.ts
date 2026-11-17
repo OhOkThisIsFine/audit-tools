@@ -5,7 +5,7 @@
 // by the findings file's commit SHA and expired whenever the routine regenerated
 // that file, so a settled question returned every night and the whole channel
 // became noise. These tests pin the durable half.
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSyncHidden } from '../helpers/spawn.mjs';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -19,15 +19,12 @@ import {
   writeOpenItems,
   readOpenItems,
   nightsBetween,
-  recordViewed,
   recordReply,
 } from '../../scripts/nightly/items.mjs';
-import * as handoffGenerator from '../../scripts/shared/generate-handoff-roadmap.mjs';
 import { renderInbox, writeInbox } from '../../scripts/nightly/render-inbox.mjs';
 import { ingestAnswers } from '../../scripts/nightly/ingest-answers.mjs';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
-const SURFACE_HOOK = join(REPO_ROOT, '.claude', 'hooks', 'nightly-surface.mjs');
 const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
 const RENDER_INBOX_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'render-inbox.mjs');
 
@@ -594,86 +591,6 @@ describe('render-inbox --check', () => {
   });
 });
 
-describe('SessionStart surface hook', () => {
-  function runHook() {
-    const r = spawnSyncHidden(process.execPath, [SURFACE_HOOK], {
-      encoding: 'utf8',
-      timeout: 15_000,
-      windowsHide: true,
-      input: '{}',
-      env: { ...process.env, CLAUDE_PROJECT_DIR: root },
-    });
-    return { status: r.status, stdout: r.stdout ?? '' };
-  }
-
-  it('is silent when there are no items', () => {
-    const r = runHook();
-    expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe('');
-  });
-
-  it('announces new items in ONE line', () => {
-    writeOpenItems(root, { items: [item()] });
-    const r = runHook();
-    expect(r.stdout.trim().split('\n')).toHaveLength(1);
-    expect(r.stdout).toMatch(/1 new item/);
-  });
-
-  it('goes silent on the SECOND session — an open item must not re-announce forever', () => {
-    writeOpenItems(root, { items: [item()] });
-    expect(runHook().stdout).toMatch(/1 new item/);
-    expect(runHook().stdout.trim()).toBe('');
-  });
-
-  it('speaks again when a genuinely new subject appears', () => {
-    writeOpenItems(root, { items: [item()] });
-    runHook();
-    writeOpenItems(root, {
-      items: [item(), item({ id: 'BKL-2', leg: 'backlog', subject_key: subjectKey('docs/backlog.md', 'other') })],
-    });
-    expect(runHook().stdout).toMatch(/1 new item/);
-  });
-
-  it('never re-asks a settled subject as an open question', () => {
-    const it1 = item();
-    writeOpenItems(root, { items: [it1] });
-    recordDecision(root, it1.subject_key, { answer: 'no change wanted' });
-    expect(runHook().stdout).not.toMatch(/new item/);
-  });
-
-  it('nudges ONCE that an answered item is ready to apply, then never again', () => {
-    // The bound is the whole point. Plenty of answers imply no work at all
-    // ("keep the pin, it is a deliberate anchor"), so they are never marked
-    // done — an unbounded nudge would reappear every session forever, which is
-    // the exact trap the subject-key ledger exists to kill.
-    const it1 = item();
-    writeOpenItems(root, { items: [it1] });
-    recordDecision(root, it1.subject_key, { answer: 'no change wanted' });
-
-    expect(runHook().stdout).toMatch(/ready to apply/);
-    expect(runHook().stdout.trim()).toBe('');
-    expect(runHook().stdout.trim()).toBe('');
-  });
-
-  it('does not nudge for grandfathered answers — their landing state is unknowable, so it would be a standing false RED', () => {
-    const it1 = item();
-    writeOpenItems(root, { items: [it1] });
-    recordDecision(root, it1.subject_key, { answer: 'answered long ago' });
-    // Backdate past the completion-tracking cutover.
-    const p = join(root, '.claude', 'nightly-decisions.json');
-    const raw = JSON.parse(readFileSync(p, 'utf8'));
-    raw[it1.subject_key].decided_at = '2026-07-01T00:00:00.000Z';
-    writeFileSync(p, JSON.stringify(raw));
-    expect(runHook().stdout.trim()).toBe('');
-  });
-
-  it('never blocks session start, even on a corrupt items file', () => {
-    mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
-    writeFileSync(join(root, '.audit-tools/nightly/open-items.json'), '{ not json');
-    expect(runHook().status).toBe(0);
-  });
-});
-
 describe('answer CLI', () => {
   function runAnswer(args: string[]) {
     const r = spawnSyncHidden(process.execPath, [ANSWER_CLI, ...args], {
@@ -746,40 +663,6 @@ describe('answer CLI', () => {
     const r = runAnswer(['--list']);
     expect(r.stdout).toMatch(/DOC-1/);
   });
-});
-
-describe('viewed state', () => {
-  it('recordViewed dedupes keys', () => {
-    recordViewed(root, ['a', 'a', 'b']);
-    const data = JSON.parse(readFileSync(join(root, '.audit-tools/nightly/last-viewed.json'), 'utf8'));
-    expect(data.keys).toEqual(['a', 'b']);
-  });
-});
-
-it('reports failed HANDOFF regeneration without losing the successful queue write', () => {
-  mkdirSync(join(root, 'docs'), { recursive: true });
-  writeFileSync(join(root, 'docs/HANDOFF.md'), '# Broken handoff');
-  const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-  try {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
-    expect(readOpenItems(root).items).toHaveLength(1);
-    expect(warn.mock.calls.map((c) => String(c[0])).join('')).toMatch(/queue.*saved.*HANDOFF.*failed/is);
-  } finally { warn.mockRestore(); }
-});
-
-it('reports a nonzero HANDOFF refusal as well as thrown failures', () => {
-  mkdirSync(join(root, 'docs'), { recursive: true });
-  writeFileSync(join(root, 'docs/HANDOFF.md'), '# Handoff');
-  const generate = vi.spyOn(handoffGenerator, 'runGenerator').mockImplementation(({ err }: any) => {
-    err('projection refused');
-    return 1;
-  });
-  const warn = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-  try {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
-    expect(readOpenItems(root).items).toHaveLength(1);
-    expect(warn.mock.calls.map((c) => String(c[0])).join('')).toContain('HANDOFF regeneration failed: projection refused');
-  } finally { warn.mockRestore(); generate.mockRestore(); }
 });
 
 it('one queue write also refreshes the answering inbox without a second call', () => {

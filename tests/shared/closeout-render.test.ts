@@ -64,13 +64,6 @@ function minimal(overrides: Record<string, unknown> = {}): Record<string, unknow
   return {
     verification: ['build + typecheck: green at `abc1234`'],
     cleanup: 'none',
-    friction: {
-      ambiguous_direction: 'none',
-      tool_should_decide: 'none',
-      inefficient_feeding: 'none',
-      open_ended: 'none',
-      logged_to: 'none',
-    },
     docs: 'none',
     landed: ['nothing — investigation only'],
     decisions: 'none',
@@ -259,7 +252,6 @@ describe('render-closeout: silence is stated, then omitted', () => {
     expect(stdout).toContain('### Verification');
     expect(stdout).toContain('### Landed this sprint');
     expect(stdout).not.toContain('### Cleanup');
-    expect(stdout).not.toContain('### Friction');
     expect(stdout).not.toContain('### Decisions needed from you');
     expect(stdout).not.toMatch(/\bnone\b/i);
   });
@@ -293,23 +285,6 @@ describe('render-closeout: silence is stated, then omitted', () => {
     const positions = order.map((h) => stdout.indexOf(h));
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
-  });
-
-  it('drops a silent friction bullet but keeps the section when one bullet has content', () => {
-    const { stdout } = render(
-      minimal({
-        friction: {
-          ambiguous_direction: 'none',
-          tool_should_decide: 'the rule was memory-enforced',
-          inefficient_feeding: 'none',
-          open_ended: 'none',
-          logged_to: 'none',
-        },
-      }),
-    );
-    expect(stdout).toContain('### Friction this sprint');
-    expect(stdout).toContain('the rule was memory-enforced');
-    expect(stdout).not.toContain('ambiguous_direction');
   });
 
   it('rejects a section id it does not know, rather than rendering an invented heading', () => {

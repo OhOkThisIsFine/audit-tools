@@ -42,12 +42,6 @@
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/nightly-surface.mjs\"",
-            "timeout": 10,
-            "statusMessage": "Checking for new nightly items"
-          },
-          {
-            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-guards.mjs\"",
             "timeout": 45,
             "statusMessage": "Lap guards: stale main, node_modules"

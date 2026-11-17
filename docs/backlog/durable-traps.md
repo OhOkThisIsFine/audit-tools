@@ -380,18 +380,6 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (The offload-lane entry above is about weak-looking output; this is the inverse failure —
   confident output with fake support.)
 
-- **After an unattended run, `git diff` the tracked docs before committing.** The nightly maintenance
-  routine runs as a local scheduled task (`~/.claude/scheduled-tasks/nightly-maintenance/`) and lands
-  real edits in the working tree — leg 1 auto-applies stale-factual doc fixes, leg 2 does mechanical
-  backlog cleanup. Those are direct file edits, so `git reflog` shows nothing; an unexpected `M` in
-  `git status` is the only signal. Instruction files (`CLAUDE.md`, `AGENTS*.md`) are escalate-only and
-  the code anchor is re-verified against HEAD before any write (`docs/nightly-routine.md` → *Safety*),
-  but that is the routine's own contract, not a gate — no hook compares a tracked doc against its
-  committed version. Bit once (2026-07-10) under the old branch-snapshot-keyed
-  doc-review auto-apply, which was replaced 2026-07-23 by the subject-keyed durable decisions ledger
-  (`253e3851`); the reconcile-against-HEAD tool fix that used to be tracked under *Open bugs* shipped
-  with it.
-
 - **npm 12 (local, since ~2026-07-09) blocks dependency install scripts by default (`allowScripts`).**
   Any child `npm install` of a package with a postinstall (e.g. the audit-tools tarball) still reports
   `added 1 package` but skips the script, warning `install scripts blocked because they are not covered by
@@ -541,10 +529,10 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   command in `src/audit/cli/forceSynthesisCommand.ts` runs synthesis from evidence already accepted
   by the ledger; it does not invent completion, and uncovered tasks remain visible as uncovered.
 
-- **A scratch file written into the repository root is tree dirt for the nightly clean-tree rule (2026-08-22, low).**
+- **A scratch file written into the repository root is tree dirt for every clean-tree rule (2026-08-22, low).**
   An untracked file at the repo root counts as dirt exactly like an uncommitted tracked edit, so a
-  one-off digest/diagnostic script whose output path DEFAULTS TO CWD blocks the nightly routine's fix
-  leg ("ten fixes the dirty tree blocked", 2026-08-22) before it starts. Scratch output belongs in the
+  one-off digest/diagnostic script whose output path DEFAULTS TO CWD blocks any step that requires a
+  clean tree ("ten fixes the dirty tree blocked", 2026-08-22). Scratch output belongs in the
   session scratchpad — never the repo root. A tool that defaults its output path to cwd is the trap;
   pass the path explicitly.
 
@@ -783,7 +771,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   (`docs/reviews/record-update-gate-measurement-2026-08-18.md`). Its mechanical halves are each
   independently enforced instead: HANDOFF generated-state parity (`check:handoff-roadmap` at
   commit + CI + the closeout gate at Stop), answered≠done ledger visibility
-  (`completed_at`/`completed_ref` split + the SessionStart nudge in `nightly-surface.mjs`), and
+  (`completed_at`/`completed_ref` split, called out in the inbox render), and
   nobody-asked-at-close (closeout-challenge evidence legs). The semantic half — record PROSE says
   the right thing — is the unscriptable sol-5 class: uncovered, and stated here outright per the
   partly-enforced-trap rule, since `check:backlog-status` bans status fields so there is no field
@@ -847,9 +835,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
 
 - **Philosophy-audit challenges PH-04, PH-05 and PH-08 are ANSWERED — the refused halves must not
   come back (2026-08-27).** From [`philosophy-simplification-audit-2026-08-26.md`](../reviews/philosophy-simplification-audit-2026-08-26.md).
-  Each was accepted in part, and the accepted halves live in `CLAUDE.md`, the brief in
-  [`project-philosophy.md`](../project-philosophy.md) and
-  [`doc-review-guidelines.md`](../doc-review-guidelines.md) — read them there, not here. What is
+  Each was accepted in part, and the accepted halves live in `CLAUDE.md` and the brief in
+  [`project-philosophy.md`](../project-philosophy.md) — read them there, not here. What is
   recorded here is what was REFUSED, because a partial acceptance is exactly the shape a later lane
   re-proposes whole. (1) PH-04: a branch-internal seam is allowed, gone before merge, every commit
   green. Refused: counting migration risk or blast radius as a reason to choose a smaller change
@@ -857,8 +844,8 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   name the boundary it is authoritative at, and one guessing at a boundary it does not own is moved
   rather than left guessing. Refused: the cost test — a working gate's avoided defects are
   unobservable, so an avoided-defect-versus-false-positive bar cannot be applied honestly.
-  (3) PH-08: semantic doc review scales to changed documents, their declared dependents and a
-  periodic sweep. Refused outright: any lightweight closeout. The closeout runs whole, every sprint,
+  (3) PH-08: its accepted half (scaled semantic doc review) retired with the nightly routine
+  (2026-11-16). Refused outright: any lightweight closeout. The closeout runs whole, every sprint,
   and the steps a light variant drops are the ones that catch things.
   [[ph01-rejected-one-core-two-draws-stands]]
 

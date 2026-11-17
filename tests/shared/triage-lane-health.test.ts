@@ -562,13 +562,10 @@ describe("coverage stamp", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(stamp);
   });
 
-  it("the sweep's own coverage line and the routine both name the retry count", () => {
-    // `retried` is driver-owned and read-verbatim by docs/nightly-routine.md,
-    // which lists the stamp's fields by name. A field the routine does not read
-    // is a number nobody sees, and the retry property is exactly the kind of
-    // silent recovery that let three partial sweeps pass as complete ones.
-    const routine = readFileSync(join(process.cwd(), "docs", "nightly-routine.md"), "utf8");
-    expect(routine).toContain("retried");
+  it("the driver and the sweep's own coverage line both name the retry count", () => {
+    // `retried` is driver-owned. The retry property is exactly the kind of
+    // silent recovery that let three partial sweeps pass as complete ones, so
+    // the sweep must surface it.
     const driver = readFileSync(join(process.cwd(), "scripts", "shared", "lane-dispatch.mjs"), "utf8");
     expect(driver).toContain("stamp.retried");
     const sweep = readFileSync(join(process.cwd(), "scripts", "shared", "triage-backlog.mjs"), "utf8");

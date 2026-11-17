@@ -18,7 +18,7 @@
 // `--help` is deliberately RECOGNIZED in every spec rather than special-cased:
 // it is usage, not work, and a script that answers it never reaches its write.
 
-/** A refused invocation exits 2, matching the `scope-ledger` verb convention. */
+/** A refused invocation exits 2, the usual usage-error exit code. */
 export const USAGE_EXIT = 2;
 
 /** True for the two spellings of the usage flag. */

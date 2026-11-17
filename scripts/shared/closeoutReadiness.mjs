@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/closeout-render.test.ts
 // Pre-render readiness checks for the end-of-sprint hand-back — ONE definition,
 // two consumers: `scripts/render-closeout.mjs` refuses to render while any is
 // outstanding, and `.claude/hooks/closeout-challenge-gate.mjs` keeps them as its
@@ -38,8 +39,7 @@ import { worktreeTrees } from './worktree-tree.mjs';
 export function closeoutReadinessFindings(root) {
   const findings = [];
 
-  // HANDOFF carries generated views of the nightly queue, the decision ledger
-  // and the backlog. A mismatch means the state the next agent reads is stale —
+  // HANDOFF carries a generated view of the backlog. A mismatch means the state the next agent reads is stale —
   // and it is deterministic, so there is no reason to discover it after the
   // report has already described that state.
   try {
@@ -54,8 +54,8 @@ export function closeoutReadinessFindings(root) {
       });
       if (r.status !== 0) {
         findings.push(
-          'docs/HANDOFF.md no longer matches its generated sources (nightly queue/decisions and ' +
-            'backlog; generate-handoff-roadmap --check failed). Fix: node ' +
+          'docs/HANDOFF.md no longer matches its generated source (the backlog; ' +
+            'generate-handoff-roadmap --check failed). Fix: node ' +
             'scripts/shared/generate-handoff-roadmap.mjs',
         );
       }

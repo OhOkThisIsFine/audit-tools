@@ -76,17 +76,6 @@ const CLOSED_BY_TOOLING = [
     },
     restatement: /gates? (?:run|fire|reach)(?:s|ing)? only at commit/i,
   },
-  {
-    // The friction itself (the tags were outside the vocabulary) is closed by the
-    // gate; what this row guards against is the SUBSYSTEM drifting apart again. The
-    // two halves: the gate reads the generated vocabulary, and it refuses.
-    friction: "the backlog's `friction:` tags carrying values the canonical vocabulary does not hold, with nothing reading them",
-    guard: {
-      file: join("scripts", "check-backlog-friction-tags.mjs"),
-      evidence: [/friction-categories\.generated\.mjs/, /friction category/],
-    },
-    restatement: /tags? (?:are|is) unchecked|not in the canonical\s+vocabulary|Tags are UNCHECKED/i,
-  },
 ];
 
 /** Every backlog section file, read once. */

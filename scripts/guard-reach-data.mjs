@@ -521,18 +521,6 @@ export const GUARDS = [
     fix: 'runtime-artifact-names.generated.mjs is stale — run node scripts/shared/generate-runtime-artifact-names.mjs',
   },
   {
-    id: 'check:friction-categories',
-    releaseOrder: 18,
-    releaseStage: 'checks',
-    kind: 'gate',
-    impl: 'check:friction-categories',
-    preCommit: 'reach',
-    fix:
-      'scripts/shared/friction-categories.generated.mjs is stale against ' +
-      'src/shared/friction/frictionRecord.ts — run ' +
-      '`node scripts/shared/generate-friction-categories.mjs`, then re-stage it',
-  },
-  {
     id: 'check:executor-producers',
     releaseOrder: 19,
     releaseStage: 'checks',
@@ -690,8 +678,7 @@ export const GUARDS = [
     preCommit: 'reach',
     fix:
       'run `node scripts/shared/generate-handoff-roadmap.mjs`, then re-stage docs/HANDOFF.md. Do NOT ' +
-      'hand-edit inside either generated block; queue detail lives in docs/nightly-inbox.md and ' +
-      'roadmap entry text lives in the backlog. If the check instead names hand-written changelog ' +
+      'hand-edit inside the generated block; roadmap entry text lives in the backlog. If the check instead names hand-written changelog ' +
       'creep (dated bullet / landing narrative / Verification-state heading), regenerating fixes ' +
       'NOTHING — trim or reword the named line; shipped-work narration belongs in git log, the ' +
       'backlog, or memory. If it names the `## Immediate next` bound, cut that section to the ' +
@@ -701,8 +688,7 @@ export const GUARDS = [
     note:
       'uncovered halves, declared. (1) The creep leg is a shape-catch: narration avoiding all five ' +
       'shapes passes — mid-line dates ("decided 2026-08-18"), a date as the bullet\'s second word, ' +
-      'lowercase "landed", "is COMPLETE", novel phrasings; the nightly doc leg remains the semantic ' +
-      'backstop (2026-08-18). (2) The `## Immediate next` leg is a WORD BUDGET, not a semantic ' +
+      'lowercase "landed", "is COMPLETE", novel phrasings. (2) The `## Immediate next` leg is a WORD BUDGET, not a semantic ' +
       'one: a chronology dense enough to fit inside it passes, and so does a short section naming ' +
       'the wrong action — the bound raises the cost of the recurrence and reds the common case, it ' +
       'does not make the section immediate-next by construction. Words rather than lines because a ' +
@@ -784,11 +770,6 @@ export const GUARDS = [
         "script": "check:backlog-line-numbers",
         "module": "scripts/check-backlog-line-numbers.mjs",
         "purpose": "Standalone focused diagnostic without other refusal classes"
-      },
-      {
-        "script": "check:backlog-friction-tags",
-        "module": "scripts/check-backlog-friction-tags.mjs",
-        "purpose": "Standalone focused diagnostic without other refusal classes"
       }
     ],
     "forms": [
@@ -847,19 +828,10 @@ export const GUARDS = [
         "exportName": "findLineNumberCitations",
         "call": "text",
         "sample": "the anchor at `:21` moved"
-      },
-      {
-        "name": "off-vocabulary friction tag",
-        "drive": "export",
-        "module": "scripts/check-backlog-friction-tags.mjs",
-        "exportName": "findFrictionTags",
-        "call": "file-content",
-        "fixturePath": "open-bugs.md",
-        "sample": "- **A thing (2026-08-30, low, friction: false_red).** prose"
       }
     ],
-    "fix": "Fix each named backlog diagnostic. Condense oversized entries and state their property; update the size baseline only after the intended changes settle. Replace status labels, line citations and noncanonical friction tags.",
-    "note": "One loaded corpus supplies budget/property, status, line-citation and friction checks. The curated recognizers retain their existing false-negative limits. Budget accounting remains bullet-based; track paragraphs have their own shared grammar view. Write-time checks preserve the line/friction-only draw and explicitly defer the baseline ratchet."
+    "fix": "Fix each named backlog diagnostic. Condense oversized entries and state their property; update the size baseline only after the intended changes settle. Replace status labels and line citations.",
+    "note": "One loaded corpus supplies budget/property, status and line-citation checks. The curated recognizers retain their existing false-negative limits. Budget accounting remains bullet-based; track paragraphs have their own shared grammar view. Write-time checks preserve the line-only draw and explicitly defer the baseline ratchet."
   },
   {
     id: 'check:review-routing',
@@ -1250,7 +1222,6 @@ export const GUARDS = [
 
   // ── hooks (registered in .claude/settings.json) ────────────────────────────
   { id: 'session-start', kind: 'hook', impl: '.claude/hooks/session-start.sh' },
-  { id: 'nightly-surface', kind: 'hook', impl: '.claude/hooks/nightly-surface.mjs' },
   { id: 'session-start-guards', kind: 'hook', impl: '.claude/hooks/session-start-guards.mjs' },
   {
     id: 'shell-trap-guard',
@@ -1474,11 +1445,6 @@ export const GUARDS = [
     kind: 'contract-test',
     impl: 'tests/shared/green-mechanism-declaration.test.ts',
   },
-  {
-    id: 'static-analysis-declaration-test',
-    kind: 'contract-test',
-    impl: 'tests/shared/static-analysis-declaration.test.ts',
-  },
   { id: 'hook-session-gates-test', kind: 'contract-test', impl: 'tests/shared/hook-session-gates.test.ts' },
   {
     id: 'session-registry-test',
@@ -1515,7 +1481,6 @@ export const GUARDS = [
   },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
-  { id: 'nightly-scope-ledger-test', kind: 'contract-test', impl: 'tests/shared/nightly-scope-ledger.test.ts' },
   { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   {
@@ -1800,8 +1765,7 @@ export const GUARDS = [
       'P28 wrapper half (sol-3): the shared one-item-per-call dispatch driver — one lane call per ' +
       'item, resume drops errored rows and re-queues exactly them, preflight aborts with a stamped ' +
       'sidecar and a typed throw, per-item log redirect before parse, finish_reason/output_bytes on ' +
-      'every lane-answered row, and the read-verbatim coverage-stamp field names/order the nightly ' +
-      'routine consumes',
+      'every lane-answered row, and the read-verbatim coverage-stamp field names/order',
   },
   {
     id: 'prompt-capability-test',
@@ -1960,18 +1924,6 @@ export const REACH = [
       "For the four 'mutates' rows the WHERE argument (every write location derives from a " +
       'caller-supplied artifactsDir) is prose in the row reason — which location a write targets is ' +
       'not mechanically decidable from source text, and that half is declared rather than guessed',
-  },
-  {
-    area: 'friction-category parity sources',
-    files: [
-      'src/shared/friction/frictionRecord.ts',
-      'scripts/shared/generate-friction-categories.mjs',
-      'scripts/shared/friction-categories.generated.mjs',
-    ],
-    guardedBy: ['check:friction-categories'],
-    note:
-      'the closeout renderer chain must run in a never-built checkout, so it imports the ' +
-      'generated sibling, never audit-tools/shared (backlog 2026-08-29)',
   },
   {
     area: 'constitutional doc-path parity sources',
@@ -2203,8 +2155,7 @@ export const REACH = [
       'stripQuoted/collapseQuoted/findLiveBackticks/findLiveExpansions/findQuotedSpans have no direct ' +
       'assertions, so a defect there is caught only when it changes a guard verdict. ' +
       '(question-philosophy-gate and closeout-challenge-gate are covered ' +
-      'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests; ' +
-      'nightly-surface by nightly-routine-test.)' +
+      'by hook-session-gates-test; attest-loop-core-review by the attestation and parity tests.)' +
       ' The P28 long-dispatch refusal in shell-trap-guard measures only the INLINE quoted prompt — a ' +
       'prompt delivered via a stdin file (`codex exec < prompt.txt`), `$(cat …)`, or a heredoc body ' +
       '(blanked before scanning) escapes measurement; scripts/shared/lane-dispatch.mjs is the primary fix. ' +
@@ -2370,21 +2321,15 @@ export const REACH = [
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'nightly-scope-ledger-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup', 'check:scripts'],
+    guardedBy: ['nightly-routine-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup', 'check:scripts'],
     note:
-      'items.mjs, render-inbox.mjs, ingest-answers.mjs, answer.mjs and the nightly-surface hook are all ' +
+      'the nightly run is retired (owner, 2026-11-16); what remains is the answer route for the ' +
+      'items it already produced. items.mjs, render-inbox.mjs, ingest-answers.mjs and answer.mjs are ' +
       'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
       'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
       'refusals. The P32 answerability refusals in writeOpenItems (options[]/eli5), the subject_key ' +
-      'derive-or-refuse, the title refusal, the bounded queue index and the in-write HANDOFF ' +
-      'regeneration are pinned by tests/shared/nightly-items-mandatory-fields.test.ts. ' +
-      'scope-ledger.mjs is covered by tests/shared/nightly-scope-ledger.test.ts — item ' +
-      'identity, the refusal of an unanchored stamp, the never-examined window, and the coverage ' +
-      'record, including the run-derived cold count. UNCOVERED HALF: nothing executes the routine ' +
-      'end-to-end, so the ORDER of the legs, the ' +
-      'decision to escalate-vs-apply, and whether a run actually CALLS `stamp` for the docs it claims ' +
-      'to have examined all remain behavioural, guarded by docs/nightly-routine.md and the three-agent ' +
-      'gate rather than by a test.',
+      'derive-or-refuse, the title refusal and the bounded queue index are pinned by ' +
+      'tests/shared/nightly-items-mandatory-fields.test.ts.',
   },
   {
     area: 'script argv refusal',
@@ -2533,9 +2478,9 @@ export const REACH = [
     ],
     note:
       'the gates that actually read the split backlog files (seek-index parity, size budget, ' +
-      'status-label ban, line-number-citation ban, friction-category vocabulary, roadmap title ' +
-      'lift, retired-infrastructure mentions); the markdown-corpus row carries the generic doc ' +
-      'gates. The write-time draw runs the aggregate line/friction checks and reports the budget ' +
+      'status-label ban, line-number-citation ban, roadmap title lift, retired-infrastructure ' +
+      'mentions); the markdown-corpus row carries the generic doc gates. The write-time draw ' +
+      'runs the aggregate line checks and reports the budget ' +
       'DEFERRED to commit because its remedy rewrites lap-scoped baseline state',
   },
   {
@@ -2581,14 +2526,10 @@ export const REACH = [
     files: ['docs/HANDOFF.md'],
     guardedBy: ['check:handoff-roadmap'],
     note:
-      'generated-block parity PLUS hand-written-region creep heuristics AND the empty-queue ' +
-      'projection contract (`hasHandwrittenNightlyClaim`) over the handoff itself — the projection ' +
-      'case used to be reachable ONLY from the full suite (`tests/shared/handoff-roadmap.test.ts`, ' +
-      "describe 'the live tree'), which is how a hand-written live-state edit using the banned word " +
-      'landed through a green pre-commit gate and burned tag v0.50.0. It now runs in this leg, ' +
-      'which fires on any HANDOFF edit; its queue/ledger sources have their own rows below. The ' +
-      'hand-written region additionally carries the `## Immediate next` length bound ' +
-      '(`findImmediateNextOverrun`), whose uncovered half is stated on the gate row above',
+      'generated-block parity PLUS hand-written-region creep heuristics over the handoff itself, ' +
+      'in the leg that fires on any HANDOFF edit. The hand-written region additionally carries the ' +
+      '`## Immediate next` length bound (`findImmediateNextOverrun`), whose uncovered half is ' +
+      'stated on the gate row above',
   },
   {
     area: 'relative-link lift',
@@ -2623,43 +2564,6 @@ export const REACH = [
       'own record path, so no second green ledger can exist beside suiteGreenStamp.mjs. The ' +
       'contract test pins both declaration shape and declared-command execution; the external ' +
       'consumer itself remains outside this repository.',
-  },
-  {
-    area: 'static-analysis declaration',
-    files: ['.claude/static-analysis.json'],
-    guardedBy: ['static-analysis-declaration-test'],
-    note:
-      'the machine-wide nightly runner reads this file from the main checkout and runs each declared ' +
-      'command; the contract test pins the shape and that each command names a package.json script. ' +
-      'The runner itself remains outside this repository.',
-  },
-  {
-    area: 'nightly determinations ledger',
-    files: ['.claude/nightly-decisions.json'],
-    guardedBy: [
-      'check:handoff-roadmap',
-      'pre-commit-gate',
-      'closeout-challenge-gate',
-    ],
-    note:
-      'read/written by scripts/nightly/answer.mjs and surfaced by the nightly-surface hook; HANDOFF ' +
-      'parity now reads it in verify:checks, at commit when the ledger changes, and at closeout. ' +
-      'UNCOVERED HALF: canonical readDecisions remains fail-soft, so parity guards the rendered view ' +
-      'but does not schema-validate a malformed ledger.',
-  },
-  {
-    area: 'nightly open queue projection',
-    files: ['.audit-tools/nightly/open-items.json'],
-    guardedBy: [
-      'check:handoff-roadmap',
-      'pre-commit-gate',
-      'closeout-challenge-gate',
-    ],
-    note:
-      'authoritative persisted queue; strictly read by the generated HANDOFF parity check, with queue ' +
-      'and decision edits triggering the same check before commit; current premise-probe source paths ' +
-      'are derived from the queue, and positive probe needles use staged git-pickaxe reach so moved ' +
-      'copies can trigger parity too',
   },
   {
     area: 'promoted deliverables',
@@ -2758,12 +2662,6 @@ export const GENERATED = [
     artifacts: ['scripts/shared/constitutional-doc-paths.generated.mjs'],
   },
   { generator: 'scripts/shared/generate-executor-producers.mjs', authority: 'check', npmScript: 'check:executor-producers' },
-  {
-    generator: 'scripts/shared/generate-friction-categories.mjs',
-    authority: 'check',
-    npmScript: 'check:friction-categories',
-    artifacts: ['scripts/shared/friction-categories.generated.mjs'],
-  },
   {
     generator: 'scripts/shared/generate-guard-reach-paths.mjs',
     authority: 'check',

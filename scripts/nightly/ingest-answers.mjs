@@ -12,8 +12,7 @@
 // and left in the inbox. Ticking two boxes, or ticking Other/Won't fix/Ask back
 // with an empty note, records NOTHING for that item: an empty settle would
 // suppress a question while capturing no reason, which is the shape that makes a
-// ledger useless a month later (see `docs/nightly-routine.md`, "Why a settled
-// question stays settled"). Every other item in the file still applies — one
+// ledger useless a month later. Every other item in the file still applies — one
 // malformed answer never blocks the rest.
 //
 // Usage:

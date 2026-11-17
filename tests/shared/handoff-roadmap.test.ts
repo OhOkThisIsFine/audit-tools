@@ -29,23 +29,17 @@ import {
   END_MARKER,
   HANDWRITTEN_CREEP_RULES,
   IMMEDIATE_NEXT_MAX_WORDS,
-  LIVE_STATUS_BEGIN_MARKER,
-  LIVE_STATUS_END_MARKER,
   PIN_MARKER,
   ROADMAP_SOURCES,
-  assertGeneratedTopology,
   collectRoadmap,
   findHandwrittenCreep,
   findImmediateNextOverrun,
   measureImmediateNext,
   parseBulletEntries,
   parseTrackEntries,
-  readOpenNightlyItems,
-  renderNightlyQueue,
   renderRoadmap,
   runGenerator,
   sectionText,
-  spliceLiveStatus,
   spliceRoadmap,
 } from '../../scripts/shared/generate-handoff-roadmap.mjs';
 
@@ -233,142 +227,6 @@ describe('rendering — a pointer, never a restated spec', () => {
   });
 });
 
-describe('nightly queue — generated live state, absent when empty', () => {
-  const items = [
-    {
-      id: 'docs-1',
-      title: 'Decide whether to retire the old routing specs',
-      eli5: 'Long explanation that belongs only in the nightly inbox.',
-      question: 'Long question that must not be copied into HANDOFF.',
-    },
-    {
-      id: 'sol-2',
-      title: 'Validate nightly triage records before counting them',
-    },
-  ];
-
-  it('renders one pointer per queued item and never copies the item spec', () => {
-    const out = renderNightlyQueue(items);
-    expect(out.startsWith(LIVE_STATUS_BEGIN_MARKER)).toBe(true);
-    expect(out.endsWith(LIVE_STATUS_END_MARKER)).toBe(true);
-    expect(out).toContain('2 nightly decisions are waiting');
-    expect(out).toContain('`docs-1` — Decide whether to retire the old routing specs');
-    expect(out).toContain('`sol-2` — Validate nightly triage records before counting them');
-    expect(out).toContain('[`nightly-inbox.md`](nightly-inbox.md)');
-    expect(out).not.toContain(items[0].eli5);
-    expect(out).not.toContain(items[0].question);
-  });
-
-  it('renders no visible nightly text when the queue is empty', () => {
-    const out = renderNightlyQueue([]);
-    expect(out).toBe(`${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`);
-    expect(out).not.toMatch(/nightly|queue/i);
-  });
-
-  it('reads only unanswered persisted items; settling the last open item produces the empty render', () => {
-    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-'));
-    try {
-      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
-      writeFileSync(
-        join(root, '.audit-tools', 'nightly', 'open-items.json'),
-        JSON.stringify({
-          items: [
-            { ...items[0], subject_key: 'settled-key' },
-            { ...items[1], subject_key: 'wontfix-key' },
-            { id: 'ask-3', title: 'Clarify the remaining question', subject_key: 'question-key' },
-          ],
-        }),
-        'utf8',
-      );
-      mkdirSync(join(root, '.claude'), { recursive: true });
-      const decisionsPath = join(root, '.claude', 'nightly-decisions.json');
-      writeFileSync(
-        decisionsPath,
-        JSON.stringify({
-          'settled-key': { disposition: 'settled' },
-          'wontfix-key': { disposition: 'wontfix' },
-          'question-key': { disposition: 'question' },
-        }),
-        'utf8',
-      );
-      expect(readOpenNightlyItems(root).map((item) => item.id)).toEqual(['ask-3']);
-
-      writeFileSync(
-        decisionsPath,
-        JSON.stringify({
-          'settled-key': { disposition: 'settled' },
-          'wontfix-key': { disposition: 'wontfix' },
-          'question-key': { disposition: 'settled' },
-        }),
-        'utf8',
-      );
-      expect(renderNightlyQueue(readOpenNightlyItems(root))).toBe(
-        `${LIVE_STATUS_BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}`,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it.each([
-    ['a missing file', null, /missing or invalid JSON/],
-    ['invalid JSON', '{', /missing or invalid JSON/],
-    ['a missing items field', '{}', /expected an object with an items array/],
-    ['a non-array items field', '{"items":{}}', /expected an object with an items array/],
-    [
-      'a malformed raw item',
-      JSON.stringify({ items: [{ id: 'x', title: 't', subject_key: '' }] }),
-      /canonical id/,
-    ],
-  ] as Array<[string, string | null, RegExp]>)('refuses %s instead of falsely rendering it as empty', (_name, body, error) => {
-    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-invalid-'));
-    try {
-      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
-      if (body !== null) {
-        writeFileSync(join(root, '.audit-tools', 'nightly', 'open-items.json'), body, 'utf8');
-      }
-      expect(() => readOpenNightlyItems(root)).toThrow(error);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('splices only the generic live-status slot', () => {
-    const handoff = `# HANDOFF\n\nabove\n\n${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}\n\nbelow\n`;
-    const block = renderNightlyQueue(items);
-    expect(spliceLiveStatus(handoff, block)).toBe(`# HANDOFF\n\nabove\n\n${block}\n\nbelow\n`);
-    expect(spliceLiveStatus(spliceLiveStatus(handoff, block), block)).toBe(
-      `# HANDOFF\n\nabove\n\n${block}\n\nbelow\n`,
-    );
-
-    const empty = renderNightlyQueue([]);
-    const cleared = spliceLiveStatus(handoff, empty);
-    expect(cleared).toBe(`# HANDOFF\n\nabove\n\n${empty}\n\nbelow\n`);
-    expect(cleared).not.toContain('OLD');
-  });
-
-  it('escapes marker-shaped queue content before it can wedge the next regeneration', () => {
-    const handoff = `${LIVE_STATUS_BEGIN_MARKER}\nOLD\n${LIVE_STATUS_END_MARKER}`;
-    const injected = renderNightlyQueue([
-      { id: 'docs-1', title: `unsafe ${LIVE_STATUS_END_MARKER}` },
-    ]);
-    expect(injected).toContain('&lt;!-- END GENERATED LIVE STATUS --&gt;');
-    expect(injected.split(LIVE_STATUS_END_MARKER)).toHaveLength(2);
-    expect(() => spliceLiveStatus(handoff, injected)).not.toThrow();
-  });
-
-  it('refuses cross-slot marker injection and nested generated slots', () => {
-    const handoff = `${BEGIN_MARKER}\nOLD\n${END_MARKER}`;
-    const injectedRoadmap = `${BEGIN_MARKER}\n${LIVE_STATUS_END_MARKER}\n${END_MARKER}`;
-    expect(() => spliceRoadmap(handoff, injectedRoadmap)).toThrow(/marker owned by another/);
-
-    const nested =
-      `${BEGIN_MARKER}\n${LIVE_STATUS_BEGIN_MARKER}\n` +
-      `${LIVE_STATUS_END_MARKER}\n${END_MARKER}`;
-    expect(() => assertGeneratedTopology(nested)).toThrow(/generated slots overlap/);
-  });
-});
-
 describe('splicing — only the delimited block is touched', () => {
   const handoff = `# HANDOFF\n\nhand-written above\n\n${BEGIN_MARKER}\nOLD\n${END_MARKER}\n\nhand-written below\n`;
 
@@ -378,23 +236,11 @@ describe('splicing — only the delimited block is touched', () => {
   });
 
   // (Missing-pair / wrong-order / duplicated-pair refusals are pinned once, in
-  // tests/shared/generated-artifacts-splice.test.ts — the cross-slot and
-  // marker-escape behaviors above stay here because they are this generator's
-  // own policy, layered on the shared splice.)
+  // tests/shared/generated-artifacts-splice.test.ts.)
 
 });
 
 describe('the live tree', () => {
-  it('an empty nightly queue leaves no hand-written nightly text anywhere in HANDOFF', () => {
-    const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
-    const emptyProjection = spliceRoadmap(
-      spliceLiveStatus(onDisk, renderNightlyQueue([])),
-      `${BEGIN_MARKER}\n${END_MARKER}`,
-    );
-    const visibleHandwrittenText = emptyProjection.replace(/<!--[\s\S]*?-->/gu, '');
-    expect(visibleHandwrittenText).not.toMatch(/\bnightly\b/iu);
-  });
-
   it('docs/HANDOFF.md matches a fresh render — and would NOT match a drifted one', () => {
     const onDisk = readFileSync(join(REPO_ROOT, 'docs', 'HANDOFF.md'), 'utf8');
     const sources = new Map(
@@ -403,10 +249,7 @@ describe('the live tree', () => {
         readFileSync(join(REPO_ROOT, 'docs', 'backlog', f), 'utf8'),
       ]),
     );
-    const fresh = spliceRoadmap(
-      spliceLiveStatus(onDisk, renderNightlyQueue(readOpenNightlyItems(REPO_ROOT))),
-      renderRoadmap(collectRoadmap(sources)),
-    );
+    const fresh = spliceRoadmap(onDisk, renderRoadmap(collectRoadmap(sources)));
     expect(fresh).toBe(onDisk);
 
     // The check must be able to FAIL, or it is decoration. The mutation has to touch
@@ -459,8 +302,7 @@ describe('the live tree', () => {
 // the HAND-WRITTEN region too (a dated 2026-08-12 bullet; a "P25 … is LANDED"
 // paragraph; a "## Verification state" section — all removed in 03468b4a).
 // These heuristics refuse exactly the OBSERVED shapes. A shape-catch, not
-// semantics: prose that avoids all three still passes, and the nightly doc leg
-// stays the semantic backstop.
+// semantics: prose that avoids all three still passes.
 describe('hand-written creep heuristics — refuse the observed changelog shapes', () => {
   it('the rule table is well-formed data: unique ids, a regex and a hint each', () => {
     const ids = HANDWRITTEN_CREEP_RULES.map((r: { id: string }) => r.id);
@@ -533,16 +375,13 @@ describe('hand-written creep heuristics — refuse the observed changelog shapes
     ).toEqual([]);
   });
 
-  it('ignores creep-shaped text INSIDE both generated marker ranges', () => {
-    // Nightly pointer titles and lifted backlog titles legitimately carry dates
-    // and landing words — the 2026-08-13 creep sat INSIDE the live-status block.
+  it('ignores creep-shaped text INSIDE the generated marker range', () => {
+    // Lifted backlog titles legitimately carry dates and landing words.
     // Skipping the range exclusion would turn the gate red on its own output.
     const text = [
       '# HANDOFF',
-      LIVE_STATUS_BEGIN_MARKER,
-      '- 2026-08-12: generated pointer titles may carry dates',
-      LIVE_STATUS_END_MARKER,
       BEGIN_MARKER,
+      '- 2026-08-12: generated pointer titles may carry dates',
       '- P25 is LANDED inside the roadmap block',
       '## Verification state',
       END_MARKER,
@@ -553,9 +392,9 @@ describe('hand-written creep heuristics — refuse the observed changelog shapes
   it('keeps line numbers correct AFTER a generated block (line-preserving blanking), CRLF included', () => {
     const lines = [
       '# HANDOFF', // 1
-      LIVE_STATUS_BEGIN_MARKER, // 2
+      BEGIN_MARKER, // 2
       '- 2026-08-12: generated, must not trip', // 3
-      LIVE_STATUS_END_MARKER, // 4
+      END_MARKER, // 4
       '', // 5
       '- 2026-08-12: hand-written creep below the block', // 6
     ];
@@ -683,21 +522,18 @@ describe('Immediate next — the hand-written length bound', () => {
     expect(measured).toEqual({ count: 9 });
   });
 
-  it('ignores generated blocks — both markers fall under this heading', () => {
+  it('ignores the generated block — its markers fall under this heading', () => {
     // In the real HANDOFF and in every `runGenerator` fixture the section runs
-    // past the markers, because the generated blocks carry no `##` of their own.
-    // Counting them would red the gate on the generator's own output.
+    // past the markers, because the generated block carries no `##` of its own.
+    // Counting it would red the gate on the generator's own output.
     const text = [
       '# HANDOFF',
       '## Immediate next',
       'the single next action',
-      LIVE_STATUS_BEGIN_MARKER,
-      '- **3 nightly decisions are waiting.**',
-      '- `a` — something',
-      '- `b` — something else',
-      LIVE_STATUS_END_MARKER,
       BEGIN_MARKER,
       '### ▶ Next up — pinned in the backlog',
+      '- `a` — something',
+      '- `b` — something else',
       '*(nothing pinned)*',
       END_MARKER,
     ].join('\n');
@@ -734,17 +570,15 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
   const makeTree = (handwritten: string) => {
     const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-creep-'));
     mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
-    mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
     for (const [file, body] of backlogSources()) {
       writeFileSync(join(root, 'docs', 'backlog', file), body, 'utf8');
     }
-    writeFileSync(join(root, '.audit-tools', 'nightly', 'open-items.json'), '{"items":[]}', 'utf8');
     // The `## Immediate next` heading is part of the hand-written contract the
     // generator now checks, so a fixture without it would test the missing-
     // section refusal in every case rather than the behaviour each one names.
     const handoff =
       `# HANDOFF\n\n## Immediate next\n\n${handwritten}\n\n` +
-      `${renderNightlyQueue([])}\n\n${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
+      `${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
     writeFileSync(join(root, 'docs', 'HANDOFF.md'), handoff, 'utf8');
     return { root, handoff };
   };
@@ -809,75 +643,9 @@ describe('runGenerator — the creep leg refuses at --check and at write time', 
     }
   });
 
-  // ── the empty-queue projection contract, in THIS leg ───────────────────────
-  // The live-tree case in `describe('the live tree')` above asserts the same
-  // property against the real docs/HANDOFF.md — but it ran only in the FULL
-  // SUITE, so a hand-written live-state edit using the banned word landed
-  // through a green pre-commit gate and green targeted suites, and only a
-  // voluntary full-suite run caught it before push. That is how tag v0.50.0
-  // burned, exactly as the backlog entry predicted. The commit leg for HANDOFF
-  // is `check:handoff-roadmap` (the reach trigger fires on any HANDOFF edit),
-  // so the contract has to be enforced HERE. These cases pin that it is.
-  it('--check refuses a hand-written line claiming a nightly state', () => {
-    const { root } = makeTree('- The nightly queue holds 2 items.');
-    try {
-      const { code, err } = run(root, true);
-      expect(code, err).toBe(1);
-      expect(err).toMatch(/HAND-WRITTEN region claims a nightly state/);
-      expect(err).toMatch(/reword|delete/i);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('write mode refuses too — regenerating cannot fix a hand-written line', () => {
-    const { root, handoff } = makeTree('- Pending nightly decisions are listed below.');
-    try {
-      const { code, err } = run(root, false);
-      expect(code, err).toBe(1);
-      expect(err).toMatch(/refusing to write/);
-      expect(readFileSync(join(root, 'docs', 'HANDOFF.md'), 'utf8')).toBe(handoff);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('the projection is hypothetical — a NON-empty queue does not license the word', () => {
-    // The whole point is the state the queue EMPTIES into. With two open items
-    // the generated block legitimately says "nightly"; the hand-written claim
-    // is still refused, because it is the prose that survives the emptying.
-    const root = mkdtempSync(join(tmpdir(), 'audit-tools-handoff-nightly-claim-'));
-    try {
-      mkdirSync(join(root, 'docs', 'backlog'), { recursive: true });
-      mkdirSync(join(root, '.audit-tools', 'nightly'), { recursive: true });
-      for (const [file, body] of backlogSources()) {
-        writeFileSync(join(root, 'docs', 'backlog', file), body, 'utf8');
-      }
-      const items = [
-        { id: 'docs-1', title: 'Decide whether to retire the old routing specs', subject_key: 'open-key-1' },
-        { id: 'sol-2', title: 'Validate nightly triage records before counting them', subject_key: 'open-key-2' },
-      ];
-      writeFileSync(
-        join(root, '.audit-tools', 'nightly', 'open-items.json'),
-        JSON.stringify({ items }),
-        'utf8',
-      );
-      const handoff =
-        `# HANDOFF\n\nThere are 2 nightly decisions waiting.\n\n` +
-        `${renderNightlyQueue(items)}\n\n${renderRoadmap(collectRoadmap(backlogSources()))}\n`;
-      writeFileSync(join(root, 'docs', 'HANDOFF.md'), handoff, 'utf8');
-      const { code, err } = run(root, true);
-      expect(code, err).toBe(1);
-      expect(err).toMatch(/HAND-WRITTEN region claims a nightly state/);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
   // ── the Immediate-next length bound, in THIS leg ───────────────────────────
-  // Same reasoning as the nightly-claim contract above: the section regrew
-  // through a green pre-commit gate and green targeted suites because the bound
-  // lived only in the full suite. `check:handoff-roadmap` is the commit leg for
+  // The section regrew through a green pre-commit gate and green targeted
+  // suites because the bound lived only in the full suite. `check:handoff-roadmap` is the commit leg for
   // HANDOFF, so the contract has to be enforced HERE.
   // THE recurrence this bound exists to catch: the 2026-09-10 lap paragraph
   // verbatim, recoverable from `git log` on the commit that cut it. Using an
@@ -1042,12 +810,6 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     );
     writeFile('README.md', '# fixture\n');
     writeFile('.gitignore', '.claude/\nnode_modules/\n');
-    writeFile(
-      '.audit-tools/nightly/open-items.json',
-      JSON.stringify({ items: [{ premise_probes: [{ file: 'src/probed.ts', contains: 'old' }] }] }),
-    );
-    writeFile('src/probed.ts', 'export const value = "named location moved";\n');
-    writeFile('src/moved.ts', 'export const movedValue = "old";\n');
     git(['add', '-A']);
     git(['commit', '-m', 'base']);
   });
@@ -1090,59 +852,21 @@ describe('pre-commit gate — the HANDOFF-roadmap trigger fires at COMMIT', () =
     reset();
   });
 
-  it('BLOCKS a commit that edits the nightly queue (the queue can stale HANDOFF live state)', () => {
+  it('BLOCKS a commit that edits the HANDOFF projection code', () => {
+    writeFile('scripts/shared/generate-handoff-roadmap.mjs', '// changed projection semantics\n');
+    git(['add', '-A']);
+    const { code, stderr } = runGate();
+    expect(code, stderr).toBe(2);
+    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
+    reset();
+  });
+
+  it('does NOT fire on the retired nightly queue — HANDOFF no longer projects it', () => {
     writeFile('.audit-tools/nightly/open-items.json', JSON.stringify({ items: [] }));
     git(['add', '-A']);
     const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
-    reset();
-  });
-
-  it('BLOCKS a commit that settles a nightly decision (the visible queue can become empty)', () => {
-    writeFile('.claude/nightly-decisions.json', '{}\n');
-    git(['add', '-f', '.claude/nightly-decisions.json']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
-    reset();
-  });
-
-  it.each([
-    'scripts/shared/generate-handoff-roadmap.mjs',
-    'scripts/nightly/items.mjs',
-  ])('BLOCKS a commit that edits HANDOFF projection code: %s', (rel) => {
-    writeFile(rel, '// changed projection semantics\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
-    reset();
-  });
-
-  it('BLOCKS a commit that changes a current nightly premise-probe source', () => {
-    writeFile('src/probed.ts', 'export const value = "new";\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
-    reset();
-  });
-
-  it('BLOCKS a rename of a current nightly premise-probe source', () => {
-    git(['mv', 'src/probed.ts', 'src/renamed.ts']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
-    reset();
-  });
-
-  it('BLOCKS removal of a positive probe fragment from a different tracked source', () => {
-    writeFile('src/moved.ts', 'export const movedValue = "gone";\n');
-    git(['add', '-A']);
-    const { code, stderr } = runGate();
-    expect(code, stderr).toBe(2);
-    expect(stderr).toMatch(/check:handoff-roadmap FAILED/);
+    expect(code, stderr).toBe(0);
+    expect(stderr).not.toMatch(/check:handoff-roadmap FAILED/);
     reset();
   });
 

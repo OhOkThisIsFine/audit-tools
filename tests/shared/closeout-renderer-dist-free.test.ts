@@ -1,18 +1,11 @@
 // The closeout hand-back is MANDATORY every sprint, so its renderer chain must
 // run in a checkout that has never been built (backlog 2026-08-29: --template
-// died on ERR_MODULE_NOT_FOUND in a fresh worktree). Two pins hold that:
-//  1. the static import closure of scripts/render-closeout.mjs stays free of
-//     audit-tools/shared (= dist/) and of any direct dist/ path;
-//  2. the tracked generated vocabulary module matches the generator's render of
-//     the canonical TS source, so CI holds what the check:friction-categories
-//     commit leg holds.
+// died on ERR_MODULE_NOT_FOUND in a fresh worktree). The pin: the static import
+// closure of scripts/render-closeout.mjs stays free of audit-tools/shared
+// (= dist/) and of any direct dist/ path.
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import {
-  extractFrictionCategories,
-  renderFrictionCategoriesModule,
-} from "../../scripts/shared/generate-friction-categories.mjs";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -49,18 +42,5 @@ describe("closeout renderer runs without a build", () => {
     // The chain was actually walked, not vacuously empty.
     expect(seen.size).toBeGreaterThan(1);
     expect(seen).toContain("scripts/closeout-sections-data.mjs");
-  });
-
-  it("the tracked generated vocabulary matches the canonical TS source", () => {
-    const source = readFileSync(
-      join(REPO_ROOT, "src", "shared", "friction", "frictionRecord.ts"),
-      "utf8",
-    );
-    const rendered = renderFrictionCategoriesModule(extractFrictionCategories(source));
-    const tracked = readFileSync(
-      join(REPO_ROOT, "scripts", "shared", "friction-categories.generated.mjs"),
-      "utf8",
-    );
-    expect(tracked.replaceAll("\r\n", "\n")).toBe(rendered);
   });
 });
