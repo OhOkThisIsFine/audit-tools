@@ -20,10 +20,9 @@ import {
 function relevantRuntimeEvidence(
   finding: Finding,
   report?: RuntimeValidationReport,
-  tasks?: RuntimeValidationTaskManifest,
+  taskById?: ReadonlyMap<string, RuntimeValidationTaskManifest["tasks"][number]>,
 ): string[] {
-  if (!report || !tasks) return [];
-  const taskById = new Map(tasks.tasks.map((task) => [task.id, task]));
+  if (!report || !taskById) return [];
   const findingPaths = new Set(finding.affected_files.map((f) => f.path));
   return report.results
     .filter((result) => result.status !== "pending")
@@ -134,8 +133,11 @@ export function mergeFindings(
     }
   }
 
+  const runtimeTaskById = runtimeTasks
+    ? new Map(runtimeTasks.tasks.map((task) => [task.id, task]))
+    : undefined;
   for (const finding of merged.values()) {
-    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport, runtimeTasks);
+    const runtimeEv = relevantRuntimeEvidence(finding, runtimeReport, runtimeTaskById);
     const externalEv = relevantExternalEvidence(finding, externalAnalyzerResults);
     if (runtimeEv.length > 0 || externalEv.length > 0) {
       finding.evidence = [

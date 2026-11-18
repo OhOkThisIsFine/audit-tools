@@ -40,6 +40,8 @@ import {
   deriveLensCoverage,
   isIngestEvent,
   reprojectLensCoverage,
+  SEVERITIES,
+  uniqueSorted,
   type AgentReflection,
   type LensCoverageEntry,
   type MeasuredOutcome,
@@ -395,8 +397,7 @@ function coverageSummary(coverage?: CoverageMatrix): {
 }
 
 function formatSeverityList(summary: Record<string, number>): string {
-  const ordered = ["critical", "high", "medium", "low", "info"];
-  const parts = ordered
+  const parts = SEVERITIES
     .filter((severity) => (summary[severity] ?? 0) > 0)
     .map((severity) => `${severity}: ${summary[severity]}`);
   return parts.length > 0 ? parts.join(", ") : "none";
@@ -996,11 +997,8 @@ function renderLaneDeliverySection(
 function renderSubmissionDriftSection(
   events: readonly SubmissionLedgerEvent[],
 ): string[] {
-  const refusedIds = new Set(
-    events
-      .filter((event) => event.kind === "rejected")
-      .map((event) => event.submission_id),
-  );
+  const rejected = events.filter((event) => event.kind === "rejected");
+  const refusedIds = new Set(rejected.map((event) => event.submission_id));
   const handRepairedIds = new Set(
     events
       .filter((event) => event.kind === "recovered_by_hand")
@@ -1021,7 +1019,6 @@ function renderSubmissionDriftSection(
   const resolved = [...refusedIds].filter(
     (id) => trailing.get(id) !== "rejected",
   ).length;
-  const rejected = events.filter((event) => event.kind === "rejected");
   const lines = [
     "### Submission drift and repair",
     "",
@@ -1200,13 +1197,11 @@ export function canonicalizeConceptualAttributionIds(
           )!;
           return {
             contributor_id: contributorId,
-            source_candidate_ids: [
-              ...new Set(
-                contributorEntries.flatMap(
-                  (entry) => entry.contribution.source_candidate_ids,
-                ),
+            source_candidate_ids: uniqueSorted(
+              contributorEntries.flatMap(
+                (entry) => entry.contribution.source_candidate_ids,
               ),
-            ].sort(compareCodeUnits),
+            ),
             contribution_percent: allocation.units / unitsPerPercent,
             rationale: contributorEntries
               .map(

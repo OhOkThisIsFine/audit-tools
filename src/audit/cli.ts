@@ -4,6 +4,7 @@ import { requireFunctionalPreflight } from "./cli/functionalPreflight.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertCliCommandAllowedFromCwd } from "audit-tools/shared";
+import { errorMessage } from "../shared/io/json.js";
 
 import {
   DIRECT_CLI_DEFAULTS,
@@ -37,8 +38,6 @@ import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
 import { cmdRecoverSubmission } from "./cli/recoverSubmissionCommand.js";
 import { cmdUnacceptResults } from "./cli/unacceptResultsCommand.js";
-
-export { runSample };
 
 export const cliTestUtils = {
   defaults: DIRECT_CLI_DEFAULTS,
@@ -134,7 +133,7 @@ async function main(argv: string[]): Promise<void> {
 
 export async function runCli(argv: string[]): Promise<void> {
   await main(argv).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage(error));
     process.exitCode = 1;
   });
 }

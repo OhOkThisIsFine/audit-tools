@@ -45,7 +45,7 @@
  * no file churns between emissions of an unchanged round.
  */
 
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { isDependencyEdgeBucket } from "../extractors/graphSignals.js";
 
@@ -217,7 +217,7 @@ export function buildReviewFileMap(
   sources.sort(compareCodeUnits);
   omittedSources.sort(compareCodeUnits);
 
-  const inScope = [...new Set(scope.files)].sort(compareCodeUnits);
+  const inScope = uniqueSorted(scope.files);
   const inScopeSet = new Set(inScope);
   const outsideScope = (bundle.repo_manifest?.files ?? []).filter(
     (file) => !inScopeSet.has(file.path),

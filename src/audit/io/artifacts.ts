@@ -3,6 +3,7 @@ import type { ZodTypeAny } from "zod";
 import { AuditTaskSchema, AuditResultSchema, CoverageMatrixSchema } from "../types.js";
 import { cp, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { errorMessage } from "../../shared/io/json.js";
 import {
   AuditFindingsReportSchema,
   AUDIT_REPORT_FILENAME,
@@ -523,7 +524,7 @@ async function verifyArchivedBytes(
     actual = await readFile(archivePath);
   } catch (error) {
     return archivePath + " could not be read back (" +
-      (error instanceof Error ? error.message : String(error)) + ")";
+      errorMessage(error) + ")";
   }
   return Buffer.compare(actual, expected) === 0
     ? null
@@ -577,7 +578,7 @@ export async function archiveRunDiagnostics(params: {
   } catch (error) {
     if (!isFileMissingError(error)) {
       lost.push(
-        `${AGENT_FEEDBACK_FILENAME} (${error instanceof Error ? error.message : String(error)})`,
+        `${AGENT_FEEDBACK_FILENAME} (${errorMessage(error)})`,
       );
     }
   }
@@ -614,7 +615,7 @@ export async function archiveRunDiagnostics(params: {
     });
   } catch (error) {
     lost.push(
-      `the friction directory listing (${error instanceof Error ? error.message : String(error)})`,
+      `the friction directory listing (${errorMessage(error)})`,
     );
   }
   if (archivedFriction.length < frictionNames.length) {
@@ -658,7 +659,7 @@ export async function archiveRunDiagnostics(params: {
       // the ledger exists to prevent, with only a console line left behind.
       lost.push(
         "the submission ledger (" +
-          (error instanceof Error ? error.message : String(error)) + ")",
+          errorMessage(error) + ")",
       );
     }
   }
@@ -709,7 +710,7 @@ export async function promoteFinalAuditReport(params: {
   } catch (error) {
     const warning =
       `audit-code: completed audit but could not promote final report to ${destination}: ` +
-      (error instanceof Error ? error.message : String(error));
+      errorMessage(error);
     warn(warning);
     return { promoted: false, archived: false, warning };
   }
@@ -731,7 +732,7 @@ export async function promoteFinalAuditReport(params: {
     // reported as { promoted: true, cleaned: true }.
     warn(
       `audit-code: could not promote ${AUDIT_FINDINGS_FILENAME} to ${promotedAuditFindingsPath(params.artifactsDir)}: ` +
-        (error instanceof Error ? error.message : String(error)),
+        errorMessage(error),
     );
     // An ABSENT findings file (the legacy-bundle case) has nothing to lose. Any
     // other failure means the machine contract is about to be destroyed by the
@@ -739,7 +740,7 @@ export async function promoteFinalAuditReport(params: {
     // as loss and gates the delete.
     if (!isFileMissingError(error)) {
       lost.push(
-        `${AUDIT_FINDINGS_FILENAME} (${error instanceof Error ? error.message : String(error)})`,
+        `${AUDIT_FINDINGS_FILENAME} (${errorMessage(error)})`,
       );
     }
   }
@@ -793,7 +794,7 @@ export async function isWorkingDirFullyPromoted(artifactsDir: string): Promise<b
       // Deliberately NOT the ENOENT itself: promotion's catch would otherwise
       // mistake a missing DESTINATION for an absent source and wave it through.
       throw new Error(
-        `not promoted: ${String(to)} is missing (${error instanceof Error ? error.message : String(error)})`,
+        `not promoted: ${String(to)} is missing (${errorMessage(error)})`,
       );
     }
     if (Buffer.compare(source, destination) !== 0) {

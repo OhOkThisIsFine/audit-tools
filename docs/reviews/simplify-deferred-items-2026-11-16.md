@@ -63,6 +63,19 @@ the work that would make it a plain cleanup.
 - **P06 — `stripJsonComments` in `graphManifestEdges/jsonc.ts`** stays exported only for
   `tests/audit/graph-framework-routes.test.ts`. **Unblock:** test it through the public jsonc
   reader in the same commit.
+- **P07 — files with no `// sites-pinned:` declaration** (the P05 rule). Not applied:
+  `errorMessage` and the next-step command that is built twice (once near the top, once in the
+  handoff text) in `supervisor/operatorHandoff.ts`; `uniqueSorted` for `allSignatures` and one
+  `knownTpTotal` for its three sums in `reporting/scoreAudit.ts`; `uniqueSorted`, a weight helper,
+  a double compare and the stale comment "First-appearance order, as before" in
+  `decompose/sources.ts`; the duplicate `AuditStateStatusSchema` / `AuditStateViewSchema` /
+  `ObligationViewSchema` in `contracts/wrapperResponse.ts` (the regenerated
+  `schemas/audit-code-v1alpha1.schema.json` must stay byte-identical); the 14-block
+  `validateTopLevelShapes` table, the double shape read in `BundleIndexes` and the no-op thunk in
+  `validatePathsCoveredBySet` in `validation/artifacts.ts`; `LENS_ID_PREFIX` through
+  `LENS_METADATA.id_prefix` in `reporting/findingIdentity.ts` (a plain-object lookup of the key
+  `constructor` also differs, so that one is a behavior change too). **Unblock:** add a
+  declaration with the test that pins each file's sites.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -111,6 +124,11 @@ real change, not a cleanup.
 - **P06 — `normalizeWorkspacePattern` in `graphManifestEdges/workspace.ts` through
   `normalizeRepoRelPath`.** Not shown to give the same output for every glob pattern (`./`, `..`,
   trailing `/**`). **Unblock:** a table test of both functions over the pattern forms.
+- **P07 — remove `merge_edge_kind_counts`** (the P04 lead). It is always `{}`
+  (`reviewPacketMetrics.ts` in P03, loop-core), it is a required field in
+  `types/reviewPlanning.ts`, and it is persisted in `audit_plan_metrics.json`, so the removal
+  changes that artifact's bytes and hash once. Two test fixtures carry it. **Unblock:** a lap that
+  removes the writer, the type field and the fixtures together, with the loop-core attestation.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -127,6 +145,9 @@ real change, not a cleanup.
 - **P05 — a derive cache for the audit state** (the P03 lead). `ingestBatchAuditResults` in
   `auditStep.ts` would also use it, but it differs on the `complete` status.
 - **P05 — a `Pick` type for `HostInputPauseInputs`**: the source types are in P03 and P07.
+  P07 checked it: the type is in `orchestrator/hostInputPause.ts` (P03), and its two callers
+  (`advance.ts`, `cli/nextStepHelpers.ts`) are loop-core. No P07 file changes. The pins are
+  `tests/audit/analyzer-consent-offer.test.ts` and `analyzer-run-consent.test.ts`.
 - **P06 — rule tables for `bucketFile` (`bucketing.ts`) and the disposition classifiers**
   (`disposition.ts`, `inferDisposition`). About twelve `if` blocks each are rows of
   `[predicate, bucket or status, reason]`. The blocks mix accumulate-all and first-match-wins, and
@@ -141,7 +162,29 @@ real change, not a cleanup.
   structural context in deep `conceptualDispatch` (the P04 lead). Each needs a new optional
   parameter on the P04 prompt modules.
 - **P05 — a prepared validator for `validateOneAuditResult`** (P07 validation; see the P05
-  leads in the partition record).
+  leads in the partition record). P07 checked it: each call runs `normalizeValidationInputs`,
+  which builds the task map and a line index over all repo files. The callers are
+  `evictInvalidatedEntries` (once per ledger entry) and `judgeAuditHostSubmission` in the
+  loop-core `cli/dispatch/hostHandoff.ts`. A new export with no adopter fails `check:deadcode`, so
+  the validator and its adopter must land together. **Unblock:** one loop-core lap for both.
+- **P07 — retire `access_memory.json`** (the P01 lead). `deriveAccessMemory`
+  (`ingestionExecutors.ts`) writes it and no code reads it; the spec calls it write-only.
+  Removal retires a persisted artifact across the registry, rollover, the dependency map,
+  artifact freshness, the spec and the tests. **Unblock:** an owner decision to retire it.
+- **P07 — one lens policy on `LENS_METADATA`** (the P04 lead). At least five lens sets exist:
+  `SENSITIVE_LENS_IDS` (security, data integrity, reliability), `MANDATORY_LENSES` (security,
+  correctness, reliability, data integrity), the high-risk-clean pair (security, data integrity)
+  in `highRiskClean.ts` and `taskBuilder.ts`, the critical-flow set (security, reliability,
+  correctness) in `taskBuilder.ts`, and the ranked runtime follow-up order in
+  `runtimeValidation.ts`. **Unblock:** about three flags and a rank on `LENS_METADATA`, with a
+  test that pins each derived set and order to today's value.
+- **P07 — move `isDocIntentFile` to the extractors** (the P06 lead). The import
+  `extractors/docsDigest.ts` → `decompose` → `extractors/commentDecomposition.ts` is a cycle at
+  the directory level. The move also touches the loop-core `orchestrator/charterPackets.ts`.
+  **Unblock:** a lap with the loop-core attestation.
+- **P07 — split `io/artifacts.ts` (promotion half to `io/promotion.ts`) and `io/runSnapshot.ts`.**
+  `tests/audit/io-remediation.test.ts` reads the source text of `artifacts.ts`, and
+  `runSnapshot.ts` is loop-core. **Unblock:** move the source-text pins with the code.
 - **P01 — public barrel narrowing** (unused exported types, `lensOutcome`): an owner decision on
   the public surface of `audit-tools/shared`.
 
@@ -176,6 +219,20 @@ worth a change.
   files, a signature change across parts); the window strings in `complexityDuplication.ts`; the
   token scan in `commentDecomposition.ts`; the per-call `RegExp` in
   `extractHtmlAttributeReferences` (`browserExtension.ts`).
+- **P07 — concurrent reads in `hashToolingInputs` (`io/toolingManifest.ts`).** This one has a
+  measurement. Each `loadArtifactBundle` calls `buildToolingManifest`, which reads about 1,798
+  files (9.5 MB, mostly under `dist/`) one at a time. Measured while a suite ran: 7.9–10.6 s
+  serial, 0.33–0.36 s with `Promise.all` over the reads; the walk itself (`collectFilesSorted`,
+  P10) takes 4–7 s of that. An unbounded `Promise.all` can exhaust file handles (1,024 by default
+  on Linux), and a per-process memo is not neutral (`dist/` is rebuilt while a process runs).
+  **Unblock:** a concurrency cap set from a measurement, with the hash input order kept.
+- **P07:** the flow loop in `relationshipsForFindings` (`reporting/workBlocks.ts`, flows ×
+  findings × files; a by-file index would change no output, medium confidence); the per-unit
+  filters in the loop-core `systemic/reviewFileMap.ts` and `secondOrderAdversaryPrompt.ts` (tens
+  of units); the `find` per path in `markExcludedPath` / `applyUnitCoverage` (`coverage.ts`, no
+  declaration, and the index belongs in `planning.ts`, P03; keep first-wins); one build of
+  `adversaryReviewScope` and `summarizeCoveredThemes` per render in the loop-core
+  `secondOrderAdversaryPrompt.ts` (the prompt bytes must not change).
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -204,6 +261,16 @@ worth a change.
   `status && isAuditExcludedStatus(status)` guards (`flows.ts`, `browserExtension.ts`,
   `gitHistory.ts`, `surfaces.ts`, `graph.ts`, and orchestrator files in P03). Each site composes
   the guard with its own `file.excluded` term, so the gain is small.
+- **P07:** one grounding/verification breakdown helper for `buildAuditReportModel` and
+  `normalizeExistingFindingsReport` (`reporting/synthesis.ts`; the key insertion order of the
+  output must stay); the dead `"."` branch and the single-assignment `let` in
+  `findingContractPrompt.ts` (prompt bytes); the five label ternaries in `decompose/findings.ts`
+  (no declaration); the duplicate arms of the default in `clarification` `blastRadius` and the
+  unreachable `?? 1` / `Math.max` in `clarification/partition.ts` (narrow the `Map.get` type
+  first); an `edgelessCount(slice, anchors)` helper for the two edgeless counts in the loop-core
+  `systemic/reviewFileMap.ts`; the judge schema in `types/conceptualAdjudication.ts` as
+  `ConceptualRoundContributorSchema.omit({ perspective: true })` (check the generated JSON schema
+  and the error text first).
 
 ## 6. Rejected — do not re-propose
 
@@ -256,3 +323,17 @@ Each of these was checked and is NOT behavior-neutral, or is correct as it stand
 - **P06:** dropping `export` from the confidence constants that only their own file reads
   (`graphManifestEdges/*`): `knip.json` sets `ignoreExportsUsedInFile`, so they are not dead
   exports.
+- **P07:** deriving `CARRIED_ARTIFACTS` (`io/runSnapshot.ts`) from the registry: it is a
+  deliberate allow-list.
+- **P07:** `writeTextFile` for the `writeFile` in `markRunEnded` (`io/rollover.ts`), and
+  `readOptionalJsonFile` in `readPackageVersion` (`io/toolingManifest.ts`): the write and the
+  stderr text differ.
+- **P07:** one flow-status rule for `validation/artifacts.ts` and `orchestrator/flowCoverage.ts`:
+  they differ on edge cases (an empty `required_lenses`).
+- **P07:** the shared `countBy` for the private one in `systemic/coveredThemes.ts`: the private
+  one trims, sorts and returns an array.
+- **P07:** removing the second validation in `writeCoreArtifacts` (deliberate), a memo for the
+  `reaches` search in `blockDependencies` (`reporting/workBlocks.ts`; it changes the semantics),
+  `findingReEmissionKey` for the `priorFindings` key in `secondOrderAdversaryPrompt.ts` (that key
+  uses `normalizeText` and a `|` separator), and one `mkdir` in `operatorHandoff.ts` (the error
+  path text differs).

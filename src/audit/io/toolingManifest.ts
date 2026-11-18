@@ -5,8 +5,8 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolingManifest } from "../types/toolingManifest.js";
-import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import { isFileMissingError } from "audit-tools/shared";
+import { compareCodeUnits, isFileMissingError, toPosixPath } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 
 // dist/audit/io/toolingManifest.js → repo root is three levels up
 // (io → audit → dist → repo root).
@@ -83,7 +83,7 @@ function recordAbsentEntry(
   packageRoot: string,
   path: string,
 ): void {
-  hash.update(relative(packageRoot, path).replace(/\\/g, "/"));
+  hash.update(toPosixPath(relative(packageRoot, path)));
   hash.update("\n");
   hash.update(ABSENT_DURING_WALK);
   hash.update("\n");
@@ -146,7 +146,7 @@ export async function readPackageVersion(
     return typeof packageJson.version === "string" ? packageJson.version : null;
   } catch (error) {
     process.stderr.write(
-      `[audit-code] readPackageVersion: failed to read/parse ${packageJsonPath}: ${error instanceof Error ? error.message : String(error)}\n`,
+      `[audit-code] readPackageVersion: failed to read/parse ${packageJsonPath}: ${errorMessage(error)}\n`,
     );
     return null;
   }
@@ -177,9 +177,8 @@ async function hashFileIfPresent(
   packageRoot: string,
   file: string,
   readBytes: (path: string) => Promise<Buffer>,
-): Promise<boolean> {
-  const relativePath = relative(packageRoot, file).replace(/\\/g, "/");
-  hash.update(relativePath);
+): Promise<void> {
+  hash.update(toPosixPath(relative(packageRoot, file)));
   hash.update("\n");
   let bytes: Buffer;
   try {
@@ -188,11 +187,10 @@ async function hashFileIfPresent(
     if (!isFileMissingError(error)) throw error;
     hash.update(ABSENT_DURING_WALK);
     hash.update("\n");
-    return false;
+    return;
   }
   hash.update(bytes);
   hash.update("\n");
-  return true;
 }
 
 /**
@@ -221,7 +219,7 @@ export async function hashToolingInputs(
     }
     existingInputs.push(input);
     const files = await collectFiles(absolute);
-    for (const file of files.sort((a, b) => compareCodeUnits(a, b))) {
+    for (const file of files.sort(compareCodeUnits)) {
       // A sentinel never reaches the reader: it stands for a path that was
       // listed and had nothing behind it. Hashed as an absence it loses its NUL
       // bracketing — a path cannot contain one, but the DIGEST is compared

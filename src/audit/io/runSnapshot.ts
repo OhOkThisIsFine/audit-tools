@@ -50,7 +50,7 @@ import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, readlink, realpath,
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
-import { compareCodeUnits, hashContent, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, writeJsonFile } from "audit-tools/shared";
+import { compareCodeUnits, hashContent, readOptionalJsonFile, resolveAuditCodeStateDir, resolveWithinRoot, toPosixPath, uniqueSorted, writeJsonFile } from "audit-tools/shared";
 import { headCommit, isGitRepo, workingTreeTree } from "../../shared/git.js";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
@@ -803,7 +803,7 @@ export async function writeBackSnapshotEdits(params: {
 }): Promise<{ written: string[]; skipped: string[] }> {
   const written: string[] = [];
   const skipped: string[] = [];
-  for (const path of [...new Set(params.paths)].sort(compareCodeUnits)) {
+  for (const path of uniqueSorted(params.paths)) {
     const edited = await readFile(join(params.sourceRoot, path)).catch(() => undefined);
     if (edited === undefined) continue;
     const live = await readFile(join(params.repositoryRoot, path)).catch(() => undefined);

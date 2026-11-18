@@ -9,7 +9,7 @@ import type {
   GraphBundle,
   Partition,
 } from "audit-tools/shared";
-import { clustersFromPartitions, decompose, toPosixPath, compareCodeUnits } from "audit-tools/shared";
+import { clustersFromPartitions, decompose, toPosixPath, compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import type { RepoManifest } from "../types.js";
 import type { StructureDecomposition } from "../types/structureDecomposition.js";
 import {
@@ -37,7 +37,7 @@ const DOC_EXTENSION = /\.(md|markdown|adoc|rst|txt)$/i;
 // sites-pinned: tests/audit/charter-packets.test.ts
 export function isDocIntentFile(path: string, status: string): boolean {
   if (status === "excluded" || status === "binary") return false;
-  return DOC_EXTENSION.test(path.replace(/\\/g, "/"));
+  return DOC_EXTENSION.test(toPosixPath(path));
 }
 /** Threshold at which an intent source's partitions collapse into boundary groups. */
 const INTENT_BOUNDARY_FRACTION = 0.5;
@@ -63,7 +63,7 @@ function partitionGroups(partition: Partition): string[][] {
   const groups: string[][] = [];
   for (const members of byComm.values()) {
     if (members.length >= 2) {
-      groups.push([...members].sort((a, b) => compareCodeUnits(a, b)));
+      groups.push([...members].sort(compareCodeUnits));
     }
   }
   return groups;
@@ -85,10 +85,8 @@ export async function buildStructureDecomposition(
       docFiles.push(path);
     }
   }
-  const sortedUniverse = [...new Set(universe)].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
-  const sortedDocs = [...new Set(docFiles)].sort((a, b) => compareCodeUnits(a, b));
+  const sortedUniverse = uniqueSorted(universe);
+  const sortedDocs = uniqueSorted(docFiles);
 
   // Async intent extraction (skipped without a root — degrades to empty).
   const commentResult = params.root

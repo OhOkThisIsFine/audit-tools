@@ -589,6 +589,24 @@
         "src/remediate/steps/recoverIngest.ts": "5f89da3780ab3255b234c176471511b7fbc71064"
       }
     },
+    "c15f5d5c1f74ca4f": {
+      "reviewed_by": "claude-opus-5-5-independent-review-subagent,agy-gemini-3.8-flash-high-design-check",
+      "attester_class": "agent",
+      "checked": "P07 behavior-neutral simplify. Loop-core sites: runSnapshot.ts applyEditedPaths loop, reviewFileMap.ts inScope, secondOrderAdversaryPrompt.ts evidencePaths now call uniqueSorted (= [...new Set(x)].sort(compareCodeUnits)); inputs are readonly string[]; compareCodeUnits equals bare string .sort() code-unit order, so order, dedup, prompt bytes and persisted bytes are identical. Independent subagent review of all 12 diff hunks: OVERALL NEUTRAL, no source-text pins. AGY design-check: no retired mechanism reintroduced, no new reachable strand; reviewFileMap order pinned by tests/audit/systemic-challenge.test.ts; the other two sites are unpinned but identical by construction. Full suite 8555 passed 0 failed.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "6c6ff3fa92fe88aa4f0c36ed41f7edceca5918bd",
+        "ran_at": "2026-11-18T22:08:12.288Z"
+      },
+      "attested_at": "2026-11-18T22:08:26.473Z",
+      "vouches": {
+        "src/audit/io/runSnapshot.ts": "95c41e25eaf40d3cafb9c58ffc0e79a9af169f5f",
+        "src/audit/systemic/reviewFileMap.ts": "10ba0d7ab52752f5ed12dcd3ad7bc928ffc4a2e8",
+        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "264bbdf90958bed03202ea5099f49f74c4947d15"
+      }
+    },
     "c2fa0250dd9f5ee5": {
       "reviewed_by": "claude-opus-5-5-session",
       "attester_class": "agent",
@@ -844,7 +862,7 @@
       "review": "be526ca9e4e1d631"
     },
     "src/audit/io/runSnapshot.ts": {
-      "review": "6257346a73ffb600"
+      "review": "c15f5d5c1f74ca4f"
     },
     "src/audit/orchestrator/accessMemory.ts": {
       "baseline": "7b79934e86baf378"
@@ -1120,10 +1138,10 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/systemic/reviewFileMap.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "c15f5d5c1f74ca4f"
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "c15f5d5c1f74ca4f"
     },
     "src/audit/validation/ingestIssueCodes.ts": {
       "baseline": "7b79934e86baf378"

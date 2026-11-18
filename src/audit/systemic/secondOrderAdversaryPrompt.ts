@@ -13,6 +13,7 @@ import {
   FindingSeveritySchema,
   LENSES,
   compareCodeUnits,
+  uniqueSorted,
 } from "audit-tools/shared";
 
 import type { ArtifactBundle } from "../io/artifacts.js";
@@ -344,7 +345,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
   );
   metricLines.push(`- Max fan-out (out-degree): ${opts.metrics.max_fan_out}`);
   const bankedFindings = priorFindings(opts.bundle);
-  const evidencePaths = [...new Set(opts.evidencePaths)].sort();
+  const evidencePaths = uniqueSorted(opts.evidencePaths);
   const fileMap = adversaryFileMap(opts.bundle, bankedFindings);
   const exampleFilePath = examplePath(opts.bundle, fileMap);
   const lenses = lensFocus(opts.bundle);

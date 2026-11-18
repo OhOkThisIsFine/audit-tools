@@ -107,11 +107,11 @@ export const SYSTEMIC_ROUND_CEILING = 6;
 
 /** A filesystem- and report-safe slug for an adversary-minted id fragment. */
 function idSlug(raw: string): string {
-  const slug = raw
+  return raw
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug.length > 0 ? slug.slice(0, 40) : "";
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
 }
 
 /**

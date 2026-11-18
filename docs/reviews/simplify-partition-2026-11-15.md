@@ -35,7 +35,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | landed |
 | P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | landed |
 | P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | landed |
-| P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | open |
+| P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | landed |
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | open |
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | open |
 | P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | open |
@@ -248,3 +248,51 @@ unblock each.
 
 P06 coverage: each of the 50 reviewed files was read in full by all four reviewers.
 `languageMap.generated.ts` is generated and was not reviewed.
+
+### From P07
+
+P07 checked the seven leads that earlier parts left for it:
+
+- **Applied:** the `workBlocks.ts` index signature and its private `stableStrings` (P04) are gone;
+  `uniqueSorted` replaces the private `[...new Set(x)].sort(...)` copies in P07 files that carry a
+  `// sites-pinned:` declaration, three of them loop-core (`io/runSnapshot.ts`,
+  `systemic/reviewFileMap.ts`, `systemic/secondOrderAdversaryPrompt.ts`).
+- **Skipped, with the reason in the deferred record:** `access_memory.json` is written and never
+  read (P01; retiring it is an owner decision); `merge_edge_kind_counts` is always `{}` (P04; the
+  removal changes persisted bytes, and the writer is loop-core P03); one lens policy on
+  `LENS_METADATA` (P04); the prepared validator (P05; its adopter is the loop-core
+  `hostHandoff.ts`); the move of `isDocIntentFile` (P06; it touches the loop-core
+  `charterPackets.ts`).
+- **Not a P07 change:** the `HostInputPauseInputs` `Pick` (P03) has its type in P03 and its
+  callers in loop-core P03/P05 files.
+
+P07 made no cross-part touch. It deleted `io/runArtifactTypes.ts` (its one interface, `RunPaths`,
+now lives in `io/runArtifacts.ts`, its only importer) and the unused `runSample` re-export in
+`cli.ts`. No P07 change is in the import closure of `extractors/graph.ts`, so
+`GRAPH_EDGE_CACHE_KEY_VERSION` stays `v16`.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P10:** `src/shared/io/collectFilesSorted.ts` walks one directory at a time and runs a `stat`
+  for every entry, also when the `Dirent` already says it is a file. That is most of the 4–7 s
+  walk in `buildToolingManifest` (pinned by `tests/shared/collect-files-sorted.test.ts`). Also: a
+  shared `getOrCreate` map helper (the same shape is in `reviewFileMap.ts`,
+  `secondOrderAdversaryPrompt.ts` and twice in `scoreAudit.ts`), and one
+  `sessionIntentPath(root)` for `supervisor/operatorHandoff.ts` and `cli/validateCommand.ts`.
+- **P03/P05 (landed, loop-core):** `judgeBoundEntry` in `cli/dispatch/hostHandoff.ts` copies
+  `activeTaskIds` and `[...auditTasks]` per entry; the index for the `coverage.ts` lookups belongs
+  in `orchestrator/planning.ts`.
+- **P04 (landed):** `LENS_ORDER` sorts `LENS_REGISTRY` again although it is already sorted, and
+  the {security, data integrity} pair has no shared constant.
+- **P05/P12:** the next-step command text in `cli/prompts.ts` and in
+  `supervisor/operatorHandoff.ts` is built in two places; check whether they must agree.
+
+P07 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each. Most code skips are in files with no `// sites-pinned:` declaration (the P05 rule).
+
+P07 coverage: five reviewers (altitude, reuse, efficiency, simplification, and a gap reader).
+Each of the 55 files was read in full by at least one reviewer, most of them from one angle only.
+The gap reader read 15 files in full from all angles (`types.ts`, `conceptualAdjudication.ts`,
+`reviewPlanning.ts`, the six `systemic/` files, `validation/artifacts.ts`,
+`ingestIssueCodes.ts`, `operatorHandoff.ts`, `scoreAudit.ts`, and the two reporting prompts).

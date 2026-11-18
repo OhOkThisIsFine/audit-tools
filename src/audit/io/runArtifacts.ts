@@ -9,9 +9,14 @@ import {
   CURRENT_TASKS_FILENAME,
 } from "../supervisor/operatorHandoff.js";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
-import type { RunPaths } from "./runArtifactTypes.js";
 
-export type { RunPaths } from "./runArtifactTypes.js";
+export interface RunPaths {
+  runDir: string;
+  reviewRunPath: string;
+  pendingTasksPath: string;
+  hostWorkloadPath: string;
+  hostResultMapPath: string;
+}
 
 /**
  * The readable half of a derived run id, CAPPED.
@@ -50,29 +55,6 @@ function normalizeRunIdSegment(value: string | null): string {
   return normalized.length > 0 ? normalized : "terminal";
 }
 
-/**
- * The review run id, DERIVED from the review obligation and the open WAVE —
- * never from a clock.
- *
- * A run id is the run DIRECTORY, and everything a host binds through hangs off
- * it: the workload, the result map, the task bindings, the accepted pair, and
- * every bound `result_path` (which the prompt embeds, so the prompt digest moves
- * with it). A clock-minted id therefore re-minted the whole published wave on
- * every pause — a partial ingest changed `result_path` and `prompt_sha256` for
- * 494/494 carried-over items (measured 2026-08-21), orphaning every worker still
- * writing against a binding it already held.
- *
- * The derivation is the SHARED identity idiom (`mintSubmissionId`): a readable
- * slug carries no identity — the slug is lossy and capped — so a digest carries
- * it, and `waveGeneration` is what the digest is a function of. The generation
- * is the tool's own durable record of which wave is OPEN (`openReviewWavePath`,
- * written by `src/audit/cli/reviewRun.ts`), so the identity moves exactly ONCE
- * per wave and never while a wave has work outstanding. Two waves of one
- * artifacts dir therefore never share a directory, and neither do two audits of
- * one repo: the second audit opens a generation the first never had (a stale
- * accepted pair at a re-used directory would withhold the new audit's work, and
- * `loadAcceptedResults` refuses a ledger written for another run).
- */
 /**
  * FROZEN MIGRATION READER — the retired clock-minted run id.
  *
@@ -153,6 +135,29 @@ export function reviewWaveDigest(waveGeneration: number | null): string {
   );
 }
 
+/**
+ * The review run id, DERIVED from the review obligation and the open WAVE —
+ * never from a clock.
+ *
+ * A run id is the run DIRECTORY, and everything a host binds through hangs off
+ * it: the workload, the result map, the task bindings, the accepted pair, and
+ * every bound `result_path` (which the prompt embeds, so the prompt digest moves
+ * with it). A clock-minted id therefore re-minted the whole published wave on
+ * every pause — a partial ingest changed `result_path` and `prompt_sha256` for
+ * 494/494 carried-over items (measured 2026-08-21), orphaning every worker still
+ * writing against a binding it already held.
+ *
+ * The derivation is the SHARED identity idiom (`mintSubmissionId`): a readable
+ * slug carries no identity — the slug is lossy and capped — so a digest carries
+ * it, and `waveGeneration` is what the digest is a function of. The generation
+ * is the tool's own durable record of which wave is OPEN (`openReviewWavePath`,
+ * written by `src/audit/cli/reviewRun.ts`), so the identity moves exactly ONCE
+ * per wave and never while a wave has work outstanding. Two waves of one
+ * artifacts dir therefore never share a directory, and neither do two audits of
+ * one repo: the second audit opens a generation the first never had (a stale
+ * accepted pair at a re-used directory would withhold the new audit's work, and
+ * `loadAcceptedResults` refuses a ledger written for another run).
+ */
 export function deriveReviewRunId(params: {
   readonly obligationId: string | null;
   /**

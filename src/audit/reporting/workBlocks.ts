@@ -11,6 +11,7 @@ import {
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
   compareCodeUnits,
   estimateTokensFromBytes,
+  uniqueSorted,
 } from "audit-tools/shared";
 import {
   FINDINGS_DRAW_COHERENCE_POLICY,
@@ -30,17 +31,12 @@ export interface WorkBlockPartitionInput {
   graphBundle?: GraphBundle;
   criticalFlows?: CriticalFlowManifest;
   sizeIndex?: Readonly<Record<string, number>>;
-  [presentationInput: string]: unknown;
 }
 
 export interface WorkBlockPartition {
   coherence_trace: ContentCoherenceTrace;
   blocks: WorkBlock[];
   seams: WorkBlockSeam[];
-}
-
-function stableStrings(values: Iterable<string>): string[] {
-  return [...new Set([...values])].sort(compareCodeUnits);
 }
 
 function canonicalSizeIndex(
@@ -92,7 +88,7 @@ function unitsForFinding(
   finding: Finding,
   fileUnitMap: ReadonlyMap<string, Set<string>>,
 ): string[] {
-  return stableStrings(
+  return uniqueSorted(
     finding.affected_files.flatMap((file) => [
       ...(fileUnitMap.get(toPosixPath(file.path)) ?? []),
     ]),
@@ -289,7 +285,7 @@ export function buildWorkBlockPartition(
     const block: WorkBlock = {
       id: `block-${index + 1}`,
       finding_ids: [...findingIds],
-      unit_ids: stableStrings(
+      unit_ids: uniqueSorted(
         findings.flatMap((finding) => unitsByFinding.get(finding.id) ?? []),
       ),
       ...facts,
