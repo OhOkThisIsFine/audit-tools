@@ -192,7 +192,7 @@ test("inv-2: the reverse direction also re-extracts — a content-ful entry is n
   expect(bundle, "the content-free build must equal a clean content-free build").toEqual(buildGraphBundle(m, undefined, {}));
 });
 
-test.each(["bare-hash", "v14"])("inv-2: an older cache key %s self-invalidates (fail-safe re-extract)", (legacyFormat) => {
+test.each(["bare-hash", "v15"])("inv-2: an older cache key %s self-invalidates (fail-safe re-extract)", (legacyFormat) => {
   const m = manifest([file(A, { hash: "ha" }), file(B, { hash: "hb" })]);
   const contents = baseContents();
   const { cache } = incrementalBuild(m, contents, undefined);
@@ -200,7 +200,7 @@ test.each(["bare-hash", "v14"])("inv-2: an older cache key %s self-invalidates (
   // Both the original bare hash and the preceding parser's version are stale.
   const legacy: GraphEdgeCache = structuredClone(cache);
   legacy.entries[B].content_key = legacyFormat === "bare-hash"
-    ? "hb" : legacy.entries[B].content_key.replace(/^[^:]+:/, "v14:");
+    ? "hb" : legacy.entries[B].content_key.replace(/^[^:]+:/, "v15:");
   legacy.entries[B].contribution.references.push({ from: B, to: "SENTINEL-LEGACY", kind: "reference", confidence: 1 });
   const { bundle } = incrementalBuild(m, contents, legacy);
   const refs = bundle.graphs?.references ?? [];
@@ -449,8 +449,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("f1361a83023fb50a15315fbeb9822d4a8e1a2bcfc945fb0bd2fb31b2f71811cf");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v15");
+  ).toBe("fae2f82bfe2b18561b93a0e1cc650177e8018e7bd7205abfa86a24117b19e8b8");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v16");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {

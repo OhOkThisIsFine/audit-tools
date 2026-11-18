@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/structure-decomposition.test.ts
 // Data/state coupling extractor (Phase B behavior-exhibited source; design of
 // record spec/conceptual-design-review-design.md §"Structure decomposition
 // sources"): "code touching the same artifact/state even with no direct call."
@@ -15,7 +16,7 @@
 // with N referrers would otherwise contribute O(N²) pairs.
 
 import type { GraphBundle } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import { allGraphEdges } from "./graphSignals.js";
 
 /** An undirected weighted coupling edge (canonical `a < b`). */
@@ -81,7 +82,7 @@ export function deriveDataStateCoupling(
   const sharedByPair = new Map<string, number>();
   for (const referrers of referrersByTarget.values()) {
     if (referrers.size < 2 || referrers.size > genericThreshold) continue;
-    const members = [...referrers].sort((a, b) => compareCodeUnits(a, b));
+    const members = uniqueSorted(referrers);
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
         const key = `${members[i]} ${members[j]}`;
@@ -90,12 +91,23 @@ export function deriveDataStateCoupling(
     }
   }
 
-  const result: CouplingEdge[] = [];
-  for (const [key, weight] of sharedByPair) {
-    if (weight < minSharedTargets) continue;
+  return couplingEdgesFromPairWeights(sharedByPair, minSharedTargets);
+}
+
+/**
+ * The coupling edges of a pair-weight map keyed `"<a> <b>"` (canonical `a < b`),
+ * keeping each pair whose weight is at least `minWeight`, sorted by (a, b).
+ */
+export function couplingEdgesFromPairWeights(
+  weightByPair: ReadonlyMap<string, number>,
+  minWeight = 0,
+): CouplingEdge[] {
+  const edges: CouplingEdge[] = [];
+  for (const [key, weight] of weightByPair) {
+    if (weight < minWeight) continue;
     const idx = key.indexOf(" ");
-    result.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
+    edges.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
   }
-  result.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
-  return result;
+  edges.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
+  return edges;
 }

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/browser-extension-utils.test.ts
 import { posix } from "node:path";
 import type { Lens, RepoManifest } from "../types.js";
 import type { FileDisposition, GraphBundle, GraphEdge, SurfaceRecord } from "audit-tools/shared";
@@ -363,9 +364,9 @@ export function deriveBrowserExtensionLensesForPath(path: string): Lens[] {
   if (normalized === "manifest.json") {
     return ["security", "correctness", "config_deployment", "operability"];
   }
+  // `includes("background")` also covers a `background/` prefix.
   if (
     normalized.startsWith("service/") ||
-    normalized.startsWith("background/") ||
     normalized.includes("service-worker") ||
     normalized.includes("background")
   ) {
@@ -374,10 +375,10 @@ export function deriveBrowserExtensionLensesForPath(path: string): Lens[] {
   if (normalized.startsWith("content/") || normalized.includes("content-script")) {
     return ["security", "correctness", "reliability"];
   }
+  // `includes("panel")` also covers `side-panel`.
   if (
     normalized.includes("popup") ||
     normalized.includes("sidebar") ||
-    normalized.includes("side-panel") ||
     normalized.includes("panel") ||
     normalized.endsWith(".html")
   ) {

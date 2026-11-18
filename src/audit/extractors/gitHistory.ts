@@ -46,12 +46,6 @@ const BROAD_AUTHORSHIP_FLOOR = 4;
 const CHURN_HOTSPOT_FLOOR = 8;
 
 /**
- * Mine `git_history.json` for `root`, keeping only paths present (and not
- * audit-excluded) in the manifest/disposition. Output is deterministic: the
- * shared miner already sorts every list by a total order, and the in-scope
- * filter preserves that order.
- */
-/**
  * The set of in-scope, graph-normalized path keys the git-history mine is scoped
  * to: every manifest file that is neither file-excluded nor audit-excluded by
  * disposition. SINGLE-SOURCED here so the mine's in-scope filter and the
@@ -73,6 +67,12 @@ export function gitHistoryInScopeKeys(
   return keys;
 }
 
+/**
+ * Mine `git_history.json` for `root`, keeping only paths present (and not
+ * audit-excluded) in the manifest/disposition. Output is deterministic: the
+ * shared miner already sorts every list by a total order, and the in-scope
+ * filter preserves that order.
+ */
 export async function mineGitHistoryArtifact(
   root: string,
   repoManifest: RepoManifest,

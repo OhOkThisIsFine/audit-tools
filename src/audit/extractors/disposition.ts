@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/recursive-tracked-adapters.test.ts, tests/audit/submodule-tracked-corpus.test.ts
 import type { RepoManifest } from "../types.js";
+import { errorMessage } from "../../shared/io/json.js";
 import {
   readRecursiveTrackedPaths,
   normalizeRepoPath,
@@ -243,18 +244,10 @@ async function evaluateVcsIgnored(
       maxBuffer: 256 * 1024 * 1024,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, reason: `git check-ignore spawn failed: ${message}` };
+    return { ok: false, reason: `git check-ignore spawn failed: ${errorMessage(error)}` };
   }
   if (result.error) {
-    const code = (result.error as NodeJS.ErrnoException).code;
-    return {
-      ok: false,
-      reason:
-        code === "ENOENT"
-          ? "git executable not found (ENOENT)"
-          : `git check-ignore failed to start: ${result.error.message}`,
-    };
+    return { ok: false, reason: gitStartFailureReason("git check-ignore", result.error) };
   }
   if (result.status === 0 || result.status === 1) {
     // 0 = some paths ignored (stdout has the set); 1 = no paths ignored.
@@ -263,13 +256,7 @@ async function evaluateVcsIgnored(
     );
     return { ok: true, ignored };
   }
-  const stderrFirstLine = (result.stderr ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
-  return {
-    ok: false,
-    reason:
-      `git check-ignore exited ${result.status ?? "by signal"}` +
-      (stderrFirstLine ? `: ${stderrFirstLine}` : ""),
-  };
+  return { ok: false, reason: gitExitReason("git check-ignore", result.status, result.stderr) };
 }
 
 type TrackedFilesEvaluation =
@@ -288,26 +275,32 @@ async function evaluateTrackedFiles(
   });
   if (result.ok) return { ok: true, tracked: new Set(result.paths) };
   if (result.kind === "thrown") {
-    const message = result.cause instanceof Error ? result.cause.message : String(result.cause);
-    return { ok: false, reason: `git ls-files spawn failed: ${message}` };
+    return { ok: false, reason: `git ls-files spawn failed: ${errorMessage(result.cause)}` };
   }
   if (result.kind === "error") {
-    const code = (result.error as NodeJS.ErrnoException).code;
-    return {
-      ok: false,
-      reason:
-        code === "ENOENT"
-          ? "git executable not found (ENOENT)"
-          : `git ls-files failed to start: ${result.error.message}`,
-    };
+    return { ok: false, reason: gitStartFailureReason("git ls-files", result.error) };
   }
-  const stderrFirstLine = result.stderr.trim().split(/\r?\n/, 1)[0] ?? "";
-  return {
-    ok: false,
-    reason:
-      `git ls-files exited ${result.status ?? "by signal"}` +
-      (stderrFirstLine ? `: ${stderrFirstLine}` : ""),
-  };
+  return { ok: false, reason: gitExitReason("git ls-files", result.status, result.stderr) };
+}
+
+/** Why a git command could not start: a missing executable, or the spawn error. */
+function gitStartFailureReason(command: string, error: Error): string {
+  return (error as NodeJS.ErrnoException).code === "ENOENT"
+    ? "git executable not found (ENOENT)"
+    : `${command} failed to start: ${error.message}`;
+}
+
+/** Why a started git command failed: its exit status and the first stderr line. */
+function gitExitReason(
+  command: string,
+  status: number | null | undefined,
+  stderr: string | undefined,
+): string {
+  const stderrFirstLine = (stderr ?? "").trim().split(/\r?\n/, 1)[0] ?? "";
+  return (
+    `${command} exited ${status ?? "by signal"}` +
+    (stderrFirstLine ? `: ${stderrFirstLine}` : "")
+  );
 }
 
 /**
@@ -336,7 +329,7 @@ function applyRuleExclusions(params: {
   items: FileDispositionItem[];
   /** Normalized form of each item's path, parallel to `items`. */
   itemPosix: string[];
-  /** Normalized paths of the included items the rule matched. */
+  /** Normalized paths the rule matched; only included items among them change. */
   matchedPosix: string[];
   reason: typeof VCS_IGNORED_REASON | typeof UNTRACKED_REASON;
   /** The rule's raw matched count, surfaced as the summary's ignored_count. */
@@ -369,9 +362,8 @@ async function applyVcsIgnoreRule(
   }
 
   const total = candidatePosix.length;
-  const ignoredCount = candidatePosix.filter((path) =>
-    evaluation.ignored.has(path),
-  ).length;
+  const ignoredPosix = candidatePosix.filter((path) => evaluation.ignored.has(path));
+  const ignoredCount = ignoredPosix.length;
 
   // Root-ignored guard: every candidate ignored means the audit root itself is
   // (effectively) ignored — applying the rule would empty the audit scope.
@@ -401,21 +393,12 @@ async function applyVcsIgnoreRule(
   }
 
   // Existing targeted exclusions take precedence; the gitignore rule only
-  // re-classifies files the heuristics would otherwise include.
-  const newlyIgnoredPosix: string[] = [];
-  for (let i = 0; i < baseline.length; i++) {
-    if (
-      baseline[i].status === "included" &&
-      evaluation.ignored.has(candidatePosix[i])
-    ) {
-      newlyIgnoredPosix.push(candidatePosix[i]);
-    }
-  }
-
+  // re-classifies files the heuristics would otherwise include
+  // (applyRuleExclusions changes included items only).
   return applyRuleExclusions({
     items: baseline,
     itemPosix: candidatePosix,
-    matchedPosix: newlyIgnoredPosix,
+    matchedPosix: ignoredPosix,
     reason: VCS_IGNORED_REASON,
     matchedCount: ignoredCount,
   });

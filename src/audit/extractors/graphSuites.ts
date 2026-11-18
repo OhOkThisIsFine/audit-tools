@@ -2,7 +2,7 @@
 import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import {
   graphEdge,
   isJsonSchemaPath,
@@ -35,10 +35,7 @@ const PACKAGE_SCRIPT_SUITE_EXTENSIONS = [
   ".jsx",
   ".mjs",
   ".cjs",
-  ".ts",
-  ".tsx",
-  ".mts",
-  ".cts",
+  ...TYPESCRIPT_TYPE_CONTRACT_EXTENSIONS,
 ] as const;
 
 function collectJsonSchemaRefs(value: unknown, refs: Set<string>): void {
@@ -164,7 +161,7 @@ export function extractSchemaContractTestEdges(
   const index = pathIndex ?? buildGraphPathIndex(pathLookup);
   const targets = [...literalBasenames]
     .flatMap((basename) => [...index.schemaBasenameMatches(basename)])
-    .sort((a, b) => compareCodeUnits(a, b));
+    .sort(compareCodeUnits);
   if (targets.length > MAX_BOUNDED_SUITE_EDGE_FILES) {
     return [];
   }
@@ -256,9 +253,7 @@ export function extractBoundedSuiteEdges(
   fileContents: Record<string, string>,
   graphEdges: GraphEdge[],
 ): GraphEdge[] {
-  const files = [...new Set(pathLookup.values())].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
+  const files = uniqueSorted(pathLookup.values());
   const edges: GraphEdge[] = [];
   const scriptSuiteDirectories = packageScriptSuiteDirectories(graphEdges);
 

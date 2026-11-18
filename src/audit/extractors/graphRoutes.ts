@@ -8,7 +8,7 @@ import {
   normalizeGraphPath,
   resolveReferenceLiteral,
   resolveSpecifier,
-  SOURCE_EXTENSIONS,
+  stripSourceExtension,
 } from "./graphPathUtils.js";
 
 const ROUTE_HANDLER_EDGE_CONFIDENCE = 0.92;
@@ -530,12 +530,6 @@ export function extractRegisteredRouteEvidence(
   return { calls, routes };
 }
 
-function stripSourceExtension(path: string): string {
-  const lowerPath = path.toLowerCase();
-  const extension = SOURCE_EXTENSIONS.find((item) => lowerPath.endsWith(item));
-  return extension ? path.slice(0, -extension.length) : path;
-}
-
 function nextRouteSegment(segment: string): string | undefined {
   if (!segment || (segment.startsWith("(") && segment.endsWith(")"))) {
     return undefined;
@@ -585,7 +579,8 @@ function conventionalRoutePath(filePath: string): string | undefined {
   // `api/` directory (FND-COR-c86f0260).
   const apiIndex = pagesIndex >= 0 ? lowerParts.indexOf("api", pagesIndex + 1) : -1;
   if (apiIndex >= 0 && apiIndex < parts.length - 1) {
-    const withoutExtension = stripSourceExtension(parts.at(-1) ?? "");
+    const fileName = parts.at(-1) ?? "";
+    const withoutExtension = stripSourceExtension(fileName) ?? fileName;
     return routePathFromSegments([...parts.slice(apiIndex, -1), withoutExtension]);
   }
 

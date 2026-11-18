@@ -42,13 +42,18 @@ const DEFAULT_IGNORES = [
  * the copy and the walk can never disagree about what intake reads.
  */
 export function isIntakeIgnored(relativePath: string, extra: readonly string[] = []): boolean {
-  return shouldIgnore(relativePath, [...DEFAULT_IGNORES, ...extra]);
+  return shouldIgnore(relativePath, posixIgnores(extra));
 }
 
+/** The default ignores plus `extra`, each in posix form (the form `shouldIgnore` reads). */
+function posixIgnores(extra: readonly string[]): string[] {
+  return [...DEFAULT_IGNORES, ...extra].map(toPosixPath);
+}
+
+/** `ignores` must be in posix form already (see {@link posixIgnores}). */
 function shouldIgnore(relativePath: string, ignores: string[]): boolean {
   const normalized = toPosixPath(relativePath);
-  return ignores.some((ignore) => {
-    const value = toPosixPath(ignore);
+  return ignores.some((value) => {
     return (
       normalized === value ||
       normalized.startsWith(`${value}/`) ||
@@ -134,12 +139,11 @@ export async function buildRepoManifestFromFs(
   options: IntakeOptions,
 ): Promise<RepoManifest> {
   const root = resolve(options.root);
-  const ignore = [...DEFAULT_IGNORES, ...(options.ignore ?? [])];
   const files: Array<{ path: string; size_bytes: number; hash?: string }> = [];
 
   const ctx: WalkContext = {
     root,
-    ignores: ignore,
+    ignores: posixIgnores(options.ignore ?? []),
     hashFiles: options.hash_files ?? false,
     maxFileSizeBytes: options.max_file_size_bytes ?? 1024 * 1024,
   };
