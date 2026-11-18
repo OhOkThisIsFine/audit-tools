@@ -34,11 +34,6 @@ import { resolveIntentLensSelection } from "../orchestrator/lensSelection.js";
 import { writeCurrentStep } from "./steps.js";
 
 
-/**
- * Publish the complete semantic-review workload. The host owns every execution
- * choice; audit-tools only binds prompts/results and ingests validated
- * AuditResult objects on the next invocation.
- */
 interface SemanticReviewStepParams {
   root: string;
   /** The run's frozen snapshot root the workload's prompts direct host lanes to. */
@@ -115,6 +110,11 @@ export async function prepareSemanticReviewWorkload(params: SemanticReviewStepPa
   };
 }
 
+/**
+ * Publish the complete semantic-review workload. The host owns every execution
+ * choice; audit-tools only binds prompts/results and ingests validated
+ * AuditResult objects on the next invocation.
+ */
 export async function renderSemanticReviewStep(params: SemanticReviewStepParams): Promise<Awaited<ReturnType<typeof writeCurrentStep>>> {
   const { root, artifactsDir, activeReviewRun } = params;
   const { handoff, completedTaskIds, resultDir, continueCommand } = await prepareSemanticReviewWorkload(params);

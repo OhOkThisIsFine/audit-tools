@@ -4,7 +4,8 @@ import { countLines } from "./args.js";
 import type { AuditTask, RepoManifest } from "../types.js";
 import { isFileMissingError } from "audit-tools/shared";
 import { canonicalizeAuditTasks } from "../../shared/affinityArtifacts.js";
-import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { uniqueSorted } from "../../shared/compareCodeUnits.js";
+import { errorMessage } from "../../shared/io/json.js";
 
 // Line-count helpers extracted from cli.ts. Pure functions over the repo
 // manifest / task file paths — used to annotate audit tasks with per-file line
@@ -63,7 +64,7 @@ async function measureLinePaths(
           // misled into treating a missing file as an empty one (COR-c868f53d).
           const kind = isFileMissingError(err) ? "file not found" : "IO error";
           process.stderr.write(
-            `[lineIndex] ${kind} counting lines for '${path}': ${err instanceof Error ? err.message : String(err)}\n`,
+            `[lineIndex] ${kind} counting lines for '${path}': ${errorMessage(err)}\n`,
           );
           failureCount++;
           // Unmeasured, not a silent 0 (CP-NODE-6) — see UNMEASURED_LINE_COUNT.
@@ -97,7 +98,7 @@ export async function buildLineIndexForPaths(
   paths: string[],
 ): Promise<Record<string, number>> {
   // Only this adapter deduplicates and sorts; keys still retain raw spelling.
-  return measureLinePaths(root, [...new Set(paths)].sort(compareCodeUnits));
+  return measureLinePaths(root, uniqueSorted(paths));
 }
 
 export async function addFileLineCountHints(

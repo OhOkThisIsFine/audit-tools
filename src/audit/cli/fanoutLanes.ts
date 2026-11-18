@@ -14,12 +14,12 @@ import { writeTextFile } from "../../shared/io/json.js";
 import { publishAuditReviewBindings, type AuditReviewBinding } from "./auditReviewBindings.js";
 
 import {
-  compareCodeUnits,
   deriveLaneDemand,
   estimateTokensFromBytes,
   laneAssetsDir,
   toPromptPathToken,
   type LaneDemand,
+  uniqueSorted,
 } from "audit-tools/shared";
 import { normalizePromptBodyPaths } from "../../shared/tooling/exec.js";
 import { sourceTreeInstruction } from "../io/runSnapshot.js";
@@ -328,7 +328,7 @@ export async function materializeFanoutLanes(params: {
     }
     const generatedContextPaths: string[] = [];
     for (const file of generated) generatedContextPaths.push(await writeGeneratedContext(promptDir, file));
-    const contextInputs = await Promise.all([...new Set([...(spec.contextPaths ?? []), ...generatedContextPaths])].sort(compareCodeUnits).map(async path => {
+    const contextInputs = await Promise.all(uniqueSorted([...(spec.contextPaths ?? []), ...generatedContextPaths]).map(async path => {
       const bytes = await readFile(path);
       return { path, sha256: hashContent(bytes), bytes: bytes.length };
     }));

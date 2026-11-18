@@ -8,6 +8,7 @@ import { functionalPreflightStep } from "./functionalPreflight.js";
 import { SEMANTIC_REVIEW_DEMAND } from "../../shared/types/stepContract.js";
 import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prompts.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/artifacts-dir-rollover.test.ts
+import { errorMessage } from "../../shared/io/json.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
@@ -23,6 +24,7 @@ import {
   writeJsonFile,
   toPromptPathToken,
   AUDIT_FINDINGS_FILENAME,
+  isFileMissingError,
 } from "audit-tools/shared";
 import type { AnalyzerPolicy } from "audit-tools/shared";
 // The ONE shared table-driven step-emission scaffold. Imported by relative path
@@ -377,7 +379,7 @@ async function cmdNextStepBody(
     await loadSessionIntent(root);
     analyzerPolicy = await loadAnalyzerPolicy(root);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     await persistConfigErrorHandoff({
       root,
       artifactsDir,
@@ -1400,7 +1402,7 @@ const emitConfirmIntent = emissionRow<"confirm_intent">(
         );
         bootstrappedGuidance = guidance.trim() || undefined;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        if (!isFileMissingError(error)) throw error;
       }
     }
     return currentStepPlan({
@@ -1715,7 +1717,6 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
     // Always-materialized (design resolution 2): the (potentially ~340-line)
     // flow-stub prompt is a lane FILE, never inlined into the step prompt. The
     // results-path section is the lane materializer's, not this emitter's.
-    const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       sourceRoot,
@@ -1729,7 +1730,7 @@ const emitCriticalFlowFallback = emissionRow<"critical_flow_fallback">(
           contextPaths: result.bundle.critical_flows ? [manifestPath] : [],
           label: "Critical-flow fallback enrichment",
           promptFilename: "critical-flow-fallback-prompt.md",
-          promptText: lanePrompt,
+          promptText: basePrompt,
         },
       ],
     });
@@ -1792,7 +1793,6 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
     // findings) is a lane FILE, never inlined into the step prompt. This step
     // previously carried no access block at all — the lane form declares one.
     // The results-path section is the lane materializer's, not this emitter's.
-    const lanePrompt = basePrompt;
     const fanout = await materializeFanoutLanes({
       artifactsDir,
       sourceRoot,
@@ -1806,7 +1806,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
           contextPaths: result.bundle.audit_findings ? [findingsPath] : [],
           label: "Synthesis narrative (themes / exec summary / top risks)",
           promptFilename: "synthesis-narrative-prompt.md",
-          promptText: lanePrompt,
+          promptText: basePrompt,
         },
       ],
     });

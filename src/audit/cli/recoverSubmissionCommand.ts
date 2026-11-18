@@ -1,6 +1,7 @@
 import { auditReviewBinding } from "./reviewSubmission.js";
 import { parseReviewSubmissionEnvelope } from "../../shared/types/reviewIndependence.js";
 // sites-pinned: tests/audit/recover-submission-mis-route.test.ts, tests/shared/hand-recovery-uses-the-same-validator.test.ts
+import { outputJson } from "./cliHelpers.js";
 //   The first suite drives this verb's own mis-route guard through the CLI; the
 //   second pins that the rescue path validates through the same gate the normal
 //   path uses, so a divergence here reds one of the two.
@@ -17,6 +18,7 @@ import {
   type CharterKind,
   type CharterPacketManifest,
   type SubmissionIssue,
+  uniqueSorted,
 } from "audit-tools/shared";
 
 import { getArtifactsDir, getFlag } from "./args.js";
@@ -123,7 +125,7 @@ function charterMisRouteIssue(
   ]
     .filter((provenance) => PATH_SHAPED_PROVENANCE_KINDS.has(provenance.kind))
     .map((provenance) => provenancePath(provenance.ref));
-  const foreign = [...new Set(refs.filter((path) => !delivered.has(path)))].sort();
+  const foreign = uniqueSorted(refs.filter((path) => !delivered.has(path)));
   if (foreign.length === 0) return null;
   return {
     code: "submission_contract_invalid",
@@ -215,15 +217,11 @@ export async function cmdRecoverSubmission(argv: string[]): Promise<void> {
     );
   }
 
-  console.log(
-    JSON.stringify(
-      {
-        status: "recovered",
-        lane,
-        submission_path: outcome.submission_path,
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      status: "recovered",
+      lane,
+      submission_path: outcome.submission_path,
+    },
   );
 }

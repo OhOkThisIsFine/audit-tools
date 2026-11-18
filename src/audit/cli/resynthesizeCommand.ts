@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/resynthesize-command.test.ts
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
@@ -21,6 +22,7 @@ import type { AuditFindingsReport } from "audit-tools/shared";
 import { readOptionalJsonFile } from "audit-tools/shared";
 import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
 import { outputJson } from "./cliHelpers.js";
+import { errorMessage } from "../../shared/io/json.js";
 
 export async function cmdResynthesize(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
@@ -46,7 +48,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
   try {
     report = JSON.parse(raw) as AuditFindingsReport;
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
+    const msg = errorMessage(error);
     console.error(`resynthesize: could not parse ${inputPath}: ${msg}`);
     process.exitCode = 1;
     return;

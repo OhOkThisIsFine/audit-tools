@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/unaccept-results-single-message.test.ts, tests/audit/host-handoff-unaccept-results.test.ts
+import { outputJson } from "./cliHelpers.js";
 import { dropAcceptedResults } from "./dispatch/hostHandoff.js";
 import {
   getArtifactsDir,
@@ -21,8 +22,9 @@ import { loadCurrentActiveReviewRun } from "./reviewRun.js";
  * Argument validation lives in {@link dropAcceptedResults} — the ONE copy of
  * the "requires --work-item or --all" refusal; this command parses argv only.
  *
- * The run id resolves from the persisted review-run manifest, not an argv flag:
- * the operator names WHAT to drop, never WHERE the state lives.
+ * The run id resolves from the persisted review-run manifest. `--run-id` is the
+ * fallback for a removed manifest only: the operator names WHAT to drop, and the
+ * manifest says WHERE the state lives.
  */
 export async function cmdUnacceptResults(argv: string[]): Promise<void> {
   const root = getRootDir(argv);
@@ -35,8 +37,8 @@ export async function cmdUnacceptResults(argv: string[]): Promise<void> {
     .filter((value): value is string => typeof value === "string");
 
   // Canonical run resolution: the same manifest `next-step`'s ingest fold reads.
-  // A hand-supplied run id would be a second way to be wrong about which state
-  // is being mutated.
+  // `--run-id` overrides it, for the case the refusal below names: a removed
+  // manifest.
   const overrideRunId = getFlag(argv, "--run-id");
   const runId =
     overrideRunId ?? (await loadCurrentActiveReviewRun(artifactsDir))?.run_id;
@@ -54,16 +56,12 @@ export async function cmdUnacceptResults(argv: string[]): Promise<void> {
     ...(all ? { all: true } : { workItemIds }),
   });
 
-  console.log(
-    JSON.stringify(
-      {
-        status: "unaccepted",
-        run_id: runId,
-        dropped_work_item_ids: outcome.dropped_work_item_ids,
-        next: "audit-code next-step re-reads the bound result files for the dropped items",
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      status: "unaccepted",
+      run_id: runId,
+      dropped_work_item_ids: outcome.dropped_work_item_ids,
+      next: "audit-code next-step re-reads the bound result files for the dropped items",
+    },
   );
 }

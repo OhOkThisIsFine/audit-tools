@@ -63,6 +63,7 @@ import { charterExtractionKindsForCeiling } from "./charterExtractionPrompt.js";
 import { archiveCharterPackets } from "../orchestrator/charterPacketArchive.js";
 import {
   LANE_SUBMISSION_SCHEMAS,
+  describeZodIssues,
   charterLaneSchema,
   describeSubmissionShapeMismatch,
   parseSubmissionArrayItems,
@@ -159,6 +160,7 @@ import {
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
 import { buildPendingAuditTasks } from "./dispatch/packetFilter.js";
 import { buildLineIndex } from "./lineIndex.js";
+import { errorMessage } from "../../shared/io/json.js";
 import {
   ingestAuditHostResults,
   type AuditHostValidationWarning,
@@ -540,6 +542,20 @@ type AnalyzerConsentBranchResult =
   | { action: "return"; result: { kind: "analyzer_consent"; state: AuditState; bundle: ArtifactBundle; pending: ExternalAnalyzerCandidate[] } }
   | { action: "fallthrough" };
 
+/** Fold the run's recorded consent decisions into the in-flight acquisition options. */
+function applyRunConsent(
+  options: ExternalAcquisitionAdvanceOptions,
+  consent: Awaited<ReturnType<typeof readRunConsentUnlocked>>,
+): void {
+  options.analyzerConsent = Object.fromEntries(
+    Object.entries(consent.decisions)
+      .filter(([, value]) => value === "declined")
+      .map(([id]) => [id, "declined" as const]),
+  );
+  const granted = Object.entries(consent.decisions).filter(([, value]) => value === "granted").map(([id]) => id);
+  options.consentToken = granted.length ? { value: consent.run_id, tools: granted } : undefined;
+}
+
 /**
  * Item B (consent surfacing) — the acquisition obligation's fold branch,
  * mirroring the analyzer-install consent fold exactly:
@@ -554,17 +570,6 @@ type AnalyzerConsentBranchResult =
  *     (`return`), so applicable consent-gated candidates are never silently
  *     skipped (the silent-fail-closed defect this program exists to fix).
  */
-function applyRunConsent(
-  options: ExternalAcquisitionAdvanceOptions,
-  consent: Awaited<ReturnType<typeof readRunConsentUnlocked>>,
-): void {
-  options.analyzerConsent = {
-    ...Object.fromEntries(Object.entries(consent.decisions).filter(([, value]) => value === "declined").map(([id]) => [id, "declined" as const])),
-  };
-  const granted = Object.entries(consent.decisions).filter(([, value]) => value === "granted").map(([id]) => id);
-  options.consentToken = granted.length ? { value: consent.run_id, tools: granted } : undefined;
-}
-
 export async function handleAnalyzerConsentBranch(
   params: Pick<NextStepParams, "root" | "sourceRoot" | "artifactsDir" | "externalAcquisition">,
   bundle: ArtifactBundle,
@@ -868,11 +873,7 @@ type ConsumeArraySubmissionResult<T> =
  * the notice the host reads disagree with the record the run keeps.
  */
 function describeSubmissionFailure(error: ZodError | string): string {
-  return typeof error === "string"
-    ? error
-    : error.issues
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; ");
+  return typeof error === "string" ? error : describeZodIssues(error);
 }
 
 /**
@@ -1242,7 +1243,7 @@ async function consumeConceptualSubmission(
       path: incoming.path,
     };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     const quarantinePath = await quarantineMisshapedSubmission(
       artifactsDir,
       incoming.path,
@@ -1572,13 +1573,6 @@ export async function handleDesignReviewBranch(
       issueCode: "submission_rejected",
       message: `${pass} pass: ${reason}` + quarantineSurvivalNote(quarantine),
     });
-    assessment =
-      withRejectedDesignReviewSubmission(assessment, pass, {
-        status: "quarantined",
-        quarantinePath: quarantine.quarantinePath,
-        lane,
-        reason,
-      }) ?? assessment;
   };
 
   // Only the two CURRENT passes are polled. The pre-split combined-findings lane
@@ -1605,9 +1599,7 @@ export async function handleDesignReviewBranch(
   );
 
   if (contractResult.status === "quarantined") {
-    assessment =
-      withRejectedDesignReviewSubmission(assessment, "contract", contractResult) ??
-      assessment;
+    assessment = withRejectedDesignReviewSubmission(assessment, "contract", contractResult);
   } else if (contractResult.status === "ok" && assessment) {
     assessment = {
       ...assessment,
@@ -1627,9 +1619,7 @@ export async function handleDesignReviewBranch(
   }
 
   if (conceptualResult.status === "quarantined") {
-    assessment =
-      withRejectedDesignReviewSubmission(assessment, "conceptual", conceptualResult) ??
-      assessment;
+    assessment = withRejectedDesignReviewSubmission(assessment, "conceptual", conceptualResult);
   } else if (conceptualResult.status === "ok" && assessment) {
     assessment = {
       ...assessment,
@@ -1669,11 +1659,14 @@ export async function handleDesignReviewBranch(
     // snapshot lost between fold and commit would silently mark a completed
     // pass satisfied (CX-02 landing 2).
     const reviewedAt = new Date().toISOString();
+    // The snapshot projects only the structural inputs and the assessment, so
+    // the reviewed bundle needs no metadata recompute.
+    const reviewed: ArtifactBundle = { ...bundle, design_assessment: assessment };
     if (contractResult.status === "ok") {
       const snapshot = buildDesignReviewSnapshot(
         "contract",
         assessment.contract_findings ?? [],
-        carried(),
+        reviewed,
         reviewedAt,
       );
       tx.pendingSnapshots.push(snapshot);
@@ -1684,7 +1677,7 @@ export async function handleDesignReviewBranch(
       const snapshot = buildDesignReviewSnapshot(
         "conceptual",
         assessment.conceptual_findings ?? [],
-        carried(),
+        reviewed,
         reviewedAt,
       );
       tx.pendingSnapshots.push(snapshot);
@@ -1759,6 +1752,38 @@ type OmittableGateAction<TStepKind extends string> =
     }
   | { action: "run_omit" }
   | { action: "return"; result: { kind: TStepKind; state: AuditState; bundle: ArtifactBundle } };
+
+/** The path option each path-applied gate hands its forced executor. */
+type GateSubmissionPathKey =
+  | "narrativeResultsPath"
+  | "intentEquivalenceVerdictPath"
+  | "criticalFlowFallbackResultsPath"
+  | "charterComparisonSubmissionPath"
+  | "charterFidelitySubmissionPath"
+  | "clarificationAnswersPath";
+
+/**
+ * The `apply` most omittable gates share: the forced single-step dispatch of
+ * `executor` on the carried bundle, handed the consumed submission's path under
+ * `pathKey`. The systemic challenge also passes a content hash, so it keeps its own.
+ */
+function applyByPath(
+  executor: string,
+  pathKey: GateSubmissionPathKey,
+): OmittableGateDescriptor<unknown, string>["apply"] {
+  return (_value, path, p, foldBundle) =>
+    runAuditStepUnlocked(
+      {
+        root: p.root,
+        sourceRoot: requireSourceRoot(p),
+        artifactsDir: p.artifactsDir,
+        preferredExecutor: executor,
+        [pathKey]: path,
+        scopeIndexMemo: p.scopeIndexMemo,
+      },
+      foldBundle,
+    );
+}
 
 type CriticalFlowFallbackBranchResult = OmittableGateAction<"critical_flow_fallback">;
 type IntentEquivalenceBranchResult = OmittableGateAction<"intent_equivalence">;
@@ -1891,18 +1916,7 @@ export async function handleSynthesisNarrativeBranch(
       kind: "synthesis_narrative",
       lane: GATE_LANES.synthesis_narrative,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.synthesis_narrative]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "synthesis_narrative_executor",
-            narrativeResultsPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("synthesis_narrative_executor", "narrativeResultsPath"),
       // Narrative disabled: omit (run the deterministic omit executor below).
       // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
       shouldOmit: () =>
@@ -1935,18 +1949,7 @@ export async function handleIntentEquivalenceBranch(
       kind: "intent_equivalence",
       lane,
       schema: LANE_SUBMISSION_SCHEMAS[lane]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "intent_equivalence_executor",
-            intentEquivalenceVerdictPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("intent_equivalence_executor", "intentEquivalenceVerdictPath"),
       shouldOmit: intentEquivalenceOmits,
     },
     params,
@@ -1979,18 +1982,7 @@ export async function handleCriticalFlowFallbackBranch(
       kind: "critical_flow_fallback",
       lane: GATE_LANES.critical_flow_fallback,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.critical_flow_fallback]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "critical_flow_fallback_executor",
-            criticalFlowFallbackResultsPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("critical_flow_fallback_executor", "criticalFlowFallbackResultsPath"),
       // Never omit: the obligation is only reached when the deterministic bar
       // failed, and the host is always available to author the enrichment.
       shouldOmit: () => false,
@@ -2043,12 +2035,12 @@ export async function handleCharterExtractionBranch(
   state: AuditState,
   tx: FoldTransaction,
 ): Promise<CharterExtractionBranchResult> {
-  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
   // Shallow ceiling (default): omit deterministically, no host turn, no lanes.
   // Single-sourced with the plan draw's classifier (obligationPolicy.ts).
   if (charterExtractionOmits(bundle)) {
     return { action: "run_omit" };
   }
+  const ceiling = resolveCharterCeiling(bundle.intent_checkpoint);
   // Per-kind blind lanes (design resolution 2): one goal-DAG submission file per
   // kind, each validated at THIS chokepoint — schema shape + kind purity (a lane
   // may only carry its own kind; anything else is a mis-routed submission). An
@@ -2206,18 +2198,7 @@ export async function handleCharterComparisonBranch(
       kind: "charter_comparison",
       lane: GATE_LANES.charter_comparison,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_comparison]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "charter_comparison_executor",
-            charterComparisonSubmissionPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("charter_comparison_executor", "charterComparisonSubmissionPath"),
       shouldOmit: charterComparisonOmits,
     },
     params,
@@ -2243,18 +2224,7 @@ export async function handleCharterFidelityBranch(
       kind: "charter_fidelity",
       lane: GATE_LANES.charter_fidelity,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_fidelity]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "charter_fidelity_executor",
-            charterFidelitySubmissionPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("charter_fidelity_executor", "charterFidelitySubmissionPath"),
       shouldOmit: charterFidelityOmits,
     },
     params,
@@ -2289,18 +2259,7 @@ export async function handleCharterClarificationBranch(
       kind: "charter_clarification",
       lane: GATE_LANES.charter_clarification,
       schema: LANE_SUBMISSION_SCHEMAS[GATE_LANES.charter_clarification]!,
-      apply: (_value, path, p, foldBundle) =>
-        runAuditStepUnlocked(
-          {
-            root: p.root,
-            sourceRoot: requireSourceRoot(p),
-            artifactsDir: p.artifactsDir,
-            preferredExecutor: "charter_clarification_executor",
-            clarificationAnswersPath: path,
-            scopeIndexMemo: p.scopeIndexMemo,
-          },
-          foldBundle,
-        ),
+      apply: applyByPath("charter_clarification_executor", "clarificationAnswersPath"),
       // The omit predicate is single-sourced with the plan draw's classifier
       // (obligationPolicy.ts) — the two draws must agree on the boundary.
       shouldOmit: charterClarificationOmits,
@@ -2394,8 +2353,8 @@ export async function executeAndRecord(
   lastSummary: string,
   bundle: ArtifactBundle,
   ctx: {
-    manifestIndexCache: WeakMap<object, { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }>;
-    failureRef: { value: { executor: string | null; obligation: string | null } | null };
+    manifestIndexCache: ManifestIndexCache;
+    failureRef: { value: FailureAttribution };
   },
 ): Promise<AdvanceAuditResult> {
   const inputManifest = bundle.repo_manifest;
@@ -2403,7 +2362,7 @@ export async function executeAndRecord(
     // Write a "started" marker before execution so a host watching the filesystem
     // can tell which executor is active during a long-running step (OBS-0d4c2311).
     const startedAt = new Date().toISOString();
-    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+    await writeJsonFile(deterministicProgressPath(params.artifactsDir), {
       iteration: index + 1,
       executor: decision.selected_executor,
       obligation: decision.selected_obligation,
@@ -2425,7 +2384,7 @@ export async function executeAndRecord(
       // ONE git-index probe per fold (see `ScopeIndexMemo`).
       scopeIndexMemo: params.scopeIndexMemo,
     });
-    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+    await writeJsonFile(deterministicProgressPath(params.artifactsDir), {
       iteration: index + 1,
       last_executor: result.selected_executor,
       last_obligation: decision.selected_obligation,
@@ -2448,7 +2407,8 @@ export async function executeAndRecord(
     // commit — the old second lock acquisition here would deadlock against the
     // fold's own hold (`withFileLock` is non-reentrant).
     ctx.failureRef.value = { executor: failedExecutor, obligation: failedObligation };
-    await writeJsonFile(join(params.artifactsDir, "steps", "deterministic-progress.json"), {
+    const detail = errorMessage(error);
+    await writeJsonFile(deterministicProgressPath(params.artifactsDir), {
       iteration: index + 1,
       last_executor: failedExecutor,
       last_obligation: failedObligation,
@@ -2457,10 +2417,9 @@ export async function executeAndRecord(
       selected_executor: decision.selected_executor,
       selected_obligation: decision.selected_obligation,
       prior_summary: lastSummary || null,
-      error: error instanceof Error ? error.message : String(error),
+      error: detail,
       timestamp: new Date().toISOString(),
     });
-    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Deterministic executor ${failedExecutor} failed on obligation ${failedObligation} (iteration ${index + 1}, prior progress: ${lastSummary || "none"}): ${detail}`,
       { cause: error instanceof Error ? error : undefined },
@@ -2485,8 +2444,8 @@ export async function executeAndRecord(
 async function manifestIndexes(
   root: string,
   bundle: ArtifactBundle,
-  cache: WeakMap<object, { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }>,
-): Promise<{ lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }> {
+  cache: ManifestIndexCache,
+): Promise<ManifestIndexes> {
   const manifest = bundle.repo_manifest;
   if (!manifest) return {};
   const cached = cache.get(manifest);
@@ -2557,7 +2516,7 @@ export async function checkNoProgressBeforeDispatch(ctx: {
   // changing content.
   if (signature !== "no-metadata" && ctx.dispatchedSignatures.has(dispatchKey)) {
     await writeJsonFile(
-      join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
+      deterministicProgressPath(ctx.params.artifactsDir),
       {
         iteration: ctx.index + 1,
         no_progress_detected: true,
@@ -2616,7 +2575,7 @@ export async function checkFinalizationCycle(ctx: {
     new Set(ctx.obligationTrail.slice(-ctx.tolerance)),
   );
   await writeJsonFile(
-    join(ctx.params.artifactsDir, "steps", "deterministic-progress.json"),
+    deterministicProgressPath(ctx.params.artifactsDir),
     {
       iteration: ctx.index + 1,
       cycle_detected: true,
@@ -2699,6 +2658,16 @@ function pendingAdvisoriesPath(artifactsDir: string): string {
   return join(artifactsDir, "steps", "pending-advisories.json");
 }
 
+/** The progress marker a filesystem-watching host reads (see `executeAndRecord`). */
+function deterministicProgressPath(artifactsDir: string): string {
+  return join(artifactsDir, "steps", "deterministic-progress.json");
+}
+
+type ManifestIndexes = { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> };
+type ManifestIndexCache = WeakMap<object, ManifestIndexes>;
+/** Dispatch-local failure attribution; `null` until a dispatch throws. */
+type FailureAttribution = { executor: string | null; obligation: string | null } | null;
+
 /**
  * Read the persisted carry. Lenient by design: an absent or unreadable file is
  * an empty carry, because this is a PROMPT convenience over a ledger that
@@ -2734,10 +2703,7 @@ async function writePendingAdvisories(
   advisories: FoldAdvisories,
 ): Promise<void> {
   const path = pendingAdvisoriesPath(artifactsDir);
-  if (
-    advisories.ingestIssues.length === 0 &&
-    advisories.validationWarnings.length === 0
-  ) {
+  if (advisoriesEmpty(advisories)) {
     try {
       await unlink(path);
     } catch (error) {
@@ -2761,26 +2727,26 @@ function mergeFoldAdvisoriesInto(
     readonly validationWarnings: readonly AuditHostValidationWarning[];
   },
 ): void {
-  for (const issue of fresh.issues) {
-    const signature = advisorySignature(issue);
-    if (
-      carried.ingestIssues.some((existing) => advisorySignature(existing) === signature)
-    ) {
-      continue;
-    }
-    carried.ingestIssues.push(issue);
+  appendUnseen(carried.ingestIssues, fresh.issues);
+  appendUnseen(carried.validationWarnings, fresh.validationWarnings);
+}
+
+/** Append each advisory whose signature is not already in `target`, in order. */
+function appendUnseen<T extends AuditHostIngestIssue | AuditHostValidationWarning>(
+  target: T[],
+  incoming: readonly T[],
+): void {
+  const seen = new Set(target.map(advisorySignature));
+  for (const advisory of incoming) {
+    const signature = advisorySignature(advisory);
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    target.push(advisory);
   }
-  for (const warning of fresh.validationWarnings) {
-    const signature = advisorySignature(warning);
-    if (
-      carried.validationWarnings.some(
-        (existing) => advisorySignature(existing) === signature,
-      )
-    ) {
-      continue;
-    }
-    carried.validationWarnings.push(warning);
-  }
+}
+
+function advisoriesEmpty(advisories: FoldAdvisories): boolean {
+  return advisories.ingestIssues.length === 0 && advisories.validationWarnings.length === 0;
 }
 
 /**
@@ -2859,12 +2825,9 @@ interface AuditNextStepCtx {
    */
   currentBundleRef: { value: ArtifactBundle };
   /** Dispatch-local failure attribution for the commit-on-throw. */
-  failureRef: { value: { executor: string | null; obligation: string | null } | null };
+  failureRef: { value: FailureAttribution };
   /** Per-manifest-identity line/size index memo (see `manifestIndexes`). */
-  manifestIndexCache: WeakMap<
-    object,
-    { lineIndex?: Record<string, number>; sizeIndex?: Record<string, number> }
-  >;
+  manifestIndexCache: ManifestIndexCache;
 }
 
 /** The engine state audit folds on: the in-memory CARRIED bundle (never reloaded). */
@@ -3278,8 +3241,6 @@ async function runHostDelegationObligation(
     bundle,
     state,
     obligationId: decision.selected_obligation,
-    selfCliPath: ctx.params.selfCliPath,
-    timeoutMs: ctx.params.timeoutMs,
   });
   // What THIS ingest saw. Deliberately NOT drained here: the carried advisories
   // are taken at the fold's single emission boundary (`runDeterministicForNextStep`),
@@ -3324,12 +3285,7 @@ async function withFoldAdvisories(
     ctx.params.artifactsDir,
     ctx.foldAdvisoriesRef,
   );
-  if (
-    carried.ingestIssues.length === 0 &&
-    carried.validationWarnings.length === 0
-  ) {
-    return step;
-  }
+  if (advisoriesEmpty(carried)) return step;
   if (step.kind !== "semantic_review") {
     return {
       ...step,
@@ -3472,7 +3428,7 @@ function foldHeartbeatRecord(obligation: string, durationMs: number): void {
  * or the no-metadata-skip (HANDOFF approach B). `advance`'s `maxTransitions` is
  * left as its pure runaway backstop. A `step === null` result (no actionable
  * obligation, e.g. synthesis flipped the state to complete) resolves to the
- * terminal step (present_report when a report is rendered, else blocked).
+ * terminal step (`complete` when a report is rendered, else blocked).
  */
 export async function runDeterministicForNextStep(
   params: NextStepParams,
@@ -3781,33 +3737,17 @@ async function runDeterministicFold(
 
   // No actionable obligation: the fold reached completion (e.g. synthesis flipped
   // the state to complete and every obligation is now satisfied). Build the
-  // terminal: present_report when the state is complete / a report is rendered,
-  // else blocked.
+  // terminal: `complete` when the state is complete / a report is rendered,
+  // else blocked. A complete state's summary is the decision's own reason.
   const bundle = await loadArtifactBundle(params.artifactsDir);
   const decision = decideNextStep(bundle);
   const state = decision.state;
-
-  if (state.status === "complete") {
-    await writeHandoffOnly({
-      root: params.root,
-      artifactsDir: params.artifactsDir,
-      bundle,
-      audit_state: state,
-      progress_summary: decision.reason,
-    });
-    const finalReportPath = await promoteCompletedReport(params.root, params.artifactsDir);
-    return {
-      kind: "complete",
-      state,
-      bundle,
-      finalReportPath,
-    };
-  }
-
   return buildTerminalStep(
     params,
     bundle,
     state,
-    ctx.lastSummaryRef.value || decision.reason,
+    state.status === "complete"
+      ? decision.reason
+      : ctx.lastSummaryRef.value || decision.reason,
   );
 }

@@ -14,7 +14,7 @@
  * findings, a decisions map). Both are expressed as the same
  * `SubmissionIssue | null` validator so a caller never has to know which.
  */
-import type { RefinementCtx, ZodTypeAny } from "zod";
+import type { RefinementCtx, ZodError, ZodTypeAny } from "zod";
 
 import {
   CharterLaneSubmissionSchema,
@@ -25,7 +25,6 @@ import {
   ClarificationAnswersSubmissionSchema,
   CriticalFlowFallbackResultSchema,
   SynthesisNarrativeSchema,
-  SystemicChallengeSubmissionSchema,
   isRecord,
   systemicChallengeSchema,
   type CharterKind,
@@ -218,19 +217,24 @@ export const LANE_SUBMISSION_SCHEMAS: Readonly<Record<string, ZodTypeAny>> = {
   [GATE_LANES.charter_comparison]: CharterComparisonSubmissionSchema,
   [GATE_LANES.charter_fidelity]: CharterFidelitySubmissionSchema,
   [GATE_LANES.charter_clarification]: ClarificationAnswersSubmissionSchema,
-  [GATE_LANES.systemic_challenge]: SystemicChallengeSubmissionSchema,
   [GATE_LANES.intent_equivalence]: IntentEquivalenceVerdictSchema,
 };
+
+/**
+ * The one spelling of a zod failure a host reads: each issue as `path: message`,
+ * the root path as `(root)`, joined by `; `. The lane validators and the fold's
+ * quarantine notice both use it, so the two never disagree.
+ */
+export function describeZodIssues(error: ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+    .join("; ");
+}
 
 function schemaIssue(schema: ZodTypeAny, value: unknown): SubmissionIssue | null {
   const parsed = schema.safeParse(value);
   if (parsed.success) return null;
-  return {
-    code: "submission_contract_invalid",
-    message: parsed.error.issues
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; "),
-  };
+  return { code: "submission_contract_invalid", message: describeZodIssues(parsed.error) };
 }
 
 function arrayIssue(value: unknown): SubmissionIssue | null {
@@ -285,8 +289,9 @@ export function laneSubmissionValidator(
 
   // The kind decides only that this IS an extraction lane; every extraction
   // lane answers to the identical contract.
-  if (charterKindForLane(lane)) {
-    const laneSchema = charterLaneSchema(context.repoFiles, charterKindForLane(lane)!);
+  const charterKind = charterKindForLane(lane);
+  if (charterKind) {
+    const laneSchema = charterLaneSchema(context.repoFiles, charterKind);
     return (value) => schemaIssue(laneSchema, value);
   }
 

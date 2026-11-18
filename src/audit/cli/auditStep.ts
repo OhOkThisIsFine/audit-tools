@@ -218,14 +218,12 @@ async function executeAdvance(
       auditResults,
       new Set((bundle.audit_tasks ?? []).map((task) => task.task_id)),
     );
-    const resultsToValidate =
-      partition && partition.orphanedTaskIds.length > 0
-        ? partition.retained
-        : auditResults;
-    if (partition && partition.orphanedTaskIds.length > 0) {
+    const orphaned = partition && partition.orphanedTaskIds.length > 0 ? partition : null;
+    const resultsToValidate = orphaned ? orphaned.retained : auditResults;
+    if (orphaned) {
       process.stderr.write(
-        `audit-results ingestion: ${partition.orphanedTaskIds.length} result(s) whose task_id ` +
-          `is not in the active manifest (orphaned by re-planning) retained in the ledger but skipped at the validation gate: ${partition.orphanedTaskIds.join(", ")}\n`,
+        `audit-results ingestion: ${orphaned.orphanedTaskIds.length} result(s) whose task_id ` +
+          `is not in the active manifest (orphaned by re-planning) retained in the ledger but skipped at the validation gate: ${orphaned.orphanedTaskIds.join(", ")}\n`,
       );
     }
     const issues = validateAuditResults(resultsToValidate, bundle.audit_tasks ?? [], {
@@ -301,7 +299,7 @@ async function executeAdvance(
         await readAuditReviewSubmission<unknown>(options.systemicChallengePath, options.artifactsDir, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []), () => currentAuditReviewInputRevision(sourceRoot, bundle, systemicChallengeLane(bundle.systemic_challenge?.rounds ?? []))),
       ) as SystemicChallengeSubmission)
     : undefined;
-  const result = await advanceAudit(bundle, {
+  return await advanceAudit(bundle, {
     root: sourceRoot,
     repositoryRoot: options.root,
     artifactsDir: options.artifactsDir,
@@ -341,8 +339,6 @@ async function executeAdvance(
     },
     runLogger,
   });
-
-  return result;
 }
 
 /**

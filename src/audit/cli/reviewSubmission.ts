@@ -33,17 +33,27 @@ export async function currentAuditReviewInputRevision(root: string, bundle: Arti
   throw new Error(`No semantic review input owner for lane '${lane}'`);
 }
 
-export async function auditReviewBinding(artifactsDir: string, lane: string): Promise<{ requirement: ReviewRequirement; promptSha256?: string }> {
+/**
+ * The one rule for what a lane's review must answer: an ordinary lane reads no
+ * binding; any other lane expects the bound prompt digest only when the binding
+ * was issued for the same requirement.
+ */
+async function resolveAuditReviewBinding(artifactsDir: string, lane: string) {
   const requirement = auditLaneReviewRequirement(lane);
-  if (requirement === "ordinary") return { requirement };
-  const binding = await readAuditReviewBinding(artifactsDir, lane);
-  return { requirement, ...(binding?.requirement === requirement ? { promptSha256: binding.promptSha256 } : {}) };
+  const binding = requirement === "ordinary" ? undefined : await readAuditReviewBinding(artifactsDir, lane);
+  const expected: { requirement: ReviewRequirement; promptSha256?: string } = {
+    requirement,
+    ...(binding?.requirement === requirement ? { promptSha256: binding.promptSha256 } : {}),
+  };
+  return { binding, expected };
+}
+
+export async function auditReviewBinding(artifactsDir: string, lane: string): Promise<{ requirement: ReviewRequirement; promptSha256?: string }> {
+  return (await resolveAuditReviewBinding(artifactsDir, lane)).expected;
 }
 
 export async function decodeAuditReviewSubmission(artifactsDir: string, lane: string, raw: unknown, currentInputRevision?: CurrentReviewInputRevision) {
-  const requirement = auditLaneReviewRequirement(lane);
-  const binding = requirement === "ordinary" ? undefined : await readAuditReviewBinding(artifactsDir, lane);
-  const expected = { requirement, ...(binding?.requirement === requirement ? { promptSha256: binding.promptSha256 } : {}) };
+  const { binding, expected } = await resolveAuditReviewBinding(artifactsDir, lane);
   const parsed = parseReviewSubmissionEnvelope(raw, expected);
   if (!parsed.ok && parsed.code !== "review_unavailable") return parsed;
   if (binding && currentInputRevision !== undefined) {

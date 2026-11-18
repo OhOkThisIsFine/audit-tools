@@ -21,9 +21,6 @@ const PROVENANCE_KINDS = CharterProvenanceSchema.shape.kind.options.join("|");
  * `true` is NOT a lane. Lane prompts are ADVANCE-FREE (no continue-command).
  */
 
-/** The three estimator kinds — every extraction lane; never `true`. */
-export type EstimatorCharterKind = CharterLaneKind;
-
 /**
  * The extraction kinds a run's ceiling requests, in canonical order. The three
  * estimator channels extract at every charter-authorizing ceiling; `deepest`
@@ -31,7 +28,7 @@ export type EstimatorCharterKind = CharterLaneKind;
  */
 export function charterExtractionKindsForCeiling(
   _ceiling: Ceiling,
-): EstimatorCharterKind[] {
+): CharterLaneKind[] {
   return ["stated", "structural", "revealed"];
 }
 
@@ -42,7 +39,7 @@ export function charterExtractionKindsForCeiling(
  * against the schema here rather than trusted, so an enum rename cannot leave a
  * stale example behind.
  */
-function exampleProvenanceKind(kind: EstimatorCharterKind): string {
+function exampleProvenanceKind(kind: CharterLaneKind): string {
   const literal = kind === "stated" ? "doc" : "code";
   const allowed: readonly string[] = CharterProvenanceSchema.shape.kind.options;
   if (!allowed.includes(literal)) {
@@ -55,7 +52,7 @@ function exampleProvenanceKind(kind: EstimatorCharterKind): string {
 
 /** Per-kind perspective line, packet description, and the `files` rule (scope follows the evidence). */
 const KIND_LANE_TEXT: Record<
-  EstimatorCharterKind,
+  CharterLaneKind,
   { perspective: string; packet: string; filesRule: string }
 > = {
   stated: {
@@ -89,7 +86,7 @@ const KIND_LANE_TEXT: Record<
  * submission path.
  */
 export function renderCharterKindLanePrompt(opts: {
-  kind: EstimatorCharterKind;
+  kind: CharterLaneKind;
   submissionPath: string;
   packetPath: string;
 }): string {

@@ -10,6 +10,7 @@ import { charterClarificationOmits } from "../orchestrator/obligationPolicy.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
 import { SubmittedDesignFindingSchema } from "../types/conceptualAdjudication.js";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { errorMessage } from "../../shared/io/json.js";
 
 /** Lanes with complete admission checks; other lanes retain their existing routes. */
 export const SUPPORTED_GATE_SUBMISSIONS = [GATE_LANES.synthesis_narrative, GATE_LANES.critical_flow_fallback, GATE_LANES.intent_equivalence, GATE_LANES.edge_reasoning, GATE_LANES.charter_clarification, GATE_LANES.design_review_contract] as const;
@@ -62,7 +63,7 @@ export async function submitGateResult(params: { artifactsDir: string; lane: str
       // shape below. The executor remains the authority when consuming it.
       refuseUnaskedRequestIds(ClarificationAnswersSubmissionSchema.parse(value), register.asked);
     } catch (error) {
-      return { written: false, issues: [{ code: "invalid_charter_clarification", message: error instanceof Error ? error.message : String(error) }] };
+      return { written: false, issues: [{ code: "invalid_charter_clarification", message: errorMessage(error) }] };
     }
   }
   if (params.lane === GATE_LANES.intent_equivalence) {

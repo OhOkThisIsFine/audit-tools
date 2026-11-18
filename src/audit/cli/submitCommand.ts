@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/result-submit.test.ts
+import { outputJson } from "./cliHelpers.js";
 import { submitGateResult, SUPPORTED_GATE_SUBMISSIONS } from "./submitGateResult.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -33,6 +34,11 @@ export async function submitWorkItemResult(params: {
   });
 }
 
+/** The argv an MCP request stands for: its root, and its artifacts dir when it names one. */
+function mcpRequestArgv(request: { root: string; artifactsDir?: string }): string[] {
+  return ["--root", request.root, ...(request.artifactsDir === undefined ? [] : ["--artifacts-dir", request.artifactsDir])];
+}
+
 /**
  * `audit-code mcp` — serve the submit-only MCP tool over stdio. The server is
  * imported here, not at the top, so no other command loads the MCP SDK. The
@@ -46,12 +52,12 @@ export async function cmdMcp(_argv: string[]): Promise<void> {
     gateSubmission: {
       lanes: SUPPORTED_GATE_SUBMISSIONS,
       submit: async request => {
-        const argv = ["--root", request.root, ...(request.artifactsDir === undefined ? [] : ["--artifacts-dir", request.artifactsDir])];
+        const argv = mcpRequestArgv(request);
         return submitGateResult({ artifactsDir: getArtifactsDir(argv), lane: request.lane, source: request.source });
       },
     },
     submit: async (request) => {
-      const argv = ["--root", request.root, ...(request.artifactsDir === undefined ? [] : ["--artifacts-dir", request.artifactsDir])];
+      const argv = mcpRequestArgv(request);
       const check = await submitWorkItemResult({
         root: getRootDir(argv),
         artifactsDir: getArtifactsDir(argv),
@@ -85,19 +91,15 @@ export async function cmdSubmit(argv: string[]): Promise<void> {
     workItemId,
     source: await readFile(from, "utf8"),
   });
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        submitted_from: resolve(from),
-        ...check,
-        written: check.issues.length === 0,
-        warning_count: check.validation_warnings.length,
-        error_count: check.issues.length,
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      artifacts_dir: artifactsDir,
+      submitted_from: resolve(from),
+      ...check,
+      written: check.issues.length === 0,
+      warning_count: check.validation_warnings.length,
+      error_count: check.issues.length,
+    },
   );
   process.exitCode = check.issues.length > 0 ? 1 : 0;
 }

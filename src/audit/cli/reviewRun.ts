@@ -91,10 +91,6 @@ export interface MaterializeReviewRunParams {
   artifactsDir: string;
   bundle: ArtifactBundle;
   obligationId: string | null;
-  /** Retained only for call-shape stability; execution is host-owned. */
-  selfCliPath?: string;
-  /** Retained only for call-shape stability; audit-tools launches nothing. */
-  timeoutMs?: number;
   tasksOverride?: AuditTask[];
   /**
    * Persist at this run id instead of deriving one — used ONLY to adopt a run an
@@ -345,8 +341,6 @@ interface ReviewPauseParams {
   bundle: ArtifactBundle;
   state: AuditState;
   obligationId: string | null;
-  selfCliPath?: string;
-  timeoutMs?: number;
   /**
    * The step kind the host is being handed INSTEAD of a semantic-review step —
    * set when the pause only opens the scoped-inspection run beside it (a charter
@@ -399,23 +393,15 @@ async function resolveReviewRun(
     isLegacyClockRunId(active.run_id)
       ? active.run_id
       : null;
-  if (adopted !== null) {
-    // The active manifest is tool-owned and never host-supplied, but the adopted
-    // id becomes a directory segment — so it clears the SAME grammar as any
-    // other run id before it is used to build a path, exactly as the
-    // host-handoff boundary does.
-    assertSubmissionRunId(adopted, "audit review run id");
-    const { activeReviewRun } = await materializeReviewRun({
-      ...params,
-      runIdOverride: adopted,
-      waveGeneration: await resolveWaveGeneration(params.artifactsDir),
-    });
-    return activeReviewRun;
-  }
-  const generation = await resolveWaveGeneration(params.artifactsDir);
+  // The active manifest is tool-owned and never host-supplied, but the adopted
+  // id becomes a directory segment — so it clears the SAME grammar as any
+  // other run id before it is used to build a path, exactly as the
+  // host-handoff boundary does.
+  if (adopted !== null) assertSubmissionRunId(adopted, "audit review run id");
   const { activeReviewRun } = await materializeReviewRun({
     ...params,
-    waveGeneration: generation,
+    ...(adopted === null ? {} : { runIdOverride: adopted }),
+    waveGeneration: await resolveWaveGeneration(params.artifactsDir),
   });
   return activeReviewRun;
 }
@@ -492,15 +478,13 @@ export async function persistConfigErrorHandoff(params: {
     });
     const blockedBundle = { ...bundle, audit_state: blockedState };
     await writeCoreArtifacts(params.artifactsDir, blockedBundle);
-    await writeAuditCodeHandoffArtifacts(
-      buildAuditCodeHandoff({
-        root: params.root,
-        artifactsDir: params.artifactsDir,
-        state: blockedState,
-        bundle: blockedBundle,
-        progressSummary: params.progressSummary,
-        isConfigError: true,
-      }),
-    );
+    await writeHandoffOnly({
+      root: params.root,
+      artifactsDir: params.artifactsDir,
+      bundle: blockedBundle,
+      audit_state: blockedState,
+      progress_summary: params.progressSummary,
+      isConfigError: true,
+    });
   });
 }

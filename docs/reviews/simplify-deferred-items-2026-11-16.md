@@ -38,6 +38,23 @@ the work that would make it a plain cleanup.
   prompts over one fixture bundle; then refactor against it.
 - **P04 — named options for `buildPacket`** in `reviewPackets.ts`. Blocker: tests call it with
   positional arguments. **Unblock:** change those tests in the same commit.
+- **P05 — unused names that tests still use:** the unused guard parameters in
+  `nextStepHelpers.ts`, the `args.ts` option aliases, the `synthesize` / `forceSynthesis` alias,
+  `NextStepParams.selfCliPath`, the re-exports that only tests import, the home of
+  `renderIntentEquivalencePrompt`, and the unused argument of `charterExtractionKindsForCeiling`.
+  **Unblock:** change the tests that name them in the same commit.
+- **P05 — files with no `// sites-pinned:` declaration.** `check:sites-pinned` refuses a changed
+  line that no declaration covers. So `outputJson` was not applied in `planCommand.ts`,
+  `ingestResultsCommand.ts` (two sites), `importExternalAnalyzerCommand.ts` and
+  `validateCommand.ts`, and `sampleRunCommand.ts` keeps its `audit_state.json` literal (the other
+  three cli sites read `ARTIFACT_DEFINITIONS.audit_state.fileName`). **Unblock:** add a declaration
+  with the test that pins each file's sites.
+- **P05 — one lane-projection helper for the five `renderFanoutExecutionLines` calls** in
+  `nextStepCommand.ts` that drop `resultPath`. Blocker: `tests/shared/lane-demand.test.ts` reads
+  each call's source text and requires the literal `demand: lane.demand` in it. **Unblock:** let
+  that test accept a call through the helper when the helper body carries `demand`.
+- **P05 — one `loadResultJudgmentContext` for `submit` and `validate-results`.** Not done in the
+  P05 lap. **Unblock:** check the sites-pinned declarations and the tests of both commands first.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -65,6 +82,21 @@ real change, not a cleanup.
   ingestion.
 - **P04 — an exhaustive table for the optional-lens switch.** Custom lens names reach the switch,
   so its default arm is live. **Unblock:** prove that no custom lens name reaches it.
+- **P05 — one quarantine-and-reject helper** for the submission consumers in
+  `nextStepHelpers.ts`. An independent refuter found that the sites differ: some write to stderr
+  and some do not, and the issue codes differ. **Unblock:** decide one stderr rule and one code
+  set for all the sites, as a behavior change.
+- **P05 — the line-index option for `runAuditStepUnlocked`** and wider `manifestIndexes` routing.
+  A shared index changes which call prints the duplicate stderr diagnostics.
+- **P05 — the fold's manifest index cache for `ingestAvailableInspectionResults`** in
+  `nextStepHelpers.ts`. The first deterministic dispatch of the fold would reuse the ingest's line
+  index, so a `[lineIndex]` warning for a file that is not on disk would print once per fold, not
+  twice. The index content is the same, and one disk pass is saved. **Unblock:** accept the
+  stderr change, together with the `runAuditStepUnlocked` item above.
+- **P05 — read the cheap skip checks first in `readPublishedAuditTaskIds`.** A missing
+  `sourceRoot` is not typed, so the new order can change which error shows.
+- **P05 — narrow `submit` and `validate-results` to `buildLineIndexForPaths`.** A narrower index
+  can change a verdict.
 - **P04 — the "unreachable" `??` fallbacks** in `intentEquivalenceExecutor.ts` (`?? Math.max(...)`)
   and `intentScopeDisposition.ts` (`?? "out of scope"`). Each is unreachable only by an invariant
   that the type does not state. **Unblock:** narrow the type so the compiler proves it.
@@ -81,6 +113,14 @@ real change, not a cleanup.
   row a type error for every bundle, not only for the bundles that test builds.
 - **P01 — `classifyRead` delegation, a private `runGit` wrapper, an artifact-freshness policy
   table.** Small gain; part of it is loop-core.
+- **P05 — a derive cache for the audit state** (the P03 lead). `ingestBatchAuditResults` in
+  `auditStep.ts` would also use it, but it differs on the `complete` status.
+- **P05 — a `Pick` type for `HostInputPauseInputs`**: the source types are in P03 and P07.
+- **P05 — one render per step of the design-review file map and input revision**, and of the
+  structural context in deep `conceptualDispatch` (the P04 lead). Each needs a new optional
+  parameter on the P04 prompt modules.
+- **P05 — a prepared validator for `validateOneAuditResult`** (P07 validation; see the P05
+  leads in the partition record).
 - **P01 — public barrel narrowing** (unused exported types, `lensOutcome`): an owner decision on
   the public surface of `audit-tools/shared`.
 
@@ -106,6 +146,8 @@ worth a change.
   a packet, the kinds of the charter packet archive, a `mkdir` per kind in its loop). Each must
   keep its output order.
 - **P04 — one pass for the three verdict filters** in `charterFidelityExecutor.ts`. Small inputs.
+- **P05:** a path-to-hash map in `toAuditHostTask`; a memo of the generated fanout context in
+  `fanoutLanes.ts`; one partition pass in `dropAcceptedResults`.
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -121,6 +163,13 @@ worth a change.
   chain needs an API change.
 - **P04 — the `.has` guard in `shouldBuildLensVerificationTask`** repeats the caller's lens filter.
   It keeps the function safe on its own input; removing it saves one lookup.
+- **P05:** a local `rejectEdgeReasoning` helper for the two edge-reasoning arms in
+  `nextStepHelpers.ts`; one remaining `mergeFoldAdvisoriesInto` cleanup; the rest of the misplaced
+  JSDoc blocks in `nextStepHelpers.ts`; a `gatePromptWithShortfall` helper for the four gate
+  emitters in `nextStepCommand.ts`; the `BranchResult` aliases; the private `fileExists` copies;
+  `resultPathFor` (kept for parity with the remediate twin); the sample `total_lines` of 100 in
+  `sampleRunCommand.ts`; a `Set` in `explainTaskCommand.ts`; the hoist of the systemic lane in
+  `auditStep.ts`; a shared `PROVENANCE_KINDS` list.
 
 ## 6. Rejected — do not re-propose
 

@@ -124,12 +124,9 @@ export function renderConfirmIntentPrompt(
     .join("\n");
 
   // Render disposition override proposals
-  const overrideProposalLines =
-    preDigest.disposition_override_proposals.length > 0
-      ? preDigest.disposition_override_proposals
-          .map((p) => `- \`${p.path}\` → \`${p.proposed_status}\` (${p.reason})`)
-          .join("\n")
-      : "_(none)_";
+  const overrideProposalLines = preDigest.disposition_override_proposals
+    .map((p) => `- \`${p.path}\` → \`${p.proposed_status}\` (${p.reason})`)
+    .join("\n");
 
   // Render the canonical lens proposition table (note 1) — one glyph-labelled
   // row per lens, in registry order. Mandatory rows always show ● mandatory.

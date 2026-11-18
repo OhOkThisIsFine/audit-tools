@@ -91,9 +91,11 @@ export const GATE_LANES = {
   systemic_challenge: "systemic_challenge",
 } as const;
 
+const CHARTER_EXTRACTION_LANE_PREFIX = "charter_extraction_";
+
 /** The blind per-kind charter lanes (one per estimator channel). */
 export function charterExtractionLane(kind: CharterKind): string {
-  return `charter_extraction_${kind}`;
+  return `${CHARTER_EXTRACTION_LANE_PREFIX}${kind}`;
 }
 
 /** Recover the charter kind a `charter_extraction_*` lane id denotes. */
@@ -104,8 +106,6 @@ export function charterKindForLane(lane: string): CharterKind | undefined {
   );
   return parsed.success ? parsed.data : undefined;
 }
-
-const CHARTER_EXTRACTION_LANE_PREFIX = "charter_extraction_";
 
 export const CONCEPTUAL_PERSPECTIVE_LANE_PREFIX = "design_review_conceptual_p";
 
@@ -239,10 +239,11 @@ export function laneSubmissionPath(
  * emissions' read-merge-write cycles can no longer interleave their merges and
  * silently drop a lane declaration.
  */
-const expectedSetStore = (artifactsDir: string) =>
-  createLockedJsonStore<ExpectedSubmissionSet | undefined>({
-    path: expectedSubmissionsPath(artifactsDir),
-    lockPath: siblingLockPath(expectedSubmissionsPath(artifactsDir)),
+const expectedSetStore = (artifactsDir: string) => {
+  const path = expectedSubmissionsPath(artifactsDir);
+  return createLockedJsonStore<ExpectedSubmissionSet | undefined>({
+    path,
+    lockPath: siblingLockPath(path),
     // CP-NODE-5's recorded degrade-not-throw design, now MECHANICAL in the
     // store rather than a try/catch this module had to remember: a corrupt set
     // degrades to absent, so `parse` sees `undefined` and the emission's
@@ -251,27 +252,17 @@ const expectedSetStore = (artifactsDir: string) =>
     parse: (raw) => {
       if (raw === undefined) return undefined;
       // A set left by another release is DISCARDED, not reinterpreted under
-      // this release's field semantics (the regenerate-on-emit design).
+      // this release's field semantics (the regenerate-on-emit design). The
+      // emission after an upgrade is then first-emission-silent: nothing was
+      // carried that this release asked for, so no lane reads as dropped.
       return discardOnSchemaVersionMismatch(
         raw as ExpectedSubmissionSet,
         EXPECTED_SET_CONTRACT_VERSION,
       );
     },
   });
+};
 
-/**
- * The current statement of what is owed, or `undefined` when there isn't one.
- *
- * REGENERABLE state: the set is rewritten at every emit from the lanes the
- * emission declares, so a set left by another release is DISCARDED rather than
- * reinterpreted under this release's field semantics. The fail-shape is the one
- * this reader already has for an absent file — the merge below starts from
- * nothing, every declared lane counts as newly added, and the carried-lane diff
- * therefore sees no prior entries and reports no shortfall. That is exactly
- * right after an upgrade: nothing was carried into this emission that this
- * release ever asked for, so the emission is first-emission-silent instead of
- * accusing the host of dropping lanes it was never coherently asked for.
- */
 /** One lane an emission owes, as the emitter knows it. */
 export interface DeclaredLane {
   readonly lane: string;
@@ -545,7 +536,10 @@ export async function closeDispatchedLaneOutcomes(
   const events = await readSubmissionLedger(artifactsDir);
   const dispatched = new Set<string>();
   const terminated = new Set<string>();
+  // A later event overwrites an earlier one: the map holds the LAST binding.
+  const lastPromptBound = new Map<string, (typeof events)[number]>();
   for (const event of events) {
+    if (event.kind === "prompt_bound") lastPromptBound.set(event.submission_id, event);
     if (event.kind === "dispatched") dispatched.add(event.submission_id);
     else if (event.kind === "lane_outcome" || isIngestEvent(event.kind)) {
       terminated.add(event.submission_id);
@@ -563,7 +557,7 @@ export async function closeDispatchedLaneOutcomes(
       kind: "lane_outcome",
       outcome: await observeLaneDelivery(
         laneSubmissionPath(artifactsDir, lane, runId),
-        [...events].reverse().find(event => event.kind === "prompt_bound" && event.submission_id === submissionId),
+        lastPromptBound.get(submissionId),
       ),
       ...(params.roundId === undefined ? {} : { round_id: params.roundId }),
       recorded_at: new Date().toISOString(),

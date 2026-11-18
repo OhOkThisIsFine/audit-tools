@@ -1,14 +1,16 @@
+// sites-pinned: tests/audit/status-command.test.ts
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
+import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
-  const auditStatePath = join(artifactsDir, "audit_state.json");
+  const auditStatePath = join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName);
 
   // 1. Read audit_state.json
   let auditState: AuditState | null = null;
@@ -27,7 +29,6 @@ export async function cmdStatus(argv: string[]): Promise<void> {
   }
 
   // Build obligations summary: count by state
-  // sites-pinned: tests/audit/status-command.test.ts
   const obligationStates: Record<ObligationState, number> = {
     missing: 0,
     present: 0,

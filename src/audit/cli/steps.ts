@@ -113,17 +113,6 @@ export const StepArtifactSchema = z
 export type StepArtifact = z.infer<typeof StepArtifactSchema>;
 
 /**
- * Write the audit step contract. Delegates to the shared `writeStepContract`
- * (drift-plan R3) — the single source for the steps/ filenames, mkdir, prompt
- * write, atomic current-step.json write, the forward-slash normalization of ALL
- * host-facing path fields, and the canonical-paths-win merge. Promoting the
- * writer to shared is what fixed audit-code's Windows path-separator drift: it
- * previously wrote `prompt_path` / `repo_root` / `artifacts_dir` /
- * `artifact_paths` with raw backslashes, while remediate-code normalized them.
- * Audit's optional fields (progress, access) ride through
- * `extraFields` with the same conditional-omission semantics as before.
- */
-/**
  * One-line scope echo rendered into EVERY step prompt from the persisted
  * `scope_summary.json` the intake executor writes. Previously the echo lived
  * only in the host loader instructions, keyed to "after the FIRST next-step
@@ -169,6 +158,17 @@ export function scopeEchoLine(artifactsDir: string): string | null {
  */
 export const AGENT_FEEDBACK_ARTIFACT_KEY = "agent_feedback";
 
+/**
+ * Write the audit step contract. Delegates to the shared `writeStepContract`
+ * (drift-plan R3) — the single source for the steps/ filenames, mkdir, prompt
+ * write, atomic current-step.json write, the forward-slash normalization of ALL
+ * host-facing path fields, and the canonical-paths-win merge. Promoting the
+ * writer to shared is what fixed audit-code's Windows path-separator drift: it
+ * previously wrote `prompt_path` / `repo_root` / `artifacts_dir` /
+ * `artifact_paths` with raw backslashes, while remediate-code normalized them.
+ * Audit's optional fields (progress, access) ride through
+ * `extraFields` with the same conditional-omission semantics as before.
+ */
 export async function writeCurrentStep(params: {
   artifactsDir: string;
   stepKind: StepKind;

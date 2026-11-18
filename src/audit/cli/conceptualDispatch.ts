@@ -272,6 +272,9 @@ export async function prepareConceptualDispatch(opts: {
       roundId: priorRound.round_id,
     });
   };
+  // The same for every lane of the pass: the bundle is not mutated between lanes.
+  const semanticInputRevision = designReviewInputRevision(bundle, "conceptual");
+  const fileCount = bundle.repo_manifest?.files.length ?? 0;
 
   if (settings.conceptual_depth !== "deep") {
     const fanout = await materializeFanoutLanes({
@@ -281,8 +284,8 @@ export async function prepareConceptualDispatch(opts: {
       lanes: [
         {
           id: GATE_LANES.design_review_conceptual,
-          semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
-          fileCount: bundle.repo_manifest?.files.length ?? 0,
+          semanticInputRevision,
+          fileCount,
           ...SEMANTIC_REVIEW_DEMAND,
           label: "Conceptual review (generative)",
           promptFilename: "design-review-conceptual-prompt.md",
@@ -375,28 +378,31 @@ export async function prepareConceptualDispatch(opts: {
   );
 
   const laneSpecs: FanoutLaneSpec[] = [
-    ...perspectiveFiles.map((f) => ({
-      id: f.lane,
-      semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
-      fileCount: bundle.repo_manifest?.files.length ?? 0,
-      ...SEMANTIC_REVIEW_DEMAND,
-      label: `Conceptual perspective — ${f.name}`,
-      promptFilename: f.promptFilename,
-      generatedContext: fileMapContext,
-      promptText: f.promptText + (perspectiveRefusals.has(laneSubmissionId(f.lane))
-        ? `\n\n## Previous submission rejected\n\n${perspectiveRefusals.get(laneSubmissionId(f.lane))!.message}`
-        : ""),
-      // A perspective's findings are read by the JUDGE, never by this tool —
-      // so the tool is owed nothing here and must not record an expectation it
-      // will never satisfy. The bound path is still minted and declared below.
-      expected: false,
-    })),
+    ...perspectiveFiles.map((f) => {
+      const refusal = perspectiveRefusals.get(laneSubmissionId(f.lane));
+      return {
+        id: f.lane,
+        semanticInputRevision,
+        fileCount,
+        ...SEMANTIC_REVIEW_DEMAND,
+        label: `Conceptual perspective — ${f.name}`,
+        promptFilename: f.promptFilename,
+        generatedContext: fileMapContext,
+        promptText: f.promptText + (refusal
+          ? `\n\n## Previous submission rejected\n\n${refusal.message}`
+          : ""),
+        // A perspective's findings are read by the JUDGE, never by this tool —
+        // so the tool is owed nothing here and must not record an expectation it
+        // will never satisfy. The bound path is still minted and declared below.
+        expected: false,
+      };
+    }),
     {
       // The judge PRODUCES the conceptual submission, so it is that lane — a
       // separate judge lane id would mint a bound path nothing reads.
       id: GATE_LANES.design_review_conceptual,
-      semanticInputRevision: designReviewInputRevision(bundle, "conceptual"),
-      fileCount: bundle.repo_manifest?.files.length ?? 0,
+      semanticInputRevision,
+      fileCount,
       ...SEMANTIC_REVIEW_DEMAND,
       label: "Conceptual review judge (independent merge)",
       promptFilename: "design-review-conceptual-judge-prompt.md",

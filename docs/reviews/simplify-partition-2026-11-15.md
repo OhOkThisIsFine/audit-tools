@@ -33,7 +33,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P02 shared infrastructure | the rest of `src/shared/**` (`analyzers`, `tooling`, `io`, `decompose`, `friction`, `graph`, `observability`, `measurement`) | 58 | 15,569 | 66 | landed |
 | P03 audit orchestrator core | `src/audit/orchestrator/**` except the P04 names | 55 | 12,438 | 47 | landed |
 | P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | landed |
-| P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | open |
+| P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | landed |
 | P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | open |
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | open |
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | open |
@@ -173,3 +173,42 @@ P04 coverage gap: the altitude reviewer did not read the `designReview*` files,
 `intentEquivalenceExecutor.ts`, `systemicChallengeExecutor.ts`, `reviewPacketGraphContext.ts`,
 `charterPacketArchive.ts`, `charterFidelityPacket.ts` and `charterExtractionExecutor.ts` in depth.
 The other three angles covered them.
+
+### From P05
+
+P05 closed the P04 lead for `uniqueSorted` in `src/audit/cli/` (`lineIndex.ts`, `fanoutLanes.ts`,
+`recoverSubmissionCommand.ts` and three sites in `dispatch/hostHandoff.ts` call it). It did not do
+the other P04 lead (one render of the structural context per step in deep `conceptualDispatch`):
+that needs a new optional parameter on the P04 prompt module, so it is in the deferred record.
+
+P05 made no cross-part touch. Every changed file is under `src/audit/cli/`.
+`describeZodIssues` (one `path: message` formatter, `(root)` for an empty path) is now exported
+from `laneValidators.ts`, and `describeSubmissionFailure` in `nextStepHelpers.ts` calls it.
+
+`ingestAuditHostResults` in `dispatch/hostHandoff.ts` no longer filters a "landed" set. The
+filter compared the additions with the in-memory accepted set, and the scan already refuses a
+result id in that set, so the filter always returned the additions. It was residue of the
+second-hold merge (`cb8acfd5`): the read, judge and append now run under one hold of the ledger
+lock.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P01:** `src/shared/submission/hostResultOutcomes.ts` has comments about a work item that "a
+  concurrent ingest accepted". Check that each one describes an earlier ingest, not a race inside
+  one ingest, which the one hold (see above) excludes. Also check whether
+  `duplicate_submission_id` with remedy `none` is the correct outcome for a re-used `result_id`.
+- **P07 (validation):** `validateOneAuditResult` builds a new lookup `Map` on each call. A
+  prepared validator per batch would build it once.
+- **P11:** the `artifactsDirWrites` prose in `scripts/guard-reach-data.mjs` is stale.
+- **Tests:** a comment in `tests/audit/semantic-review-step.test.ts` names behavior that the code
+  no longer has.
+- **P05 (correctness, not checked):** `fanoutLanes.ts` stores the unbound `body` in `writtenText`,
+  but the comment near it says that the map mirrors the written file. Find which one is intended.
+
+P05 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each. Some inline `console.log(JSON.stringify(...))` sites and one `audit_state.json`
+literal stay, because no `// sites-pinned:` declaration covers those files.
+
+P05 coverage: each of the 50 files was read in full by at least one reviewer.
+`nextStepHelpers.ts` was read in full by both of its angles.

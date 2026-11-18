@@ -1,8 +1,11 @@
+// sites-pinned: tests/audit/cleanup.test.ts, tests/audit/run-snapshot-ownership.test.ts
+import { outputJson } from "./cliHelpers.js";
 import { existsSync } from "node:fs";
 import { basename, dirname, parse, resolve } from "node:path";
 import { AUDIT_TOOLS_DIRNAME, auditArtifactsDir } from "audit-tools/shared";
 import { getArtifactsDir, getRootDir, hasFlag } from "./args.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
+import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
 
 // The structural identity of an audit artifacts directory, which the `cleanup`
 // verb has to PROVE a target carries before recursively deleting it
@@ -11,9 +14,8 @@ import { cleanupStaleArtifactsDir } from "./cleanup.js";
 // directly, the area segment derived from the helper that builds it — so a
 // layout change moves this guard with it instead of silently disarming it.
 const AUDIT_AREA_DIRNAME = basename(auditArtifactsDir("."));
-// The supervisor state marker; audit-tools/shared exposes no constant for it yet
-// (the literal is spelled at every producer/consumer site), so it is named here.
-const AUDIT_STATE_FILENAME = "audit_state.json";
+// The supervisor state marker, named by the artifact registry.
+const AUDIT_STATE_FILENAME = ARTIFACT_DEFINITIONS.audit_state.fileName;
 
 export type CleanupTargetValidation =
   | { ok: true }
@@ -67,22 +69,17 @@ function emitRefusal(
   reason: string,
   dryRun: boolean,
 ): void {
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        action: "refused",
-        reason,
-        dry_run: dryRun,
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      artifacts_dir: artifactsDir,
+      action: "refused",
+      reason,
+      dry_run: dryRun,
+    },
   );
   process.exitCode = 1;
 }
 
-// sites-pinned: tests/audit/cleanup.test.ts, tests/audit/run-snapshot-ownership.test.ts
 export async function cmdCleanup(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const dryRun = hasFlag(argv, "--dry-run");
@@ -108,39 +105,31 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
   const result = await cleanupStaleArtifactsDir(artifactsDir, { force, dryRun, repositoryRoot: getRootDir(argv) });
 
   if (result.action === "skipped") {
-    console.log(
-      JSON.stringify(
-        {
-          artifacts_dir: artifactsDir,
-          action: "skipped",
-          // Do NOT advise --force here. This fallback covers the
-          // status="unknown" branch — a directory with no audit_state.json
-          // marker — and that is the one case --force does NOT waive: the
-          // marker check above refuses a forced delete outright. Force waives
-          // the run's STATUS evidence, never its IDENTITY evidence.
-          reason:
-            result.reason ??
-            "no audit_state.json found — the directory carries no audit-run marker, so it is not provably an audit artifacts dir; --force does not waive this (force waives run STATUS evidence, never IDENTITY evidence)",
-          dry_run: dryRun,
-        },
-        null,
-        2,
-      ),
+    outputJson(
+      {
+        artifacts_dir: artifactsDir,
+        action: "skipped",
+        // Do NOT advise --force here. This fallback covers the
+        // status="unknown" branch — a directory with no audit_state.json
+        // marker — and that is the one case --force does NOT waive: the
+        // marker check above refuses a forced delete outright. Force waives
+        // the run's STATUS evidence, never its IDENTITY evidence.
+        reason:
+          result.reason ??
+          "no audit_state.json found — the directory carries no audit-run marker, so it is not provably an audit artifacts dir; --force does not waive this (force waives run STATUS evidence, never IDENTITY evidence)",
+        dry_run: dryRun,
+      },
     );
     process.exitCode = 1;
     return;
   }
 
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        action: result.action,
-        status: result.status,
-        dry_run: dryRun,
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      artifacts_dir: artifactsDir,
+      action: result.action,
+      status: result.status,
+      dry_run: dryRun,
+    },
   );
 }

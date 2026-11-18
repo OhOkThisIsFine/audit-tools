@@ -2,7 +2,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
-import { isWorkingDirFullyPromoted } from "../io/artifacts.js";
+import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted } from "../io/artifacts.js";
 import { removeRunSnapshot } from "../io/runSnapshot.js";
 import type { AuditState } from "../types/auditState.js";
 
@@ -58,7 +58,7 @@ export async function cleanupStaleArtifactsDir(
   let status: AuditState["status"] | "unknown" = "unknown";
   try {
     const state = await readJsonFile<AuditState>(
-      join(artifactsDir, "audit_state.json"),
+      join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName),
     );
     status = state.status;
   } catch (error) {

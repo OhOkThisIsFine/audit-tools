@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/frozen-snapshot.test.ts, tests/audit/inspection-handoff-binding.test.ts
+import { outputJson } from "./cliHelpers.js";
 import { readJsonFile } from "audit-tools/shared";
 import { resolve } from "node:path";
 import { loadArtifactBundle } from "../io/artifacts.js";
@@ -63,18 +64,14 @@ export async function cmdValidateResults(argv: string[]): Promise<void> {
       auditTasks: bundle.audit_tasks ?? [],
       lineIndex,
     });
-    console.log(
-      JSON.stringify(
-        {
-          artifacts_dir: artifactsDir,
-          results_path: resolve(resultsPath),
-          ...check,
-          warning_count: check.validation_warnings.length,
-          error_count: check.issues.length,
-        },
-        null,
-        2,
-      ),
+    outputJson(
+      {
+        artifacts_dir: artifactsDir,
+        results_path: resolve(resultsPath),
+        ...check,
+        warning_count: check.validation_warnings.length,
+        error_count: check.issues.length,
+      },
     );
     process.exitCode = check.issues.length > 0 ? 1 : 0;
     return;
@@ -85,19 +82,15 @@ export async function cmdValidateResults(argv: string[]): Promise<void> {
   });
   const errors = issues.filter((issue) => issue.severity === "error");
   const warnings = issues.filter((issue) => issue.severity === "warning");
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        results_path: resolve(resultsPath),
-        warning_count: warnings.length,
-        error_count: errors.length,
-        issues,
-        ...(Array.isArray(results) ? {} : { hint: SHAPE_HINT }),
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      artifacts_dir: artifactsDir,
+      results_path: resolve(resultsPath),
+      warning_count: warnings.length,
+      error_count: errors.length,
+      issues,
+      ...(Array.isArray(results) ? {} : { hint: SHAPE_HINT }),
+    },
   );
   process.exitCode = errors.length > 0 ? 1 : 0;
 }

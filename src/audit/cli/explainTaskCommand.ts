@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/cli-remediation.test.ts
+import { outputJson } from "./cliHelpers.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { getArtifactsDir, getFlag } from "./args.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
@@ -35,29 +36,25 @@ export async function cmdExplainTask(argv: string[]): Promise<void> {
     (result) => result.task_id === task.task_id,
   );
 
-  console.log(
-    JSON.stringify(
-      {
-        artifacts_dir: artifactsDir,
-        task_id: task.task_id,
-        task,
-        file_count: task.file_paths.length,
-        coverage_entries: coverageEntries,
-        pending_coverage: coverageEntries
-          .map((file) => ({
-            path: file.path,
-            missing_lenses: file.required_lenses.filter(
-              (lens) => !file.completed_lenses.includes(lens),
-            ),
-          }))
-          .filter((file) => file.missing_lenses.length > 0),
-        matching_result_count: matchingResults.length,
-        matching_finding_ids: matchingResults.flatMap((result) =>
-          result.findings.map((finding) => finding.id),
-        ),
-      },
-      null,
-      2,
-    ),
+  outputJson(
+    {
+      artifacts_dir: artifactsDir,
+      task_id: task.task_id,
+      task,
+      file_count: task.file_paths.length,
+      coverage_entries: coverageEntries,
+      pending_coverage: coverageEntries
+        .map((file) => ({
+          path: file.path,
+          missing_lenses: file.required_lenses.filter(
+            (lens) => !file.completed_lenses.includes(lens),
+          ),
+        }))
+        .filter((file) => file.missing_lenses.length > 0),
+      matching_result_count: matchingResults.length,
+      matching_finding_ids: matchingResults.flatMap((result) =>
+        result.findings.map((finding) => finding.id),
+      ),
+    },
   );
 }

@@ -362,6 +362,31 @@
         "src/audit/orchestrator/staleness.ts": "dc720ae7b488aa0a601399f76400bb595a932c7f"
       }
     },
+    "5a1d216870700235": {
+      "reviewed_by": "claude-opus-5-5 independent adversarial review subagent (P05 diff)",
+      "attester_class": "agent",
+      "checked": "Every hunk of the staged src/audit/cli diff compared with d28d41fe for emitted text, JSON, prompt bytes, side-effect and throw order, object identity, sort/dedupe, removed names; ingestAuditHostResults landed filter proven equal to additions; snapshot projections read no field that differs; conceptual revision hoist pure; describeZodIssues byte-identical; one stderr-only change (lineIndex warning once per fold) documented; the lane-projection helper reverted after the lane-demand pin; full suite 8555 passed / 0 failed on this tree",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "7032f62ccfd6e992431589e5978da5b8fc5207c9",
+        "ran_at": "2026-11-18T12:39:36.042Z"
+      },
+      "attested_at": "2026-11-18T12:39:47.736Z",
+      "vouches": {
+        "src/audit/cli/charterExtractionPrompt.ts": "00e3b9e1d5ca756245603ffb97f5b5b2bf058725",
+        "src/audit/cli/conceptualDispatch.ts": "172cad28ffc03cd9e4d4b59c5f8d4a2a1add31a9",
+        "src/audit/cli/confirmIntentStep.ts": "8e0191a12901bd33cd3820d5819955ff9a898d12",
+        "src/audit/cli/dispatch/hostHandoff.ts": "1706fd1e2c377abf3e404761e16cf40d50393f4a",
+        "src/audit/cli/fanoutLanes.ts": "bcb392815c87d05136059b20f36e2badabd5823f",
+        "src/audit/cli/laneSubmissions.ts": "c238aa6edf313fb58e30cf19382f895f6fd4deb6",
+        "src/audit/cli/laneValidators.ts": "dd1f899f26df1024bb120394d97bc04a22c7059a",
+        "src/audit/cli/nextStepCommand.ts": "16fb5d17fd4f9630e948a505bd875db3cf9879f3",
+        "src/audit/cli/nextStepHelpers.ts": "99f8dc77b97bd28d4bd0682fe0fb2b69c8be2719",
+        "src/audit/cli/semanticReviewStep.ts": "28122f453d1c22e0a162b7e3e0035712c0444b50"
+      }
+    },
     "6257346a73ffb600": {
       "reviewed_by": "AGY/gemini-3.8-flash-high/5072f699-00b5-4233-ad6d-9d8555b6bc99; Codex/orphan-assertion-and-generated-metadata-only",
       "attester_class": "agent",
@@ -397,22 +422,6 @@
       "attested_at": "2026-11-06T18:26:48.900Z",
       "vouches": {
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
-      }
-    },
-    "7a05408bec080eda": {
-      "reviewed_by": "dot-parent-independent-review",
-      "attester_class": "agent",
-      "checked": "Independent plan and code review approved survivor-aware diagnostic filtering in normal and stale returns while keeping invalid-entry persistence unfiltered. Red-green regressions verify both accepted-pair files and total-withdrawal rejection; source/test typechecks pass. Official npm test: 8496 passed, 0 failed, 38 skipped; runner accepted 21 reporter RPC timeouts as transport-only.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "491e438e36024a70f15961a341511d53fb74e730",
-        "ran_at": "2026-11-08T06:26:06.999Z"
-      },
-      "attested_at": "2026-11-08T06:26:13.428Z",
-      "vouches": {
-        "src/audit/cli/dispatch/hostHandoff.ts": "a70f6d46a3047edb25cf559435c619098ced9c36"
       }
     },
     "8aa0d48e64560f2e": {
@@ -461,6 +470,22 @@
         "src/remediate/steps/dispatch/hostCorroboration.ts": "186399ba8fc976952f3aaeb2bfffc3be5ba00566",
         "src/remediate/steps/dispatch/hostHandoff.ts": "db0674ae8c063a91c0978e7c168cb9020f9b3536",
         "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
+      }
+    },
+    "9725aa73749b253a": {
+      "reviewed_by": "claude-opus-5-5 independent adversarial review subagent (P05 diff); AGY gemini-3.8-flash-high refuter run bee42243",
+      "attester_class": "agent",
+      "checked": "Behavior neutrality of every P05 change in src/audit/cli: B3 landed filter is dead (one lock hold, scan refuses accepted ids); A9 snapshot projections read no carried field; B1 binding-set read is equivalent; no prompt text, stderr, artifact or JSON output change. The A10 lineIndex cache and the C1 lane-projection helper were reverted byte-identical to d28d41fe after review found an stderr change (A10) and a pinned call-site text (C1). Full suite 8555 passed / 0 failed on this staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e43668f8a1b7c5a7aa844cf4319556b9df2b34b8",
+        "ran_at": "2026-11-18T12:51:28.720Z"
+      },
+      "attested_at": "2026-11-18T12:51:38.516Z",
+      "vouches": {
+        "src/audit/cli/nextStepHelpers.ts": "e377e67e41654ccdb3de6f8d10e3ca428044f946"
       }
     },
     "9ae8f3b83f558bae": {
@@ -774,46 +799,46 @@
       "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/charterExtractionPrompt.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/charterFidelityPrompt.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/conceptualDispatch.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/confirmIntentStep.ts": {
-      "review": "491762bb82302829"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "7a05408bec080eda"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "d261aef2988bbeb5"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/laneSubmissions.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/laneValidators.ts": {
-      "review": "d261aef2988bbeb5"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "d261aef2988bbeb5"
+      "review": "9725aa73749b253a"
     },
     "src/audit/cli/prompts.ts": {
       "review": "4244b52bb0fdec45"
     },
     "src/audit/cli/semanticReviewStep.ts": {
-      "review": "d261aef2988bbeb5"
+      "review": "5a1d216870700235"
     },
     "src/audit/io/rollover.ts": {
       "review": "be526ca9e4e1d631"

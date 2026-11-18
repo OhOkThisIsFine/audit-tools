@@ -1,5 +1,7 @@
 import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
 // sites-pinned: tests/audit/host-handoff.test.ts, tests/audit/inspection-handoff-binding.test.ts
+import { errorMessage } from "../../../shared/io/json.js";
+import { STEP_CONTRACT_VERSION } from "../steps.js";
 // (the steward-lane verification contract: the lane-aware prompt, the one
 // optional envelope key, the refusal of that key on a lane whose contract never
 // asked for it, the enforcement of every property the prompt states, and the
@@ -55,6 +57,7 @@ import {
   writeTextFile,
   writeJsonFile,
   toPosixPath,
+  uniqueSorted,
   type IngestionCheckId,
   type LaneDemand,
   type RunLogger,
@@ -136,11 +139,11 @@ const RESULT_MAP_CONTRACT_VERSION = "audit-host-result-map/v1alpha1" as const;
 const RESULT_CONTRACT_VERSION = "audit-host-result/v1alpha1" as const;
 
 /**
- * The result envelope's REQUIRED key set. Named rather than inlined because the
- * parse and the refusal message both enumerate it, and the one OPTIONAL key
- * (`verification`) is added to the expected set only when the submission
- * actually carries it — so "exactly these keys, plus at most one optional
- * field" is one statement instead of a second hand-maintained list.
+ * The result envelope's REQUIRED key set, the one list the exact-keys parse
+ * checks against. The one OPTIONAL key (`verification`) is added to the
+ * expected set only when the submission actually carries it — so "exactly these
+ * keys, plus at most one optional field" is one statement. The refusal message
+ * spells the keys out by hand, in its own order.
  */
 const AUDIT_RESULT_ENVELOPE_KEYS = [
   "contract_version",
@@ -496,18 +499,11 @@ interface ResolvedBoundaryPaths {
    * ledger, so the read-merge-write race the ledger used to lose is closed for
    * prepare-against-ingest as well as ingest-against-ingest.
    *
-   * IT COVERS THE LEDGER ONLY — state the uncovered half rather than let the
-   * covered half read as a close. The rest of the run directory is still
-   * unsynchronized in both directions:
-   *   - `ingestAuditHostResults` reads `host-workload.json`,
-   *     `host-result-map.json` and `host-task-bindings.json` BEFORE taking the
-   *     lock, so a concurrent prepare can rewrite any of the three underneath a
-   *     ledger merge that already parsed them;
-   *   - `prepareAuditHostHandoff` writes `host-task-bindings.json` outside the
-   *     lock entirely (only the workload and result-map writes are inside it),
-   *     so that file has no writer-side serialization at all.
-   * Closing the whole prepare/ingest race — the trio under the same acquisition
-   * as the ledger — is tracked as backlog work, not done here.
+   * It also covers the binding set: `prepareAuditHostHandoff` writes
+   * `host-task-bindings.json`, `host-workload.json` and `host-result-map.json`
+   * inside the same hold, and `ingestAuditHostResults` reads all three, judges,
+   * and writes the pair inside ONE hold, so no prepare can replace a binding
+   * underneath an ingest that already parsed it.
    */
   readonly acceptedLockPath: string;
 }
@@ -649,15 +645,13 @@ function normalizeTask(
     throw new Error(`${taskId} must declare file paths and line counts`);
   }
 
-  const files = [
-    ...new Set(
-      task.file_paths.map((path) => {
-        const raw = requireNonEmptyString(path, `${taskId}.file_paths[]`);
-        const absolute = resolveContainedPath(root, raw, `${taskId} file path`);
-        return repoRelativePath(root, absolute, `${taskId} file path`);
-      }),
-    ),
-  ].sort(compareCodeUnits);
+  const files = uniqueSorted(
+    task.file_paths.map((path) => {
+      const raw = requireNonEmptyString(path, `${taskId}.file_paths[]`);
+      const absolute = resolveContainedPath(root, raw, `${taskId} file path`);
+      return repoRelativePath(root, absolute, `${taskId} file path`);
+    }),
+  );
   const normalizedLineCounts: Record<string, number> = {};
   for (const [path, count] of Object.entries(task.file_line_counts)) {
     const normalizedPath = repoRelativePath(
@@ -711,7 +705,7 @@ function normalizeTask(
     // content hash of this shape, and an incidentally-ordered array is a churn
     // source — see the stable-order rule).
     ...(Array.isArray(task.tags)
-      ? { tags: [...new Set(task.tags)].sort(compareCodeUnits) }
+      ? { tags: uniqueSorted(task.tags) }
       : {}),
     ...(coveragePolicy === undefined ? {} : { coverage_policy: coveragePolicy }),
     ...(fileMetrics === undefined ? {} : { file_metrics: fileMetrics }),
@@ -1743,18 +1737,16 @@ export async function readPublishedAuditTaskIds(params: {
   if (runId === undefined) return new Set();
   const paths = resolveBoundaryPaths({ root: params.root, sourceRoot: params.sourceRoot, artifactsDir: params.artifactsDir, runId });
   return withAcceptedResultsLock(paths, params.logger, async () => {
-    let items: Map<string, AuditHostWorkItem>;
-    let bindings: Map<string, AuditHostTaskBinding>;
+    // A missing, stale or corrupt binding set publishes nothing.
+    let bindingSet: Awaited<ReturnType<typeof readHandoffBindingSet>>;
     try {
-      const workload = parseWorkload(await readJsonFile<unknown>(paths.workloadPath), paths.runId, paths.root);
-      const resultMap = parseResultMap(await readJsonFile<unknown>(paths.resultMapPath), paths.runId);
-      bindings = parseTaskBindings(await readJsonFile<unknown>(paths.taskBindingsPath), paths.runId);
-      items = validateHandoffBinding(paths, workload, resultMap, bindings);
+      bindingSet = await readHandoffBindingSet(paths);
     } catch (error) {
-      if (isFileMissingError(error) || isJsonParseError(error) || error instanceof StaleAuditHostWorkloadError ||
-        error instanceof StaleAuditHostTaskBindingsError || error instanceof AuditHostBindingError) return new Set<string>();
+      if (isFileMissingError(error)) return new Set<string>();
       throw error;
     }
+    if (!bindingSet.ok) return new Set<string>();
+    const { items, taskBindings: bindings } = bindingSet;
     const ids = new Set<string>();
     for (const task of params.tasks) {
       const item = items.get(task.task_id), binding = bindings.get(task.task_id);
@@ -2407,15 +2399,7 @@ export async function checkAuditHostResult(params: {
         "run next-step to publish one, then write each result at the result_path it binds.",
     );
   }
-  if (!bindingSet.ok) {
-    // The SAME classified refusal ingestion reports for this binding set.
-    return {
-      run_id: runId,
-      already_accepted: false,
-      issues: [{ code: bindingSet.refusal.code, check: bindingSet.refusal.check, message: bindingSet.refusal.message }],
-      validation_warnings: [],
-    };
-  }
+  if (!bindingSet.ok) return bindingSetRefusalReport(runId, bindingSet.refusal);
   const entry = bindingSet.resultMap.entries.find(
     (candidate) => resolve(paths.root, candidate.result_path) === absolute,
   );
@@ -2482,6 +2466,19 @@ async function judgeBoundEntry(params: {
   return { alreadyAccepted, judged };
 }
 
+/** The SAME classified refusal ingestion reports for a refused binding set. */
+function bindingSetRefusalReport(
+  runId: string,
+  refusal: Extract<Awaited<ReturnType<typeof readHandoffBindingSet>>, { ok: false }>["refusal"],
+): AuditHostResultCheck {
+  return {
+    run_id: runId,
+    already_accepted: false,
+    issues: [{ code: refusal.code, check: refusal.check, message: refusal.message }],
+    validation_warnings: [],
+  };
+}
+
 function checkReport(
   runId: string,
   entry: AuditHostResultMapEntry,
@@ -2532,14 +2529,7 @@ export async function submitAuditHostResult(params: {
     runId,
   });
   const bindingSet = await readHandoffBindingSet(paths);
-  if (!bindingSet.ok) {
-    return {
-      run_id: runId,
-      already_accepted: false,
-      issues: [{ code: bindingSet.refusal.code, check: bindingSet.refusal.check, message: bindingSet.refusal.message }],
-      validation_warnings: [],
-    };
-  }
+  if (!bindingSet.ok) return bindingSetRefusalReport(runId, bindingSet.refusal);
   const entry = bindingSet.resultMap.entries.find((candidate) => candidate.work_item_id === params.workItemId);
   if (entry === undefined) {
     throw new Error(
@@ -2703,9 +2693,7 @@ export async function ingestAuditHostResults(params: {
       accepted_count: 0,
       accepted_results: accepted.entries.map((entry) => entry.audit_result),
       accepted_results_path: paths.acceptedResultsPath,
-      completed_work_item_ids: [
-        ...new Set(accepted.entries.map((entry) => entry.work_item_id)),
-      ].sort(compareCodeUnits),
+      completed_work_item_ids: [...survivingItemIds].sort(compareCodeUnits),
       issues: [...evictionIssues(), error],
       raw_issues: [...evictionIssues(), error],
       validation_warnings: [],
@@ -2765,34 +2753,18 @@ export async function ingestAuditHostResults(params: {
       });
     }
 
-    // Binding reads, validation and this accepted pair write share ONE hold.
-    // A concurrent prepare cannot replace the task bindings mid-ingestion.
-    const currentBindings = new Set(accepted.entries.map(bindingIdentity));
-    const currentResultIds = new Set(accepted.entries.map((entry) => entry.result_id));
-    const landed = additions.filter(
-      (addition) => !currentBindings.has(bindingIdentity(addition)) &&
-        !currentResultIds.has(addition.result_id),
-    );
+    // Binding reads, validation and this accepted pair write share ONE hold, so
+    // no other ingest or prepare can change the ledger or the task bindings
+    // between the judgment above and this write: every addition lands.
     const ledger: AcceptedResultsLedger = {
       contract_version: ACCEPTED_RESULTS_CONTRACT_VERSION,
       run_id: params.runId,
-      entries: [...accepted.entries, ...landed].sort((left, right) => {
+      entries: [...accepted.entries, ...additions].sort((left, right) => {
         const item = compareCodeUnits(left.work_item_id, right.work_item_id);
         return item !== 0 ? item : compareCodeUnits(left.prompt_sha256, right.prompt_sha256);
       }),
     };
-    if (landed.length > 0) await writeAcceptedResults(paths, ledger);
-    for (const addition of additions) {
-      if (landed.includes(addition)) continue;
-      issues.push({
-        code: "duplicate_submission_id",
-        message:
-          `work item '${addition.work_item_id}' was already accepted by a concurrent ` +
-          `ingest of this run, so this submission was not accepted a second time`,
-        work_item_id: addition.work_item_id,
-        result_path: addition.result_path,
-      });
-    }
+    if (additions.length > 0) await writeAcceptedResults(paths, ledger);
 
     // Ledger recording is NOT done here. The shared submission ledger is written
     // by the ONE recorder, `recordHostResultOutcomes`, at this ingest's only
@@ -2805,7 +2777,7 @@ export async function ingestAuditHostResults(params: {
     // unchanged file fails the same rule and would only repeat it. An evicted
     // item whose rewritten file was accepted above states none.
     const raw_issues = [
-      ...evictionIssues(new Set(landed.map((addition) => addition.work_item_id))),
+      ...evictionIssues(new Set(additions.map((addition) => addition.work_item_id))),
       ...issues.filter((issue) => !eviction.issues.has(issue.work_item_id ?? "")),
     ];
     const refusals = await readTrailingSubmissionRefusals(
@@ -2822,13 +2794,11 @@ export async function ingestAuditHostResults(params: {
 
     await recordHostRootLogBoundary({ ...paths, phase: "ingest", logger: params.logger });
     return {
-      accepted_count: landed.length,
+      accepted_count: additions.length,
       accepted_results: ledger.entries.map((entry) => entry.audit_result),
       accepted_results_path: paths.acceptedResultsPath,
       validation_warnings,
-      completed_work_item_ids: [
-        ...new Set(ledger.entries.map((entry) => entry.work_item_id)),
-      ].sort(compareCodeUnits),
+      completed_work_item_ids: uniqueSorted(ledger.entries.map((entry) => entry.work_item_id)),
       issues: reportedIssues,
       raw_issues,
     };
@@ -2908,9 +2878,7 @@ export async function dropAcceptedResults(params: {
     params.logger?.event?.({
       phase: "advance",
       kind: "error",
-      note: `submission-ledger removal record failed (non-fatal): ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      note: `submission-ledger removal record failed (non-fatal): ${errorMessage(error)}`,
     });
   }
 
@@ -2924,7 +2892,7 @@ export async function dropAcceptedResults(params: {
       : "unaccept-results ran but no accepted entry matched; run next-step to continue";
   await writeBlockedStepContract({
     tool: "audit-code",
-    contractVersion: "audit-code-step/v1alpha1",
+    contractVersion: STEP_CONTRACT_VERSION,
     artifactsDir: paths.artifactsDir,
     repoRoot: paths.root,
     runId: null,
