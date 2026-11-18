@@ -12,14 +12,6 @@ import {
   normalizeExtractorPath,
 } from "./pathPatterns.js";
 
-function methodsForPath(path: string): string[] | undefined {
-  const normalized = normalizeExtractorPath(path);
-  if (isNetworkSurfacePath(normalized)) {
-    return ["GET", "POST"];
-  }
-  return undefined;
-}
-
 /**
  * Detects likely execution surfaces from file paths using the shared extractor
  * heuristics, primarily to seed later audit planning.
@@ -54,12 +46,13 @@ export function buildSurfaceManifest(
     // alone would make it an entrypoint — and every surface becomes a flow.
     if (isTestPath(normalized)) continue;
     if (isSurfacePath(normalized)) {
+      const network = isNetworkSurfacePath(normalized);
       addSurface({
         id: `surface:${file.path}`,
         kind: isBackgroundSurfacePath(normalized) ? "background" : "interface",
         entrypoint: file.path,
-        exposure: isNetworkSurfacePath(normalized) ? "network" : "local",
-        methods: methodsForPath(file.path),
+        exposure: network ? "network" : "local",
+        methods: network ? ["GET", "POST"] : undefined,
         notes: [EXTRACTOR_HEURISTIC_NOTE],
       });
     }

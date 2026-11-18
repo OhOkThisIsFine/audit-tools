@@ -1,13 +1,19 @@
 // sites-pinned: tests/audit/graph-manifest-edges.test.ts, tests/audit/graph-edge-cache.test.ts
 import type { GraphEdge } from "audit-tools/shared";
-import { graphEdge, resolveManifestRelativeTarget, resolveCandidate, isPackageManifestPath } from "../graphPathUtils.js";
+import { isRecord } from "audit-tools/shared";
+import {
+  graphEdge,
+  isPackageManifestPath,
+  isPnpmWorkspaceManifestPath,
+  resolveCandidate,
+  resolveManifestRelativeTarget,
+} from "../graphPathUtils.js";
 import {
   WorkspacePattern,
   collectWorkspacePatternValues,
   workspaceMemberEdges,
 } from "./workspace.js";
 import { pnpmWorkspacePatterns } from "./pnpm.js";
-import { isPnpmWorkspaceManifestPath } from "../graphPathUtils.js";
 
 export const PACKAGE_ENTRYPOINT_EDGE_CONFIDENCE = 0.9;
 export const PACKAGE_SCRIPT_EDGE_CONFIDENCE = 0.88;
@@ -46,17 +52,9 @@ function collectPackageEntrypointValues(
 export function packageEntrypointCandidates(
   content: string,
 ): Array<{ field: string; specifier: string }> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return [];
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return [];
-  }
+  const record = parsePackageRecord(content);
+  if (!record) return [];
 
-  const record = parsed as Record<string, unknown>;
   const entries: Array<{ field: string; specifier: string }> = [];
   for (const field of ["main", "module", "types", "typings", "browser"]) {
     collectPackageEntrypointValues(record[field], field, entries);
@@ -107,24 +105,8 @@ export function extractPackageEntrypointEdges(
 export function packageScriptCandidates(
   content: string,
 ): Array<{ script: string; specifier: string }> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return [];
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return [];
-  }
-
-  const scripts = (parsed as Record<string, unknown>).scripts;
-  if (
-    scripts === null ||
-    typeof scripts !== "object" ||
-    Array.isArray(scripts)
-  ) {
-    return [];
-  }
+  const scripts = parsePackageRecord(content)?.scripts;
+  if (!isRecord(scripts)) return [];
 
   const entries: Array<{ script: string; specifier: string }> = [];
   for (const [script, command] of Object.entries(scripts)) {
@@ -171,30 +153,29 @@ export function extractPackageScriptEdges(
 }
 
 export function packageWorkspacePatterns(content: string): WorkspacePattern[] {
+  const record = parsePackageRecord(content);
+  if (!record) return [];
+
+  const patterns: WorkspacePattern[] = [];
+  collectWorkspacePatternValues(record.workspaces, patterns);
+  if (isRecord(record.workspaces)) {
+    collectWorkspacePatternValues(record.workspaces.packages, patterns);
+  }
+  return patterns;
+}
+
+/**
+ * The package.json object, or `undefined` when the text is not JSON or not a
+ * JSON object: each reader then degrades to empty and never throws.
+ */
+function parsePackageRecord(content: string): Record<string, unknown> | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    return [];
+    return undefined;
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return [];
-  }
-
-  const record = parsed as Record<string, unknown>;
-  const patterns: WorkspacePattern[] = [];
-  collectWorkspacePatternValues(record.workspaces, patterns);
-  if (
-    record.workspaces !== null &&
-    typeof record.workspaces === "object" &&
-    !Array.isArray(record.workspaces)
-  ) {
-    collectWorkspacePatternValues(
-      (record.workspaces as Record<string, unknown>).packages,
-      patterns,
-    );
-  }
-  return patterns;
+  return isRecord(parsed) ? parsed : undefined;
 }
 
 function workspacePatternsForFile(

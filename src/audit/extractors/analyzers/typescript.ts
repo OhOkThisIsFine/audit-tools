@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/typescript-analyzer.test.ts
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -6,6 +7,7 @@ import type { GraphEdge } from "audit-tools/shared";
 import { resolveWithinRoot } from "audit-tools/shared";
 import { graphEdge, normalizeGraphPath, resolveCandidate } from "../graphPathUtils.js";
 import type { AnalyzerContext, AnalyzerOutput, LanguageAnalyzer } from "./types.js";
+import { isJsTsPath } from "./complexityDuplication.js";
 import {
   TS_CALL_EDGE_CONFIDENCE,
   TS_EXTENDS_EDGE_CONFIDENCE,
@@ -14,21 +16,8 @@ import {
   TS_REEXPORT_EDGE_CONFIDENCE,
 } from "./merge.js";
 
-const SUPPORTED_EXTENSIONS = [
-  ".ts",
-  ".tsx",
-  ".mts",
-  ".cts",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-] as const;
-
 function supports(file: string): boolean {
-  const lower = normalizeGraphPath(file).toLowerCase();
-  if (lower.endsWith(".d.ts")) return false;
-  return SUPPORTED_EXTENSIONS.some((extension) => lower.endsWith(extension));
+  return isJsTsPath(normalizeGraphPath(file));
 }
 
 /**

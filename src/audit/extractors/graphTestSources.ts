@@ -1,10 +1,11 @@
+// sites-pinned: tests/audit/graph-test-sources.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
 import {
   graphEdge,
   normalizeGraphPath,
   resolveCandidate,
-  SOURCE_EXTENSIONS,
+  stripSourceExtension,
 } from "./graphPathUtils.js";
 import { isTestPath, normalizeExtractorPath } from "./pathPatterns.js";
 import { isPythonSourcePath } from "./graphPythonImports.js";
@@ -21,15 +22,6 @@ const COLOCATED_TEST_SEGMENTS = new Set([
   "spec",
   "specs",
 ]);
-
-function stripKnownSourceExtension(path: string): string | undefined {
-  const lowerPath = path.toLowerCase();
-  const extension = SOURCE_EXTENSIONS.find((item) => lowerPath.endsWith(item));
-  if (!extension) {
-    return undefined;
-  }
-  return path.slice(0, -extension.length);
-}
 
 function stripTestSuffix(pathWithoutExtension: string): string | undefined {
   const stripped = pathWithoutExtension.replace(/[._-](?:test|spec)$/i, "");
@@ -75,7 +67,7 @@ function addTestSourceCandidatesForBase(
 
 function testSourceCandidates(testPath: string): string[] {
   const normalizedPath = normalizeGraphPath(testPath);
-  const withoutExtension = stripKnownSourceExtension(normalizedPath);
+  const withoutExtension = stripSourceExtension(normalizedPath);
   if (!withoutExtension) {
     return [];
   }

@@ -249,7 +249,7 @@ function detectFlowGaps(
   const findings: LeadEmission["findings"] = [];
   for (const gap of gaps) {
     const { disconnected } = gap;
-    if (disconnected.length > 0 && disconnected.length > gap.paths * 0.5) {
+    if (disconnected.length > gap.paths * 0.5) {
       findings.push({
         id: nextId(),
         title: `Critical flow "${gap.name}" has weak graph coverage`,

@@ -24,10 +24,10 @@
 // (e.g. a JS private field) is never misread as a comment.
 
 import { join } from "node:path";
-import type { CouplingEdge } from "./dataStateCoupling.js";
+import { couplingEdgesFromPairWeights, type CouplingEdge } from "./dataStateCoupling.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 import { toPosixPath } from "../../shared/paths.js";
-import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
+import { compareCodeUnits, uniqueSorted } from "../../shared/compareCodeUnits.js";
 
 interface CommentSyntax {
   line: string[];
@@ -380,7 +380,7 @@ function referenceTokens(posixPath: string): string[] {
 /**
  * Index a file universe into the reference vocabulary that comment and doc text
  * is scanned against: every unambiguous {@link referenceTokens} token mapped to
- * the one file that owns it, plus those tokens in longest-first order.
+ * the one file that owns it.
  *
  * The input is the ALREADY-normalized universe each caller holds (posix,
  * deduped, `compareCodeUnits`-sorted). This builds no universe and normalizes
@@ -392,18 +392,10 @@ function referenceTokens(posixPath: string): string[] {
  * sentinel marks the collision during the build and the purge deletes it, so a
  * bare basename shared by two directories couples nothing.
  *
- * The longest-first order is INERT today (finding MNT-e3dd9a7f). Both consumers
- * test every token and accumulate owners into a set, so no ordering can change a
- * result, and the sort's own comment states a first-match-wins reason that does
- * not hold. The sort and that comment move here verbatim rather than change —
- * fixing either is a behavior-justifying change, not part of this relocation.
+ * The map has no match order: both consumers test every token and accumulate
+ * owners into a set, so no token order can change a result.
  */
-function buildTokenIndex(files: readonly string[]): {
-  tokenOwner: Map<string, string>;
-  tokens: string[];
-} {
-  // token → owning file (longest/most-specific token wins on collision is
-  // unnecessary; a token maps to exactly one file by construction of paths).
+function buildTokenIndex(files: readonly string[]): Map<string, string> {
   const tokenOwner = new Map<string, string>();
   for (const file of files) {
     for (const token of referenceTokens(file)) {
@@ -416,11 +408,7 @@ function buildTokenIndex(files: readonly string[]): {
   for (const [token, owner] of [...tokenOwner]) {
     if (owner === "\0ambiguous") tokenOwner.delete(token);
   }
-  // Sort tokens longest-first so a specific path matches before a substring.
-  const tokens = [...tokenOwner.keys()].sort(
-    (a, b) => b.length - a.length || compareCodeUnits(a, b),
-  );
-  return { tokenOwner, tokens };
+  return tokenOwner;
 }
 
 export interface CommentDecompositionResult {
@@ -456,11 +444,9 @@ export async function deriveCommentDecomposition(
   const read =
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
 
-  const files = [...new Set(params.files.map(toPosixPath))].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
+  const files = uniqueSorted(params.files.map(toPosixPath));
 
-  const { tokenOwner, tokens } = buildTokenIndex(files);
+  const tokenOwner = buildTokenIndex(files);
 
   const weightByPair = new Map<string, number>();
   let scannedFiles = 0;
@@ -472,26 +458,18 @@ export async function deriveCommentDecomposition(
     if (comments.length === 0) continue;
     const posixComments = toPosixPath(comments);
     const referenced = new Set<string>();
-    for (const token of tokens) {
-      const owner = tokenOwner.get(token)!;
+    for (const [token, owner] of tokenOwner) {
       if (owner === file || referenced.has(owner)) continue;
       if (posixComments.includes(token)) referenced.add(owner);
     }
     for (const other of referenced) {
-      const a = compareCodeUnits(file, other) <= 0 ? file : other;
-      const b = compareCodeUnits(file, other) <= 0 ? other : file;
+      const [a, b] = compareCodeUnits(file, other) <= 0 ? [file, other] : [other, file];
       const key = `${a} ${b}`;
       weightByPair.set(key, (weightByPair.get(key) ?? 0) + 1);
     }
   }
 
-  const edges: CouplingEdge[] = [];
-  for (const [key, weight] of weightByPair) {
-    const idx = key.indexOf(" ");
-    edges.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
-  }
-  edges.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
-  return { edges, scannedFiles };
+  return { edges: couplingEdgesFromPairWeights(weightByPair), scannedFiles };
 }
 
 export interface DocGroupsParams {
@@ -517,14 +495,10 @@ export async function deriveDocGroups(
   const maxBytes = params.maxBytes ?? DEFAULT_MAX_BYTES;
   const read =
     params.readFileText ?? ((abs: string) => defaultReadFileText(abs, maxBytes));
-  const codeFiles = [...new Set(params.codeFiles.map(toPosixPath))].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
-  const docFiles = [...new Set(params.docFiles.map(toPosixPath))].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
+  const codeFiles = uniqueSorted(params.codeFiles.map(toPosixPath));
+  const docFiles = uniqueSorted(params.docFiles.map(toPosixPath));
 
-  const { tokenOwner, tokens } = buildTokenIndex(codeFiles);
+  const tokenOwner = buildTokenIndex(codeFiles);
 
   const groups: string[][] = [];
   for (const doc of docFiles) {
@@ -532,13 +506,12 @@ export async function deriveDocGroups(
     if (text === undefined) continue;
     const posixText = toPosixPath(text);
     const named = new Set<string>();
-    for (const token of tokens) {
-      const owner = tokenOwner.get(token)!;
+    for (const [token, owner] of tokenOwner) {
       if (named.has(owner)) continue;
       if (posixText.includes(token)) named.add(owner);
     }
     if (named.size >= 2) {
-      groups.push([...named].sort((a, b) => compareCodeUnits(a, b)));
+      groups.push(uniqueSorted(named));
     }
   }
   groups.sort((a, b) => compareCodeUnits(a[0] ?? "", b[0] ?? ""));

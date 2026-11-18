@@ -34,7 +34,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P03 audit orchestrator core | `src/audit/orchestrator/**` except the P04 names | 55 | 12,438 | 47 | landed |
 | P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | landed |
 | P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | landed |
-| P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | open |
+| P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | landed |
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | open |
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | open |
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | open |
@@ -212,3 +212,39 @@ literal stay, because no `// sites-pinned:` declaration covers those files.
 
 P05 coverage: each of the 50 files was read in full by at least one reviewer.
 `nextStepHelpers.ts` was read in full by both of its angles.
+
+### From P06
+
+No earlier part left a lead for P06.
+
+P06 made one cross-part touch: `tests/audit/graph-edge-cache.test.ts`. Its `inv-2` test pins a
+digest of every module in the import closure of `graph.ts`, so any text change there requires a
+`GRAPH_EDGE_CACHE_KEY_VERSION` bump. The version is now `v16`, the digest is updated, and the
+legacy-key case now uses `v15`. An edge cache written before this landing re-extracts once.
+
+New shared helpers in `graphPathUtils.ts`: `stripSourceExtension` (the copies in `graphRoutes.ts`
+and `graphTestSources.ts` are deleted), `compareGraphEdges`, and `edgeSignature`, which moved
+there from `graph.ts` so that `analyzers/merge.ts` can use it without an import of `graph.ts`.
+`graph.ts` re-exports `edgeSignature` for its one orchestrator importer.
+`couplingEdgesFromPairWeights` in `dataStateCoupling.ts` is the one pair-weight-to-edge fold for
+`dataStateCoupling.ts` and `commentDecomposition.ts`. The inert longest-first token sort in
+`commentDecomposition.ts` is gone: both consumers test every token into a set, so no token order
+can change a result.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P03/P04 (loop-core):** `src/audit/orchestrator/edgeReasoning.ts` can import `edgeSignature`
+  from `extractors/graphPathUtils.ts`. Then `graph.ts` can drop its re-export. The file is
+  loop-core, so the change needs the review attestation.
+- **P07 (decompose):** `extractors/docsDigest.ts` imports `isDocIntentFile` from
+  `src/audit/decompose`. Check whether that predicate belongs with the extractor path predicates.
+- **P06 (correctness, not checked):** the pair key `"<a> <b>"` is split at the first space in
+  `couplingEdgesFromPairWeights`, so a path that contains a space splits into the wrong two paths.
+  Also, `dfsVisit` in `graphSignals.ts` is recursive, so a very deep graph can overflow the stack.
+
+P06 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each.
+
+P06 coverage: each of the 50 reviewed files was read in full by all four reviewers.
+`languageMap.generated.ts` is generated and was not reviewed.

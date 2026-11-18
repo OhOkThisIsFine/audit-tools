@@ -2,7 +2,7 @@
 import type { UnitManifest } from "../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { CriticalFlowManifest, RiskItem, RiskRegister } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import type { GraphSignals } from "./graphSignals.js";
 import { hasDuplicatedBlock, isComplexityHotspot } from "./analyzers/complexityDuplication.js";
 
@@ -42,10 +42,7 @@ export function mergeAnalyzerRiskSignals(
     items: register.items.map((item) => {
       const added = map.get(item.unit_id);
       if (!added || added.length === 0) return { ...item };
-      const merged = [...new Set([...item.signals, ...added])].sort((a, b) =>
-        compareCodeUnits(a, b),
-      );
-      return { ...item, signals: merged };
+      return { ...item, signals: uniqueSorted([...item.signals, ...added]) };
     }),
   };
 }
@@ -73,9 +70,7 @@ export function deriveRiskConcentration(register: RiskRegister): RiskRegister {
         return { ...item };
       }
       if (has.has(RISK_CONCENTRATION_SIGNAL)) return { ...item };
-      const merged = [...item.signals, RISK_CONCENTRATION_SIGNAL].sort((a, b) =>
-        compareCodeUnits(a, b),
-      );
+      const merged = [...item.signals, RISK_CONCENTRATION_SIGNAL].sort(compareCodeUnits);
       return { ...item, signals: merged };
     }),
   };
@@ -102,6 +97,7 @@ export function buildRiskRegister(
   }
 
   const items: RiskItem[] = unitManifest.units.map((unit) => {
+    const unitFiles = new Set(unit.files);
     const signals: string[] = [];
     if ((unit.risk_score ?? 0) >= 5) signals.push("high_bucket_density");
     if (unit.required_lenses.includes("security"))
@@ -150,9 +146,8 @@ export function buildRiskRegister(
     if (isHub) signals.push("is_hub");
     const isSeamEndpoint =
       graphSignals != null &&
-      (graphSignals.seams ?? []).some(
-        (seam) =>
-          unit.files.includes(seam.from) || unit.files.includes(seam.to),
+      graphSignals.seams.some(
+        (seam) => unitFiles.has(seam.from) || unitFiles.has(seam.to),
       );
     if (isSeamEndpoint) signals.push("seam_endpoint");
     const deletionCandidate =
@@ -165,14 +160,14 @@ export function buildRiskRegister(
     // raises maintainability risk by a bounded +1 each.
     const hasHighComplexity =
       graphSignals != null &&
-      (graphSignals.complexity ?? []).some(
-        (m) => unit.files.includes(m.node) && isComplexityHotspot(m),
+      graphSignals.complexity.some(
+        (m) => unitFiles.has(m.node) && isComplexityHotspot(m),
       );
     if (hasHighComplexity) signals.push("high_complexity");
     const hasDuplication =
       graphSignals != null &&
-      (graphSignals.duplication ?? []).some(
-        (m) => unit.files.includes(m.node) && hasDuplicatedBlock(m),
+      graphSignals.duplication.some(
+        (m) => unitFiles.has(m.node) && hasDuplicatedBlock(m),
       );
     if (hasDuplication) signals.push("duplicated_code");
 

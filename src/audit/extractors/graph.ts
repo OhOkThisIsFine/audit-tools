@@ -2,8 +2,7 @@ import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 // sites-pinned: tests/audit/graph-edge-cache.test.ts, tests/audit/graph-framework-routes.test.ts
 import { pythonRouterIdentities } from "./graphRouteSources.js";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
-import { posix } from "node:path";
+import { isAbsolute, posix, resolve } from "node:path";
 import type { RepoManifest } from "../types.js";
 import type {
   FileDisposition,
@@ -12,7 +11,7 @@ import type {
   NodeMetrics,
   RouteEdge,
 } from "audit-tools/shared";
-import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
+import { hashContent, isRecord, stableStringify, resolveWithinRoot, compareCodeUnits, edgeConfidence, uniqueSorted } from "audit-tools/shared";
 import {
   complexityScope,
   computeNodeMetricsForFile,
@@ -41,6 +40,8 @@ import {
   isPyprojectPath,
 } from "./graphManifestEdges/index.js";
 import {
+  compareGraphEdges,
+  edgeSignature,
   graphEdge,
   graphLookupKey,
   isPytestConftestPath,
@@ -206,10 +207,9 @@ export function buildPathLookup(
   );
 }
 
-/** The identity of an edge: its endpoints and kind. Two edges with one signature are one edge. */
-export function edgeSignature(edge: GraphEdge): string {
-  return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
-}
+// `edgeSignature` lives in the graphPathUtils leaf so the analyzers can share it;
+// re-exported here for the orchestrator import site.
+export { edgeSignature };
 
 function clampConfidence(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -254,12 +254,7 @@ export function uniqueSortedEdges(edges: GraphEdge[]): GraphEdge[] {
       deduped.set(signature, edge);
     }
   }
-  return [...deduped.values()].sort(
-    (a, b) =>
-      compareCodeUnits(a.from, b.from) ||
-      compareCodeUnits(a.to, b.to) ||
-      compareCodeUnits(a.kind ?? "", b.kind ?? ""),
-  );
+  return [...deduped.values()].sort(compareGraphEdges);
 }
 
 function normalizeOwnershipRoot(root: string): string | undefined {
@@ -506,10 +501,8 @@ function extractReferenceEdges(
   return edges;
 }
 
-function extractPytestConftestLinks(
-  pathLookup: Map<string, string>,
-): GraphEdge[] {
-  const allPaths = [...new Set(pathLookup.values())];
+function extractPytestConftestLinks(pathIndex: GraphPathIndex): GraphEdge[] {
+  const allPaths = pathIndex.paths;
   const conftestPaths = allPaths.filter((p) => isPytestConftestPath(p));
   if (conftestPaths.length === 0) return [];
 
@@ -802,7 +795,7 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v15";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v16";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
@@ -891,22 +884,13 @@ function hashPathLookup(pathLookup: Map<string, string>): string {
   return hashContent(stableStringify([...pathLookup.values()].sort()));
 }
 
-/** Concrete (all-present) graph map produced by `buildGraphBundle`. */
-interface BuiltGraphs {
-  imports: GraphEdge[];
-  calls: GraphEdge[];
-  references: GraphEdge[];
-  routes: RouteEdge[];
-  heuristics: GraphEdge[];
-}
-
 /**
  * Emit the OBS-003 graph-extraction metric. No RunLogger is in scope in this
  * leaf extractor, so it uses the established structured-stderr summary
  * (FINDING-012 pattern): node count, total edge count, and the number of
  * non-empty graph types.
  */
-function logGraphExtractionMetric(graphs: BuiltGraphs): void {
+function logGraphExtractionMetric(graphs: GraphEdgeAccumulator): void {
   const edgeCount =
     graphs.imports.length +
     graphs.calls.length +
@@ -951,6 +935,7 @@ function accumulateCrossFileEdges(
   options: BuildGraphBundleOptions,
   repoManifest: RepoManifest,
   dispositionMap: Map<string, FileDisposition["files"][number]["status"]>,
+  pathIndex: GraphPathIndex,
 ): void {
   acc.heuristics.push(
     ...extractHeuristicAuthSessionEdges(repoManifest, dispositionMap),
@@ -964,7 +949,7 @@ function accumulateCrossFileEdges(
     );
     acc.references.push(...extractAnalyzerGraphEdges(externalResult, pathLookup));
   }
-  acc.references.push(...extractPytestConftestLinks(pathLookup));
+  acc.references.push(...extractPytestConftestLinks(pathIndex));
   acc.references.push(
     ...extractBoundedSuiteEdges(
       pathLookup,
@@ -1068,7 +1053,7 @@ export function buildGraphBundle(
           // A per-function and a file-proxy complexity metric are different
           // contributions; neither may be replayed for the other.
           `:${complexityScope(file.path, options.complexityParsers)}` +
-          (/\.py$/i.test(file.path) ? `:${JSON.stringify([...routers].sort())}` : "");
+          (/\.py$/i.test(file.path) ? `:${JSON.stringify(uniqueSorted(routers))}` : "");
     const cached = cacheKey !== undefined ? reusableEntries?.[file.path] : undefined;
     const contribution =
       cacheKey !== undefined && isReusableCacheEntry(cached, cacheKey)
@@ -1095,7 +1080,7 @@ export function buildGraphBundle(
     }
   }
 
-  accumulateCrossFileEdges(acc, pathLookup, options, repoManifest, dispositionMap);
+  accumulateCrossFileEdges(acc, pathLookup, options, repoManifest, dispositionMap, pathIndex);
 
   if (options.edgeCacheSink) {
     options.edgeCacheSink.cache = {

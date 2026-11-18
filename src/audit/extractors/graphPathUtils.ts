@@ -1,15 +1,15 @@
 // sites-pinned: tests/audit/graph-path-utils.test.ts, tests/audit/graph-manifest-edges.test.ts
 import { posix } from "node:path";
 import type { GraphEdge } from "audit-tools/shared";
-import { normalizeGraphPath } from "audit-tools/shared";
+import { compareCodeUnits, normalizeGraphPath } from "audit-tools/shared";
 
 // `normalizeGraphPath` is single-sourced in `audit-tools/shared` (the shared
 // continuity scorer needs it too). Re-exported here so all 28 audit import sites
 // that read it from this module are unchanged.
 export { normalizeGraphPath };
 
+// No "" entry: `resolveCandidate` tries the bare path first.
 const RESOLVABLE_EXTENSIONS = [
-  "",
   ".ts",
   ".tsx",
   ".mts",
@@ -114,6 +114,20 @@ export function graphEdge(params: GraphEdge): GraphEdge {
   };
 }
 
+/** The identity of an edge: its endpoints and kind. Two edges with one signature are one edge. */
+export function edgeSignature(edge: GraphEdge): string {
+  return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
+}
+
+/** The canonical edge order: `(from, to, kind)` by code units. */
+export function compareGraphEdges(a: GraphEdge, b: GraphEdge): number {
+  return (
+    compareCodeUnits(a.from, b.from) ||
+    compareCodeUnits(a.to, b.to) ||
+    compareCodeUnits(a.kind ?? "", b.kind ?? "")
+  );
+}
+
 // ---- Cross-cluster shared helpers ----
 // These are used by more than one graph extractor cluster (import/reference
 // edges, routes, schemas, suites, test-source). They live here so each
@@ -174,17 +188,29 @@ export function resolveReferenceLiteral(
   return resolveCandidate(normalizedLiteral, pathLookup);
 }
 
+/**
+ * The path without its `SOURCE_EXTENSIONS` extension (matched case-insensitively),
+ * or `undefined` when the path has none of them.
+ */
+export function stripSourceExtension(path: string): string | undefined {
+  const lowerPath = path.toLowerCase();
+  const extension = SOURCE_EXTENSIONS.find((item) => lowerPath.endsWith(item));
+  return extension ? path.slice(0, -extension.length) : undefined;
+}
+
+/** The lower-cased basename of a graph path: the key every filename predicate below reads. */
+function lowerBasename(path: string): string {
+  return posix.basename(normalizeGraphPath(path)).toLowerCase();
+}
+
 /** True for `*.schema.json` files (JSON Schema documents). */
 export function isJsonSchemaPath(path: string): boolean {
-  return posix
-    .basename(normalizeGraphPath(path))
-    .toLowerCase()
-    .endsWith(".schema.json");
+  return lowerBasename(path).endsWith(".schema.json");
 }
 
 /** True for pytest `conftest.py` files. */
 export function isPytestConftestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "conftest.py";
+  return lowerBasename(path) === "conftest.py";
 }
 
 // ---- Build-manifest path predicates ----
@@ -195,12 +221,12 @@ export function isPytestConftestPath(path: string): boolean {
 
 /** True for `package.json` files. */
 export function isPackageManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "package.json";
+  return lowerBasename(path) === "package.json";
 }
 
 /** True for `tsconfig.json` / `tsconfig.<name>.json` project config files. */
 export function isTypescriptProjectConfigPath(path: string): boolean {
-  const basename = posix.basename(normalizeGraphPath(path)).toLowerCase();
+  const basename = lowerBasename(path);
   return (
     basename === "tsconfig.json" ||
     (basename.startsWith("tsconfig.") && basename.endsWith(".json"))
@@ -209,33 +235,30 @@ export function isTypescriptProjectConfigPath(path: string): boolean {
 
 /** True for Go `go.mod` module manifests. */
 export function isGoModuleManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.mod";
+  return lowerBasename(path) === "go.mod";
 }
 
 /** True for Go `go.work` workspace manifests. */
 export function isGoWorkspaceManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "go.work";
+  return lowerBasename(path) === "go.work";
 }
 
 /** True for Rust `Cargo.toml` manifests. */
 export function isCargoManifestPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "cargo.toml";
+  return lowerBasename(path) === "cargo.toml";
 }
 
 /** True for Maven `pom.xml` manifests. */
 export function isMavenPomPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pom.xml";
+  return lowerBasename(path) === "pom.xml";
 }
 
 /** True for Python `pyproject.toml` manifests. */
 export function isPyprojectPath(path: string): boolean {
-  return posix.basename(normalizeGraphPath(path)).toLowerCase() === "pyproject.toml";
+  return lowerBasename(path) === "pyproject.toml";
 }
 
 /** True for `pnpm-workspace.yaml` workspace manifests. */
 export function isPnpmWorkspaceManifestPath(path: string): boolean {
-  return (
-    posix.basename(normalizeGraphPath(path)).toLowerCase() ===
-    "pnpm-workspace.yaml"
-  );
+  return lowerBasename(path) === "pnpm-workspace.yaml";
 }

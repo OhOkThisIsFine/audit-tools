@@ -8,7 +8,7 @@ import type {
   GraphBundle,
   SurfaceManifest,
 } from "audit-tools/shared";
-import { CriticalFlowSchema, compareCodeUnits } from "audit-tools/shared";
+import { CriticalFlowSchema, compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import { structuralImportEdges } from "./graphSignals.js";
 import {
@@ -95,7 +95,7 @@ function flowPathEvidence(
 ): FlowPathEvidence {
   const neighbors = adjacency?.get(entry);
   if (neighbors && neighbors.size > 0) {
-    const paths = [entry, ...neighbors].sort((a, b) => compareCodeUnits(a, b));
+    const paths = [entry, ...neighbors].sort(compareCodeUnits);
     return { paths, confidence: "high" };
   }
   return { paths: keywordRelatedPaths(entry, availablePaths), confidence: "low" };
@@ -103,34 +103,36 @@ function flowPathEvidence(
 
 function keywordRelatedPaths(entry: string, availablePaths: string[]): string[] {
   const normalized = normalizeExtractorPath(entry);
+  // The entry's own categories are fixed for the whole scan.
+  const entryIsSecurity = isSecuritySensitivePath(normalized);
+  const entryIsBilling = isBillingPath(normalized);
+  const entryIsConcurrency = isConcurrencyPath(normalized);
+  const entryIsDeployment = isDeploymentConfigPath(normalized);
   const linked = new Set<string>([entry]);
 
   for (const path of availablePaths) {
-    const lower = normalizeExtractorPath(path);
     if (path === entry) continue;
-
-    // Auth / session flows: link sibling auth, session, token, user paths
-    if (isSecuritySensitivePath(normalized) && isIdentityPath(lower)) {
-      linked.add(path);
-    }
-
-    // Billing / payment flows: link ledger and subscription paths
-    if (isBillingPath(normalized) && isBillingPath(lower)) {
-      linked.add(path);
-    }
-
-    // Async / queue flows: link worker, job, retry, and task paths
-    if (isConcurrencyPath(normalized) && isAsyncTaskPath(lower)) {
-      linked.add(path);
-    }
-
-    // Deployment / infra flows: link docker, k8s, terraform, workflow paths
-    if (isDeploymentConfigPath(normalized) && isDeploymentConfigPath(lower)) {
+    const lower = normalizeExtractorPath(path);
+    if (
+      // Auth / session flows: link sibling auth, session, token, user paths
+      (entryIsSecurity && isIdentityPath(lower)) ||
+      // Billing / payment flows: link ledger and subscription paths
+      (entryIsBilling && isBillingPath(lower)) ||
+      // Async / queue flows: link worker, job, retry, and task paths
+      (entryIsConcurrency && isAsyncTaskPath(lower)) ||
+      // Deployment / infra flows: link docker, k8s, terraform, workflow paths
+      (entryIsDeployment && isDeploymentConfigPath(lower))
+    ) {
       linked.add(path);
     }
   }
 
-  return [...linked].sort((a, b) => compareCodeUnits(a, b));
+  return uniqueSorted(linked);
+}
+
+/** A surface id or path as a flow-id segment: each character outside `[a-zA-Z0-9:_-]` becomes `-`. */
+function flowIdSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9:_-]/g, "-");
 }
 
 function dedupeFlows(flows: CriticalFlow[]): CriticalFlow[] {
@@ -175,7 +177,7 @@ export function buildCriticalFlowManifest(
     const entry = surface.entrypoint;
     const { paths, confidence } = flowPathEvidence(entry, availablePaths, adjacency);
     flows.push({
-      id: `flow:${surface.id.replace(/[^a-zA-Z0-9:_-]/g, "-")}`,
+      id: `flow:${flowIdSegment(surface.id)}`,
       name: `${surface.kind} flow for ${entry}`,
       entrypoints: [entry],
       paths,
@@ -194,7 +196,7 @@ export function buildCriticalFlowManifest(
     ) {
       const { paths, confidence } = flowPathEvidence(path, availablePaths, adjacency);
       flows.push({
-        id: `flow:data:${path.replace(/[^a-zA-Z0-9:_-]/g, "-")}`,
+        id: `flow:data:${flowIdSegment(path)}`,
         name: `data evolution flow for ${path}`,
         entrypoints: [path],
         paths,

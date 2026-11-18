@@ -55,6 +55,14 @@ the work that would make it a plain cleanup.
   that test accept a call through the helper when the helper body carries `demand`.
 - **P05 — one `loadResultJudgmentContext` for `submit` and `validate-results`.** Not done in the
   P05 lap. **Unblock:** check the sites-pinned declarations and the tests of both commands first.
+- **P06 — the four manifest-predicate re-exports in `graphManifestEdges/index.ts`**
+  (`isCargoManifestPath`, `isGoWorkspaceManifestPath`, `isMavenPomPath`, `isPyprojectPath`).
+  `graph.ts` imports them through the index, and four tests in
+  `tests/audit/graph-manifest-edges.test.ts` assert the re-export. **Unblock:** import them in
+  `graph.ts` from `graphPathUtils.ts` and delete those four tests in the same commit.
+- **P06 — `stripJsonComments` in `graphManifestEdges/jsonc.ts`** stays exported only for
+  `tests/audit/graph-framework-routes.test.ts`. **Unblock:** test it through the public jsonc
+  reader in the same commit.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -100,6 +108,9 @@ real change, not a cleanup.
 - **P04 — the "unreachable" `??` fallbacks** in `intentEquivalenceExecutor.ts` (`?? Math.max(...)`)
   and `intentScopeDisposition.ts` (`?? "out of scope"`). Each is unreachable only by an invariant
   that the type does not state. **Unblock:** narrow the type so the compiler proves it.
+- **P06 — `normalizeWorkspacePattern` in `graphManifestEdges/workspace.ts` through
+  `normalizeRepoRelPath`.** Not shown to give the same output for every glob pattern (`./`, `..`,
+  trailing `/**`). **Unblock:** a table test of both functions over the pattern forms.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -116,6 +127,16 @@ real change, not a cleanup.
 - **P05 — a derive cache for the audit state** (the P03 lead). `ingestBatchAuditResults` in
   `auditStep.ts` would also use it, but it differs on the `complete` status.
 - **P05 — a `Pick` type for `HostInputPauseInputs`**: the source types are in P03 and P07.
+- **P06 — rule tables for `bucketFile` (`bucketing.ts`) and the disposition classifiers**
+  (`disposition.ts`, `inferDisposition`). About twelve `if` blocks each are rows of
+  `[predicate, bucket or status, reason]`. The blocks mix accumulate-all and first-match-wins, and
+  the output order is persisted. **Unblock:** a table form that states each rule's mode, with a
+  test that pins the output order over a mixed path corpus.
+- **P06 — split `graphRoutes.ts` by concern** (per-framework route discovery, route-path
+  normalization, call extraction; about 880 lines). A move of that size is a lap of its own, and
+  the module is in the `GRAPH_EDGE_CACHE_KEY_VERSION` digest, so the split also bumps the version.
+- **P06 — derive `TIER_S_ANALYZER_IDS` in `analyzers/registry.ts`** from the shared candidate
+  table. The table has no tier field. **Unblock:** add the field to the table first.
 - **P05 — one render per step of the design-review file map and input revision**, and of the
   structural context in deep `conceptualDispatch` (the P04 lead). Each needs a new optional
   parameter on the P04 prompt modules.
@@ -148,6 +169,13 @@ worth a change.
 - **P04 — one pass for the three verdict filters** in `charterFidelityExecutor.ts`. Small inputs.
 - **P05:** a path-to-hash map in `toAuditHostTask`; a memo of the generated fanout context in
   `fanoutLanes.ts`; one partition pass in `dropAcceptedResults`.
+- **P06:** a memo for the `pathPatterns.ts` predicates; one mask and parse for
+  `extractRegisteredRouteEvidence` and `extractFrameworkRouteEvidence`, which `graph.ts` calls back
+  to back; a cheap pre-check before the Python router scan; `detectCycles` in `graphSignals.ts`;
+  one `buildDispositionMap` passed down (it is built in five extractors and four orchestrator
+  files, a signature change across parts); the window strings in `complexityDuplication.ts`; the
+  token scan in `commentDecomposition.ts`; the per-call `RegExp` in
+  `extractHtmlAttributeReferences` (`browserExtension.ts`).
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -170,6 +198,12 @@ worth a change.
   `resultPathFor` (kept for parity with the remediate twin); the sample `total_lines` of 100 in
   `sampleRunCommand.ts`; a `Set` in `explainTaskCommand.ts`; the hoist of the systemic lane in
   `auditStep.ts`; a shared `PROVENANCE_KINDS` list.
+- **P06 — a required `pathIndex` for the `graphPythonImports.ts` extractors.** Each one builds an
+  index when the caller passes none. **Unblock:** check that every caller has an index to pass.
+- **P06 — one `isExcludedByDisposition(map, path)` helper** for the nine
+  `status && isAuditExcludedStatus(status)` guards (`flows.ts`, `browserExtension.ts`,
+  `gitHistory.ts`, `surfaces.ts`, `graph.ts`, and orchestrator files in P03). Each site composes
+  the guard with its own `file.excluded` term, so the gain is small.
 
 ## 6. Rejected — do not re-propose
 
@@ -206,3 +240,19 @@ Each of these was checked and is NOT behavior-neutral, or is correct as it stand
   change.
 - **P04:** removing the options of `computeGateVersion` in `intentCheckpointGate.ts`: a test uses
   them to prove that each component invalidates the version. The default is now computed once.
+- **P06:** `errorMessage` for the `(error as Error).message ?? String(error)` sites (`fsIntake.ts`,
+  `graphSuites.ts`, `analyzers/treeSitter.ts`, `treeSitterBatch.ts`, `typescript.ts`): the text
+  differs for a thrown `null` and for a non-`Error` object that has a `message`.
+- **P06:** `graphLookupKey` at the `normalizeGraphPath(x).toLowerCase()` sites in the analyzers,
+  `browserExtension.ts`, `graphPathIndex.ts`, `graphRoutes.ts` and others. None of them is a
+  `pathLookup` key: each is a case-insensitive match, so the name would mislead.
+- **P06:** one resolver for `graphManifestEdges/go.ts` and `maven.ts`: they differ (the Maven one
+  has a `..` guard).
+- **P06:** removing the `if (complexity)` / `if (duplication)` guards in
+  `computeNodeMetricsForFile`: both are always true at run time, but the types are
+  `NodeMetric | undefined`, so the removal needs non-null assertions.
+- **P06:** the `has` guard in `addBucket` (`bucketing.ts`): no bucket is added twice today, but
+  the guard keeps a later rule from adding one twice, at no cost.
+- **P06:** dropping `export` from the confidence constants that only their own file reads
+  (`graphManifestEdges/*`): `knip.json` sets `ignoreExportsUsedInFile`, so they are not dead
+  exports.

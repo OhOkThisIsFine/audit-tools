@@ -1,5 +1,7 @@
+// sites-pinned: tests/audit/analyzer-seam.test.ts, tests/audit/tree-sitter-analyzers.test.ts
 import type { GraphEdge } from "audit-tools/shared";
-import { compareCodeUnits, edgeConfidence } from "audit-tools/shared";
+import { edgeConfidence } from "audit-tools/shared";
+import { compareGraphEdges, edgeSignature } from "../graphPathUtils.js";
 
 // Analyzer edge confidences are set above their regex-floor counterparts so the
 // group-aware merge below prefers the compiler-derived edge for the same
@@ -50,19 +52,6 @@ function groupedKey(edge: GraphEdge, group: string): string {
   return `${edge.from}\0${edge.to}\0${group}`;
 }
 
-function ungroupedKey(edge: GraphEdge): string {
-  return `${edge.from}\0${edge.to}\0${edge.kind ?? ""}`;
-}
-
-function sortEdges(edges: GraphEdge[]): GraphEdge[] {
-  return edges.sort(
-    (a, b) =>
-      compareCodeUnits(a.from, b.from) ||
-      compareCodeUnits(a.to, b.to) ||
-      compareCodeUnits(a.kind ?? "", b.kind ?? ""),
-  );
-}
-
 /**
  * Merge analyzer edges into an existing floor bucket (e.g. `graphs.imports`).
  * Within a known relationship group, edges sharing (from, to) collapse to the
@@ -87,9 +76,9 @@ export function mergeAnalyzerEdges(
         grouped.set(key, edge);
       }
     } else {
-      ungrouped.set(ungroupedKey(edge), edge);
+      ungrouped.set(edgeSignature(edge), edge);
     }
   }
 
-  return sortEdges([...grouped.values(), ...ungrouped.values()]);
+  return [...grouped.values(), ...ungrouped.values()].sort(compareGraphEdges);
 }

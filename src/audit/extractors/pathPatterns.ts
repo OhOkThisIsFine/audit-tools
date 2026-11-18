@@ -186,7 +186,7 @@ function hasToken(normalized: string, values: readonly string[]): boolean {
 }
 
 export function isNodeModulesOrGit(normalized: string): boolean {
-  return hasSegment(normalized, "node_modules") || hasSegment(normalized, ".git");
+  return hasAnySegment(normalized, ["node_modules", ".git"]);
 }
 
 /**
@@ -199,15 +199,11 @@ export function isTmpPath(normalized: string): boolean {
 }
 
 export function isBuildOutput(normalized: string): boolean {
-  return hasSegment(normalized, "dist") || hasSegment(normalized, "build");
+  return hasAnySegment(normalized, ["dist", "build"]);
 }
 
 export function isVendorPath(normalized: string): boolean {
-  return (
-    hasSegment(normalized, "vendor") ||
-    hasSegment(normalized, "vendors") ||
-    hasSegment(normalized, "third_party")
-  );
+  return hasAnySegment(normalized, ["vendor", "vendors", "third_party"]);
 }
 
 export function isBinaryArtifact(normalized: string): boolean {
@@ -248,10 +244,7 @@ export function isGeneratedTestArtifactPath(normalized: string): boolean {
 }
 
 export function isAuditArtifactPath(normalized: string): boolean {
-  return (
-    hasSegment(normalized, ".audit-tools") ||
-    hasSegment(normalized, ".audit-artifacts")
-  );
+  return hasAnySegment(normalized, [".audit-tools", ".audit-artifacts"]);
 }
 
 /**
@@ -260,11 +253,7 @@ export function isAuditArtifactPath(normalized: string): boolean {
  * project's source. Smoke-test temp dirs can leave these inside the repo tree.
  */
 export function isPackageManagerCachePath(normalized: string): boolean {
-  return (
-    hasSegment(normalized, "_cacache") ||
-    hasSegment(normalized, "npm-cache") ||
-    hasSegment(normalized, ".npm")
-  );
+  return hasAnySegment(normalized, ["_cacache", "npm-cache", ".npm"]);
 }
 
 const AUDIT_TOOL_OUTPUT_BASENAMES = new Set<string>([
@@ -322,15 +311,12 @@ export function isConcurrencyPath(normalized: string): boolean {
 }
 
 export function isExamplesOrFixturesPath(normalized: string): boolean {
-  return hasSegment(normalized, "examples") || hasSegment(normalized, "fixtures");
+  return hasAnySegment(normalized, ["examples", "fixtures"]);
 }
 
 export function isScriptPath(normalized: string): boolean {
-  return (
-    hasToken(normalized, SCRIPT_KEYWORDS) ||
-    hasSegment(normalized, "scripts") ||
-    hasSegment(normalized, "bin")
-  );
+  // A `scripts` segment is also a `scripts` token, so SCRIPT_KEYWORDS covers it.
+  return hasToken(normalized, SCRIPT_KEYWORDS) || hasSegment(normalized, "bin");
 }
 
 export function isYamlPath(normalized: string): boolean {
@@ -393,21 +379,19 @@ export function isGeneratedPath(normalized: string): boolean {
 }
 
 export function isSurfacePath(normalized: string): boolean {
+  // A `cli` segment is also a `cli` token, so the token test covers it.
   return (
     hasSegment(normalized, "api") ||
     hasToken(normalized, SURFACE_KEYWORDS) ||
-    hasSegment(normalized, "cli") ||
     hasToken(normalized, ["cli"])
   );
 }
 
-export function isBackgroundSurfacePath(normalized: string): boolean {
-  return hasToken(normalized, CONCURRENCY_KEYWORDS);
-}
+/** A surface is `background` exactly when its path is a concurrency path. */
+export const isBackgroundSurfacePath = isConcurrencyPath;
 
-export function isNetworkSurfacePath(normalized: string): boolean {
-  return hasSegment(normalized, "api") || hasToken(normalized, INTERFACE_KEYWORDS);
-}
+/** A surface is `network`-exposed exactly when its path is an interface path. */
+export const isNetworkSurfacePath = isInterfacePath;
 
 export function isBillingPath(normalized: string): boolean {
   return hasToken(normalized, BILLING_KEYWORDS);

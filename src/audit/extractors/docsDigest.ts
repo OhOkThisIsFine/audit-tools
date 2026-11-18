@@ -121,6 +121,6 @@ export async function buildDocsDigest(
   return {
     generated_at,
     docs,
-    ...(omitted.length > 0 ? { omitted_paths: omitted.sort((a, b) => compareCodeUnits(a, b)) } : {}),
+    ...(omitted.length > 0 ? { omitted_paths: omitted.sort(compareCodeUnits) } : {}),
   };
 }
