@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/content-coherence.test.ts
 /**
  * Provider-neutral content-coherence decomposition.
  *
@@ -8,7 +9,7 @@
 
 import { z } from "zod";
 
-import { compareCodeUnits } from "../compareCodeUnits.js";
+import { compareCodeUnits, uniqueSorted } from "../compareCodeUnits.js";
 import { toPosixPath } from "../paths.js";
 import { isRecord } from "../validation/basic.js";
 import {
@@ -233,7 +234,7 @@ function stableStrings(
     }
     return normalize(entry);
   });
-  return [...new Set(entries)].sort(compareCodeUnits);
+  return uniqueSorted(entries);
 }
 
 function validateAnnotations(value: unknown, itemId: string): void {

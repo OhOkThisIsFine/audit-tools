@@ -32,7 +32,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P01 shared contracts | `src/shared/{types,validation,submission,intent,findings,steps,engine,mcp,reporting,parsing,reReview}/**` and the top-level files `src/shared/*` | 87 | 17,715 | 175 | landed |
 | P02 shared infrastructure | the rest of `src/shared/**` (`analyzers`, `tooling`, `io`, `decompose`, `friction`, `graph`, `observability`, `measurement`) | 58 | 15,569 | 66 | landed |
 | P03 audit orchestrator core | `src/audit/orchestrator/**` except the P04 names | 55 | 12,438 | 47 | landed |
-| P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | open |
+| P04 audit orchestrator review and charter | `src/audit/orchestrator/` files that start with `designReview`, `charter`, `reviewPacket`, `intent`, `systemicChallenge`, `taskAffinityGraph`, `dependencySlices`, plus `selectiveDeepening/**` | 34 | 8,113 | 8 | landed |
 | P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | open |
 | P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | open |
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | open |
@@ -123,3 +123,53 @@ P03 coverage gap: the efficiency reviewer did not read `scope.ts`, `structureExe
 `unitBuilder.ts`, `runtimeCommand.ts`, `coverageElementBaseline.ts`, `runtimeValidation.ts`,
 `flowPlanning.ts`, `edgeReasoning.ts`, `synthesisExecutors.ts`, `executors.ts` and
 `localCommands.ts` line by line. The other three angles covered them.
+
+### From P04
+
+P04 closed the P01 lead (`continuityScores` and the rest parameter of `orderReviewPackets` are
+deleted) and both P03 leads for P04 (`IMPORTANT_LENS_VERIFICATION_LENSES` is replaced by
+`SENSITIVE_LENSES`; `uniqueSorted` moved to `src/shared/compareCodeUnits.ts`).
+
+Cross-part touches that P04 made because its fix needed them:
+
+- `uniqueSorted` is now a shared primitive (`SINGLE_DEFINITION_RULES` in
+  `scripts/check-shared-primitives.mjs`). The private copies in `src/shared/affinityArtifacts.ts`,
+  `validation/findingsReport.ts`, `friction/frictionRecord.ts` and
+  `decompose/contentCoherence.ts` (P01, P02) and the six P03 sites call it.
+- `auditTaskUtils.ts` (P03) adds `SENSITIVE_LENS_IDS`, the typed list behind `SENSITIVE_LENSES`.
+  The set stays `ReadonlySet<string>`, because custom lens names reach `requeue.ts` and
+  `taskBuilder.ts`. `lineCounts.ts` (P03) adds `lineCountsFor`.
+- `scope.ts` (P03) imports from the defining modules, because the `reviewPacketGraph.ts` barrel is
+  deleted. The header comment of `src/shared/graph/graphPaths.ts` (P02) no longer names it.
+- `tests/audit/continuity-score.test.ts` is now `tests/audit/review-packet-order.test.ts`. It
+  keeps the ordering tests and drops the continuity-score cases.
+- `merge_edge_kind_counts` is now always `{}`: one packet is one coherence component, so no merge
+  edge can join two packets. `countMergeEdgeKinds`, `groups` and `planningGraphEdges` are deleted.
+- The charter packet archive writes its index with `writeJsonFile`, so that write is now atomic.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P07:** `merge_edge_kind_counts` in `src/audit/types/reviewPlanning.ts` has a constant value.
+  Remove the field from the type and its readers.
+- **P07:** four orchestrator files keep their own lens lists (`SENSITIVE_LENSES`, the two-lens
+  high-risk-clean pair, the runtime follow-up order). A policy field on `LENS_METADATA` in
+  `src/audit/types.ts` could derive them. It must encode today's sets and order exactly: the
+  high-risk-clean pair is not `SENSITIVE_LENSES`, and the runtime order is not `LENS_ORDER`.
+- **P07:** `workBlocks.ts` has an index signature and a private `stableStrings` (a `uniqueSorted`
+  copy).
+- **P05:** in deep mode, `conceptualDispatch` renders the shared structural context once per
+  perspective, and the systemic revision renders it again. One render per step is enough.
+- **P05 to P12:** other private `[...new Set(x)].sort(...)` copies can call `uniqueSorted`.
+- **P03 (caller):** `planningExecutors.ts` and `ingestionExecutors.ts` each call
+  `buildTaskAffinityGraph`, and then `buildAuditPlanMetrics` builds the same graph again through
+  `buildReviewPacketPlanningData`. Pass the built graph down as a parameter.
+
+P04 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each.
+
+P04 coverage gap: the altitude reviewer did not read the `designReview*` files,
+`intentCheckpointGate.ts`, `intentInterpreter.ts`, `intentScopeDisposition.ts`,
+`intentEquivalenceExecutor.ts`, `systemicChallengeExecutor.ts`, `reviewPacketGraphContext.ts`,
+`charterPacketArchive.ts`, `charterFidelityPacket.ts` and `charterExtractionExecutor.ts` in depth.
+The other three angles covered them.

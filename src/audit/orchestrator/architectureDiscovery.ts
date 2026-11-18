@@ -2,7 +2,8 @@
 import { hashContent, stableStringify, findingReEmissionKey } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult, AuditTask, Finding } from "../types.js";
-import { DEEPENING_TAG, taskIdFor, sanitizeSegment, uniqueSorted } from "./selectiveDeepening/shared.js";
+import { uniqueSorted } from "audit-tools/shared";
+import { DEEPENING_TAG, taskIdFor, sanitizeSegment } from "./selectiveDeepening/shared.js";
 import { computeStaleResultTaskIds } from "./resultBaseline.js";
 import { selectCurrentResults } from "./ledger.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";

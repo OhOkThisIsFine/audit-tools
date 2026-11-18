@@ -2,7 +2,7 @@
 import type { UnitManifest } from "../types.js";
 import type { FlowCoverageManifest } from "../types/flowCoverage.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-import { stableStringify, discoverProjectCommands } from "audit-tools/shared";
+import { stableStringify, discoverProjectCommands, uniqueSorted } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import { METADATA_SCHEMA_VERSION } from "../types/artifactMetadata.js";
@@ -115,7 +115,7 @@ function validationInputs(task: RuntimeValidationTask): string {
   return stableStringify({
     kind: task.kind,
     command: task.command ?? [],
-    target_paths: [...new Set(task.target_paths)].sort(),
+    target_paths: uniqueSorted(task.target_paths),
     suggested_checks: task.suggested_checks ?? [],
   });
 }

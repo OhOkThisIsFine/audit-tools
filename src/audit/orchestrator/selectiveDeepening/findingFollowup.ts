@@ -1,25 +1,24 @@
 // sites-pinned: tests/audit/audit-frontier.test.ts
-import { lineCountForPath } from "../lineCounts.js";
-import type { AuditResult, AuditTask, Finding } from "../../types.js";
+import { lineCountsFor } from "../lineCounts.js";
+import type { AuditResult, AuditTask } from "../../types.js";
 import {
   DEEPENING_TAG,
   type FindingContext,
   SEVERITY_RANK,
   isDeepeningTask,
-
   pathsForFinding,
   sanitizeSegment,
   taskIdFor,
 } from "./shared.js";
 
-export function buildFindingFollowupTask(params: {
-  result: AuditResult;
-  task?: AuditTask;
-  finding: Finding;
-  triggers: string[];
-  lineIndex?: Record<string, number>;
-}): AuditTask {
-  const paths = pathsForFinding(params.finding, params.result, params.task);
+/** One follow-up for one finding; `paths` is the context's already-derived finding scope. */
+export function buildFindingFollowupTask(
+  params: FindingContext & {
+    triggers: string[];
+    lineIndex?: Record<string, number>;
+  },
+): AuditTask {
+  const paths = params.paths;
   const triggerLabel = params.triggers.join("+");
   const taskId = taskIdFor("finding", [
     params.result.task_id,
@@ -38,12 +37,11 @@ export function buildFindingFollowupTask(params: {
     lens: params.result.lens,
     file_paths: paths,
     ...(params.task?.inputs ? { inputs: { ...params.task.inputs } } : {}),
-    file_line_counts: Object.fromEntries(
-      paths.map((path) => [
-        path,
-        lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex }),
-      ]),
-    ),
+    file_line_counts: lineCountsFor(paths, {
+      task: params.task,
+      result: params.result,
+      lineIndex: params.lineIndex,
+    }),
     rationale:
       `Follow up on ${params.finding.id} (${params.finding.severity}/${params.finding.confidence}) from ${params.result.task_id}. ` +
       "Verify impact, evidence quality, affected scope, and whether the finding should stand, narrow, or be downgraded.",

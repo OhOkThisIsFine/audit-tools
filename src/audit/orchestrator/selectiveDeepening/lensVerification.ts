@@ -2,24 +2,40 @@
 import { lineCountForPath, lineCountFromSources } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 import { isHighRiskCleanResult } from "./highRiskClean.js";
 import {
   DEEPENING_TAG,
-  IMPORTANT_LENS_VERIFICATION_LENSES,
   LENS_VERIFICATION_TAG,
   SEVERITY_RANK,
+  assignedOrCoveredPaths,
   formatList,
-  getExternalAnalyzerPaths,
   isDeepeningTask,
   isLensVerificationTask,
-
-
-  priorityLabel,
   taskIdFor,
-  uniqueSorted,
 } from "./shared.js";
-import { priorityRank } from "../auditTaskUtils.js";
+import {
+  SENSITIVE_LENSES,
+  SENSITIVE_LENS_IDS,
+  priorityRank,
+} from "../auditTaskUtils.js";
+import { normalizePriority } from "../reviewPacketShared.js";
+import { getExternalSignalPaths } from "../requeueUtils.js";
+
+/** The lenses a steward verifies — the sensitive set, in a stable order. */
+const VERIFIED_LENSES: readonly Lens[] = [...SENSITIVE_LENS_IDS].sort(compareCodeUnits);
+/** Triggers that keep an explicitly closed clean scope open for a steward. */
+const EXTERNAL_SIGNAL_TRIGGERS: ReadonlySet<string> = new Set([
+  "external_analyzer_signal",
+  "unresolved_external_signal",
+]);
+/** Triggers that alone give a single-source lens enough surface for a steward. */
+const SURFACE_TRIGGERS: ReadonlySet<string> = new Set([
+  "critical_flow",
+  "external_analyzer_signal",
+  "unresolved_external_signal",
+  "large_lens_surface",
+]);
 
 /** Score boost for files touched by a critical-flow task — highest semantic signal. */
 const SCORE_CRITICAL_FLOW = 6;
@@ -42,15 +58,10 @@ function sourceTaskIds(sources: LensVerificationSource[]): string[] {
 }
 
 function resultFiles(source: LensVerificationSource): string[] {
-  return uniqueSorted(
-    source.task?.file_paths && source.task.file_paths.length > 0
-      ? source.task.file_paths
-      : source.result.file_coverage.map((coverage) => coverage.path),
-  );
+  return assignedOrCoveredPaths(source.result, source.task);
 }
 
 function lensVerificationTriggers(params: {
-  lens: Lens;
   sources: LensVerificationSource[];
   externalAnalyzerPaths: Set<string>;
 }): string[] {
@@ -160,7 +171,7 @@ function shouldBuildLensVerificationTask(params: {
   existingTasks: AuditTask[];
   completedResultIds: Set<string>;
 }): boolean {
-  if (!IMPORTANT_LENS_VERIFICATION_LENSES.has(params.lens)) {
+  if (!SENSITIVE_LENSES.has(params.lens)) {
     return false;
   }
   if (params.sources.length === 0 || params.triggers.length === 0) {
@@ -173,9 +184,7 @@ function shouldBuildLensVerificationTask(params: {
   );
   if (
     explicitlyClosedCleanScope &&
-    !params.triggers.some((trigger) =>
-      ["external_analyzer_signal", "unresolved_external_signal"].includes(trigger),
-    )
+    !params.triggers.some((trigger) => EXTERNAL_SIGNAL_TRIGGERS.has(trigger))
   ) {
     return false;
   }
@@ -191,14 +200,7 @@ function shouldBuildLensVerificationTask(params: {
 
   const enoughSurface =
     params.sources.length >= 2 ||
-    params.triggers.some((trigger) =>
-      [
-        "critical_flow",
-        "external_analyzer_signal",
-        "unresolved_external_signal",
-        "large_lens_surface",
-      ].includes(trigger),
-    );
+    params.triggers.some((trigger) => SURFACE_TRIGGERS.has(trigger));
   if (!enoughSurface) {
     return false;
   }
@@ -249,7 +251,7 @@ function buildLensSurfaceMetrics(params: {
       add(
         path,
         priorityRank(source.task?.priority),
-        `${priorityLabel(source.task?.priority)}_priority`,
+        `${normalizePriority(source.task?.priority)}_priority`,
       );
       if (source.task?.tags?.includes("critical_flow")) {
         add(path, SCORE_CRITICAL_FLOW, "critical_flow");
@@ -323,7 +325,7 @@ function summarizeLensVerificationSource(source: LensVerificationSource): string
     ? ` tags=${source.task.tags.join(",")}`
     : "";
   return (
-    `- ${source.result.task_id} priority=${priorityLabel(source.task?.priority)}` +
+    `- ${source.result.task_id} priority=${normalizePriority(source.task?.priority)}` +
     `${tags} files=${formatList(resultFiles(source), 4)} ${findings}` +
     (source.result.requires_followup === true ? " requires_followup=true" : "")
   );
@@ -407,12 +409,10 @@ export function buildLensVerificationTasks(params: {
 }): AuditTask[] {
   const taskById = new Map(params.existingTasks.map((task) => [task.task_id, task]));
   const completedResultIds = new Set(params.results.map((result) => result.task_id));
-  const externalAnalyzerPaths = getExternalAnalyzerPaths(params.externalAnalyzerResults);
+  const externalAnalyzerPaths = getExternalSignalPaths(params.externalAnalyzerResults);
   const tasks: AuditTask[] = [];
 
-  for (const lens of [...IMPORTANT_LENS_VERIFICATION_LENSES].sort((a, b) =>
-    compareCodeUnits(a, b),
-  )) {
+  for (const lens of VERIFIED_LENSES) {
     const sources = params.results
       .map((result) => ({ result, task: taskById.get(result.task_id) }))
       .filter(
@@ -422,7 +422,6 @@ export function buildLensVerificationTasks(params: {
           !isLensVerificationTask(source.task),
       );
     const triggers = lensVerificationTriggers({
-      lens,
       sources,
       externalAnalyzerPaths,
     });

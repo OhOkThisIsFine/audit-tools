@@ -6,11 +6,8 @@ import type { GraphBundle, GraphEdge } from "../types/graph.js";
 /**
  * Graph-path + graph-edge primitives that operate purely on the shared
  * `GraphBundle`/`GraphEdge` contract — so they live in `audit-tools/shared`
- * where BOTH orchestrators (and the shared continuity scorer) can single-source
- * them. Audit re-exports `normalizeGraphPath` (from `extractors/graphPathUtils`)
- * and `collectGraphEdges` (from `orchestrator/reviewPacketGraphEdges`) from here
- * so its 28+ existing import sites are unchanged; remediate imports them for the
- * continuity consumer.
+ * where both orchestrators can single-source them. Audit re-exports
+ * `normalizeGraphPath` from `extractors/graphPathUtils`.
  */
 
 // sites-pinned: tests/audit/graph-path-utils.test.ts

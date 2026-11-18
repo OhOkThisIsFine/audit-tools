@@ -1,7 +1,7 @@
 // sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
-import { compareCodeUnits, confidenceRank, severityRank } from "audit-tools/shared";
+import { compareCodeUnits, confidenceRank, severityRank, uniqueSorted } from "audit-tools/shared";
 import type { NodeMetrics } from "audit-tools/shared";
 import { projectConceptualCharterContext } from "./designReviewTask.js";
 import { designReviewInputRevision } from "./designReviewProjection.js";
@@ -17,6 +17,7 @@ import {
   type UnitScopeDisposition,
 } from "./intentScopeDisposition.js";
 import { ReviewSubmissionEnvelopeSchema } from "audit-tools/shared";
+import type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
 import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
 import { DesignLeadCategorySchema } from "../types/designAssessment.js";
 
@@ -48,8 +49,6 @@ const LEAD_CATEGORY_RULE =
   "A finding that confirms a structural lead listed above keeps that lead's category instead, one of: " +
   `${DesignLeadCategorySchema.options.join(", ")}.`;
 
-export { deriveUnitScopeDisposition, type UnitScopeDisposition };
-
 /** Render the `[in scope]` / `[excluded: reason]` tag for a unit disposition. */
 function scopeTag(disposition: UnitScopeDisposition): string {
   return disposition.kind === "excluded"
@@ -62,17 +61,16 @@ function summarizeUnits(bundle: ArtifactBundle): string {
   if (units.length === 0) return "No units identified.";
 
   const checkpoint = bundle.intent_checkpoint;
-  const lines = units.map((unit) => {
-    const lenses = unit.required_lenses.join(", ") || "none";
-    const tag = scopeTag(deriveUnitScopeDisposition(unit.files, checkpoint));
-    return `- ${unit.unit_id} ${tag} (${unit.files.length} files, lenses: ${lenses})`;
-  });
-
-  return [
-    `${units.length} units:`,
-    ...lines.slice(0, 40),
-    ...(units.length > 40 ? [`  ... and ${units.length - 40} more`] : []),
-  ].join("\n");
+  return formatTopNList(
+    units,
+    40,
+    (total) => `${total} units:`,
+    (unit) => {
+      const lenses = unit.required_lenses.join(", ") || "none";
+      const tag = scopeTag(deriveUnitScopeDisposition(unit.files, checkpoint));
+      return `- ${unit.unit_id} ${tag} (${unit.files.length} files, lenses: ${lenses})`;
+    },
+  );
 }
 
 function summarizeGraph(bundle: ArtifactBundle): string {
@@ -90,10 +88,7 @@ function summarizeGraph(bundle: ArtifactBundle): string {
   return `Dependency graph: ${counts.join(", ")}.`;
 }
 
-/**
- * Extracted helper for MNT-795c5f85: Duplicated top-N summary pattern.
- * Formats a top-N list with header, lines, and "more" indicator.
- */
+/** Formats a top-N list with header, lines, and "more" indicator. */
 function formatTopNList<T>(
   items: T[],
   max: number,
@@ -202,10 +197,8 @@ function resolveMaxUnits(bundle: ArtifactBundle, options: DesignReviewOptions): 
   return options.max_units ?? Math.max(5, Math.min(20, Math.ceil(unitCount / 5)));
 }
 
-function fileMapContextFor(bundle: ArtifactBundle, maxUnits: number): ReviewFileMapContext {
-  return reviewFileMapContext(
-    buildReviewFileMap(bundle, startingPointReviewScope(selectStartingPoints(bundle, maxUnits))),
-  );
+function fileMapContextFor(bundle: ArtifactBundle, points: StartingPoints): ReviewFileMapContext {
+  return reviewFileMapContext(buildReviewFileMap(bundle, startingPointReviewScope(points)));
 }
 
 /**
@@ -219,7 +212,10 @@ export function designReviewFileMapContext(
   bundle: ArtifactBundle,
   options: DesignReviewOptions = {},
 ): ReviewFileMapContext {
-  return fileMapContextFor(bundle, resolveMaxUnits(bundle, options));
+  return fileMapContextFor(
+    bundle,
+    selectStartingPoints(bundle, resolveMaxUnits(bundle, options)),
+  );
 }
 
 function buildPrioritizedReadingList(points: StartingPoints): string {
@@ -456,15 +452,7 @@ function examplePath(bundle: ArtifactBundle): string {
   return bundle.repo_manifest?.files?.[0]?.path ?? "src/index.ts";
 }
 
-/**
- * A conceptual-review perspective: a deliberately narrow value system one
- * independent reviewer adopts. The deep conceptual pass fans these out to real
- * parallel lanes (one perspective each), then merges via an independent
- * judge. Provider-neutral — a perspective is a *lens*, never a model.
- */
-export { CONCEPTUAL_PERSPECTIVES, DEFAULT_CONCEPTUAL_PERSPECTIVES, clampPerspectiveCount, selectPerspectives } from "../../shared/types/conceptualPerspective.js";
-import type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
-export type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
+export { CONCEPTUAL_PERSPECTIVES, DEFAULT_CONCEPTUAL_PERSPECTIVES, selectPerspectives } from "../../shared/types/conceptualPerspective.js";
 
 /**
  * Shared "how to think" block for the conceptual-review prompts. This is the
@@ -732,14 +720,14 @@ export function renderCharterContext(bundle: ArtifactBundle): string {
   const context = projectConceptualCharterContext(bundle);
   if (context.length === 0) return "";
   const blocks = context.map((correspondence) => {
-    const files = new Set(correspondence.accounts.flatMap((account) => account.files));
+    const files = uniqueSorted(correspondence.accounts.flatMap((account) => account.files));
     const accountLines = correspondence.accounts.map((account) => {
       const disposition = account.disposition === "flag_for_human"
         ? " — LOW-CONFIDENCE account: FLAG for human intent input, do NOT opine on it"
         : "";
       return `  - [${account.kind}] ${account.purpose}${disposition}`;
     });
-    const scope = files.size > 0 ? [...files].sort().join(", ") : "(no scoped files)";
+    const scope = files.length > 0 ? files.join(", ") : "(no scoped files)";
     return [`- **${correspondence.correspondence_id}** (files: ${scope})`, ...accountLines].join("\n");
   });
 
@@ -810,7 +798,7 @@ export function renderSharedStructuralContext(
     ...renderGraphProvenance(bundle),
     // The summary only: the complete map reaches the lane as a read-only context
     // file its emission site binds (`designReviewFileMapContext`).
-    ...fileMapContextFor(bundle, maxUnits).summaryLines,
+    ...fileMapContextFor(bundle, startingPoints).summaryLines,
     "### File inventory",
     "",
     summarizeFiles(bundle),

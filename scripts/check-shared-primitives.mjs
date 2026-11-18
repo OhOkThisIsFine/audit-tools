@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/check-shared-primitives.test.ts
 //
 // check:shared-primitives — the single-source gate for tiny shared primitives.
 //
@@ -85,6 +86,7 @@ export const SCAN_PATHSPECS = [
 export const SINGLE_DEFINITION_RULES = [
   { name: 'isRecord', home: 'src/shared/validation/basic.ts' },
   { name: 'compareCodeUnits', home: ['src/shared/compareCodeUnits.ts', 'scripts/shared/primitives.mjs'] },
+  { name: 'uniqueSorted', home: 'src/shared/compareCodeUnits.ts' },
   { name: 'hashContent', home: ['src/shared/hash.ts', 'scripts/shared/primitives.mjs'] },
   { name: 'resolveWithinRoot', home: ['src/shared/io/pathContainment.ts', 'scripts/shared/primitives.mjs'] },
   { name: 'stableStringify', home: 'src/shared/stableStringify.ts' },

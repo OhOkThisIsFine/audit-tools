@@ -5,7 +5,7 @@ import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { repinRunSnapshot, writeBackSnapshotEdits } from "../io/runSnapshot.js";
 import type { AnalyzerConsentDecisions } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { uniqueSorted } from "audit-tools/shared";
 import { isAuditExcludedStatus } from "../extractors/disposition.js";
 import {
   resolveNodeTool,
@@ -126,13 +126,9 @@ function pathsForExtensions(
   byExtension: Map<string, string[]>,
   extensions: string[],
 ): string[] {
-  const collected = new Set<string>();
-  for (const extension of extensions) {
-    for (const path of byExtension.get(extension) ?? []) {
-      collected.add(path);
-    }
-  }
-  return [...collected].sort((a, b) => compareCodeUnits(a, b));
+  return uniqueSorted(
+    extensions.flatMap((extension) => byExtension.get(extension) ?? []),
+  );
 }
 
 /**

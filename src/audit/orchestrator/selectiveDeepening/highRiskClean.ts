@@ -1,13 +1,19 @@
-import { lineCountForPath } from "../lineCounts.js";
+// sites-pinned: tests/audit/orchestrator-remediation.test.ts
+import { lineCountsFor } from "../lineCounts.js";
 import type { AuditResult, AuditTask } from "../../types.js";
 import {
   DEEPENING_TAG,
+  assignedOrCoveredPaths,
   isDeepeningTask,
-
   sanitizeSegment,
   taskIdFor,
-  uniqueSorted,
 } from "./shared.js";
+
+/** Tags that mark a task's clean verdict as worth a second look on their own. */
+const HIGH_RISK_TAGS: ReadonlySet<string> = new Set([
+  "critical_flow",
+  "external_analyzer_signal",
+]);
 
 export function isHighRiskCleanResult(
   result: AuditResult,
@@ -31,11 +37,7 @@ export function isHighRiskCleanResult(
     return true;
   }
 
-  if (
-    task.tags?.some((tag) =>
-      ["critical_flow", "external_analyzer_signal"].includes(tag),
-    )
-  ) {
+  if (task.tags?.some((tag) => HIGH_RISK_TAGS.has(tag))) {
     return true;
   }
 
@@ -47,12 +49,7 @@ export function buildHighRiskCleanFollowupTask(params: {
   task?: AuditTask;
   lineIndex?: Record<string, number>;
 }): AuditTask {
-  const taskFilePaths = params.task?.file_paths;
-  const paths = uniqueSorted(
-    taskFilePaths && taskFilePaths.length > 0
-      ? taskFilePaths
-      : params.result.file_coverage.map((coverage) => coverage.path),
-  );
+  const paths = assignedOrCoveredPaths(params.result, params.task);
 
   return {
     task_id: taskIdFor("clean", [params.result.task_id, params.result.lens]),
@@ -60,12 +57,11 @@ export function buildHighRiskCleanFollowupTask(params: {
     pass_id: `deepening:${params.result.pass_id}`,
     lens: params.result.lens,
     file_paths: paths,
-    file_line_counts: Object.fromEntries(
-      paths.map((path) => [
-        path,
-        lineCountForPath(path, { task: params.task, result: params.result, lineIndex: params.lineIndex }),
-      ]),
-    ),
+    file_line_counts: lineCountsFor(paths, {
+      task: params.task,
+      result: params.result,
+      lineIndex: params.lineIndex,
+    }),
     rationale:
       `Sample high-risk no-finding result from ${params.result.task_id}. ` +
       "Re-review the assigned files for missed edge cases, hidden runtime failures, and whether the clean conclusion should stand.",

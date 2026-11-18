@@ -654,7 +654,7 @@ export {
 } from "./submission/hostResultOutcomes.js";
 
 // The ONE code-unit comparator every persisted/hashed sort orders by.
-export { compareCodeUnits } from "./compareCodeUnits.js";
+export { compareCodeUnits, uniqueSorted } from "./compareCodeUnits.js";
 
 // The two repo-path normalization behaviours (posix render / repo-rel token).
 export { normalizeRepoRelPath, toPosixPath } from "./paths.js";

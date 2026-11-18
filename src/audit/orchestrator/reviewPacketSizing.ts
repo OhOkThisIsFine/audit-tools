@@ -5,15 +5,13 @@ import {
   ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PROMPT_OVERHEAD_TOKENS,
 } from "audit-tools/shared";
+import { lineCountForPath } from "./lineCounts.js";
 
 // Per-packet sizing / token-budget arithmetic for review packetization,
 // extracted from reviewPackets.ts. Estimates derive from manifest byte counts
 // (recorded at intake) with a line-count fallback for manually built tasks.
 
-// ESTIMATED_TOKENS_PER_LINE and ESTIMATED_PROMPT_OVERHEAD_TOKENS are single-sourced
-// from audit-tools/shared; ESTIMATED_TOKENS_PER_LINE is re-exported so reviewPackets.ts
-// consumers remain stable. ESTIMATED_PACKET_PROMPT_TOKENS aliases the shared constant.
-export { ESTIMATED_TOKENS_PER_LINE };
+/** A packet's fixed prompt overhead: the shared ESTIMATED_PROMPT_OVERHEAD_TOKENS. */
 export const ESTIMATED_PACKET_PROMPT_TOKENS = ESTIMATED_PROMPT_OVERHEAD_TOKENS;
 
 /**
@@ -46,8 +44,7 @@ function pathContentTokens(
   if (typeof bytes === "number" && bytes > 0) {
     return estimateTokensFromBytes(bytes);
   }
-  const lines = owner?.file_line_counts?.[path] ?? lineIndex?.[path] ?? 0;
-  return lines * ESTIMATED_TOKENS_PER_LINE;
+  return lineCountForPath(path, { task: owner, lineIndex }) * ESTIMATED_TOKENS_PER_LINE;
 }
 
 /** Estimated content tokens for one task across all of its files. */
@@ -79,16 +76,4 @@ export function fileGroupContentTokens(
     total += pathContentTokens(owner, path, sizeIndex, lineIndex);
   }
   return total;
-}
-
-export function estimateTaskGroupTokens(
-  tasks: AuditTask[],
-  sizeIndex?: Record<string, number>,
-  lineIndex?: Record<string, number>,
-): number {
-  let contentTokens = 0;
-  for (const task of tasks) {
-    contentTokens += taskContentTokens(task, sizeIndex, lineIndex);
-  }
-  return ESTIMATED_PACKET_PROMPT_TOKENS + contentTokens;
 }

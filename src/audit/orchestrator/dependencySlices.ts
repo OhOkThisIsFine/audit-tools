@@ -128,26 +128,6 @@ function clarificationGroundingPathSlice(bundle: ArtifactBundle): unknown {
 }
 
 /**
- * The edge registry: `downstream → upstream → projection`. Three downstreams
- * are registered: `charter_register.json` (the expensive extraction step, the
- * live incident driver), `charter_clarification.json` on its manifest edge
- * (path universe only, above) and its decomposition edge (consensus membership:
- * `placeInSubsystem` reads only `{node_id, members}`, and a whole-artifact edge
- * would re-stale it on every manifest churn through the decomposition's own
- * whole-manifest edge), and `audit_tasks.json` on its three late inputs (see
- * the discovery slices above). Beyond those:
- *
- *  - `systemic_challenge` keeps its whole-artifact `repo_manifest` edge — its
- *    persisted output is a function of the WHOLE manifest: every round records
- *    `round_token = systemicPremiseToken(bundle)`, which hashes the complete
- *    canonical `repo_manifest` (file hashes included), beside the total file
- *    count (aggregateMetricsDigest), the authored path list (reviewFileMap) and
- *    full-path-set grounding (designFindingGrounding). No slice narrower than
- *    the artifact itself is a superset of that.
- *  - `intent_checkpoint.json` edges are handled by the intent-equivalence gate
- *    (revision authority via `intent_baseline`), NOT by a slice projection.
- */
-/**
  * The `graph_bundle` surface the charter_register consumes: exactly the
  * member-member dependency-edge lines the STRUCTURAL channel's packet embeds —
  * single-sourced from `memberDependencyEdgeLines` (the packet renders the same
@@ -189,6 +169,26 @@ function systemicDiscoverySlice(bundle: ArtifactBundle): unknown {
   return findings.length > 0 ? findings : null;
 }
 
+/**
+ * The edge registry: `downstream → upstream → projection`. Three downstreams
+ * are registered: `charter_register.json` (the expensive extraction step, the
+ * live incident driver), `charter_clarification.json` on its manifest edge
+ * (path universe only, above) and its decomposition edge (consensus membership:
+ * `placeInSubsystem` reads only `{node_id, members}`, and a whole-artifact edge
+ * would re-stale it on every manifest churn through the decomposition's own
+ * whole-manifest edge), and `audit_tasks.json` on its three late inputs (see
+ * the discovery slices above). Beyond those:
+ *
+ *  - `systemic_challenge` keeps its whole-artifact `repo_manifest` edge — its
+ *    persisted output is a function of the WHOLE manifest: every round records
+ *    `round_token = systemicPremiseToken(bundle)`, which hashes the complete
+ *    canonical `repo_manifest` (file hashes included), beside the total file
+ *    count (aggregateMetricsDigest), the authored path list (reviewFileMap) and
+ *    full-path-set grounding (designFindingGrounding). No slice narrower than
+ *    the artifact itself is a superset of that.
+ *  - `intent_checkpoint.json` edges are handled by the intent-equivalence gate
+ *    (revision authority via `intent_baseline`), NOT by a slice projection.
+ */
 export const DEPENDENCY_SLICE_PROJECTIONS: Partial<
   Record<string, Partial<Record<string, SliceProjection>>>
 > = {

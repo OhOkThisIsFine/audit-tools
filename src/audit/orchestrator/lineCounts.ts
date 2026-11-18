@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/line-counts.test.ts, tests/audit/orchestrator-remediation.test.ts
 // One reading of "how many lines does this path have", for the audit
 // orchestrator's planning and deepening draws.
 //
@@ -80,6 +81,16 @@ export function lineCountForPath(
       : resultLineIndexFor(sources.result)[path]) ??
     sources.lineIndex?.[path] ??
     0
+  );
+}
+
+/** The `file_line_counts` record for `paths`, each read by {@link lineCountForPath}. */
+export function lineCountsFor(
+  paths: readonly string[],
+  sources: LineCountSources,
+): Record<string, number> {
+  return Object.fromEntries(
+    paths.map((path) => [path, lineCountForPath(path, sources)]),
   );
 }
 

@@ -195,40 +195,35 @@ function buildExcludedSummary(
 
   const rows: ExcludedSummaryRow[] = [];
   for (const [prefix, files] of byPrefix) {
-    if (files.length === 1) {
-      // Single file — emit as individual row
-      rows.push({ path: files[0].path, status: files[0].status, reason: files[0].reason });
-      continue;
-    }
-
-    // Count (status+reason) combinations to find majority
-    const keyCount = new Map<string, number>();
+    // Count (status+reason) combinations to find the majority; each tally keeps
+    // its first file as the representative of that status and reason.
+    const tally = new Map<string, { count: number; status: string; reason: string }>();
     for (const f of files) {
       const key = `${f.status}|${f.reason}`;
-      keyCount.set(key, (keyCount.get(key) ?? 0) + 1);
+      const entry = tally.get(key);
+      if (entry) entry.count += 1;
+      else tally.set(key, { count: 1, status: f.status, reason: f.reason });
     }
-    const majorityEntry = [...keyCount.entries()].sort((a, b) => b[1] - a[1])[0];
-    const [majorityKey, majorityCount] = majorityEntry;
-    const [majorityStatus, majorityReason] = majorityKey.split("|") as [string, string];
+    const [majorityKey, majority] = [...tally.entries()].sort((a, b) => b[1].count - a[1].count)[0];
 
     const oddballs = files.filter((f) => `${f.status}|${f.reason}` !== majorityKey);
 
-    if (majorityCount > 1) {
+    if (majority.count > 1) {
       // Emit aggregate row for the majority
       rows.push({
         prefix,
-        file_count: majorityCount,
-        status: majorityStatus,
-        reason: majorityReason,
+        file_count: majority.count,
+        status: majority.status,
+        reason: majority.reason,
       });
       // Emit oddball rows individually (files that differ from the majority)
       for (const f of oddballs) {
         rows.push({ path: f.path, status: f.status, reason: f.reason });
       }
     } else {
-      // COR-2e048b54: majorityCount === 1 means every file has a unique
-      // status+reason combination. Emit ALL files individually — the original
-      // code emitted only the oddballs and silently dropped the "majority" file.
+      // A majority count of 1 means every file has a unique status+reason
+      // combination (a one-file group included). Emit ALL files individually —
+      // emitting only the oddballs would silently drop the "majority" file.
       for (const f of files) {
         rows.push({ path: f.path, status: f.status, reason: f.reason });
       }
@@ -348,53 +343,44 @@ function buildLensPropositions(
   designAssessment?: DesignAssessment,
 ): LensProposition[] {
   const units = unitManifest?.units ?? [];
+  // Each kind lower-cased and each in-scope path normalized ONCE; every signal
+  // below tests these.
+  const unitKinds = units.map((u) => (u.kind ?? "").toLowerCase());
+  const normalizedPaths = inScopePaths.map(normalizeExtractorPath);
+  const kindHasAny = (...tokens: string[]) =>
+    unitKinds.some((kind) => tokens.some((token) => kind.includes(token)));
+  const pathHasAny = (...tokens: string[]) =>
+    normalizedPaths.some((path) => tokens.some((token) => path.includes(token)));
+  const basename = (path: string) => path.split("/").at(-1) ?? "";
 
   // Network-surface signal (kind contains interface/api/http, or path heuristics).
-  const hasNetworkSurface = units.some((u) => {
-    const kind = (u.kind ?? "").toLowerCase();
-    return kind.includes("interface") || kind.includes("api") || kind.includes("http") || kind.includes("network");
-  }) || inScopePaths.some((p) => {
-    const norm = normalizeExtractorPath(p);
-    return norm.includes("/api/") || norm.includes("/routes/") || norm.includes("/controllers/");
-  });
+  const hasNetworkSurface =
+    kindHasAny("interface", "api", "http", "network") ||
+    pathHasAny("/api/", "/routes/", "/controllers/");
 
   // Test-unit signal.
-  const hasTestUnits = units.some((u) => {
-    const kind = (u.kind ?? "").toLowerCase();
-    return kind.includes("test") || kind.includes("spec");
-  }) || inScopePaths.some((p) => {
-    const norm = normalizeExtractorPath(p);
-    return norm.includes("/test/") || norm.includes("/tests/") || norm.includes("/spec/") || norm.includes(".test.") || norm.includes(".spec.");
-  });
+  const hasTestUnits =
+    kindHasAny("test", "spec") ||
+    pathHasAny("/test/", "/tests/", "/spec/", ".test.", ".spec.");
 
   // Config/deployment signal.
-  const hasConfigFiles = inScopePaths.some((p) => {
-    const norm = normalizeExtractorPath(p);
-    const base = norm.split("/").at(-1) ?? "";
+  const hasConfigFiles = normalizedPaths.some((path) => {
+    const base = basename(path);
     return base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".env") ||
       base.endsWith(".config.js") || base.endsWith(".config.ts") ||
       base.startsWith(".env") || base === "config.json" || base === "settings.json";
   }) || dispositionFiles.some((f) => {
-    const norm = normalizeExtractorPath(f.path);
-    const base = norm.split("/").at(-1) ?? "";
+    const base = basename(normalizeExtractorPath(f.path));
     return base.endsWith(".yaml") || base.endsWith(".yml");
   });
 
   // Logging/metrics-surface signal (kind contains logging/metrics/telemetry, or path heuristics).
-  const hasLoggingMetricsSurface = units.some((u) => {
-    const kind = (u.kind ?? "").toLowerCase();
-    return kind.includes("logging") || kind.includes("metrics") || kind.includes("telemetry") ||
-      kind.includes("observability") || kind.includes("tracing");
-  }) || inScopePaths.some((p) => {
-    const norm = normalizeExtractorPath(p);
-    return norm.includes("/logging/") || norm.includes("/metrics/") || norm.includes("/tracing/") ||
-      norm.includes("/observability/") || norm.includes("logger.") || norm.includes("metric");
-  });
+  const hasLoggingMetricsSurface =
+    kindHasAny("logging", "metrics", "telemetry", "observability", "tracing") ||
+    pathHasAny("/logging/", "/metrics/", "/tracing/", "/observability/", "logger.", "metric");
 
   // Structural-complexity signal: code spread across more than one top-level dir.
-  const topDirs = new Set(
-    inScopePaths.map((p) => normalizeExtractorPath(p).split("/")[0] || "."),
-  );
+  const topDirs = new Set(normalizedPaths.map((path) => path.split("/")[0] || "."));
   const isMultiModule = topDirs.size > 1;
 
   const include = (lens: string, reason: string): LensProposition => ({
@@ -483,6 +469,9 @@ function buildLensPropositions(
   });
 }
 
+const NO_RULE_RECORD_REASON =
+  "no rule record on file_disposition.json (heuristics-only disposition)";
+
 /**
  * Flatten the disposition's two scope-rule outcomes into render rows, in the
  * FIXED rule sequence the disposition applies them (gitignore, then untracked)
@@ -493,10 +482,7 @@ function buildLensPropositions(
  * record is exactly the "we could not tell you which rule ran" case this
  * section exists to surface, and silence would read as "the rule ran clean".
  */
-const NO_RULE_RECORD_REASON =
-  "no rule record on file_disposition.json (heuristics-only disposition)";
-
-export function buildScopeRuleOutcomes(
+function buildScopeRuleOutcomes(
   disposition: FileDispositionWithScopeRules | undefined,
 ): ScopeRuleOutcome[] {
   if (!disposition) return [];
@@ -514,9 +500,12 @@ export function buildScopeRuleOutcomes(
     applied: summary?.applied ?? false,
     matched_count: summary?.ignored_count ?? 0,
     excluded_count: countAt(reason),
-    ...(summary?.skipped_reason ? { skipped_reason: summary.skipped_reason } : {}),
+    ...(summary === undefined
+      ? { skipped_reason: NO_RULE_RECORD_REASON }
+      : summary.skipped_reason
+        ? { skipped_reason: summary.skipped_reason }
+        : {}),
     ...(summary?.guard_branch ? { guard_branch: summary.guard_branch } : {}),
-    ...(summary ? {} : { skipped_reason: NO_RULE_RECORD_REASON }),
   }));
 }
 
@@ -563,8 +552,8 @@ export async function computeScopePreDigest(
   );
 
   return {
-    mode: scope.mode === "delta" ? "delta" : "full",
-    since: scope.since ?? null,
+    mode: scope.mode,
+    since: scope.since,
     files_in_scope: inScopePaths.length,
     scope_dirs,
     excluded_summary,

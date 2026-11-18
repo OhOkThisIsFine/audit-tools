@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/task-affinity-artifacts.test.ts
 /**
  * Canonical copies for the two persisted task-affinity artifacts.
  *
@@ -7,7 +8,7 @@
  * by construction, persistence, and metadata hashing.
  */
 
-import { compareCodeUnits } from "./compareCodeUnits.js";
+import { compareCodeUnits, uniqueSorted } from "./compareCodeUnits.js";
 
 function sortObjectKeys<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -22,10 +23,6 @@ function sortObjectKeys<T>(value: T): T {
     ) as T;
   }
   return value;
-}
-
-function sortedUniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)].sort(compareCodeUnits);
 }
 
 export interface CanonicalAuditTaskShape {
@@ -57,7 +54,7 @@ function canonicalizeAuditTask<T extends CanonicalAuditTaskShape>(task: T): T {
 
   const copy = {
     ...task,
-    file_paths: sortedUniqueStrings(task.file_paths),
+    file_paths: uniqueSorted(task.file_paths),
     ...(task.file_line_counts !== undefined
       ? { file_line_counts: { ...task.file_line_counts } }
       : {}),
@@ -70,7 +67,7 @@ function canonicalizeAuditTask<T extends CanonicalAuditTaskShape>(task: T): T {
         }
       : {}),
     ...(task.tags !== undefined
-      ? { tags: sortedUniqueStrings(task.tags) }
+      ? { tags: uniqueSorted(task.tags) }
       : {}),
   } as T;
 
@@ -156,7 +153,7 @@ export function canonicalizeTaskAffinityGraph<
     nodeIds.add(node.task_id);
     return sortObjectKeys({
       ...node,
-      file_paths: sortedUniqueStrings(node.file_paths),
+      file_paths: uniqueSorted(node.file_paths),
     });
   });
 

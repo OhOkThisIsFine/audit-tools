@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/charter-packet-retention.test.ts
 /**
  * Charter evidence-packet RETENTION.
  *
@@ -40,8 +41,10 @@ import {
   hashContent,
   laneAssetsDir,
   readOptionalJsonFile,
+  writeJsonFile,
   type CharterKind,
 } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 import { charterExtractionPacketFilename } from "../cli/laneSubmissions.js";
 
 /** The retained-evidence directory, beside `design-review-snapshots/`. */
@@ -167,7 +170,7 @@ export async function archiveCharterPackets(params: {
         row.archived = true;
       }
     } catch (error) {
-      row.reason = `archive write failed: ${error instanceof Error ? error.message : String(error)}`;
+      row.reason = `archive write failed: ${errorMessage(error)}`;
     }
 
     if (row.archived) {
@@ -177,7 +180,7 @@ export async function archiveCharterPackets(params: {
         await unlink(sourcePath);
       } catch (error) {
         row.archived = false;
-        row.reason = `packet archived but the lane-asset copy survived: ${error instanceof Error ? error.message : String(error)}`;
+        row.reason = `packet archived but the lane-asset copy survived: ${errorMessage(error)}`;
       }
     }
     written.push(row);
@@ -199,21 +202,20 @@ export async function archiveCharterPackets(params: {
     // overwrites the record of what an earlier lane read. Identical (kind,
     // digest, outcome) rows collapse: same bytes, same packet, already recorded.
     const existing = await readCharterPacketIndex(params.artifactsDir);
-    const seen = new Set(
-      existing.map((r) => `${r.kind}|${r.sha256}|${r.archived}`),
-    );
+    const rowKey = (r: CharterPacketArchiveRow) => `${r.kind}|${r.sha256}|${r.archived}`;
+    const seen = new Set(existing.map(rowKey));
     const merged = [...existing];
     for (const row of written) {
-      const key = `${row.kind}|${row.sha256}|${row.archived}`;
+      const key = rowKey(row);
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(row);
     }
-    await mkdir(archiveDir, { recursive: true });
-    await writeFile(
+    // Atomic (temp then rename), so a crash mid-write cannot leave a truncated
+    // index for the next merge to read.
+    await writeJsonFile(
       charterPacketIndexPath(params.artifactsDir),
-      `${JSON.stringify(sortRows(merged), null, 2)}\n`,
-      "utf8",
+      sortRows(merged),
     );
   } catch {
     // The index is a convenience over the archived files themselves; failing to

@@ -2,7 +2,7 @@
 import type { Lens } from "../types.js";
 import { LENS_REGISTRY, isLens } from "../types.js";
 import type { CriticalFlowManifest } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, uniqueSorted } from "audit-tools/shared";
 
 /**
  * The FLOW-LENS POLICY — one source, three call sites.
@@ -105,9 +105,7 @@ export function claimFlowReviewBlocks(
   const candidates: FlowReviewBlock[] = [];
 
   for (const flow of criticalFlows.flows) {
-    const flowPaths = [...new Set(flow.paths)].sort((a, b) =>
-      compareCodeUnits(a, b),
-    );
+    const flowPaths = uniqueSorted(flow.paths);
     const desiredLenses = selectFlowLenses(flow.concerns).sort(
       (a, b) => flowLensPriority(a) - flowLensPriority(b),
     );

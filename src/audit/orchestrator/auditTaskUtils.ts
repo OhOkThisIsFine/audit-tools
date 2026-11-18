@@ -28,11 +28,13 @@ export function priorityRank(priority: AuditTask["priority"]): number {
 }
 
 /** The lenses whose findings carry the most risk; every priority rule reads this set. */
-export const SENSITIVE_LENSES: ReadonlySet<string> = new Set([
+export const SENSITIVE_LENS_IDS: readonly Lens[] = [
   "security",
   "data_integrity",
   "reliability",
-]);
+];
+/** {@link SENSITIVE_LENS_IDS} as a set a task's (possibly custom) lens name is tested against. */
+export const SENSITIVE_LENSES: ReadonlySet<string> = new Set(SENSITIVE_LENS_IDS);
 
 /**
  * Deterministic seed for a task's provider-neutral audit-risk estimate in

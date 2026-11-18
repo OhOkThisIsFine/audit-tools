@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/review-submission.test.ts, tests/audit/conceptual-charter-context.test.ts
-import { charterReviewDisposition, resolveRunBoundDesignReview, type IntentCheckpoint } from "audit-tools/shared";
+import { charterReviewDisposition, resolveRunBoundDesignReview, uniqueSorted, type IntentCheckpoint } from "audit-tools/shared";
 import { selectPerspectives } from "../../shared/types/conceptualPerspective.js";
 import { degradedAnalyzerEntries, type AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { CharterRegister } from "../types/charterRegister.js";
@@ -41,7 +41,7 @@ export function projectDesignReviewTask(bundle: DesignReviewTaskBundle, pass: "c
   const choices = resolveDesignReviewChoices(bundle);
   const common = {
     lenses: choices.lenses ? [...choices.lenses].sort() : null,
-    degraded_analyzers: [...new Set(degradedAnalyzerEntries(bundle.analyzer_capability).map((entry) => entry.id))].sort(),
+    degraded_analyzers: uniqueSorted(degradedAnalyzerEntries(bundle.analyzer_capability).map((entry) => entry.id)),
   };
   return pass === "contract" ? common : {
     ...common,

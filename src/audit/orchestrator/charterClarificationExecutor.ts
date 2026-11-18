@@ -15,8 +15,13 @@ import {
   type Ceiling,
   type IntentCheckpoint,
   resolveRunBoundDesignReview,
+  uniqueSorted,
 } from "audit-tools/shared";
-import { resolveCharterCeiling, ceilingRequestsCharters } from "./charterExtractionExecutor.js";
+import {
+  ceilingRequestsCharters,
+  issueListSuffix,
+  resolveCharterCeiling,
+} from "./charterExtractionExecutor.js";
 import { partitionDifferencesToQuestions } from "../clarification/partition.js";
 import { applyRiskGate } from "../clarification/riskGate.js";
 import { splitByAttention } from "../clarification/dials.js";
@@ -61,9 +66,8 @@ export function refuseUnaskedRequestIds(
   asked: readonly CharterDifferenceQuestion[],
 ): void {
   const askedIds = new Set(asked.map((q) => q.request_id));
-  const unasked = [...new Set(answers.answers.map((a) => a.request_id))]
-    .filter((id) => !askedIds.has(id))
-    .sort();
+  const unasked = uniqueSorted(answers.answers.map((a) => a.request_id))
+    .filter((id) => !askedIds.has(id));
   if (unasked.length === 0) return;
   throw new Error(
     `charter clarification answers name ${unasked.length} request_id(s) this run never asked: ` +
@@ -81,14 +85,14 @@ function correspondenceFiles(
   correspondence: CharterCorrespondence | undefined,
   graphs: readonly CharterLaneGraph[],
 ): string[] {
-  const files = new Set<string>();
-  for (const member of correspondence?.members ?? []) {
-    const graph = graphs.find((g) => g.kind === member.kind);
-    for (const id of member.node_ids) {
-      for (const f of graph?.nodes.find((n) => n.node_id === id)?.files ?? []) files.add(f);
-    }
-  }
-  return [...files].sort();
+  return uniqueSorted(
+    (correspondence?.members ?? []).flatMap((member) => {
+      const graph = graphs.find((g) => g.kind === member.kind);
+      return member.node_ids.flatMap(
+        (id) => graph?.nodes.find((n) => n.node_id === id)?.files ?? [],
+      );
+    }),
+  );
 }
 
 /**
@@ -144,8 +148,10 @@ function omittedRegister(
  * register's verified differences and runs the triangulation loop — partition →
  * risk-gate → split-by-attention → surface findings. Two modes:
  *
- * - **omit** (`shallow` ceiling, or no non-omitted register, or a register still
- *   owed a comparison or fidelity turn): write an empty `status:omitted` register.
+ * - **omit** (`shallow` ceiling, or no non-omitted register): write an empty
+ *   `status:omitted` register. This executor does not read the comparison or
+ *   fidelity flags: the obligation order (`PRIORITY` in `nextStep.ts`) places
+ *   both turns before clarification.
  * - **run**: assemble the VOI-ranked interactive queue (`asked`) + the banked
  *   findings, grounding every surfaced Finding's evidence against disk. Under
  *   attention `0` every question banks (the autonomous mode).
@@ -201,11 +207,6 @@ export function runCharterClarificationExecutor(
     findings,
     validation_issues: assembled.validation_issues,
   };
-  const noteSummary =
-    clarification.validation_issues.length === 0
-      ? "."
-      : `, ${clarification.validation_issues.length} note(s):\n` +
-        clarification.validation_issues.map((m) => `  - ${m}`).join("\n");
   return {
     updated: { ...bundle, charter_clarification: clarification },
     artifacts_written: ["charter_clarification.json"],
@@ -213,6 +214,6 @@ export function runCharterClarificationExecutor(
       `Charter clarification complete: ${clarification.asked.length} interactive question(s) ` +
       `(attention ${String(attention)}), ${clarification.banked.length} banked → ` +
       `${clarification.findings.length} finding(s)` +
-      noteSummary,
+      issueListSuffix(clarification.validation_issues, "note(s)"),
   };
 }

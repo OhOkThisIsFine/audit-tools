@@ -482,7 +482,7 @@ test("an existing same-question finding follow-up is reused without mutating its
     confidence: "medium" as const, lens: "correctness", systemic: true, summary: "Shared input changes after validation.", affected_files: [{ path: "src/a.ts" }] };
   const result = { task_id: base.task_id, unit_id: base.unit_id, pass_id: base.pass_id, lens: base.lens,
     file_coverage: [{ path: "src/a.ts", total_lines: 4 }], findings: [finding] };
-  const pending = buildFindingFollowupTask({ result, task: base, finding, triggers: ["high_severity"], lineIndex: { "src/a.ts": 4 } });
+  const pending = buildFindingFollowupTask({ result, task: base, finding, paths: ["src/a.ts"], triggers: ["high_severity"], lineIndex: { "src/a.ts": 4 } });
   const before = JSON.stringify(pending);
   source.audit_tasks = [base, pending];
   source.audit_results = [result];

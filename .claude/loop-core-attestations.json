@@ -171,26 +171,6 @@
         "src/shared/submission/submissionLedger.ts": "27569dfd185f7e17e1d60c34b2c164f8a75b1c46"
       }
     },
-    "132b243de694e051": {
-      "reviewed_by": "runtime_review",
-      "attester_class": "agent",
-      "checked": "Independent source review checked source invalidation, legacy metadata, explicit key clearing, planner ingestion, direct execution and partial updates. Clearing regression was reproduced red, fixed, retested and independently cleared. Required site-to-test annotations passed structural preflight; full normal gate passed 8350 tests on this tree.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "669ac3f649ed023098628470ab79d0f88dfbabdb",
-        "ran_at": "2026-11-04T09:16:51.877Z"
-      },
-      "attested_at": "2026-11-04T09:20:46.509Z",
-      "vouches": {
-        "src/audit/orchestrator/artifactMetadata.ts": "015a4fb380dea81c7de6e60cf5ac0fdbacfd9ee7",
-        "src/audit/orchestrator/ingestionExecutors.ts": "6cca988107da7d4afa70505e8d7cc37dc078b8d9",
-        "src/audit/orchestrator/planningExecutors.ts": "da80b6c0ee81984bda4fb3feb274f37e9af2a718",
-        "src/audit/orchestrator/runtimeValidation.ts": "f59414ae6895f2337a5507e2391c08dc21636044",
-        "src/audit/orchestrator/state.ts": "3dc42abe6fffb668b49ef89cde9e6d32cf67c375"
-      }
-    },
     "212b28a3d21bd167": {
       "reviewed_by": "claude-opus-5-5",
       "attester_class": "agent",
@@ -205,47 +185,6 @@
       "attested_at": "2026-11-16T20:41:13.016Z",
       "vouches": {
         "src/audit/orchestrator/edgeReasoning.ts": "1e376a9b3cc6befd4feaa72d2d23e890c7c112cb"
-      }
-    },
-    "2fd8f3fd2058e9bd": {
-      "reviewed_by": "agy-refuter-ad01283c,opus-review-afb5c9845dc6f6e1e",
-      "attester_class": "agent",
-      "checked": "charter-lane reuse: digest stamp equals binding revision; carry rule; all-carried merge writes coverage manifests (new red-green test); carried lanes re-grounded against current universe; plan draw halt kept (omit executor would empty the register); blindness and fold commit boundary unchanged",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "f74afee4c7710e7034e7aa7095f200e2a9a8e05b",
-        "ran_at": "2026-10-09T07:45:45.769Z"
-      },
-      "attested_at": "2026-10-09T07:45:51.726Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "eeba034f312e318ec25d2e56b654ccd01764732c",
-        "src/audit/cli/nextStepHelpers.ts": "37aa10d719fad86ba9f69855f78053e3152eab0c",
-        "src/audit/orchestrator/charterExtractionExecutor.ts": "64f4ec0b6754be53258c5b7374ea92a78bd4117b",
-        "src/audit/orchestrator/charterPackets.ts": "2249bfd404ecbd2c9ccd3e5385948b4e458ad493",
-        "src/audit/orchestrator/obligationPolicy.ts": "ca05369cc0ad9deeef81e2eaf9914f3092fccbac"
-      }
-    },
-    "32765e3dafb89abf": {
-      "reviewed_by": "claude-subagent-adversarial-review",
-      "attester_class": "agent",
-      "checked": "Independent adversarial review of the full dogfood-fix diff (lineage stamping, edge cache key, dependency map claim, flows, analyzers, generated-path rule, prompts); 3 should-fix + 6 notes fixed with red/green proof; full gate green (check, check:tests, npm test, verify:checks)",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "5c47755cb4cc807285fed665efcac4d2ceae2185",
-        "ran_at": "2026-11-05T09:46:16.282Z"
-      },
-      "attested_at": "2026-11-05T09:46:24.543Z",
-      "vouches": {
-        "src/audit/cli/confirmIntentStep.ts": "91e7c44fa84e6ba93a9ca9f0acedc059ddd4e57b",
-        "src/audit/cli/prompts.ts": "826ae2d4608b2b2c9cde9b28e5aa9f6f25ae5c05",
-        "src/audit/orchestrator/dependencyMap.ts": "3ad19cc764c4bd666873a9ea0d1f14038f625718",
-        "src/audit/orchestrator/designReviewPrompt.ts": "8bb95bb7140a7775f83afd5079aab805e8af38bc",
-        "src/audit/orchestrator/intentCheckpointExecutor.ts": "c321886b25feb26e07c6c72f016c023f45daf22f",
-        "src/audit/orchestrator/structureExecutors.ts": "65509b625ae5568b98cbf440b2222a171bedc814"
       }
     },
     "339be913c2e2c76d": {
@@ -460,25 +399,6 @@
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
       }
     },
-    "6cd8a9eb36e60d5d": {
-      "reviewed_by": "/root/final_candidate_review",
-      "attester_class": "agent",
-      "checked": "Independent non-author checked lossless NUL Git scope and failure fallback, immutable release SHA ancestry, pinned-app versus legacy status polling, caller-specific manifest admission, duplicate/stable call-local graph context and obligation precedence/reload/stops against full-history retirement evidence and existing defect/equivalence tests. Independently recomputed 33-module comment-only cache pin d7e12ddef12a8fd980c550437bbceb3cfce4ac487e1301e58f1d3cc98aef5489; no blocking finding. Native complete suite7813 passed,0failed,35skipped on reviewed tree4a66064df9695a9971fb614f9256c5078e052714.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "4a66064df9695a9971fb614f9256c5078e052714",
-        "ran_at": "2026-10-15T16:24:24.152Z"
-      },
-      "attested_at": "2026-10-15T16:24:40.691Z",
-      "vouches": {
-        "src/audit/orchestrator/reviewPacketGraphContext.ts": "860338cb48f8538383074155453ef0e735a9012f",
-        "src/audit/orchestrator/reviewPackets.ts": "1afdfa907b784e3691c95f9ecee589901a108735",
-        "src/audit/orchestrator/scope.ts": "2854a884dc6489a08c29444fbfd6de061cd342d6",
-        "src/remediate/steps/nextStep.ts": "ff51f23d56ce740f2336376719461bc1dfe55984"
-      }
-    },
     "7a05408bec080eda": {
       "reviewed_by": "dot-parent-independent-review",
       "attester_class": "agent",
@@ -679,23 +599,6 @@
         "src/remediate/steps/nextStep.ts": "31958511c4365d7106f184f95c2f39670413548f"
       }
     },
-    "c50e7ede07ea40a4": {
-      "reviewed_by": "/root/chat_batch_final_candidate_review",
-      "attester_class": "agent",
-      "checked": "Independent /root/chat_batch_final_candidate_review inspected exact 29-file source tree 8f483b66033e5bffabdee806871dcbaee993c626 and all seven approved patch hashes. Actively checked flow-claim ownership regressions: eligibleByLens still supplies claims, pendingByLens still filters the scheduling frontier independently, assigned retains eligible ownership, and taskBuilder consumes plain result.blocks; stable task IDs, partial completion, and detached collections covered. Also checked release pagination truncation/deadline reset, coherence trace/error order, resolver ambiguity/schema/cache-v10 parity, Python fifth collector argument and prepareBatch admission boundary, and wrapper packaging/IO error order. Native old-API baseline observed plain-result/allocation/scan/pagination reds; post-fix focused and full-suite evidence preserved. Full source review: audit-batch-final-source-review.json; native differential 600 traces and 1024 graph subsets: audit-batch-differential-result.json.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "8f483b66033e5bffabdee806871dcbaee993c626",
-        "ran_at": "2026-10-17T03:46:33.337Z"
-      },
-      "attested_at": "2026-10-17T03:47:13.061Z",
-      "vouches": {
-        "src/audit/orchestrator/flowPlanning.ts": "1eb2539ffbd059e1628097d9aadb3893681d63d9",
-        "src/audit/orchestrator/taskBuilder.ts": "afc16a8824f8b8df4bc4473c2eb202d1a70ce5d8"
-      }
-    },
     "c5d180afc57e5c00": {
       "reviewed_by": "/root/advance_audit_overnight",
       "attester_class": "agent",
@@ -802,6 +705,59 @@
         "src/shared/submission/submissionClassifier.ts": "391f7192742366d2aa86df2198538a1f8d1cfc95",
         "src/shared/submission/submissionScan.ts": "86726d05792322664bb576d0f9ca6b901888d175"
       }
+    },
+    "f20b857654eebefb": {
+      "reviewed_by": "claude-opus-5-5 session 48f746a3 (orchestrator) + four simplify reviewer subagents (reuse, simplification, efficiency, altitude)",
+      "attester_class": "agent",
+      "checked": "Behavior-neutral simplify of P04: each applied finding verified against source before the edit; byte-stability of prompt text, packet bytes and persisted arrays checked (byte-changing refactors skipped); merge_edge_kind_counts proven constant {} since one packet is one coherence component; SENSITIVE_LENSES kept a string set for custom lenses; tsc, verify:checks, staged commit legs and the full suite green on the staged tree (8555 pass, 0 fail).",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "a8da8ef9f5d0d679a22728ae820ff39410f215ac",
+        "ran_at": "2026-11-18T02:21:59.923Z"
+      },
+      "attested_at": "2026-11-18T02:22:07.147Z",
+      "vouches": {
+        "src/audit/orchestrator/architectureDiscovery.ts": "0c38f5acec1783eac412a378384f88c1166db663",
+        "src/audit/orchestrator/auditTaskUtils.ts": "991c9ca0bb5ea115e513822bb232ce41d9ea2ac6",
+        "src/audit/orchestrator/autoFixExecutor.ts": "72b61e654274f3dc85e04535d8a971b802dabdcb",
+        "src/audit/orchestrator/charterClarificationExecutor.ts": "838af26fafb3f79f1b22be1dc9c568929d4bb803",
+        "src/audit/orchestrator/charterComparisonExecutor.ts": "a448eb0b532074e467ebaf83461662ff53cd9080",
+        "src/audit/orchestrator/charterExtractionExecutor.ts": "ccc01f56984c6c8bbeb78ac99bbc76223b8ad834",
+        "src/audit/orchestrator/charterFidelityPacket.ts": "4c5996c9e78f8f6a42b3b12813ad97f2c77f78df",
+        "src/audit/orchestrator/charterPacketArchive.ts": "667a4d6639abd4ca71bc5c02a66ab354d422b409",
+        "src/audit/orchestrator/charterPackets.ts": "5f0501474da3e2cd9f030a33230a92378bc6494a",
+        "src/audit/orchestrator/dependencySlices.ts": "141296c250297ca3621ce0cf75c4241fd5658983",
+        "src/audit/orchestrator/designReviewProjection.ts": "a3c99354e9acf6ed8c6aab7eb142e81be52799ea",
+        "src/audit/orchestrator/designReviewPrompt.ts": "1cc995c5dff806f4ee5ece59ea7cd3e76eaf2ebb",
+        "src/audit/orchestrator/designReviewSnapshot.ts": "895ea881d9755589259bee33df0a99cccc7e01d3",
+        "src/audit/orchestrator/designReviewTask.ts": "3953c9c54f7f9b03e6541e1e505133a705d296a2",
+        "src/audit/orchestrator/flowPlanning.ts": "8f7eae9056d4728bfb617fad882a4ba45465729e",
+        "src/audit/orchestrator/graphEnrichmentExecutor.ts": "f4ee831a2ccc7496db6c6d4ce90ac5677f024bb9",
+        "src/audit/orchestrator/intentCheckpointExecutor.ts": "4402cb3dccd57d2d85f3410281b92eed360e31cf",
+        "src/audit/orchestrator/intentCheckpointGate.ts": "9415e4a6c794537867c39dde7d4c64d6b4f023af",
+        "src/audit/orchestrator/intentEquivalenceExecutor.ts": "4d94e291580761ba0034f1380136d9165e7b7e50",
+        "src/audit/orchestrator/lineCounts.ts": "ead7eed58aea985b951789a4fc55b868a49e38d0",
+        "src/audit/orchestrator/reviewPacketGraphContext.ts": "e7f5652d944b1ada266b778332f84e591d2bb066",
+        "src/audit/orchestrator/reviewPacketGraphEdges.ts": "414ed44c3ee35b2eb9e5ba7d032f8887d47b2d2f",
+        "src/audit/orchestrator/reviewPacketMetrics.ts": "493762a2c13b2733d3e66ac8c27217696de95236",
+        "src/audit/orchestrator/reviewPacketShared.ts": "576e6d18939c74241106cdd1a6d6fbbdb15d0141",
+        "src/audit/orchestrator/reviewPacketSizing.ts": "4f83913244419b955bd45e559f978f8843072b30",
+        "src/audit/orchestrator/reviewPackets.ts": "0c5a27b95b120be55e38682f5d4183873f9d5b62",
+        "src/audit/orchestrator/runtimeValidation.ts": "2eb868ebb61250cf00c79ac389205d6ae160f03f",
+        "src/audit/orchestrator/scope.ts": "7e6bb6f75a8f98548df67f7de07a3bd4a00c90fd",
+        "src/audit/orchestrator/selectiveDeepening/conflict.ts": "40bc34247015323126d6177acb2633af06a8c45e",
+        "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": "eec26379eca7c47d92c1cf18a722a8035963682f",
+        "src/audit/orchestrator/selectiveDeepening/highRiskClean.ts": "355e3300680c9d5708a25748a8ea2555c9109448",
+        "src/audit/orchestrator/selectiveDeepening/index.ts": "5708f8fb3ba7e685a4f664ecd65f6a8562ad95f8",
+        "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": "7f45a5035e7a96de8213e3d4f84a944fdc8ce4a4",
+        "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": "0f207db808ea95e107e6a197f2544d8d46bc80eb",
+        "src/audit/orchestrator/selectiveDeepening/shared.ts": "02513fd3b691cf0a68bbb0f1a207a7fdbd701739",
+        "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": "ba644465b84ea6182414b5d6994c876d860a685b",
+        "src/audit/orchestrator/structureExecutors.ts": "5dc0a0e672d564a155a86ee8540620f51c3ebbfb",
+        "src/audit/orchestrator/taskAffinityGraph.ts": "259eb5c8a84f8a4e368278168aa5ab21ac4cdda6"
+      }
     }
   },
   "entries": {
@@ -878,37 +834,37 @@
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/architectureDiscovery.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/artifactMetadata.ts": {
       "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/auditTaskUtils.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/autoFixExecutor.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterClarificationExecutor.ts": {
-      "review": "d261aef2988bbeb5"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterComparisonExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterExtractionExecutor.ts": {
-      "review": "2fd8f3fd2058e9bd"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterFidelityExecutor.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/charterFidelityPacket.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterPacketArchive.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/charterPackets.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/coverageElementBaseline.ts": {
       "review": "6257346a73ffb600"
@@ -920,19 +876,19 @@
       "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
-      "review": "339be913c2e2c76d"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/designReviewTask.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/edgeReasoning.ts": {
       "review": "212b28a3d21bd167"
@@ -953,7 +909,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/flowPlanning.ts": {
-      "review": "c50e7ede07ea40a4"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/flowRequeue.ts": {
       "review": "42e42270e8c264c9"
@@ -965,7 +921,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/graphEnrichmentExecutor.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/hostInputPause.ts": {
       "review": "c2fa0250dd9f5ee5"
@@ -977,13 +933,13 @@
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/intentCheckpointExecutor.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/intentCheckpointGate.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/intentEquivalenceExecutor.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/intentInterpreter.ts": {
       "baseline": "7b79934e86baf378"
@@ -998,7 +954,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/lineCounts.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/localCommands.ts": {
       "baseline": "7b79934e86baf378"
@@ -1042,65 +998,62 @@
     "src/audit/orchestrator/resultIngestion.ts": {
       "review": "42e42270e8c264c9"
     },
-    "src/audit/orchestrator/reviewPacketGraph.ts": {
-      "baseline": "7b79934e86baf378"
-    },
     "src/audit/orchestrator/reviewPacketGraphContext.ts": {
-      "review": "6cd8a9eb36e60d5d"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketGraphEdges.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketMetrics.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketShared.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketSizing.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPackets.ts": {
-      "review": "6cd8a9eb36e60d5d"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/runtimeCommand.ts": {
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/runtimeValidation.ts": {
-      "review": "132b243de694e051"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/runtimeValidationUpdate.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/scope.ts": {
-      "review": "6cd8a9eb36e60d5d"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/scopeIndexBaseline.ts": {
       "review": "42e42270e8c264c9"
     },
     "src/audit/orchestrator/selectiveDeepening/conflict.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/findingFollowup.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/highRiskClean.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/index.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/lensVerification.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/runtimeValidation.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/shared.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/selectiveDeepening/stewardFollowup.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/staleness.ts": {
       "review": "58a44ca3a3caea9d"
@@ -1109,7 +1062,7 @@
       "review": "ddfc58268ca5a92e"
     },
     "src/audit/orchestrator/structureExecutors.ts": {
-      "review": "32765e3dafb89abf"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/syntaxResolutionExecutor.ts": {
       "baseline": "7b79934e86baf378"
@@ -1121,7 +1074,7 @@
       "review": "4244b52bb0fdec45"
     },
     "src/audit/orchestrator/taskAffinityGraph.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/taskBuilder.ts": {
       "review": "42e42270e8c264c9"

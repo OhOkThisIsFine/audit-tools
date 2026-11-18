@@ -1,7 +1,7 @@
 // sites-pinned: tests/audit/lens-steward-surface.test.ts, tests/audit/orchestrator-remediation.test.ts
-import { lineCountForPath } from "../lineCounts.js";
+import { lineCountsFor } from "../lineCounts.js";
 import type { AuditResult, AuditTask } from "../../types.js";
-import { isRecord } from "audit-tools/shared";
+import { isRecord, uniqueSorted } from "audit-tools/shared";
 import {
   DEEPENING_TAG,
   LENS_VERIFICATION_FOLLOWUP_TAG,
@@ -10,7 +10,6 @@ import {
   normalizedSuggestedPriority,
   sanitizeSegment,
   taskIdFor,
-  uniqueSorted,
 } from "./shared.js";
 
 export function buildVerificationFollowupTasks(params: {
@@ -26,12 +25,6 @@ export function buildVerificationFollowupTasks(params: {
     return [];
   }
 
-  const coverageByPath = new Map(
-    params.result.file_coverage.map((coverage) => [
-      coverage.path,
-      coverage.total_lines,
-    ]),
-  );
   // The SURFACE, not the coverage, is what a follow-up may name. A steward is
   // granted the whole surface its lens was applied to and chooses what to open,
   // so "I did not open this file and it needs a closer look" is a legitimate —
@@ -39,7 +32,7 @@ export function buildVerificationFollowupTasks(params: {
   // have silently dropped exactly those, leaving the steward able to request a
   // second look only at files it had already read.
   const surfacePaths = new Set([
-    ...coverageByPath.keys(),
+    ...params.result.file_coverage.map((coverage) => coverage.path),
     ...(params.task?.file_paths ?? []),
   ]);
   // The steward task states a line count for every file on its surface, so an
@@ -112,18 +105,13 @@ export function buildVerificationFollowupTasks(params: {
       // and the parent's surface counts reach the count only as the LAST
       // fallback, inside `fallbackLineIndex`, which is what stops an unopened
       // surface file from being dispatched as zero lines.
-      file_line_counts: Object.fromEntries(
-        paths.map((path) => [
-          path,
-          lineCountForPath(path, {
-            result: params.result,
-            lineIndex: fallbackLineIndex,
-          }),
-        ]),
-      ),
+      file_line_counts: lineCountsFor(paths, {
+        result: params.result,
+        lineIndex: fallbackLineIndex,
+      }),
       rationale:
         `Lens steward follow-up from ${params.result.task_id}. ${suggestedRationale}`,
-      priority: normalizedSuggestedPriority(suggestion.priority, "medium"),
+      priority: normalizedSuggestedPriority(suggestion.priority),
       tags: [
         DEEPENING_TAG,
         LENS_VERIFICATION_FOLLOWUP_TAG,

@@ -28,7 +28,6 @@ import {
   hashContent,
   type CriticalFlowManifest,
   type GraphBundle,
-  type IntentCheckpoint,
   type RiskRegister,
   type SurfaceManifest,
   compareCodeUnits,
@@ -53,8 +52,6 @@ export interface DesignReviewBundle extends DesignReviewTaskBundle {
   critical_flows?: CriticalFlowManifest;
   risk_register?: RiskRegister;
   design_assessment?: DesignAssessment;
-  /** Confirmed scope and effective review choices; timestamps remain provenance. */
-  intent_checkpoint?: IntentCheckpoint;
 }
 
 /**
@@ -74,11 +71,15 @@ export const DESIGN_REVIEW_INPUTS = [
 
 export type DesignReviewInput = (typeof DESIGN_REVIEW_INPUTS)[number];
 
-/** Stable sort of a collection by its projection string (order-independent input). */
+/**
+ * Stable sort of a collection by its projection string (order-independent
+ * input). Each item is stringified once, not once per comparison.
+ */
 function sortByProjection<T>(items: readonly T[]): T[] {
-  return [...items].sort((a, b) =>
-    compareCodeUnits(stableStringifyProjection(a), stableStringifyProjection(b)),
-  );
+  return items
+    .map((item) => ({ item, key: stableStringifyProjection(item) }))
+    .sort((a, b) => compareCodeUnits(a.key, b.key))
+    .map(({ item }) => item);
 }
 
 function sortStrings(values: readonly string[] | undefined): string[] {

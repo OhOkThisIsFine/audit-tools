@@ -136,14 +136,15 @@ export function runIntentEquivalenceResolve(
 
   const forms = normalizeCheckpointForms(checkpoint);
   const gateVersion = computeGateVersion();
+  const baselineAt = (revision: number): IntentBaseline => ({
+    normalized_structured: forms.structured,
+    normalized_prose: forms.prose,
+    revision,
+    gate_version: gateVersion,
+  });
 
   const resolveChanged = (why: string): ExecutorRunResult => {
-    const baseline: IntentBaseline = {
-      normalized_structured: forms.structured,
-      normalized_prose: forms.prose,
-      revision: currentEntryRevision(bundle) + 1,
-      gate_version: gateVersion,
-    };
+    const baseline = baselineAt(currentEntryRevision(bundle) + 1);
     return {
       updated: withBaseline(bundle, baseline),
       artifacts_written: [],
@@ -169,15 +170,10 @@ export function runIntentEquivalenceResolve(
         "first contact with a pending checkpoint change; prior semantics unrecorded",
       );
     }
-    const baseline: IntentBaseline = {
-      normalized_structured: forms.structured,
-      normalized_prose: forms.prose,
-      // Mirror what the ordinary bump rules will assign this entry at the next
-      // metadata pass: an existing entry keeps its revision; a first-ever entry
-      // gets 1 (0 + 1).
-      revision: Math.max(currentEntryRevision(bundle), 1),
-      gate_version: gateVersion,
-    };
+    // Mirror what the ordinary bump rules will assign this entry at the next
+    // metadata pass: an existing entry keeps its revision; a first-ever entry
+    // gets 1 (0 + 1).
+    const baseline = baselineAt(Math.max(currentEntryRevision(bundle), 1));
     return {
       updated: withBaseline(bundle, baseline),
       artifacts_written: [],
@@ -226,14 +222,10 @@ export function runIntentEquivalenceResolve(
   }
   // equivalent: advance the normal forms; the revision authority stays put, so
   // downstream `dependency_revisions` compares stay clean and nothing re-derives.
-  const baseline: IntentBaseline = {
-    normalized_structured: forms.structured,
-    normalized_prose: forms.prose,
-    revision:
-      bundle.artifact_metadata?.intent_baseline?.revision ??
+  const baseline = baselineAt(
+    bundle.artifact_metadata?.intent_baseline?.revision ??
       Math.max(currentEntryRevision(bundle), 1),
-    gate_version: gateVersion,
-  };
+  );
   return {
     updated: withBaseline(bundle, baseline),
     artifacts_written: [],

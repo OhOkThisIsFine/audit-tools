@@ -14,7 +14,7 @@ import {
 } from "../types/finding.js";
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
-import { compareCodeUnits } from "../compareCodeUnits.js";
+import { uniqueSorted } from "../compareCodeUnits.js";
 import { toPosixPath } from "../paths.js";
 import {
   lensCoverageEntryContradictsCount,
@@ -519,10 +519,6 @@ function projectedBreakdown(
   return projected;
 }
 
-function stableUnique(values: readonly string[]): string[] {
-  return [...new Set(values)].sort(compareCodeUnits);
-}
-
 /**
  * The work-block facts that its member findings decide: the sorted unique POSIX
  * paths they cite, `coordination` when any member is systemic, and the highest
@@ -532,7 +528,7 @@ export function deriveWorkBlockFacts(
   members: readonly Finding[],
 ): Pick<WorkBlock, "owned_files" | "role" | "max_severity"> {
   return {
-    owned_files: stableUnique(
+    owned_files: uniqueSorted(
       members.flatMap((finding) =>
         finding.affected_files.map((file) => toPosixPath(file.path)),
       ),
@@ -597,7 +593,7 @@ export function projectAuditFindingsReportSubset(
         block: {
           id: originalBlock.id,
           finding_ids: findingIds,
-          unit_ids: stableUnique(
+          unit_ids: uniqueSorted(
             findingIds.flatMap(
               (id) => normalizedById.get(id)?.unit_ids ?? [],
             ),

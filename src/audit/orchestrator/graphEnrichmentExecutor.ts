@@ -7,7 +7,7 @@ import type {
   GraphEdge,
   RouteEdge,
 } from "audit-tools/shared";
-import { installToCache, resolveAnalyzerDep, compareCodeUnits } from "audit-tools/shared";
+import { installToCache, resolveAnalyzerDep, uniqueSorted } from "audit-tools/shared";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
 import { uniqueSortedRoutes } from "../extractors/graphRoutes.js";
@@ -150,9 +150,7 @@ function buildEnrichedGraph(
     // Union with the floor's provenance — the floor may already carry analyzers
     // that contributed BEFORE enrichment (e.g. `git-history` co-change merged in
     // the structure executor); replacing the list would silently drop them.
-    analyzers_used: [
-      ...new Set([...(floor.analyzers_used ?? []), ...analyzersUsed]),
-    ].sort(),
+    analyzers_used: uniqueSorted([...(floor.analyzers_used ?? []), ...analyzersUsed]),
   };
 }
 
@@ -213,9 +211,7 @@ export async function runGraphEnrichmentExecutor(
   const pathLookup = bundle.repo_manifest
     ? buildPathLookup(bundle.repo_manifest, dispositionMap)
     : new Map<string, string>();
-  const includedFiles = [...new Set(pathLookup.values())].sort((a, b) =>
-    compareCodeUnits(a, b),
-  );
+  const includedFiles = uniqueSorted(pathLookup.values());
 
   const entries: AnalyzerCapabilityEntry[] = [];
   const bucketEdges = { imports: [] as GraphEdge[], calls: [] as GraphEdge[], references: [] as GraphEdge[] };

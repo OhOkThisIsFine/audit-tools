@@ -4,11 +4,15 @@ import {
   CONFIDENCES,
   severityRank,
   confidenceRank,
-  compareCodeUnits,
   hashContent,
+  uniqueSorted,
 } from "audit-tools/shared";
-import type { AuditResult, AuditTask, Finding, Lens } from "../../types.js";
+import type { AuditResult, AuditTask, Finding } from "../../types.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
+import type {
+  RuntimeValidationReport,
+  RuntimeValidationTaskManifest,
+} from "../../types/runtimeValidation.js";
 
 // Shared primitives for the selective-deepening strategies. Each strategy
 // module under this directory builds one kind of follow-up task; they all draw
@@ -27,11 +31,6 @@ export const LENS_VERIFICATION_FOLLOWUP_TAG = "lens_verification_followup";
 // deleted symbol is what the comment-drift gate exists to refuse) — counted
 // FILES, which measures no cost the tool cares about.
 export const MAX_VERIFICATION_FOLLOWUP_TASKS_PER_RESULT = 4;
-export const IMPORTANT_LENS_VERIFICATION_LENSES = new Set<Lens>([
-  "security",
-  "data_integrity",
-  "reliability",
-]);
 
 // Derived from the shared single-source rank functions (no hand-copied table).
 // Kept as Record lookups because consumers index by severity/confidence AND
@@ -52,8 +51,8 @@ export interface BuildSelectiveDeepeningTaskOptions {
   existingTasks?: AuditTask[];
   results: AuditResult[];
   lineIndex?: Record<string, number>;
-  runtimeValidationTasks?: import("../../types/runtimeValidation.js").RuntimeValidationTaskManifest;
-  runtimeValidationReport?: import("../../types/runtimeValidation.js").RuntimeValidationReport;
+  runtimeValidationTasks?: RuntimeValidationTaskManifest;
+  runtimeValidationReport?: RuntimeValidationReport;
   externalAnalyzerResults?: ExternalAnalyzerResults[];
 }
 
@@ -79,15 +78,27 @@ export function sanitizeSegment(value: string): string {
   return sanitized.length > 0 ? sanitized : "followup";
 }
 
-
-
-export function uniqueSorted(values: Iterable<string>): string[] {
-  return [...new Set(values)].sort((a, b) => compareCodeUnits(a, b));
+/** Whether any of `values` is in `set`; the caller builds the set once per comparison target. */
+export function intersects(
+  values: readonly string[],
+  set: ReadonlySet<string>,
+): boolean {
+  return values.some((value) => set.has(value));
 }
 
-export function intersects(left: string[], right: string[]): boolean {
-  const rightSet = new Set(right);
-  return left.some((value) => rightSet.has(value));
+/**
+ * The files a follow-up on one result re-reads: the task's assigned paths, or
+ * the result's covered paths when the task assigned none.
+ */
+export function assignedOrCoveredPaths(
+  result: AuditResult,
+  task: AuditTask | undefined,
+): string[] {
+  return uniqueSorted(
+    task?.file_paths && task.file_paths.length > 0
+      ? task.file_paths
+      : result.file_coverage.map((coverage) => coverage.path),
+  );
 }
 
 export function pathsForFinding(
@@ -116,7 +127,6 @@ export function taskIdFor(prefix: string, values: string[]): string {
   return `deepening:${prefix}:${hashContent(values.join("\0"), { length: 10 })}`;
 }
 
-
 export function formatList(values: string[], maxItems: number): string {
   const visible = values.slice(0, maxItems);
   const suffix =
@@ -124,32 +134,11 @@ export function formatList(values: string[], maxItems: number): string {
   return `${visible.join(", ")}${suffix}`;
 }
 
-export function priorityLabel(
-  priority: AuditTask["priority"],
-): NonNullable<AuditTask["priority"]> {
-  return priority ?? "low";
-}
-
-export function getExternalAnalyzerPaths(
-  externalAnalyzerResults?: ExternalAnalyzerResults[],
-): Set<string> {
-  return new Set(
-    (externalAnalyzerResults ?? [])
-      .flatMap((tool) => tool.results ?? [])
-      .map((result) =>
-        result && typeof result.path === "string" && result.path.length > 0
-          ? result.path
-          : null,
-      )
-      .filter((path): path is string => path !== null),
-  );
-}
-
+/** A host-suggested priority when it names a known level, else `medium`. */
 export function normalizedSuggestedPriority(
   value: unknown,
-  fallback: NonNullable<AuditTask["priority"]> = "medium",
 ): NonNullable<AuditTask["priority"]> {
   return value === "high" || value === "medium" || value === "low"
     ? value
-    : fallback;
+    : "medium";
 }

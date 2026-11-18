@@ -1,5 +1,4 @@
 // sites-pinned: tests/audit/charter-current-context.test.ts, tests/audit/charter-fidelity-executor.test.ts
-import { hashContent } from "../../shared/hash.js";
 // The FIDELITY PACKET (step 4, judgment half): per open finding candidate, the
 // accounts, their cited provenance, and the exact source slices at those
 // citations — materialized by the tool so the fidelity lane is blind by INPUT
@@ -10,7 +9,7 @@ import { hashContent } from "../../shared/hash.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ArtifactBundle } from "../io/artifacts.js";
-import { provenancePath, type CharterProvenance } from "audit-tools/shared";
+import { hashContent, provenancePath, type CharterProvenance } from "audit-tools/shared";
 
 /** Lines of context shown on each side of a cited line or quote. */
 const CONTEXT_LINES = 12;

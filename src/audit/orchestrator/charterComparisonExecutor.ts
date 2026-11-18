@@ -6,10 +6,11 @@ import {
   assembleComparison,
   precheckFidelity,
   checkCitations,
+  PATH_SHAPED_PROVENANCE_KINDS,
   type CharterComparisonSubmission,
   type CharterProvenance,
 } from "audit-tools/shared";
-import { emptyCharterRegister } from "./charterExtractionExecutor.js";
+import { emptyCharterRegister, issueListSuffix } from "./charterExtractionExecutor.js";
 
 /**
  * Charter-COMPARISON executor (steps 2–3). The comparison reader authored none
@@ -95,10 +96,7 @@ export function runCharterComparisonExecutor(
       `Charter comparison complete: ${updated.correspondences.length} correspondence(s), ` +
       `${updated.differences.length} difference(s); ${pre.pendingLane.length} finding candidate(s) ` +
       `await the fidelity lane, ${settledByTool} settled unverifiable by the quote pre-check` +
-      (assembled.validation_issues.length > 0
-        ? `, ${assembled.validation_issues.length} record(s) refused:\n` +
-          assembled.validation_issues.map((m) => `  - ${m}`).join("\n")
-        : "."),
+      issueListSuffix(assembled.validation_issues, "record(s) refused"),
   };
 }
 
@@ -112,9 +110,8 @@ function buildQuoteOracle(
   root: string | undefined,
 ): (p: CharterProvenance) => boolean | undefined {
   if (!root) return () => undefined;
-  const pathShaped = new Set(["doc", "code", "comment"]);
   const citations = provenance
-    .filter((p) => pathShaped.has(p.kind) && p.quote !== undefined)
+    .filter((p) => PATH_SHAPED_PROVENANCE_KINDS.has(p.kind) && p.quote !== undefined)
     .map((p, i) => ({ owner_id: `q${i}`, ref: p.ref, quote: p.quote! }));
   const result = checkCitations({ root, corpus: new Set<string>(), citations });
   const verdictByKey = new Map<string, boolean>();
@@ -124,7 +121,7 @@ function buildQuoteOracle(
     verdictByKey.set(`${source.ref}\n${source.quote}`, check.verdict === "ok");
   });
   return (p) => {
-    if (!pathShaped.has(p.kind) || p.quote === undefined) return undefined;
+    if (!PATH_SHAPED_PROVENANCE_KINDS.has(p.kind) || p.quote === undefined) return undefined;
     return verdictByKey.get(`${p.ref}\n${p.quote}`);
   };
 }

@@ -1,5 +1,6 @@
+// sites-pinned: tests/shared/friction-run-linkage.test.ts
 import { join } from "node:path";
-import { compareCodeUnits } from "../compareCodeUnits.js";
+import { compareCodeUnits, uniqueSorted } from "../compareCodeUnits.js";
 import {
   type FrictionCaptureArtifact,
   type FrictionItem,
@@ -203,7 +204,7 @@ function normalizeRunRefs(stored: unknown): string[] {
   const refs = Array.isArray(stored)
     ? stored.filter((ref): ref is string => typeof ref === "string")
     : [];
-  return [...new Set(refs)].sort(compareCodeUnits);
+  return uniqueSorted(refs);
 }
 
 /** {@link normalizeRunRefs} of the stored array unioned with one newly-supplied id. */

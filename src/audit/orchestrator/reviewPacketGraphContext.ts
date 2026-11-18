@@ -14,7 +14,7 @@ import {
 
 // Packet-level graph context: entrypoint extraction, internal/boundary edge
 // classification, cohesion scoring, key-edge selection. Consumed by buildPacket
-// in reviewPackets.ts and by prompt rendering in dispatch.ts.
+// in reviewPackets.ts.
 
 const MAX_PACKET_KEY_EDGES = 8;
 const MAX_PACKET_BOUNDARY_FILES = 12;

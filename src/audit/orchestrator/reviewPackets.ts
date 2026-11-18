@@ -9,15 +9,13 @@ import {
   collectGraphEdges,
   compareCodeUnits,
   hashContent,
+  uniqueSorted,
 } from "audit-tools/shared";
 import { priorityRank, sortLenses } from "./auditTaskUtils.js";
-import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
-  ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PACKET_PROMPT_TOKENS,
   sizeIndexFromManifest,
   fileGroupContentTokens,
-  estimateTaskGroupTokens,
 } from "./reviewPacketSizing.js";
 import {
   buildPacketGraphContext,
@@ -26,10 +24,7 @@ import {
   type PacketGraphContextIndex,
 } from "./reviewPacketGraphContext.js";
 import { sanitizeSegment } from "./selectiveDeepening/shared.js";
-import {
-  buildTaskCoherencePartition,
-  type GraphPacket,
-} from "./partitionTaskGraph.js";
+import { buildTaskCoherencePartition } from "./partitionTaskGraph.js";
 import {
   buildTaskAffinityGraph,
   type TaskAffinityGraph,
@@ -39,20 +34,12 @@ import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
 import { normalizePriority } from "./reviewPacketShared.js";
 import { lineCountForPath } from "./lineCounts.js";
 
-export { normalizeGraphPath };
-export {
-  ESTIMATED_TOKENS_PER_LINE,
-  ESTIMATED_PACKET_PROMPT_TOKENS,
-  sizeIndexFromManifest,
-  estimateTaskGroupTokens,
-};
+export { sizeIndexFromManifest };
 
 export interface BuildReviewPacketOptions {
   graphBundle?: GraphBundle;
   lineIndex?: Record<string, number>;
   sizeIndex?: Record<string, number>;
-  continuityScores?: Map<string, number>;
-  [presentationInput: string]: unknown;
 }
 
 function canonicalTasks(tasks: readonly AuditTask[]): AuditTask[] {
@@ -73,11 +60,8 @@ function packetIdFor(tasks: readonly AuditTask[], packetIndex: number): string {
   return `${unit}:${lenses}:packet-${packetIndex + 1}-${hash}`;
 }
 
-/** Canonical component order; optional presentation inputs cannot reorder it. */
-export function orderReviewPackets(
-  packets: ReviewPacket[],
-  ..._ignored: readonly unknown[]
-): ReviewPacket[] {
+/** Canonical component order: the first task id of each component. */
+export function orderReviewPackets(packets: ReviewPacket[]): ReviewPacket[] {
   return packets.sort((left, right) =>
     compareCodeUnits(left.task_ids[0] ?? "", right.task_ids[0] ?? ""),
   );
@@ -125,9 +109,7 @@ export function buildPacket(
     "low",
   );
   const lenses = sortLenses(tasks.map((task) => task.lens));
-  const tags = [
-    ...new Set(tasks.flatMap((task) => task.tags ?? [])),
-  ].sort(compareCodeUnits);
+  const tags = uniqueSorted(tasks.flatMap((task) => task.tags ?? []));
   const baseRationale =
     tasks.length === 1
       ? tasks[0]!.rationale
@@ -142,12 +124,8 @@ export function buildPacket(
   return {
     packet_id: packetIdFor(tasks, packetIndex),
     task_ids: tasks.map((task) => task.task_id),
-    unit_ids: [...new Set(tasks.map((task) => task.unit_id))].sort(
-      compareCodeUnits,
-    ),
-    pass_ids: [...new Set(tasks.map((task) => task.pass_id))].sort(
-      compareCodeUnits,
-    ),
+    unit_ids: uniqueSorted(tasks.map((task) => task.unit_id)),
+    pass_ids: uniqueSorted(tasks.map((task) => task.pass_id)),
     lenses,
     file_paths: filePaths,
     file_line_counts: fileLineCounts,
@@ -184,10 +162,7 @@ function planningDataFromProjection(
     options.graphBundle,
   );
   const projection = buildTaskCoherencePartition(graph);
-  const groups = new Map<string, AuditTask[]>();
-  const packets: ReviewPacket[] = [];
-
-  for (const [index, component] of projection.packets.entries()) {
+  const packets = projection.packets.map((component, index): ReviewPacket => {
     const componentTasks = component.task_ids.map((taskId) => {
       const task = taskById.get(taskId);
       if (!task) {
@@ -197,47 +172,21 @@ function planningDataFromProjection(
       }
       return task;
     });
-    groups.set(component.task_ids[0] ?? `component-${index + 1}`, componentTasks);
-    packets.push(
-      materializeProjectedPacket(
+    return {
+      ...buildPacket(
         componentTasks,
-        component,
         index,
+        options.lineIndex,
+        options.sizeIndex,
         graphEdges,
-        options,
+        options.graphBundle,
         graphContextIndex,
       ),
-    );
-  }
+      risk_score: component.risk_score,
+    };
+  });
 
-  return {
-    graphEdges,
-    groups,
-    planningGraphEdges: graphEdges,
-    packets: orderReviewPackets(packets),
-  };
-}
-
-function materializeProjectedPacket(
-  tasks: AuditTask[],
-  component: GraphPacket,
-  index: number,
-  graphEdges: GraphEdge[],
-  options: BuildReviewPacketOptions,
-  graphContextIndex: PacketGraphContextIndex,
-): ReviewPacket {
-  return {
-    ...buildPacket(
-      tasks,
-      index,
-      options.lineIndex,
-      options.sizeIndex,
-      graphEdges,
-      options.graphBundle,
-      graphContextIndex,
-    ),
-    risk_score: component.risk_score,
-  };
+  return { graphEdges, packets: orderReviewPackets(packets) };
 }
 
 /**

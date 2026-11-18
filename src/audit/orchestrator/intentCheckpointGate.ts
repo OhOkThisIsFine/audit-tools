@@ -131,14 +131,17 @@ export interface CheckpointNormalForms {
  * A non-object value is returned untouched: this projection never invents
  * structure, and the gate's job is comparing what is there.
  */
+const DESIGN_REVIEW_PROVENANCE_FIELD_SET: ReadonlySet<string> = new Set(
+  DESIGN_REVIEW_PROVENANCE_FIELDS,
+);
+
 function stripDesignReviewProvenance(value: unknown): unknown {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return value;
   }
-  const drop = new Set(DESIGN_REVIEW_PROVENANCE_FIELDS);
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).filter(
-      ([key]) => !drop.has(key),
+      ([key]) => !DESIGN_REVIEW_PROVENANCE_FIELD_SET.has(key),
     ),
   );
 }
@@ -171,15 +174,14 @@ function projectFields(
  */
 export function normalizeCheckpointForms(
   checkpoint: IntentCheckpoint | undefined,
-  config: NormalizeConfig = DEFAULT_NORMALIZE_CONFIG,
 ): CheckpointNormalForms {
   if (!checkpoint) {
     const absent = stableStringify({ __absent: true });
     return { structured: absent, prose: absent };
   }
   return {
-    structured: projectFields(checkpoint, config.structuredFields),
-    prose: projectFields(checkpoint, config.proseFields),
+    structured: projectFields(checkpoint, DEFAULT_NORMALIZE_CONFIG.structuredFields),
+    prose: projectFields(checkpoint, DEFAULT_NORMALIZE_CONFIG.proseFields),
   };
 }
 
@@ -197,13 +199,29 @@ export function computeGateVersion(input?: {
   judgeId?: string;
   promptTemplateVersion?: string;
 }): string {
-  const normalizeConfig = input?.normalizeConfig ?? DEFAULT_NORMALIZE_CONFIG;
-  const judgeId = input?.judgeId ?? HOST_JUDGE_ID;
-  const promptTemplateVersion =
-    input?.promptTemplateVersion ?? INTENT_GATE_PROMPT_TEMPLATE_VERSION;
+  if (!input) return DEFAULT_GATE_VERSION;
+  return gateVersionOf(
+    input.normalizeConfig ?? DEFAULT_NORMALIZE_CONFIG,
+    input.judgeId ?? HOST_JUDGE_ID,
+    input.promptTemplateVersion ?? INTENT_GATE_PROMPT_TEMPLATE_VERSION,
+  );
+}
+
+function gateVersionOf(
+  normalizeConfig: NormalizeConfig,
+  judgeId: string,
+  promptTemplateVersion: string,
+): string {
   const configHash = hashContent(stableStringify(normalizeConfig), { length: 16 });
   return `${configHash}:${judgeId}:${promptTemplateVersion}`;
 }
+
+/** Every production caller reads the default version: hash its constant config once. */
+const DEFAULT_GATE_VERSION = gateVersionOf(
+  DEFAULT_NORMALIZE_CONFIG,
+  HOST_JUDGE_ID,
+  INTENT_GATE_PROMPT_TEMPLATE_VERSION,
+);
 
 /**
  * Hash one normal form for pair identification (the judge submission names the

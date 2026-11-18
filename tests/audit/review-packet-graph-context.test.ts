@@ -190,7 +190,6 @@ test("full serialized packets and metrics retain baseline context and complete g
   const planning = buildReviewPacketPlanningData(tasks, options);
   const metrics = buildAuditPlanMetrics(tasks, options);
   expect(planning.graphEdges).toEqual(edges);
-  expect(planning.planningGraphEdges).toBe(planning.graphEdges);
   vi.spyOn(context, "buildPacketGraphContextFromIndex").mockImplementation(files => baselineContext(files, edges, graphBundle));
   expect(JSON.stringify(buildReviewPacketPlanningData(tasks, options).packets)).toBe(JSON.stringify(planning.packets));
   expect(JSON.stringify(buildAuditPlanMetrics(tasks, options))).toBe(JSON.stringify(metrics));

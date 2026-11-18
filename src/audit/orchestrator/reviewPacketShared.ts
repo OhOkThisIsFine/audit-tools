@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-packets.test.ts, tests/audit/review-packet-order.test.ts
 import type { AuditTask } from "../types.js";
 import type { ReviewPacket } from "../types/reviewPlanning.js";
 import type { GraphEdge } from "audit-tools/shared";
@@ -11,8 +12,6 @@ import type { GraphEdge } from "audit-tools/shared";
 /** The planning intermediate reviewPackets builds and reviewPacketMetrics scores. */
 export interface ReviewPacketPlanningData {
   graphEdges: GraphEdge[];
-  groups: Map<string, AuditTask[]>;
-  planningGraphEdges: GraphEdge[];
   packets: ReviewPacket[];
 }
 

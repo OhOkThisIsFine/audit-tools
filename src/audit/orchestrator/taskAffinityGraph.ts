@@ -1,6 +1,8 @@
+// sites-pinned: tests/audit/task-affinity-graph.test.ts, tests/audit/partition-task-graph.test.ts
 import { z } from "zod";
 import type { AuditTask } from "../types.js";
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
+import { toPosixPath } from "audit-tools/shared";
 import {
   canonicalizeAuditTasks,
   canonicalizeTaskAffinityGraph,
@@ -109,10 +111,10 @@ const KIND_WEIGHT: Record<TaskAffinityEdgeKind, number> = {
 // reviewing one lens benefits from shared mental model). Never a standalone edge.
 const SAME_LENS_BONUS = 0.05;
 
+/** The directory of an already-POSIX path; `""` for a root-level file. */
 function dirOf(path: string): string {
-  const norm = path.replace(/\\/g, "/");
-  const idx = norm.lastIndexOf("/");
-  return idx === -1 ? "" : norm.slice(0, idx);
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
 }
 
 function flowIdsOf(task: AuditTask): Set<string> {
@@ -149,8 +151,8 @@ function buildFileAdjacency(graphBundle?: GraphBundle): Map<string, Set<string>>
     if (!Array.isArray(edges)) continue;
     for (const edge of edges) {
       if (!edge || !looksLikePath(edge.from) || !looksLikePath(edge.to)) continue;
-      const a = edge.from.replace(/\\/g, "/");
-      const b = edge.to.replace(/\\/g, "/");
+      const a = toPosixPath(edge.from);
+      const b = toPosixPath(edge.to);
       if (a === b) continue;
       link(a, b);
       link(b, a);
@@ -184,16 +186,16 @@ export function buildTaskAffinityGraph(
   }));
 
   const adjacency = buildFileAdjacency(options.graphBundle);
-  // Precompute per-task derived sets to keep the O(n^2) pass cheap.
-  const fileSets = canonicalTasks.map((t) => new Set(t.file_paths.map((p) => p.replace(/\\/g, "/"))));
-  const dirSets = canonicalTasks.map(
-    (t) => new Set(t.file_paths.map((p) => dirOf(p))),
-  );
+  // Precompute per-task derived sets to keep the O(n^2) pass cheap. Each path
+  // is normalized once and every set below reads the normalized form.
+  const posixPaths = canonicalTasks.map((t) => t.file_paths.map(toPosixPath));
+  const fileSets = posixPaths.map((paths) => new Set(paths));
+  const dirSets = posixPaths.map((paths) => new Set(paths.map(dirOf)));
   const flowSets = canonicalTasks.map((t) => flowIdsOf(t));
-  const neighborSets = canonicalTasks.map((t) => {
+  const neighborSets = posixPaths.map((paths) => {
     const out = new Set<string>();
-    for (const p of t.file_paths) {
-      const adj = adjacency.get(p.replace(/\\/g, "/"));
+    for (const p of paths) {
+      const adj = adjacency.get(p);
       if (adj) for (const n of adj) out.add(n);
     }
     return out;
@@ -211,15 +213,13 @@ export function buildTaskAffinityGraph(
           canonicalTasks[i].lens !== canonicalTasks[j].lens ? "cross_lens_same_file" : "shared_file",
         );
       }
-      if (flowSets[i].size > 0 && intersects(flowSets[i], flowSets[j])) {
+      if (intersects(flowSets[i], flowSets[j])) {
         kinds.push("same_flow");
       }
       if (canonicalTasks[i].unit_id === canonicalTasks[j].unit_id) kinds.push("same_unit");
-      if (
-        neighborSets[i].size > 0 &&
-        (intersects(neighborSets[i], fileSets[j]) ||
-          intersects(neighborSets[j], fileSets[i]))
-      ) {
+      // The adjacency is symmetric (`link(a, b); link(b, a)`), so i's neighbors
+      // meet j's files exactly when j's neighbors meet i's files.
+      if (intersects(neighborSets[i], fileSets[j])) {
         kinds.push("call_adjacent");
       }
       if (intersects(dirSets[i], dirSets[j])) kinds.push("same_dir");

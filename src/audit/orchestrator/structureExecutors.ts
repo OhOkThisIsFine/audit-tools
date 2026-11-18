@@ -22,7 +22,7 @@ import {
   GIT_CO_CHANGE_CATEGORY,
 } from "../extractors/gitHistory.js";
 import type { GitHistory } from "audit-tools/shared";
-import { headCommit } from "audit-tools/shared";
+import { headCommit, uniqueSorted } from "audit-tools/shared";
 import {
   canReuseGitHistory,
   deriveGitHistoryScopeKey,
@@ -148,9 +148,10 @@ export async function runStructureExecutor(
   if (coChangeEdges.length > 0) {
     graphWithCoChange = {
       ...graphWithCoChange,
-      analyzers_used: [
-        ...new Set([...(graphWithCoChange.analyzers_used ?? []), "git-history"]),
-      ].sort(),
+      analyzers_used: uniqueSorted([
+        ...(graphWithCoChange.analyzers_used ?? []),
+        "git-history",
+      ]),
     };
   }
 

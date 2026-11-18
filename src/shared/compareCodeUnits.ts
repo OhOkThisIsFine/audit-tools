@@ -1,3 +1,4 @@
+// sites-pinned: tests/shared/task-affinity-artifacts.test.ts, tests/shared/content-coherence.test.ts, tests/shared/friction-run-linkage.test.ts
 /**
  * Code-unit lexical comparator — the ONE ordering primitive for every sort
  * whose result is persisted, hashed, or compared across hosts. ICU collation
@@ -7,4 +8,9 @@
  */
 export function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** The distinct values in code-unit order — the stable form of a persisted string set. */
+export function uniqueSorted(values: Iterable<string>): string[] {
+  return [...new Set(values)].sort(compareCodeUnits);
 }

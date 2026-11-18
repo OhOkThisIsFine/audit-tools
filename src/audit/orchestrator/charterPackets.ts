@@ -1,5 +1,4 @@
 // sites-pinned: tests/audit/charter-current-context.test.ts
-import { hashContent } from "../../shared/hash.js";
 // Channel-pure charter-extraction PACKETS (design resolution 4, 2026-08-05):
 // blindness enforced by FEEDING, never instruction. Each extraction lane gets a
 // materialized packet holding ONLY its evidence channel —
@@ -34,6 +33,8 @@ import {
   CHARTER_PACKET_MANIFEST_SCHEMA_VERSION,
   EVIDENCE_CLASSES,
   compareCodeUnits,
+  hashContent,
+  uniqueSorted,
 } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { isDocIntentFile } from "../decompose/buildStructureDecomposition.js";
@@ -91,9 +92,9 @@ export function charterPacketReadSet(bundle: ArtifactBundle): {
   const sortedUnits = [...(bundle.unit_manifest?.units ?? [])]
     .sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id));
   for (const unit of sortedUnits) {
-    const files = [...new Set(unit.files)]
-      .filter((path) => !seen.has(path) && !isTestPath(normalizeExtractorPath(path)))
-      .sort((a, b) => compareCodeUnits(a, b));
+    const files = uniqueSorted(unit.files).filter(
+      (path) => !seen.has(path) && !isTestPath(normalizeExtractorPath(path)),
+    );
     if (files.length === 0) continue;
     for (const path of files) seen.add(path);
     units.push({
@@ -110,7 +111,7 @@ export function charterPacketReadSet(bundle: ArtifactBundle): {
   return {
     units,
     memberPaths: units.flatMap((unit) => unit.files),
-    docPaths: [...docs].sort((a, b) => compareCodeUnits(a, b)),
+    docPaths: uniqueSorted(docs),
   };
 }
 
@@ -215,14 +216,14 @@ function renderExcerptBody(lines: readonly NumberedSourceLine[]): string {
 
 function headingFor(
   excerptId: string,
-  candidate: ExcerptCandidate,
+  excerpt: Pick<ExcerptCandidate, "evidence_class" | "source_path">,
   runs: readonly PacketLineRun[],
 ): string {
-  const label = CLASS_LABELS[candidate.evidence_class];
+  const label = CLASS_LABELS[excerpt.evidence_class];
   const spans = runs
     .map((run) => (run.start === run.end ? `${run.start}` : `${run.start}-${run.end}`))
     .join(", ");
-  return `[${excerptId}] ${label}: ${candidate.source_path} — lines ${spans}`;
+  return `[${excerptId}] ${label}: ${excerpt.source_path} — lines ${spans}`;
 }
 
 const CLASS_LABELS: Record<EvidenceClass, string> = {
@@ -378,6 +379,31 @@ function addCandidate(plan: PacketPlan, candidate: ExcerptCandidate): void {
 }
 
 /**
+ * Name, read and extract every path of one evidence class, in path order. A
+ * path that yields no lines is noted `no_content` rather than skipped, so it
+ * stays counted in `named` and the coverage reconciles.
+ */
+async function collectClass(
+  plan: PacketPlan,
+  root: string,
+  evidenceClass: EvidenceClass,
+  paths: readonly string[],
+  extract: (text: string, path: string) => NumberedSourceLine[],
+): Promise<void> {
+  for (const path of paths) {
+    nameCandidate(plan, evidenceClass);
+    const text = await readCandidate(plan, root, evidenceClass, path);
+    if (text === undefined) continue;
+    const lines = extract(text, path);
+    if (lines.length === 0) {
+      note(plan, evidenceClass, path, "no_content");
+      continue;
+    }
+    addCandidate(plan, { evidence_class: evidenceClass, source_path: path, lines });
+  }
+}
+
+/**
  * Materialize ONE kind's evidence packet. Deterministic given the bundle + file
  * contents: stable path order, every named candidate delivered in full, and an
  * explicit per-class coverage record in which
@@ -391,31 +417,8 @@ export async function materializeCharterPacket(
   const plan = emptyPlan();
 
   if (params.kind === "stated") {
-    for (const path of docPaths) {
-      nameCandidate(plan, "doc");
-      const text = await readCandidate(plan, params.root, "doc", path);
-      if (text === undefined) continue;
-      const lines = numberedLinesOf(text);
-      if (lines.length === 0) {
-        note(plan, "doc", path, "no_content");
-        continue;
-      }
-      addCandidate(plan, { evidence_class: "doc", source_path: path, lines });
-    }
-    for (const path of memberPaths) {
-      nameCandidate(plan, "comment");
-      const text = await readCandidate(plan, params.root, "comment", path);
-      if (text === undefined) continue;
-      const lines = extractCommentLines(text, path);
-      if (lines.length === 0) {
-        // Previously a bare `continue`: a member with no comments appeared in
-        // neither the delivered nor the omitted list, so `named` could not be
-        // reconciled and 9 of 81 members were invisible.
-        note(plan, "comment", path, "no_content");
-        continue;
-      }
-      addCandidate(plan, { evidence_class: "comment", source_path: path, lines });
-    }
+    await collectClass(plan, params.root, "doc", docPaths, (text) => numberedLinesOf(text));
+    await collectClass(plan, params.root, "comment", memberPaths, extractCommentLines);
   } else if (params.kind === "structural") {
     const manifestByPath = new Map(
       (params.bundle.repo_manifest?.files ?? []).map((f) => [f.path, f]),
@@ -442,42 +445,11 @@ export async function materializeCharterPacket(
         body: edgeLines.join("\n"),
       });
     }
-    for (const path of memberPaths) {
-      nameCandidate(plan, "declaration");
-      const text = await readCandidate(plan, params.root, "declaration", path);
-      if (text === undefined) continue;
-      const lines = topLevelDeclarationLines(strippedSourceLines(text, path));
-      if (lines.length === 0) {
-        note(plan, "declaration", path, "no_content");
-        continue;
-      }
-      addCandidate(plan, {
-        evidence_class: "declaration",
-        source_path: path,
-        lines,
-      });
-    }
+    await collectClass(plan, params.root, "declaration", memberPaths, (text, path) =>
+      topLevelDeclarationLines(strippedSourceLines(text, path)),
+    );
   } else if (params.kind === "revealed") {
-    for (const path of memberPaths) {
-      nameCandidate(plan, "stripped_source");
-      const text = await readCandidate(
-        plan,
-        params.root,
-        "stripped_source",
-        path,
-      );
-      if (text === undefined) continue;
-      const lines = strippedSourceLines(text, path);
-      if (lines.length === 0) {
-        note(plan, "stripped_source", path, "no_content");
-        continue;
-      }
-      addCandidate(plan, {
-        evidence_class: "stripped_source",
-        source_path: path,
-        lines,
-      });
-    }
+    await collectClass(plan, params.root, "stripped_source", memberPaths, strippedSourceLines);
   } else {
     // `true` is never an extraction lane (nominated by the miner at deepest);
     // materializing a packet for it is a caller bug, surfaced loudly.
@@ -595,7 +567,7 @@ function renderPacket(
   }
   for (const excerpt of excerpts) {
     lines.push(
-      `## ${headingFor(excerpt.excerpt_id, { evidence_class: excerpt.evidence_class, source_path: excerpt.source_path, lines: [] }, excerpt.line_runs)}`,
+      `## ${headingFor(excerpt.excerpt_id, excerpt, excerpt.line_runs)}`,
       "",
       renderExcerptBody(excerpt.lines),
       "",

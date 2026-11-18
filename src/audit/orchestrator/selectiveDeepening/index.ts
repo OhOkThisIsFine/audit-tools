@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/selective-deepening-conflicts.test.ts, tests/audit/selective-deepening-handoff.test.ts
+import { compareCodeUnits } from "audit-tools/shared";
 import type { AuditTask } from "../../types.js";
 import {
   type BuildSelectiveDeepeningTaskOptions,
@@ -20,7 +21,6 @@ import {
 } from "./runtimeValidation.js";
 import { buildLensVerificationTasks } from "./lensVerification.js";
 import { buildVerificationFollowupTasks } from "./stewardFollowup.js";
-import { compareCodeUnits } from "../../../shared/compareCodeUnits.js";
 
 export type { BuildSelectiveDeepeningTaskOptions } from "./shared.js";
 
@@ -28,11 +28,11 @@ export type { BuildSelectiveDeepeningTaskOptions } from "./shared.js";
  * Build the self-bounding set of selective-deepening follow-up tasks. Each
  * strategy (finding-followup, conflict, steward-followup, runtime-validation,
  * lens-verification, high-risk-clean) lives in its own module under this
- * directory; this entry sequences them and dedupes (via `pushIfNew`).
+ * directory; this entry sequences them and dedupes (via `contribute`).
  *
  * There is no per-batch or total-count limit. Each strategy keys its task id off
- * the finding/unit/lens it verifies, `pushIfNew` dedupes against tasks created in
- * prior rounds, and no strategy deepens a deepening-sourced result (finding /
+ * the finding/unit/lens it verifies, `contribute` dedupes against tasks created
+ * in prior rounds, and no strategy deepens a deepening-sourced result (finding /
  * conflict / lens-verification / high-risk-clean all filter `isDeepeningTask`;
  * steward only fires on lens-verification results and its output is not itself a
  * lens-verification task). The strategy chain is therefore a finite DAG that
@@ -42,78 +42,63 @@ export type { BuildSelectiveDeepeningTaskOptions } from "./shared.js";
 export function buildSelectiveDeepeningTasks(
   options: BuildSelectiveDeepeningTaskOptions,
 ): AuditTask[] {
-  const taskById = new Map(
-    (options.existingTasks ?? []).map((task) => [task.task_id, task]),
-  );
   const existingTasks = options.existingTasks ?? [];
+  const taskById = new Map(existingTasks.map((task) => [task.task_id, task]));
   const existingIds = new Set(taskById.keys());
   const created: AuditTask[] = [];
-
-  // No cap: each qualifying item is deepened at most once. `pushIfNew` dedupes
-  // against tasks already created (this round or a prior one, via existingIds),
-  // and strategies never deepen a deepening-sourced result, so the qualifying
-  // set is finite and the chain converges on its own.
-  function pushIfNew(task: AuditTask): void {
-    if (existingIds.has(task.task_id)) {
-      return;
-    }
-    existingIds.add(task.task_id);
-    created.push(task);
-  }
-
-  // FND-OBS-c8d43100: track per-strategy contribution counts so the summary log
-  // can report which strategies fired and whether budget-capping occurred.
+  // Per-strategy contribution counts, in strategy order, for the verbose summary.
   const strategyContributions: Record<string, number> = {};
 
-  const contexts = findingContexts(options.results, taskById);
-  let beforeFindingFollowup = created.length;
-  for (const context of contexts) {
-    const triggers: string[] = [];
-    if (SEVERITY_RANK[context.finding.severity] >= SEVERITY_RANK.high) {
-      triggers.push("high_severity");
+  // Push each new task (dedupe against this round and prior rounds via
+  // existingIds) and record how many the strategy added.
+  function contribute(strategy: string, tasks: Iterable<AuditTask>): void {
+    const before = created.length;
+    for (const task of tasks) {
+      if (existingIds.has(task.task_id)) continue;
+      existingIds.add(task.task_id);
+      created.push(task);
     }
-    if (context.finding.confidence === "low") {
-      triggers.push("low_confidence");
-    }
-    if (triggers.length === 0) {
-      continue;
-    }
-    pushIfNew(
-      buildFindingFollowupTask({
-        result: context.result,
-        task: context.task,
-        finding: context.finding,
-        triggers,
-        lineIndex: options.lineIndex,
-      }),
-    );
+    strategyContributions[strategy] = created.length - before;
   }
-  strategyContributions["finding_followup"] = created.length - beforeFindingFollowup;
 
-  let beforeConflict = created.length;
-  for (const group of coalescedConflictGroups(contexts, options.lineIndex)) {
-    pushIfNew(
+  const contexts = findingContexts(options.results, taskById);
+  contribute(
+    "finding_followup",
+    contexts.flatMap((context) => {
+      const triggers: string[] = [];
+      if (SEVERITY_RANK[context.finding.severity] >= SEVERITY_RANK.high) {
+        triggers.push("high_severity");
+      }
+      if (context.finding.confidence === "low") {
+        triggers.push("low_confidence");
+      }
+      return triggers.length === 0
+        ? []
+        : [buildFindingFollowupTask({ ...context, triggers, lineIndex: options.lineIndex })];
+    }),
+  );
+
+  contribute(
+    "conflict",
+    coalescedConflictGroups(contexts, options.lineIndex).map((group) =>
       buildConflictFollowupTask({
         contexts: group.contexts,
         conflictKeys: group.conflictKeys,
         lineIndex: options.lineIndex,
       }),
-    );
-  }
-  strategyContributions["conflict"] = created.length - beforeConflict;
+    ),
+  );
 
-  let beforeSteward = created.length;
-  for (const result of options.results) {
-    const task = taskById.get(result.task_id);
-    for (const followupTask of buildVerificationFollowupTasks({
-      result,
-      task,
-      lineIndex: options.lineIndex,
-    })) {
-      pushIfNew(followupTask);
-    }
-  }
-  strategyContributions["steward_followup"] = created.length - beforeSteward;
+  contribute(
+    "steward_followup",
+    options.results.flatMap((result) =>
+      buildVerificationFollowupTasks({
+        result,
+        task: taskById.get(result.task_id),
+        lineIndex: options.lineIndex,
+      }),
+    ),
+  );
 
   const runtimeTaskById = new Map(
     (options.runtimeValidationTasks?.tasks ?? []).map((task) => [
@@ -121,7 +106,7 @@ export function buildSelectiveDeepeningTasks(
       task,
     ]),
   );
-  let beforeRuntimeValidation = created.length;
+  const runtimeFollowups: AuditTask[] = [];
   for (const result of [...(options.runtimeValidationReport?.results ?? [])].sort(
     (a, b) => compareCodeUnits(a.task_id, b.task_id),
   )) {
@@ -135,11 +120,11 @@ export function buildSelectiveDeepeningTasks(
     if (runtimeValidationHasStrongStaticFinding(runtimeTask, contexts)) {
       continue;
     }
+    const targets = new Set(runtimeTask.target_paths);
     const relatedTasks = existingTasks.filter(
-      (task) =>
-        !isDeepeningTask(task) && intersects(task.file_paths, runtimeTask.target_paths),
+      (task) => !isDeepeningTask(task) && intersects(task.file_paths, targets),
     );
-    pushIfNew(
+    runtimeFollowups.push(
       buildRuntimeValidationFollowupTask({
         runtimeTask,
         runtimeResultStatus: result.status,
@@ -149,18 +134,17 @@ export function buildSelectiveDeepeningTasks(
       }),
     );
   }
-  strategyContributions["runtime_validation"] = created.length - beforeRuntimeValidation;
+  contribute("runtime_validation", runtimeFollowups);
 
-  let beforeLensVerification = created.length;
-  for (const task of buildLensVerificationTasks({
-    existingTasks,
-    results: options.results,
-    lineIndex: options.lineIndex,
-    externalAnalyzerResults: options.externalAnalyzerResults,
-  })) {
-    pushIfNew(task);
-  }
-  strategyContributions["lens_verification"] = created.length - beforeLensVerification;
+  contribute(
+    "lens_verification",
+    buildLensVerificationTasks({
+      existingTasks,
+      results: options.results,
+      lineIndex: options.lineIndex,
+      externalAnalyzerResults: options.externalAnalyzerResults,
+    }),
+  );
 
   const cleanResults = options.results
     .map((result) => ({ result, task: taskById.get(result.task_id) }))
@@ -171,24 +155,20 @@ export function buildSelectiveDeepeningTasks(
       if (priorityDelta !== 0) return priorityDelta;
       return compareCodeUnits(a.result.task_id, b.result.task_id);
     });
-
-  let beforeHighRiskClean = created.length;
-  for (const { result, task } of cleanResults) {
-    pushIfNew(
+  contribute(
+    "high_risk_clean",
+    cleanResults.map(({ result, task }) =>
       buildHighRiskCleanFollowupTask({
         result,
         task,
         lineIndex: options.lineIndex,
       }),
-    );
-  }
-  strategyContributions["high_risk_clean"] = created.length - beforeHighRiskClean;
+    ),
+  );
 
-  // FND-OBS-c8d43100: emit a structured summary of which strategies fired so
-  // operators can understand deepening decisions. Deepening is self-bounding
-  // (each qualifying item deepened at most once), so there is no budget to report.
-  // This is info-level diagnostic noise — gate it on AUDIT_CODE_VERBOSE so a normal
-  // run's stderr stays clean (matching the reviewPackets verbose-gating pattern).
+  // Info-level diagnostics: which strategies fired. Deepening is self-bounding,
+  // so there is no budget to report. Gated on AUDIT_CODE_VERBOSE so a normal
+  // run's stderr stays clean.
   if (process.env.AUDIT_CODE_VERBOSE) {
     process.stderr.write(
       JSON.stringify({

@@ -21,7 +21,6 @@
  * affected — never a blind full re-run. Enforced by the tool, not host memory.
  */
 import { projectDesignReviewTask } from "./designReviewTask.js";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   diffProjections,
@@ -139,7 +138,7 @@ export async function writeDesignReviewSnapshot(
   artifactsDir: string,
   snapshot: DesignReviewSnapshot,
 ): Promise<void> {
-  await mkdir(snapshotDir(artifactsDir), { recursive: true });
+  // writeJsonFile creates the parent directory.
   await writeJsonFile(
     designReviewSnapshotPath(artifactsDir, snapshot.pass),
     snapshot,

@@ -1,24 +1,18 @@
-import type { AuditTask } from "../types.js";
+// sites-pinned: tests/audit/review-packet-graph-context.test.ts, tests/audit/review-packets.test.ts
 import type { GraphEdge } from "audit-tools/shared";
-import { collectGraphEdges, compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
 import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 
-// Graph-edge primitives: collection, scoring, degree indexing, expansion
-// predicate, and group-key utilities used only for presentation metrics.
-// Membership comes exclusively from shared content coherence.
-// `collectGraphEdges` is single-sourced in `audit-tools/shared` (the shared
-// continuity scorer needs it too) and re-exported here so this barrel's
-// consumers are unchanged.
-export { normalizeGraphPath, collectGraphEdges };
+// Graph-edge primitives for packet presentation and quality metrics: scoring,
+// ordering and degree indexing. Membership comes exclusively from shared
+// content coherence.
 
-const PACKET_EXPANSION_MIN_CONFIDENCE = 0.65;
 /**
  * Fan-in / fan-out degree above which a node is treated as a hub. Exported so
- * the Phase 3 delta-scope expansion skips the same hubs that packet planning
- * skips, preventing scope blow-up through highly-connected modules.
+ * the delta-scope expansion skips the same hubs that the packet metrics count,
+ * preventing scope blow-up through highly-connected modules.
  */
 export const HIGH_FAN_DEGREE_THRESHOLD = 12;
-const HIGH_FAN_EXPANSION_CONFIDENCE = 0.99;
 
 export function graphEdgeConfidence(edge: GraphEdge): number {
   if (typeof edge.confidence === "number" && Number.isFinite(edge.confidence)) {
@@ -72,40 +66,4 @@ export function buildGraphDegreeIndex(edges: GraphEdge[]): GraphDegreeIndex {
   }
 
   return { fanIn, fanOut };
-}
-
-export function isPacketExpansionEdge(
-  edge: GraphEdge,
-  degreeIndex: GraphDegreeIndex,
-): boolean {
-  if (!isConcreteGraphEdge(edge)) {
-    return false;
-  }
-  const confidence = graphEdgeConfidence(edge);
-  if (confidence < PACKET_EXPANSION_MIN_CONFIDENCE) {
-    return false;
-  }
-
-  const fromFanOut = degreeIndex.fanOut.get(normalizeGraphPath(edge.from)) ?? 0;
-  const toFanIn = degreeIndex.fanIn.get(normalizeGraphPath(edge.to)) ?? 0;
-  const highFanEdge =
-    fromFanOut > HIGH_FAN_DEGREE_THRESHOLD ||
-    toFanIn > HIGH_FAN_DEGREE_THRESHOLD;
-
-  return !highFanEdge || confidence >= HIGH_FAN_EXPANSION_CONFIDENCE;
-}
-
-export function buildFileToGroupKeys(
-  groups: Map<string, AuditTask[]>,
-): Map<string, Set<string>> {
-  const fileToGroupKeys = new Map<string, Set<string>>();
-  for (const [key, tasks] of groups) {
-    for (const path of new Set(tasks.flatMap((task) => task.file_paths))) {
-      const normalized = normalizeGraphPath(path);
-      const existing = fileToGroupKeys.get(normalized) ?? new Set<string>();
-      existing.add(key);
-      fileToGroupKeys.set(normalized, existing);
-    }
-  }
-  return fileToGroupKeys;
 }

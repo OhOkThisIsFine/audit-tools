@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/review-packets.test.ts, tests/audit/schema-contracts.test.ts
 import type { AuditTask } from "../types.js";
 import type {
   AuditPlanMetrics,
@@ -11,8 +12,6 @@ import {
   HIGH_FAN_DEGREE_THRESHOLD,
   buildGraphDegreeIndex,
   isConcreteGraphEdge,
-  isPacketExpansionEdge,
-  buildFileToGroupKeys,
 } from "./reviewPacketGraphEdges.js";
 import { roundQuality } from "./reviewPacketGraphContext.js";
 import type { ReviewPacketPlanningData } from "./reviewPacketShared.js";
@@ -70,41 +69,6 @@ function sortCountRecord(counts: Record<string, number>): Record<string, number>
   );
 }
 
-function buildTaskToGroupKey(
-  groups: Map<string, AuditTask[]>,
-): Map<string, string> {
-  const taskToGroupKey = new Map<string, string>();
-  for (const [groupKey, tasks] of groups) {
-    for (const task of tasks) {
-      taskToGroupKey.set(task.task_id, groupKey);
-    }
-  }
-  return taskToGroupKey;
-}
-
-function buildGroupToPacketIds(
-  packets: ReviewPacket[],
-  groups: Map<string, AuditTask[]>,
-): Map<string, Set<string>> {
-  const taskToGroupKey = buildTaskToGroupKey(groups);
-  const groupToPacketIds = new Map<string, Set<string>>();
-
-  for (const packet of packets) {
-    const packetGroupKeys = new Set(
-      packet.task_ids
-        .map((taskId) => taskToGroupKey.get(taskId))
-        .filter((groupKey): groupKey is string => groupKey !== undefined),
-    );
-    for (const groupKey of packetGroupKeys) {
-      const packetIds = groupToPacketIds.get(groupKey) ?? new Set<string>();
-      packetIds.add(packet.packet_id);
-      groupToPacketIds.set(groupKey, packetIds);
-    }
-  }
-
-  return groupToPacketIds;
-}
-
 function setsOverlap<T>(a?: Set<T>, b?: Set<T>): boolean {
   if (!a || !b) {
     return false;
@@ -115,56 +79,6 @@ function setsOverlap<T>(a?: Set<T>, b?: Set<T>): boolean {
     }
   }
   return false;
-}
-
-function countMergeEdgeKinds(
-  packets: ReviewPacket[],
-  groups: Map<string, AuditTask[]>,
-  planningGraphEdges: GraphEdge[],
-): Record<string, number> {
-  const counts: Record<string, number> = {};
-  const seen = new Set<string>();
-  const fileToGroupKeys = buildFileToGroupKeys(groups);
-  const groupToPacketIds = buildGroupToPacketIds(packets, groups);
-  const degreeIndex = buildGraphDegreeIndex(planningGraphEdges);
-
-  for (const edge of planningGraphEdges) {
-    if (!isPacketExpansionEdge(edge, degreeIndex)) {
-      continue;
-    }
-    const fromGroups = fileToGroupKeys.get(normalizeGraphPath(edge.from));
-    const toGroups = fileToGroupKeys.get(normalizeGraphPath(edge.to));
-    if (!fromGroups || !toGroups) {
-      continue;
-    }
-
-    let mergedDistinctGroups = false;
-    for (const fromKey of fromGroups) {
-      for (const toKey of toGroups) {
-        if (
-          fromKey !== toKey &&
-          setsOverlap(
-            groupToPacketIds.get(fromKey),
-            groupToPacketIds.get(toKey),
-          )
-        ) {
-          mergedDistinctGroups = true;
-          break;
-        }
-      }
-      if (mergedDistinctGroups) {
-        break;
-      }
-    }
-
-    const identity = edgeIdentity(edge);
-    if (mergedDistinctGroups && !seen.has(identity)) {
-      seen.add(identity);
-      incrementEdgeKindCount(counts, edge);
-    }
-  }
-
-  return sortCountRecord(counts);
 }
 
 function buildFileToPacketIds(
@@ -184,13 +98,13 @@ function buildFileToPacketIds(
 
 function countBoundaryOnlyEdgeKinds(
   packets: ReviewPacket[],
-  planningGraphEdges: GraphEdge[],
+  graphEdges: GraphEdge[],
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   const seen = new Set<string>();
   const fileToPacketIds = buildFileToPacketIds(packets);
 
-  for (const edge of planningGraphEdges) {
+  for (const edge of graphEdges) {
     if (!isConcreteGraphEdge(edge)) {
       continue;
     }
@@ -334,8 +248,6 @@ function buildPacketQualityMetrics(
   packets: ReviewPacket[],
   tasks: AuditTask[],
   graphEdges: GraphEdge[],
-  planningGraphEdges: GraphEdge[],
-  groups: Map<string, AuditTask[]>,
 ): AuditPlanMetrics["packet_quality"] {
   const packetTaskIds = new Set(packets.flatMap((packet) => packet.task_ids));
   const orphanTaskCount = tasks.filter(
@@ -374,15 +286,10 @@ function buildPacketQualityMetrics(
       (sum, packet) => sum + packet.quality.boundary_edge_count,
       0,
     ),
-    merge_edge_kind_counts: countMergeEdgeKinds(
-      packets,
-      groups,
-      planningGraphEdges,
-    ),
-    boundary_edge_kind_counts: countBoundaryOnlyEdgeKinds(
-      packets,
-      planningGraphEdges,
-    ),
+    // Structurally empty: a packet IS one coherence component, so no edge can
+    // merge two distinct groups into one packet.
+    merge_edge_kind_counts: {},
+    boundary_edge_kind_counts: countBoundaryOnlyEdgeKinds(packets, graphEdges),
     orphan_task_count: orphanTaskCount,
     high_fan_in_file_count: countHighDegreeTaskFiles(
       degreeIndex.fanIn,
@@ -419,7 +326,7 @@ export function computeAuditPlanMetrics(
   lineIndex?: Record<string, number>,
   generatedAt?: Date,
 ): AuditPlanMetrics {
-  const { graphEdges, groups, packets, planningGraphEdges } = planningData;
+  const { graphEdges, packets } = planningData;
   const taskLineCounts = tasks.map((task) => taskLineCount(task, lineIndex));
   const totalTaskLines = taskLineCounts.reduce((sum, value) => sum + value, 0);
   const totalPacketLines = packets.reduce(
@@ -473,13 +380,7 @@ export function computeAuditPlanMetrics(
     largest_packet_id: largestPacket?.packet_id,
     lens_task_counts: lensTaskCounts,
     priority_task_counts: priorityTaskCounts,
-    packet_quality: buildPacketQualityMetrics(
-      packets,
-      tasks,
-      graphEdges,
-      planningGraphEdges,
-      groups,
-    ),
+    packet_quality: buildPacketQualityMetrics(packets, tasks, graphEdges),
     packet_size: {
       single_task_packets: packets.filter((packet) => packet.task_ids.length === 1).length,
       multi_task_packets: packets.filter((packet) => packet.task_ids.length > 1).length,

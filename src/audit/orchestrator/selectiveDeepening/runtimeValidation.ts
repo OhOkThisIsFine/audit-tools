@@ -1,18 +1,18 @@
+// sites-pinned: tests/audit/orchestrator-remediation.test.ts
 import { lineCountFromSources } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import type {
   RuntimeValidationStatus,
   RuntimeValidationTask,
 } from "../../types/runtimeValidation.js";
+import { uniqueSorted } from "audit-tools/shared";
 import {
   DEEPENING_TAG,
   type FindingContext,
   SEVERITY_RANK,
   intersects,
-
   sanitizeSegment,
   taskIdFor,
-  uniqueSorted,
 } from "./shared.js";
 
 export function runtimeResultNeedsFollowup(
@@ -21,7 +21,7 @@ export function runtimeResultNeedsFollowup(
   return status === "not_confirmed" || status === "inconclusive";
 }
 
-export function pickRuntimeFollowupLens(relatedTasks: AuditTask[]): Lens {
+function pickRuntimeFollowupLens(relatedTasks: AuditTask[]): Lens {
   const preference: Lens[] = [
     "security",
     "data_integrity",
@@ -46,9 +46,10 @@ export function runtimeValidationHasStrongStaticFinding(
   runtimeTask: RuntimeValidationTask,
   contexts: FindingContext[],
 ): boolean {
+  const targets = new Set(runtimeTask.target_paths);
   return contexts.some(
     (context) =>
-      intersects(context.paths, runtimeTask.target_paths) &&
+      intersects(context.paths, targets) &&
       SEVERITY_RANK[context.finding.severity] >= SEVERITY_RANK.high,
   );
 }

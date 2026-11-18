@@ -32,6 +32,12 @@ the work that would make it a plain cleanup.
   `tests/audit/seam-dependency-map-executor-writeset-parity.test.ts`. **Unblock:** teach the
   extractor to follow a call into a same-file helper, so both executors still get their own
   write set. Pointing both rows at the helper instead would lose that per-executor attribution.
+- **P04 — text refactors in `designReviewPrompt.ts`** (the example finding object, the output
+  format block, `conceptualBody`). Blocker: the prompt bytes feed the prompt digests, and no test
+  compares the four rendered prompts byte for byte. **Unblock:** add a byte-pin test of the four
+  prompts over one fixture bundle; then refactor against it.
+- **P04 — named options for `buildPacket`** in `reviewPackets.ts`. Blocker: tests call it with
+  positional arguments. **Unblock:** change those tests in the same commit.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -47,6 +53,21 @@ real change, not a cleanup.
   snapshot behavior.
 - **P02:** hoisting `scaledDegree` in `src/shared/decompose/modularity.ts`: it moves which input
   throws first.
+- **P04 — per-bundle `WeakMap` memos** (the design-review projection, the systemic premise token,
+  the charter read set). The full fold drains on one carried bundle, and the P03 lead on the
+  derive cache found that a cache on that bundle needs a clone first. **Unblock:** that P03 lead.
+- **P04 — `{ ...bundle }` to `bundle`** in `systemicChallengeExecutor.ts`. The `updated` object
+  becomes the caller's own bundle object, which changes object identity for every reader of the
+  result. **Unblock:** show that no caller keys on or changes `updated`.
+- **P04 — the `critical_flow:` and `external_tool:` prefix arms** in the deepening strategies.
+  Removing them depends on a producer rule (every task carries the tag form) that resumed and
+  host-supplied tasks do not follow. **Unblock:** a validator that enforces the tag form at
+  ingestion.
+- **P04 — an exhaustive table for the optional-lens switch.** Custom lens names reach the switch,
+  so its default arm is live. **Unblock:** prove that no custom lens name reaches it.
+- **P04 — the "unreachable" `??` fallbacks** in `intentEquivalenceExecutor.ts` (`?? Math.max(...)`)
+  and `intentScopeDisposition.ts` (`?? "out of scope"`). Each is unreachable only by an invariant
+  that the type does not state. **Unblock:** narrow the type so the compiler proves it.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -79,6 +100,12 @@ worth a change.
 - **P03:** two `interpretFreeFormIntentForAudit` calls on one short string and two reads of the
   coverage-element baselines in `planningExecutors.ts`; nested runtime-task scans in `state.ts`;
   small `includes` lists in `ingestionExecutors.ts` and `architectureDiscovery.ts`.
+- **P04 — inverted indexes for `buildTaskAffinityGraph`** (file, directory and unit to tasks).
+  The `same_dir` and `same_unit` buckets can be dense, so the worst case stays quadratic.
+- **P04 — `Promise.all` for independent reads** (manifest and snapshot reads, the member files of
+  a packet, the kinds of the charter packet archive, a `mkdir` per kind in its loop). Each must
+  keep its output order.
+- **P04 — one pass for the three verdict filters** in `charterFidelityExecutor.ts`. Small inputs.
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -88,6 +115,12 @@ worth a change.
   bad JSON, `null`, an array and a primitive.
 - **P03 — the keyed dedupe loop in `syntaxResolutionExecutor.ts`** could use a `dedupeBy` helper.
   `requeueCommand.ts` has a private one; a shared home would be needed first.
+- **P04 — `stopNote` and `registerBase`** in `systemicChallengeExecutor.ts`: a nested ternary and
+  a repeated literal. Readability only; leave them to the work that owns the convergence wording.
+- **P04 — a fallback chain for `fallbackLineIndex`.** `LineCountSources` takes one index, so a
+  chain needs an API change.
+- **P04 — the `.has` guard in `shouldBuildLensVerificationTask`** repeats the caller's lens filter.
+  It keeps the function safe on its own input; removing it saves one lookup.
 
 ## 6. Rejected — do not re-propose
 
@@ -116,3 +149,11 @@ Each of these was checked and is NOT behavior-neutral, or is correct as it stand
 - **P03:** the `pathExists` helper in `autoFixExecutor.ts` duplicates one in
   `src/audit/io/toolingManifest.ts`, but neither is exported and there is no shared helper to
   call.
+- **P04:** `countBy` for the language and category counts in `designReviewPrompt.ts` and the key
+  and directory counts in `intentCheckpointExecutor.ts`. Those are open vocabularies, and `countBy`
+  counts on a plain `{}` (the P01 lead), which also moves integer-like keys first.
+- **P04:** `sliceFor` in `charterPackets.ts` through `renderExcerptBody`: the line-number padding
+  width differs (the end line versus the widest line), so the packet bytes and its revision hash
+  change.
+- **P04:** removing the options of `computeGateVersion` in `intentCheckpointGate.ts`: a test uses
+  them to prove that each component invalidates the version. The default is now computed once.

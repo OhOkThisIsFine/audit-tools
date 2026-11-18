@@ -328,11 +328,6 @@ export async function runCharterExtractionExecutor(
     citation_validation: citation.summary,
     comparison_pending: nodeCount > 0,
   };
-  const dropSummary =
-    register.validation_issues.length > 0
-      ? `, ${register.validation_issues.length} validation issue(s):\n` +
-        register.validation_issues.map((m) => `  - ${m}`).join("\n")
-      : ".";
   return {
     updated: { ...bundle, charter_register: register },
     artifacts_written: ["charter_register.json"],
@@ -340,6 +335,16 @@ export async function runCharterExtractionExecutor(
       `Charter extraction complete: ${lanes.length} lane DAG(s), ${nodeCount} node(s), ` +
       `${candidates.length} correspondence candidate(s)` +
       (register.comparison_pending ? " awaiting the comparison reader" : "") +
-      dropSummary,
+      issueListSuffix(register.validation_issues, "validation issue(s)"),
   };
+}
+
+/**
+ * The tail of a charter executor's progress summary: `.` when there are no
+ * issues, else `, N <label>:` and one indented line per issue.
+ */
+export function issueListSuffix(issues: readonly string[], label: string): string {
+  return issues.length === 0
+    ? "."
+    : `, ${issues.length} ${label}:\n` + issues.map((m) => `  - ${m}`).join("\n");
 }

@@ -1,18 +1,24 @@
 // sites-pinned: tests/audit/scope.test.ts
-import { readChangedFiles, gitRefExists, isGitRepo, pathMatchesPrefix, compareCodeUnits } from "audit-tools/shared";
+import {
+  collectGraphEdges,
+  compareCodeUnits,
+  gitRefExists,
+  isGitRepo,
+  pathMatchesPrefix,
+  readChangedFiles,
+} from "audit-tools/shared";
 import type { GraphBundle } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { CoverageMatrix } from "../types.js";
 import type { AuditScopeBudget, AuditScopeManifest } from "../types/auditScope.js";
 import { buildDispositionMap } from "../extractors/disposition.js";
 import { buildPathLookup } from "../extractors/graph.js";
+import { normalizeGraphPath } from "../extractors/graphPathUtils.js";
 import {
   HIGH_FAN_DEGREE_THRESHOLD,
   buildGraphDegreeIndex,
-  collectGraphEdges,
   graphEdgeConfidence,
-  normalizeGraphPath,
-} from "./reviewPacketGraph.js";
+} from "./reviewPacketGraphEdges.js";
 
 /** Default cap on in-scope files (seeds + expanded) before expansion stops. */
 export const DEFAULT_SCOPE_MAX_FILES = 200;

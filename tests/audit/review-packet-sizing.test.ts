@@ -1,23 +1,18 @@
 import { test, expect } from "vitest";
 import type { AuditTask } from "../../src/audit/types.js";
 
-// reviewPacketSizing re-exports ESTIMATED_TOKENS_PER_LINE from audit-tools/shared
-// and aliases ESTIMATED_PROMPT_OVERHEAD_TOKENS as ESTIMATED_PACKET_PROMPT_TOKENS.
-// Import from TypeScript source (via tsx) so tests are never poisoned by stale dist/.
+// reviewPacketSizing aliases ESTIMATED_PROMPT_OVERHEAD_TOKENS as
+// ESTIMATED_PACKET_PROMPT_TOKENS and reads ESTIMATED_TOKENS_PER_LINE from
+// audit-tools/shared. Import from TypeScript source (via tsx) so tests are never
+// poisoned by stale dist/.
 const {
-  ESTIMATED_TOKENS_PER_LINE,
   ESTIMATED_PACKET_PROMPT_TOKENS,
   taskContentTokens,
   fileGroupContentTokens,
-  estimateTaskGroupTokens,
 } = await import("../../src/audit/orchestrator/reviewPacketSizing.js");
+const { ESTIMATED_TOKENS_PER_LINE } = await import("audit-tools/shared");
 
-// Shared constants for cross-check — import from source, not compiled dist/
-const { ESTIMATED_TOKENS_PER_LINE: sharedETPL } = await import("audit-tools/shared");
-
-test("reviewPacketSizing uses shared ESTIMATED_TOKENS_PER_LINE (no local duplicate)", () => {
-  // The value sourced from reviewPacketSizing must equal the shared one.
-  expect(ESTIMATED_TOKENS_PER_LINE).toBe(sharedETPL);
+test("the shared ESTIMATED_TOKENS_PER_LINE is 4", () => {
   expect(ESTIMATED_TOKENS_PER_LINE).toBe(4);
 });
 
@@ -86,9 +81,7 @@ test("fileGroupContentTokens preserves owner, bytes, and no-owner fallback prece
   }
 });
 
-test("task-group estimates still charge repeated paths within and across tasks", () => {
+test("task estimates still charge a path repeated within a task", () => {
   const repeated = { ...owner({ p: 2 }), file_paths: ["p", "p"] };
   expect(taskContentTokens(repeated)).toBe(16);
-  expect(estimateTaskGroupTokens([repeated, repeated])).toBe(932);
-  expect(estimateTaskGroupTokens([repeated, repeated], { p: 5 })).toBe(908);
 });

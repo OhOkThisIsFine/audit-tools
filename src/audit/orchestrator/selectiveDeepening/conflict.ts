@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/selective-deepening-conflicts.test.ts, tests/audit/selective-deepening-handoff.test.ts
-import { compareCodeUnits, stableStringify } from "audit-tools/shared";
+import { compareCodeUnits, stableStringify, uniqueSorted } from "audit-tools/shared";
 import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";
 import {
@@ -7,10 +7,8 @@ import {
   DEEPENING_TAG,
   type FindingContext,
   SEVERITY_RANK,
-
   sanitizeSegment,
   taskIdFor,
-  uniqueSorted,
 } from "./shared.js";
 
 export function buildConflictFollowupTask(params: {
