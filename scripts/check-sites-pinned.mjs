@@ -73,7 +73,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isScriptEntry } from './shared/primitives.mjs';
 // The glob grammar check-doc-manifest.mjs owns — imported, never re-implemented,
 // so a pattern means the same thing in this gate as in every other one.
 import { globToRegExp, isGlob } from './check-doc-manifest.mjs';
@@ -432,13 +432,6 @@ export function pinSites({ diffText, readText, include, checkNames, isGenerated 
 }
 
 /**
- * The admission this gate prints on every run, pass or fail.
- *
- * It is here, in the gate, rather than only in the backlog entry, because the
- * person who would over-read a green run is the person reading the gate's output
- * and not the person reading the backlog.
- */
-/**
  * The GENERATED-file exemption set, as a `path → generator` lookup (D2).
  *
  * A generated file is exempt because its CONTENT is derived: the source it is
@@ -613,10 +606,7 @@ function main({ base, root: repoArg }) {
   process.stdout.write(`\n✓ sites-pinned: ${sites.length} file(s) with derived sites, all bound.\n`);
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
+if (isScriptEntry(import.meta.url, process.argv)) {
   const args = guardArgv(process.argv.slice(2), {
     name: 'check-sites-pinned',
     usage: 'node scripts/check-sites-pinned.mjs [--base <rev>] [--root <dir>]',

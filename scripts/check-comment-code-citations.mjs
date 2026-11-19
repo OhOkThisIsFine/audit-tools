@@ -62,12 +62,11 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import ts from "typescript";
 
 import { guardArgv } from "./shared/argvGuard.mjs";
-import { compareCodeUnits } from "./shared/primitives.mjs";
+import { compareCodeUnits, isScriptEntry } from "./shared/primitives.mjs";
 
 import {
   CODE_EXTENSIONS,
@@ -300,7 +299,4 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

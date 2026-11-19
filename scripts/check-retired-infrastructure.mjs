@@ -29,10 +29,9 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isScriptEntry } from "./shared/primitives.mjs";
 
-import { DOC_MANIFEST } from "./doc-manifest-data.mjs";
-import { globToRegExp, isGlob } from "./check-doc-manifest.mjs";
+import { excludedDocMatchers } from "./check-doc-manifest.mjs";
 import { guardArgv } from "./shared/argvGuard.mjs";
 import { RETIRED_INFRASTRUCTURE } from "./shared/retired-infrastructure-data.mjs";
 
@@ -101,21 +100,10 @@ function git(args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
 }
 
-/** Paths the doc-manifest `excluded` row names (exact or pattern). */
-function excludedMatchers() {
-  const row = DOC_MANIFEST.find((r) => r.type === "excluded");
-  if (!row) return [];
-  return row.files.map(([pattern]) =>
-    isGlob(pattern)
-      ? globToRegExp(pattern)
-      : new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-  );
-}
-
 /** Every present tracked Markdown document outside canonical excluded records. */
 export function scannedDocs() {
   const deleted = new Set(git(["ls-files", "-z", "--deleted"]).split("\0").filter(Boolean));
-  const excluded = excludedMatchers();
+  const excluded = excludedDocMatchers();
   return [...new Set(git(["ls-files", "-z"]).split("\0"))]
     .filter((doc) => doc.endsWith(".md") && !deleted.has(doc) &&
       !excluded.some((pattern) => pattern.test(doc)))
@@ -175,10 +163,7 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
+if (isScriptEntry(import.meta.url, process.argv)) {
   // The gate takes no arguments: it reads the tree at the working directory.
   guardArgv(process.argv.slice(2), {
     name: "check-retired-infrastructure",

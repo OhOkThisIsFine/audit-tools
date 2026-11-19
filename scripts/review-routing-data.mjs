@@ -14,7 +14,6 @@
 // escape hatch, which is why it is a row with a definition rather than an
 // absence: the point of the mechanism is that the author SAYS SO, once.
 
-/** @typedef {object} ReviewRoutingRow */
 /**
  * @typedef {object} ReviewRoutingRowShape
  * @property {string} id

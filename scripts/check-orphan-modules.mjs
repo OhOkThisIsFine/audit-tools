@@ -56,10 +56,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { isScriptEntry } from "./shared/primitives.mjs";
 import ts from "typescript";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(import.meta.dirname, "..");
 
 /** Files reachability may not flag, each with its reason. */
 const ORPHAN_ALLOW = new Map([
@@ -351,7 +351,4 @@ function main() {
   process.exit(1);
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

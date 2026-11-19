@@ -35,6 +35,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { ignoredPaths, RUNTIME_STATE_PREFIXES, stripLineSuffix } from "./shared/code-citation-resolution.mjs";
 import { isGeneratedRender } from "./shared/generated-renders.mjs";
 import { hostMemoryDir } from "./shared/hostMemoryDir.mjs";
 
@@ -149,10 +150,6 @@ for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
 // The marker exempts every path citation on its line, or on the line above.
 const MEMORY_PATH_EXEMPT = /<!--\s*memory-path-exempt:.*?-->/;
 
-function stripLineSuffix(token) {
-  return token.replace(/:[~\d][\d,~–-]*$/, "");
-}
-
 // The repo the notes' paths resolve against is the one the gate is run FROM —
 // exactly the repo the doc census above reads (`git ls-files "*.md"` with no
 // `cwd`). Resolving from `import.meta.url` instead would make the gate read this
@@ -170,33 +167,6 @@ const repoTopDirs = new Set(
 );
 const trackedSet = new Set(repoFiles());
 
-/**
- * Gitignored paths are out of scope by rule, the same way the doc gate scopes
- * them: a note naming `.claude/lap-start.json` or an untracked run artifact
- * names a file the run really does write, and there is no tracked file for it to
- * resolve against. One batched `git check-ignore --stdin`, rules-based, so a
- * fresh clone classifies identically.
- */
-function ignoredPaths(candidates) {
-  const unique = [...new Set(candidates)].filter(Boolean);
-  if (unique.length === 0) return new Set();
-  let out = "";
-  try {
-    out = execFileSync("git", ["check-ignore", "--stdin", "-z"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      windowsHide: true,
-      input: unique.join("\0") + "\0",
-    });
-  } catch (err) {
-    // `git check-ignore` exits 1 when nothing matched — not an error. The cast
-    // mirrors the sibling doc gate, where `checkJs` narrows a caught value to
-    // `{}` and the status is not reachable without it.
-    if (err && /** @type {any} */ (err).status === 1) return new Set();
-    throw err;
-  }
-  return new Set(out.split("\0").filter(Boolean));
-}
 const trackedDirSet = new Set();
 for (const p of trackedSet) {
   const parts = p.split("/");
@@ -215,8 +185,6 @@ function pathCandidate(token) {
   if (!repoTopDirs.has(path.split("/", 1)[0])) return null;
   return path;
 }
-
-const RUNTIME_STATE_PREFIXES = [".audit-tools/", ".audit-tools-visibility/"];
 
 /**
  * A finding read from the STORE is not in the commit being gated: the store lives
@@ -250,7 +218,9 @@ for (const note of readdirSync(memoryDir).filter((f) => f.endsWith(".md"))) {
 }
 
 // Pass 2 — resolve. A gitignored candidate is out of scope, not checked.
-const ignored = ignoredPaths(candidates.map((c) => c.path));
+const ignored = candidates.length === 0
+  ? new Set()
+  : ignoredPaths(process.cwd(), candidates.map((c) => c.path));
 const danglingPaths = [];
 for (const { note, line, path } of candidates) {
   if (ignored.has(path)) continue;

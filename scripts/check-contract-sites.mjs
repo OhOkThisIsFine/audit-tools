@@ -59,8 +59,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { isScriptEntry } from './shared/primitives.mjs';
 // The repo-wide argument rule. This gate takes no arguments at all, so an
 // unrecognized one must be refused rather than ignored — the argv-guard shape.
 import { guardArgv } from './shared/argvGuard.mjs';
@@ -73,7 +73,7 @@ import {
   reconcileRenderedSchema,
 } from '../src/shared/validation/contractConstructionSites.ts';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(import.meta.dirname, '..');
 
 /**
  * The verdict fields a construction-site marker may NEVER name, whatever the
@@ -368,10 +368,7 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
+if (isScriptEntry(import.meta.url, process.argv)) {
   // No spec: this gate accepts no arguments, which is the strictest form and
   // the right one for a check that resolves its subject from the repo root.
   guardArgv(process.argv.slice(2), {

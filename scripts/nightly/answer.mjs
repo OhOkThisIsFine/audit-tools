@@ -71,11 +71,6 @@ function fail(message) {
 // branch below — --list, --done, --settled, and the default settle path —
 // must surface that refusal usably instead of letting an uncaught exception
 // (or, before this fix, a silently-empty ledger) stand in for a real answer.
-// CFG-7aa5185c — fail-closed at the CLI boundary too: readDecisions now
-// REFUSES (throws) on a malformed ledger rather than degrading to {}, so every
-// branch below — --list, --done, --settled, and the default settle path —
-// must surface that refusal usably instead of letting an uncaught exception
-// (or, before this fix, a silently-empty ledger) stand in for a real answer.
 let state;
 let decisions;
 try {

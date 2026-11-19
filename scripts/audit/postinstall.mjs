@@ -17,6 +17,7 @@ import {
   readRequiredSource,
   readOptionalSource,
   objectValue,
+  withoutManagedBroadBashWildcard,
   resolveSharedOpenCodePermissions,
   runInstalls,
   installOpenCodeGlobalConfig,
@@ -40,8 +41,7 @@ import {
 const TOOL = 'audit-code';
 const PLAN = HOST_ASSET_PLANS[TOOL];
 const SOURCES = planSources(PLAN);
-const pkgRoot = PKG_ROOT;
-const packageVersion = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version ?? '0.0.0';
+const packageVersion = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')).version ?? '0.0.0';
 
 // Seed literals are passed through the shared canonical orderer below
 // (orderOpenCodePermissionRule) so the FIRST deploy already emits the order
@@ -91,21 +91,6 @@ const sharedOpenCodePermissions = /** @type {NonNullable<Awaited<ReturnType<type
   await resolveSharedOpenCodePermissions()
 );
 
-// A pre-hardening deploy wrote agent-scope bash['*']='allow' (the historically
-// managed broad value). Migrate exactly that value away so the generated 'ask'
-// seed wins on re-deploy; any other user-authored wildcard survives untouched.
-// This mirrors the install wrapper so an upgrade that only ever runs
-// `npm install` converges on the same hardened agent block — otherwise the
-// postinstall is the one path that keeps a broad wildcard alive.
-function withoutManagedBroadBashWildcard(rule) {
-  const { withoutOpenCodeWildcard, OPENCODE_MANAGED_BROAD_VALUE } = sharedOpenCodePermissions;
-  const existing = objectValue(rule);
-  if (existing['*'] !== OPENCODE_MANAGED_BROAD_VALUE) {
-    return rule;
-  }
-  return withoutOpenCodeWildcard(existing);
-}
-
 // Auditor agent scope (read-only agent, parity with the remediator hardening):
 // enumerated audit-code commands stay managed allows/denies, but the bash
 // wildcard defaults to "ask" (an existing user wildcard survives — the
@@ -129,7 +114,7 @@ function mergeOpenCodeAgentPermissionConfig(existingPermission, generatedPermiss
       OPENCODE_AUDIT_EDIT_PERMISSION,
     ),
     bash: mergeOpenCodeAgentPermissionRule(
-      withoutManagedBroadBashWildcard(existingPermission.bash),
+      withoutManagedBroadBashWildcard(existingPermission.bash, sharedOpenCodePermissions),
       generatedPermission.bash,
       withoutOpenCodeWildcard(OPENCODE_AUDIT_BASH_PERMISSION),
     ),
@@ -194,7 +179,7 @@ function renderOpenCodePermissionConfig() {
   };
 }
 
-const opencodeCommandTemplateFile = join(pkgRoot, 'skills', 'audit-code', 'opencode-command-template.txt');
+const opencodeCommandTemplateFile = join(PKG_ROOT, 'skills', 'audit-code', 'opencode-command-template.txt');
 const OPENCODE_COMMAND_TEMPLATE = readFileSync(opencodeCommandTemplateFile, 'utf8').replace(/\r\n/g, '\n').trim();
 
 function mergeOpenCodeGlobalConfig(existing) {
@@ -211,7 +196,7 @@ function mergeOpenCodeGlobalConfig(existing) {
       // (a standalone next-step instruction rather than the prompt body).
       [TOOL]: planOpenCodeCommand(PLAN, OPENCODE_COMMAND_TEMPLATE),
     },
-    mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(pkgRoot, TOOL)),
+    mcp: mergeOpenCodeMcpServer(parsed.mcp, TOOL, mcpServerLaunch(PKG_ROOT, TOOL)),
     permission: mergeOpenCodeGlobalPermissionConfig(parsed.permission, auditPermission),
     agent: {
       ...(parsed.agent && typeof parsed.agent === 'object' && !Array.isArray(parsed.agent)
@@ -312,7 +297,7 @@ installMcpServerRegistrations(
   {
     toolName: TOOL,
     homeDir: homedir(),
-    launch: mcpServerLaunch(pkgRoot, TOOL),
+    launch: mcpServerLaunch(PKG_ROOT, TOOL),
     claudePluginDir: planClaudePluginDir(PLAN),
   },
   counts,

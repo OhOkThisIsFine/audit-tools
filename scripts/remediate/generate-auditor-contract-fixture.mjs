@@ -2,7 +2,6 @@
 // sites-pinned: tests/remediate/fixture-generator-drift-guard.test.ts
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   AUDIT_FINDINGS_CONTRACT_VERSION,
   FINDINGS_DRAW_COHERENCE_POLICY,
@@ -14,7 +13,7 @@ import {
 // so this fixture is that machine contract. The `model` below mirrors the shape
 // the auditor's buildAuditFindingsReport emits; serialising it keeps the fixture
 // in sync without requiring a built auditor-lambda.
-const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const repoRoot = dirname(dirname(import.meta.dirname));
 const committedFixturePath = join(
   repoRoot,
   "tests",

@@ -25,7 +25,6 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   ARTIFACT_REGISTRY_FILE,
@@ -38,7 +37,7 @@ import {
   readStringConstants,
 } from "./shared/generate-spec-mirrors.mjs";
 import { parseArgv, USAGE_EXIT } from "./shared/argvGuard.mjs";
-import { compareCodeUnits } from "./shared/primitives.mjs";
+import { compareCodeUnits, isScriptEntry } from "./shared/primitives.mjs";
 
 /**
  * Recognized prefixes: normalized prefix text -> { predicate (stated in a failure),
@@ -159,7 +158,4 @@ function main() {
   console.log(`check-spec-artifact-prefixes: ${rows.length} prefixed row(s) in ${ARTIFACT_CONTRACT_DOC} — each file has its prefix's lifecycle.`);
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

@@ -4,7 +4,7 @@
 //
 // The committed schemas under `schemas/` are GENERATED artifacts; edit the zod
 // sources in src/audit/contracts/workerSchemas.ts (or the base contracts they
-// derive from) and rerun this. tests/audit/worker-schema-generation.test.mjs
+// derive from) and rerun this. tests/audit/worker-schema-generation.test.ts
 // fails if the committed files ever drift from what this script would write.
 
 import { writeFile } from "node:fs/promises";

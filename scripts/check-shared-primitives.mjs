@@ -45,7 +45,7 @@
 // body runs only on direct invocation.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isScriptEntry } from './shared/primitives.mjs';
 
 /**
  * The tracked trees this gate scans, as `git ls-files` pathspecs.
@@ -390,7 +390,4 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

@@ -39,7 +39,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | landed |
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | landed |
 | P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | landed |
-| P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | open |
+| P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | landed |
 | P12 wrapper, hooks, entries, root config | `wrapper/**`, `.claude/hooks/**`, `.githooks/**`, `audit-code.mjs`, `remediate-code.mjs`, `eslint.config.js`, `vitest.config.ts`, `.dependency-cruiser.cjs` | 34 | 10,747 | 113 | open |
 
 ## Leads and skips
@@ -502,3 +502,50 @@ JSON files were not reviewed. The docs-and-backlog reviewer
 wrote its findings from notes taken before a context compaction, so the lap checked each of its
 items against the source again. The lap checked each applied item against source, and a second
 reviewer checked the applied diff.
+
+### From P11
+
+Four reviewers read every line of the 60 hand-written scripts outside the shared directory at
+`f1704b29` (17,210 lines). The partition table keeps the original counts. Three scripts had
+since been removed. The reviewers covered installation and release (15), code gates (13),
+backlog and document gates (18), and repository operations (14). The graph excludes scripts,
+so the reviews used source. A separate reviewer checked the applied diff and the test pins.
+
+- Eleven strict direct-entry checks use `isScriptEntry`. The conversion to a file URL and the
+  undefined-argument test stay the same. Eleven module-directory expressions use Node’s
+  `import.meta.dirname`, with the original path joins. The release script also dropped a
+  one-use directory binding.
+- The document and retirement gates share `excludedDocMatchers`. The memory gate shares
+  the line-suffix parser, runtime directory prefixes, and batched Git ignore check with the
+  other citation gates. Each backlog refusal has one formatter for its standalone and
+  consolidated callers. Both file-budget refusals build their largest-entry list the same way.
+- The postinstall scripts use one wildcard permission migration. The audit installer reads
+  its package-root binding directly. The remediation smokes reuse the final-gate import and
+  the existing npm command selector.
+- The P05 reach note now describes the scoped field checked by both executor rows. P11 also
+  removed an unreachable string fallback, an unused type comment and detached comments,
+  and corrected two test citations. The six generated schemas and the auditor-contract
+  fixture matched the bytes at the review base.
+- The nightly probe filter checks that exactly one probe form is present. P11 removed a
+  repeated condition on the same stored fields, a duplicate answer-CLI comment and obsolete
+  closeout comment text. The nightly inbox, ledger and answer commands still have readers.
+- The different entry checks and error conversions keep their contracts. The scripts-tree
+  unique-sort and map-helper leads remain in the design queue. The earlier TypeScript-only
+  leads stay with their owners. See the [deferred record](simplify-deferred-items-2026-11-16.md)
+  for the skipped changes and what each needs.
+
+**P12 leads.** Check the hook and wrapper entry predicates against the shared predicate one site
+at a time. The wrapper permission helpers compare with a literal allow value. Check that
+contract against the installer's injected value before sharing code. The philosophy hook and
+generator use the same prefix for the opening marker and the same complete closing marker.
+The wrapper spawn helpers and the next-step command text still have the P10 and P05 leads above.
+
+**Correctness leads (not checked).** A URL-special character in the checkout path may affect the
+raw-file-URL guard in the guard-reach path generator. Its normal npm command did run the check.
+The executor extraction table still holds a rule with no selecting site. The smoke scripts have
+leads for a missing built module, an unchecked npm initialization, a fixed pause bound, and
+repeated next-step checks on an already advanced root. The link gate has a broad filename
+suffix guard, the comment scanner walks the AST recursively, the routing gate exposes a raw
+JSON parse error, and importing the memory CLI can run its scan. The nightly answer command reads raw arguments for the
+settlement disposition, and the producer writes queue artifacts before the projection rewrites
+them. Both leads need separate verification.

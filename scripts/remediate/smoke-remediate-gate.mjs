@@ -32,10 +32,10 @@
 import "../shared/hermetic-state-dir.mjs";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { pathToFileURL } from "url";
 import { tmpdir } from "os";
 
-const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const pkgRoot = dirname(dirname(import.meta.dirname));
 const distGatePath = join(pkgRoot, "dist", "remediate", "steps", "finalGate.js");
 
 let passed = 0;
@@ -63,7 +63,7 @@ if (!readFileSync(distGatePath, "utf8")) {
   console.error(`  FAIL the built gate module is missing at ${distGatePath} — run npm run build first`);
   process.exit(1);
 }
-const { runToolOwnedFinalGate, toolOwnedFinalGateCommands } = await import(
+const { runToolOwnedFinalGate, toolOwnedFinalGateCommands, writeFinalGateRedRecord } = await import(
   pathToFileURL(distGatePath).href
 );
 
@@ -190,7 +190,6 @@ try {
   });
 
   // The red record the run pauses on must carry the same attribution.
-  const { writeFinalGateRedRecord } = await import(pathToFileURL(distGatePath).href);
   await check("the persisted red record carries the failing command and its output tail", async () => {
     const artifactsDir = join(fixtureRoot, "artifacts");
     mkdirSync(artifactsDir, { recursive: true });

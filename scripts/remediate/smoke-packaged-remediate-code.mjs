@@ -5,15 +5,15 @@ import { spawnSync } from "child_process";
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { tmpdir } from "os";
-import { fileURLToPath } from "url";
 import { resolveSmokeTarball } from "../shared/smoke-tarball.mjs";
+import { platformCommand } from "../shared/smoke-process.mjs";
 import { resolveSpawn } from "../shared/spawn-shell.mjs";
 
-const pkgRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const pkgRoot = dirname(dirname(import.meta.dirname));
 const packageVersion = JSON.parse(
   readFileSync(join(pkgRoot, "package.json"), "utf8"),
 ).version;
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npm = platformCommand("npm");
 
 function spawnNpm(args, options) {
   const resolved = resolveSpawn(npm, args);

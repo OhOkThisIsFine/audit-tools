@@ -37,7 +37,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isScriptEntry } from "./shared/primitives.mjs";
 import { REVIEW_ROUTING_ROWS } from "./review-routing-data.mjs";
 import { guardArgv } from "./shared/argvGuard.mjs";
 
@@ -265,10 +265,8 @@ function main(args) {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) {
+// sites-pinned: tests/shared/review-routing-gate.test.ts
+if (isScriptEntry(import.meta.url, process.argv)) {
   const args = guardArgv(process.argv.slice(2), {
     name: "check-review-routing",
     usage: "node scripts/check-review-routing.mjs [root] [--update-baseline]",

@@ -43,7 +43,7 @@ const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const STATE_DIR = join(root, '.claude', 'hooks', '.state', 'closeout-render');
 const SILENT = 'none';
 
-// WHICH SESSSION IS THIS. `CLAUDE_SESSION_ID` was the name this read, and
+// WHICH SESSION IS THIS. `CLAUDE_SESSION_ID` was the name this read, and
 // nothing in this harness sets it — so `record.session_id` was always null and
 // the Stop gate was left comparing TIMESTAMPS, which cannot tell this session's
 // render from a concurrent session's render written after this one started.
@@ -352,7 +352,7 @@ if (notReady.length > 0) {
 // value the author types at the end is a second copy of it. That is the same
 // defect class as any hand-written state: it drifts, and nothing compares it.
 //
-// The record is read for THIS session (`CLAUDE_SESSION_ID`), and the range is
+// The record is read for this script's resolved session ID, and the range is
 // still computed against the LIVE HEAD — so a record left over from an earlier
 // session yields a wrong RANGE, never a wrong list: whatever `git log` prints
 // is genuinely in that range.

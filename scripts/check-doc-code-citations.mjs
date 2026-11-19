@@ -70,10 +70,9 @@
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { isScriptEntry } from "./shared/primitives.mjs";
 
-import { DOC_MANIFEST } from "./doc-manifest-data.mjs";
-import { globToRegExp, isGlob } from "./check-doc-manifest.mjs";
+import { excludedDocMatchers } from "./check-doc-manifest.mjs";
 import { RUNTIME_ARTIFACT_NAMES } from "./shared/runtime-artifact-names.generated.mjs";
 import {
   CODE_EXTENSIONS,
@@ -96,17 +95,6 @@ import {
 const root = resolve(process.argv[2] ?? process.cwd());
 
 const EXEMPT_MARKER = /<!--\s*doc-citation-exempt:.*?-->/;
-
-/** Paths the doc-manifest `excluded` row names (exact or pattern). */
-function excludedMatchers() {
-  const row = DOC_MANIFEST.find((r) => r.type === "excluded");
-  if (!row) return [];
-  return row.files.map(([pattern]) =>
-    isGlob(pattern)
-      ? globToRegExp(pattern)
-      : new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
-  );
-}
 
 /**
  * A line anchor into SOURCE is refused; into anything else it is allowed.
@@ -143,7 +131,7 @@ function main() {
   const { examined, universe } = trackedFiles(root);
   const index = buildPathIndex({ examined, universe });
   const runtimeNames = new Set(RUNTIME_ARTIFACT_NAMES);
-  const excluded = excludedMatchers();
+  const excluded = excludedDocMatchers();
   // WHICH DOCS ARE READ is a decision about the citations the gate examines, so
   // it reads `examined` — an untracked doc may be CITED (it joins the resolution
   // universe as a target) but must never add citations of its own to the
@@ -323,7 +311,4 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

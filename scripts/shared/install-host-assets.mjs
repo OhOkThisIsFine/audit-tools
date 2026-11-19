@@ -431,3 +431,12 @@ export function finishPostinstall(toolName, counts, startTime) {
     process.exitCode = 1;
   }
 }
+
+// sites-pinned: tests/shared/postinstall-agent-bash-wildcard.test.ts
+/** An earlier install set the bash wildcard to allow. Preserve every other value. */
+export function withoutManagedBroadBashWildcard(rule, sharedOpenCodePermissions) {
+  const { withoutOpenCodeWildcard, OPENCODE_MANAGED_BROAD_VALUE } = sharedOpenCodePermissions;
+  const existing = objectValue(rule);
+  if (existing["*"] !== OPENCODE_MANAGED_BROAD_VALUE) return rule;
+  return withoutOpenCodeWildcard(existing);
+}

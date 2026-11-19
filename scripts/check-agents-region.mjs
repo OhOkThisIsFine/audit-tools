@@ -6,14 +6,15 @@
 // semantics, machine-global sync behavior or generated host command blocks.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isScriptEntry } from "./shared/primitives.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const CANONICAL_LINK = /^(?:>\s*)?(?:\*\*)?(?:Start with|Read)\s+\[[^\]\r\n]+\]\((?:\.\/)?CLAUDE\.md\)/u;
 
 /** @param {{ agentsText: string, claudeText: string | undefined }} input */
 export function validateAgentsRegion({ agentsText, claudeText }) {
-  const opening = agentsText.trimStart().split(/\r?\n/u, 1)[0] ?? "";
+  const opening = agentsText.trimStart().split(/\r?\n/u, 1)[0];
   if (!CANONICAL_LINK.test(opening)) {
     return {
       ok: false,
@@ -43,4 +44,4 @@ function main() {
   process.stdout.write("✓ agents-region: AGENTS.md points at the live canonical CLAUDE.md\n");
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

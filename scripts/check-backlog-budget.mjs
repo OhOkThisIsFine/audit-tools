@@ -59,12 +59,12 @@
 //                                                            # …and accept a HIGHER ceiling
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { splitBacklogEntries } from "./shared/backlog-entry-grammar.mjs";
 import { compareCodeUnits } from './shared/primitives.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(import.meta.dirname, "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
 const baselinePath = join(backlogDir, ".size-baseline.json");
 
@@ -358,21 +358,14 @@ export function evaluateBacklog(files, baseline) {
       // nothing.
       const allowed = baseline.fileCeilings[file];
       nextBaseline.file_ceilings[file] = fileBytes;
-      if (allowed === undefined) {
+      if (allowed === undefined || fileBytes > allowed) {
+        const reason = allowed === undefined
+          ? `docs/backlog/${file} is ${fileBytes} bytes (budget ${FILE_BUDGET_BYTES}) — ` +
+            `no longer one bounded read. Condense its largest entries, or split the section.`
+          : `docs/backlog/${file} GREW from ${allowed} to ${fileBytes} bytes ` +
+            `(budget ${FILE_BUDGET_BYTES}) — an over-budget file may only shrink.`;
         violations.push(
-          `docs/backlog/${file} is ${fileBytes} bytes (budget ${FILE_BUDGET_BYTES}) — ` +
-            `no longer one bounded read. Condense its largest entries, or split the section.` +
-            sinceHead +
-            `\n      Largest entries in this file:\n` +
-            largestEntries(entries)
-              .map((e) => `        ${e.bytes} bytes  :${e.line}  ${e.title}`)
-              .join("\n"),
-        );
-      } else if (fileBytes > allowed) {
-        violations.push(
-          `docs/backlog/${file} GREW from ${allowed} to ${fileBytes} bytes ` +
-            `(budget ${FILE_BUDGET_BYTES}) — an over-budget file may only shrink.` +
-            sinceHead +
+          reason + sinceHead +
             `\n      Largest entries in this file:\n` +
             largestEntries(entries)
               .map((e) => `        ${e.bytes} bytes  :${e.line}  ${e.title}`)

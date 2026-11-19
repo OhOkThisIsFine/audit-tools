@@ -26,8 +26,7 @@ import {
   pollFailureBackoffMs,
 } from "./shared/landThroughPullRequest.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..");
+const repoRoot = resolve(import.meta.dirname, "..");
 const packageJsonPath = resolve(repoRoot, "package.json");
 const allowedBumps = new Set(["patch", "minor", "major"]);
 const bump = process.argv[2] ?? "patch";
@@ -399,8 +398,6 @@ export function classifyCiInFlight(rawRuns, { headSha } = {}) {
   };
 }
 
-// How long the pre-tag gate will wait for in-flight runs on HEAD before it
-// refuses. Injectable so tests never sit out a real 30-minute wait.
 /** @param {string} repoSlug @param {string} headSha */
 function fetchRunsForSha(repoSlug, headSha) {
   try {

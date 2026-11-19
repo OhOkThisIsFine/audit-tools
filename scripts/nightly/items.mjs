@@ -539,8 +539,7 @@ export function evaluateProbes(root, item, options = {}) {
       p &&
       wellFormedString(p.file) &&
       // Exactly one of the two forms: positive `contains` or negative `absent`.
-      (wellFormedString(p.contains) !== wellFormedString(p.absent)) &&
-      (wellFormedString(p.contains) || wellFormedString(p.absent)),
+      (wellFormedString(p.contains) !== wellFormedString(p.absent)),
   );
   // One malformed sibling must not be silently dropped. Otherwise the valid
   // subset can all resolve and close the item even though an omitted probe may

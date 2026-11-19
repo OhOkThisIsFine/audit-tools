@@ -27,6 +27,7 @@
 // test helpers.
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * Code-unit lexical comparator — the ONE ordering primitive for every sort
@@ -106,4 +107,14 @@ export function processAlive(pid) {
   } catch (err) {
     return /** @type {any} */ (err).code === "EPERM";
   }
+}
+
+// sites-pinned: tests/shared/doc-code-citations-gate.test.ts, tests/shared/review-routing-gate.test.ts
+/**
+ * Match a module URL against the script path supplied by Node.
+ * @param {string} moduleUrl
+ * @param {readonly string[]} argv
+ */
+export function isScriptEntry(moduleUrl, argv) {
+  return argv[1] !== undefined && moduleUrl === pathToFileURL(argv[1]).href;
 }

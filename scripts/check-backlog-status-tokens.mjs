@@ -45,10 +45,10 @@
 //
 //   node scripts/check-backlog-status-tokens.mjs
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(import.meta.dirname, "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
 
 /** Status words refused in LABEL position. Deliberately short — every addition is false-RED surface. */
@@ -126,6 +126,10 @@ export function findStatusMarkers(text, lines = text.split(/\r?\n/)) {
   return found;
 }
 
+export function formatStatusMarkerViolation(file, hit) {
+  return `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind}\n      ${hit.snippet}`;
+}
+
 function main() {
   const files = readdirSync(backlogDir)
     .filter((f) => f.endsWith(".md"))
@@ -134,9 +138,7 @@ function main() {
   const violations = [];
   for (const file of files) {
     for (const hit of findStatusMarkers(readFileSync(join(backlogDir, file), "utf8"))) {
-      violations.push(
-        `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind}\n      ${hit.snippet}`,
-      );
+      violations.push(formatStatusMarkerViolation(file, hit));
     }
   }
 

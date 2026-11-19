@@ -41,13 +41,13 @@
 // body runs only on direct invocation.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+import { isScriptEntry } from './shared/primitives.mjs';
 import { isGlob, globToRegExp } from './check-doc-manifest.mjs';
 import { GUARDS, REACH, guardReach } from './guard-reach-data.mjs';
 import { catalogGates, verifyChecksSteps } from './shared/verify-steps.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(import.meta.dirname, '..');
 const DATA_FILE = 'scripts/guard-reach-data.mjs';
 
 // win32: forward-slash everything before any comparison — `git ls-files` emits
@@ -474,7 +474,4 @@ function main() {
   );
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (invokedDirectly) main();
+if (isScriptEntry(import.meta.url, process.argv)) main();

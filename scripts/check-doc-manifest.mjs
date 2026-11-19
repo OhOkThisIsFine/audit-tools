@@ -32,7 +32,7 @@
 //   node scripts/check-doc-manifest.mjs --write    # regenerate the rendered table
 //
 // The reconciliation logic below is exported as a library (the contract test in
-// tests/shared/doc-manifest-gate.test.mjs drives it with synthetic manifests and
+// tests/shared/doc-manifest-gate.test.ts drives it with synthetic manifests and
 // file lists); the CLI body runs ONLY on direct invocation.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -295,3 +295,15 @@ const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) main();
+
+// sites-pinned: tests/shared/doc-code-citations-gate.test.ts, tests/shared/retired-infrastructure.test.ts
+/** Paths the doc-manifest `excluded` row names (exact or pattern). */
+export function excludedDocMatchers() {
+  const row = DOC_MANIFEST.find((r) => r.type === "excluded");
+  if (!row) return [];
+  return row.files.map(([pattern]) =>
+    isGlob(pattern)
+      ? globToRegExp(pattern)
+      : new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
+  );
+}

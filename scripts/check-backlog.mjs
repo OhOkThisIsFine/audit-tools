@@ -3,13 +3,13 @@
 // One corpus load and grammar, independent refusal policies. Standalone
 // diagnostic/baseline CLIs retain their existing APIs; release/commit use this draw.
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { guardArgv } from './shared/argvGuard.mjs';
 import { parseBacklogDocument, findEntryBoundaryDamage, renderEntryBoundaryDamage } from './shared/backlog-entry-grammar.mjs';
 import { evaluateBacklog, normalizeBaseline, headText } from './check-backlog-budget.mjs';
-import { findStatusMarkers } from './check-backlog-status-tokens.mjs';
-import { findLineNumberCitations } from './check-backlog-line-numbers.mjs';
+import { findStatusMarkers, formatStatusMarkerViolation } from './check-backlog-status-tokens.mjs';
+import { findLineNumberCitations, formatLineCitationViolation } from './check-backlog-line-numbers.mjs';
 
 /** Read each Markdown source exactly once; IO errors must propagate. */
 export function loadBacklogCorpus(root, readText = (path) => readFileSync(path, 'utf8')) {
@@ -32,13 +32,13 @@ export function evaluateBacklogCorpus(files, baseline, { writeTime = false } = {
       const damaged = findEntryBoundaryDamage(source.text, document.lines);
       if (damaged.length) diagnostics.push({ check: 'entry-boundary', message: renderEntryBoundaryDamage(damaged, `docs/backlog/${source.file}`) });
       for (const hit of findStatusMarkers(source.text, document.lines)) diagnostics.push({
-        check: 'status', message: `docs/backlog/${source.file}:${hit.line}:${hit.column} — ${hit.kind}\n      ${hit.snippet}`,
+        check: 'status', message: formatStatusMarkerViolation(source.file, hit),
       });
     }
   }
   for (const source of corpus) {
     for (const hit of findLineNumberCitations(source.text, source.document.lines)) diagnostics.push({
-      check: 'line-citation', message: `docs/backlog/${source.file}:${hit.line}:${hit.column} — ${hit.kind} \`${hit.span}\`\n      ${hit.source.trim().slice(0, 140)}`,
+      check: 'line-citation', message: formatLineCitationViolation(source.file, hit),
     });
   }
   return { diagnostics, files: files.length };
@@ -63,7 +63,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     name: 'check-backlog', usage: 'node scripts/check-backlog.mjs [--root <path>] [--write-time]',
     values: ['--root'], flags: ['--write-time'],
   });
-  const root = resolve(args.get('--root') ?? join(dirname(fileURLToPath(import.meta.url)), '..'));
+  const root = resolve(args.get('--root') ?? join(import.meta.dirname, '..'));
   try {
     const result = runBacklogCheck(root, { writeTime: args.has('--write-time') });
     if (args.has('--write-time')) console.log('[backlog:budget/property] deferred to commit; the baseline is unchanged');

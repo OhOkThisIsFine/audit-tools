@@ -8,8 +8,8 @@
 `main` carries simplify parts P01 (shared contracts, `49a42916`), P02 (shared infrastructure,
 `cec41197`), P03 (audit orchestrator core), P04 (audit orchestrator review and charter), P05
 (audit cli), P06 (audit extractors), P07 (the rest of `src/audit`), P08 (the remediate steps
-files), P09 (the rest of `src/remediate`) and P10 (`scripts/shared`) on top of release v0.55.20,
-plus the withheld
+files), P09 (the rest of `src/remediate`), P10 (`scripts/shared`), and P11 (the rest of
+`scripts`) on top of release v0.55.20, plus the withheld
 P01–P03 items the 2026-11-16 lap judged worth doing. The items it skipped stay in the
 [deferred record](reviews/simplify-deferred-items-2026-11-16.md). The owner chose to release the
 parts later, together, so the published package is v0.55.20.
@@ -34,8 +34,8 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-Next: the simplify sweep, parts P11–P12, one part per chat, landed one at a time. Each part reads
-its row and *Leads and skips* in the
+P12 is the last part of the simplify sweep. It covers the wrappers, hooks and top-level files.
+Start with its row and *Leads and skips* in the
 [partition record](reviews/simplify-partition-2026-11-15.md) first.
 Also open: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
 [qualification record](reviews/audit-refactor-qualification-2026-10-14.md) for scope and remaining gates.

@@ -20,6 +20,25 @@ the work that would make it a plain cleanup.
 
 ## 1. Blocked by a test or a test pin (a test change unblocks it)
 
+- **P11.** The document-manifest and loader-fragment tests import their checkers and exercise
+  their library functions. Add a test that runs each real CLI before replacing its entry check.
+- **P11.** The remaining module-directory expressions sit above the first declaration or in an
+  unpinned file. The affected scripts are the audit schema generator, two linked smoke scripts,
+  the packaged audit smoke script, and the doc-manifest, loader-fragments, loop-core-closure and
+  pin-obligations gates. To change them, exercise each script’s default root from another
+  working directory and bind the tested site. The closure CLI also reads `declaredReasons` twice
+  only on failure.
+- **P11.** The release contract checks the audit smoke’s npm environment and the release command
+  spelling. Preserve those checks until the tests cover equivalent behavior. The host
+  verification CLIs, linked remediation smoke and language generator need direct tests before
+  their common code can move. Add pins only for code the named test runs.
+- **P11.** The two README block writers have different marker, rendering and error contracts.
+  Add direct tests for both bodies before extracting a block writer. Moving the link grammar
+  into the test recognizer also needs a consumer test that covers both patterns.
+- **P11.** The version scanner exports its position classifier. Its missing-source fallback can
+  serve callers outside the scanner. Pin those inputs before changing the default. The release
+  contract pins the polling log constant, function and import.
+
 - **P01 — `persistAnalyzerConsent`.** Blocker: the shared fixture creators of ten test files call
   it. **Unblock:** move those fixtures to the production write path first; then the function can
   be simplified or removed.
@@ -121,6 +140,23 @@ the work that would make it a plain cleanup.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
+- **P11.** Keep the current entry spellings for truthy, path-equality and filename-suffix
+  guards. They have different empty-argument and URL behavior. Unblock with a contract for
+  unusual arguments, encoded characters and Windows paths.
+- **P11.** `validateGeneratedRegistry` accepts verification commands without the legacy marker.
+  `verifyChecksSteps` throws for them. A common parser would need to preserve each caller's
+  diagnostics. `reconcileMarkerFields` selects the first contract with the given type even when
+  a supplied registry contains duplicates. Removing the lookup changes which properties are
+  checked. Unblock with a contract for duplicate types.
+- **P11.** The argument-guard ratchet lists scripts that still accept their own arguments.
+  Migrating them, or replacing the spec gate’s custom usage, changes refusals. Specify
+  command-line errors first. The smoke assertion throws an ordinary Error. Native strict
+  assertions throw a different class.
+- **P11.** The installer supports older built modules that lack visibility or permission
+  helpers. Specify the supported build range before removing these fallbacks. Keep the npm
+  environment, spawn options, and audit and remediation host output separate while their
+  policies differ.
+
 Each of these changes an error, a throw order, a lock, a spawn order or an output value. Each is a
 real change, not a cleanup.
 
@@ -204,6 +240,16 @@ real change, not a cleanup.
   that change for the vanished-entry case, or keep the `stat` only on the `onMissing` path.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
+
+- **P11.** A prebuild error-text or path-formatting primitive needs an explicit home in the
+  single-definition rules. Keep the non-Error handling of each existing message site. A
+  scripts-tree unique-sort helper and a generic map initializer already have design entries.
+- **P11.** The separate backlog readers return different fields. Moving one into the
+  consolidated checker creates an import cycle. Choose a shared owner if both policies later
+  need the same input.
+- **P11.** The nightly answer queue still has live readers. Retiring the producer’s write and
+  index APIs needs an owner decision on persisted files and tests. A private helper still serves
+  the producer. Review them together.
 
 - **P03 — a PRIORITY-keyed derivation table for `deriveAuditState`** in
   `src/audit/orchestrator/state.ts`. About twelve rows have the same
@@ -337,6 +383,15 @@ real change, not a cleanup.
 
 ## 4. Efficiency items with no measured cost
 
+- **P11.** Measure the schema-file reads in `reconcileContractSites`, repeated alias and reach
+  projections in `reconcile`, per-line set and expression creation in `findRetiredMentions`, and
+  source splitting and pattern creation in the site-pin reader before caching them.
+- **P11.** Measure repeated parses in the backlog baseline’s vanished-key scan and release-run
+  pagination during polling before caching either.
+- **P11.** Measure partitioning the answer queue for commands that never consume the result, the
+  repeated memory-gate tracked-file scan, and the two fetches in the landing protocol. Moving
+  them can change failure or spawn order.
+
 No part measured these costs. Each item needs a measurement that shows the cost before it is
 worth a change.
 
@@ -402,6 +457,18 @@ worth a change.
   `generate-vitest-shard-baseline.mjs` (no declaration).
 
 ## 5. Low value (do it only when you are already in the file)
+
+- **P11.** The loop-core attestation checker and baseline seeder both run Git, but only the
+  seeder passes a working directory. Revisit the two adapters when a reviewed loop-core change
+  needs them.
+- **P11.** The release timing fallback, local initializers and timer wrapper, the
+  command-template trim, the language-priority switch and indentation, and the smoke fixture
+  tables are small local choices. Revisit them with the policy that uses them.
+- **P11.** The citation exemption checks have separate markers. The backlog sort spellings give
+  the same string order. Revisit these only when a caller needs a common operation.
+- **P11.** The closeout renderer uses the same bullet prefix at two sites. The Git adapters and
+  the two derived-file preflight reports differ in output, error handling or options. Revisit
+  these when a consumer needs the same contract.
 
 - **P03 — `hasPackageJsonEslintConfig`** in `syntaxResolutionExecutor.ts` could call
   `readPackageJson` from `intakeExecutors.ts`. That needs `readPackageJson` exported and an
@@ -478,6 +545,13 @@ worth a change.
   and `pruned` (their guards differ; each needs the attestation).
 
 ## 6. Rejected — do not re-propose
+
+- **P11.** Keep the registry’s path projection and the release script’s nested test-pin
+  declarations. The executable gate reads the paths and each pin scopes the code that follows.
+  The single-line status scanner and whole-document link scanner mask different text. Keep the
+  active friction triage in the audit smoke. It exercises the current report workflow.
+- **P11.** Keep the manual profiler’s narrowing error, and the live nightly answer, inbox and
+  proposal checks. The proposal archive and decision ledger still have consumers.
 
 Each of these was checked and is NOT behavior-neutral, or is correct as it stands.
 

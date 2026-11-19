@@ -45,10 +45,10 @@
 //
 //   node scripts/check-backlog-line-numbers.mjs
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = join(import.meta.dirname, "..");
 const backlogDir = join(repoRoot, "docs", "backlog");
 
 /** A line suffix at the end of a token: `:123`, `:48-55`, `:21:7`, `:12:1-14:3`. */
@@ -108,6 +108,11 @@ export function findLineNumberCitations(text, lines = text.split(/\r?\n/)) {
   return found;
 }
 
+export function formatLineCitationViolation(file, hit) {
+  return `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind} \`${hit.span}\`\n` +
+    `      ${hit.source.trim().slice(0, 140)}`;
+}
+
 function main() {
   const files = readdirSync(backlogDir)
     .filter((f) => f.endsWith(".md"))
@@ -116,10 +121,7 @@ function main() {
   const violations = [];
   for (const file of files) {
     for (const hit of findLineNumberCitations(readFileSync(join(backlogDir, file), "utf8"))) {
-      violations.push(
-        `docs/backlog/${file}:${hit.line}:${hit.column} — ${hit.kind} \`${hit.span}\`\n` +
-          `      ${hit.source.trim().slice(0, 140)}`,
-      );
+      violations.push(formatLineCitationViolation(file, hit));
     }
   }
 

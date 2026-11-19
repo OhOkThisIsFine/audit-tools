@@ -1949,9 +1949,8 @@ export const REACH = [
       'SOME-of-the-set relocation into a helper the site does not name is invisible to it, and the ' +
       'declared-⊇-extracted direction then passes vacuously for the moved artifact (the declared side is ' +
       'still caught by DECL-4). A renamed scope, and a relocation that empties the scope, both refuse loudly. ' +
-      'Separately, design_review_contract and design_review_conceptual share ONE whole-file artifactsDirWrites ' +
-      'rule over src/audit/cli/nextStepHelpers.ts, so the two cannot be told apart: a CLI-site write added there ' +
-      'for only one of them forces BOTH to declare it and the render credits an executor that never writes it. ' +
+      'The design_review_contract and design_review_conceptual rows both check the design_assessment field ' +
+      'inside handleDesignReviewBranch. A field write in either pass satisfies both rows. ' +
       'A `no-writes` site is checked in the writes-appeared direction only when it names a file+scope: ' +
       'intent_equivalence_executor does, semantic_review_executor CANNOT (no deterministic runner exists — the ' +
       'host returns results through the submission ledger), so if that executor ever started writing an artifact ' +
