@@ -14,6 +14,22 @@ import type { ProjectTestAdmissionOutcome } from "audit-tools/shared";
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 
 /**
+ * The failure text of an admitted project command: the tail of its spawn error
+ * or output, or a fixed note when it printed nothing. The landing-gate leg and
+ * the close phase's test and e2e legs share it.
+ */
+export function admittedFailureOutput(
+  outcome: ProjectTestAdmissionOutcome,
+  label: string,
+  timeoutMs: number,
+): string {
+  return (
+    (outcome.spawn_error ?? outcome.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
+    (outcome.timed_out ? `${label} timed out after ${timeoutMs}ms` : `${label} failed without output`)
+  );
+}
+
+/**
  * THE LANDING-GATE CLOSE LEG.
  *
  * The per-item required tests are the block's own `targeted_commands`, which are
@@ -118,12 +134,7 @@ export async function verifyLandingGates(params: {
       command,
       refuses: landingGateRefusal(command),
       passed,
-      output: passed
-        ? ""
-        : (outcome.spawn_error ?? outcome.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
-          (outcome.timed_out
-            ? `landing gate timed out after ${timeoutMs}ms`
-            : "landing gate failed without output"),
+      output: passed ? "" : admittedFailureOutput(outcome, "landing gate", timeoutMs),
       ...(outcome.admitted ? {} : { spawn_error: outcome.refusal_reason ?? "refused" }),
     });
   }

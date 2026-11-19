@@ -12,7 +12,7 @@ import { readContractReviewOutcomes } from "./closeReviewProvenance.js";
 //   the existing close behaviour around it is pinned by phase-close.
 import { RemediationState } from "../state/store.js";
 import { OrchestratorOptions } from "../types/options.js";
-import { dirname, extname, isAbsolute, join, relative } from "node:path";
+import { extname, isAbsolute, join, relative } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
 import {
   AGENT_FEEDBACK_FILENAME,
@@ -36,7 +36,15 @@ import {
   runAdmittedProjectE2eCommand,
   readSubmissionLedger,
   assertValidRemediationOutcomesReport,
+  archiveFrictionRecords,
+  normalizeRepoRelPath,
+  outputDirFor,
+  toPosixPath,
+  uniqueSorted,
+  REMEDIATION_OUTCOMES_FILENAME,
+  REMEDIATION_REPORT_FILENAME,
 } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 import type {
   AgentReflection,
   RemediationOutcome,
@@ -51,6 +59,7 @@ import { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "audit-tools/share
 import { FAILURE_OUTPUT_TAIL_CHARS } from "./constants.js";
 import { verifyAnalyzerLeads } from "./closeVerifyAnalyzerLeads.js";
 import {
+  admittedFailureOutput,
   verifyLandingGates,
   type LandingGateVerifyOutcome,
 } from "./closeVerifyLandingGates.js";
@@ -110,6 +119,14 @@ import { runCloseAcceptance, type CombinedTestResult } from "./closeAcceptance.j
 const OUTCOME_KEYS: RemediationOutcomeStatus[] = [
   ...RemediationOutcomeStatusSchema.options,
 ];
+
+/** Source and request outcomes that leave the run unfinished. */
+const UNFINISHED_OUTCOMES: ReadonlySet<string> = new Set(["blocked", "pending", "deferred"]);
+
+/** An item status that needs no more work: verified complete, or skipped. */
+function isSettledStatus(status: string): boolean {
+  return isVerifiedCompleteStatus(status) || isSkipStatus(status);
+}
 
 /**
  * Retry-oriented final status per outcome (see RemediationOutcomeFinalStatus).
@@ -209,11 +226,7 @@ export async function readRunRecoveryFacts(
   };
 }
 
-/**
- * Phase 7B — capture one outcome per finding (lens, affected file types, how it
- * landed, rework count, closing status). Surface only: the auditor does not
- * consume this automatically.
- */
+/** The reason a closing action of `none` committed nothing, or that an action failed; otherwise undefined. */
 function closingStatusReason(closingResult: ClosingResult): string | undefined {
   if (closingResult.status === "skipped" && closingResult.action === "none") {
     return "closing action is 'none' — no commit/push/publish configured";
@@ -338,6 +351,11 @@ function reportHeadEvidence(
   }
 }
 
+/**
+ * Phase 7B — capture one outcome per finding (lens, affected file types, how it
+ * landed, rework count, closing status). Surface only: the auditor does not
+ * consume this automatically.
+ */
 export function buildRemediationOutcomesReport(
   state: RemediationState,
   closingResult: ClosingResult,
@@ -363,7 +381,7 @@ export function buildRemediationOutcomesReport(
       rework_count: item?.rework_count ?? 0,
       ...(item?.host_landed_commit ? {landed_commit:item.host_landed_commit} : {}),
       ...(item?.host_landed_files ? {landed_files:[...item.host_landed_files]} : {}),
-      ...(item?.failure_reason ? { reason: item.failure_reason } : !item ? {reason:"No execution state was recorded for this reviewed unit."} : !isVerifiedCompleteStatus(item.status) && !isSkipStatus(item.status) ? {reason:`Execution unit remains ${item.status}.`} : {}),
+      ...(item?.failure_reason ? { reason: item.failure_reason } : !item ? {reason:"No execution state was recorded for this reviewed unit."} : !isSettledStatus(item.status) ? {reason:`Execution unit remains ${item.status}.`} : {}),
       ...(item?.conformance_review ? { conformance_review: AcceptedConformanceReviewSchema.parse(item.conformance_review) } : {}),
       ...(item?.started_at ? { started_at: item.started_at } : {}),
       ...(item?.completed_at ? { completed_at: item.completed_at } : {}),
@@ -374,7 +392,7 @@ export function buildRemediationOutcomesReport(
   if (state.plan?.request || requestDisposition) {
     const units = state.plan?.units ?? [];
     const items = units.map(unit => state.items?.[unit.id]);
-    const settled = items.length > 0 && items.every(item => item && (isVerifiedCompleteStatus(item.status) || isSkipStatus(item.status)));
+    const settled = items.length > 0 && items.every(item => item && isSettledStatus(item.status));
     const skipped = items.filter(item => item && isSkipStatus(item.status));
     const status = requestDisposition?.status ??
       (items.some(item => !item || isUnsuccessfulEndStatus(item.status)) ? "blocked" :
@@ -402,7 +420,7 @@ export function buildRemediationOutcomesReport(
     const linked = units.map(unit => state.items?.[unit.id]);
     const coverage = state.plan_coverage?.entries.find(entry => entry.finding_id === finding.id);
     const coverageDrop = coverage && DROP_REASON_BY_DISPOSITION[coverage.disposition];
-    const settledWithOwnerSkip = linked.length > 0 && linked.every(item => item && (isVerifiedCompleteStatus(item.status) || isSkipStatus(item.status))) && linked.some(item => item && isSkipStatus(item.status));
+    const settledWithOwnerSkip = linked.length > 0 && linked.every(item => item && isSettledStatus(item.status)) && linked.some(item => item && isSkipStatus(item.status));
     const unitOwnerDisposition = settledWithOwnerSkip ? {
       status:linked.every(item => item?.status === "deemed_inappropriate") ? "declined" as const : "ignored" as const,
       reason:linked.filter(item => item && isSkipStatus(item.status)).map(item => item!.failure_reason ?? "Owner declined this execution unit").join("; "),
@@ -491,13 +509,11 @@ export function buildRemediationOutcomesReport(
         }
       }
     }
-    const fileExts = [
-      ...new Set(
-        (finding?.affected_files ?? [])
-          .map((file) => extname(file.path).toLowerCase())
-          .filter((ext) => ext.length > 0),
-      ),
-    ].sort();
+    const fileExts = uniqueSorted(
+      (finding?.affected_files ?? [])
+        .map((file) => extname(file.path).toLowerCase())
+        .filter((ext) => ext.length > 0),
+    );
     const durationMs = durationBetweenMs(item.started_at, item.completed_at);
     const isSuccessfulOutcome =
       outcome === "resolved" ||
@@ -916,9 +932,9 @@ function resolveEditSurfaceManifest(state: RemediationState): string[] {
  * tool output rather than swept out by the blanket `.audit-tools/` exclude.
  */
 function toolDeliverablePaths(options: OrchestratorOptions): string[] {
-  const outputDir = dirname(options.artifactsDir);
-  return ["remediation-report.md", "remediation-outcomes.json"].map((name) =>
-    relative(options.root, join(outputDir, name)).replace(/\\/g, "/"),
+  const outputDir = outputDirFor(options.artifactsDir);
+  return [REMEDIATION_REPORT_FILENAME, REMEDIATION_OUTCOMES_FILENAME].map((name) =>
+    toPosixPath(relative(options.root, join(outputDir, name))),
   );
 }
 
@@ -1033,7 +1049,7 @@ export async function collectStagingFiles(
  * lowercased `normalizeRepoPath` remains the fold-fallback tier.
  */
 function repoPathExactKey(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  return normalizeRepoRelPath(path.trim());
 }
 
 /**
@@ -1304,9 +1320,7 @@ export async function runCombinedTestSuite(
   if (!state.plan?.test_command) {
     return { ran: false, passed: true, duration_ms: 0, output: "" };
   }
-  const suiteName = Array.isArray(state.plan.test_command)
-    ? state.plan.test_command.join(" ")
-    : state.plan.test_command;
+  const suiteName = state.plan.test_command;
 
   if (commandLeavesDeclaredShape(suiteName)) {
     return {
@@ -1333,12 +1347,7 @@ export async function runCombinedTestSuite(
       exit_code: admitted.exit_code,
       suite_name: suiteName,
       duration_ms: Date.now() - startedAt,
-      output: passed
-        ? ""
-        : (admitted.spawn_error ?? admitted.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
-          (admitted.timed_out
-            ? `default test command timed out after ${CLOSING_CHILD_DEADLINE_MS}ms`
-            : "default test command failed without output"),
+      output: passed ? "" : admittedFailureOutput(admitted, "default test command", CLOSING_CHILD_DEADLINE_MS),
     };
   }
   // argv, never a shell string: the shape gate admits only single invocations,
@@ -1353,12 +1362,15 @@ export async function runCombinedTestSuite(
   if (result.status === 0) {
     return { ran: true, passed: true, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output: "" };
   }
-  const output = (
-    (result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? "")
-  )
+  const output = combinedOutputTail(result);
+  return { ran: true, passed: false, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output };
+}
+
+/** The tail of a tracked run's stdout then stderr, cut to `FAILURE_OUTPUT_TAIL_CHARS`. */
+function combinedOutputTail(result: Awaited<ReturnType<typeof runTrackedAsync>>): string {
+  return ((result.stdout?.toString() ?? "") + (result.stderr?.toString() ?? ""))
     .trim()
     .slice(-FAILURE_OUTPUT_TAIL_CHARS);
-  return { ran: true, passed: false, exit_code: result.status, suite_name: suiteName, duration_ms: durationMs, output };
 }
 
 /**
@@ -1372,16 +1384,13 @@ function extractImplicatedPaths(testOutput: string): string[] {
   const pathPattern = /(?:FAIL\s+|at\s+\S+\s+\(|●\s+)?([^\s()]+\.[a-z]{1,6})(?::\d+)?/g;
   let match: RegExpExecArray | null;
   while ((match = pathPattern.exec(testOutput)) !== null) {
-    const candidate = match[1]!;
-    // Only keep plausible repo-relative paths (contain at least one slash or look like a file)
-    if (candidate.includes("/") || candidate.includes("\\") || /\.[a-z]{1,6}$/.test(candidate)) {
-      const normalized = safeAttributionPath(candidate);
-      if (
-        normalized &&
-        !normalizeRepoPath(normalized).startsWith("node_modules/")
-      ) {
-        paths.add(normalized);
-      }
+    // The capture always ends in `.<ext>`, so every candidate looks like a file.
+    const normalized = safeAttributionPath(match[1]!);
+    if (
+      normalized &&
+      !normalizeRepoPath(normalized).startsWith("node_modules/")
+    ) {
+      paths.add(normalized);
     }
   }
   return [...paths];
@@ -1394,10 +1403,7 @@ function extractImplicatedPaths(testOutput: string): string[] {
  * of being collapsed into a different block's declared scope.
  */
 function safeAttributionPath(path: string): string | null {
-  const normalized = path.trim().replace(/\\/g, "/");
-  const withoutLeadingDot = normalized.startsWith("./")
-    ? normalized.slice(2)
-    : normalized;
+  const withoutLeadingDot = normalizeRepoRelPath(path.trim());
   return withoutLeadingDot
     .split("/")
     .some((segment) => segment === "." || segment === "..")
@@ -1428,17 +1434,17 @@ function touchedPathMatchesImplicated(tf: string, ip: string): boolean {
 }
 
 /**
- * On a combined-test failure, selectively re-block items whose touched_files
+ * On a combined-test failure, selectively re-block items whose allowed files
  * overlap with the failing tests' implicated paths. When attribution is
  * ambiguous (no overlap found), falls back to re-blocking all resolved items.
  * Returns whether any item was blocked — the caller transitions back to triage.
  *
- * The surface is read from the item's BLOCK (`block.touched_files`), which is
- * REQUIRED on the block contract and is the same scope the host binds an
- * implementer to. It previously read a per-item `item_spec.touched_files`;
+ * The surface is read from the item's execution unit (`unit.allowed_files` on
+ * the plan), which is the same scope the host binds an implementer to. It
+ * previously read a per-item `item_spec.touched_files`;
  * nothing in production ever wrote an item_spec, so that expression was always
  * `[]`, attribution could never succeed, and the ambiguity fallback re-blocked
- * EVERY resolved item on any combined-suite failure. Reading the block is what
+ * EVERY resolved item on any combined-suite failure. Reading the unit is what
  * makes the attribution arm reachable at all.
  */
 export function blockResolvedItemsOnCombinedFailure(
@@ -1526,12 +1532,7 @@ async function runE2eTests(
     return {
       ran: true,
       passed,
-      output: passed
-        ? ""
-        : (admitted.spawn_error ?? admitted.output).trim().slice(-FAILURE_OUTPUT_TAIL_CHARS) ||
-          (admitted.timed_out
-            ? `default e2e command timed out after ${CLOSING_CHILD_DEADLINE_MS}ms`
-            : "default e2e command failed without output"),
+      output: passed ? "" : admittedFailureOutput(admitted, "default e2e command", CLOSING_CHILD_DEADLINE_MS),
     };
   }
   const e2eResult = await runTrackedAsync(
@@ -1544,17 +1545,17 @@ async function runE2eTests(
   );
   const e2ePassed = e2eResult.status === 0;
   if (!e2ePassed) {
-    const e2eOutput = (
-      (e2eResult.stdout?.toString() ?? "") +
-      (e2eResult.stderr?.toString() ?? "")
-    )
-      .trim()
-      .slice(-FAILURE_OUTPUT_TAIL_CHARS);
+    const e2eOutput = combinedOutputTail(e2eResult);
     console.warn("End-to-end tests failed after remediation. Transitioning to triage.");
     return { ran: true, passed: false, output: e2eOutput };
   }
   console.log("End-to-end tests passed.");
   return { ran: true, passed: true, output: "" };
+}
+
+/** The optional `verify_code_against_documentation` result file of one unit. */
+function verifyDocResultPath(artifactsDir: string, unitId: string): string {
+  return join(artifactsDir, `result_${unitId}_verify_code_against_documentation.json`);
 }
 
 interface ResolvedReportEntry {
@@ -1597,10 +1598,7 @@ function collectReportEntries(
       let verificationEvidence: string[] | undefined =
         item.host_result_evidence;
 
-      const verificationResultPath = join(
-        options.artifactsDir,
-        `result_${item.unit_id}_verify_code_against_documentation.json`,
-      );
+      const verificationResultPath = verifyDocResultPath(options.artifactsDir, item.unit_id);
       if (existsSync(verificationResultPath)) {
         try {
           const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
@@ -1645,6 +1643,15 @@ function collectReportEntries(
   return entries;
 }
 
+/** One resolved or verified-no-change line of the report, with its verification lines. */
+function renderResolvedEntry(entry: ResolvedReportEntry): string {
+  let text = `- **${entry.unit_id}**: ${entry.summary}\n`;
+  for (const check of entry.verification_evidence ?? []) {
+    text += `  - *Verification*: ${check}\n`;
+  }
+  return text;
+}
+
 /**
  * Render `remediation-report.md` from the partitioned entries, closing action,
  * e2e result, and per-finding outcomes. Pure string builder (no I/O).
@@ -1671,10 +1678,10 @@ export function buildRemediationReportMarkdown(
   const completedUnits = executionUnits.filter(unit => unit.status === "resolved" || unit.status === "resolved_no_change").length;
   const skippedUnits = executionUnits.filter(unit => unit.status === "ignored" || unit.status === "deemed_inappropriate").length;
   reportContent += `## Execution units\n\n${executionUnits.length} unit(s): ${completedUnits} verified complete, ${skippedUnits} skipped, ${executionUnits.length - completedUnits - skippedUnits} unfinished.\n\n`;
-  for (const unit of outcomesReport.execution_outcomes ?? []) {
+  for (const unit of executionUnits) {
     reportContent += `- **${unit.unit_id}** ${unit.title}: ${unit.status}${unit.reason ? ` — ${unit.reason}` : ""}\n`;
   }
-  if (!(outcomesReport.execution_outcomes ?? []).length) reportContent += "No execution units were required.\n";
+  if (!executionUnits.length) reportContent += "No execution units were required.\n";
   reportContent += "\n";
 
   // Host results are accepted only after the claimed commit is mechanically
@@ -1701,26 +1708,12 @@ export function buildRemediationReportMarkdown(
   if (entries.resolved.length === 0) {
     reportContent += `None.\n`;
   } else {
-    for (const entry of entries.resolved) {
-      reportContent += `- **${entry.unit_id}**: ${entry.summary}\n`;
-      if (entry.verification_evidence) {
-        for (const check of entry.verification_evidence) {
-          reportContent += `  - *Verification*: ${check}\n`;
-        }
-      }
-    }
+    for (const entry of entries.resolved) reportContent += renderResolvedEntry(entry);
   }
 
   if (entries.verifiedNoChange.length > 0) {
     reportContent += `\n## Verified Already Correct (no changes made)\n\n`;
-    for (const entry of entries.verifiedNoChange) {
-      reportContent += `- **${entry.unit_id}**: ${entry.summary}\n`;
-      if (entry.verification_evidence) {
-        for (const check of entry.verification_evidence) {
-          reportContent += `  - *Verification*: ${check}\n`;
-        }
-      }
-    }
+    for (const entry of entries.verifiedNoChange) reportContent += renderResolvedEntry(entry);
   }
 
   if (entries.inappropriate.length > 0) {
@@ -1737,7 +1730,8 @@ export function buildRemediationReportMarkdown(
     }
   }
 
-  const skippedByCheckpoint = (state.plan_coverage?.entries ?? []).filter(
+  const coverageEntries = state.plan_coverage?.entries ?? [];
+  const skippedByCheckpoint = coverageEntries.filter(
     (e) => e.disposition === "dropped_by_checkpoint",
   );
   if (skippedByCheckpoint.length > 0) {
@@ -1748,7 +1742,7 @@ export function buildRemediationReportMarkdown(
     }
   }
 
-  const droppedByGrounding = (state.plan_coverage?.entries ?? []).filter(
+  const droppedByGrounding = coverageEntries.filter(
     (e) => e.disposition === "dropped_phantom_paths",
   );
   if (droppedByGrounding.length > 0) {
@@ -1760,7 +1754,7 @@ export function buildRemediationReportMarkdown(
     }
   }
 
-  const ungroundedEvidence = (state.plan_coverage?.entries ?? []).filter(
+  const ungroundedEvidence = coverageEntries.filter(
     (e) => e.disposition === "planned" && e.evidence_grounded === false,
   );
   if (ungroundedEvidence.length > 0) {
@@ -1965,11 +1959,10 @@ export async function cleanupTempBranchesAndArtifacts(
     // a failed final-state persist means a restart resumes from the PRE-close
     // state and re-runs closing actions (re-commit/re-push) with no operator
     // clue why. Surface it on the console and in the structured run log.
-    // kind:"error" — see the matching note on the branch-cleanup catch above:
-    // this is a run-level diagnostic (the final-state persist itself failed),
-    // never a per-finding outcome, so it must not share the "outcome" kind
-    // the per-finding loop below emits.
-    const reason = error instanceof Error ? error.message : String(error);
+    // kind:"error": this is a run-level diagnostic (the final-state persist
+    // itself failed), never a per-finding outcome, so it does not use the
+    // "outcome" kind.
+    const reason = errorMessage(error);
     console.warn(
       `Failed to persist the final remediation state — a resumed run may re-execute closing actions: ${reason}`,
     );
@@ -2003,11 +1996,11 @@ export async function cleanupTempBranchesAndArtifacts(
   // classification (see closingActionCompleted): success, or the skipped
   // action=none no-op — never a skipped non-none close.
   const closingCompleted = closingActionCompleted(closingResult);
-  const unresolvedSources = sourceOutcomes.outcomes.some(outcome => ["blocked", "pending", "deferred"].includes(outcome.outcome));
-  const unresolvedRequest = sourceOutcomes.request_outcome && ["blocked", "pending", "deferred"].includes(sourceOutcomes.request_outcome.status);
+  const unresolvedSources = sourceOutcomes.outcomes.some(outcome => UNFINISHED_OUTCOMES.has(outcome.outcome));
+  const unresolvedRequest = sourceOutcomes.request_outcome && UNFINISHED_OUTCOMES.has(sourceOutcomes.request_outcome.status);
   const unresolvedUnits = (completeState.plan?.units ?? []).some(unit => {
     const item = completeState.items?.[unit.id];
-    return !item || (!isVerifiedCompleteStatus(item.status) && !isSkipStatus(item.status));
+    return !item || !isSettledStatus(item.status);
   });
   const fullyGreen =
     combinedTest.passed &&
@@ -2045,7 +2038,6 @@ export async function cleanupTempBranchesAndArtifacts(
   // non-green close already preserves it — so the answer is to KEEP the
   // directory and say why, not to abort a close that has already written its
   // report.
-  const { archiveFrictionRecords, outputDirFor } = await import("audit-tools/shared");
   let archiveFailure = "friction archive listing failed";
   try {
     await archiveFrictionRecords({
@@ -2056,7 +2048,7 @@ export async function cleanupTempBranchesAndArtifacts(
     archiveFailure = "conformance evidence archive failed";
     await archiveConformanceSubjects(options.artifactsDir, outputDirFor(options.artifactsDir));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     console.warn(
       "Close-out evidence could not be archived, so the artifacts " +
         "directory is kept rather than deleted: " +
@@ -2075,7 +2067,7 @@ export async function cleanupTempBranchesAndArtifacts(
     const { rm } = await import("node:fs/promises");
     await rm(options.artifactsDir, { recursive: true, force: true });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = errorMessage(error);
     console.warn(
       "Failed to clean up artifacts directory — manual removal may be needed.",
     );
@@ -2124,7 +2116,7 @@ export function buildVerificationReport(
       trace_id: `${unit.id}:command:${i}`, kind: "command", label: command,
       evidence: [...(item?.host_result_evidence ?? [])], status: passed ? "passed" : "failed",
     });
-    const verificationResultPath = join(options.artifactsDir, `result_${unit.id}_verify_code_against_documentation.json`);
+    const verificationResultPath = verifyDocResultPath(options.artifactsDir, unit.id);
     if (existsSync(verificationResultPath)) {
       try {
         const result = JSON.parse(readFileSync(verificationResultPath, "utf8"));
@@ -2150,9 +2142,9 @@ export function buildVerificationReport(
       ...(outcome.reason ? [{trace_id:`${outcome.finding_id}:source-disposition`,kind:"task" as const,label:outcome.outcome,evidence:[outcome.reason],status:"failed" as const}] : []),
     ],
     overall_status: outcome.outcome === "ignored" || outcome.outcome === "inappropriate" ? "skipped"
-      : ["blocked", "pending", "deferred"].includes(outcome.outcome) ? "failed" : "passed",
+      : UNFINISHED_OUTCOMES.has(outcome.outcome) ? "failed" : "passed",
   }));
-  const requestUnfinished = outcomeReport.request_outcome && ["blocked","pending","deferred"].includes(outcomeReport.request_outcome.status);
+  const requestUnfinished = outcomeReport.request_outcome && UNFINISHED_OUTCOMES.has(outcomeReport.request_outcome.status);
   const overallPassed = !requestUnfinished && combinedTest.passed && closingActionCompleted(closingResult) &&
     units.every(unit => unit.overall_status !== "failed") && findings.every(finding => finding.overall_status !== "failed");
   return {
@@ -2202,9 +2194,9 @@ export async function runClosePhase(
   // runLogger is actually wired, so it changes nothing for a caller that
   // doesn't ask for it.
   {
-    const findingIds = new Set((state.plan.units ?? []).map((unit) => unit.id));
+    const unitIds = new Set((state.plan.units ?? []).map((unit) => unit.id));
     const itemIds = new Set(Object.keys(state.items));
-    const uncounted = [...findingIds].filter((id) => !itemIds.has(id));
+    const uncounted = [...unitIds].filter((id) => !itemIds.has(id));
     if (uncounted.length > 0) {
       runLogger?.event({
         phase: "close",
@@ -2408,7 +2400,7 @@ export async function runClosePhase(
     closingResult,
   );
 
-  // 4. Generate remediation-report.md and remediation-report.json
+  // 5. Generate remediation-report.md and remediation-outcomes.json
   const entries = collectReportEntries(state, options);
 
   // Phase 7B: capture per-finding outcomes (surface only), carrying the run's
@@ -2526,16 +2518,16 @@ export async function runClosePhase(
   // written for a consumer to find much later.
   assertValidRemediationOutcomesReport(outcomesFile);
 
-  const outputDir = dirname(options.artifactsDir);
+  const outputDir = outputDirFor(options.artifactsDir);
 
-  // 5. Write verification_report.json for the contract pipeline closing phase.
+  // 6. Write verification_report.json for the contract pipeline closing phase.
   const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest);
   const verificationReportPath = join(outputDir, "verification_report.json");
   const completeState: RemediationState = { ...state, status: "complete" };
 
   await Promise.all([
-    writeTextFile(join(outputDir, "remediation-report.md"), reportContent),
-    writeJsonFile(join(outputDir, "remediation-outcomes.json"), outcomesFile),
+    writeTextFile(join(outputDir, REMEDIATION_REPORT_FILENAME), reportContent),
+    writeJsonFile(join(outputDir, REMEDIATION_OUTCOMES_FILENAME), outcomesFile),
     writeJsonFile(verificationReportPath, verificationReport),
     writeJsonFile(join(outputDir, "remediation-state.complete.json"), completeState),
   ]);
@@ -2562,7 +2554,7 @@ export async function runClosePhase(
   });
   console.log("Remediation report generated.");
 
-  // 6. Clean up temporary branches and artifact directory (only when fully green).
+  // 7. Persist the final state, then delete the artifacts directory (only when fully green).
   await cleanupTempBranchesAndArtifacts(
     options,
     completeState,

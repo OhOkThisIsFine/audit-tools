@@ -9,6 +9,14 @@ import {
   pushValidationIssue,
   requireKeys,
 } from "audit-tools/shared";
+import type { ZodIssue } from "zod";
+
+/** One schema issue as a validation error under `path`. */
+function schemaIssue(path: string, issue: ZodIssue): ValidationIssue {
+  return { path: `${path}.${issue.path.join(".")}`, message: issue.message, severity: "error" };
+}
+
+const VALID_TRIAGE_ACTIONS: ReadonlySet<string> = new Set(["retry", "ignore", "halt"]);
 
 export function validateFinding(
   value: unknown,
@@ -75,14 +83,14 @@ export function validateFinding(
 
 export function validateExecutionUnit(value: unknown, path = "unit"): ValidationIssue[] {
   const result = ExecutionUnitSchema.safeParse(value);
-  return result.success ? [] : result.error.issues.map(issue => ({ path: `${path}.${issue.path.join(".")}`, message: issue.message, severity: "error" as const }));
+  return result.success ? [] : result.error.issues.map(issue => schemaIssue(path, issue));
 }
 
 export function validateRemediationPlan(value: unknown, path = "remediation_plan"): ValidationIssue[] {
   const result = RemediationPlanSchema.safeParse(value);
   return result.success
     ? executionPlanReferenceIssues(result.data, result.data.findings.map(finding => finding.id)).map(message => ({ path, message, severity: "error" as const }))
-    : result.error.issues.map(issue => ({ path: `${path}.${issue.path.join(".")}`, message: issue.message, severity: "error" as const }));
+    : result.error.issues.map(issue => schemaIssue(path, issue));
 }
 
 export function validateTriageResolution(
@@ -94,7 +102,6 @@ export function validateTriageResolution(
   issues.push(...requireKeys(value, path, ["items"]));
   if (!isRecord(value)) return issues;
 
-  const validActions = new Set(["retry", "ignore", "halt"]);
   if (!Array.isArray(value.items)) {
     pushValidationIssue(issues, `${path}.items`, "Expected an array.");
   } else {
@@ -124,11 +131,11 @@ export function validateTriageResolution(
             `Valid ids: ${[...knownUnitIds].join(", ")}.`,
         );
       }
-      if (typeof item.action !== "string" || !validActions.has(item.action)) {
+      if (typeof item.action !== "string" || !VALID_TRIAGE_ACTIONS.has(item.action)) {
         pushValidationIssue(
           issues,
           `${path}.items[${i}].action`,
-          `Expected one of ${[...validActions].join(", ")}.`,
+          `Expected one of ${[...VALID_TRIAGE_ACTIONS].join(", ")}.`,
         );
       }
     }

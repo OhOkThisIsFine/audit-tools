@@ -181,11 +181,6 @@ export function classifyChangeKind(finding: Finding): ChangeKindClassification {
   };
 }
 
-/**
- * Whether a single finding is auto-approvable in autonomous mode: tier "safe"
- * AND a positively-allowlisted change-kind. Both are necessary; the
- * change-kind allowlist is the hard, fail-closed non-destructiveness gate.
- */
 export interface AutonomousFindingVerdict {
   finding_id: string;
   approved: boolean;
@@ -194,6 +189,11 @@ export interface AutonomousFindingVerdict {
   reason: string;
 }
 
+/**
+ * Whether a single finding is auto-approvable in autonomous mode: tier "safe"
+ * AND a positively-allowlisted change-kind. Both are necessary; the
+ * change-kind allowlist is the hard, fail-closed non-destructiveness gate.
+ */
 export function evaluateAutonomousFinding(finding: Finding): AutonomousFindingVerdict {
   const tier = classifyFindingRisk(finding).tier;
   const kind = classifyChangeKind(finding);

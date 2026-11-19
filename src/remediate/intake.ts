@@ -3,13 +3,16 @@ import { FindingSelectionSchema } from "./intakeSelection.js";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { writeJsonFile, writeTextFile, type ProjectFacts } from "audit-tools/shared";
 import {
+  writeJsonFile,
+  writeTextFile,
+  type ProjectFacts,
   IntentFiltersSchema,
   readOptionalJsonFile,
   readOptionalTextFile,
   isRecord,
 } from "audit-tools/shared";
+import { errorMessage } from "../shared/io/json.js";
 
 export const INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION =
   "remediate-code-intake-source-manifest/v1alpha1" as const;
@@ -55,6 +58,11 @@ const IntakeSourceManifestSchema = z
   .strict();
 export type IntakeSourceManifest = z.infer<typeof IntakeSourceManifestSchema>;
 
+/** The dotted path of a zod issue, or `(root)` for the whole value. */
+function zodIssuePath(issue: z.ZodIssue): string {
+  return issue.path.length > 0 ? issue.path.join(".") : "(root)";
+}
+
 /**
  * Read `intake/source-manifest.json`: undefined when absent, the manifest when
  * it matches {@link IntakeSourceManifestSchema}, and a THROW naming each bad
@@ -71,7 +79,7 @@ export async function readSourceManifest(
   const parsed = IntakeSourceManifestSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+      .map((issue) => `${zodIssuePath(issue)}: ${issue.message}`)
       .join("; ");
     throw new Error(
       `Malformed intake source manifest at ${path}: ${issues}. The tool writes this ` +
@@ -141,7 +149,7 @@ export function validateIntakeSummary(
   const parsed = IntakeSummarySchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues
-      .map((issue) => `\`${issue.path.length > 0 ? issue.path.join(".") : "(root)"}\`: ${issue.message}`)
+      .map((issue) => `\`${zodIssuePath(issue)}\`: ${issue.message}`)
       .join("; ");
     return { refusal: `The previous intake summary was refused: ${issues}.` };
   }
@@ -627,7 +635,7 @@ export async function readIntakeArtifacts(
     rawSummary = await readOptionalJsonFile<unknown>(paths.summary);
   } catch (error) {
     summaryRefusal =
-      `The previous intake summary is not valid JSON (${error instanceof Error ? error.message : String(error)}).`;
+      `The previous intake summary is not valid JSON (${errorMessage(error)}).`;
   }
   const validated = rawSummary === undefined ? undefined : validateIntakeSummary(rawSummary);
   if (validated && "refusal" in validated) summaryRefusal = validated.refusal;

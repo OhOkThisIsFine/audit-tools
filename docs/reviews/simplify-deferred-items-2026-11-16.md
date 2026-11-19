@@ -87,6 +87,15 @@ the work that would make it a plain cleanup.
   (`steps/contractPipelinePrompts.ts`). `tests/remediate/adversarial-depth-dial.test.ts` passes
   the elements of a `string[]`, so the narrower type fails `check:tests`. **Unblock:** type that
   test array `as const`.
+- **P09 — files with no `// sites-pinned:` declaration** (the P05 rule). Not applied: the
+  `errorMessage` site in `phases/grounding.ts`; a point-free `map` in `review/autonomousGate.ts`;
+  a `matchPathRisks` helper for the two path-risk loops in the loop-core `riskSignal.ts`; one
+  partition pass in `review/findingFilter.ts`. **Unblock:** add a declaration with the test that
+  pins each file's sites.
+- **P09 — rename `cleanupTempBranchesAndArtifacts`** (`phases/close.ts`; it no longer touches
+  branches). `tests/remediate/host-handoff-corroboration-obligations.test.ts` imports it by name. **Unblock:** change those imports in the same commit.
+- **P09 — the `wordJaccard` re-export in `dedup/crossLensDedup.ts`.** Only a test imports it
+  from there. **Unblock:** point that test at the shared module in the same commit.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -157,6 +166,15 @@ real change, not a cleanup.
   `spec.argv` directly differs only for an empty argv (`[undefined]` against `[]`), and no
   producer makes one today. **Unblock:** a type or a check that makes an empty gate argv
   impossible.
+- **P09 — the second `validateRemediationPlan(state.plan)` call in `validation/artifacts.ts`**
+  repeats a check that `loadState` already ran, but a caller that builds `state` without
+  `loadState` loses it. **Unblock:** show that every caller passes a loaded state.
+- **P09 — the try/catch around `hashAffectedPath` in `utils/fileIntegrity.ts`**
+  (`checkAffectedFileIntegrity`). `hashAffectedPath` catches its own errors, so the catch looks
+  unreachable, but removing it removes a failure path. **Unblock:** show that
+  `resolveAffectedPath` cannot throw.
+- **P09 — one map for the plan ledger** (`phases/plan.ts`). It is equal only when ids are
+  unique, and no check makes them unique there. **Unblock:** a uniqueness check or a proof.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -236,6 +254,28 @@ real change, not a cleanup.
 - **P08 — one role-keyed parse in `reviewStep`** (`steps/contractPipeline.ts`). The
   `CritiqueSchema`, `CriticSchema` and `PlanJudgeSchema` parses of an already parsed payload exist
   only to narrow the type. **Unblock:** a parse that returns a discriminated union by role.
+- **P09 — one `backtickList` helper** for the backticked id list (16 copies in six remediate
+  and shared files). **Unblock:** a home in `src/shared`, adopted in all six files at once.
+- **P09 — a `DECISION_INPUT_FILENAMES` constant** for `clarification_resolution.json` and
+  `triage_resolution.json` (`phases/triage.ts`, `state/decisionConsumption.ts`, P08's
+  `steps/submitGateResult.ts`). `generate-runtime-artifact-names.mjs` reads quoted `join(`
+  literals, so a constant changes its source set. **Unblock:** a generator rule for the
+  constant, or a decision to keep the literals.
+- **P09 — the `conformance-review` paths in `phases/triageConformance.ts`** belong to
+  `conformanceReviewPaths` in `steps/` (P08, landed), with an `observation` member, a
+  `conformanceSubjectsDir` export and the `conformanceIssue` export. **Unblock:** one change
+  across both parts.
+- **P09 — an exported `IntakePaths` type** (`intake.ts`). Its only users are the
+  `ReturnType<typeof intakePaths>` sites in `steps/` and tests; adding the export with no adopter
+  fails `check:deadcode`. **Unblock:** add it with its `steps/` adopters in one commit. The same
+  holds for `intentInterpretationPath` (`intent/intentPersistence.ts`, private now) and the
+  `executionPlanPaths(...).ownerDecision` adoption in `steps/`.
+- **P09 — export `STATE_FILENAME` and `PHASE_LOCK_FILENAME`** (`state/store.ts`); their other
+  users are `steps/` files. **Unblock:** the same as above.
+- **P09 — one shared `Sha256HexSchema`.** `state/types.ts` has a local `Sha256Hex`; the same
+  regex is in `state/decisionConsumption.ts`, `contractPipeline/executionPlan.ts`,
+  `steps/dispatch/contractConformanceReview.ts` and three shared charter schemas.
+  **Unblock:** a home in `src/shared`, adopted at every site in one commit.
 
 ## 4. Efficiency items with no measured cost
 
@@ -291,6 +331,11 @@ worth a change.
   blocked item in `triagePrompt`; the repeated `readPlanReviewHistory` reads in
   `buildNextContractPipelineStep` (the read after the write must stay fresh); the second parse of
   a supplied file in the `resolveIntakeStep` fast path. Plan sizes are tens of units.
+- **P09:** one build of the verification report in `buildVerificationReport` (`phases/close.ts`);
+  one partition pass for the `present` and `absent` lists in `close.ts`; a hoist of `knownIds`,
+  of the comparator and of the `checkpointFilter` `affectedPaths`; one read of `review-history`
+  where two reads run; one `sourceSha` per source in `contractPipeline/executionPlan.ts`. Plan
+  sizes are tens of units.
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -346,6 +391,13 @@ worth a change.
   `nextStep.ts` from `contractPipeline/executionPlan.ts` and deleting the re-export in
   `steps/contractPipeline.ts` (check the namespace import in
   `tests/remediate/dirty-baseline-capture.test.ts` first).
+- **P09:** `finding?.` where `finding` is never undefined (`close.ts`); a `timestamped` helper
+  for the `close.ts` records; a `recordContext` spread in `phases/closeAcceptance.ts`; a hoist of
+  `reviewRequired` and its `context ?` test in `phases/triage.ts`; a requirement and
+  counterexample helper; a `conversationSourceEntry` helper in `intake.ts`; the declaration
+  reflow in `index.ts`; the empty ` *` line in the `autonomousGate.ts` doc. Also the delete of
+  `REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1` (`state/types.ts`): it names the retired version,
+  and tests use its literal.
 
 ## 6. Rejected — do not re-propose
 

@@ -3,11 +3,13 @@ import { join } from "node:path";
 import type { Stats } from "node:fs";
 import { mkdir, rename, readFile, lstat, readdir } from "node:fs/promises";
 import { z } from "zod";
-import { hashContent, stableStringify, readOptionalJsonFile, writeJsonFile, repoRelativePath, toPosixPath, commandLeavesDeclaredShape, FindingSchema, AuditReadSchema, readIntentCheckpoint, fileExclusionReason, pathMatchesPrefix, EXCLUDED_OVERRIDE_STATUSES, AUDIT_TOOLS_DIRNAME, compareCodeUnits } from "audit-tools/shared";
+import { contentSha256, hashContent, stableStringify, readOptionalJsonFile, writeJsonFile, repoRelativePath, toPosixPath, commandLeavesDeclaredShape, FindingSchema, AuditReadSchema, readIntentCheckpoint, fileExclusionReason, pathMatchesPrefix, EXCLUDED_OVERRIDE_STATUSES, AUDIT_TOOLS_DIRNAME, compareCodeUnits } from "audit-tools/shared";
 import { IntentCheckpointSchema } from "../../shared/types/intentCheckpoint.js";
 import { ExecutableChangePlanSchema, type ExecutableChangePlan, ExecutionRequestSchema, executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
 import { ContractReviewProvenanceSchema, reviewIndependenceIssue } from "../../shared/types/reviewIndependence.js";
 import { runTrackedAsync, TRACKED_CHILD_DEADLINE_MS } from "../../shared/tooling/exec.js";
+import { errorMessage } from "../../shared/io/json.js";
+import { intakePaths } from "../intake.js";
 
 const text = z.string().trim().min(1);
 const digest = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -23,7 +25,7 @@ export const PlanSourceSchema = z.object({
 export type PlanSource = z.infer<typeof PlanSourceSchema>;
 
 export async function readExecutionIntent(artifactsDir:string):Promise<PlanSource["intent"]>{
-  const checkpoint=await readIntentCheckpoint(join(artifactsDir,"intent_checkpoint.json"));
+  const checkpoint=await readIntentCheckpoint(intakePaths(artifactsDir).intentCheckpoint);
   if(!checkpoint)return undefined;
   const {confirmed_at:_timestamp,closing_action:_closing,closing_custom_command:_command,conformance_review:_conformance,...intent}=checkpoint;
   return ExecutionIntentSchema.parse(intent);
@@ -118,6 +120,8 @@ export function executionPlanPaths(artifactsDir: string) {
     submission: join(directory, "plan.input.json"),
     history: join(directory, "review-history.json"),
     approval: join(directory, "approval.json"),
+    ownerDecision: join(directory, "owner-decision.json"),
+    riskDecisions: join(directory, "risk-decisions.json"),
     review: (role: PlanReviewRole) => ({
       request: join(directory, `${role}.request.json`),
       submission: join(directory, `${role}.input.json`),
@@ -129,11 +133,11 @@ export function executionPlanPaths(artifactsDir: string) {
 /** Canonical order ignores unrelated insert/reorder, but command order is semantic. */
 export function executionPlanRevision(plan: ExecutableChangePlan, sourceSha256: string, contextFiles: CanonicalPlan["context_files"] = []): string {
   const byId = <T extends { id: string }>(values: T[]) => [...values].sort((a, b) => compareCodeUnits(a.id,b.id));
-  return hashContent(stableStringify({ source_sha256: sourceSha256, context_files: [...contextFiles].sort((a,b)=>compareCodeUnits(a.path,b.path)), plan: {
+  return contentSha256({ source_sha256: sourceSha256, context_files: [...contextFiles].sort((a,b)=>compareCodeUnits(a.path,b.path)), plan: {
     ...plan,
     requirements: byId(plan.requirements),
     units: byId(plan.units).map(unit => ({ ...unit, dependencies: [...unit.dependencies].sort(), requirement_ids: [...unit.requirement_ids].sort(), source_finding_ids: [...unit.source_finding_ids].sort() })),
-  } }));
+  } });
 }
 
 export async function readPlanSource(artifactsDir: string): Promise<PlanSource | undefined> {
@@ -235,14 +239,14 @@ export async function ingestExecutionPlan(params: {
   if(stableStringify(source.intent??null)!==stableStringify(await readExecutionIntent(params.artifactsDir)??null))return {changed:false,issues:["Confirmed intent changed. Refresh the tool-owned input and review the plan under the new scope before proceeding."]};
   let next: ExecutableChangePlan;
   try { next = normalizeExecutionPlanPaths(params.root, parsed.data.plan); }
-  catch (error) { return { changed: false, issues: [error instanceof Error ? error.message : String(error)] }; }
+  catch (error) { return { changed: false, issues: [errorMessage(error)] }; }
   const previous = await readCanonicalPlan(params.artifactsDir);
   if (parsed.data.base_revision_sha256 !== (previous?.revision_sha256 ?? null)) {
     // A crash after the canonical write but before consuming its input must be
     // resumable. Identical accepted semantics are replay, never a new revision.
-    if (previous && executionPlanRevision(next, hashContent(stableStringify(source)), previous.context_files) === previous.revision_sha256) {
+    if (previous && executionPlanRevision(next, contentSha256(source), previous.context_files) === previous.revision_sha256) {
       await mkdir(join(paths.directory,"submissions"),{recursive:true});
-      await rename(paths.submission,join(paths.directory,"submissions",`${previous.revision_sha256}-${hashContent(stableStringify(raw))}.json`));
+      await rename(paths.submission,join(paths.directory,"submissions",`${previous.revision_sha256}-${contentSha256(raw)}.json`));
       return { changed:false,issues:[] };
     }
     return { changed: false, issues: ["The submission's base revision is stale. Read the current plan and revise that version."] };
@@ -269,10 +273,10 @@ export async function ingestExecutionPlan(params: {
   const history = await readPlanReviewHistory(params.artifactsDir);
   for (const id of history.accepted_ids) if (!next.units.some(unit => unit.addresses_counterexample_ids.includes(id))) issues.push(`Accepted counterexample ${id} must remain addressed by an execution unit.`);
   if (issues.length) return { changed: false, issues };
-  const sourceSha = hashContent(stableStringify(source));
+  const sourceSha = contentSha256(source);
   let contextFiles: CanonicalPlan["context_files"];
   try { contextFiles = await captureExecutionContext(params.root,next); }
-  catch (error) { return { changed: false, issues: [error instanceof Error ? error.message : String(error)] }; }
+  catch (error) { return { changed: false, issues: [errorMessage(error)] }; }
   const revision = executionPlanRevision(next, sourceSha, contextFiles);
   const canonical: CanonicalPlan = { contract_version: "remediate-code-executable-plan/v1", revision_sha256: revision, source_sha256: sourceSha, context_files: contextFiles, plan: next };
   if (previous) await writeJsonFile(join(paths.directory, "history", `${previous.revision_sha256}.json`), previous);
@@ -330,7 +334,7 @@ export async function executionPlanContextIssues(root: string, canonical: Canoni
   let context: CanonicalPlan["context_files"];
   try { context = await captureExecutionContext(root,canonical.plan); }
   catch (error) {
-    return [`Reviewed repository context cannot be inspected safely: ${error instanceof Error ? error.message : String(error)} Restore a contained readable context or revise/review the plan before continuing.`];
+    return [`Reviewed repository context cannot be inspected safely: ${errorMessage(error)} Restore a contained readable context or revise/review the plan before continuing.`];
   }
   const current=new Map(context.map(entry=>[entry.path,entry.sha256]));
   const expected=new Map(canonical.context_files.map(entry=>[entry.path,entry.sha256]));
@@ -361,26 +365,26 @@ export async function readPlanReview(artifactsDir: string, role: PlanReviewRole,
 export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{ canonical: CanonicalPlan; source: PlanSource } | undefined> {
   const canonical = await readCanonicalPlan(artifactsDir);
   const source = await readPlanSource(artifactsDir);
-  if (!canonical || !source || canonical.source_sha256 !== hashContent(stableStringify(source))) return undefined;
+  if (!canonical || !source || canonical.source_sha256 !== contentSha256(source)) return undefined;
   if(stableStringify(source.intent??null)!==stableStringify(await readExecutionIntent(artifactsDir)??null))return undefined;
   for (const entry of source.sources) {
     try { if (hashContent(await readFile(entry.path, "utf8")) !== entry.sha256) return undefined; }
     catch { return undefined; }
   }
-  const approval = await readOptionalJsonFile<{ revision_sha256?: string; judge_input_sha256?: string; owner_decision_sha256?: string; risk_decision_sha256?:string; history_sha256?:string; review_sha256?:Record<string,string> }>(executionPlanPaths(artifactsDir).approval);
   const paths=executionPlanPaths(artifactsDir);
-  const owner = await readOptionalJsonFile<unknown>(join(paths.directory, "owner-decision.json"));
-  const risk = await readOptionalJsonFile<unknown>(join(paths.directory, "risk-decisions.json"));
-  if (approval?.owner_decision_sha256 !== hashContent(stableStringify(owner ?? null)) || approval.risk_decision_sha256 !== hashContent(stableStringify(risk ?? null))) return undefined;
+  const approval = await readOptionalJsonFile<{ revision_sha256?: string; judge_input_sha256?: string; owner_decision_sha256?: string; risk_decision_sha256?:string; history_sha256?:string; review_sha256?:Record<string,string> }>(paths.approval);
+  const owner = await readOptionalJsonFile<unknown>(paths.ownerDecision);
+  const risk = await readOptionalJsonFile<unknown>(paths.riskDecisions);
+  if (approval?.owner_decision_sha256 !== contentSha256(owner ?? null) || approval.risk_decision_sha256 !== contentSha256(risk ?? null)) return undefined;
   // An approved history is evidence, even when empty; absence is only a valid
   // default during initial authoring, never after an approval bound that record.
   if (await readOptionalJsonFile<unknown>(paths.history) === undefined) return undefined;
   const history=await readPlanReviewHistory(artifactsDir);
-  if(approval.history_sha256!==hashContent(stableStringify(history)))return undefined;
+  if(approval.history_sha256!==contentSha256(history))return undefined;
   const receipts:Partial<Record<PlanReviewRole,PlanReviewReceipt>>={};
   for(const role of PLAN_REVIEW_ROLES){
     const receipt=await readPlanReview(artifactsDir,role,canonical.revision_sha256);
-    if(!receipt || receipt.provenance.reviewed_content_hash!==canonical.revision_sha256 || reviewIndependenceIssue(receipt.provenance.requirement,receipt.provenance.review) || approval.review_sha256?.[role]!==hashContent(stableStringify(receipt)))return undefined;
+    if(!receipt || receipt.provenance.reviewed_content_hash!==canonical.revision_sha256 || reviewIndependenceIssue(receipt.provenance.requirement,receipt.provenance.review) || approval.review_sha256?.[role]!==contentSha256(receipt))return undefined;
     if(role==="judge" && (receipt.provenance.requirement!=="independent" || receipt.provenance.review.mode!=="independent"))return undefined;
     receipts[role]=receipt;
   }

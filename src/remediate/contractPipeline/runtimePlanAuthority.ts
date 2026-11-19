@@ -1,5 +1,6 @@
 // sites-pinned: tests/remediate/close-plan-authority.test.ts, tests/remediate/execution-unit-runtime.test.ts, tests/remediate/executable-plan-safety.test.ts
 import { stableStringify } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 import { ExecutableChangePlanSchema } from "../../shared/types/executionPlan.js";
 import type { RemediationState } from "../state/store.js";
 import { executionPlanRevision, readApprovedExecutionPlan, readPlanReviewHistory } from "./executionPlan.js";
@@ -40,7 +41,7 @@ export async function assertApprovedRuntimePlan(artifactsDir: string, state: Rem
   } catch (error) {
     if (error instanceof RemediationPlanAuthorityError) throw error;
     throw new RemediationPlanAuthorityError(
-      `The current reviewed plan authority cannot be verified: ${error instanceof Error ? error.message : String(error)}`,
+      `The current reviewed plan authority cannot be verified: ${errorMessage(error)}`,
     );
   }
 }

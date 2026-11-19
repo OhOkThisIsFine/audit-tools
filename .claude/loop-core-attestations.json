@@ -236,6 +236,25 @@
         "src/shared/loopCorePaths.ts": "8c4ad34e56d2eaaf4c5621cf38bc7c7cf89c6898"
       }
     },
+    "41a055b0e3222d8a": {
+      "reviewed_by": "opus-subagent-p09-diff-review-af4342e635f90da3b",
+      "attester_class": "agent",
+      "checked": "Loop-core files in the P09 diff: runtimePlanAuthority.ts (errorMessage, exact form), intentPersistence.ts (confirmedFreeFormIntent and private intentInterpretationPath helpers, same guard and same path), reviewGate.ts (errorMessage, toEntry(finding, classification), firstPath renamed affectedPaths), riskSignal.ts (orphan comment only). An independent Opus reviewer checked all 19 numbered neutrality checks against the full diff: NEUTRAL, no behavior-changing hunk; its four comment defects were fixed. sites-pinned bound, build/check/lint green, full suite green on this staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "2a32da3c283e04fc48d7a78aa91f4e3db4b4f095",
+        "ran_at": "2026-11-19T08:32:46.767Z"
+      },
+      "attested_at": "2026-11-19T08:32:55.086Z",
+      "vouches": {
+        "src/remediate/contractPipeline/runtimePlanAuthority.ts": "3c41f2e38e25b2da6f51c251898e59e72788da99",
+        "src/remediate/intent/intentPersistence.ts": "85c3a14f0e2c7d40658913a1da05944435995efd",
+        "src/remediate/review/reviewGate.ts": "cd00a60534a50a6776632f4bde1e851eae835767",
+        "src/remediate/riskSignal.ts": "a383e9badfb5445ca2a0fc89ee02ec31245b6fc0"
+      }
+    },
     "4244b52bb0fdec45": {
       "reviewed_by": "orchestrator-session-41e45b93",
       "attester_class": "agent",
@@ -1098,25 +1117,25 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/contractPipeline/runtimePlanAuthority.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "41a055b0e3222d8a"
     },
     "src/remediate/droppedFindingsRecord.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/intent/intentPersistence.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "41a055b0e3222d8a"
     },
     "src/remediate/review/filterDispositions.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/review/reviewGate.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "41a055b0e3222d8a"
     },
     "src/remediate/review/reviewNecessity.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/riskSignal.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "41a055b0e3222d8a"
     },
     "src/remediate/state/runIdentity.ts": {
       "baseline": "7b79934e86baf378"

@@ -2,7 +2,7 @@
 import { open, rename, link, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import { compareCodeUnits, hashContent, stableStringify, withFsRetry, writeJsonFile } from "audit-tools/shared";
+import { compareCodeUnits, contentSha256, hashContent, withFsRetry, writeJsonFile } from "audit-tools/shared";
 import type { RemediationPlan, RemediationItemState } from "./types.js";
 interface DecisionState {
   plan?: RemediationPlan;
@@ -38,9 +38,9 @@ export async function readDecisionSnapshot(path: string): Promise<{ bytes: strin
     const after = await handle.stat();
     if (before.mtimeMs !== after.mtimeMs || before.size !== after.size) throw new Error("Operator input changed while reading; retry without accepting it.");
     const inputDigest = hashContent(data);
-    const identity_sha256 = hashContent(stableStringify({
+    const identity_sha256 = contentSha256({
       sha256: inputDigest, dev: after.dev, ino: after.ino, birthtime: after.birthtimeMs, mtime: after.mtimeMs, size: after.size,
-    }));
+    });
     return { bytes, sha256: inputDigest, identity_sha256 };
   } finally { await handle.close(); }
 }
@@ -68,7 +68,7 @@ async function archiveCommittedSnapshot(path: string, expected: { sha256: string
 }
 
 export function decisionContextDigest(state: DecisionState): string {
-  return hashContent(stableStringify({
+  return contentSha256({
     plan_id: state.plan?.plan_id, revision: state.plan?.review_revision_sha256,
     started_at: state.started_at,
     items: Object.values(state.items ?? {}).map(item => ({
@@ -76,7 +76,7 @@ export function decisionContextDigest(state: DecisionState): string {
       question: item.clarification_question, failure_reason: item.failure_reason,
       last_successful_step: item.last_successful_step,
     })).sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id)),
-  }));
+  });
 }
 
 /** Only a durably committed receipt may authorize cleanup; mismatching replacement bytes survive. */
@@ -84,23 +84,23 @@ export async function reconcileDecisionCleanup(state: DecisionState, artifactsDi
   let changed = false;
   for (const receipt of state.decision_applications ?? []) {
     try {
-    if (receipt.cleanup_complete) {
       const input = join(artifactsDir, receipt.input);
-      const archive = `${input}.stale-${receipt.context_sha256}-${receipt.input_identity_sha256}`;
-      const staged = await readDecisionSnapshot(`${archive}.pending-cleanup`);
-      const snapshot = await readDecisionSnapshot(input);
-      if (staged || (snapshot?.sha256 === receipt.input_sha256 && snapshot.identity_sha256 === receipt.input_identity_sha256)) {
-        await archiveCommittedSnapshot(input, { sha256: receipt.input_sha256, identity_sha256: receipt.input_identity_sha256 }, archive);
+      const expected = { sha256: receipt.input_sha256, identity_sha256: receipt.input_identity_sha256 };
+      if (receipt.cleanup_complete) {
+        const archive = `${input}.stale-${receipt.context_sha256}-${receipt.input_identity_sha256}`;
+        const staged = await readDecisionSnapshot(`${archive}.pending-cleanup`);
+        const snapshot = await readDecisionSnapshot(input);
+        if (staged || (snapshot?.sha256 === receipt.input_sha256 && snapshot.identity_sha256 === receipt.input_identity_sha256)) {
+          await archiveCommittedSnapshot(input, expected, archive);
+        }
+        continue;
       }
-      continue;
-    }
       if (receipt.outcome) await writeJsonFile(join(artifactsDir, "triage-outcome.json"), receipt.outcome);
       for (const result of receipt.retry_results) {
         const path = join(artifactsDir, result.path);
         await archiveCommittedSnapshot(path, result, `${path}.stale-${receipt.context_sha256}-${result.identity_sha256}`);
       }
-      const input = join(artifactsDir, receipt.input);
-      await archiveCommittedSnapshot(input, { sha256: receipt.input_sha256, identity_sha256: receipt.input_identity_sha256 },
+      await archiveCommittedSnapshot(input, expected,
         `${input}.consumed-${receipt.context_sha256}-${receipt.input_identity_sha256}`);
       receipt.cleanup_complete = true;
       changed = true;

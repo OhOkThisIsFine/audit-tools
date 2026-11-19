@@ -21,13 +21,16 @@ export type { Finding };
 import { EvidenceSchema, MechanicalVerificationSchema } from "../../shared/types/remediationOutcome.js";
 import { PER_FINDING_DISPOSITIONS } from "./disposition.js";
 
+/** A full-length lowercase hex SHA-256 digest. */
+const Sha256Hex = z.string().regex(/^[0-9a-f]{64}$/u);
+
 /** One reviewed semantic plan, carrying immutable source provenance. */
 export const RemediationPlanSchema = ExecutableChangePlanSchema.extend({
   goal_id: z.string().optional(),
   source: z.string().optional(),
   findings: z.array(FindingSchema),
   request: ExecutionRequestSchema.optional(),
-  review_revision_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+  review_revision_sha256: Sha256Hex,
   review_counterexamples: z.array(PlanCounterexampleSchema).default([]),
   project_type: z.string(),
   test_command: z.string().optional(),
@@ -44,8 +47,8 @@ export const SourceVerificationSchema = z.object({
   evidence: EvidenceSchema.optional(),
   recorded_by_module: z.string().min(1).optional(),
   mechanical_verification: MechanicalVerificationSchema.optional(),
-  review_revision_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
-  source_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  review_revision_sha256: Sha256Hex.optional(),
+  source_sha256: Sha256Hex.optional(),
   head_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u).nullable().optional(),
 }).strict();
 export type SourceVerification = z.infer<typeof SourceVerificationSchema>;
@@ -71,29 +74,22 @@ export const REMEDIATION_HOST_SCOPE_SEMANTICS =
 export const ConformanceReviewBindingSchema = z.object({
   run_id: z.string().min(1),
   enabled: z.boolean(),
-  checkpoint_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  checkpoint_sha256: Sha256Hex.optional(),
 }).strict();
 export type ConformanceReviewBinding = z.infer<typeof ConformanceReviewBindingSchema>;
 
-const RemediationHostHandoffBindingFields = {
-  run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
-  baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
-  workload_sha256: z.string().regex(/^[0-9a-f]{64}$/u),
-  /** Enforces persistence of the tool-minted required-review snapshot alongside this handoff. */
-  conformance_policy_sha256: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
-  work_item_ids: z.array(z.string()).min(1),
-
-};
-
-const ExplicitScopeRemediationHostHandoffRecordSchema = z
+export const RemediationHostHandoffRecordSchema = z
   .object({
     contract_version: z.literal(REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA2),
     scope_semantics: z.literal(REMEDIATION_HOST_SCOPE_SEMANTICS),
-    ...RemediationHostHandoffBindingFields,
+    run_id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u),
+    baseline_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u),
+    workload_sha256: Sha256Hex,
+    /** Enforces persistence of the tool-minted required-review snapshot alongside this handoff. */
+    conformance_policy_sha256: Sha256Hex.optional(),
+    work_item_ids: z.array(z.string()).min(1),
   })
   .strict();
-
-export const RemediationHostHandoffRecordSchema = ExplicitScopeRemediationHostHandoffRecordSchema;
 export type RemediationHostHandoffRecord = z.infer<
   typeof RemediationHostHandoffRecordSchema
 >;

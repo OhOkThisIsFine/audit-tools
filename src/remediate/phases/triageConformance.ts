@@ -5,13 +5,12 @@ import { readFile, readdir, lstat, readlink } from "node:fs/promises";
 import { hashContent } from "../../shared/hash.js";
 import { stableStringify } from "../../shared/stableStringify.js";
 import { headCommit } from "../../shared/git.js";
-import { AUDIT_TOOLS_DIRNAME, readOptionalJsonFile, writeJsonFile, parseCommandString, resolveWithinRoot } from "audit-tools/shared";
+import { AUDIT_TOOLS_DIRNAME, contentSha256, readOptionalJsonFile, writeJsonFile, parseCommandString, resolveWithinRoot, uniqueSorted } from "audit-tools/shared";
 import type { RemediationState } from "../state/store.js";
 import { worktreeContentId } from "../steps/gateCommands.js";
 import { checkConformanceSubject, conformanceReviewPaths, type ConformanceReviewCheck } from "../steps/dispatch/contractConformanceReview.js";
 import { readSubmissionDocument } from "../../shared/submission/submissionClassifier.js";
 
-const digest = (value: unknown): string => hashContent(stableStringify(value));
 
 /** Historical evidence only; admission continues to use the run's live request and state. */
 export async function archiveConformanceSubjects(artifactsDir: string, outputDir: string): Promise<void> {
@@ -45,13 +44,13 @@ export async function triageEvidenceContext(root: string, state: RemediationStat
     const normalized = relative.replaceAll("\\", "/").replace(/^\.\//u, "");
     if (normalized === ".git" || normalized.startsWith(".git/") || normalized === AUDIT_TOOLS_DIRNAME || normalized.startsWith(AUDIT_TOOLS_DIRNAME + "/")) return;
     const stats = await lstat(join(root, relative));
-    if (stats.isSymbolicLink()) files[relative] = digest({ symlink: await readlink(join(root, relative)), target_hash: hashContent(await readFile(join(root, relative))) });
+    if (stats.isSymbolicLink()) files[relative] = contentSha256({ symlink: await readlink(join(root, relative)), target_hash: hashContent(await readFile(join(root, relative))) });
     else if (stats.isDirectory()) {
       files[relative] = "directory";
       for (const child of (await readdir(join(root, relative))).sort()) await visit(join(relative, child));
     } else files[relative] = hashContent(await readFile(join(root, relative)));
   };
-  try { for (const path of [...new Set([...unit.allowed_files, ...unit.read_paths])].sort()) await visit(path); }
+  try { for (const path of uniqueSorted([...unit.allowed_files, ...unit.read_paths])) await visit(path); }
   catch { return null; }
   // Explicit test scripts can live in ignored scratch; bind their bytes too.
   for (const command of unit.required_tests) for (const argument of parseCommandString(command).slice(1)) {
@@ -76,7 +75,7 @@ export async function triageEvidenceContext(root: string, state: RemediationStat
 }
 
 function triageObservationPath(artifactsDir: string, runId: string, itemId: string): string {
-  return join(artifactsDir, "conformance-review", `${digest({ run_id: runId, work_item_id: itemId })}.observation.json`);
+  return join(artifactsDir, "conformance-review", `${contentSha256({ run_id: runId, work_item_id: itemId })}.observation.json`);
 }
 
 export async function readTriageObservation(artifactsDir: string, runId: string, itemId: string, context: unknown): Promise<unknown | null> {
@@ -118,12 +117,12 @@ export async function assertSuccessfulConformance(root: string, artifactsDir: st
     if (!receipt || receipt.review.mode !== "independent") fail();
     const paths = conformanceReviewPaths(artifactsDir, state.plan.plan_id, unit.id);
     const request = await readOptionalJsonFile<{ binding: string; content: Record<string, unknown> }>(paths.request);
-    if (!request || request.binding !== receipt!.binding || digest(request.content) !== receipt!.binding) fail();
+    if (!request || request.binding !== receipt!.binding || contentSha256(request.content) !== receipt!.binding) fail();
     const content = request!.content;
     if ("observation" in content) {
       const context = await triageEvidenceContext(root, state, unit.id);
       const observation = context && await readTriageObservation(artifactsDir, state.plan.plan_id, unit.id, context);
-      if (!observation || digest({ context, observation }) !== receipt!.binding) fail();
+      if (!observation || contentSha256({ context, observation }) !== receipt!.binding) fail();
     } else {
       const requirements = state.plan.requirements.filter(requirement => unit.requirement_ids.includes(requirement.id));
       const examples = (state.plan.review_counterexamples ?? []).filter(example => unit.addresses_counterexample_ids.includes(example.id));
@@ -146,7 +145,7 @@ export async function reopenStaleTriageSuccesses(root: string, artifactsDir: str
     if (!request || !("observation" in request.content)) continue;
     const context = await triageEvidenceContext(root, state, unit.id);
     const observation = context && await readTriageObservation(artifactsDir, state.plan.plan_id, unit.id, context);
-    if (!observation || digest({ context, observation }) !== item.conformance_review.binding) {
+    if (!observation || contentSha256({ context, observation }) !== item.conformance_review.binding) {
       if (state.closing_context === "user_halted") {
         item.status = "abandoned";
         item.failure_reason = "The owner halted this run after the reviewed tool-owned success observation became stale. Historical conformance evidence is retained; current success is not claimed.";

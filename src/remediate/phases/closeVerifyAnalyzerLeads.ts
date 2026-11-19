@@ -86,8 +86,8 @@ export async function verifyAnalyzerLeads(params: {
       ...persistedAnalyzerPolicy.analyzers,
       ...overrides?.analyzerPolicy?.analyzers,
     },
+    // `loadAnalyzerPolicy` drops legacy persisted consent, so only an override supplies it.
     analyzer_consent: {
-      ...persistedAnalyzerPolicy.analyzer_consent,
       ...overrides?.analyzerPolicy?.analyzer_consent,
     },
   };

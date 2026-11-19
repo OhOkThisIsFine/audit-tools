@@ -150,12 +150,14 @@ export interface IntentOrderingResult {
 }
 
 /**
- * Reorder `findings` and `units` by intent-derived weight (descending), stably.
+ * Reorder `units` by intent-derived weight (descending), stably. `findings` is
+ * returned unchanged.
  *
- * - Findings sort by `findingIntentWeight` desc, ties broken by original index.
- * - Units sort by the MAX intent weight of their member findings (so a block
- *   carrying an emphasised finding is dispatched first), ties broken by original
- *   index. A block's internal item order is left untouched.
+ * - Units sort by the MAX `findingIntentWeight` of their member findings (so a
+ *   block carrying an emphasised finding is dispatched first). On a tie, when
+ *   the members' highest severities are equal, a unit with a judge-confirmed
+ *   member goes first; the last tie-break is the original index. A block's
+ *   internal item order is left untouched.
  * - When the intent carries no signal, both arrays are returned UNCHANGED (no
  *   reordering, no severity-shuffle) so behaviour is a strict no-op without a
  *   `free_form_intent`.

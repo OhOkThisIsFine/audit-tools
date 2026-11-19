@@ -2,7 +2,7 @@
 import { z } from "zod";
 import {
   FindingSeveritySchema, projectApprovedFindings, projectAuditFindingsReportSubset,
-  type AuditFindingsReport,
+  type AuditFindingsReport, uniqueSorted,
 } from "audit-tools/shared";
 
 export const FindingSelectionSchema = z.object({
@@ -20,8 +20,8 @@ export interface FindingSelectionOptions {
 export function requestedFindingSelection(options: FindingSelectionOptions): FindingSelection | undefined {
   if (options.severity === undefined && options.findingIds === undefined) return undefined;
   return FindingSelectionSchema.parse({
-    severity: [...new Set(options.severity ?? [])].sort(),
-    finding_ids: [...new Set(options.findingIds ?? [])].sort(),
+    severity: uniqueSorted(options.severity ?? []),
+    finding_ids: uniqueSorted(options.findingIds ?? []),
   });
 }
 

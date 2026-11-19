@@ -19,11 +19,12 @@
 // items become a RECORDED terminal disposition, never a silent close.
 
 import { z } from "zod";
+import { errorMessage } from "../../shared/io/json.js";
 import type { Finding, FindingSeverity, FindingConfidence } from "audit-tools/shared";
 import {
   type ReviewNecessity,
   type ImplementationCost,
-  classifyReviewNecessity,
+  type ReviewClassification,
   partitionByReviewNecessity,
   REVIEW_NECESSITY_ORDER,
   REVIEW_NECESSITY_LABELS,
@@ -112,12 +113,11 @@ export interface ReviewDecision {
   declined: Array<{ finding_id: string; reason: string }>;
 }
 
-function firstPath(finding: Finding): string[] {
+function affectedPaths(finding: Finding): string[] {
   return (finding.affected_files ?? []).map((f) => f.path).filter(Boolean);
 }
 
-function toEntry(finding: Finding): ReviewItemEntry {
-  const classification = classifyReviewNecessity(finding);
+function toEntry(finding: Finding, classification: ReviewClassification): ReviewItemEntry {
   return {
     finding_id: finding.id,
     title: finding.title,
@@ -125,7 +125,7 @@ function toEntry(finding: Finding): ReviewItemEntry {
     confidence: finding.confidence,
     lens: finding.lens,
     summary: finding.summary,
-    affected_files: firstPath(finding),
+    affected_files: affectedPaths(finding),
     necessity: classification.necessity,
     rationale: classification.rationale,
     implementation_cost: classification.implementation_cost,
@@ -156,7 +156,7 @@ export function buildReviewRequest(
       necessity,
       label: REVIEW_NECESSITY_LABELS[necessity].title,
       description: REVIEW_NECESSITY_LABELS[necessity].description,
-      items: classified.map((c) => toEntry(c.finding)),
+      items: classified.map((c) => toEntry(c.finding, c.classification)),
     });
   }
   return {
@@ -234,7 +234,7 @@ export function parseReviewResolution(
   } catch (error) {
     return {
       kind: "refused",
-      reason: `the file is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+      reason: `the file is not valid JSON (${errorMessage(error)})`,
     };
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

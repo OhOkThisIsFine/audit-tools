@@ -25,9 +25,9 @@ import type { PerFindingDisposition } from "./disposition.js";
  * tool-gave-up state (`abandoned`).
  *
  * `abandoned` exists so that EVERY item ends terminal. A run that exhausts its
- * retry bound, fails its final gate, or is halted by the operator still has to
- * end, and a no-human host must never livelock waiting for a triage that will
- * not come. Before it existed, such items were left in a non-terminal status and
+ * retry bound or is halted by the operator still has to end (a red final gate
+ * pauses the run instead and leaves item statuses unchanged), and a no-human
+ * host must never livelock waiting for a triage that will not come. Before it existed, such items were left in a non-terminal status and
  * the close phase rendered them as a partial-completion outcome — which silently
  * broke the invariant that remediation ends binary. It is deliberately DISTINCT
  * from `ignored`: `ignored` is a settled human decision not to act, `abandoned`
@@ -100,7 +100,7 @@ export function isInProgressStatus(status: string): boolean {
 /**
  * Statuses that legitimately END a run with no further implement work: the two
  * success states, the two settled-no-act (SKIP) states, and `abandoned` (the
- * tool gave up — retry bound exhausted, final gate red, or operator halt).
+ * tool gave up — retry bound exhausted, or operator halt).
  * `blocked` and `needs_clarification` are deliberately NOT terminal — triage
  * retries `blocked`, an answer resolves `needs_clarification` — so either
  * leaves the run non-terminal rather than closing. The force-close backstop
@@ -308,7 +308,7 @@ export function requiresVerificationEvidence(
  * named `RemediationOutcomeStatus` members — landed in the SAME commit as that
  * widening (`src/shared/types/remediationOutcome.ts`) and the matching
  * `PerFindingDisposition` union widening at its declaration
- * (`src/remediate/state/disposition.ts:16`), because this Record is exhaustive
+ * (`PER_FINDING_DISPOSITIONS` in `src/remediate/state/disposition.ts`), because this Record is exhaustive
  * over `PerFindingDisposition`: a partial landing across the three files is a
  * `npm run check` compile error, never a silent gap.
  */

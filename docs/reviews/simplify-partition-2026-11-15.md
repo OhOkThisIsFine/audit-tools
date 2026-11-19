@@ -37,7 +37,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | landed |
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | landed |
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | landed |
-| P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | open |
+| P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | landed |
 | P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | open |
 | P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | open |
 | P12 wrapper, hooks, entries, root config | `wrapper/**`, `.claude/hooks/**`, `.githooks/**`, `audit-code.mjs`, `remediate-code.mjs`, `eslint.config.js`, `vitest.config.ts`, `.dependency-cruiser.cjs` | 34 | 10,747 | 113 | open |
@@ -368,3 +368,74 @@ P08 coverage: four reviewers, one per file group (`nextStep.ts`; `dispatch/hostH
 other dispatch and gate files; the prompt and intake files). Each of the 21 files was read in full
 by its reviewer from all four angles. An independent refuter checked the risky items before the
 apply, and a second reviewer checked the applied diff.
+
+### From P09
+
+P09 closed the P08 leads for `errorMessage` (the exact form, at 13 sites in seven files), for
+`intakePaths(...).intentCheckpoint` in `contractPipeline/executionPlan.ts`, and for the
+`contentSha256` sites in `executionPlan.ts` and `phases/triageConformance.ts` (plus two in
+`state/decisionConsumption.ts`). The `owner-decision.json` and `risk-decisions.json` joins in
+`executionPlan.ts` are now the `ownerDecision` and `riskDecisions` members of
+`executionPlanPaths`, and `readApprovedExecutionPlan` reads them there. The quoted `join(`
+literals stay, so the output of `generate-runtime-artifact-names.mjs` did not change. P09 also
+used the shared `uniqueSorted`, `normalizeRepoRelPath`, `toPosixPath`, `outputDirFor`,
+`REMEDIATION_REPORT_FILENAME` and `REMEDIATION_OUTCOMES_FILENAME` where a file spelled out the
+same body.
+
+Moves inside P09: `admittedFailureOutput` is exported from `phases/closeVerifyLandingGates.ts`,
+and the default test and e2e legs of `phases/close.ts` use it (the same tail-or-label body).
+`close.ts` imports `archiveFrictionRecords` and `outputDirFor` statically; the old
+`await import("audit-tools/shared")` loaded a module that the file already imports. In
+`state/types.ts`, the host-handoff record schema is one `z.object` (the binding-fields object
+and the explicit-scope alias each had one reader), and the 64-hex digest regex is the local
+`Sha256Hex`. `RemediationStore` lost its unused `_correlationId` constructor parameter (no
+caller passes a second argument). `phases/closeVerifyAnalyzerLeads.ts` no longer spreads the
+persisted `analyzer_consent`: `loadAnalyzerPolicy` drops legacy consent, so the spread was
+always empty.
+
+Comment fixes: `state/itemStatus.ts` no longer says that a red final gate routes an item to
+`abandoned` (a red final gate pauses the run and leaves the item statuses as they are).
+The `applyIntentOrdering` doc in `intent/intentOrdering.ts` now says that only units are
+reordered, and it states the tie-break. The stale `opencode.json` comment in `index.ts` is now
+the named `DEFAULT_ARTIFACTS_DIR_OPTION`.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P08 sites (landed), with the P09 helpers:** `steps/contractPipeline.ts` (five) and
+  `steps/nextStep.ts` (one) still join `owner-decision.json` and `risk-decisions.json` by hand;
+  `executionPlanPaths(...).ownerDecision` and `.riskDecisions` own those paths now.
+  `dispatch/hostHandoff.ts` still builds the `intent_checkpoint.json` path. An exported
+  `IntakePaths` type serves only the `steps/` sites, so P09 did not add it (see the deferred
+  record).
+- **P08 sites (landed):** `phases/triageConformance.ts` repeats the `conformance-review` path
+  literals that `conformanceReviewPaths` in `steps/` owns. An `observation` member and a
+  `conformanceSubjectsDir` export would serve both.
+- **Any part (tested-but-unwired, for the manual knip audit):** `LOCK_TIMEOUT_MS`
+  (`state/store.ts`), `validateFinding` and `validateExecutionUnit` (`validation/`) have no
+  production reader; only tests import them.
+- **P09 (correctness, not checked):** `readRunRecoveryFacts` (`phases/close.ts`) turns a read
+  failure into "no facts"; the verify-doc result that `close.ts` reads has no producer in the
+  tree; the e2e failure reason reuses the combined-suite text; the by-outcome sentence of the
+  outcomes report omits two statuses; the preserve note omits `unresolvedRequest`.
+- **P09 (correctness, not checked):** `state/store.ts` parses the plan twice, so one plan error
+  can show two times; the `!inputSnapshot` check in `phases/triage.ts` cannot be reached; the
+  `phases/grounding.ts` doc names a map that does not exist; a nested retired key in
+  `review/reviewGate.ts` gives an empty reason; `closeVerifyLandingGates.ts` splits a command
+  with `command.split(" ")` where `close.ts` uses `parseCommandString`;
+  `review_filter_dispositions.json` is not in the generated runtime artifact names;
+  `applyIntentOrdering` reorders units but not findings; `ingestExecutionPlan` reports
+  `String(error)`; the `review-history` read can race its existence check.
+- **Owner item:** `runValidateCommand` (`index.ts`) has `timeout: 3_600_000` with no measurement
+  behind it (the owner rule on limits).
+
+P09 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each. `phases/grounding.ts`, `review/autonomousGate.ts` (code), `riskSignal.ts` (code)
+and `review/findingFilter.ts` have no `// sites-pinned:` declaration for those sites, so their
+code did not change (the P05 rule).
+
+P09 coverage: four reviewers, one per file group (`phases/close.ts` and `closeAcceptance.ts`;
+the other `phases/` and `review/` files; the top-level, `contractPipeline/` and `intent/` files;
+the `state/` and `validation/` files). Each of the 40 files was read in full by its reviewer from
+all four angles. The lap checked each risky item against source before the apply, and a second
+reviewer checked the applied diff.

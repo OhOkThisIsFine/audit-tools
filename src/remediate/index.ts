@@ -27,6 +27,7 @@ import { submitRemediationWorkItemResult } from "./steps/submitResult.js";
 import { submitRemediationGateResult, SUPPORTED_REMEDIATION_GATE_SUBMISSIONS } from "./steps/submitGateResult.js";
 import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./steps/dispatch/hostContracts.js";
+import { errorMessage } from "../shared/io/json.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -35,9 +36,9 @@ const { version: pkgVersion } = JSON.parse(
   readFileSync(join(pkgRoot, "package.json"), "utf8"),
 ) as { version: string };
 
-// opencode.json is optional package data (shipped with the package). Read it
-// best-effort so a missing/unshipped config can never crash the CLI on startup —
-// default to no extra permissions instead.
+/** The commander default of `--artifacts-dir`; `resolveArtifactsDirOption` compares against it. */
+const DEFAULT_ARTIFACTS_DIR_OPTION = ".audit-tools/remediation";
+
 const program = new Command();
 
 program
@@ -95,7 +96,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   // Repeatable: each `--input <path>` accumulates into a string[] via a collect
   // reducer (NOT a variadic `<path...>`, which would greedily swallow following
@@ -167,7 +168,7 @@ for (const action of ["pause", "resume", "cancel"] as const) {
   program.command(action)
     .description(`${action} the persisted remediation run without changing accepted work or owning host worktrees`)
     .option("--root <path>", ROOT_OPTION_DESCRIPTION)
-    .option("--artifacts-dir <path>", "Artifacts directory", ".audit-tools/remediation")
+    .option("--artifacts-dir <path>", "Artifacts directory", DEFAULT_ARTIFACTS_DIR_OPTION)
     .option("--worktree <path>", "Host-reported worktree location (metadata only)")
     .option("--outcome <text>", "Host-reported work outcome (metadata only)")
     .action(async (options) => {
@@ -228,7 +229,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   .requiredOption("--run-id <id>", "The run the work item belongs to")
   .requiredOption("--submission-id <id>", "The work item id the submission answers")
@@ -263,7 +264,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   .requiredOption("--run-id <id>", "The run whose workload results are ingested")
   .action(async (options) => {
@@ -292,7 +293,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   .action(async (options) => {
     const root = resolveRootOption(options.root);
@@ -348,7 +349,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   .action(async (options) => {
     const { result, exitCode } = await runValidateArtifactAction(options);
@@ -365,7 +366,7 @@ program
   .option(
     "--artifacts-dir <path>",
     "Artifacts directory",
-    ".audit-tools/remediation",
+    DEFAULT_ARTIFACTS_DIR_OPTION,
   )
   .requiredOption("--work-item <id>", "The work-item id your prompt names")
   .requiredOption("--from <path>", "Any file that holds the result JSON you wrote with your file tool")
@@ -399,7 +400,7 @@ program
         submit: async request => {
           const root = resolveRootOption(request.root);
           return submitRemediationGateResult({
-            artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? ".audit-tools/remediation"),
+            artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? DEFAULT_ARTIFACTS_DIR_OPTION),
             lane: request.lane,
             workItemId: request.workItemId,
             source: request.source,
@@ -410,7 +411,7 @@ program
         const root = resolveRootOption(request.root);
         return submitRemediationWorkItemResult({
           root,
-          artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? ".audit-tools/remediation"),
+          artifactsDir: resolveArtifactsDirOption(root, request.artifactsDir ?? DEFAULT_ARTIFACTS_DIR_OPTION),
           workItemId: request.workItemId,
           source: request.source,
         });
@@ -514,7 +515,7 @@ export function resolveArtifactsDirOption(
   root: string,
   artifactsDir: string,
 ): string {
-  return artifactsDir === ".audit-tools/remediation"
+  return artifactsDir === DEFAULT_ARTIFACTS_DIR_OPTION
     ? remediationArtifactsDir(root)
     : resolve(artifactsDir);
 }
@@ -585,7 +586,7 @@ export async function recoverIngestVerb(options: {
   } catch (error) {
     return {
       status: "unrunnable",
-      message: error instanceof Error ? error.message : String(error),
+      message: errorMessage(error),
     };
   }
   const expectedPendingOnly =

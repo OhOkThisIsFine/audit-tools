@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { collectFilesSorted } from "../../shared/io/collectFilesSorted.js";
+import { errorMessage } from "../../shared/io/json.js";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import {
   absoluteSubmissionPath,
@@ -89,7 +90,7 @@ async function readJsonForValidation(
   try {
     return await readJsonFile<unknown>(path);
   } catch (error) {
-    issues.push(`Invalid JSON at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    issues.push(`Invalid JSON at ${path}: ${errorMessage(error)}`);
     return undefined;
   }
 }
@@ -396,10 +397,10 @@ async function validateHostSubmissions(
   // disk and the discovery filter matched none of them, the join is broken —
   // which is exactly the state that returned `ok` with issue_count 0 for a run
   // whose whole result surface went unchecked. Report it rather than pass.
-  const boundOnDisk = [...bound.keys()].filter((path) => existsSync(path));
+  const boundOnDisk = [...bound].filter((path) => existsSync(path));
   if (boundOnDisk.length > 0 && submissions.length === 0) {
     issues.push(
-      `No host submissions were discovered under ${join(artifactsDir, "runs")}, yet ` +
+      `No host submissions were discovered under ${runsDir}, yet ` +
         `${String(boundOnDisk.length)} bound submission file(s) exist on disk — the validator's ` +
         "filename join no longer matches what the host handoff mints.",
     );
@@ -488,7 +489,7 @@ async function validateCompletedArtifacts(artifactsDir: string, root: string): P
       issues.push(...stateIssues.map(issue => `${statePath}: ${issue}`));
       if (stateIssues.length === 0 && isRecord(state) && state.status === "complete") completeState = state as unknown as RemediationState;
     } catch (error) {
-      issues.push(`${statePath}: ${error instanceof Error ? error.message : String(error)}`);
+      issues.push(`${statePath}: ${errorMessage(error)}`);
     }
     if (!isRecord(state) || state.status !== "complete") {
       issues.push(`${statePath} must have status complete.`);
@@ -510,7 +511,7 @@ async function validateCompletedArtifacts(artifactsDir: string, root: string): P
   try {
     if (!(await readFile(reportPath, "utf8")).trim()) issues.push(`${reportPath} must not be empty.`);
   } catch (error) {
-    issues.push(`Cannot read completed remediation report at ${reportPath}: ${error instanceof Error ? error.message : String(error)}`);
+    issues.push(`Cannot read completed remediation report at ${reportPath}: ${errorMessage(error)}`);
   }
 
   // A new run's active state must not be replaced by an earlier completion.

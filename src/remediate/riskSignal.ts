@@ -132,8 +132,6 @@ export interface IntakeRiskSignal {
   escalated: boolean;
 }
 
-/** Normalize a path for pattern matching: forward slashes, no leading `./`. */
-
 export interface ComputeIntakeRiskInput {
   /** Best-available affected-file list at intake (repo-relative paths). */
   affectedFiles: readonly string[];

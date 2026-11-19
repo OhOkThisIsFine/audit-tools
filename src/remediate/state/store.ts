@@ -313,13 +313,14 @@ function clarificationQuestionErrors(obj: Record<string, unknown>): string[] {
     const it = item as Record<string, unknown>;
     if (it["status"] !== "needs_clarification") continue;
     const question = it["clarification_question"];
+    const fields = question as Record<string, unknown>;
     if (
       !question ||
       typeof question !== "object" ||
       Array.isArray(question) ||
-      !isClarificationCategory((question as Record<string, unknown>)["category"]) ||
-      typeof (question as Record<string, unknown>)["description"] !== "string" ||
-      ((question as Record<string, unknown>)["description"] as string).trim().length === 0
+      !isClarificationCategory(fields["category"]) ||
+      typeof fields["description"] !== "string" ||
+      fields["description"].trim().length === 0
     ) {
       errors.push(
         `items["${key}"] is needs_clarification but carries no valid clarification_question ` +
@@ -355,11 +356,7 @@ export class StateStore {
    */
   private readonly store: LockedJsonStore<RemediationState | null>;
 
-  constructor(
-    private artifactsDir: string,
-    // correlationId retained for API compatibility; no longer used in lock body
-    private readonly _correlationId?: string,
-  ) {
+  constructor(private artifactsDir: string) {
     this.store = createLockedJsonStore<RemediationState | null>({
       path: statePath(artifactsDir),
       lockPath: lockPath(artifactsDir),
@@ -370,8 +367,7 @@ export class StateStore {
         // `validateRemediationState` throws SchemaVersionMismatchError for a state stamped
         // with another release's contract version; that propagates out of the
         // read exactly as the policy requires (see the constant's doc).
-        const adopted = raw;
-        const errors = validateRemediationState(adopted);
+        const errors = validateRemediationState(raw);
         if (errors.length > 0) {
           throw new Error(
             `state.json failed schema validation: ${errors.join("; ")}`,
@@ -384,7 +380,7 @@ export class StateStore {
         // written before the field existed has none until its next write, and
         // `validateRemediationState` admits that (see the constant's doc) — which is the
         // whole reason the field is optional on the type rather than required.
-        return adopted as RemediationState;
+        return raw as RemediationState;
       },
       // The WRITE hook. Without it the store's own `persist` wrote whatever a
       // caller handed it — the load gate was the only validation on the path,

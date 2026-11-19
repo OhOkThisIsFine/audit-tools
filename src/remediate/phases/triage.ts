@@ -14,6 +14,7 @@ import { remediationHostResultFilePath } from "../steps/dispatch/hostHandoff.js"
 import { stableStringify } from "../../shared/stableStringify.js";
 import { triageEvidenceContext, readTriageObservation, writeTriageObservation, checkTriageConformance } from "./triageConformance.js";
 import type { ConformanceReviewIssue } from "../steps/dispatch/contractConformanceReview.js";
+import type { RemediationItemState } from "../state/types.js";
 
 interface TriageResolution {
   /**
@@ -44,6 +45,23 @@ interface TriageBatch {
     failure_reason: string;
     last_successful_step: string;
   }[];
+}
+
+/** Write `triage_batch.json` for the blocked items the host must decide. */
+async function writeTriageBatch(
+  state: RemediationState,
+  artifactsDir: string,
+  blocked: RemediationItemState[],
+): Promise<void> {
+  const batch: TriageBatch = {
+    ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
+    items: blocked.map((item) => ({
+      unit_id: item.unit_id,
+      failure_reason: item.failure_reason ?? "Unknown error",
+      last_successful_step: item.last_successful_step ?? "Unknown step",
+    })),
+  };
+  await writeJsonFile(join(artifactsDir, "triage_batch.json"), batch);
 }
 
 function markRetry(item: { started_at?: string; completed_at?: string }): void {
@@ -259,7 +277,7 @@ export async function runTriagePhase(
         undefined,
         new Set(Object.keys(state.items)),
       );
-      if (triageIssues.filter((i) => i.severity === "error").length > 0) {
+      if (triageIssues.some((i) => i.severity === "error")) {
         throw new Error(
           `Invalid triage_resolution.json:\n${formatValidationIssues(triageIssues)}`,
         );
@@ -321,15 +339,7 @@ export async function runTriagePhase(
         (item) => item.status === "blocked",
       );
       if (stillBlockedAfterResolution.length > 0) {
-        const rebatch: TriageBatch = {
-          ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
-          items: stillBlockedAfterResolution.map((item) => ({
-            unit_id: item.unit_id,
-            failure_reason: item.failure_reason ?? "Unknown error",
-            last_successful_step: item.last_successful_step ?? "Unknown step",
-          })),
-        };
-        await writeJsonFile(join(options.artifactsDir, "triage_batch.json"), rebatch);
+        await writeTriageBatch(state, options.artifactsDir, stillBlockedAfterResolution);
         console.error(
           `\nTriage resolution left ${stillBlockedAfterResolution.length} blocked item(s) undecided. Re-wrote triage_batch.json.`,
         );
@@ -418,19 +428,7 @@ export async function runTriagePhase(
         return reconciledToClosing(state);
       }
 
-      const triageBatch: TriageBatch = {
-        ...(state.plan?.plan_id ? { plan_id: state.plan.plan_id } : {}),
-        items: stillBlocked.map((item) => ({
-          unit_id: item.unit_id,
-          failure_reason: item.failure_reason ?? "Unknown error",
-          last_successful_step: item.last_successful_step ?? "Unknown step",
-        })),
-      };
-
-      await writeJsonFile(
-        join(options.artifactsDir, "triage_batch.json"),
-        triageBatch,
-      );
+      await writeTriageBatch(state, options.artifactsDir, stillBlocked);
 
       console.error(
         `\nFound ${stillBlocked.length} blocked items. Wrote triage_batch.json.`,

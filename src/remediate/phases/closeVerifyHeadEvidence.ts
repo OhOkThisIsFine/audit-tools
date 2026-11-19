@@ -213,6 +213,8 @@ async function determine(
   { disposition: PerFindingDisposition; evidence: Evidence } | { withheld: string }
 > {
   const { root, head, base, dirtyAtBase, corpus, finding, readAtRef } = params;
+  const shortBase = base.slice(0, 12);
+  const shortHead = head.slice(0, 12);
   const anchor = anchorFor(finding);
   if (!anchor) {
     // Too little evidence to decide. Stated, never guessed at: this is the
@@ -236,13 +238,12 @@ async function determine(
     return {
       withheld:
         `the audit read an uncommitted version of '${file}' (it is listed in audit_read.dirty_paths), ` +
-        `so the blob at the audit-read commit ${base.slice(0, 12)} is not what the audit read`,
+        `so the blob at the audit-read commit ${shortBase} is not what the audit read`,
     };
   }
-  const shortHead = head.slice(0, 12);
   const baseContent = await readAtRef(root, base, file);
   if (baseContent === undefined) {
-    return { withheld: `'${file}' is not a readable file at the audit-read commit ${base.slice(0, 12)}` };
+    return { withheld: `'${file}' is not a readable file at the audit-read commit ${shortBase}` };
   }
   const basePresence = spanPresence(baseContent, anchor.quoted);
   if (basePresence.kind === "withheld") return { withheld: basePresence.reason };
@@ -273,7 +274,7 @@ async function determine(
       // makes no claim about the English of the finding, so it declines.
       return {
         withheld:
-          `the cited span is present both at the audit-read commit ${base.slice(0, 12)} and at HEAD ${shortHead}, ` +
+          `the cited span is present both at the audit-read commit ${shortBase} and at HEAD ${shortHead}, ` +
           "so this leg cannot tell a still-standing defect from a finding the code never showed",
       };
     }
@@ -284,7 +285,7 @@ async function determine(
         line,
         mechanism: "read_at_head_verification",
         mechanism_detail:
-          `read '${file}' at the audit-read commit ${base.slice(0, 12)} and at HEAD ${shortHead}: ` +
+          `read '${file}' at the audit-read commit ${shortBase} and at HEAD ${shortHead}: ` +
           "the cited span the finding quotes was present there and is no longer present, so the defect it cites was fixed by the time of the HEAD read",
       },
     };
@@ -300,7 +301,7 @@ async function determine(
       line,
       mechanism: "read_at_head_refutation",
       mechanism_detail:
-        `read '${file}' at the audit-read commit ${base.slice(0, 12)}: the cited span the finding quotes ` +
+        `read '${file}' at the audit-read commit ${shortBase}: the cited span the finding quotes ` +
         "is not present there, so the cited location never showed the defect the finding claims",
     },
   };
@@ -326,7 +327,7 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
     if (disposition?.status === "already_fixed" || disposition?.status === "refuted") return true;
     const units = (state.plan?.units ?? []).filter(unit => unit.source_finding_ids.includes(finding.id));
     return units.length > 0 && units.every(unit => state.items?.[unit.id]?.status === "resolved_no_change");
-  }).map(finding => ({ finding }));
+  });
   // A previous read is not authority for this HEAD — for ANY finding, not only
   // a current candidate. A finding whose unit was reworked to a real change is
   // no longer a candidate, and its old `refuted` would otherwise override that
@@ -347,7 +348,7 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
     head,
     base: null,
     recorded: {},
-    withheld: candidates.map(({ finding }) => ({
+    withheld: candidates.map((finding) => ({
       finding_id: finding.id,
       determined: false as const,
       reason,
@@ -386,14 +387,11 @@ export async function verifyHeadEvidenceAgainstFindings(params: {
   const dirtyAtBase = new Set(auditRead.dirty_paths.map((path) => normalizeRepoPath(path)));
 
   const corpus = await enumerateTrackedFilePaths(root);
-  const readAtRef =
-    overrides?.readAtRef ??
-    ((readRoot: string, ref: string, file: string) =>
-      fileContentAtRef(readRoot, ref, file));
+  const readAtRef = overrides?.readAtRef ?? fileContentAtRef;
 
   const recorded: Record<string, HeadEvidenceRecord> = {};
   const withheld: HeadEvidenceRecord[] = [];
-  for (const { finding } of candidates) {
+  for (const finding of candidates) {
     const verdict = await determine({
       root,
       head,

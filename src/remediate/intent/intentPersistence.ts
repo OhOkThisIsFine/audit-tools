@@ -42,6 +42,18 @@ export interface PersistedIntentInterpretation {
   created_at: string;
 }
 
+/** The host-confirmed, non-blank `free_form_intent` of a checkpoint, or null. */
+function confirmedFreeFormIntent(checkpoint: IntentCheckpoint | undefined): string | null {
+  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
+  const raw = checkpoint.free_form_intent;
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  return raw;
+}
+
+function intentInterpretationPath(artifactsDir: string): string {
+  return join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
+}
+
 /**
  * Interpret a confirmed checkpoint's `free_form_intent` via the shared
  * deterministic interpreter and persist the structured signals to a sidecar
@@ -58,9 +70,8 @@ export async function interpretConfirmedCheckpointIntent(
   // loss of intent and belongs in the durable log, not only on stderr.
   runLogger?: RunLogger,
 ): Promise<PersistedIntentInterpretation | null> {
-  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
-  const raw = checkpoint.free_form_intent;
-  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  const raw = confirmedFreeFormIntent(checkpoint);
+  if (raw === null) return null;
 
   const interpreted = interpretFreeFormIntent(raw);
   // The clause pipeline (interpretIntent) owns identity + blocking questions;
@@ -76,7 +87,7 @@ export async function interpretConfirmedCheckpointIntent(
   };
   try {
     await writeJsonFile(
-      join(artifactsDir, INTENT_INTERPRETATION_FILENAME),
+      intentInterpretationPath(artifactsDir),
       persisted,
     );
   } catch {
@@ -115,11 +126,10 @@ export async function readOrRepairIntentInterpretation(
   checkpoint: IntentCheckpoint | undefined,
   runLogger?: RunLogger,
 ): Promise<PersistedIntentInterpretation | null> {
-  if (!checkpoint || checkpoint.confirmed_by !== "host") return null;
-  const raw = checkpoint.free_form_intent;
-  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  const raw = confirmedFreeFormIntent(checkpoint);
+  if (raw === null) return null;
 
-  const sidecarPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
+  const sidecarPath = intentInterpretationPath(artifactsDir);
   try {
     const parsed = parsePersistedIntentInterpretation(
       JSON.parse(await readFile(sidecarPath, "utf8")),
