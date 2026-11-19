@@ -105,6 +105,7 @@ import {
   dispatchBoundedItems,
   LanePreflightError,
 } from './lane-dispatch.mjs';
+import { splitBacklogEntries } from './backlog-entry-grammar.mjs';
 import { openDispatchLane } from './mcp-dispatch-lane.mjs';
 import { evaluateProbes } from '../nightly/items.mjs';
 import { hashContent } from './primitives.mjs';
@@ -263,6 +264,9 @@ export function countTriageStamp(stamp, rec) {
 /** Premise stamps that establish nothing about the tree. */
 const UNEARNED_PREMISES = new Set(['unprobed', 'probes_unusable', 'premise_unconfirmed']);
 
+/** Probe states that carry no signal about the premise. */
+const SIGNAL_FREE_PROBE_STATES = new Set(['bad_path', 'unknown', 'error', 'untrackable']);
+
 /**
  * Downgrade a deletion-authorizing verdict whose premise was never evaluated
  * (P65, owner decision 2026-09-05 — accepted as written).
@@ -325,8 +329,7 @@ export function premiseVerdict(rec, root = ROOT) {
   const stamp = (() => {
     if (status === 'unprobed') return raw.length > 0 ? 'probes_unusable' : 'unprobed';
     if (status === 'resolved') return 'premise_unconfirmed';
-    const signalFree = new Set(['bad_path', 'unknown', 'error', 'untrackable']);
-    if (probes.every((p) => signalFree.has(p.state))) return 'probes_unusable';
+    if (probes.every((p) => SIGNAL_FREE_PROBE_STATES.has(p.state))) return 'probes_unusable';
     return probes.some((p) => p.state === 'absent') ? 'partial' : 'holds';
   })();
   return { stamp, recovered };
@@ -374,22 +377,14 @@ export function resolveCodePaths(raw, tracked) {
     const written = entry.replace(/\\/g, "/").replace(/^\.\//, "");
     if (seen.has(written)) continue;
     seen.add(written);
-    if (written.includes("/")) {
-      // A full path the model gave is checked, not trusted: the column's whole
-      // defect was paths that read like evidence and resolve to nothing.
-      const hits = tracked(["ls-files", "--", written]);
-      if (hits && hits.length === 1) {
-        resolved.push(hits[0]);
-        continue;
-      }
-      unresolved.push({ written, reason: hits && hits.length > 1 ? "ambiguous" : "not_tracked" });
-      continue;
-    }
-    // A bare basename, resolved only when exactly one tracked file carries it.
-    const hits = tracked(["ls-files", "--", `*/${written}`, written]);
+    // A full path the model gave is checked, not trusted: the column's whole
+    // defect was paths that read like evidence and resolve to nothing. A bare
+    // basename is resolved only when exactly one tracked file carries it.
+    const fullPath = written.includes("/");
+    const hits = tracked(fullPath ? ["ls-files", "--", written] : ["ls-files", "--", `*/${written}`, written]);
     if (hits && hits.length === 1) {
       resolved.push(hits[0]);
-      recovered.push({ from: written, via: "basename", to: hits[0] });
+      if (!fullPath) recovered.push({ from: written, via: "basename", to: hits[0] });
       continue;
     }
     unresolved.push({ written, reason: hits && hits.length > 1 ? "ambiguous" : "not_tracked" });
@@ -476,17 +471,9 @@ export function triageRecordCallbacks({ root = ROOT } = {}) {
 }
 
 function chunk(file, root) {
-  const text = fs.readFileSync(join(root, 'docs', 'backlog', file), 'utf8');
-  const lines = text.split(/\r?\n/);
-  const entries = [];
-  let cur = null;
-  for (const l of lines) {
-    if (/^- \*\*/.test(l)) { if (cur) entries.push(cur); cur = { file, body: [l] }; }
-    else if (cur) cur.body.push(l);
-  }
-  if (cur) entries.push(cur);
-  return entries.map((e) => {
-    const text = e.body.join('\n').trim();
+  const source = fs.readFileSync(join(root, 'docs', 'backlog', file), 'utf8');
+  return splitBacklogEntries(source).map((entry) => {
+    const text = entry.body.trim();
     // Normalize whitespace so a reflow alone does not re-triage the entry.
     const hash = hashContent(text.replace(/\s+/g, ' '), { length: 8 });
     return { id: `${file.replace('.md', '')}#${hash}`, file, text };

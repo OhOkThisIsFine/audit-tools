@@ -1,7 +1,7 @@
 // sites-pinned: tests/shared/session-registry.test.ts
 // Session registry + the `-z` porcelain identity the session-scoped gates
 // share. Consumers: session-start-guards (registration + baseline capture),
-// closeout-challenge-gate (partition read + child skip), and the friction-stop /
+// closeout-challenge-gate (partition read + child skip), and the
 // question-philosophy / pre-commit gates (registry read).
 //
 // Every function is fail-soft: fs/git faults return the empty/neutral value,
@@ -362,8 +362,8 @@ export function lapOwnedBy(root, sessionId) {
 // One-call read for every Stop/PreToolUse gate. An EMPTY sessionId is never
 // classified as a child: real children always carry session_id (probed
 // 2026-08-18), so an empty one means an older payload shape — gates keep their
-// current empty-sid behavior (closeout/question: fail open for cap reasons;
-// friction: proceed). A child by env marker is a child ARMED OR NOT: a fresh
+// current empty-sid behavior (closeout/question: fail open for cap reasons).
+// A child by env marker is a child ARMED OR NOT: a fresh
 // worktree holds no owner record to arm the registry, and a delegated lane must
 // never be recruited there either.
 //

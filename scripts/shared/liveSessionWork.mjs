@@ -1,6 +1,5 @@
-// Live-work predicate for Stop-hook payloads — shared by the session-lifecycle
-// Stop gates (closeout-challenge, friction-stop) so both read ONE definition of
-// "this stop is a wait, not an end".
+// Live-work predicate for Stop-hook payloads — the ONE definition of "this stop
+// is a wait, not an end" for the closeout-challenge Stop gate.
 //
 // Empirical basis (probed live 2026-08-07, Claude Code 2.1.222, win32; re-probed
 // 2026-08-29, CC 2.1.247): the Stop payload carries `background_tasks` — the
@@ -24,10 +23,10 @@
 // counts as LIVE, task `type` is ignored (subagents, workflows and shell tasks
 // all mean the harness will re-invoke the session), and every leg suppresses
 // only on POSITIVE evidence — a missing, empty, or unreadable signal never
-// reads as "live", so no leg can invert absence into a skipped challenge. For
-// both consumers the cheap failure is a skipped intervention at a turn
-// boundary; the expensive one is spending a capped challenge — or forcing a
-// friction walk — on a stop the harness is about to resume anyway.
+// reads as "live", so no leg can invert absence into a skipped challenge. The
+// cheap failure is a skipped intervention at a turn boundary; the expensive one
+// is spending a capped challenge on a stop the harness is about to resume
+// anyway.
 
 import { readFileSync } from 'node:fs';
 

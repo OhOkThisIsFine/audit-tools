@@ -322,8 +322,7 @@ export function runInstalls(toolName, installs, counts) {
  * audit-code, "OpenCode command" for remediate-code — the two tools have
  * historically worded this differently). `manualInstructions`, if given, is
  * an array of extra warn lines printed on failure only.
- */
-/**
+ *
  * @param {{toolName: string, path: string, sharedOpenCodePermissions: any, buildMerged: Function, label: string, manualInstructions?: string[]}} options
  * @param {{succeeded: number, failed: number}} counts
  */

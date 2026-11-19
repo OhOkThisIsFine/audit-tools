@@ -96,6 +96,28 @@ the work that would make it a plain cleanup.
   branches). `tests/remediate/host-handoff-corroboration-obligations.test.ts` imports it by name. **Unblock:** change those imports in the same commit.
 - **P09 — the `wordJaccard` re-export in `dedup/crossLensDedup.ts`.** Only a test imports it
   from there. **Unblock:** point that test at the shared module in the same commit.
+- **P10 — files, or regions of files, with no `// sites-pinned:` declaration** (the P05 rule; it
+  covers every `scripts/**/*.mjs`). Not applied, with the test that would pin each site:
+  `byKey` in `generate-executor-producers.mjs` is a wrapper of `compareCodeUnits` (the region
+  above its one declaration; `tests/audit/executor-artifact-production-declaration.test.ts`); a
+  `propertyKeyText` for the two `property.name.getText().replace(...)` copies in
+  `generate-spec-mirrors.mjs` (`tests/shared/spec-mirror-drift.test.ts`); the second
+  `ts.isArrayLiteralExpression(value)` test in `readCheckRow` (`generate-ingestion-checks.mjs`,
+  `tests/shared/ingestion-checks-drift.test.ts`); the two method cases of `renderMembers` in
+  `generate-filelock-export-surface.mjs` (`tests/shared/filelock-export-surface.test.ts`); the
+  unreachable branches of `toRepoRelativeTestPath` and `readDurationMap` in
+  `vitest-sequencer.mjs` (no test names the file, so it needs a new pinning test first); the area
+  totals sorted twice and the local comparator in `vitest-timing-reporter.mjs`
+  (`tests/shared/parallel-flake-baseline.test.ts`); the always-false `isAbsolute` guard in
+  `clean-dist.mjs`; the `npm.cmd` ternary in `smoke-tarball.mjs`, which `smoke-process.mjs` and
+  `profile.mjs` also spell (`tests/shared/packaged-smoke-single-pack.test.ts`).
+  **Unblock:** add a declaration with the test that pins each file's sites.
+- **P10 — one parse for `collectIndex` and `collectWatchRows`** (`generate-backlog-index.mjs`).
+  Tests call `collectWatchRows` with its own sources argument. **Unblock:** change those tests in
+  the same commit.
+- **P10 — one read of each doc in `renderDocs`** (`generate-spec-mirrors.mjs`; no declaration,
+  and `tests/shared/spec-mirror-drift.test.ts` drives it). **Unblock:** a declaration, and a check
+  that the error order of a failed read stays.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -175,6 +197,11 @@ real change, not a cleanup.
   `resolveAffectedPath` cannot throw.
 - **P09 — one map for the plan ledger** (`phases/plan.ts`). It is equal only when ids are
   unique, and no check makes them unique there. **Unblock:** a uniqueness check or a proof.
+- **P10 (a P07 lead) — no `stat` for a `Dirent` that is a file in `collectFilesSorted`**
+  (`src/shared/io/collectFilesSorted.ts`, P02). P07 measured the walk at 4–7 s of
+  `buildToolingManifest`. A file that disappears between `readdir` and `stat` now goes to the
+  caller's `onMissing` policy; without the `stat` it is returned as a file. **Unblock:** accept
+  that change for the vanished-entry case, or keep the `stat` only on the `onMissing` path.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -276,6 +303,37 @@ real change, not a cleanup.
   regex is in `state/decisionConsumption.ts`, `contractPipeline/executionPlan.ts`,
   `steps/dispatch/contractConformanceReview.ts` and three shared charter schemas.
   **Unblock:** a home in `src/shared`, adopted at every site in one commit.
+- **P10 — a scripts-tree `uniqueSorted`.** Six `[...new Set(x)].sort()` sites in
+  `scripts/shared/` sort with the default comparator (code-unit order for strings).
+  `SINGLE_DEFINITION_RULES` in `scripts/check-shared-primitives.mjs` names one home for
+  `uniqueSorted` (`src/shared/compareCodeUnits.ts`), so a twin in `primitives.mjs` needs a second
+  home in that rule first. **Unblock:** the rule change and the twin, adopted at every site.
+- **P10 — AST helpers in `tsAstHelpers.mjs`.** The "find a top-level `const NAME`" search is in
+  `generate-executor-producers.mjs`, `generate-ingestion-checks.mjs` and
+  `executor-write-sites.mjs`; the property-key unquote is in `generate-executor-producers.mjs`
+  and `generate-spec-mirrors.mjs`. Their error text and their tolerance of a bad input differ.
+  **Unblock:** a `findTopLevelConst` and `propertyKeyText` with those differences as parameters,
+  with the generated files byte-identical.
+- **P10 — one `isTreeId`.** The git tree-id regex is in `worktree-tree.mjs` (private),
+  `suiteGreenStamp.mjs`, `dispatch-load-flake-investigation.mjs` and `verify-release-source.mjs`
+  (which throws, so it stays). `worktree-tree.mjs` and `dispatch-load-flake-investigation.mjs`
+  have no declaration, and `tests/shared/vitest-gate-false-red.test.ts` copies
+  `worktree-tree.mjs` into a fixture root. **Unblock:** declarations, and the export in the same
+  commit as its adopters.
+- **P10 — the `.audit-tools-profile` directory literal** in `profile.mjs`, `run-vitest-gate.mjs`
+  and `generate-vitest-shard-baseline.mjs`. `tests/shared/vitest-gate-false-red.test.ts` pins the
+  text `resolve(profileDir, "load-flake-record.json")`. **Unblock:** export `profileDir` from
+  `profile.mjs`, keep the local name in `run-vitest-gate.mjs`, and add a declaration to the
+  baseline generator.
+- **P10 — delete `conversion-assertion-parity.mjs`.** No script, test or gate runs it; the
+  `.mjs`-to-`.ts` test conversion it checked is done. `docs/backlog/durable-traps.md` tells a
+  future conversion to run it. **Unblock:** an owner decision on that trap.
+- **P10 (P07 leads, `src/` files of landed parts):** one `getOrCreate` map helper
+  (`systemic/reviewFileMap.ts`, `secondOrderAdversaryPrompt.ts`, twice in
+  `reporting/scoreAudit.ts`) and one `sessionIntentPath(root)` (`supervisor/operatorHandoff.ts`,
+  `cli/validateCommand.ts`). Two of the sites are loop-core, and `scoreAudit.ts` and
+  `operatorHandoff.ts` have no declaration for them. **Unblock:** a home in `src/shared`, adopted
+  in one lap with the loop-core attestation.
 
 ## 4. Efficiency items with no measured cost
 
@@ -336,6 +394,12 @@ worth a change.
   of the comparator and of the `checkpointFilter` `affectedPaths`; one read of `review-history`
   where two reads run; one `sourceSha` per source in `contractPipeline/executionPlan.ts`. Plan
   sizes are tens of units.
+- **P10:** one module walk and one read per module for `evaluateClosure` and
+  `checkDeclaredClaims` (`loopCoreClosure.mjs`; both are called from
+  `scripts/check-loop-core-closure.mjs` in P11, and `tests/shared/loop-core-closure.test.ts`
+  calls both); one `ts.createSourceFile` for `buildScopeIndexFromText` and `scopeNodeFor`
+  (`executor-write-sites.mjs`); a `Set` for the `tracked.includes` filter in
+  `generate-vitest-shard-baseline.mjs` (no declaration).
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -398,6 +462,20 @@ worth a change.
   reflow in `index.ts`; the empty ` *` line in the `autonomousGate.ts` doc. Also the delete of
   `REMEDIATION_HOST_HANDOFF_RECORD_V1ALPHA1` (`state/types.ts`): it names the retired version,
   and tests use its literal.
+- **P10:** in `triage-backlog.mjs`, a helper for the two path normalizations and the `Set` in
+  `reviveRecord` (`resolveCodePaths` dedupes too, but the `Set` states the merge); an
+  `OPEN_TRACKS_HEADING` constant (its three uses are a regex, a trimmed compare and data); the
+  `SOURCE` regex in `code-citation-resolution.mjs` built from `CODE_EXTENSIONS`; in
+  `loopCoreClosure.mjs`, `base ?? spec`, an expression-body filter and the
+  `known.has(target)` test in `checkDeclaredClaims` (`resolveSpecifier` returns only known
+  modules, but a cheap guard in a gate stays); the indent of one `tail` line in
+  `derived-file-preflight.mjs`; one `includes('/')` test in `catalogCommands`
+  (`verify-steps.mjs`); renaming the inner `result` in `runIsolatedDiagnostics`
+  (`run-vitest-gate.mjs`); a `git` helper for the six `spawnSync('git', ...)` calls in
+  `sessionRegistry.mjs` (their timeouts and stdio differ); the `sessionsDir` hoist in
+  `pruneStaleSessionRecords`. In the loop-core `loopCoreAttestationLedger.mjs`: the
+  `?? kinds(ledger)[0]` fallback in `citedRecord` and one cited-set builder for `verifyLedger`
+  and `pruned` (their guards differ; each needs the attestation).
 
 ## 6. Rejected — do not re-propose
 
@@ -482,3 +560,12 @@ Each of these was checked and is NOT behavior-neutral, or is correct as it stand
   `carriesEnvironmentVerdict`, `FinalGateRedRecord`, `FinalGateVerdictRecord`, `WriteStepInput`,
   and the `isTerminalStatus` / `isVerifiedCompleteStatus` re-export in `nextStep.ts`): knip's
   `ignoreExportsUsedInFile` already ignores them.
+- **P10:** the `llm-relay` comments in `triage-backlog.mjs` say "retired" and give the origin of
+  a carried value, so they are history, not residue. The `size`, `system`, `schema` and
+  `maxTokens` options that `mcp-dispatch-lane.mjs` ignores are passed by callers and asserted by
+  `tests/shared/triage-lane-lifecycle.test.ts`. The `wrapper/` copies of `resolveSpawn` and
+  `quoteForCmd` differ from `spawn-shell.mjs`. `trackedMatches` in `triage-backlog.mjs` and the
+  `git` helper in `code-citation-resolution.mjs` differ on failure (`null` against a throw).
+  `sessionRegistry.mjs` and `hostMemoryDir.mjs` each have a `repositoryRoot`, and they differ
+  (timeout, memo, stderr). Moving `generate-guard-reach-paths.mjs` and
+  `generate-ci-trigger-paths.mjs` onto `runGeneratedArtifactCli` changes their output text.

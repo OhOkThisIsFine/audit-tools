@@ -132,15 +132,12 @@ const PINS = new Map([
   ["README.md",["tests/shared/philosophy-brief-gate.test.ts","tests/shared/generated-artifact-registry.test.ts"]],
 ]);
 
-/** Repo-relative path with backslashes normalized and any leading `./` dropped. */
-const normPinPath = (p) => String(p).replace(/\\/g, '/').replace(/^\.\//, '');
-
 /** Does `text` import the built package (the `dist/`-backed subpath)? */
 function importsBuiltPackage(text) {
   const re = /(?:^|\n)\s*import\s+(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]/g;
   for (const m of text.matchAll(re)) {
     const spec = m[1];
-    if (/^audit-tools(?:\/|$)/.test(spec) || /^(?:\.\.\/)+dist\//.test(normPinPath(spec))) return true;
+    if (/^audit-tools(?:\/|$)/.test(spec) || /^(?:\.\.\/)+dist\//.test(norm(spec))) return true;
   }
   return false;
 }
@@ -163,7 +160,7 @@ function importsBuiltPackage(text) {
  * @returns {string[]}
  */
 export function reconcilePinObligations(tracked, readText, pins = PINS) {
-  const files = new Set(tracked.map(normPinPath));
+  const files = new Set(tracked.map(norm));
   const errors = [];
   for (const [subject, tests] of pins) {
     if (!files.has(subject)) {

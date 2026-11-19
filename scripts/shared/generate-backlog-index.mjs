@@ -208,6 +208,13 @@ export function collectWatchRows(sources) {
   return rows;
 }
 
+/**
+ * An entry title lifted VERBATIM from `docs/backlog/<file>` into `docs/backlog.md`
+ * — one directory up — so relative links inside the title must be re-based,
+ * exactly as the roadmap generator does it.
+ */
+const liftTitle = (title, file) => rebaseRelativeLinks(title, `docs/backlog/${file}`, "docs/backlog.md");
+
 /** Render the live-run watch matrix block, markers included. */
 export function renderWatchMatrix(rows) {
   const head =
@@ -227,7 +234,7 @@ export function renderWatchMatrix(rows) {
   const body = rows
     .map(
       (r) =>
-        `- **${rebaseRelativeLinks(r.title, `docs/backlog/${r.file}`, "docs/backlog.md")}** — ` +
+        `- **${liftTitle(r.title, r.file)}** — ` +
         `[${r.file}](backlog/${r.file})\n  ${r.watch}\n`,
     )
     .join("");
@@ -243,19 +250,7 @@ export function renderIndex(groups) {
         `### [\`${heading(g)}\`](backlog/${g.file})\n\n` +
         (g.items.length === 0
           ? `*(none)*\n`
-          : g.items
-              .map(
-                // Lifted VERBATIM from `docs/backlog/<file>` into `docs/backlog.md`
-                // — one directory up — so relative links inside the title must be
-                // re-based, exactly as the roadmap generator does it.
-                (i) =>
-                  `- \`${i.file}:${i.line}\` — ${rebaseRelativeLinks(
-                    i.title,
-                    `docs/backlog/${i.file}`,
-                    "docs/backlog.md",
-                  )}\n`,
-              )
-              .join("")),
+          : g.items.map((i) => `- \`${i.file}:${i.line}\` — ${liftTitle(i.title, i.file)}\n`).join("")),
     )
     .join("\n");
 

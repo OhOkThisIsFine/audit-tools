@@ -38,7 +38,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | landed |
 | P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | landed |
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | landed |
-| P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | open |
+| P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | landed |
 | P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | open |
 | P12 wrapper, hooks, entries, root config | `wrapper/**`, `.claude/hooks/**`, `.githooks/**`, `audit-code.mjs`, `remediate-code.mjs`, `eslint.config.js`, `vitest.config.ts`, `.dependency-cruiser.cjs` | 34 | 10,747 | 113 | open |
 
@@ -438,4 +438,67 @@ P09 coverage: four reviewers, one per file group (`phases/close.ts` and `closeAc
 the other `phases/` and `review/` files; the top-level, `contractPipeline/` and `intent/` files;
 the `state/` and `validation/` files). Each of the 40 files was read in full by its reviewer from
 all four angles. The lap checked each risky item against source before the apply, and a second
+reviewer checked the applied diff.
+
+### From P10
+
+P10 checked the leads that earlier parts left for it:
+
+- **The P08 lead on `loopCoreClosureData.mjs`:** the `intakeResolver.ts` row keeps
+  `claim: "reads-only"`. The closure gate (`checkDeclaredClaims` in `loopCoreClosure.mjs`) reads
+  only the module's own source for a direct filesystem verb, and it does not follow a helper.
+  `intakeResolver.ts` writes only through `writeJsonFile`, `writeCurrentStep` and
+  `writeRemediationBrief`, so the claim is true by the gate's rule; `mutates` would red the gate.
+  The row's `reason` now names those writes. The data file's header and the claim comment in
+  `loopCoreClosure.mjs` no longer say that a `reads-only` module "can observe, never change".
+- **Private `[...new Set(x)].sort(...)` copies (P04 lead):** none in `scripts/shared/` uses a
+  comparator. Several use the default `.sort()`, which is code-unit order for strings. A
+  scripts-tree `uniqueSorted` twin is in the deferred record.
+- **The three P07 leads labeled P10** (`collectFilesSorted`, a `getOrCreate` helper, one
+  `sessionIntentPath`) name `src/` files of landed parts, not `scripts/shared/`. They are in the
+  deferred record.
+
+P10 made no cross-part touch. Every changed file is under `scripts/shared/`.
+`triage-backlog.mjs` splits entries with `splitBacklogEntries` (its `chunk` was a copy), and
+`resolveCodePaths` has one query and one result tail for both path forms. The handoff roadmap
+generator lost the `groups` list that it built and discarded, and the `heading` field that only
+that list read; `sectionText` and the Immediate-next reader share one section scan.
+`lane-dispatch.mjs` has one `errText` and one `rawText`; `mcp-dispatch-lane.mjs` has one
+`cancelJob` for its two cancel paths, and a `// sites-pinned:` declaration that binds those paths
+to `tests/shared/triage-lane-health.test.ts`, the test that drives them.
+`derived-file-preflight.mjs` lost `normPinPath`, a copy of `norm`. Comments in
+`sessionRegistry.mjs` and `liveSessionWork.mjs` no longer name the retired friction Stop gate.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P11/P12:** the "is this module the entry point" test is written out in about 30 scripts, with
+  two spellings (`pathToFileURL` and `new URL(\`file://...\`)`); the two can differ for a Windows
+  path. A shared helper in `scripts/shared/` would serve them.
+- **P11:** the repo-root derivation `resolve(here, "../..")` is written in about 14 files.
+- **P11:** `(error)?.message ?? error` and `error instanceof Error ? error.message : String(error)`
+  are both used in `scripts/`; they differ for a non-`Error` throw. The `src` `errorMessage` cannot
+  be imported there (the scripts tree is pre-build).
+- **P12:** the `wrapper/` copies of `resolveSpawn` and `quoteForCmd` differ from
+  `scripts/shared/spawn-shell.mjs` (caret escape, `%` refusal); they are not twins.
+- **P10 (correctness, not checked):** `shardSuffix` (`vitestShard.mjs`) reads only the
+  `--shard=N/M` form, so `--shard 1/4` gets no suffix; `readLoadFlakeRecord` hides a corrupt
+  record behind an empty catch; `install-host-assets.mjs` prints "build the shared workspace
+  first", but there is one package now; `conversion-assertion-parity.mjs` runs `git` at import
+  and exits 0 on a divergence; `MUTATING_CALL` in `loopCoreClosure.mjs` also matches comments and
+  strings; `resolveSpecifier` uses a `startsWith(root)` test that is not segment-accurate;
+  `OUT = process.argv[2]` in `triage-backlog.mjs` is read at import time, so an importer's default
+  `outPath` can be a test-runner argument.
+
+P10 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each. Most code skips are in files, or regions of files, with no `// sites-pinned:`
+declaration (the P05 rule).
+
+P10 coverage: four reviewers, one per file group (the docs and backlog generators; the session,
+lane, landing and host-asset files; the gate, generator and loop-core files; the test, suite and
+release files). Each of the 64 hand-written `.mjs` files was read in full by its reviewer from
+all four angles; the three `*.generated.mjs` files (their generators were reviewed) and the three
+JSON files were not reviewed. The docs-and-backlog reviewer
+wrote its findings from notes taken before a context compaction, so the lap checked each of its
+items against the source again. The lap checked each applied item against source, and a second
 reviewer checked the applied diff.

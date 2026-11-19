@@ -60,6 +60,13 @@ export class LanePreflightError extends Error {
   }
 }
 
+/** The text a row or stamp records for a caught failure. */
+const errText = (err) => String(/** @type {any} */ (err).message || err);
+
+/** A lane result's raw reply as text, whatever the lane put there. */
+const rawText = (laneResult) =>
+  typeof laneResult?.raw === 'string' ? laneResult.raw : String(laneResult?.raw ?? '');
+
 /**
  * Drive a bounded sweep: one lane call per item, resumable, stamped.
  *
@@ -200,7 +207,7 @@ export async function dispatchBoundedItems({
     try {
       await preflight();
     } catch (err) {
-      stamp.aborted = /** @type {any} */ (`preflight failed: ${String(/** @type {any} */ (err).message || err)}`);
+      stamp.aborted = /** @type {any} */ (`preflight failed: ${errText(err)}`);
       stampSafe(stamp);
       throw new LanePreflightError(stamp.aborted, { cause: err });
     }
@@ -217,7 +224,7 @@ export async function dispatchBoundedItems({
   const errorRow = (e, err) => ({
     id: e.id,
     ...(typeof e.file === 'string' ? { file: e.file } : {}),
-    error: String(/** @type {any} */ (err).message || err),
+    error: errText(err),
   });
 
   /**
@@ -233,27 +240,27 @@ export async function dispatchBoundedItems({
    */
   async function attempt(e) {
     const failures = [];
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let round = 1; round <= 2; round++) {
       let laneResult;
       try {
         laneResult = await callLane(e);
       } catch (err) {
-        failures.push(String(/** @type {any} */ (err).message || err));
-        if (attempt === 2) return { laneResult: null, failures, record: errorRow(e, new Error(failures.join(' | retry: '))) };
+        failures.push(errText(err));
+        if (round === 2) return { laneResult: null, failures, record: errorRow(e, new Error(failures.join(' | retry: '))) };
         retried += 1;
         continue;
       }
       try {
-        const raw = typeof laneResult?.raw === 'string' ? laneResult.raw : String(laneResult?.raw ?? '');
+        const raw = rawText(laneResult);
         // Log before parsing; preserve both malformed and replacement replies.
         if (itemLogPath) {
-          if (attempt === 1) fs.writeFileSync(itemLogPath(e), raw);
+          if (round === 1) fs.writeFileSync(itemLogPath(e), raw);
           else fs.appendFileSync(itemLogPath(e), '\n--- retry ---\n' + raw);
         }
         return { laneResult, failures, record: buildRecord(e, laneResult) };
       } catch (err) {
-        if (attempt === 1 && retryRecordError?.(err)) {
-          failures.push(String(/** @type {any} */ (err).message || err));
+        if (round === 1 && retryRecordError?.(err)) {
+          failures.push(errText(err));
           retried += 1;
           continue;
         }
@@ -270,7 +277,7 @@ export async function dispatchBoundedItems({
       if (laneResult && failures.length > 0) rec.retry = { attempts: 2, errors: failures };
       if (laneResult) {
         // Driver-owned diagnostics refer to the final lane response.
-        const raw = typeof laneResult.raw === 'string' ? laneResult.raw : String(laneResult.raw ?? '');
+        const raw = rawText(laneResult);
         rec.finish_reason = laneResult.finishReason;
         rec.output_bytes = Buffer.byteLength(raw, 'utf8');
       }

@@ -490,6 +490,27 @@ async function callTool(bridge, name, args) {
   return sc;
 }
 
+// sites-pinned: tests/shared/triage-lane-health.test.ts
+//   The deadline cancel and the input_required cancel are driven there.
+/**
+ * Cancel a job. A failed cancel throws a `DispatchLaneError` whose text names
+ * the job and `failedWhat`, the phrase that says which cancel failed.
+ *
+ * @param {ReturnType<typeof startBridge>} bridge
+ * @param {string} jobId
+ * @param {string} failedWhat
+ */
+async function cancelJob(bridge, jobId, failedWhat) {
+  try {
+    return await callTool(bridge, 'opencode_job_cancel', { jobId });
+  } catch (err) {
+    throw new DispatchLaneError(
+      `opencode_job_cancel for ${jobId} ${failedWhat}: ${/** @type {any} */ (err)?.message ?? err}`,
+      { cause: err },
+    );
+  }
+}
+
 /**
  * Poll a job to a terminal status, respecting the CALLER's `deadline` — not
  * the bridge's own 45-second-per-call clamp. On deadline, cancel and RETURN
@@ -506,18 +527,10 @@ async function callTool(bridge, name, args) {
 async function pollUntilTerminal(bridge, jobId, deadline, startedAt, waitRetryMs) {
   for (;;) {
     if (Date.now() >= deadline) {
-      let cancelled;
-      try {
-        cancelled = await callTool(bridge, 'opencode_job_cancel', { jobId });
-      } catch (err) {
-        // The cancel itself failing after a deadline is a transport-level
-        // fault, not an ordinary timeout: throw, so the driver's one retry
-        // applies (a plain timed-out RETURN never reaches that retry).
-        throw new DispatchLaneError(
-          `opencode_job_cancel for ${jobId} failed after its deadline: ${/** @type {any} */ (err)?.message ?? err}`,
-          { cause: err },
-        );
-      }
+      // The cancel itself failing after a deadline is a transport-level
+      // fault, not an ordinary timeout: `cancelJob` throws, so the driver's one
+      // retry applies (a plain timed-out RETURN never reaches that retry).
+      const cancelled = await cancelJob(bridge, jobId, 'failed after its deadline');
       // Upstream JobService.cancel() returns the TERMINAL snapshot unchanged
       // when the job already finished between the last wait and this cancel
       // call — a real completed/failed answer must never be discarded and
@@ -552,15 +565,7 @@ async function pollUntilTerminal(bridge, jobId, deadline, startedAt, waitRetryMs
  * @param {string} jobId
  */
 async function cancelInputRequired(bridge, jobId) {
-  let cancelled;
-  try {
-    cancelled = await callTool(bridge, 'opencode_job_cancel', { jobId });
-  } catch (err) {
-    throw new DispatchLaneError(
-      `opencode_job_cancel for ${jobId} (input_required) failed: ${/** @type {any} */ (err)?.message ?? err}`,
-      { cause: err },
-    );
-  }
+  const cancelled = await cancelJob(bridge, jobId, '(input_required) failed');
   return {
     ...cancelled,
     error: cancelled.error ?? `job ${jobId} asked for input; a headless sweep cannot answer it — cancelled`,

@@ -101,7 +101,8 @@ export function buildImporterGraph(root, modules) {
 //   'pure'       neither the module nor anything it reaches imports a node I/O
 //                builtin. It cannot touch the filesystem even indirectly.
 //   'reads-only' I/O is reachable, but the module's own source performs no
-//                mutating filesystem call. It can observe, never change.
+//                mutating filesystem call. A write it makes goes through a
+//                helper module, which the claim does not follow.
 //   'mutates'    the module's own source performs a mutating filesystem call,
 //                so its reason must go on to say what it writes and who owns
 //                that location — the boundary itself, or its caller.

@@ -179,6 +179,12 @@ function defaultRunCommand(command, args, cwd) {
   return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? String(result.error ?? "") };
 }
 
+/** @param {number} ms */
+const defaultSleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** @param {string} line */
+const defaultLog = (line) => console.log(line);
+
 /**
  * Land `sha` on `defaultBranch` through a pull request from `branch`.
  *
@@ -207,9 +213,9 @@ export async function landThroughPullRequest({
   waitMs,
   pollMs,
   runCommand = defaultRunCommand,
-  sleep = (ms) => new Promise((done) => setTimeout(done, ms)),
+  sleep = defaultSleep,
   now = () => Date.now(),
-  log = (line) => console.log(line),
+  log = defaultLog,
 }) {
   // A full commit id only: an empty or partial one would turn the pushes below
   // into `:refs/heads/<branch>` — a branch DELETE.
@@ -365,8 +371,8 @@ export async function deleteLandingBranch({
   prUrl,
   pollMs,
   runCommand = defaultRunCommand,
-  sleep = (ms) => new Promise((done) => setTimeout(done, ms)),
-  log = (line) => console.log(line),
+  sleep = defaultSleep,
+  log = defaultLog,
 }) {
   let failures = 0;
   let announced = false;

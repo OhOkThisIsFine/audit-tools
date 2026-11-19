@@ -24,7 +24,8 @@
 //   'pure'        neither this module nor anything it reaches imports a node
 //                 I/O builtin — it cannot touch the filesystem even indirectly.
 //   'reads-only'  I/O is reachable, but this module's own source performs no
-//                 mutating filesystem call. It can observe, never change.
+//                 mutating filesystem call. A write it makes goes through a
+//                 helper module, which the claim does not follow.
 //   'mutates'     this module's own source performs a mutating filesystem call,
 //                 so the reason below must say what it writes and who owns that
 //                 location. This is the only claim whose argument is prose, and
@@ -73,7 +74,7 @@ export const LOOP_CORE_CLOSURE_EXCLUSIONS = [
   { module: "src/remediate/phases/close.ts", claim: "mutates", reason: "closing-action bodies; it WRITES closing artifacts and removes the artifacts dir on promotion, but the STEP MACHINE owns the transition and the directory — close.ts executes a close it was handed, it does not decide that the run is closing or where its artifacts live (options.artifactsDir is caller-supplied throughout)" },
   { module: "src/remediate/phases/triage.ts", claim: "mutates", reason: "triage decision bodies; it WRITES triage_batch.json / triage-outcome.json and renames quarantined files, all under a caller-supplied options.artifactsDir — the step machine owns the transition and the location" },
   { module: "src/remediate/review/autonomousGate.ts", claim: "pure", reason: "autonomous-review gating predicate; pure" },
-  { module: "src/remediate/steps/intakeResolver.ts", claim: "reads-only", reason: "intake resolution; it reads intake artifacts and returns the resolution — the step machine owns the transition" },
+  { module: "src/remediate/steps/intakeResolver.ts", claim: "reads-only", reason: "intake resolution; it reads intake artifacts and writes the source manifest, the selected-findings projection, the current step and the brief only through helper modules (writeJsonFile, writeCurrentStep, writeRemediationBrief) — the step machine owns the transition" },
   { module: "src/remediate/steps/sessionConfigLoad.ts", claim: "reads-only", reason: "session-config adapter; loadSessionIntent reads repository session intent, while the step machine owns the transition and this module performs no writes" },
 ];
 

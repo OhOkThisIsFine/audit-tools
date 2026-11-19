@@ -74,28 +74,10 @@ export const PIN_MARKER = "▶";
  * it is visible rather than silent.
  */
 export const ROADMAP_SOURCES = [
-  {
-    file: "open-bugs.md",
-    kind: "bullets",
-    heading: "Open bugs & frictions — the working queue",
-  },
-  {
-    file: "forward-tracks.md",
-    section: "Open tracks",
-    kind: "tracks",
-    heading: "Open tracks — in flight",
-  },
-  {
-    file: "forward-tracks.md",
-    section: "Forward tracks",
-    kind: "bullets",
-    heading: "Forward tracks — design-level directions",
-  },
-  {
-    file: "deferred.md",
-    kind: "bullets",
-    heading: "Deferred / waiting — blocked on data, a live run, credentials or a toolchain",
-  },
+  { file: "open-bugs.md", kind: "bullets" },
+  { file: "forward-tracks.md", section: "Open tracks", kind: "tracks" },
+  { file: "forward-tracks.md", section: "Forward tracks", kind: "bullets" },
+  { file: "deferred.md", kind: "bullets" },
 ];
 
 const collapse = (s) => s.replace(/\s+/g, " ").trim();
@@ -157,6 +139,11 @@ export function sectionText(text, heading) {
         `scripts/shared/generate-handoff-roadmap.mjs.`,
     );
   }
+  return sectionBody(lines, start).join("\n");
+}
+
+/** The lines after the heading at `start`, up to the next `## ` heading. */
+function sectionBody(lines, start) {
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     if (/^## /.test(lines[i])) {
@@ -164,7 +151,7 @@ export function sectionText(text, heading) {
       break;
     }
   }
-  return lines.slice(start + 1, end).join("\n");
+  return lines.slice(start + 1, end);
 }
 
 /**
@@ -172,7 +159,6 @@ export function sectionText(text, heading) {
  * callers (and tests) can drive this without touching disk.
  */
 export function collectRoadmap(sources) {
-  const groups = [];
   const pinned = [];
   for (const src of ROADMAP_SOURCES) {
     const whole = sources.get(src.file);
@@ -185,18 +171,15 @@ export function collectRoadmap(sources) {
       title: e.title,
       file: src.file,
     }));
-    const kept = [];
     for (const item of items) {
       if (item.title.startsWith(PIN_MARKER)) pinned.push(item);
-      else kept.push(item);
     }
-    groups.push({ heading: src.heading, items: kept });
   }
   // IMMEDIATE-NEXT-ONLY. `CLAUDE.md` and this doc's own header scope HANDOFF to the
   // immediate next step; an exhaustive 100+ item list is a second index competing
   // with `docs/backlog.md`'s seek index, and it re-created the "read HANDOFF to see
-  // everything" habit the split backlog exists to end. `groups` is therefore
-  // DISCARDED: only pinned entries are emitted.
+  // everything" habit the split backlog exists to end. Only pinned entries are
+  // emitted; every source is still parsed, so a malformed entry still refuses.
   //
   // The unpinned set is not lost — it is in the backlog, which is its one home, and
   // reachable by the seek index. Pinning is a one-character edit on the entry's bold
@@ -206,7 +189,6 @@ export function collectRoadmap(sources) {
   // Always ONE group, even when empty: an absent section reads as "the generator did
   // not run", while an explicit empty one states that nothing is pinned. That is the
   // affirmation half — a success-shaped empty must say so.
-  void groups;
   return [{ heading: `${PIN_MARKER} Next up — pinned in the backlog`, items: pinned }];
 }
 
@@ -391,14 +373,7 @@ function blankGeneratedRanges(lines) {
 function immediateNextSection(lines) {
   const start = lines.findIndex((l) => l.trim() === IMMEDIATE_NEXT_HEADING);
   if (start === -1) return null;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i++) {
-    if (/^## /.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  return lines.slice(start + 1, end);
+  return sectionBody(lines, start);
 }
 
 /**
