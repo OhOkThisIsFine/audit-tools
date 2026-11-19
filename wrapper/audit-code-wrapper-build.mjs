@@ -1,11 +1,11 @@
 import { open, stat, unlink } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { fileExists, newestMtimeMs } from './audit-code-wrapper-io.mjs';
 import { resolveWithinRoot } from '../scripts/shared/primitives.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+// sites-pinned: tests/audit/cleanup.test.ts
+const repoRoot = join(import.meta.dirname, '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
 const tsconfigPath = join(repoRoot, 'tsconfig.json');
 const sourceRoot = join(repoRoot, 'src');

@@ -1,7 +1,7 @@
+// sites-pinned: tests/audit/smoke-fixture-root.test.ts, tests/audit/a7.test.ts
 import { mkdir, mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   fileExists,
   readJson,
@@ -25,9 +25,10 @@ import {
   renderCodexAutomationRecipe,
   renderAntigravityPlanningGuide,
   renderGeminiCommandToml as _renderGeminiCommandTomlImpl,
+  INSTALLED_PROMPT_FILENAME,
 } from './audit-code-wrapper-install-renderers.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(import.meta.dirname, '..');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
 const skillAssetPath = join(repoRoot, 'skills', 'audit-code', 'SKILL.md');
 const INSTALL_MARKER_START = '<!-- audit-code:begin -->';
@@ -35,7 +36,6 @@ const INSTALL_MARKER_END = '<!-- audit-code:end -->';
 const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
-const INSTALLED_PROMPT_FILENAME = 'audit-code.import.md';
 
 function hasFlag(argv, name) {
   return argv.includes(name);
@@ -1181,9 +1181,7 @@ export async function installHostPrompt(argv) {
   await installBootstrap(argv);
 }
 
-// Underscore-aliased re-exports consumed by host-bootstrap-descriptors.test.mjs
-// via audit-code-wrapper-lib.mjs. Keep these so the test import chain resolves
-// without modification to the test file.
+// The wrapper library re-exports these descriptor aliases.
 export {
   INSTALL_HOST_ORDER as _INSTALL_HOST_ORDER,
   INSTALL_HOST_DEFINITIONS as _INSTALL_HOST_DEFINITIONS,

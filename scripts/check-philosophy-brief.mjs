@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/philosophy-brief-gate.test.ts
 // Philosophy-brief reconciliation gate.
 //
 // `docs/project-philosophy.md` carries THE BRIEF — the canonical condensed
@@ -19,16 +20,17 @@
 //   node scripts/check-philosophy-brief.mjs --write     # regenerate the README block
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BRIEF_BEGIN, BRIEF_END, markedPhilosophyBrief } from './shared/philosophy-brief.mjs';
+
+export { BRIEF_BEGIN, BRIEF_END };
 
 const ROOT = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const SOURCE = 'docs/project-philosophy.md';
 const TARGET = 'README.md';
 
-export const BRIEF_BEGIN = '<!-- BEGIN philosophy-brief';
-export const BRIEF_END = '<!-- END philosophy-brief -->';
 export const README_BEGIN =
   '<!-- BEGIN philosophy-brief — generated from docs/project-philosophy.md; do not hand-edit -->';
-export const README_END = '<!-- END philosophy-brief -->';
+export const README_END = BRIEF_END;
 
 /**
  * Pull the brief out of the philosophy doc and split it into its two halves.
@@ -37,12 +39,10 @@ export const README_END = '<!-- END philosophy-brief -->';
  * silently-empty brief would render an empty README section and still "pass".
  */
 export function extractBrief(docText) {
-  const begin = docText.indexOf(BRIEF_BEGIN);
-  const end = docText.indexOf(BRIEF_END);
-  if (begin === -1 || end === -1 || end < begin) {
+  const body = markedPhilosophyBrief(docText);
+  if (body === null) {
     throw new Error(`${SOURCE} is missing the philosophy-brief markers (${BRIEF_BEGIN} … ${BRIEF_END}).`);
   }
-  const body = docText.slice(docText.indexOf('-->', begin) + 3, end).trim();
 
   // The halves are labelled by a bolded lead line; everything until the next
   // label belongs to the current half.

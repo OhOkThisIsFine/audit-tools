@@ -283,17 +283,17 @@ if (unnamed.length > 0) {
 // drift from a second. The stamp must equal the staged tree WITHOUT this run's
 // ledger write — the same tree the preflight below judges, since nothing writes
 // the index in between — so dirt beside the staged set (an unstaged edit, an
-// untracked file) is refused: the suite then ran on other content than the
-// commit carries. Checked before the ledger review is built, which records it.
+// untracked file) is refused before the ledger review records the tested tree.
 const testedTree = git(['write-tree']);
-if (!testedTree.ok || !testedTree.stdout.trim()) {
+const testedTreeSha = testedTree.ok ? testedTree.stdout.trim() : '';
+if (!testedTreeSha) {
   fail(`\`git write-tree\` failed — not a git repo, or the index is unmerged. ${testedTree.stderr}`);
 }
 const originalStamp = (() => { try { return readFileSync(suiteGreenStampPath(root), 'utf8'); } catch { return ''; } })();
-const suiteGreen = suiteGreenVerdict(readSuiteGreenStamp(root), testedTree.stdout.trim());
+const suiteGreen = suiteGreenVerdict(readSuiteGreenStamp(root), testedTreeSha);
 if (!suiteGreen.ok) {
   fail(
-    `refusing to attest: no full-suite green run covers the staged tree ${testedTree.stdout.trim().slice(0, 12)} — ` +
+    `refusing to attest: no full-suite green run covers the staged tree ${testedTreeSha.slice(0, 12)} — ` +
       `${suiteGreen.reason}. A review must run the tests, not only read the change: with the working tree ` +
       'equal to the staged set (no unstaged edits, no untracked files), run `npm test`, then attest again. ' +
       `No review record was written and ${LEDGER_PATH} was not touched.`,
@@ -306,7 +306,7 @@ const nextLedger = applyAttestation(priorLedger, blobs, loopCoreFiles, {
   attester_class: /** @type {'agent'|'human'} */ (attesterClass),
   checked,
   verdict: /** @type {'clear'|'concerns'} */ (verdict),
-  override: override ?? null,
+  override,
   tests_ran: testsRan,
   attested_at: new Date().toISOString(),
 });
@@ -414,10 +414,10 @@ const attestPath = join(dir, sha + '.json');
 // ledger-only A→B transition, after attributable preflight and final-tree checks.
 // Missing/legacy run evidence keeps the ordinary second-suite requirement.
 const suiteTransition = verdict === 'clear' && preflight.attributable && !preflight.abstention &&
-  preflight.stagedTree === testedTree.stdout.trim() &&
-  preflight.worktreeTreeBefore === testedTree.stdout.trim() &&
-  preflight.worktreeTreeAfter === testedTree.stdout.trim()
-  ? ledgerSuiteTransition(root, testedTree.stdout.trim(), sha, originalStamp)
+  preflight.stagedTree === testedTreeSha &&
+  preflight.worktreeTreeBefore === testedTreeSha &&
+  preflight.worktreeTreeAfter === testedTreeSha
+  ? ledgerSuiteTransition(root, testedTreeSha, sha, originalStamp)
   : null;
 const record = {
   schema_version: 'loop-core-review/v2',
@@ -432,7 +432,7 @@ const record = {
   agent_env_markers: agentEnvMarkers,
   checked,
   verdict,
-  override: override ?? null,
+  override,
   tests_ran: testsRan,
   loop_core_files: loopCoreFiles,
   // What the preflight was actually able to establish about THIS tree. An

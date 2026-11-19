@@ -20,6 +20,20 @@ the work that would make it a plain cleanup.
 
 ## 1. Blocked by a test or a test pin (a test change unblocks it)
 
+- **P12.** A project-level remediator fixture that migrates the historical allow wildcard and
+  preserves a user rule would pin its migration. The global postinstall tests run different
+  entry points. Preserve the literal fallback for older builds before sharing the value test.
+- **P12.** The audit installer tests run the Copilot flag check, VS Code prompt renderer and
+  file verification. The remediation tests that exercise the installer force an OpenCode
+  install. Add tests for the other remediation paths before extracting their flag
+  error, prompt renderer, verification collector and file check. Seed real legacy remediation
+  files, including Codex agent metadata, before sharing their removal.
+- **P12.** The audit wrapper tests reach the build freshness check with a current distribution.
+  Add a stale-distribution fixture that observes the actual build command before changing
+  its Windows quoting or inlining its npm executable selector.
+- **P12.** The Git launcher tests pin the executable modes, interpreter, delegation and path
+  spellings. A new launcher contract and its tests would be needed to combine the scripts.
+
 - **P11.** The document-manifest and loader-fragment tests import their checkers and exercise
   their library functions. Add a test that runs each real CLI before replacing its entry check.
 - **P11.** The remaining module-directory expressions sit above the first declaration or in an
@@ -140,6 +154,22 @@ the work that would make it a plain cleanup.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
+- **P12.** The remediation CLI prints complete error stacks. Its missing-root refusal changed
+  when the common installer helpers moved. The standalone host verifiers can also surface
+  installer and filesystem errors, and npm inherits the postinstallers' stderr. Keep the
+  existing locations of the installer flag, directory, relative path and frontmatter helpers,
+  the catalog map, the OpenCode coercion and bash-rule extraction, and the managed Markdown
+  writers. Approve a stable error-output contract or preserve the same observable frames
+  before consolidating them.
+
+- **P12.** Keep the remediation entry check's real-path comparison and filesystem errors.
+  The two history readers select different messages and fields. The Git probes have
+  different failure policies. A shared contract must define those cases first.
+- **P12.** The legacy cleanup and refresh paths, lap record, tree snapshots and suite stamps
+  observe files at separate points. In `writeMergedGeneratedJson`, one existence check sets
+  the receipt and a later check determines whether to read the file. The host list is mutable
+  across awaits. Require an explicit change to observation order before caching these values.
+
 - **P11.** Keep the current entry spellings for truthy, path-equality and filename-suffix
   guards. They have different empty-argument and URL behavior. Unblock with a contract for
   unusual arguments, encoded characters and Windows paths.
@@ -240,6 +270,11 @@ real change, not a cleanup.
   that change for the vanished-entry case, or keep the `stat` only on the `onMissing` path.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
+
+- **P12.** The two products own different permission rules, install messages, mutable profile
+  arrays and exported interfaces. A common installer would need a design that keeps those
+  differences. The snapshot factory also exposes a Git runner that its in-repo callers do
+  not use. Confirm the exported contract before removing it.
 
 - **P11.** A prebuild error-text or path-formatting primitive needs an explicit home in the
   single-definition rules. Keep the non-Error handling of each existing message site. A
@@ -383,6 +418,9 @@ real change, not a cleanup.
 
 ## 4. Efficiency items with no measured cost
 
+- **P12.** Measure the remaining quote scans, background exit-status scans, closeout dirt
+  partition and parser caches before adding state or changing the traversal.
+
 - **P11.** Measure the schema-file reads in `reconcileContractSites`, repeated alias and reach
   projections in `reconcile`, per-line set and expression creation in `findRetiredMentions`, and
   source splitting and pattern creation in the site-pin reader before caching them.
@@ -457,6 +495,11 @@ worth a change.
   `generate-vitest-shard-baseline.mjs` (no declaration).
 
 ## 5. Low value (do it only when you are already in the file)
+
+- **P12.** Leave the small Git-list transforms, state-file path pairs, prompt marker
+  constants and caught refresh-parse variants in their current homes. Revisit when a caller
+  needs a common contract. The extra legacy metadata spelling has little value to remove
+  without the remediation fixture listed above.
 
 - **P11.** The loop-core attestation checker and baseline seeder both run Git, but only the
   seeder passes a working directory. Revisit the two adapters when a reviewed loop-core change
@@ -545,6 +588,19 @@ worth a change.
   and `pruned` (their guards differ; each needs the attestation).
 
 ## 6. Rejected — do not re-propose
+
+- **P12.** Dependency-cruiser prints the `no-circular` rule description in long and Markdown
+  reports. Its JSON report includes the configured exclusion in `summary.optionsUsed`.
+  Editing the phrase or removing the exclusion requires an approved report change.
+- **P12.** The exported audit wrapper accepts `preferredEntrypoint` and prints that value in
+  help when supplied. Removing the option requires changing that interface. The audit and
+  remediation build checks also have different errors and import requirements. Keep each
+  contract until its callers and tests can migrate.
+- **P12.** The generated matcher and its imports have a parity test. The live nightly
+  decision lookup, permission cleanup and legacy surface cleanup still have callers. The
+  shell quote scanners produce different shapes. Keep the separate installer-help and
+  top-level flag grammars and the audit IO facade's tested export keys. Revisit these
+  decisions only when their contracts change.
 
 - **P11.** Keep the registry’s path projection and the release script’s nested test-pin
   declarations. The executable gate reads the paths and each pin scopes the code that follows.

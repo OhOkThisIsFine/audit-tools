@@ -2,11 +2,8 @@
 // PostToolUse advisory: run registry-declared file-scoped checks immediately,
 // then debounce the package typecheck after a source TypeScript edit.
 //
-// ADVISORY ONLY — this hook surfaces early type-error hints to the agent;
-// it is NOT an authoritative correctness verdict. The PreToolUse commit gate
-// (pre-commit-gate.mjs) runs a full clean-env `npm run check` before every
-// commit and is the sole authority. Never treat this hook's output as blocking
-// evidence of correctness or incorrectness.
+// This hook gives early type-error hints. The Git commit gate (commit-gate.mjs)
+// runs the authoritative typecheck on the staged tree.
 //
 // Registered with "async": true so it NEVER blocks the edit.
 // Exit 2 + stderr surfaces advisory failures; exit 0 = clean or skipped.

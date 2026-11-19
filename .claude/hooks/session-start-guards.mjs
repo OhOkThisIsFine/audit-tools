@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // sites-pinned: tests/shared/session-registry.test.ts, tests/shared/hook-session-start-guards.test.ts
-// SessionStart probe for the two lap-opening traps. Reports on stdout (the
+// SessionStart registers the session and runs the lap-opening checks. Reports on stdout (the
 // agent reads it as session context) and, for the stale-main case, records a
 // marker that `tool-input-guard.mjs` turns into a deny-once on the first source
 // edit — the mechanical half the `start-lap` skill's instruction cannot provide.
@@ -357,16 +357,9 @@ try {
 }
 
 // ── Offload-lane liveness ────────────────────────────────────────────────────
-// The delegation lanes are DECLARED DATA in the MACHINE registry
-// (~/.agent-config/offload-lane-data.mjs — moved out of the repo 2026-08-29,
-// owner decision F10: lane inventory is machine-scoped; llm-relay is the
-// eventual owner — llm-relay itself retired 2026-09-22 by the switch/agent-dispatch
-// lap, superseded by agent-dispatch <!-- retired-infrastructure-exempt: llm-relay
-// — the owner's F10 decision is quoted verbatim; this note dates its retirement -->)
-// and this leg probes every probeable row CONCURRENTLY, each
-// bounded by its own timeout, so a dead lane is a named constraint at session
-// start rather than a mid-lap stall. An ABSENT registry means this machine
-// declares no lanes: both lane legs skip silently (fresh machine, CI).
+// The machine registry (~/.agent-config/offload-lane-data.mjs) owns the lane list.
+// Probe its eligible rows concurrently with their configured timeouts. An absent
+// registry skips the probe on a fresh machine or CI.
 // AUDIT_TOOLS_OFFLOAD_LANE_REGISTRY overrides the path for hermetic tests.
 // Probe only; bringing a lane up is the owner's call — each down note carries
 // its row's remedy verbatim. Silent-unless-down: unprobeable rows state their
@@ -394,7 +387,7 @@ try {
     laneRegistry = await import(pathToFileURL(registryPath).href);
   }
 } catch {
-  /* an unreadable registry must never block a session — both lane legs skip */
+  /* an unreadable registry must never block a session — the probe skips */
 }
 const { OFFLOAD_LANES = [], probeLane } = laneRegistry ?? {};
 try {

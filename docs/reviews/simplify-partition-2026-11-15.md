@@ -40,7 +40,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | landed |
 | P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | landed |
 | P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | landed |
-| P12 wrapper, hooks, entries, root config | `wrapper/**`, `.claude/hooks/**`, `.githooks/**`, `audit-code.mjs`, `remediate-code.mjs`, `eslint.config.js`, `vitest.config.ts`, `.dependency-cruiser.cjs` | 34 | 10,747 | 113 | open |
+| P12 wrapper, hooks, entries, root config | `wrapper/**`, `.claude/hooks/**`, `.githooks/**`, `audit-code.mjs`, `remediate-code.mjs`, `eslint.config.js`, `vitest.config.ts`, `.dependency-cruiser.cjs` | 34 | 10,747 | 113 | landed |
 
 ## Leads and skips
 
@@ -549,3 +549,54 @@ suffix guard, the comment scanner walks the AST recursively, the routing gate ex
 JSON parse error, and importing the memory CLI can run its scan. The nightly answer command reads raw arguments for the
 settlement disposition, and the producer writes queue artifacts before the projection rewrites
 them. Both leads need separate verification.
+
+### From P12
+
+The four source reviews cover all 38 tracked paths selected by the partition rule at
+`54b807b4` (10,655 lines). They cover nine installer modules, ten Git and commit-hook
+files, eight session and tool hooks, and eleven runtime and configuration files. The Git
+group checked the generated loop-core matcher against its generator. All four Git launcher
+scripts are included. A second reviewer checked the runtime and configuration group.
+The table retains its original partition counts.
+
+- The audit installer takes its prompt filename from its renderer. Five wrapper modules use
+  Node's file-module directory. The audit wrapper reads Node's executable at the spawn site.
+  Its only child-process caller inherits stdio and discards the result, so the unused output
+  buffers are gone. Root discovery resolves the starting path once in the climb helper.
+- The core ESLint rule and its TypeScript counterpart get the same unused-variable options
+  from one definition. Each gets its own array and options object.
+- The independent review caught a change to the remediation CLI's stderr on a missing root.
+  The CLI prints the error stack. Moving a helper changed both its filename and the caller
+  locations. P12 kept the installer, OpenCode and Markdown writer paths that expose those
+  locations. A comparison at the same checkout path reproduced the difference and verified
+  the restored stderr bytes.
+- The philosophy hook and README generator read the same marked text. Each keeps its own
+  action for missing markers or an empty body. The commit gate uses the record reader's stale
+  verdict and one scan for loop-core paths. The attester keeps the SHA of its first capture
+  for the suite check. The push gate stops at the first failed source check.
+- The closeout hook uses the upstream sentence directly and skips sorting for a length-only
+  key. The tool hooks reuse the containment verdict, statement list and restore tokens.
+  Comments now identify which Git hook runs the checks and which machine registry supplies
+  the lanes.
+
+**Earlier leads.** The remediation entry guard compares both real paths and handles missing
+paths. The audit entry runs directly. The hooks that turn paths into file URLs use them for
+imports. None needs the strict script-entry helper. The wrapper and script quoting contracts
+remain separate. The supervisor suggests the installed command with the artifact directory.
+The prompt builder also selects the invocation and passes the repository root. Merging these
+would change command bytes. The prebuild sort helper and earlier TypeScript-only leads keep
+their existing entries in the [deferred record](simplify-deferred-items-2026-11-16.md).
+
+**Correctness leads (not checked).** The remediator normalizes its source prompt on install
+and compares with the raw prompt on verification. The installer help describes home-directory
+writes. The closeout hook may produce a second finding for an unreadable render record. The
+tree snapshot restore has open questions about a failed path listing and journal retention
+after a failed restore. The attester's summary and the branch-strand refusal may describe a
+different path set or branch workflow from the one that ran.
+
+The runtime review also flagged the audit binary writer's production reach, the Windows
+build command under a custom shell, lock-release events after a close or unlink error, and
+the two CLIs' different error displays. The audit wrapper's flag-span assumption and the
+handling of `--help=x` also remain unchecked.
+
+P12 closes the sweep. The combined release is on hold.

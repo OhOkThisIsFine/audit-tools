@@ -162,27 +162,25 @@ for (const statement of pushes) {
     if (source && PROTECTED.includes(target)) sources.push(source);
   }
 }
-if (sources.length === 0) process.exit(0);
-let verdict;
 for (const source of sources) {
   const resolved = git(['rev-parse', '--verify', '--end-of-options', `${source}^{tree}`]);
   if (!resolved.ok) {
     noteFailOpen(`cannot resolve pushed source ${source} — the suite check was SKIPPED`);
     process.exit(0);
   }
-  verdict = suiteQualificationVerdict(root, resolved.stdout.trim(), { concernsBlock: true });
-  if (!verdict.ok) break;
-}
-if (verdict?.ok) process.exit(0);
+  const verdict = suiteQualificationVerdict(root, resolved.stdout.trim(), { concernsBlock: true });
+  if (verdict.ok) continue;
 
-console.error(
-  `[push gate] push to a PROTECTED branch (${PROTECTED.join('/')}) refused — ${verdict && !verdict.ok ? verdict.reason : 'no pushed tree evidence'}.\n` +
-    `Every narrow gate passes on a touched area; a CROSS-AREA invariant is only reachable by the\n` +
-    `full suite, which nothing local runs before a push (two commits shipped red this way on\n` +
-    `2026-08-27). Run the full suite, then push again:\n` +
-    `  npm test\n` +
-    `A green FULL run writes the stamp this gate reads, bound to the tree it ran on. The local\n` +
-    `source ref being pushed must carry that exact content. A FILTERED run (a file path, --shard,\n` +
-    `--exclude) mints no stamp by design: a subset is not whole-tree evidence.`,
-);
-process.exit(2);
+  console.error(
+    `[push gate] push to a PROTECTED branch (${PROTECTED.join('/')}) refused — ${verdict.reason}.\n` +
+      `Every narrow gate passes on a touched area; a CROSS-AREA invariant is only reachable by the\n` +
+      `full suite, which nothing local runs before a push (two commits shipped red this way on\n` +
+      `2026-08-27). Run the full suite, then push again:\n` +
+      `  npm test\n` +
+      `A green FULL run writes the stamp this gate reads, bound to the tree it ran on. The local\n` +
+      `source ref being pushed must carry that exact content. A FILTERED run (a file path, --shard,\n` +
+      `--exclude) mints no stamp by design: a subset is not whole-tree evidence.`,
+  );
+  process.exit(2);
+}
+process.exit(0);

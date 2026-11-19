@@ -106,7 +106,8 @@ if (Array.isArray(input?.edits)) {
   for (const e of input.edits) if (typeof e?.new_string === 'string') written.push(e.new_string);
 }
 
-if (inProject(filePath)) {
+const isProjectFile = inProject(filePath);
+if (isProjectFile) {
   for (const text of written) {
     const at = findControlByte(text);
     if (at === -1) continue;
@@ -142,7 +143,7 @@ const relPath = isAbsolute(filePath)
   ? relative(ROOT, filePath).replace(/\\/g, '/')
   : filePath.replace(/\\/g, '/');
 
-if (inProject(filePath) && SOURCE_EDIT.test(relPath)) {
+if (isProjectFile && SOURCE_EDIT.test(relPath)) {
   const markerPath = join(ROOT, '.claude', 'hooks', '.state', 'stale-main.json');
   if (existsSync(markerPath)) {
     let marker = null;

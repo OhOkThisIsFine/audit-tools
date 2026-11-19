@@ -182,10 +182,8 @@ recoverInterruptedRoundTrip();
 // ── Child-session refusal (Build 1 / P23) ────────────────────────────────────
 // A session with no record in .claude/hooks/.state/sessions/ while the registry
 // is armed is a child agent sharing this checkout. Children return work; the
-// dispatching session owns git. The allow token is honored through the shared
-// bypassEnabled mechanic (hook env or per-dispatch inline assignment); the scan
-// runs on heredoc-blanked text so a commit-message BODY naming the token cannot
-// enable it. Registry faults degrade to unarmed inside the read (fail open). A
+// dispatching session owns git. Git passes this hook the process environment.
+// Registry faults degrade to unarmed inside the read. A
 // missing session_id fails open too, but ANNOUNCED when the registry is armed —
 // a silent fail-open is indistinguishable from a clean pass; an unarmed
 // registry is the normal state and warrants no announcement. The refusal text
@@ -223,20 +221,8 @@ function noteFailOpen(reason) {
 }
 
 
-// The tree SHA an attestation binds to — the exact snapshot the commit will
-// carry. When the command stages the working tree first (`git add -A && git
-// commit`, `git commit -a`/`-am`) that snapshot is the WORKTREE tree, captured
-// through a SCRATCH index so the real staged index is never touched; otherwise
-// it is the staged-index tree. Returns null on a git fault, and every caller
-// fails OPEN on that (an infra fault must not wedge the session) while failing
-// CLOSED on a missing/stale attestation.
-//
-// Single-sourced because two independent gates below bind to it — the loop-core
-// review attestation and the constitutional-doc override. Two copies of a
-// binding rule is two chances for one of them to bind to the wrong tree.
-// Memoized: both gates can fire on one commit. Under a git hook the index is
-// final (a `git commit -a` already staged its content into the temporary index
-// git hands the hook), so the binding is always `git write-tree` on that index.
+// Git supplies the index the commit will use, including the temporary index for `git commit -a`.
+// Both attestation checks share the resulting tree SHA, or null if the Git call fails.
 let boundStagedTreeSha;
 function bindStagedTreeSha() {
   if (boundStagedTreeSha !== undefined) return boundStagedTreeSha;
@@ -320,14 +306,6 @@ function runGate(committedPaths) {
     return { blocked: false };
   }
 
-
-  // At git's boundary the staged snapshot IS what the commit carries — for a
-  // merge commit the merged index, for `git am` the applied patch, for a routed
-  // cherry-pick/revert (`-n`, then `git commit`) the applied result — so the
-  // attestation checks read it directly. The verbs git does not hook (a
-  // fast-forward merge, a direct cherry-pick or revert) are ROUTED here by the
-  // tool-boundary hook when they carry gated content.
-  const attestationPaths = staged;
 
   // The docs/assets the doc-contract subset pins: any markdown (docs/**.md,
   // CLAUDE.md, AGENTS.md, copilot-instructions.md, auditor.agent.md) plus the
@@ -488,7 +466,7 @@ function runGate(committedPaths) {
   // FAIL-OPEN only on a genuine git write-tree fault.
   // Both policies judge one bound staged tree; report all refusals together.
   const constitutionalVerdict = (() => {
-    const constitutionalStaged = attestationPaths.filter(isConstitutionalDocPath);
+    const constitutionalStaged = staged.filter(isConstitutionalDocPath);
     if (constitutionalStaged.length > 0) {
       const sha = bindStagedTreeSha();
       const overrideHint =
@@ -526,7 +504,7 @@ function runGate(committedPaths) {
           );
         }
         const override = loaded.record;
-        if (override?.staged_tree !== sha) {
+        if (loaded.kind === 'stale') {
           return blockMessage(
             `the override record is STALE (binds tree ${String(override?.staged_tree).slice(0, 12)}, staged ` +
               `tree is ${sha.slice(0, 12)})`,
@@ -562,8 +540,8 @@ function runGate(committedPaths) {
     // enforce that a human reviewed (the honest limit). FAIL-CLOSED on a
     // missing/stale attestation for loop-core; FAIL-OPEN only on a genuine git
     // write-tree fault.
-    if (attestationPaths.some(isLoopCorePath)) {
-      const loopCoreStaged = attestationPaths.filter(isLoopCorePath);
+    const loopCoreStaged = staged.filter(isLoopCorePath);
+    if (loopCoreStaged.length > 0) {
       const sha = bindStagedTreeSha();
       if (!sha) {
         noteFailOpen(
@@ -595,7 +573,7 @@ function runGate(committedPaths) {
         };
       }
       const attest = loaded.record;
-      if (attest?.staged_tree !== sha) {
+      if (loaded.kind === 'stale') {
         return {
           blocked: true,
           message:
@@ -783,11 +761,15 @@ if (!acquireRoundTripLock()) {
 // so a temp-dir path is safe and works identically in main and linked worktrees.
 const scratchIndex = join(tmpdir(), `audit-tools-pre-commit-index-${randomBytes(6).toString('hex')}`);
 
+function removeBestEffort(path) {
+  try { rmSync(path, { force: true }); } catch { /* ignore */ }
+}
+
 // 1. Capture the current worktree tree and the staged (real-index) tree.
 const worktreeTree = captureWorktreeTree(scratchIndex);
 const stagedWt = git(['write-tree']);
 if (worktreeTree === null || !stagedWt.ok) {
-  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  removeBestEffort(scratchIndex);
   releaseRoundTripLock();
   console.error(
     `[commit gate] could not capture the staged snapshot (git write-tree failed) — ` +
@@ -803,7 +785,7 @@ const stagedTree = stagedWt.stdout.trim();
 const stagedPaths = listTreePaths(stagedTree);
 const worktreePaths = listTreePaths(worktreeTree);
 if (stagedPaths === null || worktreePaths === null) {
-  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  removeBestEffort(scratchIndex);
   releaseRoundTripLock();
   console.error(
     `[commit gate] could not enumerate the staged snapshot (git ls-tree failed) — ` +
@@ -838,7 +820,7 @@ try {
   );
 } catch {
   // Can't journal → don't take an unrecoverable risk: skip the check (fail-open).
-  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  removeBestEffort(scratchIndex);
   releaseRoundTripLock();
   console.error(
     '[commit gate] could not write the round-trip recovery journal — skipping the staged-snapshot ' +
@@ -850,8 +832,8 @@ try {
 // 2. Materialize the staged tree into the worktree.
 if (!checkoutTreeExact(scratchIndex, stagedTree, unionPaths)) {
   checkoutTreeExact(scratchIndex, worktreeTree, unionPaths); // best-effort restore
-  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
-  try { rmSync(RT_JOURNAL, { force: true }); } catch { /* ignore */ }
+  removeBestEffort(scratchIndex);
+  removeBestEffort(RT_JOURNAL);
   releaseRoundTripLock();
   console.error(
     `[commit gate] could not materialize the staged snapshot (git checkout-index failed) — ` +
@@ -876,9 +858,9 @@ try {
   // guarantee the staged snapshot is preserved verbatim).
   const restoredWt = checkoutTreeExact(scratchIndex, worktreeTree, unionPaths);
   const restoredIdx = git(['read-tree', stagedTree]).ok;
-  try { rmSync(scratchIndex, { force: true }); } catch { /* ignore */ }
+  removeBestEffort(scratchIndex);
   if (restoredWt && restoredIdx) {
-    try { rmSync(RT_JOURNAL, { force: true }); } catch { /* ignore */ }
+    removeBestEffort(RT_JOURNAL);
   }
   // On a FAILED restore the journal stays: the next invocation retries the
   // recovery from the journaled SHAs.

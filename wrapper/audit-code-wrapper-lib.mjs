@@ -1,7 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { ensureBuilt, shouldBuildDistForPaths, assertWorkspaceInstalled } from './audit-code-wrapper-build.mjs';
 import { fileExists } from './audit-code-wrapper-io.mjs';
 import {
@@ -25,7 +24,8 @@ import { resolveWrapperRoot } from './repo-root.mjs';
 export { shouldBuildDistForPaths, assertWorkspaceInstalled };
 export { _INSTALL_HOST_ORDER, _INSTALL_HOST_DEFINITIONS, _getInstallHostKeys, _getInstallProfile, _renderGeminiCommandToml };
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+// sites-pinned: tests/audit/cleanup.test.ts
+const repoRoot = join(import.meta.dirname, '..');
 const distEntry = join(repoRoot, 'dist', 'audit', 'index.js');
 const packageJsonPath = join(repoRoot, 'package.json');
 const promptAssetPath = join(repoRoot, 'skills', 'audit-code', 'audit-code.prompt.md');
@@ -132,10 +132,6 @@ function setFlag(argv, name, value) {
 
 export { hasLeadingFlag, setFlag };
 
-function nodeExecutable() {
-  return process.execPath;
-}
-
 // When the wrapper runs from a source checkout (its package dir is NOT inside a
 // node_modules tree), generated continuation commands should re-invoke THIS
 // wrapper via `node <path>` so a dogfooded monorepo run stays pinned to local
@@ -200,12 +196,14 @@ function resolveSpawn(command, args, platform = process.platform) {
 // CLI surface.
 export { quoteForCmd, resolveSpawn };
 
-function run(command, args, options = {}) {
+// sites-pinned: tests/audit/cleanup.test.ts
+/** @returns {Promise<void>} */
+function run(command, args, env) {
   return new Promise((resolvePromise, rejectPromise) => {
     const resolved = resolveSpawn(command, args);
     const child = spawn(resolved.command, resolved.args, {
       cwd: repoRoot,
-      stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
+      stdio: 'inherit',
       // Node-worktree guard: this spawn pins cwd to the PACKAGE root, so the
       // backend's process.cwd() carries no evidence of where the CALLER ran
       // from. Stamp the caller's true cwd so the backend guard can refuse
@@ -213,28 +211,16 @@ function run(command, args, options = {}) {
       // Literal must match AUDIT_TOOLS_CALLER_CWD_ENV in
       // src/shared/io/nodeWorktreeGuard.ts (pinned by
       // tests/shared/node-worktree-guard.test.mjs).
-      env: { ...(options.env ?? process.env), AUDIT_TOOLS_CALLER_CWD: process.cwd() }
+      env: { ...env, AUDIT_TOOLS_CALLER_CWD: process.cwd() }
     });
-
-    let stdout = '';
-    let stderr = '';
-
-    if (options.capture) {
-      child.stdout?.on('data', (chunk) => {
-        stdout += String(chunk);
-      });
-      child.stderr?.on('data', (chunk) => {
-        stderr += String(chunk);
-      });
-    }
 
     child.on('error', rejectPromise);
     child.on('exit', (code) => {
       if (code === 0) {
-        resolvePromise({ stdout, stderr });
+        resolvePromise();
         return;
       }
-      rejectPromise(new Error(options.capture ? stderr || `Command failed with exit code ${code}.` : `Command failed with exit code ${code}.`));
+      rejectPromise(new Error(`Command failed with exit code ${code}.`));
     });
   });
 }
@@ -285,6 +271,7 @@ async function printPromptPath() {
   console.log(resolve(promptAssetPath));
 }
 
+// sites-pinned: tests/audit/cleanup.test.ts
 async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } = {}) {
   const commandArgs = [...argv];
   // An absent --root is DISCOVERED (nearest ancestor owning .audit-tools/.git),
@@ -304,8 +291,9 @@ async function runDistCommand(commandName, argv, { ensureArtifactsDir = false } 
   }
 
   await ensureBuilt();
-  await run(nodeExecutable(), [distEntry, commandName, ...commandArgs], {
-    env: { ...process.env, ...selfInvocationEnv() },
+  await run(process.execPath, [distEntry, commandName, ...commandArgs], {
+    ...process.env,
+    ...selfInvocationEnv(),
   });
 }
 

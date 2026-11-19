@@ -5,7 +5,7 @@
 // Most questions the owner gets asked are already answered by a standing
 // conviction ("effort/complexity is not a cost", "ideal code over compatibility",
 // "deliverables land in a file"), and answering them by hand is the owner
-// re-reading their own philosophy aloud. This gate injects PART B + the BRIDGE of
+// re-reading their own philosophy aloud. This gate injects the Product and Working halves of
 // `docs/project-philosophy.md` once per session, at the moment a question is
 // actually being asked, and lets the question through on the retry.
 //
@@ -51,6 +51,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, mkdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { markedPhilosophyBrief } from '../../scripts/shared/philosophy-brief.mjs';
 import {
   readSessionRegistry,
   sanitizeSessionId,
@@ -280,10 +281,7 @@ const DOC = 'docs/project-philosophy.md';
 let brief = '';
 try {
   const text = readFileSync(join(ROOT, DOC), 'utf8');
-  const begin = text.indexOf('<!-- BEGIN philosophy-brief');
-  const end = text.indexOf('<!-- END philosophy-brief -->');
-  if (begin === -1 || end === -1 || end < begin) process.exit(0); // restructured → fail open
-  brief = text.slice(text.indexOf('-->', begin) + 3, end).trim();
+  brief = markedPhilosophyBrief(text);
   if (!brief) process.exit(0);
 } catch {
   process.exit(0);

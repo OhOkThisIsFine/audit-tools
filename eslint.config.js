@@ -16,11 +16,9 @@ import tsPlugin from "@typescript-eslint/eslint-plugin";
 import sonarjs from "eslint-plugin-sonarjs";
 import globals from "globals";
 
-// Real defect classes, verified against this tree at adoption.
-const CORRECTNESS_RULES = {
-  // Dead code that tsc (noUnusedLocals off) does not catch. `^_` is the
-  // deliberate-discard convention.
-  "@typescript-eslint/no-unused-vars": [
+// The TypeScript and core ESLint rules use the same deliberate-discard convention.
+function unusedVariableRule() {
+  return [
     "error",
     {
       args: "all",
@@ -30,7 +28,12 @@ const CORRECTNESS_RULES = {
       caughtErrorsIgnorePattern: "^_",
       ignoreRestSiblings: true,
     },
-  ],
+  ];
+}
+
+// Real defect classes, verified against this tree at adoption.
+const CORRECTNESS_RULES = {
+  "@typescript-eslint/no-unused-vars": unusedVariableRule(),
   // Two byte-identical functions are a drift hazard ("extract, don't
   // drift-test") — caught live at adoption (orchestrator.ts assert twins).
   "sonarjs/no-identical-functions": "error",
@@ -89,9 +92,8 @@ export default [
     },
   },
   {
-    // The typechecker-invisible .mjs surface (scripts/, wrapper/, dispatch/,
-    // bins, hooks-adjacent generators): no tsc safety net at all, so the core
-    // correctness rules matter most here. Non-type-aware.
+    // Plain JavaScript scripts and wrappers use the core ESLint rules without type information.
+    // check:scripts also typechecks the files in tsconfig.scripts.json.
     files: ["scripts/**/*.mjs", "wrapper/**/*.mjs", "dispatch/**/*.mjs", "*.mjs"],
     languageOptions: {
       ecmaVersion: "latest",
@@ -101,17 +103,7 @@ export default [
     plugins: { sonarjs },
     rules: {
       "no-undef": "error",
-      "no-unused-vars": [
-        "error",
-        {
-          args: "all",
-          argsIgnorePattern: "^_",
-          varsIgnorePattern: "^_",
-          caughtErrors: "all",
-          caughtErrorsIgnorePattern: "^_",
-          ignoreRestSiblings: true,
-        },
-      ],
+      "no-unused-vars": unusedVariableRule(),
       "no-dupe-keys": "error",
       "no-unreachable": "error",
       "no-fallthrough": "error",

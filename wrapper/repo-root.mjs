@@ -48,10 +48,10 @@ function repoRootCeiling() {
     return null;
   }
 }
-
+// sites-pinned: tests/shared/wrapper-repo-root-parity.test.ts
 /** @param {string} [startDir] @returns {string} */
 export function discoverRepoRoot(startDir = process.cwd()) {
-  const start = climbOutOfAuditTools(resolve(startDir));
+  const start = climbOutOfAuditTools(startDir);
   const ceiling = repoRootCeiling();
   let current = start;
   for (;;) {

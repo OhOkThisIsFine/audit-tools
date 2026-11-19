@@ -5,7 +5,7 @@
 // to dist/remediate/index.js.
 
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { join } from "path";
 import { existsSync, readdirSync, statSync, realpathSync } from "fs";
 import { spawnSync } from "child_process";
 
@@ -17,8 +17,8 @@ const INSTALLER_MODULE = "./wrapper/remediate-code-wrapper-install-hosts.mjs";
 // Same lazy treatment, same reason: the verb list and help bodies are shared
 // with audit-code so the two bins cannot document the same verb differently.
 const VERB_HELP_MODULE = "./wrapper/installer-verb-help.mjs";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// sites-pinned: tests/remediate/remediate-code.test.ts
+const __dirname = import.meta.dirname;
 const distEntry = join(__dirname, "dist", "remediate", "index.js");
 const sourceRoot = join(__dirname, "src");
 const tsconfigPath = join(__dirname, "tsconfig.json");

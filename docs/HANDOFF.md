@@ -5,14 +5,11 @@
 
 ## Current state
 
-`main` carries simplify parts P01 (shared contracts, `49a42916`), P02 (shared infrastructure,
-`cec41197`), P03 (audit orchestrator core), P04 (audit orchestrator review and charter), P05
-(audit cli), P06 (audit extractors), P07 (the rest of `src/audit`), P08 (the remediate steps
-files), P09 (the rest of `src/remediate`), P10 (`scripts/shared`), and P11 (the rest of
-`scripts`) on top of release v0.55.20, plus the withheld
-P01–P03 items the 2026-11-16 lap judged worth doing. The items it skipped stay in the
-[deferred record](reviews/simplify-deferred-items-2026-11-16.md). The owner chose to release the
-parts later, together, so the published package is v0.55.20.
+All twelve simplify parts have landed on `main`. P12 finished the wrappers, hooks, entry points
+and root configuration. The [partition record](reviews/simplify-partition-2026-11-15.md) gives
+the results and the [deferred record](reviews/simplify-deferred-items-2026-11-16.md) gives the
+skips and their unblock conditions. The published package remains v0.55.20. The owner will
+release the twelve parts together later.
 The remaining structured MCP routes are in [`forward-tracks.md`](backlog/forward-tracks.md).
 
 Release metadata is in [package.json](../package.json); publication and global-install evidence
@@ -34,10 +31,8 @@ is present on the owner's machine and has not been reviewed; retain unknown work
 
 ## Immediate next
 
-P12 is the last part of the simplify sweep. It covers the wrappers, hooks and top-level files.
-Start with its row and *Leads and skips* in the
-[partition record](reviews/simplify-partition-2026-11-15.md) first.
-Also open: qualify the isolated reviewed refactor candidate under the serialized validation lane; see the
+The sweep is complete. The isolated refactor candidate still needs qualification under the
+serialized validation lane. See the
 [qualification record](reviews/audit-refactor-qualification-2026-10-14.md) for scope and remaining gates.
 No commit, publication or release acceptance is established. The owner discarded the paused
 2026-10-05 dogfood run (2026-10-09); a new dogfood run is the owner's call and would use 0.55.6.

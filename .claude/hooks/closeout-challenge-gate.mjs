@@ -37,7 +37,7 @@
 //
 // Exit 0 = allow stop, exit 2 = block (stderr is fed back to the agent).
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -53,11 +53,7 @@ import {
   SESSIONS_DIR_SEGMENTS,
 } from '../../scripts/shared/sessionRegistry.mjs';
 
-// Does a timestamp fall at or after THIS session's start? The ONE definition
-// both session-attribution checks below read — the HEAD-commit test and the
-// closeout-render test — so the two cannot drift into disagreeing about whose
-// work a timestamp represents.
-//
+// Use the session start to attribute the HEAD commit to this session.
 // The direction on missing evidence is deliberate, and it is NOT symmetric.
 // An unparseable `registered_at` means the registry cannot say whose work this
 // is, and the safe answer there is OURS: that keeps the challenge firing rather
@@ -85,32 +81,21 @@ function isAtOrAfterSessionStart(tsMs, registryRecord) {
 // case, which is the conservative direction: the challenge already fired, and
 // the extra sentence must not talk the reader out of it. This helper only ever
 // adds a sentence — it never decides whether the gate fires.
-function branchUpstreamState(remoteName, branch) {
-  const local = {
-    current: false,
-    sentence:
-      'No upstream is configured for this branch, so these commits exist only in this checkout ' +
-      'until they are pushed.',
-  };
+function branchUpstreamSentence(remoteName, branch) {
+  const local =
+    'No upstream is configured for this branch, so these commits exist only in this checkout ' +
+    'until they are pushed.';
   if (!remoteName || !branch || branch === 'HEAD' || branch === 'main') return local;
   const upstreamRef = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${branch}@{upstream}`]);
   if (!upstreamRef.ok || !upstreamRef.out) return local;
   const ahead = git(['rev-list', '--count', `${upstreamRef.out}..HEAD`]);
   if (!ahead.ok) return local;
   if (Number(ahead.out) === 0) {
-    return {
-      current: true,
-      sentence:
-        `This branch IS pushed and current on ${upstreamRef.out}, so the work is not local-only — ` +
-        `it is simply not merged into ${remoteName}/main yet.`,
-    };
+    return `This branch IS pushed and current on ${upstreamRef.out}, so the work is not local-only — ` +
+      `it is simply not merged into ${remoteName}/main yet.`;
   }
-  return {
-    current: false,
-    sentence:
-      `This branch tracks ${upstreamRef.out}, which is ${ahead.out} commit(s) BEHIND HEAD — push ` +
-      `before handing off.`,
-  };
+  return `This branch tracks ${upstreamRef.out}, which is ${ahead.out} commit(s) BEHIND HEAD — push ` +
+    `before handing off.`;
 }
 
 // The closeout skill's lap signal: the machine's one definition of "is this stop
@@ -311,7 +296,7 @@ const notOnMain = remote ? git(['log', '--oneline', `${remote}/main..HEAD`]).out
 // separately so the finding states WHICH of the two situations this is instead
 // of implying the worse one.
 const branchName = git(['rev-parse', '--abbrev-ref', 'HEAD']).out;
-const upstreamState = branchUpstreamState(remote, branchName);
+const upstreamSentence = branchUpstreamSentence(remote, branchName);
 
 if (sessionDirt.length === 0 && !headMovedRecently && !notOnMain) process.exit(0);
 
@@ -322,7 +307,6 @@ if (sessionDirt.length === 0 && !headMovedRecently && !notOnMain) process.exit(0
 // whole-tree key: equal-length reshapes of session dirt do not re-key.
 const sessionDirtKey = sessionDirt
   .map((entry) => entry.display)
-  .sort()
   .join('|').length;
 const stateKey = `${git(['rev-parse', 'HEAD']).out}:${sessionDirtKey}:${notOnMain.length}`;
 if ((/** @type {string[]} */ (state.states ?? [])).includes(stateKey)) process.exit(0);
@@ -359,15 +343,11 @@ if (notOnMain) {
       `will not see these:` +
       `\n` +
       notOnMain.split(/\r?\n/).slice(0, 8).map((l) => `      ${l}`).join('\n') +
-      `\n      ${upstreamState.sentence}`,
+      `\n      ${upstreamSentence}`,
   );
 }
 
-// Deterministic, session-independent readiness — the stale generated HANDOFF and
-// the unindexed memory files. Shared with the RENDERER, which refuses to render
-// while any is outstanding (scripts/shared/closeoutReadiness.mjs). This gate is
-// the backstop, not the first line: raising them here for the first time is what
-// used to force a second render of a report that was wrong when it was written.
+// The renderer checks the same handoff, memory index and suite evidence before writing the report.
 findings.push(...closeoutReadinessFindings(ROOT));
 
 /**
@@ -420,8 +400,7 @@ function reportReachedTheOwner(transcriptPath, rec) {
   return false;
 }
 
-// One worktree-content identity serves both content-bound checks below: the
-// closeout-render binding and the full-suite green stamp.
+// Bind the closeout render to the content of this worktree.
 const currentTree = worktreeTree(ROOT);
 
 // The hand-back itself: rendered through scripts/render-closeout.mjs, which
@@ -521,11 +500,6 @@ if (!existsSync(recPath)) {
       );
     }
 }
-
-// (the suite-green tree comparison and the memory-index check both live in
-// scripts/shared/closeoutReadiness.mjs — the pre-render seam — so the renderer
-// raises them BEFORE a report is written and this gate keeps them as backstop
-// through the closeoutReadinessFindings call above)
 
 // CI on the default branch. The lap rule says to check it by hand at every
 // close-out; a rule that depends on remembering is the thing this project moves

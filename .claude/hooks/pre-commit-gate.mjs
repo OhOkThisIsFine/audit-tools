@@ -50,34 +50,9 @@ import { treeSnapshotTools } from './tree-snapshot.mjs';
 // registry SessionStart writes; the same lib serves the three Stop gates.
 import { readSessionRegistry, sanitizeSessionId } from '../../scripts/shared/sessionRegistry.mjs';
 
-// ── Loop-core adversarial-review gate ────────────────────────────────────────
-// Hand-authored (non-node) edits to the dispatch / admission / quota / rolling /
-// orchestrator-step substrate carry the highest blast radius and have no
-// automated adversarial-review gate; three author-green defects reached main
-// this way. Block a commit whose STAGED set touches a loop-core path unless a
-// FRESH, staged-tree-hash-bound review attestation exists. The pattern list AND
-// the membership predicate are IMPORTED from a generated sibling rather than
-// re-declared here: this hook runs under plain node pre-build and cannot import
-// `src/shared/loopCorePaths.ts`, but it can import a .mjs generated FROM it, so
-// both keep exactly one hand-maintained home. `npm run check:loop-core-patterns`
-// (in verify:checks) fails the build if the generated file drifts from the
-// source of truth. A "/"-terminated pattern is a directory prefix; every other
-// entry is an exact repo-relative path.
+// Route incoming paths using the same generated matchers as the Git commit gate.
 import { isLoopCorePath } from "./loop-core-patterns.mjs";
 
-// ── Constitutional-doc refusal ───────────────────────────────────────────────
-// A constitutional doc states what this project IS (the two philosophies, the
-// instruction files, the doc-review rubric, the normative spec/audit contracts
-// and goals docs). `docs/doc-review-guidelines.md` has always SAID these are
-// escalate-only and "never silently rewritten to match code" — and commit
-// 6fc2e453 rewrote spec/remediate/remediation-goals.md anyway, inside a routine
-// nine-file doc-review sweep. The gap was a REFUSAL, not a label; this is the
-// refusal. Same import arrangement as the loop-core list: the canonical home is
-// `src/shared/constitutionalDocPaths.ts`, which this pre-build hook cannot
-// import, so it imports a generated sibling. The generated file lives under
-// `scripts/` because `.gitignore` re-includes `.claude/hooks/*` BY NAME — a new
-// file there is silently dropped from commits until someone adds the allowlist
-// line. `npm run check:constitutional-doc-paths` fails the build on drift.
 import { isConstitutionalDocPath } from "../../scripts/shared/constitutional-doc-paths.generated.mjs";
 
 let raw = '';
@@ -127,55 +102,21 @@ function gitSubcommandRe(name) {
 // (collapses to `echo ""` — no match), while `git -C "path with spaces" commit`
 // collapses to `git -C "" commit` so the option-value hop can span it.
 const isGitSubcommand = (name) => (s) => gitSubcommandRe(name).test(collapseQuoted(s));
-// Every subcommand that can CREATE a commit, not just the one named "commit".
-// A merge, a rebase continuation, a cherry-pick, a revert or an `am` all write
-// history, and every one of them used to skip all legs of this gate (observed
-// live: stray-doc failures on all three v0.34.7 merge commits, main red until
-// 0c6a5a6d). Known accepted limit — pre-hoc, the gate can only validate the
-// CURRENT staged snapshot: for `--continue` forms the index already holds the
-// resolved result (fully gated), but the content a `git merge <branch>` or a
-// fresh cherry-pick will INTRODUCE does not exist yet, so an incoming bad tree
-// still lands and surfaces at the next local gate run / CI. What this widening
-// guarantees: no commit-creating command runs from an already-red snapshot,
-// and the hook-bypass vectors are refused on every history-writing form.
+// Check the tool invocation for each Git verb that can create a commit.
 const COMMIT_CREATING_SUBCOMMANDS = ['commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am'];
 const isCommitCreating = (s) => COMMIT_CREATING_SUBCOMMANDS.some((name) => isGitSubcommand(name)(s));
 
-// Build 1 (P23): `git push` is detected ONLY for the child-session refusal
-// below. It must never enter the commit machinery — no hook-bypass scan, no
-// staged-set reads, no runGate, no staged-snapshot round-trip.
+// A push enters only the child-session check.
 const isPush = isGitSubcommand('push');
 
 // Exit early if no commit-creating or push invocation exists in any statement.
 if (!subCmds.some((s) => isCommitCreating(s) || isPush(s))) process.exit(0);
 
 // ── Target-repo scoping ──────────────────────────────────────────────────────
-// Every check below reads THIS repository's state (root = CLAUDE_PROJECT_DIR):
-// the staged set, the attestations, the branch, the staged-snapshot round-trip.
-// But the hook fires on every Bash/PowerShell call in the session, so a commit
-// made in a DIFFERENT repo — `cd C:/other && git commit …`, `git -C ../other
-// commit …`, or a plain `git commit` after the session cd'd away — used to be
-// gated against audit-tools' own index anyway. Observed live 2026-08-19: an
-// unrelated fresh repo's first commit was blocked because a concurrent session
-// had loop-core files staged HERE. That is the false-RED class — as corrosive
-// as a false green, because it trains the reader to distrust or bypass the
-// gate. [[false-red-is-as-corrosive-as-false-green]]
-//
-// So each detected commit/push statement is resolved to the repository it
-// actually targets: the payload cwd, folded through the `cd`/`chdir`/`pushd`/
-// `sl`/`Set-Location`/`Push-Location` statements EARLIER in the chain, then
-// through the statement's own `git -C <path>` hops. Repo identity is the
-// absolute `--git-common-dir`, NOT `--show-toplevel`: a linked worktree has
-// its own toplevel but shares the common dir, and a commit into a sibling
-// worktree of THIS repo must stay gated. Statements that target another
-// repository fall out of the gate's view entirely — including the hook-bypass
-// scan and the child-session refusal, which exist to protect this repo's
-// history, not to govern git use elsewhere.
-//
-// FAIL-CLOSED on resolution faults, by design: an unresolvable hop (`cd "$V"`,
-// `cd -`, popd, a bare `cd`, a `--git-dir`/`--work-tree` override, a target
-// git cannot answer for) counts as targeting THIS repo. The worst residue is
-// the old false RED in an exotic shape — never an ungated audit-tools commit.
+// Resolve command targets using the payload cwd, shell directory changes and git -C.
+// The Git common directory identifies linked worktrees as the same repository.
+// A target elsewhere is out of scope. Only the hook-bypass check treats an
+// unresolved target as possibly belonging to this repository.
 
 // Canonical comparable form of a filesystem path: realpath when it exists
 // (settles symlinked tempdirs, Windows 8.3/case aliases), forward slashes,
@@ -455,20 +396,9 @@ function noteFailOpen(reason) {
 }
 
 // ── Incoming content for history-moving verbs (owner decision, 2026-08-29) ───
-// This gate reads the INDEX, and a fresh `git cherry-pick <sha>` / `git merge
-// <branch>` stages NOTHING — so the loop-core and constitutional attestation
-// checks read an empty set and demanded nothing while the command landed the
-// incoming tree. On a branch that is survivable (the gates re-run when the work
-// reaches `main` by ordinary commit); onto `main` it lands loop-core or
-// constitutional content with zero mechanical review. The gate used to record
-// this as an accepted limit; the owner reversed that acceptance, because the
-// incoming path set IS derivable before the command runs, from the ref it names.
-//
-// Covered: cherry-pick and revert (`git show --name-only`), merge (`git diff
-// --name-only HEAD...<ref>`). NOT covered, and stated in the backlog entry:
-// `git am <mailbox>` names no ref at all, and the `--continue`/`--abort`/`--skip`
-// forms carry no incoming ref either — for `--continue` the index already holds
-// the resolved result, which the staged set already covers.
+// Look up the paths in a cherry-pick or revert with git show, and the paths in
+// a merge with git diff. Route gated incoming content through the Git commit
+// hook. Mailboxes and continuation flags do not supply an incoming ref.
 const INCOMING_REF_VERBS = { 'cherry-pick': 'show', revert: 'show', merge: 'diff' };
 const REF_LESS_FLAGS = new Set(['--continue', '--abort', '--skip', '--quit', '--edit-todo']);
 

@@ -1,7 +1,7 @@
+// sites-pinned: tests/shared/install-bootstrap-opencode-stability.test.ts
 import { mkdir, mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   fileExists,
   INSTALL_MARKER_END,
@@ -30,7 +30,7 @@ import {
   INSTALLED_PROMPT_FILENAME,
 } from './remediate-code-wrapper-install-renderers.mjs';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(import.meta.dirname, '..');
 const promptAssetPath = join(repoRoot, 'skills', 'remediate-code', 'remediate-code.prompt.md');
 const skillAssetPath = join(repoRoot, 'skills', 'remediate-code', 'SKILL.md');
 const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
@@ -1217,9 +1217,6 @@ export async function installHostPrompt(argv) {
   await installBootstrap(argv);
 }
 
-// Underscore-aliased re-exports consumed by host-bootstrap-descriptors tests
-// via remediate-code-wrapper-lib.mjs. Keep these so the test import chain resolves
-// without modification to the test file.
 export {
   INSTALL_HOST_ORDER as _INSTALL_HOST_ORDER,
   INSTALL_HOST_DEFINITIONS as _INSTALL_HOST_DEFINITIONS,

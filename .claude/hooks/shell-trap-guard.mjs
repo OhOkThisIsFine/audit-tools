@@ -217,8 +217,8 @@ function restoreTargets(sub) {
     // `--staged` alone unstages (index only) and is safe; `--worktree` (or the
     // absence of `--staged`) writes the working tree.
     if (/--staged\b/.test(stripped) && !/--worktree\b/.test(stripped)) return null;
-    const args = sub.split(/\s+/).slice(sub.split(/\s+/).indexOf('restore') + 1);
-    return args.filter((a) => !a.startsWith('-'));
+    const tokens = sub.split(/\s+/);
+    return tokens.slice(tokens.indexOf('restore') + 1).filter((a) => !a.startsWith('-'));
   }
 
   // The stash verbs that MOVE edits out of the working tree. Tested the same way
@@ -1062,7 +1062,7 @@ if (
     // whose stripped form BEGINS with the verb — so a `cd` inside a prompt is
     // never mistaken for a real one.
     const targets = [];
-    for (const st of splitShellStatements(cmd)) {
+    for (const st of subCmds) {
       if (!CD_STATEMENT.test(stripQuoted(st))) continue;
       const m = st.match(/^\s*(?:cd|pushd|Set-Location|sl)\s+(?:-\S+\s+)*(?:'([^']+)'|"([^"]+)"|(\S+))/i);
       const target = m && (m[1] || m[2] || m[3]);
