@@ -1,14 +1,13 @@
 // sites-pinned: tests/remediate/host-handoff-corroboration-obligations.test.ts
-import type { ConformanceReviewIssueCode } from "./hostContracts.js";
+import type { ConformanceReviewIssueCode, RemediationHostResult, RemediationHostDecision, RemediationHostWorkItem } from "./hostContracts.js";
 import { readSubmissionDocument } from "../../../shared/submission/submissionClassifier.js";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import { hashContent } from "../../../shared/hash.js";
+import { contentSha256 } from "../../../shared/submission/hostHandoffCore.js";
 import { headCommit } from "../../../shared/git.js";
 import { stableStringify } from "../../../shared/stableStringify.js";
 import { writeJsonFile } from "../../../shared/io/json.js";
 import { ReviewDeclarationSchema, reviewIndependenceIssue, AcceptedConformanceReviewSchema, type AcceptedConformanceReview } from "../../../shared/types/reviewIndependence.js";
-import type { RemediationHostResult, RemediationHostDecision, RemediationHostWorkItem } from "./hostContracts.js";
 
 const ConformanceResponseSchema = z.object({
   schema_version: z.literal("contract-conformance-review/v1"),
@@ -23,8 +22,6 @@ const ConformanceResponseSchema = z.object({
   }).strict()),
 }).strict();
 
-const digest = (value: unknown): string => hashContent(stableStringify(value));
-
 /** Shared admission checks; success policy and freshness belong to the consumer. */
 export function parseConformanceResponse(value: unknown, binding: string) {
   const parsed = ConformanceResponseSchema.safeParse(value);
@@ -37,7 +34,7 @@ export function conformanceObligationsMatch(review: { obligations: readonly { ob
 }
 
 export function conformanceReviewPaths(artifactsDir: string, runId: string, itemId: string): { request: string; response: string } {
-  const stem = digest({ run_id: runId, work_item_id: itemId });
+  const stem = contentSha256({ run_id: runId, work_item_id: itemId });
   const dir = join(artifactsDir, "conformance-review");
   return { request: join(dir, `${stem}.request.json`), response: join(dir, `${stem}.response.json`) };
 }
@@ -53,6 +50,10 @@ export interface ConformanceReviewIssue {
 export type ConformanceReviewCheck =
   | { ok: true; receipt?: AcceptedConformanceReview }
   | { ok: false; issue: ConformanceReviewIssue };
+
+function conformanceIssue(paths: { request: string; response: string }, itemId: string, code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck {
+  return { ok: false, issue: { code, work_item_id: itemId, result_path: paths.response, review_request_path: paths.request, message } };
+}
 
 /** Called only AFTER mechanical result, obligation, commit, scope and test checks pass. */
 export async function checkContractConformance(params: {
@@ -84,7 +85,7 @@ export async function checkContractConformance(params: {
   };
   const checked = await checkConformanceSubject({ artifactsDir: params.artifactsDir, runId: params.runId, itemId: params.item.id, obligationIds: params.item.obligation_ids, content, evidenceInstruction: `Inspect the cited source and tests at ${verifiedHead ? "the verified_head commit" : "the landed commit"}. Do not accept a citation merely because it exists; explain how it satisfies the obligation and the relevant requirement.` });
   if (!checked.ok) return checked;
-  const issue = (code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck => ({ ok: false, issue: { code, work_item_id: params.item.id, result_path: paths.response, review_request_path: paths.request, message } });
+  const issue = (code: ConformanceReviewIssueCode, message: string) => conformanceIssue(paths, params.item.id, code, message);
   // The result may have been edited while mechanical test commands were running.
   // Never accept a receipt for bytes other than the ones this pass validated.
   const currentResult = await readSubmissionDocument(resolve(params.root, params.item.result_path));
@@ -101,7 +102,7 @@ export async function checkContractConformance(params: {
 export async function checkConformanceSubject(params: { artifactsDir: string; runId: string; itemId: string; obligationIds: readonly string[]; content: unknown; evidenceInstruction: string }): Promise<ConformanceReviewCheck> {
   const paths = conformanceReviewPaths(params.artifactsDir, params.runId, params.itemId);
   const content = params.content;
-  const binding = digest(content);
+  const binding = contentSha256(content);
   const request = {
     schema_version: "contract-conformance-request/v1",
     binding,
@@ -128,9 +129,7 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
   if (savedSubject.kind !== "value") await writeJsonFile(subjectPath, request);
   const existing = await readSubmissionDocument(paths.request);
   if (stableStringify(existing.kind === "value" ? existing.value : null) !== stableStringify(request)) await writeJsonFile(paths.request, request);
-  const issue = (code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck => ({ ok: false, issue: {
-    code, work_item_id: params.itemId, result_path: paths.response, review_request_path: paths.request, message,
-  } });
+  const issue = (code: ConformanceReviewIssueCode, message: string) => conformanceIssue(paths, params.itemId, code, message);
   const raw = await readSubmissionDocument(paths.response);
   const review = parseConformanceResponse(raw.kind === "value" ? raw.value : undefined, binding);
   if (!review) {

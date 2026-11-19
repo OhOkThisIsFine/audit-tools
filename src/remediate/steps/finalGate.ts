@@ -29,13 +29,14 @@ import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "..
 // the scrub guarantees is that a child cannot read the parent's location as its
 // own, not that the child is session-free.
 //
-// Hard floor (always run, in order — single package, single-flight build — CE-001):
-//   1. npm run build                          (one tsc build for the whole package)
-//   2. npm run check                          (typecheck, no emit)
-//   3. BUILD-FREE unit suites at the repo root, each invoked directly so dist is
-//      never rebuilt or raced:
-//        - shared+audit:  node --import tsx/esm --test tests/shared/*.test.mjs tests/audit/*.test.mjs
-//        - remediate-code: npx vitest run
+// Hard floor (always run, in order — single package, single-flight build — CE-001).
+// `toolOwnedFinalGateCommands` is the source of truth for the exact argv; today:
+//   1. `npm run build`        (one tsc build for the whole package)
+//   2. `npm run check`        (typecheck, no emit)
+//   3. `npm run check:tests`  (the test-tree typecheck)
+//   4. the BUILD-FREE vitest unit suite at the repo root, run through the vitest
+//      gate script with `--retry=2`, invoked directly so dist is never rebuilt
+//      or raced.
 //
 // CE-002: the hard floor is scoped to build + typecheck + unit. The
 // runtime/packaged-bin smoke surface (the `verify:release` smokes) is recorded
@@ -69,9 +70,8 @@ import {
 } from "./gateCommands.js";
 
 // `FinalGateCommandSpec`, `isAuditToolsMonorepo`, and `toolOwnedFinalGateCommands`
-// are single-sourced in the leaf module `gateCommands.ts` (so `dispatch.ts` can
-// derive the same pinned merged-base check without an import cycle). Imported
-// here for local use and re-exported to preserve the public surface + test imports.
+// are single-sourced in the leaf module `gateCommands`. Imported here for local
+// use and re-exported to preserve the public surface + test imports.
 export { isAuditToolsMonorepo, toolOwnedFinalGateCommands };
 export type { FinalGateCommandSpec };
 
@@ -213,7 +213,7 @@ export const RUNTIME_RESIDUAL_DECLARATION: ToolOwnedFinalGateResult["runtime_res
 /**
  * Run the tool-owned final gate (INV-RS-10). Each command runs through the
  * shared async `runTrackedAsync`, which scrubs the wrapper's
- * `AUDIT_TOOLS_CALLER_CWD` stamp (and nothing else — see `finalGate.ts`'s file
+ * `AUDIT_TOOLS_CALLER_CWD` stamp (and nothing else — see the file
  * header; the host's session variables reach the child unchanged).
  * The first failing command short-circuits the floor (a broken build makes the
  * later layers meaningless). A `runner` may be injected for tests. When the
@@ -629,7 +629,7 @@ export async function recordFinalGateOutcome(ctx: {
     outcome: ctx.outcome,
     passed: ctx.passed,
     commands_run: ctx.commandsRun,
-    ...(ctx.reason === undefined ? {} : { reason: ctx.reason }),
+    reason: ctx.reason,
   });
   ctx.runLogger?.event({
     phase: ctx.logPhase ?? "next-step",

@@ -231,17 +231,15 @@ export async function runRequiredTest(
       signal: result.signal,
     };
   }
-  if (result.status !== 0) {
-    return {
-      command,
-      output_log,
-      outcome: "failed",
-      exit_code: result.status,
-      stdout,
-      stderr,
-    };
-  }
-  return null;
+  // Every other outcome returned above, so the status is non-zero here.
+  return {
+    command,
+    output_log,
+    outcome: "failed",
+    exit_code: result.status,
+    stdout,
+    stderr,
+  };
 }
 
 export async function rerunRequiredTests(
@@ -319,7 +317,24 @@ function boundRequiredTestMessage(message: string): string {
   return `${message.slice(0, room)}${REQUIRED_TEST_TRUNCATION_MARKER}`;
 }
 
-
+/**
+ * Pre-computed required-test verdicts, keyed by `root` + command: `null` =
+ * green, a {@link RequiredTestFailure} = the classified failure.
+ *
+ * This is the recovery path's ANSWER TABLE, not a lazy cache. The recovery verb
+ * runs every distinct command ONCE, up front and unlocked
+ * (`precomputeRecoveryTestVerdicts`), and hands the finished table to the
+ * locked phase, which only ever READS it — no required test is spawned while
+ * the state lock is held.
+ *
+ * Two consequences are deliberate. A command absent from the table is treated
+ * as FAILED, never spawned — fail-closed is the only answer that keeps the
+ * no-spawn-under-the-lock property mechanical rather than remembered. And the
+ * table is recovery-only: a `targeted_command` is host-authored and need not be
+ * idempotent (one that appends to a log, bumps a counter, or is flaky produces
+ * a genuinely different second run), so collapsing spawns is a behavior change.
+ * The normal lane passes `null` and every command spawns once per work item.
+ */
 export type RemediationRequiredTestVerdicts = ReadonlyMap<
   string,
   RequiredTestFailure | null

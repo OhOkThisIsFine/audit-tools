@@ -19,7 +19,6 @@ export async function presentReportStep(
     repoRoot: root,
     artifactsDir,
     prompt: `# Present Remediation Report\n\nRead \`${reportPath}\` and summarize the remediation outcome.\nMention resolved, ignored, and deemed-inappropriate counts plus the closing action.`,
-    allowedCommands: [],
     stopCondition: "Present the remediation report summary and stop.",
     artifactPaths: { final_report: reportPath },
   });

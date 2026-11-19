@@ -1,4 +1,6 @@
 // sites-pinned: tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/friction-capture-closeout.test.ts
+import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
+
 export const REMEDIATION_STEP_CONTRACT_VERSION =
   "remediate-code-step/v1alpha1" as const;
 
@@ -108,8 +110,6 @@ export type RemediationStepKind =
   // Persisted contract: an ADDITIVE value, read the same way as `final_gate_red`
   // by a host that does not know it.
   | "extracted_plan_discarded";
-
-import type { StepStatus, AccessDeclaration } from "audit-tools/shared";
 
 // AccessDeclaration is single-sourced in audit-tools/shared; re-exported here
 // (from the single import above) so existing importers of this module are

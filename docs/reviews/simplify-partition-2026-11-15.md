@@ -36,7 +36,7 @@ Lines are whole-file line counts at the base. "Churn" is added + deleted non-tes
 | P05 audit cli | `src/audit/cli/**` | 50 | 16,203 | 594 | landed |
 | P06 audit extractors | `src/audit/extractors/**` | 51 | 12,039 | 29 | landed |
 | P07 audit other | the rest of `src/audit/**` (`reporting`, `io`, `validation`, `types`, `systemic`, `contracts`, `decompose`, `clarification`, `supervisor`, top-level files) | 55 | 12,499 | 160 | landed |
-| P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | open |
+| P08 remediate steps | `src/remediate/steps/**` | 21 | 10,858 | 527 | landed |
 | P09 remediate other | the rest of `src/remediate/**` | 40 | 11,197 | 66 | open |
 | P10 scripts shared | `scripts/shared/**` | 69 | 14,406 | 269 | open |
 | P11 scripts other | the rest of `scripts/**` | 63 | 18,357 | 82 | open |
@@ -296,3 +296,75 @@ Each of the 55 files was read in full by at least one reviewer, most of them fro
 The gap reader read 15 files in full from all angles (`types.ts`, `conceptualAdjudication.ts`,
 `reviewPlanning.ts`, the six `systemic/` files, `validation/artifacts.ts`,
 `ingestIssueCodes.ts`, `operatorHandoff.ts`, `scoreAudit.ts`, and the two reporting prompts).
+
+### From P08
+
+P08 closed the P04 lead for `uniqueSorted` in `src/remediate/steps/` (`contractPipeline.ts`
+`sourceDigests`, two lists in `dispatch/hostCorroboration.ts`, three returns in
+`gateCommands.ts`). It also used the shared `errorMessage`, `countBy`, `contentSha256`,
+`isRecord`, `stringArray` and `idsAreStrictlyAscending` where a file spelled out the same body.
+The `countBy` site counts the closed item-status enum, so the P01 `constructor` caveat does not
+apply.
+
+Cross-part touches: two comments that named `KNOWN_SCHEMA_VERSIONS` in `intakeResolver.ts` as the
+example of a duplicated version literal (`scripts/check-version-gates.mjs`,
+`tests/shared/version-gate-scan.test.ts`). That Set now imports the three intake version
+constants, so the comments describe the shape without naming it. Comment text only.
+
+Moves inside P08: `randomRunId` is exported from `stepWriter.ts` (the blocked-step backstop and
+`nextStep.ts` share it; the old copy in `stepWriter.ts` said an import would cycle, and it does
+not). `RETIRED_DISPATCH_SHAPE_MESSAGE` is exported from `dispatch/hostContracts.ts` and replaces
+four copies in `nextStep.ts` and `recoverIngest.ts`. The orphaned, stale docblock of
+`RemediationRequiredTestVerdicts` moved from `dispatch/hostHandoff.ts` to the type in
+`dispatch/requiredTests.ts`, with the `spawnSync` rationale corrected.
+
+`prepareRemediationHostHandoff` no longer catches a `BlockContractError` from the workload build,
+and its empty-workload branch no longer scans the plan a second time. The `planBlockIssues` scan
+just before the build refuses every block the build can reach, so neither path could run.
+`settledFindingIds` and `pendingItems` in the host ingest were residue of the time when a work
+item held several findings: a work item id is unique in the workload, so the filter could never
+skip an item.
+
+Leads for later parts (not fixed, not verified as defects):
+
+- **P09:** exact `error instanceof Error ? error.message : String(error)` sites that can call
+  `errorMessage`: `contractPipeline/executionPlan.ts` (three), `runtimePlanAuthority.ts`,
+  `index.ts`, `intake.ts`, `phases/close.ts` (three), `phases/grounding.ts`,
+  `review/reviewGate.ts`, `validation/artifacts.ts` (three). Check each for the exact form first
+  (the P03 and P06 rejections were other forms).
+- **P09 (with a P08 site):** `contractPipeline/executionPlan.ts` and `dispatch/hostHandoff.ts`
+  (P08, loop-core) build the `intent_checkpoint.json` path by hand; `intakePaths(...)
+  .intentCheckpoint` owns it. The `owner-decision.json` and `risk-decisions.json` joins
+  (`executionPlan.ts`, five in `steps/contractPipeline.ts`, one in `steps/nextStep.ts`, one test)
+  belong as members of `executionPlanPaths`; `generate-runtime-artifact-names.mjs` reads
+  `executionPlan.ts`, so check its output.
+- **P09:** `phases/triageConformance.ts` has its own `hashContent(stableStringify(...))` digest
+  (use `contentSha256`) and repeats the `conformance-review` path literals that
+  `conformanceReviewPaths` owns. `executionPlan.ts` has two more `contentSha256` sites.
+- **P09:** `intake.ts` can export a named `IntakePaths` type; `ReturnType<typeof intakePaths>` is
+  spelled four times in `steps/prompts.ts`, four times in `steps/intakeResolver.ts`, and in tests.
+- **P09:** `"clarification_resolution.json"` and `"triage_resolution.json"` are raw literals in
+  `steps/submitGateResult.ts`, `phases/triage.ts` and the `z.enum` in
+  `state/decisionConsumption.ts`, with no named constant.
+- **P10:** `scripts/shared/loopCoreClosureData.mjs` declares `steps/intakeResolver.ts` as
+  `claim: "reads-only"`, but the module writes `source-manifest.json`,
+  `selected-audit-findings.json`, the current step and the brief. Check what the closure gate
+  verifies, and correct the claim.
+- **P01 (landed):** `errorMessage` is not in the `audit-tools/shared` barrel, so every remediate
+  caller needs a deep import. `hasExactKeys` in `submission/hostHandoffCore.ts` sorts
+  `[...expected]` again for each key; one sort per call is enough.
+- **P05 (landed):** the audit twin `cli/dispatch/hostHandoff.ts` has three hand-rolled
+  string-array checks (`stringArray`, as in P08), and the same "issue ids for the refusal read"
+  projection as `recordAndEnrichHostIssues`; a helper in `src/shared/submission/` would serve both.
+- **Any part:** the backticked id list `` .map((id) => `\`${id}\``).join(", ") `` is written 16
+  times in six remediate and shared files. One shared helper gives the same bytes.
+
+P08 skips are in
+[`simplify-deferred-items-2026-11-16.md`](simplify-deferred-items-2026-11-16.md), with what would
+unblock each. `stepUtils.ts` and `sessionConfigLoad.ts` have no `// sites-pinned:` declaration, so
+they did not change (the P05 rule).
+
+P08 coverage: four reviewers, one per file group (`nextStep.ts`; `dispatch/hostHandoff.ts`; the
+other dispatch and gate files; the prompt and intake files). Each of the 21 files was read in full
+by its reviewer from all four angles. An independent refuter checked the risky items before the
+apply, and a second reviewer checked the applied diff.

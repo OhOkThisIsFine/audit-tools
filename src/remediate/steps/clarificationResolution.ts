@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { compareCodeUnits } from "audit-tools/shared";
+import { errorMessage } from "../../shared/io/json.js";
 import type { RemediationState } from "../state/store.js";
 import type { ClarificationRequest } from "../state/types.js";
 
@@ -70,7 +71,7 @@ export async function readPlanClarificationResolutions(
   } catch (error) {
     return {
       ok: false,
-      reason: `the file is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+      reason: `the file is not valid JSON (${errorMessage(error)})`,
     };
   }
   return parsePlanClarificationResolutions(value);

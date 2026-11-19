@@ -5,7 +5,10 @@ import { remediationArtifactsDir, headCommit, SKIP_WRITE, invalidateStepContract
 import { StateStore } from "../state/store.js";
 import { currentHostBoundaryState } from "../state/runIdentity.js";
 import { workloadBindingIdentity, precomputeRecoveryTestVerdicts, ingestRemediationHostResults } from "./dispatch/hostHandoff.js";
-import { type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
+import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
+
+const noStateError = (artifactsDir: string): Error =>
+  new Error(`No remediation state at ${artifactsDir} — there is nothing to ingest.`);
 
 /**
  * The `recover-ingest` verb's whole body: ingest the host's landed results in
@@ -69,23 +72,18 @@ export async function recoverIngestHostResults(options: {
 
   // ── Phase 1: unlocked ────────────────────────────────────────────────────
   const snapshot = await store.loadState();
-  if (!snapshot) {
-    throw new Error(
-      `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
-    );
-  }
+  if (!snapshot) throw noStateError(artifactsDir);
   const headBeforeTests = await headCommit(root);
-  const bindingBeforeTests = workloadBindingIdentity(currentHostBoundaryState(snapshot));
+  const snapshotBoundary = currentHostBoundaryState(snapshot);
+  const bindingBeforeTests = workloadBindingIdentity(snapshotBoundary);
   const requiredTestVerdicts = await precomputeRecoveryTestVerdicts({
     root,
     artifactsDir,
     runId: options.runId,
-    state: currentHostBoundaryState(snapshot),
+    state: snapshotBoundary,
   });
   if (requiredTestVerdicts === "unsupported_retired_state") {
-    throw new Error(
-      "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
-    );
+    throw new Error(RETIRED_DISPATCH_SHAPE_MESSAGE);
   }
 
   // ── Phase 2: locked; children are async + deadline-bounded only ──────────
@@ -96,13 +94,10 @@ export async function recoverIngestHostResults(options: {
   let ingested!: RemediationHostIngestSummary;
   await store.withActiveOperator(async () => {
   await store.mutate(async (state) => {
-    if (!state) {
-      throw new Error(
-        `No remediation state at ${artifactsDir} — there is nothing to ingest.`,
-      );
-    }
+    if (!state) throw noStateError(artifactsDir);
     const headNow = await headCommit(root);
-    const bindingNow = workloadBindingIdentity(currentHostBoundaryState(state));
+    const boundary = currentHostBoundaryState(state);
+    const bindingNow = workloadBindingIdentity(boundary);
     // TWO identities, because they catch different writers. HEAD moves when the
     // tree does; the workload binding moves when a concurrent state writer
     // settles items or re-mints the workload without committing anything. The
@@ -143,7 +138,7 @@ export async function recoverIngestHostResults(options: {
               },
         ],
         state_changed: false,
-        state: currentHostBoundaryState(state),
+        state: boundary,
       };
       // The lock was taken to WRITE. Nothing changed, so write nothing: the
       // no-op sentinel is what keeps a settled recovery from replacing
@@ -154,13 +149,11 @@ export async function recoverIngestHostResults(options: {
       root,
       artifactsDir,
       runId: options.runId,
-      state: currentHostBoundaryState(state),
+      state: boundary,
       recovery: { requiredTestVerdicts },
     });
     if (outcome === "unsupported_retired_state") {
-      throw new Error(
-        "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.",
-      );
+      throw new Error(RETIRED_DISPATCH_SHAPE_MESSAGE);
     }
     ingested = outcome;
     // A nothing-to-recover pass returns the sentinel, not the state it read: the

@@ -18,6 +18,10 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
   let value: unknown;
   try { value = JSON.parse(params.source); }
   catch { return refuse("invalid_json", "Gate result must be valid JSON."); }
+  const admit = async (path: string) => {
+    await writeJsonFile(path, value);
+    return { written: true, path, issues: [] };
+  };
   const state = await new StateStore(params.artifactsDir).loadState();
   if (params.lane === "conformance_review") {
     const unit = state?.plan?.units.find(unit => unit.id === params.workItemId);
@@ -43,8 +47,7 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
     }
     // Negative reviews are useful feedback, not acceptance. The file consumer
     // retains independence, verdict, source freshness and history ownership.
-    await writeJsonFile(paths.response, value);
-    return { written: true, path: paths.response, issues: [] };
+    return admit(paths.response);
   }
   if (params.lane === "clarification") {
     const pending = state ? pausedClarifications(state) : [];
@@ -54,9 +57,7 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
     const parsed = parsePlanClarificationResolutions(value);
     const refusal = planClarificationRefusal(parsed, new Set(pending.map(question => question.unit_id)), "not waiting for a clarification");
     if (refusal !== null) return refuse("invalid_clarification", refusal);
-    const path = join(params.artifactsDir, "clarification_resolution.json");
-    await writeJsonFile(path, value);
-    return { written: true, path, issues: [] };
+    return admit(join(params.artifactsDir, "clarification_resolution.json"));
   }
   if (!state?.plan || !state.items ||
     (state.status !== "triage" && state.status !== "waiting_for_triage") ||
@@ -70,7 +71,5 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
   if (isRecord(value) && typeof value.plan_id === "string" && value.plan_id !== state.plan.plan_id) {
     return refuse("stale_triage_plan", "Triage decisions do not name the live plan; obtain the current triage step.");
   }
-  const path = join(params.artifactsDir, "triage_resolution.json");
-  await writeJsonFile(path, value);
-  return { written: true, path, issues: [] };
+  return admit(join(params.artifactsDir, "triage_resolution.json"));
 }

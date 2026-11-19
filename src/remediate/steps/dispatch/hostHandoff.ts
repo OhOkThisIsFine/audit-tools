@@ -72,8 +72,10 @@ import {
   type IngestionCheckId,
   type SubmissionIssue,
   type SubmissionLedgerEvent,
+  type SubmissionParse,
   type SubmissionScanMessages,
 } from "audit-tools/shared";
+import { errorMessage } from "../../../shared/io/json.js";
 import {
   REMEDIATION_STATE_CONTRACT_VERSION,
   type RemediationState,
@@ -98,12 +100,6 @@ import {
   REMEDIATION_HOST_RESULT_CONTRACT_VERSION as RESULT_CONTRACT_VERSION,
   REMEDIATION_HOST_WORKLOAD_CONTRACT_VERSION as WORKLOAD_CONTRACT_VERSION,
 } from "../types.js";
-
-// The state contract version is the STORE's declaration, not a second literal
-// here. It used to be private to this module — and the module then supplied it
-// to its own parser at the call site below, so the check it performed was
-// "does the constant equal itself".
-const STATE_CONTRACT_VERSION = REMEDIATION_STATE_CONTRACT_VERSION;
 
 /** A recognized preparation defect, emitted as a bounded repair step by next-step. */
 export class RemediationHostPreparationError extends Error {
@@ -229,7 +225,7 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
   if (
     !isRecord(value) ||
     !hasOnlyKnownKeys(value, CURRENT_STATE_KEYS) ||
-    value.contract_version !== STATE_CONTRACT_VERSION ||
+    value.contract_version !== REMEDIATION_STATE_CONTRACT_VERSION ||
     value.status !== "implementing"
   ) {
     return null;
@@ -248,15 +244,7 @@ function parseCurrentState(value: unknown): CurrentRemediationHostState | null {
     if (!parsedHandoff.success) return null;
     if (parsedHandoff.data.conformance_policy_sha256 !== undefined &&
       (value.conformance_review === undefined || contentSha256(value.conformance_review) !== parsedHandoff.data.conformance_policy_sha256)) return null;
-    const ids = parsedHandoff.data.work_item_ids;
-    if (
-      new Set(ids).size !== ids.length ||
-      ids.some(
-        (id, index) => index > 0 && compareCodeUnits(ids[index - 1]!, id) >= 0,
-      )
-    ) {
-      return null;
-    }
+    if (!idsAreStrictlyAscending(parsedHandoff.data.work_item_ids)) return null;
   }
 
   const unitIds = new Set(parsedPlan.data.units.map(unit => unit.id));
@@ -280,14 +268,6 @@ async function assertApprovedRuntimePlan(artifactsDir: string, state: CurrentRem
     if (!(error instanceof RemediationPlanAuthorityError)) throw error;
     throw new RemediationHostPreparationError(error.code, error.message);
   }
-}
-
-function normalizeDeclaredPath(root: string, candidate: string, label: string): string {
-  if (candidate.length === 0 || isAbsolute(candidate)) {
-    throw new Error(`${label} must be a non-empty repository-relative path`);
-  }
-  const normalized = repoRelativePath(root, candidate, label);
-  return candidate.endsWith("/") ? `${normalized}/` : normalized;
 }
 
 /**
@@ -343,11 +323,8 @@ function assertBlockContract(root: string, block: ExecutionUnit): void {
     }
     let normalized: string;
     try {
-      normalized = normalizeDeclaredPath(
-        root,
-        raw,
-        `${block.id}.touched_files[]`,
-      );
+      const relative = repoRelativePath(root, raw, `${block.id}.touched_files[]`);
+      normalized = raw.endsWith("/") ? `${relative}/` : relative;
     } catch {
       throw new BlockContractError(
         block.id,
@@ -443,30 +420,6 @@ function planBlockIssues(
     if (!issues.some(issue => issue.message === message)) issues.push({ code: "block_contract_invalid", message });
   }
   return issues;
-}
-
-/**
- * The classified "cannot prepare" message for a producer defect that reached the
- * build path as a throw. Aggregates the whole plan scan so an operator sees
- * EVERY malformed block, not just the first one the builder tripped on.
- *
- * The THROWER is attributed by name, not by whether the scan happened to find
- * anything. Falling back only on an EMPTY scan silently dropped the raised error
- * whenever the scan named some OTHER block — a plan with one ghost dependency
- * elsewhere was enough to make the message describe a block that did not throw
- * and omit the one that did.
- */
-function cannotPrepareMessage(
-  root: string,
-  state: CurrentRemediationHostState,
-  raised: BlockContractError,
-): string {
-  const scanned = planBlockIssues(root, state);
-  const messages = scanned.map((issue) => issue.message);
-  if (!scanned.some((issue) => issue.work_item_id === raised.blockId)) {
-    messages.push(raised.message);
-  }
-  return `Cannot prepare a remediation host workload: ${messages.join("; ")}`;
 }
 
 function resolveBoundaryPaths(
@@ -710,9 +663,8 @@ function renderResultTemplate(item: {
  * The score is the WORST severity in the block, with the count of same-or-worse
  * findings nudging it up — a block of many high-severity findings is above a
  * block with one. Deterministic (no clock, no sampling) and bounded by
- * construction. A block whose findings are all absent from the plan contributes
- * nothing, so an unresolvable block honestly ranks `low` rather than being
- * guessed at.
+ * construction. A block with no source findings contributes nothing, so it
+ * ranks `low` rather than being guessed at.
  */
 export function severityRiskWeight(severity: FindingSeverity): number {
   // DERIVED from the shared tuple, never a second copy of it. This used to be a
@@ -745,17 +697,11 @@ export function severityRiskWeight(severity: FindingSeverity): number {
 }
 
 function blockRiskScore(
-  state: CurrentRemediationHostState,
-  block: ExecutionUnit,
+  findings: readonly { readonly severity?: FindingSeverity }[],
 ): number {
-  const scores = block.source_finding_ids
-    .map(
-      (findingId) =>
-        state.plan.findings.find((entry) => entry.id === findingId)?.severity,
-    )
-    .flatMap((severity) =>
-      severity === undefined ? [] : [severityRiskWeight(severity)],
-    );
+  const scores = findings.flatMap(({ severity }) =>
+    severity === undefined ? [] : [severityRiskWeight(severity)],
+  );
   if (scores.length === 0) return 0;
   const worst = Math.max(...scores);
   // Each additional finding at or above half the worst severity adds a tenth,
@@ -798,7 +744,7 @@ function buildWorkItem(
     allowed_files: [...unit.allowed_files], baseline_commit: baselineCommit,
     obligation_ids: obligationIds, prompt: { text: prompt.text, sha256: prompt.sha256 },
     required_tests: [...unit.required_tests], result_path: resultPath,
-    demand: deriveLaneDemand({ tokenEstimate, fileCount: unit.allowed_files.length, riskScore: blockRiskScore(state, unit) }),
+    demand: deriveLaneDemand({ tokenEstimate, fileCount: unit.allowed_files.length, riskScore: blockRiskScore(sourceFindings) }),
     token_estimate: tokenEstimate,
   };
 }
@@ -859,14 +805,10 @@ function parseWorkItem(
     typeof value.id !== "string" ||
     !LaneDemandSchema.safeParse(value.demand).success ||
     !isCommit(value.baseline_commit) ||
-    !Array.isArray(value.source_finding_ids) ||
-    !value.source_finding_ids.every((entry) => typeof entry === "string") ||
-    !Array.isArray(value.obligation_ids) ||
-    !value.obligation_ids.every((entry) => typeof entry === "string") ||
-    !Array.isArray(value.allowed_files) ||
-    !value.allowed_files.every((entry) => typeof entry === "string") ||
-    !Array.isArray(value.required_tests) ||
-    !value.required_tests.every((entry) => typeof entry === "string") ||
+    stringArray(value.source_finding_ids) === null ||
+    stringArray(value.obligation_ids) === null ||
+    stringArray(value.allowed_files) === null ||
+    stringArray(value.required_tests) === null ||
     typeof value.result_path !== "string" ||
     !Number.isInteger(value.token_estimate) ||
     Number(value.token_estimate) < 0 ||
@@ -1023,10 +965,7 @@ export async function submitRemediationHostResult(params: {
     workItemId: workItem.id,
     resultPath: workItem.result_path,
     source: params.source,
-    parse: (value) => {
-      const result = parseResult(value, params.runId, workItem);
-      return result.ok ? { ok: true, parsed: result } : { ok: false, check: result.check, detail: result.reason };
-    },
+    parse: scanParser(params.runId, workItem),
     resultId: (result) => result.result.result_id,
     seen: () => false,
     messages: remediationScanMessages,
@@ -1074,6 +1013,17 @@ const remediationScanMessages: SubmissionScanMessages = {
   contractInvalid: (detail) => detail,
   duplicate: (resultId) => `result_id ${resultId} is duplicated in this workload`,
 };
+
+/** {@link parseResult} in the shape {@link scanBoundSubmission} takes. */
+function scanParser(
+  runId: string,
+  workItem: RemediationHostWorkItem,
+): (value: unknown) => SubmissionParse<AcceptedHostResult> {
+  return (value) => {
+    const result = parseResult(value, runId, workItem);
+    return result.ok ? { ok: true, parsed: result } : { ok: false, check: result.check, detail: result.reason };
+  };
+}
 
 function parseResult(
   value: unknown,
@@ -1279,29 +1229,6 @@ function parseResult(
 }
 
 /**
- * Pre-computed required-test verdicts, keyed by `root` + command: `null` =
- * green, a string = the failure detail.
- *
- * This is the recovery path's ANSWER TABLE, not a lazy cache. A required-test
- * rerun is a `spawnSync`, which blocks the event loop for its whole duration —
- * so running one inside the state lock would starve the lock's own heartbeat
- * timer and let a second acquirer reclaim the lock as stale mid-hold. The
- * recovery verb therefore runs every distinct command ONCE, up front and
- * unlocked ({@link precomputeRecoveryTestVerdicts}), and hands the finished
- * table to the locked phase, which only ever READS it.
- *
- * Two consequences are deliberate. A command absent from the table is treated
- * as FAILED, never spawned — fail-closed is the only answer that keeps the
- * no-spawn-under-the-lock property mechanical rather than remembered. And the
- * table is recovery-only: a `targeted_command` is host-authored and need not be
- * idempotent (one that appends to a log, bumps a counter, or is flaky produces
- * a genuinely different second run), so collapsing spawns is a behavior change.
- * The normal lane passes `null` and stays byte-identical to the pre-recovery
- * behavior — every command spawns once per work item, exactly as before.
- */
-
-
-/**
  * The MINTED verdict table: a Map subclass that exists only inside this module.
  *
  * The type above says "a table of verdicts"; it cannot say "a table produced by
@@ -1331,7 +1258,7 @@ function isMintedVerdictTable(
  * by HEAD alone. HEAD says the TREE has not moved; it says nothing about whether
  * the RUN's own state changed underneath those unlocked spawns — and a
  * concurrent state writer can settle items without touching a single commit.
- * The verdict table phase 1 computed is keyed on which findings were PENDING
+ * The verdict table phase 1 computed is keyed on which work items were PENDING
  * (`precomputeRecoveryTestVerdicts` filters on exactly that), so once the
  * frontier moves, a command the table no longer covers reads as
  * `required_test_failed` — a bookkeeping race reported as the host's work being
@@ -1343,7 +1270,7 @@ function isMintedVerdictTable(
  *  - the binding record's own parts (run, baseline, workload digest, item ids),
  *    which the ordinary workload-integrity check would also catch — kept here so
  *    this guard is the one place that says "the frontier moved";
- *  - the sorted set of work items with at least one still-PENDING finding, which
+ *  - the sorted set of work items still PENDING, which
  *    is what the verdict table is actually keyed on. This is the residual's real
  *    shape, and no digest in the state tracks it.
  *
@@ -1367,11 +1294,11 @@ export function workloadBindingIdentity(
 }
 
 /**
- * The bound work item ids with at least one finding still `pending`, sorted.
+ * The bound work item ids whose item is still `pending`, sorted.
  *
  * Derived from the STATE alone — the workload document is not read, because the
  * caller may be comparing a snapshot whose workload file is no longer on disk
- * (which is one of the situations this guard exists to refuse). A finding with
+ * (which is one of the situations this guard exists to refuse). A work item with
  * no item record is NOT counted: the state is corrupt in that case, and the
  * ingest's own parse refuses it with a better message than this guard could.
  */
@@ -1398,8 +1325,7 @@ function unresolvedFrontierWorkItemIds(
  * return the finished verdict table. Call this OUTSIDE the state lock — that is
  * the entire point (see {@link RemediationRequiredTestVerdicts}).
  *
- * Candidates are the work items with at least one still-pending finding whose
- * result file is present and parses as JSON; an item with no result file is
+ * Candidates are the still-pending work items whose result file is present and parses as JSON; an item with no result file is
  * refused before its tests would ever run, so spawning for it is pure cost. The
  * filter is deliberately generous otherwise — over-inclusion costs one spawn,
  * while under-inclusion becomes a fail-closed refusal of a good result.
@@ -1523,39 +1449,23 @@ export async function prepareRemediationHostHandoff(params: {
   const baselineCommit = existingRecord?.baseline_commit ?? params.baselineCommit;
   const planIssues = planBlockIssues(paths.root, state);
   if (planIssues.length) throw new RemediationHostPreparationError("plan_repair_required", planIssues.map(issue => issue.message).join("; "));
-  let workload: RemediationHostWorkload;
-  try {
-    workload = buildCanonicalWorkload({
-      paths,
-      state,
-      runId: params.runId,
-      baselineCommit,
-      ...(existingRecord
-        ? { workItemIds: existingRecord.work_item_ids }
-        : {}),
-    });
-  } catch (error) {
-    // A malformed block ON the frontier reaches this as a raw BlockContractError
-    // — an uncaught throw whose stack says nothing about which producer wrote the
-    // bad block, and which every retry reproduces. Re-raised in the SAME
-    // classified aggregate form the empty-workload branch below uses, so both
-    // producer-defect exits read alike.
-    if (!(error instanceof BlockContractError)) throw error;
-    throw new RemediationHostPreparationError("plan_repair_required", cannotPrepareMessage(paths.root, state, error));
-  }
+  // The scan above covers every block the build below can reach (the bound ids,
+  // or the pending level-0 frontier), so a malformed block or a missing
+  // prerequisite has already been refused by name: the build cannot raise a
+  // BlockContractError, and an empty workload is genuinely empty.
+  const workload = buildCanonicalWorkload({
+    paths,
+    state,
+    runId: params.runId,
+    baselineCommit,
+    ...(existingRecord
+      ? { workItemIds: existingRecord.work_item_ids }
+      : {}),
+  });
   if (workload.work_items.length === 0) {
-    // Name the producer defect when it is the cause. An empty level 0 that is
-    // really "every candidate block declares a prerequisite that does not
-    // exist" used to surface as a bare "empty workload", sending the operator
-    // to look at scheduling rather than at the plan.
-    const blocked = planBlockIssues(paths.root, state);
     throw new RemediationHostPreparationError(
       "plan_repair_required",
-      blocked.length === 0
-        ? "Cannot prepare an empty remediation host workload"
-        : `Cannot prepare a remediation host workload: ${blocked
-            .map((issue) => issue.message)
-            .join("; ")}`,
+      "Cannot prepare an empty remediation host workload",
     );
   }
   const workloadDigest = contentSha256(workload);
@@ -1736,7 +1646,6 @@ export async function ingestRemediationHostResults(params: {
     workItemOutcomes: new Map(),
     resultIds: new Set<string>(),
     landedFiles: new Set(nextState.applied_edit_surface ?? []),
-    settledFindingIds: new Set<string>(),
     recordedRecoveryMarks: null,
   };
   const verdicts = await executeHostVerificationReruns(validated.ctx, acc);
@@ -1814,13 +1723,12 @@ interface HostIngestContext {
 /**
  * One accepted item, carrying everything the state commit needs.
  *
- * `pendingItems` and `at` ride on the verdict rather than being recomputed in
- * the commit phase, and that is load-bearing rather than convenience. Both are
- * observations of a moment INSIDE the loop: `pendingItems` is the finding set
- * that was still pending when this item was verified, and `at` is the instant
- * this item finished — which the loop interleaves with git probes and test
- * reruns that take real wall-clock time. Recomputing either during the commit
- * would change what the ingest writes for the same input.
+ * `at` rides on the verdict rather than being recomputed in the commit phase,
+ * and that is load-bearing rather than convenience. It is an observation of a
+ * moment INSIDE the loop: the instant this item finished — which the loop
+ * interleaves with git probes and test reruns that take real wall-clock time.
+ * Recomputing it during the commit would change what the ingest writes for the
+ * same input.
  *
  * A refusal produces NO verdict; it pushes a classified issue and continues, so
  * the fail-closed shape stays structural rather than encoded in a verdict kind.
@@ -1829,7 +1737,6 @@ type HostItemVerdict =
   | {
       readonly kind: "decision";
       readonly workItem: RemediationHostWorkItem;
-      readonly pendingItems: readonly string[];
       readonly at: string;
       readonly conformance_review?: AcceptedConformanceReview;
       readonly outcome: RemediationHostDecision["outcome"];
@@ -1837,7 +1744,6 @@ type HostItemVerdict =
   | {
       readonly kind: "landed";
       readonly workItem: RemediationHostWorkItem;
-      readonly pendingItems: readonly string[];
       readonly at: string;
       readonly conformance_review?: AcceptedConformanceReview;
       /**
@@ -1873,35 +1779,25 @@ interface HostIngestAccumulators {
    * Per-item OBSERVED outcome, written where the item's bound path is read and
    * carried onto the summary. A work item is recorded `rejected` when an issue
    * names it, `missing_result_with_commit` when nothing is at its path but the
-   * run holds a corroborated commit for one of its findings, and
+   * run holds a corroborated commit for it, and
    * `awaiting_result` otherwise — so "the host has not written this yet" and
    * "the host wrote it and we refused it" never share a shape.
    */
   readonly workItemOutcomes: Map<string, WorkItemOutcome>;
   readonly resultIds: Set<string>;
   readonly landedFiles: Set<string>;
-  /**
-   * Findings an accepted verdict has already settled THIS ingest.
-   *
-   * The pending filter used to read the settlement off `nextState` directly,
-   * because the loop mutated as it went. With mutation deferred to the commit
-   * phase it would instead read the pre-loop clone, so two work items sharing a
-   * finding id would both claim it. This set restores exactly what the filter
-   * used to observe.
-   */
-  readonly settledFindingIds: Set<string>;
   recordedRecoveryMarks: SubmissionLedgerEvent[] | null;
 }
 
 /**
  * Phase 1 — the whole-bundle gates, up to the schedulable frontier.
  *
- * Returns either a populated context or ONE OF THREE finished summaries. The
- * three do not agree on `pending_work_item_ids` — the read failure and the
- * canonical parse failure return the binding's own item ids, the trusted-binding
- * refusal returns the empty list — so folding any two together is a silent
- * behavior change. Each is pinned by a test that asserts the pending list, not
- * just the code.
+ * Returns either a populated context or ONE OF FOUR finished summaries. The
+ * four do not agree on `pending_work_item_ids` — the read failure, the stale
+ * workload and the canonical parse failure return the binding's own item ids,
+ * the trusted-binding refusal returns the empty list — so each exit passes its
+ * own list and folding the lists together is a silent behavior change. Each is
+ * pinned by a test that asserts the pending list, not just the code.
  */
 async function validateHostResultBundle(input: {
   readonly state: CurrentRemediationHostState;
@@ -1921,6 +1817,22 @@ async function validateHostResultBundle(input: {
 > {
   const { state, nextState, paths } = input;
   const issues: RemediationHostIngestIssue[] = [];
+  // The finished summary of an exit that accepted nothing. The pending list is
+  // the caller's, because the exits do not agree on it (see above).
+  const noAcceptance = (
+    pendingWorkItemIds: readonly string[],
+  ): { readonly kind: "summary"; readonly summary: RemediationHostIngestSummary } => ({
+    kind: "summary",
+    summary: {
+      accepted_count: 0,
+      completed_work_item_ids: [],
+      pending_work_item_ids: pendingWorkItemIds,
+      issues,
+      work_item_outcomes: new Map(),
+      state_changed: false,
+      state: nextState,
+    },
+  });
   const workloadRead = await readSubmissionDocument(paths.workloadPath);
   if (workloadRead.kind !== "value") {
     if (state.host_handoff) {
@@ -1936,18 +1848,7 @@ async function validateHostResultBundle(input: {
             : `the workload file is not valid JSON: ${workloadRead.detail}`,
       });
     }
-    return {
-      kind: "summary",
-      summary: {
-        accepted_count: 0,
-        completed_work_item_ids: [],
-        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-        issues,
-        work_item_outcomes: new Map(),
-        state_changed: false,
-        state: nextState,
-      },
-    };
+    return noAcceptance(state.host_handoff?.work_item_ids ?? []);
   }
 
   // Producer-side plan defects are reported BEFORE the workload is parsed: a
@@ -1972,18 +1873,7 @@ async function validateHostResultBundle(input: {
       message:
         "a git-backed remediation workload requires the tool-owned host_handoff state binding",
     });
-    return {
-      kind: "summary",
-      summary: {
-        accepted_count: 0,
-        completed_work_item_ids: [],
-        pending_work_item_ids: [],
-        issues,
-        work_item_outcomes: new Map(),
-        state_changed: false,
-        state: nextState,
-      },
-    };
+    return noAcceptance([]);
   }
 
   // A workload an EARLIER contract version wrote is not a defect in it: the
@@ -1997,18 +1887,7 @@ async function validateHostResultBundle(input: {
       message:
         "the workload file was written under an earlier contract version; the tool writes it again",
     });
-    return {
-      kind: "summary",
-      summary: {
-        accepted_count: 0,
-        completed_work_item_ids: [],
-        pending_work_item_ids: state.host_handoff.work_item_ids,
-        issues,
-        work_item_outcomes: new Map(),
-        state_changed: false,
-        state: nextState,
-      },
-    };
+    return noAcceptance(state.host_handoff.work_item_ids);
   }
 
   const workload = parseWorkload(workloadRead.value, paths, input.runId, state);
@@ -2022,18 +1901,7 @@ async function validateHostResultBundle(input: {
       message:
         "the workload does not match its canonical state shape and persisted digest binding",
     });
-    return {
-      kind: "summary",
-      summary: {
-        accepted_count: 0,
-        completed_work_item_ids: [],
-        pending_work_item_ids: state.host_handoff?.work_item_ids ?? [],
-        issues,
-        work_item_outcomes: new Map(),
-        state_changed: false,
-        state: nextState,
-      },
-    };
+    return noAcceptance(state.host_handoff?.work_item_ids ?? []);
   }
 
   return {
@@ -2065,26 +1933,15 @@ async function validateHostResultBundle(input: {
 }
 
 /**
- * Phase 2 — per-item verification. Writes NOTHING to `ctx.nextState`.
- *
- * Iterates the effective workload in order and emits one verdict per ACCEPTED
- * item; a refusal pushes its classified issue and continues. The ledger mark
- * for a recovery acceptance still goes down before that item's verdict is
- * emitted, so no acceptance can outrun its record.
- */
-/**
  * Did a corroborated commit already land for this work item, even though no
  * result file is at its bound path?
  *
  * Ground truth, not a claim: `host_landed_commit` is written only after
  * `corroborateHostResult` verified the commit resolves, is reachable from HEAD,
  * and that its mechanically derived diff lies within the item's write scope.
- * Anything less is not a landing.
- *
- * ANY finding of the item counts, because the commit is attributed per FINDING
- * and a work item is a bundle of them: a commit for one of its findings is work
- * this item did, which is exactly what the host needs to know before rewriting
- * the result from scratch.
+ * Anything less is not a landing. A landed commit is work this item did, which
+ * is exactly what the host needs to know before rewriting the result from
+ * scratch.
  */
 function hasLandedCommitFor(
   state: CurrentRemediationHostState,
@@ -2098,17 +1955,26 @@ async function requiredConformanceReview(
   result: RemediationHostResult | RemediationHostDecision,
 ): Promise<ConformanceReviewCheck> {
   if (!ctx.state.conformance_review?.enabled) return { ok: true };
+  const unit = ctx.state.plan.units.find(candidate => candidate.id === workItem.id)!;
   return checkContractConformance({
     root: ctx.paths.root, artifactsDir: ctx.paths.artifactsDir, runId: ctx.runId,
     item: workItem, result,
     requirements: ctx.state.plan.requirements.filter(requirement => workItem.obligation_ids.includes(requirement.id)),
-    unit: ctx.state.plan.units.find(unit => unit.id === workItem.id)!,
+    unit,
     revision: ctx.state.plan.review_revision_sha256,
     counterexamples: (ctx.state.plan.review_counterexamples ?? []).filter(example =>
-      ctx.state.plan.units.find(unit => unit.id === workItem.id)!.addresses_counterexample_ids.includes(example.id)),
+      unit.addresses_counterexample_ids.includes(example.id)),
   });
 }
 
+/**
+ * Phase 2 — per-item verification. Writes NOTHING to `ctx.nextState`.
+ *
+ * Iterates the effective workload in order and emits one verdict per ACCEPTED
+ * item; a refusal pushes its classified issue and continues. The ledger mark
+ * for a recovery acceptance still goes down before that item's verdict is
+ * emitted, so no acceptance can outrun its record.
+ */
 async function executeHostVerificationReruns(
   ctx: HostIngestContext,
   acc: HostIngestAccumulators,
@@ -2116,12 +1982,7 @@ async function executeHostVerificationReruns(
   const { paths, nextState, state } = ctx;
   const verdicts: HostItemVerdict[] = [];
   for (const workItem of ctx.effectiveWorkload.work_items) {
-    const pendingItems = [workItem.id].filter(
-      (findingId) =>
-        nextState.items[findingId]?.status === "pending" &&
-        !acc.settledFindingIds.has(findingId),
-    );
-    if (pendingItems.length === 0) continue;
+    if (nextState.items[workItem.id]?.status !== "pending") continue;
     if (!ctx.eligibleIds.has(workItem.id)) {
       acc.issues.push({
         code: "work_item_not_eligible",
@@ -2137,12 +1998,7 @@ async function executeHostVerificationReruns(
       artifactsDir: paths.artifactsDir,
       workItemId: workItem.id,
       resultPath: workItem.result_path,
-      parse: (value) => {
-        const result = parseResult(value, ctx.runId, workItem);
-        return result.ok
-          ? { ok: true, parsed: result }
-          : { ok: false, check: result.check, detail: result.reason };
-      },
+      parse: scanParser(ctx.runId, workItem),
       resultId: (result) => result.result.result_id,
       seen: (resultId) => acc.resultIds.has(resultId),
       messages: remediationScanMessages,
@@ -2224,11 +2080,9 @@ async function executeHostVerificationReruns(
       const review: ConformanceReviewCheck = outcome.status === "resolved_no_change"
         ? await requiredConformanceReview(ctx, workItem, result) : { ok: true };
       if (!review.ok) { acc.issues.push(review.issue); continue; }
-      for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
       verdicts.push({
         kind: "decision",
         workItem,
-        pendingItems,
         at: new Date().toISOString(),
         outcome,
         conformance_review: review.receipt,
@@ -2322,17 +2176,15 @@ async function executeHostVerificationReruns(
           result_path: workItem.result_path,
           message:
             "the recovery acceptance could not be recorded on the submission ledger, so it " +
-            `was refused: ${error instanceof Error ? error.message : String(error)}`,
+            `was refused: ${errorMessage(error)}`,
         });
         continue;
       }
     }
-    for (const findingId of pendingItems) acc.settledFindingIds.add(findingId);
     verdicts.push({
       kind: "landed",
       conformance_review: review.receipt,
       workItem,
-      pendingItems,
       at: new Date().toISOString(),
       landedCommit: result.landed_commit,
       changedFiles: corroborated.changedFiles,
@@ -2350,8 +2202,8 @@ async function executeHostVerificationReruns(
  *
  * Infallible given the verdicts: every refusal was already classified in
  * phase 2, so nothing here can reject. Verdicts apply in workload order, which
- * is the order they were emitted, so a finding two items share is written the
- * same way it was before the phases were separated.
+ * is the order they were emitted, and each writes only its own work item's
+ * state (the workload's ids are unique).
  */
 function commitRemediationStateUpdates(
   ctx: HostIngestContext,
@@ -2361,55 +2213,50 @@ function commitRemediationStateUpdates(
 ): RemediationHostIngestSummary {
   const { nextState } = ctx;
   for (const verdict of verdicts) {
+    const item = nextState.items[verdict.workItem.id]!;
     if (verdict.kind === "decision") {
       const outcome = verdict.outcome;
-      for (const findingId of verdict.pendingItems) {
-        const item = nextState.items[findingId]!;
-        if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
-        else delete item.conformance_review;
-        item.started_at ??= verdict.at;
-        if (outcome.status === "resolved_no_change") {
-          item.status = "resolved_no_change";
-          item.completed_at = verdict.at;
-          item.host_result_evidence = [...outcome.evidence];
-          delete item.failure_reason;
-        } else if (outcome.status === "blocked") {
-          item.status = "blocked";
-          item.completed_at = verdict.at;
-          item.failure_reason = outcome.failure_reason;
-        } else {
-          item.status = "needs_clarification";
-          delete item.completed_at;
-          item.failure_reason = outcome.question;
-          // The question lives on the item (its one home): the clarification
-          // round lists every paused item, so no answer can erase another's.
-          item.clarification_question = {
-            category: isClarificationCategory(outcome.category)
-              ? outcome.category
-              : "scope_of_fix",
-            description: outcome.question,
-          };
-        }
+      if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
+      else delete item.conformance_review;
+      item.started_at ??= verdict.at;
+      if (outcome.status === "resolved_no_change") {
+        item.status = "resolved_no_change";
+        item.completed_at = verdict.at;
+        item.host_result_evidence = [...outcome.evidence];
+        delete item.failure_reason;
+      } else if (outcome.status === "blocked") {
+        item.status = "blocked";
+        item.completed_at = verdict.at;
+        item.failure_reason = outcome.failure_reason;
+      } else {
+        item.status = "needs_clarification";
+        delete item.completed_at;
+        item.failure_reason = outcome.question;
+        // The question lives on the item (its one home): the clarification
+        // round lists every paused item, so no answer can erase another's.
+        item.clarification_question = {
+          category: isClarificationCategory(outcome.category)
+            ? outcome.category
+            : "scope_of_fix",
+          description: outcome.question,
+        };
       }
       continue;
     }
-    for (const findingId of verdict.pendingItems) {
-      const item = nextState.items[findingId]!;
-        if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
-        else delete item.conformance_review;
-      item.status = "resolved";
-      item.started_at ??= verdict.at;
-      item.completed_at = verdict.at;
-      // The corroborated outcome is PERSISTED per item, not just folded into the
-      // run-wide `applied_edit_surface`, so the attribution survives the process
-      // that observed it — and read back by `hasLandedCommitFor` on the next
-      // ingest, which is how an item whose edits landed but whose result file
-      // never arrived is told apart from one that was never attempted.
-      item.host_landed_commit = verdict.landedCommit;
-      item.host_landed_files = [...verdict.changedFiles];
-      delete item.failure_reason;
-      delete item.host_result_evidence;
-    }
+    if (verdict.conformance_review) item.conformance_review = verdict.conformance_review;
+    else delete item.conformance_review;
+    item.status = "resolved";
+    item.started_at ??= verdict.at;
+    item.completed_at = verdict.at;
+    // The corroborated outcome is PERSISTED per item, not just folded into the
+    // run-wide `applied_edit_surface`, so the attribution survives the process
+    // that observed it — and read back by `hasLandedCommitFor` on the next
+    // ingest, which is how an item whose edits landed but whose result file
+    // never arrived is told apart from one that was never attempted.
+    item.host_landed_commit = verdict.landedCommit;
+    item.host_landed_files = [...verdict.changedFiles];
+    delete item.failure_reason;
+    delete item.host_result_evidence;
   }
 
   if (acc.completed.length > 0) {
@@ -2417,11 +2264,7 @@ function commitRemediationStateUpdates(
   }
 
   const pendingWorkItemIds = ctx.effectiveWorkload.work_items
-    .filter((workItem) =>
-      [workItem.id].some(
-        (findingId) => nextState.items[findingId]?.status === "pending",
-      ),
-    )
+    .filter((workItem) => nextState.items[workItem.id]?.status === "pending")
     .map((workItem) => workItem.id);
   let stateChanged = acc.completed.length > 0;
   if (nextState.host_handoff && pendingWorkItemIds.length === 0) {

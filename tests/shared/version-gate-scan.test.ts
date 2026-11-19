@@ -129,8 +129,8 @@ describe("version-gate scan does not report a checked read", () => {
   });
 
   it("accepts a check written against a duplicated string literal in another module", () => {
-    // `KNOWN_SCHEMA_VERSIONS` in intakeResolver.ts is this shape: the read IS
-    // guarded, just not through the constant's identifier.
+    // A known-versions Set that spells the version out as a literal is this
+    // shape: the read IS guarded, just not through the constant's identifier.
     const validator = `
 const KNOWN_SCHEMA_VERSIONS = new Set([
   "pipeline/carry/v1",

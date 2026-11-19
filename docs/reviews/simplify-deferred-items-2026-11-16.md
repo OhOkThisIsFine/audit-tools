@@ -76,6 +76,17 @@ the work that would make it a plain cleanup.
   `LENS_METADATA.id_prefix` in `reporting/findingIdentity.ts` (a plain-object lookup of the key
   `constructor` also differs, so that one is a behavior change too). **Unblock:** add a
   declaration with the test that pins each file's sites.
+- **P08 — files with no `// sites-pinned:` declaration** (the P05 rule). Not applied: the
+  `FindingClassification` doc in `steps/stepUtils.ts` describes the `reason` field, not the
+  interface; `loadRemediateSessionConfig` in `steps/sessionConfigLoad.ts` is a single-use
+  indirection. **Unblock:** add a declaration with the test that pins each file's sites.
+- **P08 — the unused `_path` parameter of `validateSuppliedInput`** (`steps/intakeResolver.ts`).
+  Four calls in `tests/remediate/intake-resolver.test.ts` pass it. **Unblock:** change those
+  calls in the same commit.
+- **P08 — `reviewRequirementForRole(role: string, …)` as `PlanReviewRole`**
+  (`steps/contractPipelinePrompts.ts`). `tests/remediate/adversarial-depth-dial.test.ts` passes
+  the elements of a `string[]`, so the narrower type fails `check:tests`. **Unblock:** type that
+  test array `as const`.
 
 ## 2. Blocked by a behavior or ordering change (needs `/design-check` first)
 
@@ -129,6 +140,23 @@ real change, not a cleanup.
   `types/reviewPlanning.ts`, and it is persisted in `audit_plan_metrics.json`, so the removal
   changes that artifact's bytes and hash once. Two test fixtures carry it. **Unblock:** a lap that
   removes the writer, the type field and the fixtures together, with the loop-core attestation.
+- **P08 — the emitted wording of the block-contract refusals** (`steps/dispatch/hostHandoff.ts`).
+  The `BlockContractError` messages say `touched_files` and `targeted_commands`, but the fields
+  are `allowed_files` and `required_tests`. The command-shape message says that the boundary runs
+  commands "through a shell", but `runRequiredTest` splits the argv with no shell. Tests pin the
+  text. **Unblock:** a wording decision, with the pinned tests changed in the same commit.
+- **P08 — `"audit-findings/v1alpha1"` in `KNOWN_SCHEMA_VERSIONS`** (`steps/intakeResolver.ts`)
+  matches no producer: the audit report stamps `contract_version`
+  (`AUDIT_FINDINGS_CONTRACT_VERSION`), not `schema_version`. Removing the entry changes which
+  supplied files are accepted. **Unblock:** an owner decision.
+- **P08 — the `options.root === undefined` and `options.artifactsDir` fallback arms of
+  `recoverIngestHostResults`** (`steps/recoverIngest.ts`) are dead by type only.
+  **Unblock:** show that the CLI caller `recoverIngestVerb` (`src/remediate/index.ts`) always
+  supplies defined, non-empty values.
+- **P08 — the default runner in `steps/finalGate.ts` spreads `spec.argv` again.** Passing
+  `spec.argv` directly differs only for an empty argv (`[undefined]` against `[]`), and no
+  producer makes one today. **Unblock:** a type or a check that makes an empty gate argv
+  impossible.
 
 ## 3. Design changes (larger than a cleanup; worth a lap of their own)
 
@@ -187,6 +215,27 @@ real change, not a cleanup.
   `runSnapshot.ts` is loop-core. **Unblock:** move the source-text pins with the code.
 - **P01 — public barrel narrowing** (unused exported types, `lensOutcome`): an owner decision on
   the public surface of `audit-tools/shared`.
+- **P08 — the rationale of the two-phase `recover-ingest`** (`steps/recoverIngest.ts`). Its doc
+  says that a required-test rerun is a `spawnSync`, which is false now: the reruns are awaited
+  (`runRequiredTest`). The doc uses that fact as the reason for the unlocked-test, locked-write
+  split, and part of the phase machinery (`tree_moved_between_phases`,
+  `state_moved_between_phases`) may now rest only on lock hold time. **Unblock:** the owner states
+  the current rationale; then the comment fix is a plain cleanup.
+- **P08 — tested-but-unwired prompts** in `steps/prompts.ts`: `ambiguityReviewPrompt` and
+  `extractedPlanDiscardedPrompt` lost their callers in `3f73d24f`. Only
+  `tests/shared/driverPromptFixtures.ts` and the "17a" block of
+  `tests/remediate/clarification-round-contract.test.ts` use them. After the deletion,
+  `intakePaths().extractedPlan` has no reader. **Unblock:** an owner-approved deletion (the
+  CLAUDE.md "tested-but-unwired class" audit).
+- **P08 — one tail helper** for `outputTail` (`steps/finalGate.ts`) and `tail`
+  (`steps/dispatch/requiredTests.ts`). The limits differ, and so does the result for an empty
+  input (`undefined` against `""`). **Unblock:** a home in `src/shared` with a parameter for the
+  empty case.
+- **P08 — rename `steps/frictionCloseout.ts`** (it holds only `presentReportStep`; the friction
+  check is retired). The rename touches its importers and the sites-pinned test lists.
+- **P08 — one role-keyed parse in `reviewStep`** (`steps/contractPipeline.ts`). The
+  `CritiqueSchema`, `CriticSchema` and `PlanJudgeSchema` parses of an already parsed payload exist
+  only to narrow the type. **Unblock:** a parse that returns a discriminated union by role.
 
 ## 4. Efficiency items with no measured cost
 
@@ -233,6 +282,15 @@ worth a change.
   declaration, and the index belongs in `planning.ts`, P03; keep first-wins); one build of
   `adversaryReviewScope` and `summarizeCoveredThemes` per render in the loop-core
   `secondOrderAdversaryPrompt.ts` (the prompt bytes must not change).
+- **P08:** one `discoverLandingGates` read per workload build instead of one per work item
+  (`steps/dispatch/hostHandoff.ts`; the hoist needs a parameter through four functions); a `Set`
+  for the command list in `precomputeRecoveryTestVerdicts`; the per-unit lower-phase filter in
+  `hostDependencyLevels` and `permanentlyDeadPendingUnits`; the `includes` scans over obligation
+  ids in `parseResult` and `conformanceObligationsMatch`; one partition pass for the two
+  `pathIsAllowedByWriteScope` filters in `corroborateNoChangeClaim`; a map for the unit lookup per
+  blocked item in `triagePrompt`; the repeated `readPlanReviewHistory` reads in
+  `buildNextContractPipelineStep` (the read after the write must stay fresh); the second parse of
+  a supplied file in the `resolveIntakeStep` fast path. Plan sizes are tens of units.
 
 ## 5. Low value (do it only when you are already in the file)
 
@@ -271,6 +329,23 @@ worth a change.
   `systemic/reviewFileMap.ts`; the judge schema in `types/conceptualAdjudication.ts` as
   `ConceptualRoundContributorSchema.omit({ perspective: true })` (check the generated JSON schema
   and the error text first).
+- **P08 — `resultPathFor` and the `BoundaryPaths` alias** in `steps/dispatch/hostHandoff.ts`: a
+  pure pass-through and a type alias. The audit twin keeps its `resultPathFor` for parity (the P05
+  item above), so remove both twins' wrappers together or neither.
+- **P08:** one closing-action predicate for the two copies in `steps/nextStep.ts` (the confirm
+  step and the obligation; not shown character-identical, one copy casts the checkpoint); inlining
+  the `origin` argument of `handleReadyIntakeContractPipeline` (always `"new_pre_edit_run"`);
+  moving the import above the sites-pinned line in `steps/intakeResolver.ts` (it changes module
+  evaluation order); a closed-set line helper for the three prompt sites in `steps/prompts.ts`; a
+  read-and-join helper for `ensureSource` and `writePathASeedFromFindings`; the
+  `persistedWorkloadAllowsRebind` check through `idsAreStrictlyAscending`; a helper for the
+  repeated `conformance_review` and `started_at` lines in `commitRemediationStateUpdates` (a
+  module-level helper would move state writes outside the phase functions); one
+  `identityFailureDiagnostic` for both `parseResult` branches; the indentation of the
+  `store.mutate` body in `recoverIngest.ts`; importing `readApprovedExecutionPlan` in
+  `nextStep.ts` from `contractPipeline/executionPlan.ts` and deleting the re-export in
+  `steps/contractPipeline.ts` (check the namespace import in
+  `tests/remediate/dirty-baseline-capture.test.ts` first).
 
 ## 6. Rejected — do not re-propose
 
@@ -337,3 +412,21 @@ Each of these was checked and is NOT behavior-neutral, or is correct as it stand
   `findingReEmissionKey` for the `priorFindings` key in `secondOrderAdversaryPrompt.ts` (that key
   uses `normalizeText` and a `|` separator), and one `mkdir` in `operatorHandoff.ts` (the error
   path text differs).
+- **P08:** the `unit_id` set in `unresolvedFrontierWorkItemIds` and the sort in
+  `workloadBindingIdentity` (`steps/dispatch/hostHandoff.ts`): the recovery caller passes
+  `currentHostBoundaryState(...)`, a cast and not a parse, so neither the key match nor the
+  ascending order is guaranteed there.
+- **P08:** folding the two `isGitRepo` probes in `validateHostResultBundle` (it changes the number
+  of git spawns); hoisting `resolveAdversarialDepth` out of the per-role `reviewStep` (it can write
+  an escalated risk signal, so the hoist moves a write).
+- **P08:** the second `admitRemediationDirtyBaseline` in `runTouchedPaths` (`steps/gateCommands.ts`;
+  it fixes the throw order before the git spawns, and it is the only call in
+  `writeFinalGateRedRecord` when `failed` is undefined); the `headCommit` guard in
+  `worktreeContentId` (without it, a repository with no commit gets the empty tree); spreads in
+  the key-by-key persisted literals (`writeFinalGateVerdict`, the `runRequiredTest` returns, the
+  conformance `request` and `content`), which risk the key order.
+- **P08:** dropping `export` from symbols that only their own file reads
+  (`CONFORMANCE_REVIEW_ISSUES`, `GATE_ATTRIBUTION_SAMPLE_LIMIT`, `isTestFilePath`,
+  `carriesEnvironmentVerdict`, `FinalGateRedRecord`, `FinalGateVerdictRecord`, `WriteStepInput`,
+  and the `isTerminalStatus` / `isVerifiedCompleteStatus` re-export in `nextStep.ts`): knip's
+  `ignoreExportsUsedInFile` already ignores them.

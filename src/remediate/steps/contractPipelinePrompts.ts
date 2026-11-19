@@ -11,6 +11,7 @@ export function renderPlanAuthorPrompt(params: {
   root: string; source: PlanSource; canonical?: CanonicalPlan; history: PlanReviewHistory;
   sourcePath: string; planPath: string; outputPath: string; reason?: string;
 }): string {
+  const findingIds = params.source.findings.map(f => f.id);
   return `# ${params.canonical ? "Revise" : "Author"} the executable change plan
 
 Goal: make the agreed changes and demonstrate that they work. Plan cohesive implementation units, not a complete restatement of every module in the repository.
@@ -24,11 +25,11 @@ ${JSON.stringify({
     plan: {
       plan_id: params.source.plan_id,
       objective: "<agreed goal>", non_goals: [],
-      requirements: [{ id: "REQ-stable-name", description: "<specific required behavior>", source_finding_ids: params.source.findings.map(f => f.id), change_kind: "behavior_change", assertions: [
+      requirements: [{ id: "REQ-stable-name", description: "<specific required behavior>", source_finding_ids: findingIds, change_kind: "behavior_change", assertions: [
         { kind: "positive", description: "<falsifiable success case>", scope_paths: ["<affected source/test>"] },
         { kind: "negative", description: "<falsifiable failure/regression case>", scope_paths: ["<affected source/test>"] },
       ] }],
-      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: params.source.findings.map(f => f.id), requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [], addresses_counterexample_ids: params.history.accepted_ids }],
+      units: [{ id: "UNIT-stable-name", title: "<cohesive change>", description: "<exact implementation intent>", source_finding_ids: findingIds, requirement_ids: ["REQ-stable-name"], dependencies: [], read_paths: ["<existing source/test>"], allowed_files: ["<every source/test/config file to edit or create>"], required_tests: ["<one executable command per entry>"], affected_interfaces: [], addresses_counterexample_ids: params.history.accepted_ids }],
       source_dispositions: [],
     },
     retired_requirements: [],

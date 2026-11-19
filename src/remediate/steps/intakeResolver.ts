@@ -3,7 +3,7 @@ import { requestedFindingSelection, selectAuditFindings, renderFindingSelection,
 // sites-pinned: tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/intake-resolver.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { hashContent, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
+import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import { isAuditFindingsReport } from "../phases/plan.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { InputResolution, RemediationStep } from "./types.js";
@@ -22,6 +22,9 @@ import {
   sourceManifestsEquivalent,
   validateClarificationResolution,
   writeRemediationBrief,
+  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+  INTAKE_SUMMARY_SCHEMA_VERSION,
+  INTAKE_CLARIFICATION_SCHEMA_VERSION,
   type IntakeSource,
   type IntakeSourceManifest,
   type IntakeSummary,
@@ -29,9 +32,9 @@ import {
 
 const KNOWN_SCHEMA_VERSIONS = new Set([
   "audit-findings/v1alpha1",
-  "remediate-code-intake-source-manifest/v1alpha1",
-  "remediate-code-intake-summary/v1alpha2",
-  "remediate-code-intake-clarifications/v1alpha1",
+  INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
+  INTAKE_SUMMARY_SCHEMA_VERSION,
+  INTAKE_CLARIFICATION_SCHEMA_VERSION,
 ]);
 
 export function validateSuppliedInput(
@@ -44,12 +47,8 @@ export function validateSuppliedInput(
   } catch {
     return { ok: false, reason: "file is not valid JSON" };
   }
-  if (
-    parsed !== null &&
-    typeof parsed === "object" &&
-    "schema_version" in parsed
-  ) {
-    const sv = (parsed as Record<string, unknown>).schema_version;
+  if (isRecord(parsed)) {
+    const sv = parsed.schema_version;
     if (typeof sv === "string" && !KNOWN_SCHEMA_VERSIONS.has(sv)) {
       return { ok: false, reason: `unrecognised schema_version: ${sv}` };
     }
@@ -64,7 +63,6 @@ export type IntakeResult =
 export async function resolveIntakeStep(params: {
   root: string;
   artifactsDir: string;
-  input?: string | string[];
   findingSelection?: FindingSelectionOptions;
   inputResolution: InputResolution;
   loaderCommand: (cmd: string) => string;
@@ -125,7 +123,6 @@ export async function resolveIntakeStep(params: {
   let intake = await readIntakeArtifacts(artifactsDir);
   const previousManifest = intake.manifest;
   let manifest: IntakeSourceManifest | undefined = intake.manifest;
-  let manifestRefreshed = false;
 
   if (
     !inputResolution.supplied &&
@@ -179,10 +176,7 @@ export async function resolveIntakeStep(params: {
       // host can weigh (type, mtime, finding count) — the full context set, not
       // just the single best match the pipeline would auto-select.
       const sourceRows: string[] = [];
-      // Defensive: fall back to the single-best `existing` if a caller omitted
-      // the full context set (older callers/tests predate `allExisting`).
-      const discovered = inputResolution.allExisting ?? inputResolution.existing;
-      for (const candidatePath of discovered) {
+      for (const candidatePath of inputResolution.allExisting) {
         let sourceTypeLabel = "document";
         let findingCount: number | undefined;
         let mtimeStr: string | undefined;
@@ -196,10 +190,7 @@ export async function resolveIntakeStep(params: {
             const parsed = JSON.parse(content);
             if (isAuditFindingsReport(parsed)) {
               sourceTypeLabel = "structured_audit";
-              const asRecord = parsed as unknown as Record<string, unknown>;
-              if (Array.isArray(asRecord.findings)) {
-                findingCount = (asRecord.findings as unknown[]).length;
-              }
+              findingCount = parsed.findings.length;
             }
           } catch { /* best-effort */ }
         }
@@ -362,7 +353,7 @@ export async function resolveIntakeStep(params: {
     await writeJsonFile(projectedPath, selected);
   }
   await writeJsonFile(paths.sourceManifest, manifest);
-  manifestRefreshed = !sourceManifestsEquivalent(previousManifest, manifest);
+  const manifestRefreshed = !sourceManifestsEquivalent(previousManifest, manifest);
   if (manifest.finding_selection?.selected_count === 0) {
     return { kind: "step", step: await writeCurrentStep({
       stepKind: "zero_documentable_findings", status: "complete",
@@ -388,11 +379,9 @@ export async function resolveIntakeStep(params: {
     intake = { manifest, resolvedQuestions: [] };
   }
 
-  const summary = manifestRefreshed ? undefined : intake.summary;
-  const summaryRefusal = manifestRefreshed ? undefined : intake.summaryRefusal;
-  const rawClarificationResolution = manifestRefreshed
-    ? undefined
-    : intake.clarificationResolution;
+  const summary = intake.summary;
+  const summaryRefusal = intake.summaryRefusal;
+  const clarificationResolution = intake.clarificationResolution;
 
   // The brief is a render of the summary, never host-authored: refresh it
   // whenever a schema-valid summary is read, before any step can list it.
@@ -410,8 +399,7 @@ export async function resolveIntakeStep(params: {
   // own question is not a typo) and to the blocking set (the question must still
   // be shown as answered, or the "addresses no blocking question" check would
   // refuse a resolution that just resolved the last one).
-  let clarificationResolution: unknown = rawClarificationResolution;
-  if (rawClarificationResolution !== undefined && summary) {
+  if (clarificationResolution !== undefined && summary) {
     const resolved = intake.resolvedQuestions;
     // The reconciled summary plus the questions it just cleared is the summary
     // as authored, which is what the id-join must be checked against.
@@ -421,7 +409,7 @@ export async function resolveIntakeStep(params: {
       ...resolved.filter((question) => question.blocking === true),
     ];
     const validation = validateClarificationResolution(
-      rawClarificationResolution,
+      clarificationResolution,
       blocking,
       knownQuestions,
     );
@@ -524,9 +512,3 @@ export async function resolveIntakeStep(params: {
   // enter the contract pipeline. Signal the caller to route to the pipeline.
   return { kind: "pipeline_ready" };
 }
-
-// `InputResolution` is declared ONCE, in `./types.js` — the module both this
-// resolver and the decide loop import — and re-exported here so existing
-// importers of this module are unchanged. It used to be declared a second time
-// in `nextStep.ts` under the same name with a different field set.
-export type { InputResolution } from "./types.js";

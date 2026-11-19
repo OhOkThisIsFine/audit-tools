@@ -11,6 +11,10 @@ export type ConformanceReviewIssueCode = (typeof CONFORMANCE_REVIEW_ISSUES)[numb
 
 export type UnsupportedRetiredRemediationState = "unsupported_retired_state";
 
+/** The refusal a caller throws when it receives {@link UnsupportedRetiredRemediationState}. */
+export const RETIRED_DISPATCH_SHAPE_MESSAGE =
+  "Remediation state uses a retired dispatch shape and cannot cross the host handoff boundary.";
+
 export type CurrentRemediationHostState = RemediationState & {
   readonly contract_version: typeof REMEDIATION_STATE_CONTRACT_VERSION;
   readonly status: "implementing";
@@ -139,9 +143,10 @@ export const REMEDIATION_ISSUE_CODES = [
    */
   "baseline_missing",
   /**
-   * The work item's baseline commit exists but is no longer an ancestor of HEAD
-   * (history was rewritten under the run). The spawn-free `recover-ingest` verb
-   * is the named repair; no worker can make it.
+   * The work item's baseline commit exists but is ORPHANED: HEAD does not reach
+   * it, no ref contains it, and no worktree's HEAD is it (history was rewritten
+   * under the run; see `gitCommitIsOrphaned`). The spawn-free `recover-ingest`
+   * verb is the named repair; no worker can make it.
    */
   "baseline_orphaned",
   /**

@@ -34,7 +34,7 @@ function blockedItems(state: RemediationState): RemediationItemState[] {
  * The resolution-entry rules: an example entry, the three actions as a table,
  * the write-scope rule, and the whole-file refusal. They state exactly
  * what the one resolution parser (`readPlanClarificationResolutions`,
- * nextStep.ts) accepts.
+ * clarificationResolution.ts) accepts.
  */
 function resolutionEntryRules(
   firstId: string,

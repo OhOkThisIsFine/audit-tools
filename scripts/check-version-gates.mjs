@@ -28,8 +28,9 @@
 // every envelope emitted for a host to consume and never read back — a false
 // RED, which in this repo is as corrosive as a false green. Condition 3 matches
 // the constant's VALUE as well as its identifier, so a check written against a
-// duplicated string literal (`KNOWN_SCHEMA_VERSIONS` in `intakeResolver.ts`)
-// counts as a check.
+// duplicated string literal of the version (for example a known-versions Set
+// that spells the version out instead of importing the constant) counts as a
+// check.
 //
 // The cost of that narrowness is false NEGATIVES: a payload read as `unknown`
 // and then narrowed by hand, or a version stamped without a `typeof C` member,

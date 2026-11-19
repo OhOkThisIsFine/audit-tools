@@ -61,15 +61,19 @@ export async function writeCurrentStep({
   });
 }
 
+/** A fresh run id: `<prefix>-<base36 time>-<6 random base36 chars>`. */
+export function randomRunId(prefix = "RUN"): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /**
  * Write the terminal blocked step the CLI's fatal backstop emits (backlog:
  * abnormal-exit no-step-contract). Remediate's DRAW of the shared blocked-step
  * assembly (`writeBlockedStepContract` in audit-tools/shared — semantics in
  * `runWithBlockedStepBackstop`): this wrapper supplies only the per-mode
- * inputs — the remediation contract version and the minted run id (same shape
- * as nextStep.ts's `randomRunId`, inlined because importing it would cycle
- * stepWriter → nextStep → stepWriter; there may be no loadable state to read a
- * real run id from when the backstop fires).
+ * inputs — the remediation contract version and a freshly minted run id
+ * (there may be no loadable state to read a real run id from when the
+ * backstop fires).
  */
 export async function writeBlockedStep(params: {
   root: string;
@@ -81,7 +85,7 @@ export async function writeBlockedStep(params: {
     contractVersion: REMEDIATION_STEP_CONTRACT_VERSION,
     artifactsDir: params.artifactsDir,
     repoRoot: params.root,
-    runId: `BLOCKED-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    runId: randomRunId("BLOCKED"),
     reason: params.reason,
   });
 }

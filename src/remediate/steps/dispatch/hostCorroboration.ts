@@ -1,7 +1,7 @@
 import { DirtyPathDiscoveryError, readGitPathList, stagedAndUntracked } from "audit-tools/shared";
 import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
-import { AUDIT_TOOLS_DIRNAME, compareCodeUnits, normalizeRepoPath, repoRelativePath, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS, type IngestionCheckId } from "audit-tools/shared";
+import { AUDIT_TOOLS_DIRNAME, normalizeRepoPath, repoRelativePath, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS, uniqueSorted, type IngestionCheckId } from "audit-tools/shared";
 import type { CurrentRemediationHostState, RemediationHostWorkItem, RemediationHostResult, RemediationHostIngestIssue } from "./hostContracts.js";
 import type { RemediationRequiredTestVerdicts } from "./requiredTests.js";
 import { rerunRequiredTests, requiredTestIssue } from "./requiredTests.js";
@@ -25,6 +25,13 @@ function pathIsAllowedByWriteScope(
   );
 }
 
+type CorroborationRefusal = {
+  readonly ok: false;
+  readonly code: RemediationHostIngestIssue["code"];
+  readonly check: IngestionCheckId;
+  readonly message: string;
+};
+
 type CorroboratedHostResult =
   | {
       readonly ok: true;
@@ -36,12 +43,7 @@ type CorroboratedHostResult =
        */
       readonly usedRecovery: boolean;
     }
-  | {
-      readonly ok: false;
-      readonly code: RemediationHostIngestIssue["code"];
-      readonly check: IngestionCheckId;
-      readonly message: string;
-    };
+  | CorroborationRefusal;
 
 // The corroboration probes below run while the remediation state lock (and, on
 // the fold path, the phase lock) is held — ASYNC with the shared deadline
@@ -143,7 +145,7 @@ async function gitChangedFilesOfCommit(
   const result = await readGitPathList(root,
     ["diff-tree", "--root", "--no-commit-id", "--name-only", "--no-renames", "--ignore-submodules=none", "-r", "-z", commit],
   );
-  return result.ok ? [...new Set(result.paths)].sort(compareCodeUnits) : null;
+  return result.ok ? uniqueSorted(result.paths) : null;
 }
 
 /**
@@ -165,8 +167,8 @@ async function gitChangedFilesSince(
     ["diff", "--name-only", "--no-renames", "--ignore-submodules=none", "-z", baseline, "HEAD"],
   );
   if (!committed.ok) throw new DirtyPathDiscoveryError("no-change committed paths", committed.reason);
-  return [...new Set([...committed.paths, ...live])]
-    .filter(path => !isAuditToolsArtifactPath(path)).sort(compareCodeUnits);
+  return uniqueSorted([...committed.paths, ...live])
+    .filter(path => !isAuditToolsArtifactPath(path));
 }
 
 /** Whether a repo-relative path lives inside this tool's own artifact tree. */
@@ -211,15 +213,7 @@ export async function corroborateNoChangeClaim(params: {
   readonly workItem: RemediationHostWorkItem;
   /** Repo-relative paths whose movement is already accounted for. */
   readonly excusedPaths: ReadonlySet<string>;
-}): Promise<
-  | { readonly ok: true }
-  | {
-      readonly ok: false;
-      readonly code: RemediationHostIngestIssue["code"];
-      readonly check: IngestionCheckId;
-      readonly message: string;
-    }
-> {
+}): Promise<{ readonly ok: true } | CorroborationRefusal> {
   const { root, workItem, excusedPaths } = params;
   let changed: readonly string[];
   try {
@@ -299,11 +293,12 @@ export async function corroborateHostResult(params: {
     };
   }
   if (!(await gitCommitIsAncestor(root, baseline, landed))) {
+    const orphaned = await gitCommitIsOrphaned(root, baseline);
     if (!params.recovery) {
       // An ORPHANED baseline (no ref contains it, HEAD cannot reach it) is a
       // fault in the run, not in the work: no commit could ever descend from
       // it. The spawn-free recovery verb is its named repair.
-      if (await gitCommitIsOrphaned(root, baseline)) {
+      if (orphaned) {
         return {
           ok: false,
           code: "baseline_orphaned",
@@ -329,7 +324,7 @@ export async function corroborateHostResult(params: {
     // binding, and a landed commit that does not descend from it is exactly the
     // stale-worker case the ancestry check exists to catch; recovery refuses it
     // identically to the normal lane.
-    if (!(await gitCommitIsOrphaned(root, baseline))) {
+    if (!orphaned) {
       return {
         ok: false,
         code: "baseline_not_ancestor",

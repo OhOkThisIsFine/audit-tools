@@ -424,27 +424,6 @@
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
       }
     },
-    "8aa0d48e64560f2e": {
-      "reviewed_by": "claude-sonnet-5-5-charter-subagent",
-      "attester_class": "agent",
-      "checked": "independent opus review APPROVE-WITH-NITS of M8/M1/M5; N1 fold-level handoff test added and red-proven; full npm test green on staged tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "42ba345bf7c7a3bbf98c6210cf1655344e1c4d68",
-        "ran_at": "2026-10-04T07:24:22.753Z"
-      },
-      "attested_at": "2026-10-04T07:25:29.364Z",
-      "vouches": {
-        "src/audit/cli/charterExtractionPrompt.ts": "bddfb689e6db800fd60621d6261d7e7b9f2c31ae",
-        "src/audit/cli/laneValidators.ts": "ae95cb4b59c2c2a088c171141db2d6b4ffcf187a",
-        "src/audit/cli/nextStepHelpers.ts": "da14abb01825217ff2b8b065c556832ccf9b1833",
-        "src/remediate/steps/contractPipeline.ts": "8435f8fba5321c12f1293e66d8844e81a1492faa",
-        "src/remediate/steps/nextStep.ts": "2ec1717bec6877db9d256c14afc5673336486dd3",
-        "src/remediate/steps/prompts.ts": "fa8b5fb6cce6dc3ba90c3ea2c688df770695835b"
-      }
-    },
     "92a14c6e9e3ff056": {
       "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
       "attester_class": "agent",
@@ -567,28 +546,6 @@
         "src/remediate/steps/nextStep.ts": "72bff5e5d8da4596c8aef2511cd285e52b4ab500"
       }
     },
-    "beb774a606887b42": {
-      "reviewed_by": "claude-opus-5-5-session",
-      "attester_class": "agent",
-      "checked": "hostHandoff.ts/requiredTests.ts/recoverIngest.ts/hostContracts.ts/contractConformanceReview.ts: sites-pinned and comment retargets to the split test files only (verified per file by import and test name); dependencyMap.ts: charter_clarification declares structure_decomposition (placeInSubsystem reads it); dependencySlices.ts: clarification edges sliced to path universe and consensus membership; red proofs: map edge, both slices, INV-audit-cli-12 mutex, pollStatusKey; full suite green on staged tree",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "7b450e97a843639e3a65d745a9206747d8d91098",
-        "ran_at": "2026-10-04T22:20:43.108Z"
-      },
-      "attested_at": "2026-10-04T22:21:10.496Z",
-      "vouches": {
-        "src/audit/orchestrator/dependencyMap.ts": "276c58341745a8c68a1ae67fb96ff571f941061a",
-        "src/audit/orchestrator/dependencySlices.ts": "398237c879855914f687b6a62be0edabc47753f4",
-        "src/remediate/steps/dispatch/contractConformanceReview.ts": "5812867ac47b16e7ebe298cda87e7d7eaf70cb70",
-        "src/remediate/steps/dispatch/hostContracts.ts": "7155379ab34c8c9da6c08430c38a8ef90638109e",
-        "src/remediate/steps/dispatch/hostHandoff.ts": "ecd239649613d0a81967cb6ad703907e22d91e2b",
-        "src/remediate/steps/dispatch/requiredTests.ts": "de01ddcf6e5d423668e4a4ab09d821aef707723e",
-        "src/remediate/steps/recoverIngest.ts": "5f89da3780ab3255b234c176471511b7fbc71064"
-      }
-    },
     "c15f5d5c1f74ca4f": {
       "reviewed_by": "claude-opus-5-5-independent-review-subagent,agy-gemini-3.8-flash-high-design-check",
       "attester_class": "agent",
@@ -624,38 +581,6 @@
         "src/shared/engine/obligationEngine.ts": "cbd4d1d26ee2d82b1f13fe788f4a51351814c98d",
         "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
-      }
-    },
-    "c4f7b1b9139e16d8": {
-      "reviewed_by": "review_clarification_mcp_support",
-      "attester_class": "agent",
-      "checked": "Independent native source review and16 passing actual MCP tests: strict shared parser, fixed path, unchanged consumer replay and scope fences; author42 focused and official8539 passed full suite.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "09b72aa70d07cc5f05e8c5ca8ea3bcb89bb85f3e",
-        "ran_at": "2026-11-08T13:04:12.687Z"
-      },
-      "attested_at": "2026-11-08T13:04:29.126Z",
-      "vouches": {
-        "src/remediate/steps/nextStep.ts": "31958511c4365d7106f184f95c2f39670413548f"
-      }
-    },
-    "c5d180afc57e5c00": {
-      "reviewed_by": "/root/advance_audit_overnight",
-      "attester_class": "agent",
-      "checked": "Independent review of conformance MCP admission: shared response validation, identity and obligation binding, negative feedback, independence-first consumer policy, unchanged freshness and history. Guard regressions and official suite passed.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "20b537e9fb3b6b199110032294441a02bc18c8ee",
-        "ran_at": "2026-11-08T14:35:29.939Z"
-      },
-      "attested_at": "2026-11-08T14:35:40.265Z",
-      "vouches": {
-        "src/remediate/steps/dispatch/contractConformanceReview.ts": "11327dade3187d0f261ec276ed7096331de0ba89"
       }
     },
     "d261aef2988bbeb5": {
@@ -728,6 +653,32 @@
       "attested_at": "2026-11-16T20:52:35.054Z",
       "vouches": {
         "src/audit/orchestrator/state.ts": "d53560f89388783a046dc4d6b225b629029ee52b"
+      }
+    },
+    "e27b7c336e51764b": {
+      "reviewed_by": "agent:ad6fa6c7fef1d8cd9-independent-diff-review,agent:p08-file-group-reviewers-and-refuter",
+      "attester_class": "agent",
+      "checked": "Behavior-neutral P08 simplify of src/remediate/steps/**. Independent diff reviewer: every item NEUTRAL, every edited comment TRUE, pin tests still match source. Orchestrator checked F13 receipt key order, randomRunId bytes, H1 planBlockIssues precheck covers the build, H2 unique workload ids, runPhaseBoundaryGate testCommand reuse (binding is a hash string, no later read). build, check, verify:checks and npm test (8555 passed) green on this staged tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e0c2ec6fb7ff37d4b5e31a6bba33e86d5411fcd5",
+        "ran_at": "2026-11-19T03:24:29.117Z"
+      },
+      "attested_at": "2026-11-19T03:25:01.969Z",
+      "vouches": {
+        "src/remediate/steps/contractPipeline.ts": "52fd3bfa6ad8766f927c1a968f71aa6a3dc92a26",
+        "src/remediate/steps/contractPipelinePrompts.ts": "58fae438505143dbcdfb541375d242560ee6adb1",
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "08f7d3ab3c23a9a32a2421c5d519c6435e6445f3",
+        "src/remediate/steps/dispatch/hostContracts.ts": "5870f7929ba60aa0a7e716dd92ae3c091129b4b9",
+        "src/remediate/steps/dispatch/hostCorroboration.ts": "7391759b5467806deb244357f285c2a4f77f02df",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "02a7691978965b61c53c8a63b62ddf1a704663dc",
+        "src/remediate/steps/dispatch/requiredTests.ts": "347d111ff53dfe29d54b02a0494d28b9ccde1273",
+        "src/remediate/steps/frictionCloseout.ts": "891a9265894d4e4b28bcc536b7efe87b71e342a8",
+        "src/remediate/steps/nextStep.ts": "4538ea8d75c6a9bc69edcb6027ff10d50e01b866",
+        "src/remediate/steps/prompts.ts": "7a77211578ff2ef3fa1cd96e2a331443e25ff7b6",
+        "src/remediate/steps/recoverIngest.ts": "1f06c14be5ecdb2f7fbb34c83009aae6d936b1ca"
       }
     },
     "e501ffc69df5ac27": {
@@ -1171,37 +1122,37 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "review": "c5d180afc57e5c00"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
-      "review": "beb774a606887b42"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostCorroboration.ts": {
-      "review": "92a14c6e9e3ff056"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "9ae8f3b83f558bae"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
-      "review": "beb774a606887b42"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/frictionCloseout.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "c4f7b1b9139e16d8"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/prompts.ts": {
-      "review": "8aa0d48e64560f2e"
+      "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/recoverIngest.ts": {
-      "review": "beb774a606887b42"
+      "review": "e27b7c336e51764b"
     },
     "src/shared/engine/obligationEngine.ts": {
       "review": "c2fa0250dd9f5ee5"

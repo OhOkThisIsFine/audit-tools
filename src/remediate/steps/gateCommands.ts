@@ -8,15 +8,15 @@ import { join } from "node:path";
 import { normalizeRepoPath } from "../../shared/validation/findingGrounding.js";
 import { AUDIT_TOOLS_DIRNAME } from "../../shared/io/auditToolsPaths.js";
 import { headCommit, stagedAndUntracked, workingTreeTree } from "../../shared/git.js";
+import { uniqueSorted } from "../../shared/compareCodeUnits.js";
 
 // Pinned, deterministically-derived gate command set for the audit-tools monorepo.
-// Single-sourced here so BOTH the tool-owned final gate / phase-boundary gate
-// (`nextStep.ts`) and the per-node merged-base check (`dispatch.ts`) draw the exact
-// command from one derivation rather than a hardcoded string literal — a literal
-// `"npm run check"` default is host-discretion-by-prose (it assumes npm + a `check`
-// script) and fails the everything-agnostic test. Living in its own leaf module
-// keeps `dispatch.ts` free of an import cycle with `nextStep.ts` (which imports
-// `dispatch.ts`).
+// Single-sourced here so every gate that runs it (the tool-owned final gate and
+// the phase-boundary gate) draws the exact command from one derivation rather
+// than a hardcoded string literal — a literal `"npm run check"` default is
+// host-discretion-by-prose (it assumes npm + a `check` script) and fails the
+// everything-agnostic test. It imports no remediation step module, so any of
+// them can import it without an import cycle.
 
 /** One command in the tool-owned final gate. */
 export interface FinalGateCommandSpec {
@@ -90,10 +90,8 @@ const RUN_SCRATCH_PREFIX = `${AUDIT_TOOLS_DIRNAME}/`;
 
 /**
  * The slice of remediation state red attribution reads. Declared structurally
- * rather than imported so this leaf module keeps its position outside the state
- * module's import graph — `dispatch.ts` and `nextStep.ts` both import it, and
- * `nextStep.ts` owns the state type (the same reason the command spec lives
- * here at all).
+ * rather than imported, so this module depends only on the fields attribution
+ * reads, not on the full remediation state type.
  *
  * `run_baseline_diff` is the one member that is NOT a persisted field: the gate
  * derives it from `root` beside the state and hands it over on the same object,
@@ -181,7 +179,7 @@ async function runTouchedPaths(
   for (const path of await currentRunDiff(root, state)) {
     paths.add(path);
   }
-  return [...paths].sort();
+  return uniqueSorted(paths);
 }
 
 /**
@@ -209,7 +207,7 @@ async function currentRunDiff(root: string, state: RemediationGateState): Promis
     if (normalized.startsWith(RUN_SCRATCH_PREFIX)) continue;
     if (normalized.length > 0) paths.add(normalized);
   }
-  return [...paths].sort();
+  return uniqueSorted(paths);
 }
 
 /**
@@ -291,17 +289,16 @@ function failingPathsFromOutput(output: string, root: string): string[] {
     if (normalized.endsWith("/")) continue;
     if (normalized.startsWith("node_modules/")) continue;
     const absolute = join(root, ...normalized.split("/"));
-    if (!existsSync(absolute)) continue;
     let stat;
     try {
       stat = statSync(absolute);
     } catch {
-      continue; // raced away between the check and the stat — not a path we can name
+      continue; // missing or unreadable — not a path we can name
     }
     if (!stat.isFile()) continue;
     found.add(normalized);
   }
-  return [...found].sort();
+  return uniqueSorted(found);
 }
 
 /**
@@ -314,12 +311,9 @@ function failingPathsFromOutput(output: string, root: string): string[] {
  * cached against the tree hash"). Two runs over identical content against an
  * identical environment cannot disagree, so the second one is redundant.
  *
- * DERIVED BY GIT, from the bytes, through a TEMPORARY index: `GIT_INDEX_FILE`
- * points into the run's scratch, `git read-tree HEAD` seeds it, `git add -A`
- * writes the working tree into it, and `git write-tree` returns ONE tree id.
- * (Same plumbing as `scripts/shared/worktree-tree.mjs`, the repo's prior art for
- * this identity — reproduced here rather than imported, because that module is a
- * build-time script and this is shipped code.)
+ * DERIVED BY GIT, from the bytes, through a TEMPORARY index: the shared
+ * `workingTreeTree` seeds it from HEAD (`git read-tree`), writes the working tree
+ * into it (`git add -A`), and returns ONE tree id (`git write-tree`).
  *
  * WHY NOT A HAND-ROLLED DIGEST. The predecessor read each dirty path itself
  * through `normalizeRepoPath` — a lower-casing COMPARISON key — so on a
