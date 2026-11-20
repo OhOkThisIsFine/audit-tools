@@ -10,7 +10,6 @@ corrects graph extraction on deep chains and paths containing spaces, and retire
 file and an empty metrics field. The public shared-module migration and audit artifact changes are documented in the
 [package contracts](audit-pkg/contracts.md). The [partition record](reviews/simplify-partition-2026-11-15.md)
 and [deferred record](reviews/simplify-deferred-items-2026-11-16.md) cover the original sweep.
-The combined release is on hold at the owner's request. The published package is v0.55.20.
 The remaining structured MCP routes are in [`forward-tracks.md`](backlog/forward-tracks.md).
 
 Release metadata is in [package.json](../package.json); publication and global-install evidence
