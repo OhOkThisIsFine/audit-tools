@@ -37,6 +37,23 @@ describe("source outcomes derive from all canonical execution units",()=>{
 });
 
 describe("execution-unit outcome contract", () => {
+  it("counts all nine dispositions in the overall Markdown sentence", () => {
+    const state = { status: "closing", closing_plan: { action: "none" }, plan: canonicalPlanFixture({}), items: {} } as RemediationState;
+    const outcomes = buildRemediationOutcomesReport(state, closing);
+    const by_outcome = {
+      resolved: 1, verified_no_change: 2, inappropriate: 3, ignored: 4, blocked: 5,
+      pending: 6, deferred: 7, verified_already_fixed: 8, refuted: 9,
+    };
+    const markdown = buildRemediationReportMarkdown(state,
+      { resolved: [], verifiedNoChange: [], ignored: [], inappropriate: [], blocked: [] },
+      closing, undefined, { ...outcomes, total: 45, by_outcome },
+      { passed: true, ran: false, duration_ms: 0, output: "" });
+    const sentence = markdown.split("\n").find(line => line.startsWith("Of 45 finding(s):"));
+    for (const count of ["8 verified already fixed", "9 refuted", "1 resolved", "2 verified already correct",
+      "3 deemed inappropriate", "4 ignored", "5 blocked", "6 pending", "7 deferred"]) {
+      expect(sentence).toContain(count);
+    }
+  });
   it("unfinished runnable units remain pending rather than blocked",()=>{
    expect(report(["F1"],[{id:"U1",sources:["F1"],status:"resolved"},{id:"U2",sources:["F1"],status:"pending"}]).outcomes[0]?.outcome).toBe("pending");
   });

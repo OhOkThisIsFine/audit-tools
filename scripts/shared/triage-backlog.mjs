@@ -134,11 +134,7 @@ if (IS_CLI && OUT_ARG?.startsWith('-')) {
   console.error(USAGE);
   process.exit(1);
 }
-// A flag never reaches here under direct invocation, and an importer's argv is
-// none of this script's business — so the default stands for anything flag-shaped.
-const OUT = OUT_ARG && !OUT_ARG.startsWith('-')
-  ? OUT_ARG
-  : join(ROOT, '.audit-tools', 'backlog-triage.jsonl');
+// sites-pinned: tests/shared/script-entry-regressions.test.ts
 const CONCURRENCY = Number(process.env.TRIAGE_CONCURRENCY || 3);
 
 // Ceiling on one entry's dispatch — carried over unchanged from the retired
@@ -631,7 +627,7 @@ function triageTask(e) {
 /** Import-safe sweep entry; the opener is injectable for offline lifecycle tests. */
 export async function main({
   root = ROOT,
-  outPath = OUT,
+  outPath = join(root, '.audit-tools', 'backlog-triage.jsonl'),
   entries = ['open-bugs.md', 'forward-tracks.md', 'deferred.md'].flatMap((file) => chunk(file, root)),
   concurrency = CONCURRENCY,
   openLane = openDispatchLane,
@@ -725,5 +721,5 @@ export async function main({
 }
 
 if (IS_CLI) {
-  await main();
+  await main({ outPath: OUT_ARG || undefined });
 }

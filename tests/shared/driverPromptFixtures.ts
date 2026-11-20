@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { renderConfirmIntentPrompt } from "../../src/audit/cli/confirmIntentStep.js";
 import { renderAnalyzerConsentPrompt, renderAnalyzerInstallPrompt, renderEdgeReasoningDispatchPrompt, renderPresentReportPrompt } from "../../src/audit/cli/prompts.js";
 import { functionalPreflightStep, FunctionalPreflightSchema } from "../../src/audit/cli/functionalPreflight.js";
-import { ambiguityReviewPrompt, clarificationPrompt, collectIntakeClarificationsPrompt, collectStartingPointPrompt, extractedPlanDiscardedPrompt, reviewApprovalPrompt, triagePrompt } from "../../src/remediate/steps/prompts.js";
+import { clarificationPrompt, collectIntakeClarificationsPrompt, collectStartingPointPrompt, reviewApprovalPrompt, triagePrompt } from "../../src/remediate/steps/prompts.js";
 import { intakePaths, INTAKE_SUMMARY_SCHEMA_VERSION } from "../../src/remediate/intake.js";
 import { buildReviewRequest } from "../../src/remediate/review/reviewGate.js";
 import { renderBlockedStepPrompt } from "../../src/shared/io/stepContractWriter.js";
@@ -47,14 +47,12 @@ export const driverPromptRows: PromptContractRegistryRow[] = [
   }), { ...checks(["typescript"], [answerPath], [...ANALYZER_SETTINGS]), actor: /(?:ask|operator|user)/i }),
   row("renderEdgeReasoningDispatchPrompt", auditFile, () => renderEdgeReasoningDispatchPrompt({ promptPath: "registry-fixture/edges-prompt.md", resultsPath: answerPath, continueCommand, contentHash: "fixture-content-hash", candidateCount: 1, scratchDirPath: "registry-fixture/scratch" }), checks(["registry-fixture/edges-prompt.md", "registry-fixture/scratch", "fixture-content-hash"], [answerPath]), "dispatch"),
   row("renderPresentReportPrompt", auditFile, () => renderPresentReportPrompt("registry-fixture/audit-report.md"), checks(["registry-fixture/audit-report.md"], ["Present", "Do not run the orchestrator again"])),
-  row("ambiguityReviewPrompt", remediateFile, () => ambiguityReviewPrompt([question], answerPath, [question.unit_id], undefined, "registry-fixture/ambiguity-request.json"), checks([question.unit_id, question.description, "registry-fixture/ambiguity-request.json"], [answerPath, "unit_id", "action", "rationale"], ["[]"])),
   row("clarificationPrompt", remediateFile, () => clarificationPrompt([question], answerPath), checks([question.unit_id, question.description], [answerPath, "unit_id", "action", "rationale"], question.options)),
   row("collectIntakeClarificationsPrompt", remediateFile, () => collectIntakeClarificationsPrompt({
     schema_version: INTAKE_SUMMARY_SCHEMA_VERSION, ready: false, source_type: "conversation", goals: [], non_goals: [], constraints: [], affected_files: [],
     open_questions: [{ id: "Q-CHOICE", question: "Which API is public?", blocking: true }], source_summary: "Fixture task", acceptance_criteria: [], scope_summary: "Fixture", intent_summary: "Fixture", filters: {},
   }, paths), checks(["Q-CHOICE", "Which API is public?"], [paths.clarificationResolution, "question_id", "answer"])),
   row("collectStartingPointPrompt", remediateFile, () => collectStartingPointPrompt("registry-fixture", ["registry-fixture/audit-findings.json"], ["registry-fixture/missing.json"], paths), checks(["registry-fixture/missing.json", "registry-fixture/audit-findings.json"], ["--input", "--guidance"])),
-  row("extractedPlanDiscardedPrompt", remediateFile, () => extractedPlanDiscardedPrompt("Unknown finding F-BAD", "registry-fixture/original-plan.json", paths), checks(["Unknown finding F-BAD", "registry-fixture/original-plan.json"], [paths.extractedPlan])),
   row("reviewApprovalPrompt", remediateFile, () => reviewApprovalPrompt(buildReviewRequest([{ id: "F-REVIEW", title: "Preserve fixture API", category: "General", severity: "high", confidence: "high", lens: "correctness", summary: "The public API drops a required field", affected_files: [{ path: "src/api.ts" }], evidence: ["src/api.ts#handler"] }], "PLAN-CHOICE"), answerPath), checks(["F-REVIEW", "The public API drops a required field"], [answerPath, "declined_findings", "declined_tiers"], [...REVIEW_NECESSITY_ORDER])),
   row("triagePrompt", remediateFile, () => triagePrompt(makeState({ status: "waiting_for_triage", items: { "F-CHOICE": { unit_id: "F-CHOICE", status: "blocked", failure_reason: "Fixture test fails" } } }), answerPath), checks(["F-CHOICE", "Fixture test fails"], [answerPath, "unit_id", "action", "rationale"], ["retry", "ignore", "halt"])),
   row("renderBlockedStepPrompt", "src/shared/io/stepContractWriter.ts", () => renderBlockedStepPrompt("audit-code", "Fixture infrastructure unavailable"), checks(["Fixture infrastructure unavailable"], ["Report this blocker", "stop"])),

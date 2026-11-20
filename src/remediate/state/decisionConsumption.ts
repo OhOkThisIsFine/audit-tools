@@ -4,6 +4,10 @@ import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { compareCodeUnits, contentSha256, hashContent, withFsRetry, writeJsonFile } from "audit-tools/shared";
 import type { RemediationPlan, RemediationItemState } from "./types.js";
+
+export const CLARIFICATION_RESOLUTION_FILENAME = "clarification_resolution.json";
+export const TRIAGE_RESOLUTION_FILENAME = "triage_resolution.json";
+
 interface DecisionState {
   plan?: RemediationPlan;
   items?: Record<string, RemediationItemState>;
@@ -13,7 +17,7 @@ interface DecisionState {
 
 const Digest = z.string().regex(/^[0-9a-f]{64}$/u);
 export const DecisionApplicationReceiptSchema = z.object({
-  input: z.enum(["clarification_resolution.json", "triage_resolution.json"]),
+  input: z.enum([CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME]),
   input_sha256: Digest,
   input_identity_sha256: Digest,
   context_sha256: Digest,

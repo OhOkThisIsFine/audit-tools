@@ -1,7 +1,7 @@
 // sites-pinned: tests/remediate/remediate-state-invariants.test.ts, tests/remediate/cp-node-1-regressions.test.ts
 /**
  * Fold a confirmed checkpoint's structured `InterpretedIntent` into remediation
- * block / finding ORDERING (DC-1, remediate half).
+ * execution-unit ordering (DC-1, remediate half).
  *
  * The user's `free_form_intent` is interpreted ONCE, deterministically, by the
  * single shared interpreter (`interpretFreeFormIntent`) into lens weights,
@@ -11,12 +11,11 @@
  * Hard boundaries (mirroring audit's planning boost):
  * - ORDERING ONLY. Intent never drops, filters, or mutates a finding — dropping
  *   is the review/clarification gate's job (DC-1 tradeoff note). Every input
- *   finding/block is present in the output; only their order changes.
+ *   finding retains its position. Every unit is present in the output.
  * - INV-S04: the verbatim `free_form_intent` string is never read here. Only the
  *   derived `InterpretedIntent` (lens weights / priority / scope) is consumed, so
  *   the raw directive can never leak into a worker prompt via the ordering path.
- * - STABLE. Equal-weight findings keep their original relative order, so ordering
- *   is deterministic across runs.
+ * - STABLE. Units tied on weight and verification priority retain their input order.
  *
  * Pure and synchronous — no IO, no LLM.
  */

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/stored-nightly-queue.test.ts, tests/shared/nightly-routine.test.ts
 // @generated-artifact tracked-output
 //
 // Render the nightly routine's open items as a TRACKED markdown inbox the owner
@@ -22,8 +23,8 @@
 //
 // ARGV IS REFUSED, NOT IGNORED — writing the queue is the default action, so a
 // query-shaped flag must never perform it (see `scripts/shared/argvGuard.mjs`).
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   readOpenItems,
   readDecisions,
@@ -37,6 +38,7 @@ import {
   OPEN_ITEMS_INDEX_RELPATH,
   DECISIONS_RELPATH,
 } from './items.mjs';
+import { writeQueueFile } from './queue-files.mjs';
 import { guardArgv } from '../shared/argvGuard.mjs';
 
 const USAGE = 'node scripts/nightly/render-inbox.mjs [--root <repo>] [--check]';
@@ -242,7 +244,7 @@ export function renderInbox({ items, decisions = {}, run = null, applied = [], s
 }
 
 export function projectInbox(root) {
-  const state = readOpenItems(root);
+  const state = readOpenItems(root, { required: true });
   const decisions = readDecisions(root);
   const { open } = partitionBySettled(state.items, decisions, root);
   const body = renderInbox({
@@ -262,11 +264,10 @@ export function writeInbox(root) {
   const snapshotPath = join(root, OPEN_ITEMS_RELPATH);
   const indexPath = join(root, OPEN_ITEMS_INDEX_RELPATH);
   const out = join(root, INBOX_RELPATH);
-  mkdirSync(dirname(snapshotPath), { recursive: true });
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(snapshotPath, snapshot, 'utf8');
-  writeFileSync(indexPath, index, 'utf8');
-  writeFileSync(out, body, 'utf8');
+  // The queue remains the regeneration source until both derived files exist.
+  writeQueueFile(indexPath, index);
+  writeQueueFile(out, body);
+  writeQueueFile(snapshotPath, snapshot);
   return { path: out, open };
 }
 
@@ -303,15 +304,16 @@ export function checkInbox(root) {
   try {
     projection = projectInbox(root);
   } catch (err) {
+    const failedPath = /** @type {NodeJS.ErrnoException} */ (err)?.path === snapshotPath ? OPEN_ITEMS_RELPATH : DECISIONS_RELPATH;
     return {
       path: out,
       snapshotPath,
       indexPath,
       open: 0,
       fresh: false,
-      stale: [DECISIONS_RELPATH],
+      stale: [failedPath],
       reason:
-        `${DECISIONS_RELPATH} could not be read, so the queue cannot be reconciled against it: ` +
+        `${failedPath} could not be read, so the queue cannot be reconciled: ` +
         `${err instanceof Error ? err.message : String(err)}`,
     };
   }

@@ -196,47 +196,45 @@ export function structuralImportEdges(graphBundle: GraphBundle): GraphEdge[] {
   return edges;
 }
 
-function dfsVisit(
-  node: string,
-  path: string[],
-  adjacency: Map<string, Set<string>>,
-  visited: Set<string>,
-  stack: Set<string>,
-  cycles: string[][],
-): void {
-  if (stack.has(node)) {
-    const cycleStart = path.indexOf(node);
-    if (cycleStart >= 0) {
-      cycles.push(path.slice(cycleStart));
-    }
-    return;
-  }
-  if (visited.has(node)) return;
-
-  visited.add(node);
-  stack.add(node);
-  path.push(node);
-
-  for (const neighbor of adjacency.get(node) ?? []) {
-    dfsVisit(neighbor, path, adjacency, visited, stack, cycles);
-  }
-
-  path.pop();
-  stack.delete(node);
-}
-
+// sites-pinned: tests/audit/graph-signals.test.ts
 function detectCycles(adjacency: Map<string, Set<string>>): string[][] {
   const cycles: string[][] = [];
-  // Each DFS root gets a fresh per-DFS visited set so that nodes already fully
-  // explored via one root are re-entered from a new root. This is required
-  // because a shared visited set across DFS starts prevents detection of cycles
-  // that are reachable from a later root only through an already-visited node
-  // (the "diamond reachability" case). The stack (current DFS path) is still
-  // per-path-bookkeeping and correctly identifies back-edges within each DFS.
-  for (const node of adjacency.keys()) {
-    const visited = new Set<string>();
-    const stack = new Set<string>();
-    dfsVisit(node, [], adjacency, visited, stack, cycles);
+  const acyclic = new Set<string>();
+  for (const [root, outgoing] of adjacency) {
+    if (acyclic.has(root)) continue;
+    // Revisit a cyclic region from each root. Different starts can expose
+    // different back edges, even when both starts reach the same set of nodes.
+    const visited = new Set([root]);
+    const active = new Map([[root, 0]]);
+    const frames = [{ node: root, neighbors: outgoing.values() }];
+    const previousCount = cycles.length;
+    while (frames.length) {
+      const frame = frames[frames.length - 1]!;
+      const next = frame.neighbors.next();
+      if (next.done) {
+        active.delete(frame.node);
+        frames.pop();
+        continue;
+      }
+      const node = next.value;
+      const ancestor = active.get(node);
+      if (ancestor !== undefined) {
+        cycles.push(frames.slice(ancestor).map(entry => entry.node));
+        continue;
+      }
+      if (visited.has(node) || acyclic.has(node)) continue;
+      visited.add(node);
+      const targets = adjacency.get(node);
+      if (targets) {
+        active.set(node, frames.length);
+        frames.push({ node, neighbors: targets.values() });
+      }
+    }
+    // With no back edge in the entire walk, no reachable node can lead to a
+    // cycle. Later roots may skip this region, including a long import chain.
+    if (cycles.length === previousCount) {
+      for (const node of visited) acyclic.add(node);
+    }
   }
   return cycles;
 }

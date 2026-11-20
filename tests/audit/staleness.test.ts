@@ -155,19 +155,6 @@ test("artifact freshness helpers normalize deterministic metadata hashes", () =>
   expect(ARTIFACT_DEPENDS_ON_MAP["coverage_matrix.json"].includes(
       "external_analyzer_results.json",
     )).toBeTruthy();
-  // access_memory.json carries run_id as provenance only — it must be stripped
-  // from the semantic content hash so it can never churn the artifact revision.
-  expect(hashArtifactValue("access_memory.json", {
-      version: 1,
-      run_id: "run-a",
-      total_ordinals: 1,
-      paths: [],
-    })).toBe(hashArtifactValue("access_memory.json", {
-      version: 1,
-      run_id: "run-b",
-      total_ordinals: 1,
-      paths: [],
-    }));
 });
 
 test("charter-family artifacts strip generated_at provenance from the content hash", () => {

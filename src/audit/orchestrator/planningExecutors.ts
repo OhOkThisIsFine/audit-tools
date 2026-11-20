@@ -296,6 +296,7 @@ export async function runPlanningExecutor(
     graphBundle: bundle.graph_bundle,
   });
   const auditPlanMetrics = buildAuditPlanMetrics(allReviewTasks, {
+    affinityGraph: taskAffinityGraph,
     graphBundle: bundle.graph_bundle,
     lineIndex,
     sizeIndex: resolvedSizeIndex,

@@ -200,9 +200,10 @@ export async function readRunRecoveryFacts(
   let ledger;
   try {
     ledger = await readSubmissionLedger(artifactsDir);
-  } catch {
-    return { ...NO_RECOVERY };
+  } catch (error) {
+    return { ...NO_RECOVERY, read_error: errorMessage(error) };
   }
+  if (ledger.read_error !== undefined) return { ...NO_RECOVERY, read_error: ledger.read_error };
   const marksFor = (kind: RecoveryMark["kind"]): RecoveryMark[] =>
     ledger
       .filter(
@@ -1450,6 +1451,7 @@ function touchedPathMatchesImplicated(tf: string, ip: string): boolean {
 export function blockResolvedItemsOnCombinedFailure(
   state: RemediationState,
   testOutput: string,
+  suite: "Combined test suite" | "End-to-end tests" = "Combined test suite",
 ): boolean {
   const resolvedItems = Object.values(state.items ?? {}).filter(
     (i) => isVerifiedCompleteStatus(i.status),
@@ -1483,7 +1485,7 @@ export function blockResolvedItemsOnCombinedFailure(
   for (const item of toBlock) {
     item.status = "blocked";
     item.completed_at = now;
-    item.failure_reason = `Combined test suite failed after remediation. ${attributionNote}${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
+    item.failure_reason = `${suite} failed after remediation. ${attributionNote}${testOutput ? `\n\nTest output:\n${testOutput}` : ""}`;
   }
 
   return true;
@@ -1553,11 +1555,6 @@ async function runE2eTests(
   return { ran: true, passed: true, output: "" };
 }
 
-/** The optional `verify_code_against_documentation` result file of one unit. */
-function verifyDocResultPath(artifactsDir: string, unitId: string): string {
-  return join(artifactsDir, `result_${unitId}_verify_code_against_documentation.json`);
-}
-
 interface ResolvedReportEntry {
   unit_id: string;
   summary: string;
@@ -1577,12 +1574,10 @@ interface ReportEntries {
 
 /**
  * Partition the terminal items into the report's resolved / verified-no-change
- * / inappropriate / ignored buckets, pulling each resolved item's verification
- * evidence from its `verify_code_against_documentation` result file when present.
+ * / inappropriate / ignored buckets, using the evidence accepted with each unit.
  */
 function collectReportEntries(
   state: RemediationState,
-  options: OrchestratorOptions,
 ): ReportEntries {
   const entries: ReportEntries = {
     resolved: [],
@@ -1595,28 +1590,10 @@ function collectReportEntries(
     if (isVerifiedCompleteStatus(item.status)) {
       const unit = state.plan?.units.find((u) => u.id === item.unit_id);
       const title = unit?.title ?? item.unit_id;
-      let verificationEvidence: string[] | undefined =
-        item.host_result_evidence;
-
-      const verificationResultPath = verifyDocResultPath(options.artifactsDir, item.unit_id);
-      if (existsSync(verificationResultPath)) {
-        try {
-          const verRes = JSON.parse(readFileSync(verificationResultPath, "utf8"));
-          if (Array.isArray(verRes.reason) && verRes.reason.length > 0) {
-            verificationEvidence = verRes.reason;
-          }
-        } catch (error) {
-          console.warn(
-            `Failed to parse verification result ${verificationResultPath}.`,
-            error,
-          );
-        }
-      }
-
       const entry: ResolvedReportEntry = {
         unit_id: item.unit_id,
         summary: title,
-        verification_evidence: verificationEvidence,
+        verification_evidence: item.host_result_evidence,
       };
       if (item.status === "resolved_no_change") {
         entries.verifiedNoChange.push(entry);
@@ -1831,9 +1808,11 @@ export function buildRemediationReportMarkdown(
     ...outcomesReport.recovery.accepted_via_recovery,
     ...outcomesReport.recovery.recovered_by_hand,
   ];
-  if (marks.length === 0) {
+  if (outcomesReport.recovery.read_error !== undefined) {
+    reportContent += `Recovery report incomplete. The submission ledger could not be read: ${outcomesReport.recovery.read_error}\nRepair the ledger and run next-step to retry reporting.\n`;
+  } else if (marks.length === 0 && outcomesReport.recovery.dropped_lines === 0) {
     reportContent += `None — no submission was readmitted; every accepted submission passed the normal lane's checks.\n`;
-  } else {
+  } else if (marks.length > 0) {
     reportContent += `${marks.length} submission(s) were READMITTED after the normal lane did not accept them. Findings fixed through a recovered submission are less corroborated than the rest of this run's:\n\n`;
     for (const mark of marks) {
       reportContent += `- \`${mark.submission_id}\` (lane \`${mark.lane}\`): ${recoveryLabel(mark.kind)}${mark.issue_code ? ` — \`${mark.issue_code}\`` : ""}\n`;
@@ -1849,7 +1828,12 @@ export function buildRemediationReportMarkdown(
 
   const o = outcomesReport.by_outcome;
   reportContent += `\n## Remediation Outcomes\n\n`;
-  reportContent += `Of ${outcomesReport.total} finding(s): ${o.resolved} resolved, ${o.verified_no_change} verified already correct, ${o.inappropriate} deemed inappropriate, ${o.ignored} ignored, ${o.blocked} blocked, ${o.pending} pending, ${o.deferred} deferred.\n`;
+  const labels: Record<RemediationOutcomeStatus, string> = {
+    resolved: "resolved", verified_no_change: "verified already correct", inappropriate: "deemed inappropriate",
+    ignored: "ignored", blocked: "blocked", pending: "pending", deferred: "deferred",
+    verified_already_fixed: "verified already fixed", refuted: "refuted",
+  };
+  reportContent += `Of ${outcomesReport.total} finding(s): ${OUTCOME_KEYS.map(key => `${o[key]} ${labels[key]}`).join(", ")}.\n`;
   const lensNames = Object.keys(outcomesReport.by_lens).sort();
   if (lensNames.length > 0) {
     reportContent += `\nBy lens:\n`;
@@ -2007,6 +1991,7 @@ export async function cleanupTempBranchesAndArtifacts(
     e2eResult.passed &&
     landingGates.passed &&
     closingCompleted &&
+    sourceOutcomes.recovery.read_error === undefined &&
     !anyBlocked &&
     !unresolvedSources &&
     !unresolvedRequest &&
@@ -2018,7 +2003,7 @@ export async function cleanupTempBranchesAndArtifacts(
       kind: "artifact_write",
       obligation: "closing",
       artifact: options.artifactsDir,
-      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked}, unresolvedSources=${unresolvedSources}, unresolvedUnits=${unresolvedUnits})`,
+      note: `Artifacts directory preserved for diagnosis (combinedTest.passed=${combinedTest.passed}, e2e.passed=${e2eResult.passed}, landingGates.passed=${landingGates.passed}, closing=${closingResult.status}, closingAction=${closingResult.action}, anyBlocked=${anyBlocked}, unresolvedSources=${unresolvedSources}, unresolvedRequest=${Boolean(unresolvedRequest)}, unresolvedUnits=${unresolvedUnits}, recoveryReadError=${sourceOutcomes.recovery.read_error ?? "none"})`,
     });
     return {};
   }
@@ -2084,20 +2069,15 @@ export async function cleanupTempBranchesAndArtifacts(
 }
 
 /**
- * Build a VerificationReport from the post-remediation state. One
- * FindingVerificationTrace per terminal finding, with trace entries for:
- *   - combined test suite result (task kind)
- *   - each item's verification evidence from result files (file kind)
- *   - closing action outcome (command kind)
- *
- * Overall status is "passed" when combined tests passed and all resolved
- * items have at least one passing trace. "failed" otherwise.
+ * Project accepted unit evidence onto the reviewed requirements and commands.
+ * Each source finding includes its linked unit traces and its own recorded disposition.
  */
 export function buildVerificationReport(
   state: RemediationState,
-  options: OrchestratorOptions,
+  _options: OrchestratorOptions,
   closingResult: ClosingResult,
   combinedTest: CombinedTestResult,
+  createdAt = new Date().toISOString(),
 ): VerificationReport {
   const units = (state.plan?.units ?? []).map(unit => {
     const item = state.items?.[unit.id];
@@ -2116,14 +2096,6 @@ export function buildVerificationReport(
       trace_id: `${unit.id}:command:${i}`, kind: "command", label: command,
       evidence: [...(item?.host_result_evidence ?? [])], status: passed ? "passed" : "failed",
     });
-    const verificationResultPath = verifyDocResultPath(options.artifactsDir, unit.id);
-    if (existsSync(verificationResultPath)) {
-      try {
-        const result = JSON.parse(readFileSync(verificationResultPath, "utf8"));
-        const evidence = Array.isArray(result.reason) ? result.reason.filter((v: unknown) => typeof v === "string") : [];
-        traces.push({trace_id: `${unit.id}:verify-doc`, kind:"file", label:"verify_code_against_documentation", evidence, status:evidence.length ? "passed":"failed"});
-      } catch { /* malformed optional evidence cannot establish a passing trace */ }
-    }
     if (closingResult.action !== "none") traces.push({
       trace_id: `${unit.id}:closing`, kind: "command", label: `closing action: ${closingResult.action}`,
       evidence: [`status=${closingResult.status}`], status: closingActionCompleted(closingResult) ? "passed" : "failed",
@@ -2152,7 +2124,7 @@ export function buildVerificationReport(
     ...(state.plan?.goal_id ? {goal_id:state.plan.goal_id} : {}),
     findings, units,
     overall_status: overallPassed ? "passed" : "failed",
-    created_at: new Date().toISOString(),
+    created_at: createdAt,
   };
 }
 
@@ -2173,6 +2145,9 @@ export async function runClosePhase(
   options: OrchestratorOptions,
   runLogger?: RunLogger,
 ): Promise<RemediationState> {
+  const resumed = await retryIncompleteCloseReport(state, options, runLogger);
+  if (resumed) return resumed;
+  if (state.status === "complete") return state;
   admitRemediationDirtyBaseline(state);
   console.log("Running Close Phase...");
 
@@ -2332,7 +2307,7 @@ export async function runClosePhase(
   const e2eResult = await runE2eTests(state, options);
   if (!e2eResult.passed) {
     console.log("End-to-end tests failed. Transitioning back to triage.");
-    if (blockResolvedItemsOnCombinedFailure(state, e2eResult.output)) {
+    if (blockResolvedItemsOnCombinedFailure(state, e2eResult.output, "End-to-end tests")) {
       runLogger?.event({
         phase: "close",
         kind: "state",
@@ -2395,26 +2370,89 @@ export async function runClosePhase(
   // reporting success.
   console.log(`Executing closing action: ${state.closing_plan.action}`);
   const closingResult = await executeClosingAction(state, options);
-  await writeJsonFile(
-    join(options.artifactsDir, "remediation-closing-result.json"),
-    closingResult,
-  );
+  const context: CloseReportContext = {
+    combinedTest, e2eResult, landingGates, contractReviews, endedAt: new Date().toISOString(),
+  };
+  // Persist the irreversible action's result and the facts needed to report it in
+  // one atomic rename, before attempting any ledger read or report write.
+  await writeJsonFile(join(options.artifactsDir, CLOSING_RESULT_FILENAME), {
+    ...closingResult,
+    pending_report: { verified_state: state, context, sha256: contentSha256([closingResult, state, context]) },
+  } satisfies RecordedClosingResult);
+  return reportRecordedClose(state, options, closingResult, context, runLogger, false);
+}
 
-  // 5. Generate remediation-report.md and remediation-outcomes.json
-  const entries = collectReportEntries(state, options);
+// sites-pinned: tests/remediate/phase-close.test.ts
+const CLOSING_RESULT_FILENAME = "remediation-closing-result.json";
 
-  // Phase 7B: capture per-finding outcomes (surface only), carrying the run's
-  // tool-owned gate outcome so the report can say which of executed / scoped-out
-  // / disabled / absent this run actually was.
-  // The run's recovery record, read HERE — the single point from which both the
-  // outcomes contract and the markdown render take it. Read before
-  // `cleanupTempBranchesAndArtifacts`, which deletes the artifacts directory
-  // (and the ledger under it) on a green close; the value is THREADED into the
-  // builders rather than re-read by them, so neither can resurrect a deleted
-  // file. A read failure is stated, never laundered into a clean-looking empty
-  // set: the alternative makes "the ledger was unreadable" report as "this run
-  // was clean", which is the collapse the ledger exists to prevent.
+interface CloseReportContext {
+  endedAt: string;
+  combinedTest: CombinedTestResult;
+  e2eResult: E2eTestResult;
+  landingGates: LandingGateVerifyOutcome;
+  contractReviews: ContractReviewOutcome[];
+}
+
+interface RecordedClosingResult extends ClosingResult {
+  pending_report?: { verified_state: RemediationState; context: CloseReportContext; sha256: string };
+}
+
+/** Resume after the authorized action, including when a report write failed before state became complete. */
+export async function retryIncompleteCloseReport(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  runLogger?: RunLogger,
+): Promise<RemediationState | undefined> {
+  const saved = await readOptionalJsonFile<RecordedClosingResult>(join(options.artifactsDir, CLOSING_RESULT_FILENAME));
+  if (!saved || !("pending_report" in saved)) return;
+  const { pending_report: retry, ...closingResult } = saved;
+  const verified = retry?.verified_state;
+  if (!retry || !verified?.plan || !state.plan || (state.status !== "complete" && state.status !== "closing") ||
+      verified.plan.plan_id !== state.plan.plan_id || verified.started_at !== state.started_at ||
+      verified.plan.review_revision_sha256 !== state.plan.review_revision_sha256 ||
+      verified.closing_plan?.action !== state.closing_plan?.action) {
+    throw new Error("Saved reporting retry does not match this remediation run and closing plan.");
+  }
+  if (retry.sha256 !== contentSha256([closingResult, verified, retry.context])) {
+    throw new Error("Saved closing result or reporting inputs changed. Cannot retry reporting.");
+  }
+  return reportRecordedClose(verified, options, closingResult, retry.context, runLogger, true);
+}
+
+async function reportRecordedClose(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  closingResult: ClosingResult,
+  context: CloseReportContext,
+  runLogger: RunLogger | undefined,
+  reportingRetry: boolean,
+): Promise<RemediationState> {
   const recovery = await readRunRecoveryFacts(options.artifactsDir, state);
+  const completed = await finishCloseReport(state, options, closingResult, context, recovery, runLogger, reportingRetry);
+  const resultPath = join(options.artifactsDir, CLOSING_RESULT_FILENAME);
+  if (recovery.read_error === undefined && existsSync(resultPath)) {
+    // A preserved run can still have its old closing state if the final state write failed.
+    // Keep the action receipt available until a restart will see a completed state.
+    const { StateStore } = await import("../state/store.js");
+    const persisted = await new StateStore(options.artifactsDir).loadState();
+    if (persisted?.status === "complete") {
+      await writeJsonFile(resultPath, closingResult);
+    }
+  }
+  return completed;
+}
+
+async function finishCloseReport(
+  state: RemediationState,
+  options: OrchestratorOptions,
+  closingResult: ClosingResult,
+  { combinedTest, e2eResult, landingGates, contractReviews, endedAt }: CloseReportContext,
+  recovery: RunRecovery,
+  runLogger?: RunLogger,
+  reportingRetry = false,
+): Promise<RemediationState> {
+  // 5. Generate remediation-report.md and remediation-outcomes.json
+  const entries = collectReportEntries(state);
 
   // Hydrate original coverage-only sources before ANY outcome or verification
   // projection. Reading them after building outcomes silently loses excluded
@@ -2435,7 +2473,7 @@ export async function runClosePhase(
   // at close would be a duplicate — and `kind: "outcome"` at close means "one
   // per finding", which a run-level line would quietly break.
   // One run-log line per outcome, plus a summary line for the artifact write.
-  for (const outcome of outcomesReport.outcomes) {
+  for (const outcome of reportingRetry ? [] : outcomesReport.outcomes) {
     runLogger?.event({
       phase: "close",
       kind: "outcome",
@@ -2444,7 +2482,6 @@ export async function runClosePhase(
     });
   }
 
-  const endedAt = new Date().toISOString();
   // Workers may have appended opt-in reflections during document/implement
   // dispatch; parse leniently (malformed lines skipped) and surface them in the
   // report. Workers own the file — it is read-only here.
@@ -2454,7 +2491,7 @@ export async function runClosePhase(
   const closeFeedback = feedbackText
     ? parseReflectionsNdjson(feedbackText)
     : { reflections: [], discarded: [] };
-  reportDiscardedReflections(closeFeedback.discarded, "remediate-code");
+  if (!reportingRetry) reportDiscardedReflections(closeFeedback.discarded, "remediate-code");
   const reportContent = buildRemediationReportMarkdown(
     state,
     entries,
@@ -2497,7 +2534,7 @@ export async function runClosePhase(
     },
     ...(e2eResult.ran ? { e2e_result: { passed: e2eResult.passed } } : {}),
     closing_result: {
-      action: state.closing_plan.action,
+      action: closingResult.action,
       status: closingResult.status,
       commands: closingResult.commands,
       // Untouched-user-dirt set collectStagingFiles left alone (never staged) —
@@ -2521,16 +2558,19 @@ export async function runClosePhase(
   const outputDir = outputDirFor(options.artifactsDir);
 
   // 6. Write verification_report.json for the contract pipeline closing phase.
-  const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest);
+  const verificationReport = buildVerificationReport(state, options, closingResult, combinedTest, endedAt);
   const verificationReportPath = join(outputDir, "verification_report.json");
   const completeState: RemediationState = { ...state, status: "complete" };
 
-  await Promise.all([
+  // Keep the phase lock until every in-flight write settles, including on a reporting retry.
+  const writes = await Promise.allSettled([
     writeTextFile(join(outputDir, REMEDIATION_REPORT_FILENAME), reportContent),
     writeJsonFile(join(outputDir, REMEDIATION_OUTCOMES_FILENAME), outcomesFile),
     writeJsonFile(verificationReportPath, verificationReport),
     writeJsonFile(join(outputDir, "remediation-state.complete.json"), completeState),
   ]);
+  const failure = writes.find(write => write.status === "rejected");
+  if (failure) throw failure.reason;
   runLogger?.event({
     phase: "close",
     kind: "artifact_write",

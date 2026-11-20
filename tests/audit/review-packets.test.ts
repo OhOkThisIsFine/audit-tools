@@ -1,4 +1,7 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import * as affinity from "../../src/audit/orchestrator/taskAffinityGraph.js";
+import { AuditPlanMetricsSchema } from "../../src/audit/types/reviewPlanning.js";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 
 import type { AuditTask } from "../../src/audit/types.js";
 import {
@@ -89,6 +92,35 @@ test("task order and plan metrics consume the same canonical components", () => 
     packet_count: 2,
     estimated_agent_reduction: 1,
   });
+});
+
+// Historical semantic hashes measured on b2f2c0ea for these frozen fixtures.
+test.each([
+  ["empty", "b646cf34ed3d6a4a25a3e1177b5a07bfc38d8afbd2bd1ae32442d4caf6a9476c", []],
+  ["sparse", "84c8f65a2006ec1ffba2fc48a1b69dcfeabb1e957c8d3ac1a4476fc6fe96d0d4", [["a", "b"], ["d"], ["z"]]],
+  ["dense", "657f526115caef53092f794302ec33d6165de38d35e4478e7f9666d754608d7a", [["a", "b", "d", "z"]]],
+] as const)("reuses the %s affinity graph without changing packet metrics or order", (shape, oldHash, order) => {
+  const tasks = shape === "empty" ? [] : ["z", "a", "d", "b"].map(id =>
+    task(id, shape === "dense" || id === "b" ? "a.ts" : id + ".ts"));
+  const generatedAt = new Date("2026-04-22T00:00:00Z");
+  const graph = affinity.buildTaskAffinityGraph(tasks);
+  const expected = buildAuditPlanMetrics(tasks, { generatedAt });
+  const build = vi.spyOn(affinity, "buildTaskAffinityGraph");
+  try {
+    const metrics = buildAuditPlanMetrics(tasks, { generatedAt, affinityGraph: graph });
+    expect(buildReviewPacketPlanningData(tasks, { affinityGraph: graph }).packets.map(packet => packet.task_ids)).toEqual(order);
+    expect(build).not.toHaveBeenCalled();
+    expect(JSON.stringify(metrics)).toBe(JSON.stringify(expected));
+    expect(metrics.packet_quality).not.toHaveProperty("merge_edge_kind_counts");
+    expect(AuditPlanMetricsSchema.parse(metrics)).toEqual(metrics);
+    const historical = { ...metrics, packet_quality: { ...metrics.packet_quality, merge_edge_kind_counts: {} } };
+    expect(AuditPlanMetricsSchema.parse(historical)).toEqual(historical);
+    const hash = (value: unknown) => hashArtifactValue("audit_plan_metrics.json", value);
+    expect(hash(historical)).toBe(oldHash);
+    expect(hash(metrics)).not.toBe(oldHash);
+  } finally {
+    build.mockRestore();
+  }
 });
 
 // Counts the underlying membership work, not time or calls to Array.includes.

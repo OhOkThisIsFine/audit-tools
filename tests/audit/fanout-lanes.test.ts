@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
+import { readAuditReviewBinding } from "../../src/audit/cli/auditReviewBindings.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import os from "node:os";
@@ -6,10 +8,10 @@ import type { FanoutLaneSpec } from "../../src/audit/cli/fanoutLanes.js";
 import { sourceTreeInstruction } from "../../src/audit/io/runSnapshot.js";
 
 const { materializeFanoutLanes } = await import("../../src/audit/cli/fanoutLanes.js");
-const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE } = await import(
+const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE, GATE_LANES } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
-const { laneAssetsDir } = await import("../../src/shared/io/auditToolsPaths.js");
+const { laneAssetsDir, expectedSubmissionsPath } = await import("../../src/shared/io/auditToolsPaths.js");
 
 // Always-materialized fan-out lanes (design resolution 2, 2026-08-05).
 // Constraint 6 (K-of-N resume) pinned at the unit: a lane whose SUBMISSION
@@ -21,6 +23,37 @@ const { laneAssetsDir } = await import("../../src/shared/io/auditToolsPaths.js")
 // tool where the submission goes rather than re-spelling a filename — which is
 // the property, not an inconvenience.
 describe("materializeFanoutLanes", () => {
+  it("binds the pre-trailer body and the completed prompt file independently on emission and replay", async () => {
+    const dir = await mkdtemp(join(os.tmpdir(), "review-digests-"));
+    const lane = GATE_LANES.design_review_contract;
+    const emit = () => materializeFanoutLanes({
+      artifactsDir: dir, sourceRoot: dir, runId: AUDIT_GATE_SUBMISSION_SCOPE,
+      lanes: [{ id: lane, label: "Review", fileCount: 0, riskScore: 0, promptFilename: "review.md", promptText: "Review this contract." }],
+    });
+    const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+    try {
+      const verifyBinding = async () => {
+        const fanout = await emit();
+        const prompt = await readFile(fanout.lanes[0]!.promptPath, "utf8");
+        const trailer = prompt.lastIndexOf("\n\n## Bound review submission\n");
+        expect(trailer).toBeGreaterThan(0);
+        const expectedBody = hash(prompt.slice(0, trailer));
+        const expectedSet = JSON.parse(await readFile(expectedSubmissionsPath(dir), "utf8"));
+        expect(expectedSet.entries[0].prompt_sha256).toBe(expectedBody);
+        expect(await readAuditReviewBinding(dir, lane)).toMatchObject({
+          promptSha256: expectedBody, promptContentSha256: hash(prompt),
+        });
+        return fanout.lanes[0]!;
+      };
+      const first = await verifyBinding();
+      await mkdir(dirname(first.resultPath), { recursive: true });
+      await writeFile(first.resultPath, "{}", "utf8");
+      await writeFile(first.promptPath, "damaged prompt", "utf8");
+      expect((await verifyBinding()).resultExists).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   const lanes = (dir: string): FanoutLaneSpec[] => [
     {
       id: "alpha",

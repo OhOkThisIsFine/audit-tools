@@ -1010,26 +1010,26 @@ describe("a block outside the consumed write-scope contract is refused, not norm
     );
   });
 
-  it("refuses an absolute touched_files entry with a named, block-attributed error", async () => {
+  it("refuses an absolute allowed_files entry with a named, block-attributed error", async () => {
     const { run } = await prepareWith({ allowed_files: [resolve("/etc/passwd")] });
     await expect(run()).rejects.toThrow(
-      /block 'block-a' is outside the normalized write-scope contract: touched_files entry .* is absolute/u,
+      /block 'block-a' is outside the normalized write-scope contract: allowed_files entry .* is absolute/u,
     );
   });
 
-  it("refuses a touched_files entry that is not in normalized repo-relative form", async () => {
+  it("refuses an allowed_files entry that is not in normalized repo-relative form", async () => {
     const { run } = await prepareWith({ allowed_files: ["./src/a.ts"] });
     await expect(run()).rejects.toThrow(/is not in normalized repo-relative form/u);
   });
 
-  it("refuses a shell-chained targeted_command, and never runs it", async () => {
+  it("refuses a shell-chained required_tests entry, and never runs it", async () => {
     const { root, run } = await prepareWith({
       required_tests: [
         `node -e "require('fs').writeFileSync('pwned','x')" && echo chained`,
       ],
     });
     await expect(run()).rejects.toThrow(
-      /targeted_command .* leaves the declared shape/u,
+      /required_tests entry .* leaves the declared shape/u,
     );
     expect(
       existsSync(join(root, "pwned")),
@@ -1037,7 +1037,7 @@ describe("a block outside the consumed write-scope contract is refused, not norm
     ).toBe(false);
   });
 
-  it("refuses a redirecting targeted_command", async () => {
+  it("refuses a redirecting required test", async () => {
     const { run } = await prepareWith({
       required_tests: ["npm run build > build.log"],
     });

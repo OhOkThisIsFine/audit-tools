@@ -1,3 +1,4 @@
+import { STATE_FILENAME } from "../state/store.js";
 // sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -117,7 +118,7 @@ async function reviewStep(options: ContractPipelineStepOptions, canonical: Canon
   const paths = executionPlanPaths(options.artifactsDir), rolePaths = paths.review(role);
   const history = await readPlanReviewHistory(options.artifactsDir);
   const dependencies = await Promise.all(REVIEW_DEPENDENCIES[role].map(dependency => readPlanReview(options.artifactsDir, dependency, canonical.revision_sha256)));
-  const ownerDecision = await readOptionalJsonFile<unknown>(join(paths.directory, "owner-decision.json"));
+  const ownerDecision = await readOptionalJsonFile<unknown>(paths.ownerDecision);
   const inputSha = hashContent(stableStringify({ revision: canonical.revision_sha256, role, dependencies, history, ownerDecision }));
   const prior = await readPlanReview(options.artifactsDir, role, canonical.revision_sha256);
   const { adversarialDepth } = await resolveAdversarialDepth(options.artifactsDir);
@@ -209,7 +210,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
     try { actual = hashContent(await readFile(entry.path, "utf8")); } catch { actual = "missing"; }
     if (actual !== entry.sha256) return emit(options, `The agreed input ${entry.path} changed or disappeared. The current plan is preserved. Restore the agreed source or explicitly start a new run; an old review cannot authorize changed source evidence.`, "blocked");
   }
-  const state = await readOptionalJsonFile<{ plan?: { units?: unknown[] }; items?: Record<string, { status: string }> }>(join(options.artifactsDir, "state.json"));
+  const state = await readOptionalJsonFile<{ plan?: { units?: unknown[] }; items?: Record<string, { status: string }> }>(join(options.artifactsDir, STATE_FILENAME));
   const acceptedUnits = new Map<string, unknown>();
   for (const unit of state?.plan?.units ?? []) {
     const entry = unit as { id: string };
@@ -222,7 +223,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
   const contextIssues = await executionPlanContextIssues(options.root, canonical);
   if (contextIssues.length) return authorStep(options,source,canonical,contextIssues.join("\n"));
   if (source.request || canonical.plan.source_dispositions.some(entry => entry.status === "deferred")) {
-    const decisionPath = join(paths.directory, "owner-decision.json");
+    const decisionPath = paths.ownerDecision;
     const rawDecision = await readOptionalJsonFile<unknown>(decisionPath);
     const decision = z.object({ revision_sha256: z.string(), confirmed_by: z.literal("host"), approved_unit_ids: z.array(z.string()), declined_units: z.array(z.object({ id: z.string(), reason: z.string().min(1) }).strict()), deferred_findings: z.array(z.object({ finding_id:z.string(), reason:z.string().min(1) }).strict()).default([]) }).strict().safeParse(rawDecision);
     const ids = canonical.plan.units.map(unit => unit.id);
@@ -257,7 +258,7 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       }
       const residuals = judge.classifications.filter(entry => entry.classification === "residual_risk");
       if (residuals.length) {
-        const riskPath = join(paths.directory, "risk-decisions.json");
+        const riskPath = paths.riskDecisions;
         const risk = PlanRiskDecisionSchema.safeParse(await readOptionalJsonFile<unknown>(riskPath));
         if (!risk.success || risk.data.revision_sha256 !== canonical.revision_sha256 || residuals.some(entry => !risk.data.accepted_counterexample_ids.includes(entry.counterexample_id))) return emit(options, `# Accept or repair remaining risks\n\nThe independent judge proposes these residual risks, which remain the operator's choice:\n${JSON.stringify(residuals,null,2)}\nAsk the operator to accept them or revise the plan. Explicit acceptance is recorded at ${riskPath}: ${JSON.stringify({revision_sha256:canonical.revision_sha256,confirmed_by:"host",accepted_counterexample_ids:residuals.map(entry=>entry.counterexample_id)})}. Never infer risk acceptance from the judge's classification.`, "blocked");
       }
@@ -266,8 +267,8 @@ export async function buildNextContractPipelineStep(options: ContractPipelineSte
       await writeJsonFile(paths.history,{counterexamples:[...finalExamples.values()],accepted_ids:[],repair_rounds:0});
       const reviews=Object.fromEntries(await Promise.all(PLAN_REVIEW_ROLES.map(async role=>[role,hashContent(stableStringify(await readPlanReview(options.artifactsDir,role,canonical.revision_sha256)))])));
       await writeJsonFile(paths.approval, { revision_sha256: canonical.revision_sha256, judge_input_sha256: result.input_sha256,
-        owner_decision_sha256: hashContent(stableStringify(await readOptionalJsonFile<unknown>(join(paths.directory,"owner-decision.json")) ?? null)),
-        risk_decision_sha256: hashContent(stableStringify(await readOptionalJsonFile<unknown>(join(paths.directory,"risk-decisions.json")) ?? null)),
+        owner_decision_sha256: hashContent(stableStringify(await readOptionalJsonFile<unknown>(paths.ownerDecision) ?? null)),
+        risk_decision_sha256: hashContent(stableStringify(await readOptionalJsonFile<unknown>(paths.riskDecisions) ?? null)),
         history_sha256: hashContent(stableStringify(await readPlanReviewHistory(options.artifactsDir))),review_sha256:reviews });
     }
   }

@@ -1,7 +1,8 @@
 import { createExecutablePlanFixture, approveExecutablePlanFixture } from "./helpers/executablePlanFixture.js";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import * as jsonStore from "../../src/shared/io/json.js";
 import { readOptionalJsonFile, writeJsonFile } from "../../src/shared/index.js";
 import { buildNextContractPipelineStep } from "../../src/remediate/steps/contractPipeline.js";
 import { readCanonicalPlan, ingestExecutionPlan, readApprovedExecutionPlan } from "../../src/remediate/contractPipeline/executionPlan.js";
@@ -26,6 +27,21 @@ test("approved conversation plan is immediately executable without synthetic fin
   expect(approved?.source.findings).toEqual([]);
   expect(approved?.canonical.plan.units).toEqual(f.plan.units);
   expect(await buildNextContractPipelineStep(f.options)).toBeNull();
+});
+
+test("approval reads and returns the exact history snapshot it verified", async () => {
+  const f = await fixture();
+  await approve(f);
+  const read = vi.spyOn(jsonStore, "readOptionalJsonFile");
+  try {
+    const approved = await readApprovedExecutionPlan(f.artifactsDir);
+    expect(approved?.history).toEqual(JSON.parse(await readFile(f.paths.history, "utf8")));
+    expect(read.mock.calls.filter(([path]) => path === f.paths.history)).toHaveLength(1);
+    await rm(f.paths.history);
+    expect(await readApprovedExecutionPlan(f.artifactsDir)).toBeUndefined();
+  } finally {
+    read.mockRestore();
+  }
 });
 
 test("approval of revision R cannot activate revision R+1", async () => {

@@ -9,7 +9,6 @@ import { join } from "node:path";
 import {
   type LockedJsonStore,
   createLockedJsonStore,
-  LOCKED_JSON_STORE_TIMEOUT_MS,
   SchemaVersionMismatchError,
   SKIP_WRITE,
   assertNotNodeWorktreeCwd,
@@ -47,7 +46,8 @@ export const REMEDIATION_STATE_CONTRACT_VERSION =
   "remediate-code-state/v2" as const;
 
 /** The file this store owns, named once so the version error can name it too. */
-const STATE_FILENAME = "state.json";
+export const PHASE_LOCK_FILENAME = "phase.lock";
+export const STATE_FILENAME = "state.json";
 
 export const OPERATOR_LIFECYCLE_FILENAME = "operator-lifecycle.json";
 export const OPERATOR_LIFECYCLE_VERSION = "remediation-operator-lifecycle/v1" as const;
@@ -212,9 +212,6 @@ export function validateRemediationState(value: unknown): string[] {
     const plan = obj["plan"];
     if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
       errors.push(`status "${status}" requires a persisted plan`);
-    } else {
-      const parsed = RemediationPlanSchema.safeParse(plan);
-      if (!parsed.success) errors.push(...parsed.error.issues.map(issue => `plan.${issue.path.join(".")}: ${issue.message}`));
 
     }
   }
@@ -332,11 +329,6 @@ function clarificationQuestionErrors(obj: Record<string, unknown>): string[] {
 }
 
 const LOCK_FILENAME = "state.lock";
-// Acquire timeout for the shared file lock — the STALE_LOCK_MS-minus-margin
-// derivation is single-sourced in the shared locked JSON store (a fresh-but-held
-// lock times out deterministically before it could be reclaimed as stale).
-// Re-exported here because callers and tests pin the store's timeout by name.
-export const LOCK_TIMEOUT_MS = LOCKED_JSON_STORE_TIMEOUT_MS;
 
 function statePath(artifactsDir: string): string {
   return join(artifactsDir, STATE_FILENAME);
@@ -417,7 +409,7 @@ export class StateStore {
 
   /** Recovery writers share the advance mutex, then take the state lock. */
   async withActiveOperator<T>(body: () => Promise<T>): Promise<T> {
-    return withFileLock(join(this.artifactsDir, "phase.lock"), async () => {
+    return withFileLock(join(this.artifactsDir, PHASE_LOCK_FILENAME), async () => {
       await this.assertOperatorActive();
       return body();
     });

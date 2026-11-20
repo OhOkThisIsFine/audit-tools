@@ -1,4 +1,4 @@
-import { EXTERNAL_ANALYZER_CANDIDATES, persistAnalyzerConsent, persistAnalyzerSettings, toPromptPathToken } from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES, persistAnalyzerSettings, toPromptPathToken } from "audit-tools/shared";
 import { afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { runCli } from "../../src/audit/cli.js";
 import { validateAuditArguments, NEXT_STEP_ARGUMENTS } from "../../src/audit/cli/argumentContract.js";
 import { getFlag } from "../../src/audit/cli/args.js";
-import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
+import { prepareFixtureRun, satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 
 const roots: string[] = [];
@@ -22,7 +22,7 @@ it("the public next-step emits capability work before semantic or deterministic 
   const { root, artifactsDir } = await fixture();
   await writeFile(join(root, "sample.ts"), "export const sample = 1;\n");
   await persistAnalyzerSettings(root, { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" });
-  await persistAnalyzerConsent(root, Object.fromEntries(EXTERNAL_ANALYZER_CANDIDATES.map(candidate => [candidate.id, "declined" as const])));
+  await prepareFixtureRun(root, { declinedAnalyzerIds: EXTERNAL_ANALYZER_CANDIDATES.map(candidate => candidate.id), preflight: false });
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   await cmdNextStep(["--root", root]);
   const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
@@ -43,7 +43,7 @@ it("a host that copies the emitted example verbatim satisfies the run binding (t
   const { root, artifactsDir } = await fixture();
   await writeFile(join(root, "sample.ts"), "export const sample = 1;\n");
   await persistAnalyzerSettings(root, { typescript: "skip", python: "skip", html: "skip", css: "skip", sql: "skip" });
-  await persistAnalyzerConsent(root, Object.fromEntries(EXTERNAL_ANALYZER_CANDIDATES.map(candidate => [candidate.id, "declined" as const])));
+  await prepareFixtureRun(root, { declinedAnalyzerIds: EXTERNAL_ANALYZER_CANDIDATES.map(candidate => candidate.id), preflight: false });
   vi.spyOn(console, "log").mockImplementation(() => undefined);
   await cmdNextStep(["--root", root]);
   const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));

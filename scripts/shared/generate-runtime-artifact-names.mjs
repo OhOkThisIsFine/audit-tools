@@ -62,6 +62,8 @@ export const RUNTIME_NAME_SOURCES = [
   { file: "src/remediate/steps/dispatch/hostHandoff.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/intake.ts", rules: ["joinLiterals"] },
   { file: "src/remediate/intent/intentPersistence.ts", rules: ["filenameConstants"] },
+  { file: "src/remediate/review/filterDispositions.ts", rules: ["filenameConstants"] },
+  { file: "src/remediate/state/decisionConsumption.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/state/store.ts", rules: ["filenameConstants"] },
   { file: "src/remediate/steps/nextStep.ts", rules: ["joinLiterals", "filenameConstants"] },
   { file: "src/remediate/steps/finalGate.ts", rules: ["filenameConstants", "joinLiterals"] },

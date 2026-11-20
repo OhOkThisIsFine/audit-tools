@@ -164,6 +164,13 @@ describe("parseReviewResolution", () => {
     expect(refusalOf('["ARC-1"]')).toMatch(/one JSON object/);
   });
 
+  it("reports nested unknown keys even when their spelling is retired at the top level", () => {
+    const reason = refusalOf(JSON.stringify({ declined_findings: [{ finding_id: "ARC-1", disapproved_tiers: [], extra: true }] }));
+    expect(reason).toContain("declined_findings.0");
+    expect(reason).toContain("`disapproved_tiers`");
+    expect(reason).toContain("`extra`");
+  });
+
   it("refuses the retired disapproved_* names and states the new ones", () => {
     const reason = refusalOf('{"disapproved_findings":["ARC-1"],"disapproved_tiers":[]}');
     expect(reason).toContain("`disapproved_findings` is not a field — write `declined_findings`");

@@ -83,7 +83,6 @@ const CARRIED_ARTIFACTS = [
   "audit_plan_metrics",
   "task_affinity_graph",
   "requeue_tasks",
-  "access_memory",
   "synthesis_narrative",
 ] as const satisfies ReadonlyArray<keyof typeof ARTIFACT_DEFINITIONS>;
 

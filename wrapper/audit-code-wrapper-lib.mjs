@@ -14,7 +14,9 @@ import {
   _getInstallProfile,
   _renderGeminiCommandToml,
 } from './audit-code-wrapper-install-hosts.mjs';
+// sites-pinned: tests/shared/installer-verb-help.test.ts
 import {
+  commandRequestsHelp,
   wantsInstallerVerbHelp,
   installerVerbHelp,
   installerVerbSummaries,
@@ -73,24 +75,19 @@ function flagOccurrences(argv, name) {
   return occurrences;
 }
 
-// The caller's LAST occurrence is their final word for the flag.
-function lastFlagEntry(argv, name) {
-  const occurrences = flagOccurrences(argv, name);
-  return occurrences[occurrences.length - 1];
-}
-
+// sites-pinned: tests/shared/installer-verb-help.test.ts
 function getFlag(argv, name) {
-  const entry = lastFlagEntry(argv, name);
-  if (!entry) return undefined;
-  return entry.inline ? argv[entry.index].slice(name.length + 1) : argv[entry.index + 1];
+  let value;
+  for (const entry of flagOccurrences(argv, name)) {
+    value = entry.inline ? argv[entry.index].slice(name.length + 1)
+      : entry.span === 2 ? argv[entry.index + 1] : undefined;
+    if (!value) throw new Error(`${name} requires a value; use ${name}=<value> for a value beginning with --.`);
+  }
+  return value;
 }
 
-// Overwrite an existing flag's value or append when absent, ALWAYS emitting the
-// bare two-token form (`--name value`) — the only spelling
-// src/audit/cli/args.ts parses (argv.indexOf, no '=' handling anywhere in
-// src/audit), so forwarding an equals-form token verbatim means dist silently
-// drops it and the CLI default wins — explicit loses, the exact failure class
-// this guards. Every OTHER occurrence (either spelling, including each bare
+// Overwrite an existing flag's value or append when absent, emitting one
+// canonical two-token form (`--name value`). Every other occurrence (either spelling, including each bare
 // occurrence's consumed value token) is removed, so exactly one canonical
 // occurrence reaches the child and dist's first-match parse cannot land on a
 // stale one. A fill-only-if-missing default would otherwise forward a
@@ -356,7 +353,8 @@ export async function runAuditCodeWrapper({
   // stays the protocol stream.
   const commandArgv = argv.slice(1);
   // Help is informational: it must not create the artifacts directory.
-  const ensureArtifactsDir = !commandArgv.some((arg) => arg === '--help' || arg === '-h');
+  // sites-pinned: tests/shared/installer-verb-help.test.ts
+  const ensureArtifactsDir = !commandRequestsHelp(argv[0], commandArgv);
 
   if (argv[0] === 'next-step') {
     await runDistCommand('next-step', commandArgv, { ensureArtifactsDir });

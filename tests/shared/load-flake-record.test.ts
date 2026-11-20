@@ -6,12 +6,46 @@ import {
   addLoadOnlyObservation,
   emptyLoadFlakeRecord,
   markInvestigationRequested,
+  mutateLoadFlakeRecord,
   observeAndClaimLoadFlake,
   observationFor,
   readLoadFlakeRecord,
 } from "../../scripts/shared/load-flake-record.mjs";
 import { createIsolatedSnapshot } from "../../scripts/shared/dispatch-load-flake-investigation.mjs";
 import { execFileSyncHidden } from "../helpers/spawn.mjs";
+
+it.each(["{ damaged", '{"schema":2,"environments":{}}', '{"schema":1,"environments":[]}', '{"schema":1,"environments":{"ci":{"files":[]}}}'])(
+  "refuses damaged load history before applying a mutation (%s)", async (bytes) => {
+    const root = mkdtempSync(join(tmpdir(), "damaged-load-record-"));
+    const path = join(root, "load-flake-record.json");
+    try {
+      expect(readLoadFlakeRecord(path)).toEqual(emptyLoadFlakeRecord());
+      writeFileSync(path, bytes);
+      let invoked = false;
+      await expect(mutateLoadFlakeRecord(path, async () => {
+        invoked = true;
+        return { record: emptyLoadFlakeRecord(), value: null };
+      })).rejects.toThrow(path);
+      expect(invoked).toBe(false);
+      expect(readFileSync(path, "utf8")).toBe(bytes);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  },
+);
+
+it("a partial investigation receipt cannot be overwritten by the next observation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "partial-load-receipt-"));
+  const path = join(root, "record.json");
+  try {
+    const first = addLoadOnlyObservation({ record: emptyLoadFlakeRecord(), environment: "ci", file: "a.test.ts",
+      tree: "first", observedAt: "2026-09-07T00:00:00Z" });
+    first.observation.investigation_report = "existing-report.md";
+    const bytes = JSON.stringify(first.record);
+    writeFileSync(path, bytes);
+    await expect(observeAndClaimLoadFlake({ path, environment: "ci", file: "a.test.ts", tree: "second",
+      observedAt: "2026-09-08T00:00:00Z", startInvestigation: async () => ({ started: false }) })).rejects.toThrow(path);
+    expect(readFileSync(path, "utf8")).toBe(bytes);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 const ENVIRONMENT = "win32-cpu16-w16";
 const FILE = "tests/audit/heavy.test.ts";

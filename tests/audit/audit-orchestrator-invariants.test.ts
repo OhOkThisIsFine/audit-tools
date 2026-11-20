@@ -70,7 +70,6 @@ function makeAuditPlanMetrics(overrides: Partial<AuditPlanMetrics> = {}): AuditP
     packet_quality: {
       average_cohesion_score: 1,
       boundary_crossing_count: 0,
-      merge_edge_kind_counts: {},
       boundary_edge_kind_counts: {},
       orphan_task_count: 0,
       high_fan_in_file_count: 0,

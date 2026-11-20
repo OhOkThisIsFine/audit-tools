@@ -226,7 +226,9 @@ export const DOC_MANIFEST = [
       "the answering surface for the items the retired nightly routine produced, and the ONE tracked doc that is deliberately " +
       "current-state rather than timeless. The owner answers by ticking a checkbox; " +
       "`scripts/nightly/ingest-answers.mjs` reads the ticks into `.claude/nightly-decisions.json` and " +
-      "re-renders, so answered items drop out on their own. Everything except the ticked boxes and the " +
+      "re-renders, so answered items drop out on their own. If a projection write fails after saving answers, " +
+      "run `node scripts/nightly/render-inbox.mjs` to rebuild the index and inbox from the existing snapshot and accepted ledger. " +
+      "Everything except the ticked boxes and the " +
       "`notes` blocks is rewritten on each run — review the item CONTENT at its source " +
       "(`.audit-tools/nightly/open-items.json`), never by hand-editing this file. Its status-noise is the point: it is a " +
       "work queue, the same sanctioned exception as `docs/HANDOFF.md`.",

@@ -1,5 +1,6 @@
 // sites-pinned: tests/shared/install-bootstrap-opencode-stability.test.ts
-import { mkdir, mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { assertDirectoryExists, collectVerifyCheck, ensureFile, getFlag, hasFlag, normalizeNewlines, renderPromptFile, requireFlagValue, splitFrontmatter, toRepoRelativePath } from './shared-install-hosts.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import {
@@ -37,74 +38,6 @@ const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
 const INSTALL_DIR = '.remediate-code';
-
-function hasFlag(argv, name) {
-  return argv.includes(name);
-}
-
-function getFlag(argv, name) {
-  const index = argv.indexOf(name);
-  if (index < 0) return undefined;
-  return argv[index + 1];
-}
-
-function requireFlagValue(argv, name) {
-  const value = getFlag(argv, name);
-  if (!value) {
-    throw new Error(`${name} requires a value.`);
-  }
-  return value;
-}
-
-function normalizeNewlines(value) {
-  return value.replace(/\r\n/g, '\n');
-}
-
-function splitFrontmatter(markdown) {
-  const normalized = normalizeNewlines(markdown);
-  const match = normalized.match(/^---\n([\s\S]*?)\n---\n?/u);
-  if (!match) {
-    return { frontmatter: null, body: normalized };
-  }
-
-  return {
-    frontmatter: match[1],
-    body: normalized.slice(match[0].length),
-  };
-}
-
-function renderFrontmatter(fields) {
-  const entries = Object.entries(fields).filter(([, value]) => {
-    if (value === undefined || value === null) {
-      return false;
-    }
-
-    if (typeof value === 'string') {
-      return value.length > 0;
-    }
-
-    return true;
-  });
-  if (entries.length === 0) {
-    return '';
-  }
-
-  return [
-    '---',
-    ...entries.map(([key, value]) => `${key}: ${value}`),
-    '---',
-    '',
-  ].join('\n');
-}
-
-function renderPromptFile(fields, body) {
-  return `${renderFrontmatter(fields)}${body.trimStart()}`;
-}
-
-function toRepoRelativePath(root, targetPath) {
-  const value = relative(root, targetPath).replace(/\\/g, '/');
-  return value.length > 0 ? value : '.';
-}
 
 function buildInstallDirective(relativePromptPath) {
   return [
@@ -477,51 +410,6 @@ export function renderInstallGuide({
   return lines.join('\n');
 }
 
-async function assertDirectoryExists(path, description) {
-  let stats;
-  try {
-    stats = await stat(path);
-  } catch {
-    throw new Error(`${description} does not exist: ${path}`);
-  }
-
-  if (!stats.isDirectory()) {
-    throw new Error(`${description} is not a directory: ${path}`);
-  }
-}
-
-async function collectVerifyCheck(target, id, fn) {
-  try {
-    const details = await fn();
-    target.push({
-      id,
-      status: 'ok',
-      ...(details ?? {}),
-    });
-  } catch (error) {
-    target.push({
-      id,
-      status: 'error',
-      summary: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-async function ensureFile(path, description) {
-  let stats;
-  try {
-    stats = await stat(path);
-  } catch {
-    throw new Error(`${description} does not exist: ${path}`);
-  }
-
-  if (!stats.isFile()) {
-    throw new Error(`${description} is not a file: ${path}`);
-  }
-
-  return stats;
-}
-
 export async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSource) {
   const results = [];
   const legacyInstalledPromptPath = join(root, INSTALL_DIR, 'install', 'remediate-code.prompt.md');
@@ -605,8 +493,8 @@ export async function installBootstrap(argv, options = {}) {
   const root = resolveWrapperRoot(getFlag(argv, '--root'));
   await assertDirectoryExists(root, 'Target repository root');
   const profile = getInstallProfile(host);
-  const promptSource = (await readFile(promptAssetPath, 'utf8')).replace(/\r\n/g, '\n');
-  const skillSource = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
+  const promptSource = normalizeNewlines(await readFile(promptAssetPath, 'utf8'));
+  const skillSource = normalizeNewlines(await readFile(skillAssetPath, 'utf8'));
   const { body: promptBody } = splitFrontmatter(promptSource);
   const assetPaths = buildInstallAssetPaths(root, profile);
   const {
@@ -945,8 +833,8 @@ export async function verifyInstalledBootstrap(argv) {
   await collectVerifyCheck(generalChecks, 'installed_prompt', async () => {
     await ensureFile(assetPaths.installedPromptPath, 'Installed prompt asset');
     const installedPrompt = await readFile(assetPaths.installedPromptPath, 'utf8');
-    const sourcePrompt = await readFile(promptAssetPath, 'utf8');
-    if (installedPrompt !== sourcePrompt) {
+    const sourcePrompt = normalizeNewlines(await readFile(promptAssetPath, 'utf8'));
+    if (normalizeNewlines(installedPrompt) !== sourcePrompt) {
       throw new Error(
         `Installed prompt is out of sync with the source prompt. Run "remediate-code install" from ${root}.`,
       );
@@ -959,8 +847,8 @@ export async function verifyInstalledBootstrap(argv) {
 
   await collectVerifyCheck(generalChecks, 'installed_skill', async () => {
     await ensureFile(assetPaths.installedSkillPath, 'Installed skill asset');
-    const installedSkill = (await readFile(assetPaths.installedSkillPath, 'utf8')).replace(/\r\n/g, '\n');
-    const sourceSkill = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
+    const installedSkill = normalizeNewlines(await readFile(assetPaths.installedSkillPath, 'utf8'));
+    const sourceSkill = normalizeNewlines(await readFile(skillAssetPath, 'utf8'));
     if (installedSkill !== sourceSkill) {
       throw new Error(
         `Installed skill is out of sync with the source skill. Run "remediate-code install" from ${root}.`,
@@ -1089,8 +977,8 @@ export async function detectBootstrapRefreshReason(root, host) {
   if (installedPrompt === null) {
     return 'missing_installed_prompt';
   }
-  const sourcePrompt = await readFile(promptAssetPath, 'utf8');
-  if (installedPrompt !== sourcePrompt) {
+  const sourcePrompt = normalizeNewlines(await readFile(promptAssetPath, 'utf8'));
+  if (normalizeNewlines(installedPrompt) !== sourcePrompt) {
     return 'stale_installed_prompt';
   }
   const { body: sourcePromptBody } = splitFrontmatter(sourcePrompt);
@@ -1099,8 +987,8 @@ export async function detectBootstrapRefreshReason(root, host) {
   if (installedSkill === null) {
     return 'missing_installed_skill';
   }
-  const sourceSkill = (await readFile(skillAssetPath, 'utf8')).replace(/\r\n/g, '\n');
-  if (installedSkill.replace(/\r\n/g, '\n') !== sourceSkill) {
+  const sourceSkill = normalizeNewlines(await readFile(skillAssetPath, 'utf8'));
+  if (normalizeNewlines(installedSkill) !== sourceSkill) {
     return 'stale_installed_skill';
   }
 
@@ -1144,7 +1032,7 @@ export async function detectBootstrapRefreshReason(root, host) {
           return 'missing_host_asset:antigravity:skill';
         }
         const antigravitySkill = await readTextIfExists(expectedSkillPath);
-        if (antigravitySkill !== null && antigravitySkill.replace(/\r\n/g, '\n') !== sourceSkill) {
+        if (antigravitySkill !== null && normalizeNewlines(antigravitySkill) !== sourceSkill) {
           return 'stale_host_asset:antigravity:skill';
         }
         break;

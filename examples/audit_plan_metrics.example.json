@@ -27,9 +27,6 @@
   "packet_quality": {
     "average_cohesion_score": 1,
     "boundary_crossing_count": 1,
-    "merge_edge_kind_counts": {
-      "esm": 1
-    },
     "boundary_edge_kind_counts": {
       "audit-log-link": 1
     },

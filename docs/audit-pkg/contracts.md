@@ -16,6 +16,64 @@ The canonical final outputs are:
 
 The JSON contract is authoritative; Markdown is its render.
 
+## TypeScript import migration
+
+Import the current-run consent writer with `import { persistAnalyzerConsent } from "audit-tools/shared/analyzerPolicy"`. The function accepts the same repository root and decline decisions and returns the durable analyzer settings.
+
+The next release also moves the following type-only imports from `audit-tools/shared` to their defining public subpaths. Keep the same type name and change the module specifier in your `import type` declaration. For example, `import type { ChurnEntry } from "audit-tools/shared/git"` imports the entry returned by the Git history reader.
+
+| Import from | Type names |
+|---|---|
+| `audit-tools/shared/agentReflections` | `ReflectionClarity`, `ReflectionSeverity` |
+| `audit-tools/shared/analyzers/normalizeExternal` | `NormalizeExternalOptions` |
+| `audit-tools/shared/contentKey` | `IdempotencyKeyInput`, `TaskContentSignatureInput` |
+| `audit-tools/shared/decompose/charterClarification` | `AssembledClarifications` |
+| `audit-tools/shared/decompose/charterExtraction` | `AssembledComparison`, `AssembledLaneGraph`, `CharterMergedLane` |
+| `audit-tools/shared/decompose/consensus` | `DecomposeOptions` |
+| `audit-tools/shared/decompose/contentCoherence` | `ContentCoherenceEligibility`, `ContentCoherenceInput`, `ContentCoherenceItem`, `NormalizedContentCoherenceItem` |
+| `audit-tools/shared/fileIntegrity` | `FileIntegrityCheckOptions`, `FileIntegrityHashOutcome` |
+| `audit-tools/shared/findings/dedupe` | `AbsorbOptions` |
+| `audit-tools/shared/friction/frictionRecord` | `FrictionRecordReference` |
+| `audit-tools/shared/friction/stepBoundaryCapture` | `StepBoundaryFriction` |
+| `audit-tools/shared/friction/triage` | `FrictionTriageDecision`, `TriageSubject` |
+| `audit-tools/shared/git` | `AuthorshipEntry`, `ChurnEntry`, `CoChangePair`, `MineGitHistoryOptions` |
+| `audit-tools/shared/hash` | `HashContentOptions` |
+| `audit-tools/shared/hostAssets` | `RenderHostAssetOptions` |
+| `audit-tools/shared/intent/clauseInterpreter` | `ClauseInterpretResult`, `IntentClauseKind` |
+| `audit-tools/shared/io/gitignoreArtifacts` | `RepoVisibility` |
+| `audit-tools/shared/io/pathContainment` | `WithinRootOptions` |
+| `audit-tools/shared/observability/runLog` | `RunLoggerOptions` |
+| `audit-tools/shared/opencodePermissions` | `OpenCodeCeilingViolation` |
+| `audit-tools/shared/parsing/stringAwareScanner` | `QuoteChar`, `StringAwareScannerOptions` |
+| `audit-tools/shared/prompts` | `CacheablePromptParts` |
+| `audit-tools/shared/reporting/auditDeliverable` | `AuditDeliverablePair` |
+| `audit-tools/shared/reporting/findingDisplay` | `FindingBadge`, `FindingDisplay`, `FindingDisplayOptions`, `FindingFileRef` |
+| `audit-tools/shared/reReview/projectionDiff` | `ReReviewSectionInput` |
+| `audit-tools/shared/submission/expectedSubmissions` | `ExpectedSetDiff`, `ExpectedSubmissionLane`, `SubmissionClassification` |
+| `audit-tools/shared/submission/hostHandoffCore` | `IdentityBindingParams`, `IdentityComponent`, `ResultMapEntry`, `ResultMappedItem`, `WorkloadEnvelopeParse` |
+| `audit-tools/shared/submission/hostResultOutcomes` | `HostResultOutcomes`, `TrailingSubmissionRefusal` |
+| `audit-tools/shared/submission/ingestionChecks` | `IngestionCheck`, `IngestionDraw` |
+| `audit-tools/shared/submission/submissionClassifier` | `SubmissionReadContext` |
+| `audit-tools/shared/submission/submissionIdentity` | `SubmissionIdParts` |
+| `audit-tools/shared/submission/submissionLedger` | `SubmissionLedgerDropReason` |
+| `audit-tools/shared/submission/submissionScan` | `SubmissionScanOutcome` |
+| `audit-tools/shared/tooling/allowlistedExec` | `AllowlistedExecOutcome`, `AllowlistedExecRunner` |
+| `audit-tools/shared/tooling/analyzerDeps` | `AnalyzerDepVia`, `InstallToCacheResult`, `ResolveAnalyzerDepOptions`, `ResolvedAnalyzerDep` |
+| `audit-tools/shared/tooling/exec` | `SpawnDeadlineMiss` |
+| `audit-tools/shared/tooling/landingGates` | `LandingGateRole` |
+| `audit-tools/shared/tooling/repoConventions` | `RepoConventions` |
+| `audit-tools/shared/types/charter` | `ClarificationValue`, `CorrespondenceMember`, `DifferenceAccount`, `DifferenceDimension`, `DifferenceRelation`, `DifferenceSplit`, `GoalEdge`, `GoalNode`, `LaneGoalEdge` |
+| `audit-tools/shared/types/charterPacket` | `CharterPacketManifestExcerpt`, `PacketExcerptLine` |
+| `audit-tools/shared/types/contractPropertyShapes` | `ContractPropertyShape`, `ContractTypeShape` |
+| `audit-tools/shared/types/executionPlan` | `ExecutionSourceDisposition` |
+| `audit-tools/shared/types/finding` | `FindingEvidenceLane`, `FindingLocationLineIssue`, `FindingVerificationStatus` |
+| `audit-tools/shared/types/flows` | `FlowConfidenceLevel` |
+| `audit-tools/shared/types/intentCheckpoint` | `DesignReviewSettings`, `LenientIntentCheckpointRead` |
+| `audit-tools/shared/types/reviewIndependence` | `ContractReviewDeclaration`, `ContractReviewProvenance`, `ReviewDeclaration`, `ReviewSubmissionEnvelope`, `ReviewSubmissionFailureCode`, `ReviewSubmissionParseResult` |
+| `audit-tools/shared/types/surfaces` | `SurfaceKind` |
+| `audit-tools/shared/validation/basic` | `ValidationSeverity` |
+| `audit-tools/shared/validation/contractConstructionSites` | `DerivedSiteMap`, `DerivedSites`, `FileSiteMarkers`, `RenderedJsonSchema`, `SiteMarker` |
+
 ## Step artifacts
 
 `audit-code next-step` advances one bounded, fold-aware drain of the deterministic frontier and writes:
@@ -160,6 +218,12 @@ file disposition, graph and critical-flow data, coverage, risk, audit tasks,
 runtime validation, accepted host results, synthesis narrative, and the final
 deliverables.
 
+<!-- doc-citation-exempt: historical run artifact retired from the current registry -->
+New runs omit `access_memory.json`. Older runs resume without it, and rollover
+clears the working copy. Archived copies retain the original data. For tools
+reproducing an old metadata hash for that retired filename, omit `run_id`
+before hashing the payload.
+
 Run `audit-code validate` instead of treating file presence as proof of a valid
 state transition.
 
@@ -170,9 +234,10 @@ optional direction, confidence, and reason. Deterministic import, entrypoint,
 test/source, and ownership evidence may drive grouping; weak affinity and
 high-fan-in edges remain explainable context unless corroborated.
 
-Planning metrics record which edges merged work and which stayed boundary
-context. New analyzers enrich the same graph contract rather than teaching the
-planner a second language-specific artifact.
+Planning metrics record packet cohesion and the kinds of edges that cross
+packet boundaries. New metrics omit `packet_quality.merge_edge_kind_counts`.
+Previously written metrics remain readable. Removing the field changes the
+payload hash when a run writes the new shape.
 
 ## Guided recovery
 

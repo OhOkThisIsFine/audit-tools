@@ -1,3 +1,4 @@
+import { backtickList } from "../../shared/reporting/markdown.js";
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/clarification-submit.test.ts
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
@@ -128,7 +129,7 @@ export function planClarificationRefusal(
     .map((r) => r.unit_id)
     .filter((id) => !validIds.has(id));
   if (unknownIds.length > 0) {
-    return `finding id(s) ${outsideSetLabel}: ${unknownIds.map((i) => `\`${i}\``).join(", ")}`;
+    return `finding id(s) ${outsideSetLabel}: ${backtickList(unknownIds)}`;
   }
   return null;
 }

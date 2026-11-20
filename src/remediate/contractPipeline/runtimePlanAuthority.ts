@@ -3,7 +3,7 @@ import { stableStringify } from "audit-tools/shared";
 import { errorMessage } from "../../shared/io/json.js";
 import { ExecutableChangePlanSchema } from "../../shared/types/executionPlan.js";
 import type { RemediationState } from "../state/store.js";
-import { executionPlanRevision, readApprovedExecutionPlan, readPlanReviewHistory } from "./executionPlan.js";
+import { executionPlanRevision, readApprovedExecutionPlan } from "./executionPlan.js";
 
 /** A recoverable authority failure; it never invalidates or deletes accepted evidence. */
 export class RemediationPlanAuthorityError extends Error {
@@ -23,7 +23,7 @@ export async function assertApprovedRuntimePlan(artifactsDir: string, state: Rem
       "No current independently approved executable plan exists. Restore or renew the reviewed authority before continuing.",
     );
     const semantic = ExecutableChangePlanSchema.strip().parse(plan);
-    const history = await readPlanReviewHistory(artifactsDir);
+    const { history } = approved;
     const referenced = new Set(plan.units.flatMap(unit => unit.addresses_counterexample_ids));
     const counterexamples = history.counterexamples.filter(example => referenced.has(example.id));
     if (approved.canonical.revision_sha256 !== plan.review_revision_sha256 ||

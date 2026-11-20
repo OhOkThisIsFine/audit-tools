@@ -1,7 +1,6 @@
-import type { AnalyzerConsentDecisions } from "audit-tools/shared";
+import type { ExternalAcquisitionAdvanceOptions } from "./acquisitionExecutor.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type {
-  AnalyzerConsentTokenGrant,
   AnalyzerSetting,
   GraphEdge,
 } from "audit-tools/shared";
@@ -22,6 +21,7 @@ import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
  * graph-enrichment executor. Single-sourcing them here keeps the drain loop and
  * the primary fold from drifting on WHERE the pipeline pauses for the operator.
  */
+// sites-pinned: tests/audit/analyzer-consent-offer.test.ts, tests/audit/analyzer-run-consent.test.ts
 export interface HostInputPauseInputs {
   /** Repo root — the analyzer plan resolves dependencies against it. */
   root?: string;
@@ -29,24 +29,8 @@ export interface HostInputPauseInputs {
   analyzers?: Record<string, AnalyzerSetting>;
   /** Phase 4B gate: low-confidence edge-reasoning host turn only fires when true. */
   graphLlmEdgeReasoning?: boolean;
-  /** Item B: acquisition gate — the consent fold only fires when acquisition is live. */
-  externalAcquisitionEnabled?: boolean;
-  /**
-   * Item B: recorded per-candidate consent DECLINES, from the durable analyzer
-   * policy at `.audit-tools/audit/analyzer-policy.json` — NOT session config,
-   * whose schema is strict and holds only review_mode + observability. A grant
-   * is never here: it binds one run and rides the scoped consent token below.
-   */
-  analyzerConsent?: AnalyzerConsentDecisions;
-  /**
-   * Item B: a per-run, tool-SCOPED consent grant. Typed as the
-   * {@link AnalyzerConsentTokenGrant} shape — never a bare string — so the
-   * scoped consent-fold below can ask exactly which candidates the grant names:
-   * a candidate outside the grant's `tools` is still owed its offer. A bare
-   * string would read as "admits everything", which is precisely the unscoped
-   * path this type retires.
-   */
-  acquisitionConsentToken?: AnalyzerConsentTokenGrant;
+  /** Current-run declines and the tools named in this run's consent grant. */
+  externalAcquisition?: Pick<ExternalAcquisitionAdvanceOptions, "enabled" | "analyzerConsent" | "consentToken">;
 }
 
 /**
@@ -91,8 +75,9 @@ export function graphEnrichmentUnresolvedAnalyzers(
 export function pendingAnalyzerConsent(
   inputs: HostInputPauseInputs,
 ): typeof EXTERNAL_ANALYZER_CANDIDATES {
-  if (inputs.externalAcquisitionEnabled !== true || !inputs.root) return [];
-  const grant = inputs.acquisitionConsentToken;
+  const acquisition = inputs.externalAcquisition;
+  if (acquisition?.enabled !== true || !inputs.root) return [];
+  const grant = acquisition.consentToken;
   const grantedTools =
     grant && grant.value.trim().length > 0 && Array.isArray(grant.tools)
       ? new Set<string>(grant.tools)
@@ -101,7 +86,7 @@ export function pendingAnalyzerConsent(
   return EXTERNAL_ANALYZER_CANDIDATES.filter((candidate) => {
     if (candidate.defaultRun) return false;
     if (inputs.analyzers?.[candidate.id] === "skip") return false;
-    if (inputs.analyzerConsent?.[candidate.id] !== undefined) return false;
+    if (acquisition.analyzerConsent?.[candidate.id] !== undefined) return false;
     // Scoped: only a grant that names THIS candidate suppresses its offer.
     if (grantedTools?.has(candidate.id)) return false;
     try {

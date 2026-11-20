@@ -826,11 +826,8 @@ async function advanceAuditInner(
         root: options.root,
         analyzers: options.analyzers,
         graphLlmEdgeReasoning: options.graphLlmEdgeReasoning,
-        externalAcquisitionEnabled: options.externalAcquisition?.enabled,
-        analyzerConsent: options.externalAcquisition?.analyzerConsent,
-        // The grant rides through TYPED (AnalyzerConsentTokenGrant): the pause
-        // predicate reads its per-candidate scope, never a run-wide string.
-        acquisitionConsentToken: options.externalAcquisition?.consentToken,
+        // Snapshot the options at drain start, including this run's scoped grant.
+        externalAcquisition: { ...options.externalAcquisition },
         narrativeEnabled: options.narrativeEnabled,
         submissionProbe: options.submissionProbe,
       },

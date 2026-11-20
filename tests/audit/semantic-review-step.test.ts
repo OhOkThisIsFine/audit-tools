@@ -297,7 +297,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
           code: "duplicate_submission_id",
           work_item_id: "task-c",
           message:
-            "work item 'task-c' was already accepted by a concurrent ingest of this run",
+            "the result ID for work item 'task-c' is already settled",
           result_path: "runs/semantic-host-run/results/task-c.json",
         },
         {
@@ -338,7 +338,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
     expect(prompt).not.toContain("## Result status requiring attention");
   });
 
-  it("states the repair paragraph only when something is repairable", async () => {
+  it("renders a supplied settled issue without a repair paragraph", async () => {
     // The paragraph is the repair instruction. A run whose only refusals are
     // settled has nothing to repair, so stating it there re-introduces the same
     // wrong instruction the section split exists to remove.
@@ -353,7 +353,7 @@ describe("the semantic-review prompt states the right remedy for each refusal", 
         {
           code: "duplicate_submission_id",
           work_item_id: "task-c",
-          message: "already accepted by a concurrent ingest of this run",
+          message: "this result ID is already settled",
           result_path: "runs/semantic-host-run/results/task-c.json",
         },
       ],

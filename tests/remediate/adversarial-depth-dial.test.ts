@@ -10,6 +10,6 @@ test("low risk permits declared lightweight critique/critic but judge remains in
 test("unknown and elevated risk require independent review",()=>{
   for(const tier of [undefined,"medium","high"] as const) {
     expect(adversarialDepthForTier(tier)).toBe("full");
-    for(const role of ["critique","critic","judge"]) expect(reviewRequirementForRole(role,adversarialDepthForTier(tier))).toBe("independent");
+    for(const role of ["critique","critic","judge"] as const) expect(reviewRequirementForRole(role,adversarialDepthForTier(tier))).toBe("independent");
   }
 });

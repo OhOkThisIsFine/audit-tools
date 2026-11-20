@@ -4,7 +4,7 @@
 // locally via the B2 bootstrap; every other verb (e.g. next-step) is forwarded
 // to dist/remediate/index.js.
 
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { join } from "path";
 import { existsSync, readdirSync, statSync, realpathSync } from "fs";
 import { spawnSync } from "child_process";
@@ -154,7 +154,7 @@ export async function main(argv = process.argv.slice(2)) {
     // here, so commander's native `<verb> --help` never reaches them — without
     // this, `remediate-code install --help` ran the installer and wrote four
     // files. "Ask the tool what this does" is the likeliest first command a new
-    // operator types, and two of these verbs write to the repo and to HOME.
+    // operator types, and two of these verbs write repo-local assets.
     const { wantsInstallerVerbHelp, installerVerbHelp } = await import(VERB_HELP_MODULE);
     if (wantsInstallerVerbHelp(argv)) {
       console.log(
@@ -181,6 +181,14 @@ export async function main(argv = process.argv.slice(2)) {
   if (!existsSync(distEntry)) {
     console.error("remediate-code: dist/remediate/index.js not found. Run: npm run build");
     process.exit(1);
+  }
+
+  // sites-pinned: tests/remediate/validate-cli.test.ts
+  if (verb === "validate") {
+    // Let the public process own cancellation and wait for the compiler to exit.
+    const { program } = await import(pathToFileURL(distEntry).href);
+    await program.parseAsync(argv, { from: "user" });
+    return;
   }
 
   const result = spawnSync(process.execPath, ["--no-warnings", distEntry, ...argv], {

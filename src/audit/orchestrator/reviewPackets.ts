@@ -37,6 +37,8 @@ import { lineCountForPath } from "./lineCounts.js";
 export { sizeIndexFromManifest };
 
 export interface BuildReviewPacketOptions {
+  /** Graph already built for this exact task set and graph bundle. */
+  affinityGraph?: TaskAffinityGraph;
   graphBundle?: GraphBundle;
   lineIndex?: Record<string, number>;
   sizeIndex?: Record<string, number>;
@@ -199,7 +201,7 @@ export function buildReviewPacketPlanningData(
   tasks: AuditTask[],
   options: BuildReviewPacketOptions = {},
 ): ReviewPacketPlanningData {
-  const graph = buildTaskAffinityGraph(tasks, {
+  const graph = options.affinityGraph ?? buildTaskAffinityGraph(tasks, {
     graphBundle: options.graphBundle,
   });
   return planningDataFromProjection(tasks, graph, options);

@@ -14,6 +14,7 @@ import {
   buildMixedSourceManifest,
   manifestIsInputBound,
   intakePaths,
+  type IntakePaths,
   intakeSummaryContentErrors,
   isIntakeReady,
   blockingIntakeQuestions,
@@ -30,26 +31,29 @@ import {
   type IntakeSummary,
 } from "../intake.js";
 
-const KNOWN_SCHEMA_VERSIONS = new Set([
-  "audit-findings/v1alpha1",
+const KNOWN_SCHEMA_VERSIONS: ReadonlySet<string> = new Set([
   INTAKE_SOURCE_MANIFEST_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
 ]);
 
 export function validateSuppliedInput(
-  _path: string,
+  path: string,
   content: string,
+  allowDocumentFallback = false,
 ): { ok: true } | { ok: false; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    return { ok: false, reason: "file is not valid JSON" };
+    return allowDocumentFallback ? { ok: true } : { ok: false, reason: "file is not valid JSON" };
   }
   if (isRecord(parsed)) {
     const sv = parsed.schema_version;
-    if (typeof sv === "string" && !KNOWN_SCHEMA_VERSIONS.has(sv)) {
+    if (sv === "audit-findings/v1alpha1") {
+      return { ok: false, reason: `${path} uses retired schema_version ${sv}. Regenerate the audit with contract_version audit-tools/audit-findings/v1alpha2.` };
+    }
+    if (!allowDocumentFallback && typeof sv === "string" && !KNOWN_SCHEMA_VERSIONS.has(sv)) {
       return { ok: false, reason: `unrecognised schema_version: ${sv}` };
     }
   }
@@ -71,16 +75,16 @@ export async function resolveIntakeStep(params: {
     root: string,
     checked: string[],
     missing: string[],
-    paths: ReturnType<typeof intakePaths>,
+    paths: IntakePaths,
   ) => string;
   synthesizeIntakePrompt: (
     resolvedSources: IntakeSource[],
-    paths: ReturnType<typeof intakePaths>,
+    paths: IntakePaths,
     hasClarificationResolution: boolean,
   ) => string;
   collectIntakeClarificationsPrompt: (
     summary: IntakeSummary,
-    paths: ReturnType<typeof intakePaths>,
+    paths: IntakePaths,
   ) => string;
 }): Promise<IntakeResult> {
   const { root, artifactsDir, inputResolution } = params;
@@ -275,13 +279,20 @@ export async function resolveIntakeStep(params: {
       inputResolution.existing.length === 1 &&
       singleInput.toLowerCase().endsWith(".json");
 
+    if (inputResolution.supplied && inputResolution.existing.length > 1) {
+      for (const path of inputResolution.existing.filter(path => path.toLowerCase().endsWith(".json"))) {
+        const validation = validateSuppliedInput(path, await readFile(path, "utf8"), true);
+        if (!validation.ok) return collectStartingPointStep([path], validation.reason);
+      }
+    }
+
     if (shouldTryAuditFastPath) {
       const content = await readFile(singleInput, "utf8");
       // Recognize an explicit audit even alongside guidance, while preserving
       // mixed document intake's existing fallback for non-audit JSON content.
-      if (inputResolution.supplied &&
-          (!intake.conversationStart || requestedSelection !== undefined || previousManifest?.finding_selection !== undefined)) {
-        const validation = validateSuppliedInput(singleInput, content);
+      if (inputResolution.supplied) {
+        const allowDocumentFallback = Boolean(intake.conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined;
+        const validation = validateSuppliedInput(singleInput, content, allowDocumentFallback);
         if (!validation.ok) {
           return collectStartingPointStep(
             [singleInput],

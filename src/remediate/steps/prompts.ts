@@ -1,3 +1,4 @@
+import { backtickList } from "../../shared/reporting/markdown.js";
 // sites-pinned: tests/remediate/clarification-round-contract.test.ts, tests/remediate/intake-starting-point-contract.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts
 import type {
   ClarificationRequest,
@@ -14,7 +15,7 @@ import {
   INTAKE_CLARIFICATION_SCHEMA_VERSION,
   INTAKE_SUMMARY_SCHEMA_VERSION,
   blockingIntakeQuestions,
-  intakePaths,
+  type IntakePaths,
   type IntakeSource,
   type IntakeSummary,
 } from "../intake.js";
@@ -121,79 +122,10 @@ After the user answers, write JSON to exactly:
 ${resolutionEntryRules(ids[0] ?? "F-001", "the user's answer, in words the worker can act on")}
 
 \`unit_id\` MUST be drawn from this closed set (copy, never retype):
-${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
+${backtickList(ids) || "_(none)_"}.
 
 You can answer only some of the findings. A finding with no entry stays paused,
 and a later step asks about it again.
-
-Then run \`${loaderCommand("next-step")}\`.
-`;
-}
-
-/**
- * Up-front ambiguity-review prompt (note 3, part A). The tool seeds deterministic
- * CANDIDATE ambiguities; the host's job is the judgment slot the tool cannot
- * fill: review each candidate against the actual code, dismiss false positives,
- * ADD any genuine scoping/judgment ambiguity it finds, then batch ALL genuine
- * ones into ONE round of user questions before any fix is implemented. This is
- * the gate that stops a scoping question from falling silently to triage mid-run.
- *
- * If, after reviewing with repo access, there is nothing genuinely ambiguous, the
- * host writes an empty array to proceed — no user round is forced on a clean plan.
- */
-export function ambiguityReviewPrompt(
-  candidates: ClarificationRequest[],
-  resolutionPath: string,
-  validFindingIds: readonly string[] = [],
-  refusal?: string,
-  requestPath?: string,
-): string {
-  const count = candidates.length;
-  const intro = count
-    ? `The tool found ${count} candidate ambigu${count === 1 ? "ity" : "ities"} in the remediation plan. A candidate is a
-starting point, not a final list.`
-    : `The tool found no candidate ambiguity in the remediation plan. Still review
-the findings in the set below yourself.`;
-  const candidateBlock = candidates
-    .map(
-      (item) => `
-## ${item.unit_id}
-
-- Category: ${item.category}
-- Candidate: ${item.description}
-`,
-    )
-    .join("");
-  const firstId = candidates[0]?.unit_id ?? validFindingIds[0] ?? "F-001";
-
-  return `
-# Resolve ambiguity in the plan before implementation
-${refusalBanner(refusal, "applied")}
-${intro}
-${requestPath ? `Read the complete findings, evidence, confidence, cited paths and candidate ambiguities in \`${requestPath}\` before deciding what needs clarification.` : ""}
-${candidateBlock}
-Do these steps:
-
-1. Read the cited files for each candidate. Drop a candidate that is not a real
-   ambiguity.
-2. Add each real ambiguity that the candidates missed: an unclear scope, an
-   unclear intended behavior, or an unclear choice to fix at all. It can be about
-   any finding in the set below.
-3. Ask the user all of the remaining questions in one message. Do not leave a
-   scope question for a later step.
-
-After the user answers, write JSON to exactly:
-
-\`${resolutionPath}\`
-
-If no real ambiguity remains, write \`[]\`. The plan then continues unchanged.
-
-${resolutionEntryRules(firstId, "the user's answer: the scope the fix must have")}
-
-\`unit_id\` MUST be drawn from this closed set (copy, never retype):
-${validFindingIds.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
-
-A finding with no entry continues as planned.
 
 Then run \`${loaderCommand("next-step")}\`.
 `;
@@ -282,7 +214,7 @@ The file above approves every finding.
 - A declined finding is not fixed. The final report lists it with the user's
   reason.
 - \`finding_id\` MUST be drawn from this closed set (copy, never retype):
-  ${validIds.map((id) => `\`${id}\``).join(", ")}.
+  ${backtickList(validIds)}.
 
 The tool refuses the WHOLE file when it is not valid JSON, has a field not shown
 above, has a wrong type, or names an id or tier outside the sets above. The
@@ -341,68 +273,11 @@ export function formatIntakeSources(sources: IntakeSource[]): string {
   return sources.map((source) => `- ${source.type}: \`${source.path}\``).join("\n");
 }
 
-/**
- * The step emitted when an extracted plan was UNUSABLE and has been removed.
- *
- * This exists because the alternative was `collectStartingPointPrompt`, which is
- * headed "Collect Remediation Starting Point" and lists the default input
- * locations. Telling a host whose plan was just destroyed to go and find an input
- * is a wrong instruction, not merely a vague one: the input was supplied, it was
- * read, and it failed for a stated reason the tool already knew. The reason went
- * to the run log and to stderr, neither of which the host reads.
- *
- * @param reason the failure that made the plan unusable, verbatim
- * @param archivePath where the original bytes were preserved, when they were
- */
-export function extractedPlanDiscardedPrompt(
-  reason: string,
-  archivePath: string | undefined,
-  paths: ReturnType<typeof intakePaths>,
-): string {
-  const archiveNote = archivePath
-    ? `The plan that failed was archived first, unchanged, at:\n\n\`${archivePath}\`\n\nRead it to see exactly what was rejected.`
-    : "There was no plan file on disk to archive, so nothing was preserved.";
-
-  return `
-# Extracted Plan Discarded
-
-Host: read the rejection and repair the extracted plan. Do not restart intake.
-
-The extracted plan was read and could not be used, so it was removed. **This is
-not a missing input** — an input was supplied and parsed. Do not go looking for
-one.
-
-## Why it was rejected
-
-${reason}
-
-## The original
-
-${archiveNote}
-
-## What to do
-
-Correct the cause named above, then write a corrected plan to exactly:
-
-\`${paths.extractedPlan}\`
-
-and run next-step again. Re-extracting without changing anything reproduces this
-exact rejection: the failure is in the plan's content, not in the reading of it.
-
-Two causes account for most rejections, and they need different corrections:
-
-- **Every finding cited only paths that do not exist.** Cite real repository
-  paths, relative to the repository root.
-- **A finding carried no evidence.** Give each finding at least one concrete
-  citation — name a symbol and the file that holds it, not a line number.
-`;
-}
-
 export function collectStartingPointPrompt(
   root: string,
   checkedPaths: string[],
   missingPaths: string[],
-  paths: ReturnType<typeof intakePaths>,
+  paths: IntakePaths,
 ): string {
   const missing = missingPaths.length
     ? `\n\nThe supplied input path did not exist:\n${missingPaths
@@ -460,7 +335,7 @@ sources itself: do not write a source manifest, and do not edit source files.
  */
 export function synthesizeIntakePrompt(
   sources: IntakeSource[],
-  paths: ReturnType<typeof intakePaths>,
+  paths: IntakePaths,
   hasClarificationResolution: boolean,
 ): string {
   const clarificationText = hasClarificationResolution
@@ -533,7 +408,7 @@ Then run \`${loaderCommand("next-step")}\`.
 
 export function collectIntakeClarificationsPrompt(
   summary: IntakeSummary,
-  paths: ReturnType<typeof intakePaths>,
+  paths: IntakePaths,
 ): string {
   const questions = blockingIntakeQuestions(summary);
   const ids = questions.map((question) => question.id);
@@ -574,7 +449,7 @@ required and must not be blank. You can add an optional \`rationale\`: a short
 note on how the answer removes the ambiguity.
 
 \`question_id\` MUST be drawn from this closed set (copy, never retype):
-${ids.map((id) => `\`${id}\``).join(", ") || "_(none)_"}.
+${backtickList(ids) || "_(none)_"}.
 
 The tool refuses the file when an entry has an unknown \`question_id\` or a blank
 \`answer\`, or when no entry answers a question above. The refusal names each

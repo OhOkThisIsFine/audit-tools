@@ -3,7 +3,7 @@ import type { ReviewRequirement } from "../../shared/types/reviewIndependence.js
 import type { AdversarialDepth } from "../riskSignal.js";
 import type { PlanReviewRole, PlanSource, CanonicalPlan, PlanReviewHistory } from "../contractPipeline/executionPlan.js";
 
-export function reviewRequirementForRole(role: string, depth?: AdversarialDepth): ReviewRequirement {
+export function reviewRequirementForRole(role: PlanReviewRole, depth?: AdversarialDepth): ReviewRequirement {
   return role === "judge" || depth !== "light" ? "independent" : "degraded_allowed";
 }
 

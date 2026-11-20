@@ -443,7 +443,7 @@ if (!existsSync(recPath)) {
   // the old repo-global path; it satisfies no session, so the single session
   // that spans the upgrade re-renders once. That is the correct direction — an
   // unattributable render is not evidence that this session rendered.
-  let rec = null;
+  let rec;
   try {
     rec = JSON.parse(readFileSync(recPath, 'utf8'));
   } catch {
@@ -455,6 +455,7 @@ if (!existsSync(recPath)) {
         'not the report.',
     );
   }
+  if (rec !== undefined) {
     if (rec?.session_id !== sessionId) {
       const whom =
         rec?.session_id === null || rec?.session_id === undefined
@@ -499,6 +500,7 @@ if (!existsSync(recPath)) {
           'message you send.',
       );
     }
+  }
 }
 
 // CI on the default branch. The lap rule says to check it by hand at every

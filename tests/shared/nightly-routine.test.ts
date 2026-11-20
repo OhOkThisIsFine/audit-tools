@@ -1,3 +1,4 @@
+import { seedStoredQueue } from "../helpers/storedNightlyQueue.js";
 // Contract tests for the nightly maintenance routine's state + surfacing.
 //
 // The property under test throughout is the one the previous channel got wrong:
@@ -11,14 +12,10 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
-  subjectKey,
-  normalizeSubject,
   recordDecision,
   readDecisions as readDecisionsRaw,
   partitionBySettled,
-  writeOpenItems,
   readOpenItems,
-  nightsBetween,
   recordReply,
 } from '../../scripts/nightly/items.mjs';
 import { renderInbox, writeInbox } from '../../scripts/nightly/render-inbox.mjs';
@@ -28,10 +25,7 @@ const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const ANSWER_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'answer.mjs');
 const RENDER_INBOX_CLI = join(REPO_ROOT, 'scripts', 'nightly', 'render-inbox.mjs');
 
-// Every fixture item carries a probe against this file, because writeOpenItems
-// refuses an item whose premise is not verifiably true at creation. The file
-// must be git-TRACKED: P8 refuses a probe target git cannot speak about, so a
-// bare temp dir (no repo) reads as "untrackable" and every write is refused.
+// Stored probes are evaluated against tracked source in this fixture.
 const PROBE_FILE = 'src-probe.txt';
 
 function fixtureGit(cwd: string, ...args: string[]): void {
@@ -86,7 +80,7 @@ const item = (over: Partial<NightlyItemFixture> = {}): NightlyItemFixture => ({
   title: 'A claim the code contradicts',
   question: 'Should this stay?',
   evidence: ['grep found zero hits'],
-  subject_key: subjectKey('spec/foo.md', 'the claim prose'),
+  subject_key: '1111111111111111',
   // Every item carries an eli5 and options: an item without them degrades to a
   // bare text box, which is what shipped on 2026-07-29 and made 18 items cost
   // an essay each to answer. Both are now REFUSED at write (P32), so every
@@ -123,29 +117,6 @@ function readDecisions(rootDir: string): Record<string, NightlyDecisionEntry> {
   return readDecisionsRaw(rootDir);
 }
 
-describe('subject key — identity is the SUBJECT, not the question wording', () => {
-  it('is stable when the question is rephrased around the same prose', () => {
-    const a = subjectKey('spec/foo.md', 'The gate emits the service axis');
-    const b = subjectKey('spec/foo.md', 'the   gate emits the SERVICE axis  ');
-    expect(a).toBe(b);
-  });
-
-  it('changes when the underlying prose changes — a reword re-opens the question', () => {
-    const before = subjectKey('spec/foo.md', 'The gate emits the service axis');
-    const after = subjectKey('spec/foo.md', 'The gate does not emit the service axis');
-    expect(after).not.toBe(before);
-  });
-
-  it('changes when the same prose moves to a different doc', () => {
-    expect(subjectKey('a.md', 'same prose')).not.toBe(subjectKey('b.md', 'same prose'));
-  });
-
-  it('normalizes whitespace and case but never punctuation that flips meaning', () => {
-    expect(normalizeSubject('  A  B  ')).toBe('a b');
-    expect(normalizeSubject('is shipped')).not.toBe(normalizeSubject('is not shipped'));
-  });
-});
-
 describe('decisions ledger — a settled subject is never re-asked', () => {
   it('suppresses an item whose subject was settled', () => {
     const it1 = item();
@@ -158,7 +129,7 @@ describe('decisions ledger — a settled subject is never re-asked', () => {
   it('does NOT suppress after the underlying prose changes (new key)', () => {
     const original = item();
     recordDecision(root, original.subject_key, { answer: 'keep as is' });
-    const reworded = item({ subject_key: subjectKey('spec/foo.md', 'the claim prose, now different') });
+    const reworded = item({ subject_key: '2222222222222222' });
     const { open } = partitionBySettled([reworded], readDecisions(root));
     expect(open).toHaveLength(1);
   });
@@ -168,7 +139,7 @@ describe('decisions ledger — a settled subject is never re-asked', () => {
     recordDecision(root, it1.subject_key, { answer: 'settled once' });
     // Simulate several nights: the routine rewrites open-items.json each run.
     for (let night = 0; night < 3; night++) {
-      writeOpenItems(root, { items: [item({ id: `DOC-${night}` })] });
+      seedStoredQueue(root, { items: [item({ id: `DOC-${night}` })] });
       const { open } = partitionBySettled(readOpenItems(root).items, readDecisions(root));
       expect(open, `re-asked on night ${night + 1}`).toHaveLength(0);
     }
@@ -253,13 +224,8 @@ describe('premise probes — an item whose quoted code has vanished closes itsel
     expect(resolved).toHaveLength(0);
   });
 
-  it('writeOpenItems refuses an item carrying no probes', () => {
-    const bare = item();
-    delete bare.premise_probes;
-    expect(() => writeOpenItems(root, { items: [bare] })).toThrow(/premise_probes/);
-  });
 
-  it('a malformed sibling probe fails open and is refused at write', () => {
+  it('a malformed stored sibling probe fails open', () => {
     const mixed = item({
       premise_probes: [
         { file: PROBE_FILE, contains: 'REMOVED_BY_A_FIX' },
@@ -269,32 +235,8 @@ describe('premise probes — an item whose quoted code has vanished closes itsel
     const { open, resolved } = partitionBySettled([mixed], readDecisions(root), root);
     expect(open).toHaveLength(1);
     expect(resolved).toEqual([]);
-    expect(() => writeOpenItems(root, { items: [mixed] })).toThrow(/premise_probes/);
   });
 
-  it('writeOpenItems refuses a probe whose string is not in the tree — the premise must be true at creation', () => {
-    const stale = item({ premise_probes: [{ file: PROBE_FILE, contains: 'NOT_IN_THE_FILE' }] });
-    expect(() => writeOpenItems(root, { items: [stale] })).toThrow(/premise/i);
-  });
-});
-
-describe('open items — nights_open carries across runs', () => {
-  it('counts an item as new on its first night', () => {
-    const written = writeOpenItems(root, { items: [item()] });
-    expect(written.items[0].nights_open).toBe(1);
-  });
-
-  it('preserves first_seen across a regenerated run', () => {
-    writeOpenItems(root, { items: [item({ first_seen: '2026-07-01' })] });
-    const second = writeOpenItems(root, { items: [item()] });
-    expect(second.items[0].first_seen).toBe('2026-07-01');
-    expect(second.items[0].nights_open).toBeGreaterThan(1);
-  });
-
-  it('nightsBetween is inclusive of both ends', () => {
-    expect(nightsBetween('2026-07-01', '2026-07-01')).toBe(1);
-    expect(nightsBetween('2026-07-01', '2026-07-03')).toBe(3);
-  });
 });
 
 describe('inbox render — the tracked markdown answering surface', () => {
@@ -345,7 +287,7 @@ describe('inbox render — the tracked markdown answering surface', () => {
   });
 
   it('calls out answered-but-not-applied work, since that is the agent\'s debt not the owner\'s', () => {
-    const key = subjectKey('a.md', 'some subject');
+    const key = '2222222222222222';
     const decisions = {
       [key]: { disposition: 'settled', answer: 'do it', decided_at: '2026-07-29T00:00:00Z' },
     };
@@ -361,7 +303,7 @@ describe('inbox render — the tracked markdown answering surface', () => {
 
 describe('inbox ingest — a ticked box becomes a ledger entry', () => {
   function writeInboxFor(items: NightlyItem[]): void {
-    writeOpenItems(root, { items });
+    seedStoredQueue(root, { items });
     writeInbox(root);
   }
   const tick = (label: string): void => {
@@ -452,7 +394,7 @@ describe('inbox ingest — a ticked box becomes a ledger entry', () => {
   });
 
   it('one malformed answer never blocks the others', () => {
-    writeInboxFor([item({ id: 'DOC-1' }), item({ id: 'DOC-2', subject_key: subjectKey('spec/bar.md', 'a second claim') })]);
+    writeInboxFor([item({ id: 'DOC-1' }), item({ id: 'DOC-2', subject_key: '3333333333333333' })]);
     const p = join(root, 'docs', 'nightly-inbox.md');
     // tick a valid option on the first block, and a note-less Other on the last
     writeFileSync(p, readFileSync(p, 'utf8').replace('- [ ] **1. Keep it**', '- [x] **1. Keep it**'));
@@ -538,7 +480,7 @@ describe('render-inbox --check', () => {
     });
 
   it('passes on the current tracked projection and writes nothing', () => {
-    writeOpenItems(root, { items: [item()] });
+    seedStoredQueue(root, { items: [item()] });
     writeInbox(root);
     const before = readFileSync(join(root, 'docs', 'nightly-inbox.md'), 'utf8');
     const result = runCheck();
@@ -547,7 +489,7 @@ describe('render-inbox --check', () => {
   });
 
   it('fails read-only when the tracked render is stale', () => {
-    writeOpenItems(root, { items: [item()] });
+    seedStoredQueue(root, { items: [item()] });
     writeInbox(root);
     const path = join(root, 'docs', 'nightly-inbox.md');
     writeFileSync(path, readFileSync(path, 'utf8') + '\nstale\n');
@@ -560,7 +502,7 @@ describe('render-inbox --check', () => {
   it('fails when the QUEUE SNAPSHOT is the stale half, naming it', () => {
     // The 2026-08-27 drift was the snapshot, not the markdown: both artifacts
     // are derived, so each must be reconciled independently.
-    writeOpenItems(root, { items: [item()] });
+    seedStoredQueue(root, { items: [item()] });
     writeInbox(root);
     const snap = join(root, '.audit-tools', 'nightly', 'open-items.json');
     writeFileSync(snap, readFileSync(snap, 'utf8') + '\n');
@@ -570,7 +512,7 @@ describe('render-inbox --check', () => {
   });
 
   it('fails when the ENUMERABLE INDEX is the stale half, naming it', () => {
-    writeOpenItems(root, { items: [item()] });
+    seedStoredQueue(root, { items: [item()] });
     writeInbox(root);
     const indexPath = join(root, '.audit-tools', 'nightly', 'open-items-index.json');
     writeFileSync(indexPath, readFileSync(indexPath, 'utf8') + '\n');
@@ -582,7 +524,7 @@ describe('render-inbox --check', () => {
   it('names the LEDGER, not a stale file, when the ledger itself is unreadable', () => {
     // A corrupt ledger is a REFUSAL about the reconciliation, not a claim that
     // a tracked artifact drifted — the fix is a different one.
-    writeOpenItems(root, { items: [item()] });
+    seedStoredQueue(root, { items: [item()] });
     writeInbox(root);
     writeFileSync(join(root, '.claude', 'nightly-decisions.json'), '{ not json', 'utf8');
     const result = runCheck();
@@ -603,7 +545,7 @@ describe('answer CLI', () => {
   }
 
   beforeEach(() => {
-    writeOpenItems(root, { items: [item({ id: 'DOC-1' })] });
+    seedStoredQueue(root, { items: [item({ id: 'DOC-1' })] });
   });
 
   it('records an answer against the subject key', () => {
@@ -662,70 +604,5 @@ describe('answer CLI', () => {
   it('--list prints the open ids', () => {
     const r = runAnswer(['--list']);
     expect(r.stdout).toMatch(/DOC-1/);
-  });
-});
-
-it('one queue write also refreshes the answering inbox without a second call', () => {
-  writeOpenItems(root, { items: [item({ id: 'DOC-ONE' })] });
-  const inbox = readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8');
-  expect(inbox).toContain('DOC-ONE');
-  writeOpenItems(root, { items: [] });
-  expect(readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8')).toContain('Nothing to answer');
-});
-
-it('propagates inbox write failure while preserving the accepted queue', () => {
-  mkdirSync(join(root, 'docs/nightly-inbox.md'), { recursive: true });
-  expect(() => writeOpenItems(root, { items: [item({ id: 'DOC-ONE' })] })).toThrow();
-  expect(readOpenItems(root).items[0].id).toBe('DOC-ONE');
-});
-
-
-describe('superseded answer application receipts', () => {
-  const clause = 'Lane choice stays with the retired bridge.';
-  const later = 'owner decision 2026-09-22, replacement commit abc123';
-  const receipt = () => ({
-    kind: 'superseded-answer',
-    subject_key: item().subject_key,
-    applied: 'Documented the independent reviewer requirement.',
-    superseded_clause: clause,
-    later_decision_ref: later,
-  });
-
-  it('persists and renders the remainder, omitted clause and later decision without rewriting or reopening the answer', () => {
-    recordDecision(root, item().subject_key, { answer: `State the independent reviewer requirement. ${clause}` });
-    const ledger = readFileSync(join(root, '.claude/nightly-decisions.json'), 'utf8');
-    const { open } = partitionBySettled([item()], readDecisions(root));
-    writeOpenItems(root, { items: open, applied: ['An ordinary change.', receipt()] });
-    const stored = readOpenItems(root);
-    expect(stored.items).toEqual([]);
-    expect(stored.applied[0]).toBe('An ordinary change.');
-    expect(typeof stored.applied[1]).toBe('string');
-    for (const text of [item().subject_key, receipt().applied, clause, later]) {
-      expect(stored.applied[1]).toContain(text);
-      expect(readFileSync(join(root, 'docs/nightly-inbox.md'), 'utf8')).toContain(text);
-    }
-    expect(readFileSync(join(root, '.claude/nightly-decisions.json'), 'utf8')).toBe(ledger);
-    expect(partitionBySettled([item()], readDecisions(root)).open).toEqual([]);
-  });
-
-  it.each([
-    ['unknown subject', { subject_key: 'unknown' }],
-    ['clause absent from the answer', { superseded_clause: 'Invented instruction.' }],
-    ['missing later decision', { later_decision_ref: ' ' }],
-    ['missing applied remainder', { applied: '' }],
-    ['unknown receipt kind', { kind: 'guess' }],
-  ])('refuses %s before changing the queue', (_label, overrides) => {
-    recordDecision(root, item().subject_key, { answer: `State the requirement. ${clause}` });
-    writeOpenItems(root, { items: [], applied: ['Prior run.'] });
-    const prior = readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8');
-    expect(() => writeOpenItems(root, { items: [], applied: [{ ...receipt(), ...overrides }] })).toThrow(/applied receipt/);
-    expect(readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8')).toBe(prior);
-  });
-
-  it('refuses to reinterpret an unanswered question as a superseded answer', () => {
-    recordDecision(root, item().subject_key, { answer: clause, disposition: 'question' });
-    const prior = readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8');
-    expect(() => writeOpenItems(root, { items: [], applied: [receipt()] })).toThrow(/settled answer/);
-    expect(readFileSync(join(root, '.audit-tools/nightly/open-items.json'), 'utf8')).toBe(prior);
   });
 });

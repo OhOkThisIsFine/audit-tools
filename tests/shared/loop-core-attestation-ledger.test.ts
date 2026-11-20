@@ -289,10 +289,10 @@ describe("the attest hook vouches only for content it is told to", () => {
 
   test("it vouches for each unvouched path named explicitly, and lists it", () => {
     unvouchedBesideStagedEdit();
-    const a = attest("--include-unvouched", UNVOUCHED);
+    const a = attest("--include-unvouched", UNVOUCHED, "--include-unvouched", STAGED_LOOP_CORE_PATH);
     expect(a.status, a.stderr).toBe(0);
     expect(a.stdout).toContain(UNVOUCHED);
-    expect(a.stdout).toContain("named with --include-unvouched");
+    expect(a.stdout).toContain("of which 1 outside the staged set, named with --include-unvouched");
     g("commit", "-qm", "attested");
     const ledger = JSON.parse(readFileSync(join(repo, LEDGER_PATH), "utf8"));
     expect(Object.keys(ledger.reviews[ledger.entries[UNVOUCHED].review].vouches).sort()).toEqual(

@@ -178,6 +178,17 @@ describe("executor→artifact production declaration", () => {
     expect(problems.sort()).toEqual([]);
   });
 
+  it("rejects a retired selector by name and executor before using its write pattern", () => {
+    const site = EXECUTOR_WRITE_SITES.find(row => row.rule === "artifactPathBinding")!;
+    const original = site.rule;
+    try {
+      site.rule = "artifactsDirWrites";
+      expect(() => extractExecutorWriteSets()).toThrow(`unknown write-site rule "artifactsDirWrites" for ${site.executor}`);
+    } finally {
+      site.rule = original;
+    }
+  });
+
   it("DECL-6: write-site data covers exactly the registry's executors, and dynamic contributors resolve", () => {
     const registryIds = sorted(EXECUTOR_REGISTRY.map((e) => e.id));
     const siteIds = sorted(EXECUTOR_WRITE_SITES.map((s) => s.executor));

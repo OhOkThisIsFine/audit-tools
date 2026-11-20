@@ -3,11 +3,7 @@ import type { AccessMemory, AccessMemoryPathRecord } from "./types/accessMemory.
 import { ACCESS_MEMORY_VERSION } from "./types/accessMemory.js";
 
 /**
- * A single normalized "touch" of a file by one step. Both orchestrators map their
- * own result shape to a stream of these, so the deterministic core below is
- * single-sourced and can't drift between audit and remediate:
- *   - audit: each `AuditResult.file_coverage[]` entry → a covered event.
- *   - remediate: each file a merged block actually edited → an edited event.
+ * A normalized read or edit of a file at one ordinal in a run.
  */
 export interface AccessTouchEvent {
   /** Repo-relative path, as the orchestrator sees it (normalization is the reader's job). */
@@ -21,15 +17,13 @@ export interface AccessTouchEvent {
 }
 
 /**
- * Deterministic core of the access-memory harvest, shared by both orchestrators.
+ * Build the historical access-memory format from a supplied sequence of touches.
  *
  * Pure: the same event stream always yields a byte-identical record. Frequency is
  * split into `covered_count` (reads) and `edited_count` (edits); recency is the
  * MAXIMUM ordinal that touched the path (step-ordinal space, never wall-clock).
  * Output arrays are content-sorted (paths by path, lenses lexically) so the
- * serialized bytes are stable regardless of event iteration order — the
- * "stable, content-derived array order" invariant that keeps the artifact's
- * content hash from churning the staleness DAG.
+ * serialized bytes are stable regardless of event iteration order.
  */
 export function deriveAccessMemoryFromEvents(
   events: Iterable<AccessTouchEvent>,

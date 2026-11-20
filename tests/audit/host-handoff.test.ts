@@ -745,6 +745,17 @@ describe(FAILURE_SIGNATURE, () => {
     }
 
     await writeFile(resultA, JSON.stringify(boundResult(runId, itemA)), "utf8");
+    // A different pending item copying the accepted ID fails identity validation.
+    const ingestNow = () => boundary.ingestAuditHostResults({
+      pendingTaskIds: new Set(), root, sourceRoot: root, artifactsDir, runId, auditTasks: tasks,
+    });
+    expect((await ingestNow()).accepted_count).toBe(1);
+    await writeFile(resultB, JSON.stringify(boundResult(runId, itemB, { result_id: boundResult(runId, itemA).result_id })), "utf8");
+    const copied = await ingestNow();
+    expect(copied.accepted_count).toBe(0);
+    expect(copied.issues).toContainEqual(expect.objectContaining({
+      code: "submission_contract_invalid", check: "identity_binding", work_item_id: itemB.id,
+    }));
     await writeFile(resultB, JSON.stringify(boundResult(runId, itemB)), "utf8");
     const accepted = await boundary.ingestAuditHostResults({
       pendingTaskIds: new Set(),
@@ -754,7 +765,7 @@ describe(FAILURE_SIGNATURE, () => {
       runId,
       auditTasks: tasks,
     });
-    expect(accepted.accepted_count).toBe(2);
+    expect(accepted.accepted_count).toBe(1);
     expect([...accepted.completed_work_item_ids].sort()).toEqual(expectedIds);
 
     const beforeReplay = await snapshotTree(artifactsDir);
@@ -767,6 +778,8 @@ describe(FAILURE_SIGNATURE, () => {
       auditTasks: tasks,
     });
     expect([...replay.completed_work_item_ids].sort()).toEqual(expectedIds);
+    expect(replay.accepted_count).toBe(0);
+    expect(replay.issues).toEqual([]);
     expect(await snapshotTree(artifactsDir)).toEqual(beforeReplay);
 
     // The drain's paused state: the caller hands the boundary the STILL-OWED

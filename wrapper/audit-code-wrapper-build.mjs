@@ -87,15 +87,6 @@ async function shouldBuildDist() {
   });
 }
 
-async function releaseBuildLock(handle) {
-  try {
-    await handle?.close();
-  } finally {
-    await unlink(buildLockPath).catch(() => {});
-    process.stderr.write(JSON.stringify({ event: "build_lock_released", pid: process.pid, lock: buildLockPath, released_at: new Date().toISOString() }) + '\n');
-  }
-}
-
 async function waitForPeerBuild() {
   const start = Date.now();
 
@@ -176,12 +167,24 @@ export async function ensureBuilt() {
     return;
   }
 
+  // sites-pinned: tests/shared/wrapper-build-lock.test.ts
+  const errors = [];
   try {
-    if (!(await shouldBuildDist())) {
-      return;
-    }
-    await runBuild(npmExecutable(), ['run', 'build']);
-  } finally {
-    await releaseBuildLock(lockHandle);
+    if (await shouldBuildDist()) await runBuild(npmExecutable(), ['run', 'build']);
+  } catch (error) {
+    errors.push(error);
   }
+  try {
+    await lockHandle.close();
+  } catch (error) {
+    errors.push(new Error(`Could not close build lock ${buildLockPath}: ${error}`, { cause: error }));
+  }
+  try {
+    await unlink(buildLockPath);
+    process.stderr.write(JSON.stringify({ event: "build_lock_released", pid: process.pid, lock: buildLockPath, released_at: new Date().toISOString() }) + '\n');
+  } catch (error) {
+    errors.push(new Error(`Could not release build lock ${buildLockPath}: ${error}`, { cause: error }));
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, errors.map(String).join('\n'));
 }

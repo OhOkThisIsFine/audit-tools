@@ -146,20 +146,7 @@ three writers).
 | `requeue_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
 | `runtime_validation_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
 | `runtime_validation_report.json` | `repo_manifest.json`, `file_disposition.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
-| `access_memory.json` | `audit_results.jsonl` |
 <!-- END GENERATED spec-mirror dependency-map#phase-3 -->
-
-`access_memory.json` is a pure per-run summary harvested from the ingested
-result ledger (which files/lenses each step covered, with recency in
-step-ordinal space) — the ingestion executor writes it in the same
-`advanceAudit` call that appends the ledger, so it records the post-append
-`audit_results.jsonl` revision (dependency-first, no cycle). No audit-side reader
-exists — the audit side writes continuity information and never consumes it;
-the artifact is reserved to bias later host-work composition toward continuity,
-and which downstream consumer reads it is outside this map. The bias is
-deliberately **not** a DAG edge — a
-`coverage_matrix → audit_results → access_memory → coverage_matrix` edge would
-be a cycle.
 
 `scope.json` records how a run was scoped (the `--since` delta mode): `full`
 (default) or `delta` with the seed (changed) + expanded (graph-neighbour) file

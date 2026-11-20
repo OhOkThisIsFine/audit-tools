@@ -242,10 +242,6 @@ export const SPEC_MIRROR_REGIONS = [
         artifact: "requeue_tasks.json",
         purpose: "Re-audit tasks derived from coverage/flow-coverage gaps.",
       },
-      {
-        artifact: "access_memory.json",
-        purpose: "Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses) — a write-only record with no audit-side reader; reserved to bias later host-work composition toward continuity.",
-      },
     ],
   },
   {
@@ -457,7 +453,6 @@ export const SPEC_MIRROR_REGIONS = [
       { artifact: "requeue_tasks.json" },
       { artifact: "runtime_validation_tasks.json" },
       { artifact: "runtime_validation_report.json" },
-      { artifact: "access_memory.json" },
     ],
   },
   {

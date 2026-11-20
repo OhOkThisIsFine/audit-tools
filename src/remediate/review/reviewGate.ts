@@ -1,3 +1,4 @@
+import { backtickList } from "../../shared/reporting/markdown.js";
 // sites-pinned: tests/remediate/reviewGate.test.ts, tests/remediate/next-step-review-gate.test.ts
 // Review-approval gate engine — builds the tiered item-set the user
 // approves or declines, and consumes their verdict.
@@ -202,14 +203,14 @@ function unknownResolutionIds(
   (resolution.declined_findings ?? []).forEach((entry, index) => {
     if (!validIdSet.has(entry.finding_id)) {
       problems.push(
-        `\`declined_findings[${index}].finding_id\`: \`${entry.finding_id}\` is not in the request (valid: ${validIds.map((i) => `\`${i}\``).join(", ")})`,
+        `\`declined_findings[${index}].finding_id\`: \`${entry.finding_id}\` is not in the request (valid: ${backtickList(validIds)})`,
       );
     }
   });
   (resolution.declined_tiers ?? []).forEach((tier, index) => {
     if (!validTiers.has(tier)) {
       problems.push(
-        `\`declined_tiers[${index}]\`: \`${tier}\` is not a tier (valid: ${REVIEW_NECESSITY_ORDER.map((t) => `\`${t}\``).join(", ")})`,
+        `\`declined_tiers[${index}]\`: \`${tier}\` is not a tier (valid: ${backtickList(REVIEW_NECESSITY_ORDER)})`,
       );
     }
   });
@@ -255,11 +256,11 @@ export function parseReviewResolution(
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       if (issue.code === z.ZodIssueCode.unrecognized_keys) {
-        const unknown = issue.keys.filter((k) => !(k in RETIRED_RESOLUTION_FIELDS));
+        const unknown = issue.keys.filter((k) => issue.path.length > 0 || !Object.hasOwn(RETIRED_RESOLUTION_FIELDS, k));
         const where = issue.path.length > 0 ? ` in \`${issue.path.join(".")}\`` : "";
         if (unknown.length > 0) {
           problems.push(
-            `unknown field(s)${where}: ${unknown.map((k) => `\`${k}\``).join(", ")}`,
+            `unknown field(s)${where}: ${backtickList(unknown)}`,
           );
         }
         continue;

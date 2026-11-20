@@ -44,6 +44,22 @@ test("deriveGraphSignals returns no cycles for a DAG", () => {
   expect(signals.nodesInCycles.size).toBe(0);
 });
 
+test("completes a ten-thousand-edge import chain", () => {
+  const imports = Array.from({ length: 10_000 }, (_, i) => ({ from: String(i), to: String(i + 1) }));
+  const signals = deriveGraphSignals(bundle(imports));
+  expect(signals.cycles).toEqual([]);
+  expect(signals.connected.size).toBe(10_001);
+});
+
+test("visits sibling branches in edge order and emits only the active ancestor path", () => {
+  const signals = deriveGraphSignals(bundle([
+    { from: "root", to: "b" }, { from: "root", to: "a" },
+    { from: "b", to: "b1" }, { from: "b1", to: "b" },
+    { from: "a", to: "a1" }, { from: "a1", to: "a" }, { from: "a1", to: "b1" },
+  ]));
+  expect(signals.cycles).toEqual([["b", "b1"], ["a", "a1"]]);
+});
+
 test("deriveGraphSignals dedups the same directed cycle found from different roots", () => {
   // A two-node cycle a<->b is reachable as a root from both a and b; canonical
   // rotation must collapse the duplicates into one.

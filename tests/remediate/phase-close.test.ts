@@ -14,13 +14,15 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSyncHidden as execSync } from "../helpers/spawn.mjs";
 import { RunLogger } from "audit-tools/shared";
-import type { RemediationState } from "../../src/remediate/state/store.js";
+import { StateStore, type RemediationState } from "../../src/remediate/state/store.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
 import { canonicalPlanFixture, canonicalUnitFixture, writeApprovedPlanFixture } from "./helpers/canonicalPlanFixture.js";
 import type { RemediationItemState, RemediationPlan, SourceVerification } from "../../src/remediate/state/types.js";
 import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import { validateVerificationReport } from "../../src/remediate/validation/verificationReport.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { submissionLedgerPath } from "../../src/shared/submission/submissionLedger.js";
+import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = scratchDir(".test-close-repo");
@@ -107,6 +109,109 @@ afterEach(async () => {
 });
 
 describe("runClosePhase", () => {
+  it.each([
+    ["matching", ["accepted"], ["accepted"]],
+    ["conflicting", ["accepted"], ["loose only"]],
+    ["missing side file", ["accepted"], undefined],
+    ["side file only", undefined, ["loose only"]],
+  ] as const)("uses accepted unit evidence in Markdown and traces (%s)", async (_case, accepted, loose) => {
+    const state = makeState({ items: { U1: { status: "resolved", host_result_evidence: accepted } } });
+    if (loose) await writeFileAsync(join(TEST_DIR, "result_U1_verify_code_against_documentation.json"), JSON.stringify({ reason: loose }));
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    await runClosePhase(state, BASE_OPTIONS);
+    const markdown = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    const verification = JSON.parse(await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"));
+    expect(markdown.includes("  - *Verification*: accepted")).toBe(Boolean(accepted));
+    expect(markdown).not.toContain("loose only");
+    const requirement = verification.units[0].traces.find((trace: { kind: string }) => trace.kind === "requirement");
+    expect(requirement.evidence).toEqual(accepted ?? []);
+    expect(JSON.stringify(verification)).not.toContain("loose only");
+  });
+
+  it("names an unfinished request as the reason for keeping the run directory", async () => {
+    const state = makeState({ plan: { request: { id: "R", text: "Add a route", source_paths: [] } } });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const logPath = join(OUTPUT_DIR, "close.log");
+    await runClosePhase(state, BASE_OPTIONS, new RunLogger(logPath, { enabled: true }));
+    expect(existsSync(TEST_DIR)).toBe(true);
+    expect(await readFile(logPath, "utf8")).toContain("unresolvedRequest=true");
+  });
+  it("preserves unreadable recovery evidence and retries reports without repeating the closing action", async () => {
+    const state = makeState({ closing_plan: {
+      action: "custom",
+      custom_command: [process.execPath, "-e", "require('node:fs').appendFileSync('action-count', 'x')"],
+    } });
+    const ledgerPath = submissionLedgerPath(TEST_DIR);
+    await mkdir(ledgerPath, { recursive: true });
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const completed = await runClosePhase(state, BASE_OPTIONS);
+    expect(completed.status).toBe("complete");
+    const readOutcomes = async () => JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+    const first = await readOutcomes();
+    const firstVerification = await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8");
+    expect(first.recovery.read_error).toMatch(/EISDIR|EACCES|EPERM/i);
+    expect(first.closing_result.status).toBe("success");
+    expect(await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8")).toContain("Recovery report incomplete");
+    expect(existsSync(ledgerPath)).toBe(true);
+    await rm(ledgerPath, { recursive: true });
+    await writeFileAsync(ledgerPath, "{torn line\n");
+    const retry = await decideNextStep({ root: REPO_DIR });
+    expect(retry.step_kind).toBe("present_report");
+    const repaired = await readOutcomes();
+    expect(repaired.recovery.read_error).toBeUndefined();
+    expect(repaired.recovery.dropped_lines).toBe(1);
+    expect(repaired.closing_result).toEqual(first.closing_result);
+    expect(repaired.ended_at).toEqual(first.ended_at);
+    expect(await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8")).toBe(firstVerification);
+    const markdown = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
+    expect(markdown).toContain("1 ledger line(s) could not be read");
+    expect(markdown).not.toContain("every accepted submission passed");
+    expect(await readFile(join(REPO_DIR, "action-count"), "utf8")).toBe("x");
+  });
+  it.each(["absent", "readable", "unreadable"])("resumes only reporting when the ledger is %s and an obstructed report leaves the run closing", async ledgerState => {
+    const state = makeState({
+      plan: { findings: [{ id: "F", title: "F", summary: "", category: "correctness", lens: "correctness",
+        severity: "low", confidence: "low", affected_files: [{ path: "initial.txt" }] }] },
+      items: { F: { status: "blocked", failure_reason: "Unfinished item retains the run log" } },
+      closing_plan: { action: "custom", custom_command: [process.execPath, "-e",
+        "require('node:fs').appendFileSync('action-count', 'x')"] },
+    });
+    const ledger = submissionLedgerPath(TEST_DIR);
+    const report = join(OUTPUT_DIR, "remediation-report.md");
+    if (ledgerState === "unreadable") await mkdir(ledger, { recursive: true });
+    if (ledgerState === "readable") {
+      await mkdir(dirname(ledger), { recursive: true });
+      await writeFileAsync(ledger, "");
+    }
+    await mkdir(report);
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const store = new StateStore(TEST_DIR);
+    await store.saveState(state);
+    const log = join(TEST_DIR, "run.log.jsonl");
+    await expect(runClosePhase(state, BASE_OPTIONS, new RunLogger(log, { enabled: true }))).rejects.toThrow(/remediation-report\.md/);
+    expect((await store.loadState())?.status).toBe("closing");
+    expect(await readFile(join(REPO_DIR, "action-count"), "utf8")).toBe("x");
+    await rm(report, { recursive: true });
+    if (ledgerState !== "absent") await rm(ledger, { recursive: true });
+    const receipt = join(TEST_DIR, "remediation-closing-result.json");
+    if (ledgerState === "absent") {
+      const original = await readFile(receipt, "utf8");
+      const damaged = JSON.parse(original);
+      damaged.pending_report.context.combinedTest.passed = false;
+      await writeFileAsync(receipt, JSON.stringify(damaged));
+      await expect(decideNextStep({ root: REPO_DIR })).rejects.toThrow(/reporting inputs changed/);
+      await writeFileAsync(receipt, original);
+    }
+    const result = await decideNextStep({ root: REPO_DIR });
+    expect(result.step_kind).toBe("present_report");
+    expect(await readFile(report, "utf8")).toContain("## Recovery");
+    expect((await store.loadState())?.status).toBe("complete");
+    expect(JSON.parse(await readFile(receipt, "utf8"))).not.toHaveProperty("pending_report");
+    expect(await readFile(join(REPO_DIR, "action-count"), "utf8")).toBe("x");
+    const events = (await readFile(log, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(events.filter(event => event.kind === "outcome")).toHaveLength(1);
+  });
+
   it("throws when plan is missing", async () => {
     const state: RemediationState = { status: "closing", run_start_dirty: [], run_start_dirty_encoding: "git-z/v1" };
     await expect(runClosePhase(state, BASE_OPTIONS)).rejects.toThrow(
@@ -208,9 +313,8 @@ describe("runClosePhase", () => {
     });
 
     const markdown = await readFile(join(OUTPUT_DIR, "remediation-report.md"), "utf8");
-    expect(markdown).toContain("  - *Verification*: check A");
-    expect(markdown).toContain("  - *Verification*: check B");
-    expect(markdown).not.toContain("check A\ncheck B");
+    expect(markdown).toContain("  - *Verification*: tool-observed requirement verification");
+    expect(markdown).not.toContain("check A");
 
     const verificationReport = JSON.parse(
       await readFile(join(OUTPUT_DIR, "verification_report.json"), "utf8"),
@@ -220,8 +324,8 @@ describe("runClosePhase", () => {
     expect(traces).toEqual(expect.arrayContaining([
       expect.objectContaining({ trace_id: "F1:requirement:REQ-F1", kind: "requirement", label: "REQ-F1", evidence: ["tool-observed requirement verification"], status: "passed" }),
       expect.objectContaining({ trace_id: "F1:command:0", kind: "command", label: "npm test -- auth", evidence: ["tool-observed requirement verification"], status: "passed" }),
-      expect.objectContaining({ trace_id: "F1:verify-doc", kind: "file", evidence: ["check A", "check B"], status: "passed" }),
     ]));
+    expect(JSON.stringify(traces)).not.toContain("check A");
     expect(traces.some((trace: { trace_id: string }) => trace.trace_id === "F1:contract-goal")).toBe(false);
   });
 
@@ -1095,6 +1199,7 @@ describe("runClosePhase", () => {
         (i) => i.status === "blocked",
       );
       expect(blockedItems.length).toBeGreaterThan(0);
+      expect(blockedItems[0]!.failure_reason).toMatch(/^End-to-end tests failed/);
     });
 
     it("passes when e2e_command exits zero", async () => {

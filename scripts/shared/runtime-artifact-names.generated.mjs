@@ -7,7 +7,6 @@
 // runtime layout module: node scripts/shared/generate-runtime-artifact-names.mjs
 // (drift is pinned by tests/shared/runtime-artifact-names-drift.test.ts).
 export const RUNTIME_ARTIFACT_NAMES = [
-  "access_memory.json",
   "agent-feedback.jsonl",
   "analyzer_capability.json",
   "approval.json",
@@ -87,6 +86,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "review-history.json",
   "review-run.json",
   "review_decision.json",
+  "review_filter_dispositions.json",
   "review_request.json",
   "review_resolution.json",
   "risk-decisions.json",

@@ -478,10 +478,6 @@ export const EXECUTOR_REGISTRY: ExecutorDefinition[] = [
     obligation_ids: ["audit_results_ingested"],
     produces: [
       {
-        artifact: "access_memory.json",
-        role: "primary",
-      },
-      {
         artifact: "audit_plan_metrics.json",
         role: "refresh",
       },

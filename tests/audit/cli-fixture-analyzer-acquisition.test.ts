@@ -15,7 +15,7 @@ import { readRunConsentUnlocked } from "../../src/shared/analyzerRunConsent.js";
  * The control is the product's own seam, not a test-only escape hatch: a
  * recorded operator `declined` is read FIRST in `admitSpawn` and refuses the
  * spawn outright. `declineDefaultAcquiredAnalyzers` states that decision through
- * `persistAnalyzerConsent`, and every shared fixture creator calls it.
+ * the current-run consent writer, and every shared fixture creator calls it.
  *
  * Both halves are pinned here because either one alone is satisfiable without
  * the other: the fixtures WRITE the decision (cheap, per helper), and the fold
@@ -28,6 +28,8 @@ import { join } from "node:path";
 import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 import { ANALYZER_DENIAL_REASONS } from "../../src/shared/analyzers/acquisitionEngine.js";
 import { DEFAULT_ACQUIRED_ANALYZER_IDS } from "../helpers/analyzerConsentFixture.js";
+import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
+import { functionalPreflightPath } from "../../src/audit/cli/functionalPreflight.js";
 import {
   callNextStep,
   withTempRepo as withCompletionRepo,
@@ -58,6 +60,30 @@ const FIXTURE_CREATORS: ReadonlyArray<
 ];
 
 describe("shared CLI fixtures record the operator decline before any CLI call", () => {
+  test("refuses a relative root before creating run state", async () => {
+    await withTempDir("relative-run-root-", async (root) => {
+      const artifactsDir = join(root, "artifacts");
+      await expect(prepareFixtureRun(".", { artifactsDir, declinedAnalyzerIds: ["knip"], preflight: true }))
+        .rejects.toThrow("Repository root must be absolute");
+      expect(existsSync(artifactsDir)).toBe(false);
+    });
+  });
+
+  test("concurrent fixture declines merge under one run identity", async () => {
+    await withTempDir("concurrent-run-decisions-", async (root) => {
+      const artifactsDir = join(root, ".audit-tools", "audit");
+      await Promise.all([
+        prepareFixtureRun(root, { declinedAnalyzerIds: ["eslint"], preflight: true }),
+        prepareFixtureRun(root, { declinedAnalyzerIds: ["knip"], preflight: false }),
+      ]);
+      const run = await readRunConsentUnlocked(root, artifactsDir);
+      expect(run.decisions).toEqual({ eslint: "declined", knip: "declined" });
+      const preflight = JSON.parse(await readFile(functionalPreflightPath(artifactsDir), "utf8"));
+      expect(preflight.run_id).toBe(run.run_id);
+      expect(preflight.repository_root).toBe(run.repository_root);
+    });
+  });
+
   for (const [label, createFixture] of FIXTURE_CREATORS) {
     test(`${label} declines every default acquired analyzer`, async () => {
       await createFixture(async (root) => {
@@ -65,6 +91,7 @@ describe("shared CLI fixtures record the operator decline before any CLI call", 
         // Derived from the registry: a new `defaultRun: true` candidate must be
         // declined by every fixture the day it lands.
         expect(DEFAULT_ACQUIRED_ANALYZER_IDS.length).toBeGreaterThan(0);
+        expect(Object.keys(policy.decisions).sort()).toEqual([...DEFAULT_ACQUIRED_ANALYZER_IDS].sort());
         for (const id of DEFAULT_ACQUIRED_ANALYZER_IDS) {
           expect(
             policy.decisions[id],

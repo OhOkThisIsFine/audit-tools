@@ -19,7 +19,7 @@ import { join } from "node:path";
 
 import { readFile } from "node:fs/promises";
 
-import { appendNdjsonFile } from "../io/json.js";
+import { appendNdjsonFile, errorMessage, isFileMissingError } from "../io/json.js";
 import { isRecord } from "../validation/basic.js";
 import { siblingLockPath } from "../io/lockedJsonStore.js";
 import { withFileLock } from "../io/fileLock.js";
@@ -380,12 +380,15 @@ export interface SubmissionLedgerDrop {
 export type SubmissionLedgerRead = readonly SubmissionLedgerEvent[] & {
   readonly events: readonly SubmissionLedgerEvent[];
   readonly dropped: readonly SubmissionLedgerDrop[];
+  readonly read_error?: string;
 };
 
 function ledgerRead(
   events: SubmissionLedgerEvent[],
   dropped: SubmissionLedgerDrop[],
+  readError?: string,
 ): SubmissionLedgerRead {
+  if (readError !== undefined) Object.defineProperty(events, "read_error", { value: readError });
   Object.defineProperty(events, "events", {
     value: events,
     enumerable: false,
@@ -436,8 +439,9 @@ export async function readSubmissionLedger(
   let content: string;
   try {
     content = await readFile(submissionLedgerPath(artifactsDir), "utf8");
-  } catch {
-    return ledgerRead([], []);
+  } catch (error) {
+    // sites-pinned: tests/remediate/phase-close.test.ts
+    return ledgerRead([], [], isFileMissingError(error) ? undefined : errorMessage(error));
   }
   const events: SubmissionLedgerEvent[] = [];
   const dropped: SubmissionLedgerDrop[] = [];

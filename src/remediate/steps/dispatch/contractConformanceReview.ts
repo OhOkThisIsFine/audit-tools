@@ -33,10 +33,14 @@ export function conformanceObligationsMatch(review: { obligations: readonly { ob
   return ids.length === new Set(ids).size && ids.length === expected.length && ids.every(id => expected.includes(id));
 }
 
-export function conformanceReviewPaths(artifactsDir: string, runId: string, itemId: string): { request: string; response: string } {
+export function conformanceSubjectsDir(artifactsDir: string): string {
+  return join(artifactsDir, "conformance-review", "subjects");
+}
+
+export function conformanceReviewPaths(artifactsDir: string, runId: string, itemId: string) {
   const stem = contentSha256({ run_id: runId, work_item_id: itemId });
   const dir = join(artifactsDir, "conformance-review");
-  return { request: join(dir, `${stem}.request.json`), response: join(dir, `${stem}.response.json`) };
+  return { request: join(dir, `${stem}.request.json`), response: join(dir, `${stem}.response.json`), observation: join(dir, `${stem}.observation.json`) };
 }
 
 export interface ConformanceReviewIssue {
@@ -51,7 +55,7 @@ export type ConformanceReviewCheck =
   | { ok: true; receipt?: AcceptedConformanceReview }
   | { ok: false; issue: ConformanceReviewIssue };
 
-function conformanceIssue(paths: { request: string; response: string }, itemId: string, code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck {
+export function conformanceIssue(paths: { request: string; response: string }, itemId: string, code: ConformanceReviewIssueCode, message: string): ConformanceReviewCheck {
   return { ok: false, issue: { code, work_item_id: itemId, result_path: paths.response, review_request_path: paths.request, message } };
 }
 
@@ -124,7 +128,7 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
     },
   };
   // Retain the exact review subject even when a later tree replaces the live request.
-  const subjectPath = join(params.artifactsDir, "conformance-review", "subjects", `${binding}.json`);
+  const subjectPath = join(conformanceSubjectsDir(params.artifactsDir), `${binding}.json`);
   const savedSubject = await readSubmissionDocument(subjectPath);
   if (savedSubject.kind !== "value") await writeJsonFile(subjectPath, request);
   const existing = await readSubmissionDocument(paths.request);
@@ -145,7 +149,7 @@ export async function checkConformanceSubject(params: { artifactsDir: string; ru
   }
   // Preserve the independently supplied review as history; adapter freshness guards
   // still decide whether this review can authorize a state transition.
-  await writeJsonFile(join(params.artifactsDir, "conformance-review", "subjects", `${binding}.review.json`), review);
+  await writeJsonFile(join(conformanceSubjectsDir(params.artifactsDir), `${binding}.review.json`), review);
   return { ok: true, receipt: AcceptedConformanceReviewSchema.parse({
     requirement: "independent", binding, review: review.declaration, summary: review.summary.slice(0, 2000),
   }) };

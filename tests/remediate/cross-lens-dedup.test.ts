@@ -1,8 +1,8 @@
+import { wordJaccard } from "audit-tools/shared";
 import { describe, it, expect } from "vitest";
 import type { Finding } from "../../src/remediate/state/types.js";
 import {
   deduplicateCrossLensFindings,
-  wordJaccard,
 } from "../../src/remediate/dedup/crossLensDedup.js";
 
 function makeFinding(overrides: Partial<Finding> & { id: string }): Finding {

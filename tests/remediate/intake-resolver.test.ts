@@ -153,16 +153,10 @@ describe("resolveIntakeStep", () => {
     const intakeDir = join(artifactsDir, "intake");
     await mkdir(intakeDir, { recursive: true });
 
-    // Write a minimal audit-findings.json fixture
     const auditFindingsPath = join(TEST_DIR, "audit-findings.json");
     await writeFile(
       auditFindingsPath,
-      JSON.stringify({
-        contract_version: "audit-tools/audit-findings/v1alpha2",
-        audit_read: null,
-        findings: [],
-        work_blocks: [],
-      }),
+      await readFile(new URL("./fixtures/audit-findings-fast-path-eligible.json", import.meta.url), "utf8"),
       "utf8",
     );
 
@@ -1363,11 +1357,11 @@ describe("validateSuppliedInput", () => {
     expect(result.reason).toContain("unknown/v9");
   });
 
-  it("returns ok:true for JSON with a known schema_version", () => {
+  it("names the obsolete audit input and how to regenerate it", () => {
     const result = validateSuppliedInput(
       "file.json",
       JSON.stringify({ schema_version: "audit-findings/v1alpha1" }),
     );
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/file\.json.*regenerate.*audit-tools\/audit-findings\/v1alpha2/i) });
   });
 });

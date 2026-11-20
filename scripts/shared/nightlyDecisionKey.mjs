@@ -12,7 +12,7 @@
 //
 // A citation is checkable mechanically, so it is checked here rather than left
 // to the caller's care: `.claude/nightly-decisions.json` is keyed by exactly
-// the 16-lowercase-hex `subjectKey` this module matches on.
+// the stored 16-lowercase-hex subject key this module matches on.
 //
 // WHY REFUSE RATHER THAN WARN. The record is the artifact; a warning printed to
 // a scrollback that the record outlives is not enforcement. The cost of a
@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { DECISIONS_RELPATH, decisionsPath } from '../nightly/items.mjs';
 
 // The ledger key format, and the ONLY shape this module treats as a citation.
-// `subjectKey` (scripts/nightly/items.mjs) builds it as the 16-char prefix of a
+// Historical queues stored it as the 16-char prefix of a
 // sha1 hex digest of `<path>::<normalized subject>`.
 const LEDGER_KEY_RE = /\b[0-9a-f]{16}\b/g;
 

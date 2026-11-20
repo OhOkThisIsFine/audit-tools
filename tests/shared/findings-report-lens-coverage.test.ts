@@ -19,6 +19,7 @@ import {
   validateAuditFindingsReport,
 } from "../../src/shared/validation/findingsReport.js";
 import type { Finding } from "../../src/shared/types/finding.js";
+import { buildAuditFindingsDeliverable } from "../../src/shared/reporting/auditDeliverable.js";
 
 function finding(id: string, lens: string): Finding {
   return {
@@ -38,6 +39,14 @@ const FINDINGS = [
   finding("b", "architecture"),
   finding("c", "performance"),
 ];
+
+it("serializes custom lens names as numeric counts in audit-findings.json", () => {
+  const lenses = ["__proto__", "constructor", "__proto__", "toString"];
+  const output = buildAuditFindingsDeliverable(lenses.map((lens, i) => finding(String(i), lens)), null);
+  expect(Object.entries(JSON.parse(JSON.stringify(output.summary.lens_breakdown)))).toEqual([
+    ["__proto__", 2], ["constructor", 1], ["toString", 1],
+  ]);
+});
 
 function report(overrides: Record<string, unknown> = {}): unknown {
   return {

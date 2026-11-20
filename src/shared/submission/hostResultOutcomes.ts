@@ -72,7 +72,7 @@ export async function readTrailingSubmissionRefusals(
  *  - `repair`   — something WAS written and refused. The remedy is a corrected
  *                 result at the bound path.
  *  - `none`     — the submission is settled and no work remains. The item is
- *                 finished (a concurrent ingest accepted it), or the refusal is
+ *                 finished (its binding is already accepted), or the refusal is
  *                 about the run's own persisted documents rather than about any
  *                 result, and the tool repairs it itself.
  *  - `operator` — no worker can fix it: the plan, the run's recorded state or
@@ -113,8 +113,8 @@ export const SUBMISSION_ISSUE_REMEDY: Readonly<
   submission_malformed: "repair",
   submission_contract_invalid: "repair",
   submission_rejected: "repair",
-  // The work item was ALREADY ACCEPTED by a concurrent ingest of this run, so
-  // it is not pending, it is not republished, and there is nothing to write.
+  // Shared default for a settled duplicate ID. Audit serializes acceptance,
+  // skips an accepted binding on replay, and checks result identity before duplicates.
   duplicate_submission_id: "none",
 };
 

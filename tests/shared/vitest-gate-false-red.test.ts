@@ -139,7 +139,16 @@ interface GateCase {
   args?: string[];
   sentinel?: boolean;
   mutateTree?: boolean;
+  reportFromChild?: boolean;
 }
+
+test("the gate consumes the reporter's shard-specific ledger in both CLI spellings", () => {
+  for (const args of [["--shard", "1/4"], ["--shard=2/4"]]) {
+    const result = runGateCase({ status: 0, args, reportFromChild: true });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stamp, null);
+  }
+});
 
 function runGateCase(scenario: GateCase) {
   const root = mkdtempSync(resolve(tmpdir(), "vitest-gate-boundary-"));
@@ -154,6 +163,7 @@ function runGateCase(scenario: GateCase) {
       "run-vitest-gate.mjs", "vitestShard.mjs", "vitestGateVerdict.mjs",
       "worktree-tree.mjs", "suiteGreenStamp.mjs", "load-flake-record.mjs", "primitives.mjs",
       "loopCoreAttestationLedger.mjs",
+      ...(scenario.reportFromChild ? ["vitest-timing-reporter.mjs", "profile.mjs", "spawn-shell.mjs"] : []),
     ]) {
       mkdirSync(resolve(root, "scripts/shared"), { recursive: true });
       copyFileSync(resolve("scripts/shared", file), resolve(root, "scripts/shared", file));
@@ -163,7 +173,11 @@ function runGateCase(scenario: GateCase) {
     put("package.json", '{"type":"module"}');
     put(".gitignore", "node_modules/\n.audit-tools-profile/\n.claude/hooks/.state/\nchild-calls.jsonl\n");
     put("node_modules/vitest/package.json", '{"name":"vitest"}');
-    put("node_modules/vitest/vitest.mjs", 'throw new Error("must be intercepted");');
+    put("node_modules/vitest/vitest.mjs", scenario.reportFromChild
+      ? `import Reporter from "../../scripts/shared/vitest-timing-reporter.mjs";
+        process.env.GITHUB_STEP_SUMMARY = "";
+        new Reporter().onFinished([{ filepath: "tests/real.test.ts", tasks: [{ type: "test", name: "real", result: { state: "pass" } }] }]);`
+      : 'throw new Error("must be intercepted");');
     // Not a lock test: fail loudly if an abnormal exit reaches observations.
     put("dist/shared/io/fileLock.js", 'export function withFileLock() { throw new Error("unexpected load-only observation"); }');
     put("scenario.json", JSON.stringify(scenario));
@@ -177,6 +191,7 @@ cp.spawnSync = (command, args, options) => {
   if (command === process.execPath) {
     fs.appendFileSync(path.join(__dirname, "child-calls.jsonl"), JSON.stringify(args) + "\\n");
     if (args[1] !== "run") throw new Error("unexpected isolated diagnostic");
+    if (scenario.reportFromChild) return original(command, args, options);
     if (scenario.mutateTree) fs.writeFileSync(path.join(__dirname, "during-run.txt"), "changed");
     const ledger = scenario.ledger ?? "fresh";
     if (ledger !== "missing") {

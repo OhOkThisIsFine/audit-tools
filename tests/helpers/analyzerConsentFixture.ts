@@ -1,4 +1,4 @@
-import { satisfyFunctionalPreflight } from "./functionalPreflightFixture.js";
+import { prepareFixtureRun } from "./functionalPreflightFixture.js";
 /**
  * Fixture hermeticity for the ACQUIRED analyzer set.
  *
@@ -19,7 +19,7 @@ import { satisfyFunctionalPreflight } from "./functionalPreflightFixture.js";
  * hatch: a recorded operator `declined` is consulted FIRST in `admitSpawn`,
  * ahead of the settings channel, the DEFAULT-set short-circuit and any consent
  * token, so it refuses the spawn outright. The fixture states that operator
- * decision through `persistAnalyzerConsent` — the same current-run decision record
+ * decision through the same current-run writer and decision record
  * (`.audit-tools/audit/run-consent.json`) the CLI itself reads — before the
  * first `next-step`. Production admission logic is untouched, and there is no
  * environment flag to remember.
@@ -31,11 +31,7 @@ import { satisfyFunctionalPreflight } from "./functionalPreflightFixture.js";
  * offer step is real coverage, and declining the whole registry here would
  * delete it.
  */
-import {
-  EXTERNAL_ANALYZER_CANDIDATES,
-  persistAnalyzerConsent,
-  type AnalyzerConsentDecision,
-} from "audit-tools/shared";
+import { EXTERNAL_ANALYZER_CANDIDATES } from "audit-tools/shared";
 
 /** Every candidate `admitSpawn` would run with no consent token — derived, never listed. */
 export const DEFAULT_ACQUIRED_ANALYZER_IDS: readonly string[] =
@@ -44,19 +40,9 @@ export const DEFAULT_ACQUIRED_ANALYZER_IDS: readonly string[] =
   );
 
 /**
- * Record the operator's decline of every default-set acquired analyzer into
- * `root`'s durable analyzer policy. Call it once, when a fixture repository is
- * created and before any CLI invocation against it.
+ * Prepare the preflight record and decline the default acquired set before the first CLI call.
+ * Tests that bypass the optional-analyzer offer can also name those extra declines.
  */
-export async function declineDefaultAcquiredAnalyzers(root: string): Promise<void> {
-  // CLI fixtures explicitly satisfy the versioned host capability entry step.
-  await satisfyFunctionalPreflight(root);
-  await persistAnalyzerConsent(
-    root,
-    Object.fromEntries(
-      DEFAULT_ACQUIRED_ANALYZER_IDS.map(
-        (id) => [id, "declined" satisfies AnalyzerConsentDecision] as const,
-      ),
-    ),
-  );
+export async function declineDefaultAcquiredAnalyzers(root: string, additionalIds: readonly string[] = []): Promise<void> {
+  await prepareFixtureRun(root, { declinedAnalyzerIds: [...DEFAULT_ACQUIRED_ANALYZER_IDS, ...additionalIds], preflight: true });
 }

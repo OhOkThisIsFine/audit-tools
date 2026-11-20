@@ -1,3 +1,4 @@
+import { TRIAGE_RESOLUTION_FILENAME } from "../state/decisionConsumption.js";
 // sites-pinned: tests/remediate/artifacts-validation.test.ts
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -15,7 +16,7 @@ import {
 } from "audit-tools/shared";
 import { verificationReportPath } from "../../shared/io/auditToolsPaths.js";
 import type { RemediationState } from "../state/store.js";
-import { StateStore, validateRemediationState } from "../state/store.js";
+import { StateStore, STATE_FILENAME, validateRemediationState } from "../state/store.js";
 import { isInProgressStatus } from "../state/itemStatus.js";
 import {
   validateRemediationPlan,
@@ -559,7 +560,7 @@ export async function validateArtifacts(
   // cwd. Every call site already passes the resolved root.
   root: string,
 ): Promise<ArtifactValidationResult> {
-  if (!existsSync(join(artifactsDir, "state.json")) &&
+  if (!existsSync(join(artifactsDir, STATE_FILENAME)) &&
       existsSync(join(dirname(artifactsDir), "remediation-state.complete.json"))) {
     return validateCompletedArtifacts(artifactsDir, root);
   }
@@ -569,7 +570,7 @@ export async function validateArtifacts(
   const state = await store.loadState();
 
   if (!state) {
-    issues.push(`Missing remediation state at ${join(artifactsDir, "state.json")}.`);
+    issues.push(`Missing remediation state at ${join(artifactsDir, STATE_FILENAME)}.`);
   }
 
   if (state?.plan) {
@@ -593,7 +594,7 @@ export async function validateArtifacts(
   }
 
   const triageResolution = await readJsonForValidation(
-    join(artifactsDir, "triage_resolution.json"),
+    join(artifactsDir, TRIAGE_RESOLUTION_FILENAME),
     issues,
   );
   if (triageResolution) {

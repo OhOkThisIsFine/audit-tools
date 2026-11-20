@@ -50,7 +50,8 @@ describe("pre-commit gate: branch-strand refusal (docs-only commit on a remediat
     expect(r.stderr).toContain("remediation/PLAN-1");
     expect(r.stderr).toContain("STRAND");
     // The message must carry the recovery, not just the diagnosis.
-    expect(r.stderr).toContain("git checkout main && git commit");
+    expect(r.stderr).toContain("git worktree list");
+    expect(r.stderr).toContain("If a linked worktree holds main");
     expect(r.stderr).toContain("docs/HANDOFF.md");
   });
 

@@ -463,8 +463,8 @@ console.log(
     `  tests_ran   : full suite green on ${testsRan.tree.slice(0, 12)}${testsRan.ran_at ? ` at ${testsRan.ran_at}` : ''}\n` +
     `  loop_core   : ${loopCoreFiles.length} file(s)\n` +
     loopCoreFiles.map((p) => `                - ${p}`).join('\n') +
-    (named.length > 0
-      ? `\n  of which ${named.length} outside the staged set, named with --include-unvouched, carried content ` +
+    (unvouchedOutsideStaged.length > 0
+      ? `\n  of which ${unvouchedOutsideStaged.length} outside the staged set, named with --include-unvouched, carried content ` +
         `the ledger did not vouch for before this review.`
       : '') +
     (ledgerChanged ? `\n  ledger      : ${LEDGER_PATH} updated and staged — commit it with the change.` : '') +

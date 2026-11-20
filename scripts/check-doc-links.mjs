@@ -32,7 +32,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve, relative, basename } from "node:path";
 import { isGeneratedRender } from "./shared/generated-renders.mjs";
-import { compareCodeUnits, resolveWithinRoot } from './shared/primitives.mjs';
+import { compareCodeUnits, isScriptEntry, resolveWithinRoot } from './shared/primitives.mjs';
 
 const root = resolve(process.argv[2] ?? process.cwd());
 
@@ -258,6 +258,7 @@ function main() {
   process.exitCode = 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("check-doc-links.mjs")) {
+// sites-pinned: tests/shared/script-entry-regressions.test.ts
+if (isScriptEntry(import.meta.url, process.argv)) {
   main();
 }

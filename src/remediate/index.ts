@@ -4,6 +4,8 @@ import { recoverIngestHostResults } from "./steps/recoverIngest.js";
 // ACCEPTED-WITH-ISSUES arm — its status token and exit code)
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { changeOperatorLifecycle, decideNextStep } from "./steps/nextStep.js";
@@ -19,7 +21,6 @@ import {
   resolveRepoRoot,
   invalidateStepContracts,
   recoverSubmission,
-  runTracked,
   runWithBlockedStepBackstop,
 } from "audit-tools/shared";
 import { writeBlockedStep } from "./steps/stepWriter.js";
@@ -28,6 +29,7 @@ import { submitRemediationGateResult, SUPPORTED_REMEDIATION_GATE_SUBMISSIONS } f
 import { remediationSubmissionBinding } from "./steps/dispatch/hostHandoff.js";
 import { type RemediationHostIngestSummary } from "./steps/dispatch/hostContracts.js";
 import { errorMessage } from "../shared/io/json.js";
+import { stripAuditToolsControlEnv } from "../shared/tooling/exec.js";
 
 // src/remediate/index.ts (source) or dist/remediate/index.js (built) → three
 // dirnames up is the package root, holding package.json + skills/ + opencode.json.
@@ -41,6 +43,7 @@ const DEFAULT_ARTIFACTS_DIR_OPTION = ".audit-tools/remediation";
 
 const program = new Command();
 
+// sites-pinned: tests/remediate/validate-cli.test.ts
 program
   .name("remediate-code")
   .description("Autonomous remediation orchestrator")
@@ -198,10 +201,11 @@ for (const action of ["pause", "resume", "cancel"] as const) {
 // summaries; the wrapper is `.mjs` and this tree is typechecked TypeScript with
 // no allowJs, so a contract test pins the verbs AND their summary text against
 // that module (tests/shared/installer-verb-help.test.ts) rather than an import.
+// sites-pinned: tests/shared/installer-verb-help.test.ts
 const BIN_ROUTED_INSTALLER_VERBS: ReadonlyArray<readonly [string, string]> = [
   ["ensure", "lazily bootstraps repo-local /remediate-code assets when they are missing or stale"],
   ["install", "bootstraps /remediate-code into supported repo-local host surfaces"],
-  ["install-host", "installs /remediate-code into ONE named host surface (--host <name>)"],
+  ["install-host", "installs repo-local /remediate-code assets for Copilot (--host copilot)"],
   ["verify-install", "smoke-tests the generated /remediate-code host assets after an install"],
 ];
 
@@ -423,7 +427,7 @@ program
   .command("validate")
   .description("Validate TypeScript types and schema contracts")
   .action(async () => {
-    process.exit(runValidateCommand());
+    process.exitCode = await runValidateCommand();
   });
 
 // Exported so tests can construct argv and parse it through the real program
@@ -701,26 +705,45 @@ export async function recoverSubmissionVerb(options: {
   });
 }
 
-export function runValidateCommand(
+// sites-pinned: tests/remediate/validate-cli.test.ts, tests/remediate/install-repo-assets.test.ts
+async function runTypecheck(): Promise<number> {
+  const compiler = createRequire(import.meta.url).resolve("typescript/bin/tsc");
+  const child = spawn(process.execPath, [compiler, "--noEmit"], {
+    cwd: pkgRoot,
+    env: stripAuditToolsControlEnv(),
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  let interrupted: number | undefined;
+  const interrupt = () => { interrupted = 130; child.kill("SIGINT"); };
+  const terminate = () => { interrupted = 143; child.kill("SIGTERM"); };
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", terminate);
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => resolve(interrupted ?? code ?? 1));
+    });
+  } finally {
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", terminate);
+  }
+}
+
+export async function runValidateCommand(
   deps: {
-    run?: typeof runTracked;
+    run?: () => Promise<number>;
     log?: (message: string) => void;
     error?: (message: string) => void;
   } = {},
-): number {
-  const run = deps.run ?? runTracked;
+): Promise<number> {
+  const run = deps.run ?? runTypecheck;
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
-  const result = run(["npx", "tsc", "--noEmit"], {
-    cwd: pkgRoot,
-    stdio: "inherit",
-    // Declared bound (required by the sync twin): a full typecheck runs
-    // minutes at worst; this command runs outside any held file lock.
-    timeout: 3_600_000,
-  });
-  if (result.status !== 0) {
+  const status = await run();
+  if (status !== 0) {
     error("Type check failed.");
-    return result.status ?? 1;
+    return status;
   }
   log("validate: TypeScript types OK");
   return 0;

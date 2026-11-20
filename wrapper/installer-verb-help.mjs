@@ -9,7 +9,7 @@
 // first non-flag token (it must, or `explain-task -v` would print the wrapper's
 // version instead of forwarding `-v`). Two reasonable local decisions adding up
 // to the same surprise on the commands a new operator touches first, two of
-// which write into the repo and the home directory.
+// which write into the repository.
 //
 // One home for the list and the text: a verb added to one bin cannot silently
 // go undocumented in the other, and the contract test enumerates THIS array
@@ -25,10 +25,11 @@ export const INSTALLER_VERBS = Object.freeze([
 
 // `{product}` is substituted with the slash-command the bin installs, so the
 // same sentence serves both bins without a second copy drifting.
+// sites-pinned: tests/shared/installer-verb-help.test.ts
 const VERB_SUMMARY = Object.freeze({
   ensure: 'lazily bootstraps repo-local {product} assets when they are missing or stale',
   install: 'bootstraps {product} into supported repo-local host surfaces',
-  'install-host': 'installs {product} into ONE named host surface (--host <name>)',
+  'install-host': 'installs repo-local {product} assets for Copilot (--host copilot)',
   'verify-install': 'smoke-tests the generated {product} host assets after an install',
 });
 
@@ -39,13 +40,12 @@ const VERB_DETAIL = Object.freeze({
     'needs to be invoked by hand.',
   ],
   install: [
-    'Writes repo-local host assets for every supported surface it detects.',
-    'This WRITES to the repository and to the home directory.',
+    'Writes the supported host assets into the repository. Use --host to select a host.',
+    'The npm postinstall step deploys user-level assets separately.',
   ],
   'install-host': [
-    'The narrower path when only one surface should be written, e.g.',
-    '  --host copilot',
-    'This WRITES to the repository and to the home directory.',
+    'Use --host copilot to write the Copilot assets into the repository.',
+    'For other supported hosts, use install --host <name>.',
   ],
   'verify-install': [
     'Read-only. Exits non-zero when a generated asset is missing or stale.',
@@ -80,7 +80,20 @@ export function isInstallerVerb(verb) {
  */
 export function wantsInstallerVerbHelp(argv) {
   if (!Array.isArray(argv) || !isInstallerVerb(argv[0])) return false;
-  return argv.slice(1).some((token) => token === '--help' || token === '-h');
+  return commandRequestsHelp(argv[0], argv.slice(1));
+}
+
+// sites-pinned: tests/shared/installer-verb-help.test.ts
+export function commandRequestsHelp(command, args) {
+  let requested = false;
+  for (const arg of args) {
+    if (arg === '--') break;
+    if (arg.startsWith('--help=') || arg.startsWith('-h=')) {
+      throw new Error(`${command}: ${arg.split('=', 1)[0]} does not take a value.`);
+    }
+    if (arg === '--help' || arg === '-h') requested = true;
+  }
+  return requested;
 }
 
 /**

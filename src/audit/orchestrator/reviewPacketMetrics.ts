@@ -286,9 +286,6 @@ function buildPacketQualityMetrics(
       (sum, packet) => sum + packet.quality.boundary_edge_count,
       0,
     ),
-    // Structurally empty: a packet IS one coherence component, so no edge can
-    // merge two distinct groups into one packet.
-    merge_edge_kind_counts: {},
     boundary_edge_kind_counts: countBoundaryOnlyEdgeKinds(packets, graphEdges),
     orphan_task_count: orphanTaskCount,
     high_fan_in_file_count: countHighDegreeTaskFiles(

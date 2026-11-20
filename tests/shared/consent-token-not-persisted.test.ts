@@ -24,9 +24,9 @@ import {
   SessionIntentV1Schema,
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
-  persistAnalyzerConsent,
   persistAnalyzerSettings,
 } from "audit-tools/shared";
+import { persistAnalyzerConsent } from "audit-tools/shared/analyzerPolicy";
 
 /**
  * Every spelling a future field addition would plausibly use. A persisted schema

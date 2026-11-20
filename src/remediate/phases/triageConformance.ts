@@ -8,13 +8,13 @@ import { headCommit } from "../../shared/git.js";
 import { AUDIT_TOOLS_DIRNAME, contentSha256, readOptionalJsonFile, writeJsonFile, parseCommandString, resolveWithinRoot, uniqueSorted } from "audit-tools/shared";
 import type { RemediationState } from "../state/store.js";
 import { worktreeContentId } from "../steps/gateCommands.js";
-import { checkConformanceSubject, conformanceReviewPaths, type ConformanceReviewCheck } from "../steps/dispatch/contractConformanceReview.js";
+import { checkConformanceSubject, conformanceIssue, conformanceReviewPaths, conformanceSubjectsDir, type ConformanceReviewCheck } from "../steps/dispatch/contractConformanceReview.js";
 import { readSubmissionDocument } from "../../shared/submission/submissionClassifier.js";
 
 
 /** Historical evidence only; admission continues to use the run's live request and state. */
 export async function archiveConformanceSubjects(artifactsDir: string, outputDir: string): Promise<void> {
-  const sourceDir = join(artifactsDir, "conformance-review", "subjects");
+  const sourceDir = conformanceSubjectsDir(artifactsDir);
   let names: string[];
   try { names = await readdir(sourceDir); }
   catch (error) {
@@ -74,12 +74,8 @@ export async function triageEvidenceContext(root: string, state: RemediationStat
   };
 }
 
-function triageObservationPath(artifactsDir: string, runId: string, itemId: string): string {
-  return join(artifactsDir, "conformance-review", `${contentSha256({ run_id: runId, work_item_id: itemId })}.observation.json`);
-}
-
 export async function readTriageObservation(artifactsDir: string, runId: string, itemId: string, context: unknown): Promise<unknown | null> {
-  const document = await readSubmissionDocument(triageObservationPath(artifactsDir, runId, itemId));
+  const document = await readSubmissionDocument(conformanceReviewPaths(artifactsDir, runId, itemId).observation);
   const parsed = ObservationSchema.safeParse(document.kind === "value" ? document.value : null);
   if (!parsed.success || stableStringify(parsed.data.context) !== stableStringify(context)) return null;
   const commands = (context as { unit: { required_tests: string[] } }).unit.required_tests;
@@ -95,13 +91,13 @@ export async function checkTriageConformance(root: string, artifactsDir: string,
   });
   if (!observation || stableStringify(await triageEvidenceContext(root, state, itemId)) !== stableStringify(context)) {
     const paths = conformanceReviewPaths(artifactsDir, state.plan!.plan_id, itemId);
-    return { ok: false, issue: { code: "conformance_review_required", work_item_id: itemId, result_path: paths.response, review_request_path: paths.request, message: "The working-tree verification context is unavailable or changed. Keep this unit blocked; resume against stable readable source before obtaining conformance review." } };
+    return conformanceIssue(paths, itemId, "conformance_review_required", "The working-tree verification context is unavailable or changed. Keep this unit blocked; resume against stable readable source before obtaining conformance review.");
   }
   return checked;
 }
 
 export async function writeTriageObservation(artifactsDir: string, runId: string, itemId: string, context: unknown, commands: readonly string[]): Promise<void> {
-  await writeJsonFile(triageObservationPath(artifactsDir, runId, itemId), { schema_version: "triage-verification/v1", producer: "triage_required_tests", context,
+  await writeJsonFile(conformanceReviewPaths(artifactsDir, runId, itemId).observation, { schema_version: "triage-verification/v1", producer: "triage_required_tests", context,
     verification: commands.map(command => ({ command, outcome: "passed", exit_code: 0 })),
   });
 }

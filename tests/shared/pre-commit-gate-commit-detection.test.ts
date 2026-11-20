@@ -89,6 +89,7 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
       JSON.stringify({
         worktreeTree,
         stagedTree,
+        indexPath: null,
         head: g("rev-parse", "HEAD").stdout.trim(),
         at: new Date().toISOString(),
       }),
@@ -106,15 +107,15 @@ describe("pre-commit gate: commit detection is subcommand-positional", () => {
     ).toBe(false);
   });
 
-  test("a LIVE lock makes a divergent-tree commit fail open (no interleaved tree surgery)", () => {
+  test("a LIVE lock makes a divergent-tree commit block (no interleaved tree surgery)", () => {
     writeFileSync(join(repo, "sentinel.txt"), "BAD\n");
     g("add", "sentinel.txt");
     writeFileSync(join(repo, "sentinel.txt"), "GOOD\n"); // divergent → round-trip path
     mkdirSync(join(repo, ".claude", "hooks", ".state", "gate-roundtrip.lock"), { recursive: true });
 
-    const r = runCommit(); // BAD staged would block — but the live lock must fail open
-    expect(r.status, `expected fail-open allow (0); stderr:\n${r.stderr}`).toBe(0);
-    expect(r.stderr).toContain("another staged-snapshot round-trip is in flight");
+    const r = runCommit(); // The live lock blocks before either tree is checked.
+    expect(r.status, `expected block (2); stderr:\n${r.stderr}`).toBe(2);
+    expect(r.stderr).toContain("a staged-snapshot round-trip is in flight");
     // Worktree untouched by the skipped round-trip.
     expect(readFileSync(join(repo, "sentinel.txt"), "utf8").trim()).toBe("GOOD");
   });

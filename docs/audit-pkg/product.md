@@ -38,7 +38,7 @@ The supported user-facing surfaces are:
 
 - `audit-code ensure` — lazily bootstraps repo-local /audit-code assets when they are missing or stale
 - `audit-code install` — bootstraps /audit-code into supported repo-local host surfaces
-- `audit-code install-host` — installs /audit-code into ONE named host surface (--host <name>)
+- `audit-code install-host` — installs repo-local /audit-code assets for Copilot (--host copilot)
 - `audit-code verify-install` — smoke-tests the generated /audit-code host assets after an install
 
 <!-- END GENERATED CLI SURFACE -->

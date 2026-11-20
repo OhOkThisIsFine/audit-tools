@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ calls: [] as string[], badFlag: "", output: "" }));
+const fixture = vi.hoisted(() => ({ calls: [] as string[], badFlag: "", output: "", failInit: false }));
 vi.mock("../../scripts/shared/hermetic-state-dir.mjs", () => ({}));
 vi.mock("../../scripts/shared/smoke-tarball.mjs", () => ({
   resolveSmokeTarball: () => ({ tarballPath: "/fixture/package.tgz", packed: false }),
@@ -16,6 +16,8 @@ vi.mock("fs", () => ({
 vi.mock("child_process", () => ({
   spawnSync: (command: string, args: string[]) => {
     fixture.calls.push(`${command} ${args.join(" ")}`);
+    if (fixture.failInit && args[0] === "init") return { status: 17, stderr: "fixture init refused", stdout: "" };
+    if (fixture.failInit && args[0] === "install") return { status: 19, stderr: "later install failure", stdout: "" };
     let stdout = "";
     if (/remediate-code(?:\.cmd)?$/.test(command)) {
       stdout = args[0] === "--version" ? "0.52.4\n" : "Usage: remediate-code [options] [command]\n";
@@ -32,6 +34,7 @@ beforeEach(() => {
   vi.resetModules();
   fixture.calls.length = 0;
   fixture.badFlag = fixture.output = "";
+  fixture.failInit = false;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("smoke rejected"); });
@@ -39,6 +42,12 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 const runSmoke = () => import("../../scripts/remediate/smoke-packaged-remediate-code.mjs");
+
+test("an npm init failure stops fixture setup and reports the child error", async () => {
+  fixture.failInit = true;
+  await expect(runSmoke()).rejects.toThrow(/npm init.*17.*fixture init refused/s);
+  expect(fixture.calls.some(call => call.includes(" install "))).toBe(false);
+});
 
 test("packaged smoke executes installed npm bin for version and help", async () => {
   await runSmoke();

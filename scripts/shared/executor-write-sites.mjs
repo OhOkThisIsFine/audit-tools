@@ -53,9 +53,6 @@ const FILENAME_CONSTANT_RULE = /([A-Z][A-Z0-9_]*FILENAME)\s*=\s*"([^"\\/\s]+\.[A
  *                           addressed). Follows the local-variable form
  *                           (`const artifactsWritten = [...]` + `.push("x")`)
  *                           the intake and acquisition runners use.
- *   'artifactsDirWrites'  — `writeJsonFile(join(<x.>artifactsDir, "name"))`: the
- *                           CLI-site writes of host_delegation executors, which
- *                           never return an `artifacts_written` array.
  *   'artifactPathBinding' — `= join(<x.>artifactsDir, "name")`: the artifact path
  *                           the CLI BINDS and hands to the host, which then
  *                           performs the write itself.
@@ -70,12 +67,11 @@ const FILENAME_CONSTANT_RULE = /([A-Z][A-Z0-9_]*FILENAME)\s*=\s*"([^"\\/\s]+\.[A
  *                           `artifacts_written` literal appearing there refuses,
  *                           instead of leaving the executor's pin vacuous.
  *
- * Both regex rules honour an optional `scope`, matching inside that top-level
+ * The path-binding rule honours an optional `scope`, matching inside that top-level
  * binding rather than over the whole file — the whole-file form attributes any
  * later matching call in the module to this executor.
  */
-const ARTIFACTS_DIR_WRITE_RULE =
-  /writeJsonFile\(\s*join\(\s*(?:[A-Za-z_$][\w$]*\.)*artifactsDir,\s*"([^"\\/\s]+\.[A-Za-z0-9]+)"\s*\)/g;
+// sites-pinned: tests/audit/executor-artifact-production-declaration.test.ts
 const ARTIFACT_PATH_BINDING_RULE =
   /=\s*join\(\s*(?:[A-Za-z_$][\w$]*\.)*artifactsDir,\s*"([^"\\/\s]+\.[A-Za-z0-9]+)"\s*\)/g;
 
@@ -504,15 +500,11 @@ export function extractExecutorWriteSets(root = repoRoot) {
         );
       }
     } else {
-      const rule = {
-        artifactsDirWrites: ARTIFACTS_DIR_WRITE_RULE,
-        artifactPathBinding: ARTIFACT_PATH_BINDING_RULE,
-      }[site.rule];
-      if (!rule) {
+      if (site.rule !== "artifactPathBinding") {
         throw new Error(`unknown write-site rule "${site.rule}" for ${site.executor}`);
       }
       const haystack = site.scope ? scopeNodeFor(site).getText() : source;
-      names = new Set([...haystack.matchAll(rule)].map((match) => match[1]));
+      names = new Set([...haystack.matchAll(ARTIFACT_PATH_BINDING_RULE)].map((match) => match[1]));
       if (names.size === 0) {
         throw new Error(
           `write site for ${site.executor} (${site.rule} over ${site.file}${site.scope ? `#${site.scope}` : ""}) matched nothing — the rule or the call shape moved`,

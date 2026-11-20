@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { cmdNextStep } from "../../src/audit/cli/nextStepCommand.js";
@@ -160,6 +160,28 @@ test("every input of the stored architecture-discovery tasks stales audit_tasks.
       expect(computeStaleArtifacts(changed, { emit: false }).has("audit_tasks.json"), artifact).toBe(true);
     }
   });
+});
+
+test("planning and ingestion derive metrics from the affinity graph they persist", async () => {
+  const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
+  const { runResultIngestionExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
+  const metrics = await import("../../src/audit/orchestrator/reviewPackets.js");
+  const observed = vi.spyOn(metrics, "buildAuditPlanMetrics");
+  try {
+    await withTempRepo(async root => {
+      const planned = await runPlanningExecutor(deepCeilingBundle(), root, { "src/a.ts": 4, "README.md": 2 });
+      expect(planned.updated.task_affinity_graph).toBeDefined();
+      expect(observed.mock.lastCall?.[1]?.affinityGraph).toBe(planned.updated.task_affinity_graph);
+      observed.mockClear();
+      const ingested = runResultIngestionExecutor(planned.updated, []);
+      expect(ingested.updated.task_affinity_graph).toBeDefined();
+      expect(observed.mock.lastCall?.[1]?.affinityGraph).toBe(ingested.updated.task_affinity_graph);
+      expect(ingested.artifacts_written).not.toContain("access_memory.json");
+      expect(ingested.updated).not.toHaveProperty("access_memory");
+    });
+  } finally {
+    observed.mockRestore();
+  }
 });
 
 test("result ingestion stamps audit_tasks.json only with the discovery family its ingested ledger derives", async () => {

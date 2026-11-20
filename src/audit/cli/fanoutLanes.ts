@@ -310,8 +310,9 @@ export async function materializeFanoutLanes(params: {
   await mkdir(promptDir, { recursive: true });
 
   const lanes: MaterializedFanoutLane[] = [];
-  /** The text actually written per lane — footed, so the record matches the file. */
-  const writtenText = new Map<string, string>();
+  // Expected submissions bind the body. Independent review files also contain the binding trailer.
+  // sites-pinned: tests/audit/fanout-lanes.test.ts
+  const promptBodyByLane = new Map<string, string>();
   const reviewBindings = new Map<string, { promptSha256: string; reviewRequirement: string; promptPath: string }>();
   const activeBindings = new Map<string, AuditReviewBinding>();
   for (const spec of params.lanes) {
@@ -351,7 +352,7 @@ export async function materializeFanoutLanes(params: {
     const promptText = bound.text;
     const promptPath = requirement === "ordinary" ? join(promptDir, spec.promptFilename) : join(promptDir, "prompts", bound.sha256, spec.promptFilename);
     if (requirement !== "ordinary") activeBindings.set(spec.id, { requirement, ...(spec.semanticInputRevision === undefined ? {} : { semanticInputRevision: spec.semanticInputRevision }), promptSha256: bound.sha256, promptContentSha256: hashContent(promptText), promptPath, runId: params.runId, submissionId: laneSubmissionId(spec.id, params.runId), inputs: contextInputs.map(({ path, sha256 }) => ({ path, sha256 })) });
-    writtenText.set(spec.id, body);
+    promptBodyByLane.set(spec.id, body);
     reviewBindings.set(spec.id, { promptSha256: bound.sha256, reviewRequirement: requirement, promptPath });
     // Required review assets are content-addressed and repaired to their exact
     // canonical bytes before publication, even when a response already exists.
@@ -408,7 +409,7 @@ export async function materializeFanoutLanes(params: {
     // throws instead of minting an expectation nothing can ever satisfy.
     params.lanes
       .filter((spec) => spec.expected !== false)
-      .map((spec) => ({ lane: spec.id, promptText: writtenText.get(spec.id)! })),
+      .map((spec) => ({ lane: spec.id, promptText: promptBodyByLane.get(spec.id)! })),
   );
 
   const pendingLanes = lanes.filter((lane) => !lane.resultExists);

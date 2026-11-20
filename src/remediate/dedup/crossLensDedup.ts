@@ -1,11 +1,7 @@
 // sites-pinned: tests/remediate/cross-lens-dedup.test.ts, tests/shared/finding-similarity.test.ts
-import { crossLensDedupe, wordJaccard } from "audit-tools/shared";
+import { crossLensDedupe } from "audit-tools/shared";
 import type { CrossLensDedupeResult } from "audit-tools/shared";
 import type { Finding } from "../state/types.js";
-
-// Re-exported: tests/remediate/cross-lens-dedup.test.ts imports wordJaccard
-// directly from this module.
-export { wordJaccard };
 
 /**
  * Remediate's DRAW of the shared cross-lens dedup core (`crossLensDedupe`): the

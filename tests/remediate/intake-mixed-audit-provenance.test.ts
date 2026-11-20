@@ -58,6 +58,16 @@ async function readyMixedIntake(declinedFindingId?: string) {
   return step;
 }
 
+test.each([false, true])("public intake refuses a retired audit report with guidance=%s", async withGuidance => {
+  await writeFile(inputPath, JSON.stringify({ schema_version: "audit-findings/v1alpha1", findings: [] }));
+  const result = cli("--input", inputPath, ...(withGuidance ? ["--guidance-file", guidancePath] : []));
+  expect(result.status, result.stderr).toBe(0);
+  const step = JSON.parse(result.stdout);
+  expect(step.step_kind).toBe("collect_starting_point");
+  expect(step.stop_condition).toContain(inputPath);
+  expect(step.stop_condition).toMatch(/regenerate.*audit-tools\/audit-findings\/v1alpha2/i);
+});
+
 for (const selected of [false, true]) {
   test(`public mixed intake retains audit provenance and separate guidance${selected ? " with a finding selection" : ""}`, async () => {
     const result = cli("--input", inputPath, "--guidance-file", guidancePath, ...(selected ? ["--severity", "high"] : []));

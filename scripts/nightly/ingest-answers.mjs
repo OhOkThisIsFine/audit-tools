@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/stored-nightly-queue.test.ts, tests/shared/nightly-routine.test.ts
 // sites-pinned: tests/shared/nightly-routine.test.ts, tests/shared/nightly-completion-ledger.test.ts
 //
 // Read the owner's ticked boxes out of the tracked markdown inbox and record
@@ -25,7 +26,7 @@
 // `--dryrun` can no longer perform the write `--dry-run` was meant to prevent.
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { recordDecision, readOpenItems, INBOX_RELPATH } from './items.mjs';
+import { recordDecisions, readOpenItems, INBOX_RELPATH } from './items.mjs';
 import { MARKER_RE, CITATION_EXEMPT_RE } from './render-inbox.mjs';
 import { guardArgv } from '../shared/argvGuard.mjs';
 
@@ -106,9 +107,10 @@ export function ingestAnswers(root, { dryRun = false } = {}) {
 
   const text = readFileSync(path, 'utf8');
   const blocks = splitBlocks(text);
-  const byKey = new Map((readOpenItems(root).items ?? []).map((i) => [i.subject_key, i]));
+  const byKey = new Map((readOpenItems(root, { required: true }).items ?? []).map((i) => [i.subject_key, i]));
 
   const recorded = [];
+  const answers = [];
   const errors = [];
   let unanswered = 0;
 
@@ -118,20 +120,17 @@ export function ingestAnswers(root, { dryRun = false } = {}) {
     if (parsed.error) { errors.push(parsed); continue; }
 
     const item = byKey.get(key);
-    if (!dryRun) {
-      recordDecision(root, key, {
-        answer: parsed.answer,
-        disposition: parsed.disposition,
-        subject: item?.subject,
-        path: item?.path,
-        note: parsed.note,
-      });
-    }
+    answers.push({ key,
+      answer: parsed.answer,
+      disposition: parsed.disposition,
+      subject: item?.subject,
+      path: item?.path,
+      note: parsed.note,
+    });
     recorded.push({ key, id: item?.id ?? key, disposition: parsed.disposition, answer: parsed.answer });
   }
 
-  // Each recordDecision re-renders the inbox, so answered items have dropped out
-  // and a 'question' disposition has come back open.
+  if (!dryRun && answers.length) recordDecisions(root, answers);
 
   return { recorded, errors, unanswered, missing: false };
 }

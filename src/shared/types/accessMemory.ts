@@ -1,29 +1,13 @@
 import { z } from "zod";
 
 /**
- * Per-run access-memory record: a deterministic, artifact-derived summary of
- * which files (and, later, symbols) earlier steps actually covered or edited,
- * used to bias later packet composition toward continuity (files earlier steps
- * touched are likelier relevant and cheaper to re-include).
- *
- * Invariants (single-sourced here so both orchestrators conform):
- * - **Deterministic, content-derived serialization.** `paths` is path-sorted and
- *   `lenses` lexically sorted; counters are values, never an access-ordered
- *   array — so the artifact's content hash is stable across re-derivation and
- *   never churns the staleness DAG on iteration incidentals.
- * - **Recency lives in STEP-ORDINAL space, never wall-clock.** `last_ordinal` is
- *   a result's position in the ingested ledger (a step index), so the recency
- *   signal is stable across machines/agents and clock skew.
- * - **Raw counters persisted; continuity SCORES derived JIT at dispatch.** This
- *   record carries only the raw frequency/recency counters; the personalized
- *   ranking that consumes them is computed at dispatch and never persisted.
+ * Historical per-run summary of covered and edited paths. Retained for readers
+ * of archived artifacts. Recency is measured in ledger ordinals.
  */
 export const ACCESS_MEMORY_VERSION = 1;
 
 /**
- * Reserved for the `path::symbol` granularity increment. Unpopulated by the
- * audit-side path-level harvest (AuditResult.file_coverage carries no symbol
- * information); a later increment fills it from the extractors' symbol spans.
+ * Optional symbol-level detail supported by the historical wire format.
  */
 export const AccessMemorySymbolRecordSchema = z
   .object({

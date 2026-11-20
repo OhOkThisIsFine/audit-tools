@@ -54,10 +54,16 @@ export function renderBaseline(files) {
   return `${JSON.stringify({ note: "Pre-mechanism review records with no routing declaration. This list only SHRINKS: declare a record's routing and re-run with --update-baseline, or the stale entry is a red.", files: [...files].sort() }, null, 2)}\n`;
 }
 
+// sites-pinned: tests/shared/script-entry-regressions.test.ts
 function readBaseline() {
   const path = join(root, BASELINE_PATH);
   if (!existsSync(path)) return [];
-  return JSON.parse(readFileSync(path, "utf8")).files ?? [];
+  const raw = readFileSync(path, "utf8");
+  try {
+    return JSON.parse(raw).files ?? [];
+  } catch (error) {
+    throw new Error(`Could not parse routing baseline at ${path}`, { cause: error });
+  }
 }
 
 function git(args) {

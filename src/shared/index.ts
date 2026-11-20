@@ -15,7 +15,6 @@ export {
 export type { RiskItem, RiskRegister } from "./types/risk.js";
 export { RiskItemSchema, RiskRegisterSchema } from "./types/risk.js";
 export type {
-  FlowConfidenceLevel,
   CriticalFlow,
   CriticalFlowManifest,
   CriticalFlowFallbackResult,
@@ -28,7 +27,6 @@ export {
   CriticalFlowFallbackResultSchema,
 } from "./types/flows.js";
 export type {
-  SurfaceKind,
   SurfaceRecord,
   SurfaceManifest,
 } from "./types/surfaces.js";
@@ -72,10 +70,8 @@ export { edgeConfidence } from "./graph/edgeConfidence.js";
 export type {
   FindingSeverity,
   FindingConfidence,
-  FindingEvidenceLane,
   FindingLocation,
   FindingGrounding,
-  FindingVerificationStatus,
   AnchorExpectation,
   ExecutableAnchor,
   Finding,
@@ -89,7 +85,6 @@ export type {
   AuditRead,
 } from "./types/finding.js";
 export { findingIdentity } from "./types/finding.js";
-export type { FindingLocationLineIssue } from "./types/finding.js";
 // Zod schemas (A6 single source) — type inferred above, JSON schema generated.
 export {
   FindingSeveritySchema,
@@ -119,11 +114,9 @@ export {
 export type { LensCoverageEntry } from "./types/finding.js";
 export type {
   DesignReviewBinding,
-  DesignReviewSettings,
   IntentCheckpoint,
 } from "./types/intentCheckpoint.js";
 export type {
-  LenientIntentCheckpointRead,
   RejectedCheckpointField,
 } from "./types/intentCheckpoint.js";
 export {
@@ -143,11 +136,8 @@ export type {
   CharterConfidence,
   CharterProvenance,
   Charter,
-  GoalNode,
-  GoalEdge,
   GoalGraph,
   Ceiling,
-  ClarificationValue,
 } from "./types/charter.js";
 export {
   CharterKindSchema,
@@ -182,7 +172,6 @@ export type {
   DecompositionSource,
   DecomposedNode,
   DecomposeResult,
-  DecomposeOptions,
 } from "./decompose/consensus.js";
 export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
 // The five-step charter layer (design of record 2026-09-15; spec §"The estimator
@@ -192,15 +181,9 @@ export { decompose, clustersFromPartitions } from "./decompose/consensus.js";
 export type {
   CharterLaneKind,
   LaneGoalNode,
-  LaneGoalEdge,
   CharterLaneGraph,
-  CorrespondenceMember,
   CorrespondenceCandidate,
   CharterCorrespondence,
-  DifferenceDimension,
-  DifferenceRelation,
-  DifferenceSplit,
-  DifferenceAccount,
   DifferenceRoute,
   FidelityVerdict,
   CharterDifference,
@@ -227,11 +210,8 @@ export {
 } from "./types/charter.js";
 export type {
   CharterSubmission as CharterLaneSubmission,
-  CharterMergedLane,
   CharterExtractionMerged,
-  AssembledLaneGraph,
   CharterComparisonSubmission,
-  AssembledComparison,
   CharterFidelitySubmission,
 } from "./decompose/charterExtraction.js";
 export {
@@ -257,7 +237,6 @@ export type {
   ClarificationDifferenceInput,
   ClarificationAttention,
   ClarificationLoopDeps,
-  AssembledClarifications,
   ClarificationAnswersSubmission,
 } from "./decompose/charterClarification.js";
 export {
@@ -278,9 +257,7 @@ export { interpretFreeFormIntent } from "./intent/freeFormIntentInterpreter.js";
 
 // Intent interpretation
 export type {
-  IntentClauseKind,
   IntentClause,
-  ClauseInterpretResult,
 } from "./intent/clauseInterpreter.js";
 export {
   decomposeIntent,
@@ -324,7 +301,6 @@ export {
   confidenceRank,
   severityCompare,
 } from "./types/lens.js";
-export type { RepoConventions } from "./tooling/repoConventions.js";
 export {
   detectRepoConventions,
   formatRepoConventions,
@@ -356,7 +332,6 @@ export {
   getAnalyzerPolicyPath,
   loadAnalyzerPolicy,
   persistAnalyzerSettings,
-  persistAnalyzerConsent,
 } from "./analyzerPolicy.js";
 export type {
   AnalyzerConsentDecision,
@@ -400,21 +375,12 @@ export {
   composeOpenCodeBashCeiling,
   verifyOpenCodeBashCeiling,
 } from "./opencodePermissions.js";
-export type { OpenCodeCeilingViolation } from "./opencodePermissions.js";
 
 // Agent meta-audit reflections (opt-in worker feedback channel, both orchestrators)
 export type {
-  ReflectionClarity,
-  ReflectionSeverity,
   AgentReflection,
   ReflectionAggregate,
 } from "./agentReflections.js";
-export type {
-  FindingFileRef,
-  FindingBadge,
-  FindingDisplay,
-  FindingDisplayOptions,
-} from "./reporting/findingDisplay.js";
 export {
   findingLead,
   formatFindingFileRef,
@@ -424,7 +390,6 @@ export {
   renderFindingBlockLines,
   renderFindingBlock,
 } from "./reporting/findingDisplay.js";
-export type { AuditDeliverablePair } from "./reporting/auditDeliverable.js";
 export {
   buildAuditFindingsDeliverable,
   renderAuditDeliverableMarkdown,
@@ -466,14 +431,10 @@ export { chunkByBudget } from "./chunkByBudget.js";
 // One provider-neutral content-coherence membership core. Audit packets and
 // findings work blocks are projections over this exact trace.
 export type {
-  ContentCoherenceEligibility,
   ContentCoherenceEvidence,
-  ContentCoherenceItem,
   ContentCoherencePolicy,
   ContentCoherenceRelationshipKind,
   ContentCoherenceRelationship,
-  ContentCoherenceInput,
-  NormalizedContentCoherenceItem,
   ContentCoherenceTrace,
 } from "./decompose/contentCoherence.js";
 export {
@@ -524,15 +485,12 @@ export {
 } from "./findingSimilarity.js";
 
 // Content hashing: shared SHA-256 primitive (single source; explicit length)
-export type { HashContentOptions } from "./hash.js";
 export { hashContent, hashContentStream } from "./hash.js";
 
 // File integrity: the shared classify-and-bucket loop behind audit-code's
 // checkFileIntegrity and remediate-code's checkAffectedFileIntegrity.
 export type {
   FileIntegrityBuckets,
-  FileIntegrityHashOutcome,
-  FileIntegrityCheckOptions,
 } from "./fileIntegrity.js";
 export { checkFileIntegrityRecords } from "./fileIntegrity.js";
 
@@ -543,7 +501,6 @@ export { stableStringify } from "./stableStringify.js";
 // expected-set contract, append-only drift/repair ledger, and the validated
 // hand-recovery entry point both bins draw from. See src/shared/submission/.
 export type {
-  SubmissionIdParts,
   SubmissionRoots,
 } from "./submission/submissionIdentity.js";
 export {
@@ -557,7 +514,6 @@ export {
 export type {
   SubmissionIssue,
   SubmissionIssueCode,
-  SubmissionReadContext,
   SubmissionReadOutcome,
 } from "./submission/submissionClassifier.js";
 export {
@@ -566,7 +522,7 @@ export {
   classifyRead,
   readSubmissionDocument,
 } from "./submission/submissionClassifier.js";
-export type { IngestionCheck, IngestionCheckId, IngestionDraw } from "./submission/ingestionChecks.js";
+export type { IngestionCheckId } from "./submission/ingestionChecks.js";
 export {
   INGESTION_CHECKS,
   INGESTION_DRAWS,
@@ -575,11 +531,8 @@ export {
   ingestionCheckIdsFor,
 } from "./submission/ingestionChecks.js";
 export type {
-  ExpectedSetDiff,
   ExpectedSubmission,
-  ExpectedSubmissionLane,
   ExpectedSubmissionSet,
-  SubmissionClassification,
 } from "./submission/expectedSubmissions.js";
 export {
   EXPECTED_SET_CONTRACT_VERSION,
@@ -591,7 +544,6 @@ export {
 export type {
   SubmissionEventKind,
   SubmissionLedgerDrop,
-  SubmissionLedgerDropReason,
   SubmissionLedgerEvent,
   SubmissionLedgerRead,
 } from "./submission/submissionLedger.js";
@@ -617,7 +569,6 @@ export { recoverSubmission } from "./submission/handRecovery.js";
 export type {
   SubmissionParse,
   SubmissionScanMessages,
-  SubmissionScanOutcome,
 } from "./submission/submissionScan.js";
 export { scanBoundSubmission } from "./submission/submissionScan.js";
 // THE ingest-report renderer both draws render through, each with its own
@@ -630,10 +581,8 @@ export {
   workerPromptBindingHolds,
 } from "./submission/workerPromptBinding.js";
 export type {
-  HostResultOutcomes,
   IssueRemedy,
   SubmissionIngestHistory,
-  TrailingSubmissionRefusal,
   // A TYPE, and it must be re-exported as one: a value re-export of a
   // type-only binding emits nothing, so an importer's named import fails at
   // RUNTIME ("does not provide an export named ...") after a green typecheck
@@ -690,11 +639,6 @@ export {
 } from "./submission/hostHandoffCore.js";
 export type {
   HostHandoffPaths,
-  IdentityBindingParams,
-  IdentityComponent,
-  ResultMapEntry,
-  ResultMappedItem,
-  WorkloadEnvelopeParse,
 } from "./submission/hostHandoffCore.js";
 
 // Content-key seam (O2 ↔ F1): tool-owned task-content signature + discriminator,
@@ -702,10 +646,8 @@ export type {
 // contentKey, per-record instance id. See src/shared/contentKey.ts.
 export type {
   IdentityKeyInput,
-  TaskContentSignatureInput,
   ResultEmitSource,
   ResultContentDiscriminatorInput,
-  IdempotencyKeyInput,
   ContentKeyInput,
 } from "./contentKey.js";
 export {
@@ -725,7 +667,6 @@ export {
 // own projection table; this single-sources the diff algorithm + prompt shape.
 export type {
   ProjectionDiffEntry,
-  ReReviewSectionInput,
 } from "./reReview/projectionDiff.js";
 export {
   stableStringifyProjection,
@@ -739,7 +680,6 @@ export type {
   RunTrackedSyncOptions,
   RunTrackedResult,
   SpawnDeadline,
-  SpawnDeadlineMiss,
 } from "./tooling/exec.js";
 export {
   runTracked,
@@ -764,10 +704,6 @@ export {
 // Tooling: allowlisted read-only command runner + default-deny arg allowlist
 // (single source for the auditor's executable-anchor grounding pass; CRIT
 // ARC-a06a3945 — validates arguments, not just the executable).
-export type {
-  AllowlistedExecOutcome,
-  AllowlistedExecRunner,
-} from "./tooling/allowlistedExec.js";
 export {
   ALLOWLISTED_EXEC_TIMEOUT_MS,
   ANCHOR_ALLOWLIST,
@@ -788,7 +724,6 @@ export { discoverProjectCommands } from "./tooling/testCommand.js";
 // one piece the per-item prepare still needs, because a scope that cannot reach
 // the glossary document makes the gate unsatisfiable for the item that coins an
 // id.
-export type { LandingGateRole } from "./tooling/landingGates.js";
 export {
   GLOSSARY_DOCUMENT_PATH,
   LANDING_GATE_SCRIPT_NAMES,
@@ -839,11 +774,7 @@ export {
 
 // Tooling: optional analyzer dependency resolution
 export type {
-  AnalyzerDepVia,
-  ResolvedAnalyzerDep,
-  ResolveAnalyzerDepOptions,
   InstallToCacheOptions,
-  InstallToCacheResult,
 } from "./tooling/analyzerDeps.js";
 export {
   ANALYZER_CACHE_ROOT_MODE,
@@ -870,14 +801,10 @@ export {
 } from "./git.js";
 export type {
   GitHistory,
-  CoChangePair,
-  ChurnEntry,
-  AuthorshipEntry,
-  MineGitHistoryOptions,
 } from "./git.js";
 
 // Observability
-export type { RunLogEvent, RunLoggerOptions } from "./observability/runLog.js";
+export type { RunLogEvent } from "./observability/runLog.js";
 export { RunLogger } from "./observability/runLog.js";
 
 // IO
@@ -985,7 +912,6 @@ export {
   REPO_ROOT_MARKERS,
 } from "./io/repoRoot.js";
 export { resolveWithinRoot, assertWithinRoot } from "./io/pathContainment.js";
-export type { WithinRootOptions } from "./io/pathContainment.js";
 
 // IO: node-worktree context guard (a dispatched worker's cwd must never reach
 // the shared run state through a driver lifecycle CLI or a session writer).
@@ -1032,7 +958,6 @@ export { captureFrictionEvent } from "./friction/captureFrictionEvent.js";
 // snapshot a new fact can silently bypass.
 export type {
   StepBoundaryEventType,
-  StepBoundaryFriction,
 } from "./friction/stepBoundaryCapture.js";
 export {
   captureStepBoundaryFriction,
@@ -1047,8 +972,6 @@ export {
 export type {
   FrictionDisposition,
   FrictionDispositionRecord,
-  TriageSubject,
-  FrictionTriageDecision,
   FrictionOpenObservation,
   FrictionCategoryAttestation,
   FrictionCategory,
@@ -1073,7 +996,6 @@ export {
 // The friction record's RUN LINKAGE: the writer seam that names the step-envelope
 // run and the dispatch run a round relates to, and the by-reference reader that
 // finds a record from any id it references (semantics: `FrictionRunLinks`).
-export type { FrictionRecordReference } from "./friction/frictionRecord.js";
 export {
   linkFrictionRunIds,
   findFrictionRecordsByRunLink,
@@ -1082,7 +1004,6 @@ export {
 // IO: install/ensure-time .gitignore management for artifacts emitted into a
 // consuming repo's tree — always-ignore build/install assets + friction sidecar;
 // visibility-conditional ignore of deliverables + meta-audit reflections.
-export type { RepoVisibility } from "./io/gitignoreArtifacts.js";
 export {
   ALWAYS_IGNORE_PATTERNS,
   PUBLIC_TREE_IGNORE,
@@ -1120,7 +1041,7 @@ export {
 } from "./io/stepContractWriter.js";
 
 // Validation
-export type { ValidationSeverity, ValidationIssue } from "./validation/basic.js";
+export type { ValidationIssue } from "./validation/basic.js";
 export {
   describeValue,
   isRecord,
@@ -1166,12 +1087,10 @@ export type {
   CharterPacketCoverage,
   CharterPacketCoverageClass,
   CharterPacketManifest,
-  CharterPacketManifestExcerpt,
   CitationValidationSummary,
   EvidenceClass,
   OmissionReason,
   PacketExcerpt,
-  PacketExcerptLine,
   PacketLineRun,
 } from "./types/charterPacket.js";
 export {
@@ -1220,27 +1139,17 @@ export {
 } from "./validation/contractConstructionSites.js";
 export type {
   ContractFieldSet,
-  DerivedSiteMap,
-  DerivedSites,
-  FileSiteMarkers,
-  RenderedJsonSchema,
-  SiteMarker,
 } from "./validation/contractConstructionSites.js";
 
 // The CONTRACT-TYPE registry: every validated contract type, its canonical
 // schema, and the property shapes a construction-site walk decides on.
 export { CONTRACT_PROPERTY_SHAPES } from "./types/contractPropertyShapes.js";
-export type {
-  ContractPropertyShape,
-  ContractTypeShape,
-} from "./types/contractPropertyShapes.js";
 
 // sites-pinned: tests/shared/contract-construction-sites.test.ts
 //   This file declares no behaviour — it is the shared surface's re-export
 //   barrel, and the rows above are pinned by the registry suite that holds the
 //   contract shapes against the real zod schemas.
 
-export type { CacheablePromptParts } from "./prompts.js";
 export {
   buildCacheablePrompt,
   DISPATCH_PROMPT_HANDOFF_NOTE,
@@ -1250,7 +1159,7 @@ export {
 } from "./prompts.js";
 
 // Host-asset renderers — every IDE asset derives from the one canonical prompt body.
-export type { HostAssetKind, RenderHostAssetOptions } from "./hostAssets.js";
+export type { HostAssetKind } from "./hostAssets.js";
 export { renderHostAsset } from "./hostAssets.js";
 
 // sites-pinned: tests/shared/shared-tests-invariants.test.mjs, tests/shared/contractPipeline-types.test.ts
@@ -1259,7 +1168,6 @@ export type {
   ExecutionRequirement,
   ExecutionUnit,
   ExecutionRequest,
-  ExecutionSourceDisposition,
   ExecutableChangePlan,
 } from "./types/executionPlan.js";
 export {
@@ -1282,7 +1190,6 @@ export type {
 export { CONTRACT_PIPELINE_VERIFICATION_REPORT_VERSION } from "./types/verificationReport.js";
 
 // Parsing utilities
-export type { QuoteChar, StringAwareScannerOptions } from "./parsing/stringAwareScanner.js";
 export { scanStringAware } from "./parsing/stringAwareScanner.js";
 export {
   pathMatchesPrefix,
@@ -1304,7 +1211,6 @@ export {
 export type {
   CrossLensDedupePolicy,
   CrossLensDedupeResult,
-  AbsorbOptions,
 } from "./findings/dedupe.js";
 
 export type {
@@ -1400,7 +1306,6 @@ export {
   normalizeGenericExternalResults,
   normalizeGenericExternalEdges,
 } from "./analyzers/normalizeExternal.js";
-export type { NormalizeExternalOptions } from "./analyzers/normalizeExternal.js";
 export {
   AnalyzerLeadProvenanceSchema,
   normalizeAnalyzerSnippet,
@@ -1438,11 +1343,10 @@ export {
 export { parseClippy } from "./analyzers/clippy.js";
 
 export { ReviewRequirementSchema, ReviewDeclarationSchema, reviewIndependenceIssue } from "./types/reviewIndependence.js";
-export type { ReviewRequirement, ReviewDeclaration } from "./types/reviewIndependence.js";
+export type { ReviewRequirement } from "./types/reviewIndependence.js";
 export { ReviewSubmissionEnvelopeSchema, parseReviewSubmissionEnvelope } from "./types/reviewIndependence.js";
-export type { ReviewSubmissionEnvelope, ReviewSubmissionParseResult, ReviewSubmissionFailureCode } from "./types/reviewIndependence.js";
 export { ContractReviewProvenanceSchema, ContractReviewOutcomeSchema, AcceptedConformanceReviewSchema } from "./types/reviewIndependence.js";
-export type { ContractReviewProvenance, ContractReviewDeclaration, ContractReviewOutcome, AcceptedConformanceReview } from "./types/reviewIndependence.js";
+export type { ContractReviewOutcome, AcceptedConformanceReview } from "./types/reviewIndependence.js";
 
 export { readRecursiveTrackedPaths } from "./gitTrackedPaths.js";
 

@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
+import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { buildTerminalStep } from "../../src/audit/cli/nextStepHelpers.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
@@ -27,11 +29,31 @@ test("the next audit reviews only what changed since the completed one", async (
     const artifactsDir = join(root, ".audit-tools", "audit");
     await advanceToDispatchReady(root);
     const tasks = JSON.parse(await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"));
+    const metricsPath = join(artifactsDir, "audit_plan_metrics.json");
+    const historicalMetrics = JSON.parse(await readFile(metricsPath, "utf8"));
+    expect(historicalMetrics.packet_quality).not.toHaveProperty("merge_edge_kind_counts");
+    historicalMetrics.packet_quality.merge_edge_kind_counts = {};
+    await writeFile(metricsPath, JSON.stringify(historicalMetrics));
+    const metadataPath = join(artifactsDir, "artifact_metadata.json");
+    const historicalMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    historicalMetadata.artifacts["audit_plan_metrics.json"].content_hash = hashArtifactValue("audit_plan_metrics.json", historicalMetrics);
+    const memoryPath = join(artifactsDir, "access_memory.json");
+    const oldMemory = { version: 1, total_ordinals: 0, paths: [] };
+    await writeFile(memoryPath, JSON.stringify(oldMemory));
+    historicalMetadata.artifacts["access_memory.json"] = {
+      revision: 1, content_hash: hashArtifactValue("access_memory.json", oldMemory),
+      dependency_revisions: { "audit_results.jsonl": historicalMetadata.artifacts["audit_results.jsonl"]?.revision ?? 0 },
+    };
+    await writeFile(metadataPath, JSON.stringify(historicalMetadata));
+    expect((await loadArtifactBundle(artifactsDir)).audit_plan_metrics).toEqual(historicalMetrics);
     await seedEmptyNarrative(artifactsDir);
     // Outside the audited tree: a results file in the root would be a new file the next run reviews.
     const resultsPath = join(root, ".audit-tools", "results.json");
     await writeFile(resultsPath, JSON.stringify(await buildSyntheticResults(tasks, root), null, 2));
     await callIngestResults(["--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath]);
+    expect(await readFile(memoryPath, "utf8")).toBe(JSON.stringify(oldMemory));
+    expect(JSON.parse(await readFile(metadataPath, "utf8")).artifacts).not.toHaveProperty(["access_memory.json"]);
+    expect(JSON.parse(await readFile(metricsPath, "utf8")).packet_quality).not.toHaveProperty("merge_edge_kind_counts");
     const done = await nextStepUntilPresentReport(root);
     expect(done.status).toBe("complete");
 
@@ -53,6 +75,7 @@ test("the next audit reviews only what changed since the completed one", async (
     expect(secondConsent.run_id).not.toBe(firstConsent.run_id);
     expect(existsSync(join(artifactsDir, "session-config.json"))).toBe(true);
     expect(existsSync(join(artifactsDir, "stray-run-record.json"))).toBe(false);
+    expect(existsSync(memoryPath)).toBe(false);
     // Only the edited file is reviewed again.
     const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as {
       work_items: Array<{ scope: { files: string[] } }>;
@@ -72,6 +95,7 @@ test("the next audit reviews only what changed since the completed one", async (
     await writeFile(resultsPath, JSON.stringify(await buildSyntheticResults(secondTasks as never, root), null, 2));
     await callIngestResults(["--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath]);
     expect(await resultCount()).toBe(before + secondTasks.length);
+    expect(existsSync(memoryPath)).toBe(false);
     const second = await nextStepUntilPresentReport(root);
     expect(second.status).toBe("complete");
   });
@@ -101,6 +125,29 @@ describe("rollOverFinishedRun", () => {
       expect(await rollOverFinishedRun(artifactsDir)).toBe(false);
       expect(existsSync(join(artifactsDir, "run-consent.json"))).toBe(true);
       expect(existsSync(join(artifactsDir, "audit_state.json"))).toBe(true);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  test("an older run resumes without loading access memory and rollover expires only its working copy", async () => {
+    const { base, artifactsDir, promotedDir } = await endedRun();
+    try {
+      const working = join(artifactsDir, "access_memory.json");
+      const archived = join(promotedDir, "archive", "old-run", "access_memory.json");
+      const bytes = JSON.stringify({ version: 1, run_id: "old-run", total_ordinals: 0, paths: [] });
+      await mkdir(join(promotedDir, "archive", "old-run"), { recursive: true });
+      await writeFile(working, bytes);
+      await writeFile(archived, bytes);
+      const bundle = await loadArtifactBundle(artifactsDir);
+      expect(bundle.audit_state?.status).toBe("complete");
+      expect(bundle).not.toHaveProperty("access_memory");
+      expect(await rollOverFinishedRun(artifactsDir)).toBe(false);
+      expect(await readFile(working, "utf8")).toBe(bytes);
+      await markRunEnded(artifactsDir);
+      expect(await rollOverFinishedRun(artifactsDir)).toBe(true);
+      expect(existsSync(working)).toBe(false);
+      expect(await readFile(archived, "utf8")).toBe(bytes);
     } finally {
       await rm(base, { recursive: true, force: true });
     }

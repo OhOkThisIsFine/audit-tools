@@ -50,7 +50,7 @@ function confirmedFreeFormIntent(checkpoint: IntentCheckpoint | undefined): stri
   return raw;
 }
 
-function intentInterpretationPath(artifactsDir: string): string {
+export function intentInterpretationPath(artifactsDir: string): string {
   return join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
 }
 

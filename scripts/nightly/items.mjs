@@ -17,10 +17,10 @@
 // changes and the question legitimately returns — the same "a reword is a new
 // item" rule the doc-review ledger already used, applied to the durable side.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { hashContent } from '../shared/primitives.mjs';
-// Call-time cycle only: the renderer reads this module, but never calls this writer.
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { writeQueueFile } from './queue-files.mjs';
+// Saving a decision refreshes projections of an existing queue.
 import { writeInbox } from './render-inbox.mjs';
 
 export const DECISIONS_RELPATH = '.claude/nightly-decisions.json';
@@ -67,24 +67,6 @@ export const LEG_TITLES = {
   solutions: 'Recurring-problem solutions',
 };
 
-// Collapse whitespace and case so trivial reflow does not read as a new subject.
-// Deliberately NOT stripping punctuation: a claim that gains a "not" is a
-// different claim and must re-surface.
-export function normalizeSubject(text) {
-  return String(text ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-// Identity of the THING under question — `<path>::<normalized subject>`.
-// A printable "::" separator, never a control byte: this repo's control-byte
-// guard exists because those land raw in source and turn the file binary.
-export function subjectKey(path, subject) {
-  const material = `${String(path ?? '').replace(/\\/g, '/')}::${normalizeSubject(subject)}`;
-  return hashContent(material, { algorithm: 'sha1', length: 16 });
-}
-
 function readJson(file, fallback) {
   try {
     const data = JSON.parse(readFileSync(file, 'utf8'));
@@ -92,11 +74,6 @@ function readJson(file, fallback) {
   } catch {
     return fallback; // absent / malformed → default, never throw
   }
-}
-
-function writeJson(file, data) {
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(data, null, 2) + '\n', 'utf8');
 }
 
 export function decisionsPath(root) {
@@ -142,7 +119,10 @@ export function readDecisions(root) {
         `${file}, repair or restore it (e.g. from git history or a backup), then retry.`,
     );
   }
-  return data && typeof data === 'object' ? data : {};
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`readDecisions: ${file} must contain a decision object.`);
+  }
+  return data;
 }
 
 // The ONE ledger write. The inbox and the queue snapshot are projections of
@@ -150,8 +130,15 @@ export function readDecisions(root) {
 // commit gate's `check:nightly-inbox` leg then refuses until someone runs
 // `render-inbox.mjs` by hand (seen with `answer.mjs --done`, 2026-10-01).
 function writeDecisions(root, decisions) {
-  writeJson(decisionsPath(root), decisions);
-  writeInbox(root);
+  writeQueueFile(decisionsPath(root), JSON.stringify(decisions, null, 2) + '\n');
+  if (existsSync(join(root, OPEN_ITEMS_RELPATH))) {
+    try {
+      writeInbox(root);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`Decisions saved to ${decisionsPath(root)}. Could not refresh the stored queue: ${reason}. Retry scripts/nightly/render-inbox.mjs with --root ${JSON.stringify(root)}.`, { cause: error });
+    }
+  }
 }
 
 // Record the owner's answer for a subject. Permanent by design — this is the
@@ -162,21 +149,31 @@ function writeDecisions(root, decisions) {
  * @param {string} key
  * @param {{answer?: string, disposition?: string, subject?: string, path?: string, note?: string}} [options]
  */
-export function recordDecision(root, key, { answer, disposition, subject, path, note } = {}) {
-  if (!key) throw new Error('recordDecision: a subject key is required');
+export function recordDecision(root, key, options = {}) {
+  return recordDecisions(root, [{ ...options, key }]);
+}
+
+// A checked inbox may contain several answers. Save them together before
+// replacing its Markdown, including when a prior projection write failed.
+export function recordDecisions(root, answers) {
   const decisions = readDecisions(root);
-  const prior = decisions[key];
-  decisions[key] = {
-    disposition: disposition || 'settled',
-    answer: answer ?? '',
-    subject: subject ?? prior?.subject ?? '',
-    path: path ?? prior?.path ?? '',
-    ...(note ? { note } : {}),
-    // Completion is carried forward, never reset by a re-answer: an owner
-    // clarifying an answer must not silently un-land work that already shipped.
-    ...(prior?.completed_at ? { completed_at: prior.completed_at, completed_ref: prior.completed_ref ?? '' } : {}),
-    decided_at: new Date().toISOString(),
-  };
+  for (const { key, answer, disposition, subject, path, note } of answers) {
+    if (!key) throw new Error('recordDecision: a subject key is required');
+    const prior = decisions[key];
+    const next = {
+      disposition: disposition || 'settled',
+      answer: answer ?? '',
+      subject: subject ?? prior?.subject ?? '',
+      path: path ?? prior?.path ?? '',
+      ...(note ? { note } : {}),
+    };
+    if (prior && prior.note === next.note && Object.entries(next).every(([field, value]) => prior[field] === value)) continue;
+    decisions[key] = {
+      ...next,
+      ...(prior?.completed_at ? { completed_at: prior.completed_at, completed_ref: prior.completed_ref ?? '' } : {}),
+      decided_at: new Date().toISOString(),
+    };
+  }
   writeDecisions(root, decisions);
   return decisions;
 }
@@ -220,7 +217,7 @@ export function recordCompletion(root, key, ref) {
   if (!entry) throw new Error(`recordCompletion: no settled subject "${key}"`);
   decisions[key] = {
     ...entry,
-    completed_at: new Date().toISOString(),
+    completed_at: entry.completed_at && entry.completed_ref === String(ref ?? '').trim() ? entry.completed_at : new Date().toISOString(),
     completed_ref: String(ref ?? '').trim(),
   };
   writeDecisions(root, decisions);
@@ -261,16 +258,19 @@ export function answeredNotDone(decisions, since = COMPLETION_TRACKING_SINCE) {
   return { actionable, grandfathered };
 }
 
-export function readOpenItems(root) {
-  const data = readJson(join(root, OPEN_ITEMS_RELPATH), null);
-  if (!data) return { generated_at: null, run: null, items: [], applied: [], skipped: [] };
-  return {
-    generated_at: data.generated_at ?? null,
-    run: data.run ?? null,
-    items: Array.isArray(data.items) ? data.items : [],
-    applied: Array.isArray(data.applied) ? data.applied : [],
-    skipped: Array.isArray(data.skipped) ? data.skipped : [],
-  };
+export function readOpenItems(root, { required = false } = {}) {
+  const file = join(root, OPEN_ITEMS_RELPATH);
+  let data;
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'));
+    if (!Array.isArray(data?.items) || ['applied', 'skipped'].some(key => data[key] !== undefined && !Array.isArray(data[key]))) {
+      throw new Error('expected an items array and arrays for any applied or skipped entries');
+    }
+  } catch (error) {
+    if (!required && /** @type {NodeJS.ErrnoException} */ (error)?.code === 'ENOENT') return { generated_at: null, run: null, items: [], applied: [], skipped: [] };
+    throw Object.assign(new Error(`Cannot read stored queue ${file}: ${error instanceof Error ? error.message : String(error)}`), { path: file, cause: error });
+  }
+  return { generated_at: null, run: null, ...data, applied: data.applied ?? [], skipped: data.skipped ?? [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -279,8 +279,7 @@ export function readOpenItems(root) {
 // it is ANSWERED — a fact about the conversation. Nothing used to re-test the
 // premise in between, so on 2026-07-25 fifteen of twenty-one surfaced items were
 // already fixed at HEAD. A probe pins the premise mechanically: the literal
-// strings the item quotes, verified at CREATION (the premise must be true when
-// the item is written) and re-evaluated at PRESENTATION.
+// strings the stored item quotes, re-evaluated when presenting the queue.
 //
 // Absence is decided with GIT EVIDENCE, never inferred from a failed read
 // (2026-07-30: 44% of a model-emitted probe batch named unresolvable bare
@@ -351,12 +350,6 @@ export function isRecordPath(file) {
   return RECORD_PATH_PREFIXES.some((p) => norm === p || norm.startsWith(`${p}/`));
 }
 
-// A positive `contains` probe passes at WRITE time in either of two ways: the
-// ordinary tracked-source read ('present'), or the record-file read that is
-// admitted only for a declared non-auto-closing item ('record_present'). Both
-// mean "the premise is true at HEAD"; neither is ever a closing verdict.
-const PASSING_CONTAINS_STATES = new Set(['present', 'record_present']);
-
 // The repo-wide move/rename search domain. Exported because the pre-commit
 // HANDOFF parity trigger must use the identical domain when deciding whether a
 // staged pickaxe change can alter a presentation-time probe verdict.
@@ -385,40 +378,10 @@ function isTrackedPath(root, file) {
   return gitLines(root, ['ls-files', '--error-unmatch', '--', file]) !== null;
 }
 
-function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}) {
-  // Refuse the target before reading it: a probe that cannot produce evidence
-  // must not produce the verdict that closes an item.
-  //
-  // The RECORD-path half of that rule is split by DIRECTION. Closing and
-  // creating need opposite properties from the same probe, and one rule was
-  // enforcing both: a record file quotes the code it is about, so its text
-  // vanishing says nothing about whether the defect was fixed (must never
-  // CLOSE) — but that same text being present is exactly the premise a question
-  // ABOUT a record asserts (must be checkable at CREATE). Callers on the close
-  // path leave the flag off and keep the abstention unchanged; `writeOpenItems`
-  // turns it on only for an item that has declared itself non-auto-closing.
-  //
-  // The two states below are the guarantee, and it is STRUCTURAL rather than
-  // caller-dependent: neither is ever 'absent', 'appeared' or 'holds', so no
-  // record-path probe can reach 'resolved' in `evaluateProbes` even if a future
-  // caller passes the flag on the close path by mistake. Only the positive
-  // `contains` form is admitted — a negative `absent` probe asserts the code
-  // side of a divergence, which a record can never speak for.
-  if (isRecordPath(probe.file)) {
-    if (!recordPathsCarryEvidence || typeof probe.contains !== 'string') {
-      return { state: 'untrackable', reason: 'record_path' };
-    }
-    let recordText = null;
-    try {
-      recordText = readFileSync(join(root, probe.file), 'utf8');
-    } catch (err) {
-      if (!err || /** @type {any} */ (err).code !== 'ENOENT') return { state: 'error' };
-      return { state: 'record_missing' };
-    }
-    return recordText.includes(probe.contains)
-      ? { state: 'record_present' }
-      : { state: 'record_missing' };
-  }
+function evaluateOneProbe(root, probe) {
+  // A record can quote stale code. Its contents cannot establish that the
+  // code under discussion changed, so it never closes a stored item.
+  if (isRecordPath(probe.file)) return { state: 'untrackable', reason: 'record_path' };
   // An untracked target abstains only when it is untracked AND PRESENT — that
   // is the gitignored runtime artifact this refusal was built for: a file whose
   // content varies per run and so can never be evidence.
@@ -525,13 +488,8 @@ function evaluateOneProbe(root, probe, { recordPathsCarryEvidence = false } = {}
  *                 contribute to an auto-close.
  *   'open'      — anything else (fail-open).
  *
- * `options` is forwarded verbatim to each probe evaluation. The only flag today
- * is `recordPathsCarryEvidence`, which `writeOpenItems` sets for a declared
- * non-auto-closing item; every close-path caller omits it and so keeps the
- * record-path abstention. Leaving it off is the DEFAULT, so a new caller
- * inherits the safe direction without knowing the flag exists.
  */
-export function evaluateProbes(root, item, options = {}) {
+export function evaluateProbes(root, item) {
   const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
   const wellFormedString = (v) => typeof v === 'string' && v.trim() !== '';
   const probes = raw.filter(
@@ -544,8 +502,7 @@ export function evaluateProbes(root, item, options = {}) {
   // One malformed sibling must not be silently dropped. Otherwise the valid
   // subset can all resolve and close the item even though an omitted probe may
   // still describe a live premise. Persisted legacy corruption therefore
-  // degrades to unprobed/open; the write path sees zero accepted probes and
-  // refuses the item before it reaches the queue.
+  // degrades to unprobed/open.
   if (probes.length !== raw.length) return { status: 'unprobed', probes: [] };
   if (probes.length === 0) return { status: 'unprobed', probes: [] };
 
@@ -553,7 +510,7 @@ export function evaluateProbes(root, item, options = {}) {
     file: p.file,
     form: wellFormedString(p.absent) ? 'absent' : 'contains',
     ...(wellFormedString(p.absent) ? { absent: p.absent } : { contains: p.contains }),
-    ...evaluateOneProbe(root, p, options),
+    ...evaluateOneProbe(root, p),
   }));
 
   // A divergence item (any negative-form probe) resolves as soon as EITHER side
@@ -597,12 +554,8 @@ function actionableTarget(item) {
  * keeps the whole file inside one Read for a queue of any realistic size —
  * the 2026-07-26 walk needed a hand-written `node -e` for exactly this.
  *
- * Deliberately NO timestamp. The index is a pure function of the queue and the
- * ledger, and that is what lets `checkInbox` byte-compare it: a `generated_at`
- * would differ between the two writers of this file (the queue write and the
- * inbox render) and the freshness arm would be permanently red, which is how a
- * gate stops being read. The store keeps the timestamp; a projection of state
- * does not need one of its own.
+ * The index omits timestamps so regeneration from the stored queue and ledger
+ * reproduces the same bytes for checkInbox.
  */
 export function queueIndex({ items, run = null }) {
   return {
@@ -627,246 +580,6 @@ export function renderQueueIndex({ items, run = null }) {
 
 export function readOpenItemsIndex(root) {
   return readJson(join(root, OPEN_ITEMS_INDEX_RELPATH), { count: 0, items: [] });
-}
-
-// `subject_key` is the identity EVERYTHING downstream keys on: the settled
-// lookup in `partitionBySettled`, `first_seen`/`nights_open` carry-forward, and
-// the answering inbox. This
-// writer consumed it while validating every OTHER field exhaustively and never
-// checked the one the whole durable-answer mechanism is keyed on — so a missing
-// key was persisted to `open-items.json` and the refusal landed two steps later
-// in `generate-handoff-roadmap.mjs`, as a BLOCKED COMMIT naming `items[N]` and
-// HANDOFF rather than the malformed item (2026-08-14, re-hit 2026-08-19).
-//
-// A field the writer reads is either DERIVED or REFUSED, here. Every item
-// already carries the `subject` its key is computed from, so derivation is
-// possible in every well-formed case; the refusal is for an item that names
-// neither side of the identity.
-export function withSubjectKey(item) {
-  const trimmed = typeof item?.subject_key === 'string' ? item.subject_key.trim() : '';
-  if (trimmed) return item.subject_key === trimmed ? item : { ...item, subject_key: trimmed };
-  const subject = typeof item?.subject === 'string' ? item.subject.trim() : '';
-  const path = typeof item?.path === 'string' ? item.path.trim() : '';
-  if (!subject || !path) {
-    throw new Error(
-      `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no subject_key and none can be derived ` +
-        `(need a non-empty path and subject; ${path ? 'path is present' : 'path is missing'}, ` +
-        `${subject ? 'subject is present' : 'subject is missing'}). The subject key is the identity the ` +
-        `durable-answer ledger keys on — an item without one can never be settled, never carries ` +
-        `nights_open forward, and cannot be re-asked correctly when its prose changes.`,
-    );
-  }
-  return { ...item, subject_key: subjectKey(path, subject) };
-}
-
-// Structured supersession receipts become ordinary applied strings so every
-// existing reader and inbox renderer retains the same persisted contract.
-// This validates the binding, not the host's semantic judgement: the host must
-// verify that the cited later OWNER decision actually supersedes this clause.
-function normalizeAppliedReceipts(root, applied) {
-  const decisions = readDecisions(root);
-  return applied.map((receipt) => {
-    if (typeof receipt === 'string') return receipt;
-    if (receipt?.kind !== 'superseded-answer') {
-      throw new Error('writeOpenItems: applied receipt has an unknown kind');
-    }
-    for (const field of ['subject_key', 'applied', 'superseded_clause', 'later_decision_ref']) {
-      if (typeof receipt[field] !== 'string' || !receipt[field].trim()) {
-        throw new Error(`writeOpenItems: applied receipt needs a non-empty ${field}`);
-      }
-    }
-    const decision = decisions[receipt.subject_key];
-    if (decision?.disposition !== 'settled' || typeof decision.answer !== 'string') {
-      throw new Error('writeOpenItems: applied receipt must name a settled answer');
-    }
-    if (!decision.answer.includes(receipt.superseded_clause)) {
-      throw new Error('writeOpenItems: applied receipt clause is absent from the recorded answer');
-    }
-    return `Subject ${receipt.subject_key}: ${receipt.applied.trim()} ` +
-      `Omitted superseded clause ${JSON.stringify(receipt.superseded_clause)}; ` +
-      `later owner decision: ${receipt.later_decision_ref.trim()}.`;
-  });
-}
-
-// Persist this run's items, carrying `first_seen` forward from the previous run
-// so `nights_open` is real. An item that has been open for many nights is the
-// signal the old channel destroyed by repeating everything identically: it means
-// either the owner cannot action it as posed, or it should never have been
-// asked. The digest surfaces that count rather than hiding it in repetition.
-//
-// Every item must carry PASSING premise probes: a probe that fails at write
-// time means the premise is not true at HEAD — the item is either mis-quoted
-// or describes something already fixed (a carried-over item whose premise
-// vanished overnight is the second case: drop it as resolved, don't re-write
-// it). Refusal is the load-bearing half; without it a probe-less item would
-// ride the store forever immune to auto-close.
-/**
- * @param {string} root
- * @param {{items: any[], applied?: Array<string | object>, skipped?: any[], run?: any}} options
- */
-export function writeOpenItems(root, { items, applied = [], skipped = [], run = null }) {
-  const appliedReceipts = normalizeAppliedReceipts(root, applied);
-  const normalized = items.map(withSubjectKey);
-  for (const item of normalized) {
-    const raw = Array.isArray(item?.premise_probes) ? item.premise_probes : [];
-    // A leg-2 escalation asks what a RECORD should become ("is this backlog
-    // entry still worth keeping, or what should it turn into"), so its premise
-    // is prose in a record file and there is frequently no code side at all.
-    // Such an item declares itself non-auto-closing and is then verified at
-    // write exactly like any other; it leaves the queue when the owner answers,
-    // which for that question is the only correct exit anyway. The direction
-    // split this rides on is documented in `evaluateOneProbe`.
-    const nonClosing = item?.auto_close === false;
-    const { status, probes } = evaluateProbes(root, item, {
-      recordPathsCarryEvidence: nonClosing,
-    });
-    if (probes.length === 0) {
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no premise_probes ` +
-          `(need [{file, contains}, ...] quoting literal strings from the code the item is about; ` +
-          `${raw.length > 0 ? 'the probes present are malformed' : 'none were supplied'})`,
-      );
-    }
-    // Structural rule for divergence items (P12): a negative `{file, absent}`
-    // probe expresses only the code side of a relation; without a positive
-    // sibling pinning the doc/prose side, nothing anchors what the item is
-    // ABOUT, and the item could never auto-close off the doc side moving.
-    if (probes.some((p) => p.form === 'absent') && !probes.some((p) => p.form === 'contains')) {
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries only negative {file, absent} ` +
-          `probes. A divergence item needs one probe per SIDE: a {file, contains} probe quoting ` +
-          `the prose/code that asserts the wrong thing, plus the {file, absent} probe on the side ` +
-          `that lacks it.`,
-      );
-    }
-    // The flag is only reachable when EVERY probe is a positive probe on a
-    // record path. An item that has a code side must auto-close off that side,
-    // so `auto_close: false` can never become the lazy opt-out that lets an
-    // ordinary item ride the queue forever immune to closing — which is the
-    // exact failure the subject-key ledger was built to end.
-    if (nonClosing) {
-      const offending = probes.filter((p) => p.form !== 'contains' || !isRecordPath(p.file));
-      if (offending.length > 0) {
-        const detail = offending.map((p) => `${p.file} [${p.form}]`).join('; ');
-        throw new Error(
-          `writeOpenItems: item "${item?.id ?? '(no id)'}" declares auto_close:false but carries ` +
-            `${offending.length} probe(s) that are not a positive {file, contains} probe on a ` +
-            `record path (${detail}). The flag exists only for a question ABOUT a record ` +
-            `(docs/backlog, docs/reviews, docs/HANDOFF.md, docs/nightly-inbox.md, ` +
-            `.audit-tools/nightly, .claude). ` +
-            `An item with a code side must auto-close off that side — drop the flag and probe ` +
-            `the tracked source file instead.`,
-        );
-      }
-    }
-    const failing = probes.filter((p) =>
-      p.form === 'absent' ? p.state !== 'holds' : !PASSING_CONTAINS_STATES.has(p.state),
-    );
-    if (failing.length > 0) {
-      const untrackable = failing.filter((p) => p.state === 'untrackable');
-      if (untrackable.length > 0) {
-        const detail = untrackable.map((p) => `${p.file} (${p.reason})`).join('; ');
-        throw new Error(
-          `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe whose TARGET carries ` +
-            `no evidence (${detail}). A gitignored runtime artifact under ".audit-tools/", a build ` +
-            `output, or a record file (docs/backlog, docs/reviews, docs/HANDOFF.md, ` +
-            `docs/nightly-inbox.md, .audit-tools/nightly, .claude) says nothing about whether ` +
-            `the defect is fixed. ` +
-            `Quote a fragment from the tracked SOURCE file the fix would touch.`,
-        );
-      }
-      const detail = failing
-        .map((p) => `${p.file} [${p.state}] "${(p.contains ?? p.absent ?? '').slice(0, 60)}"`)
-        .join('; ');
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" has a premise probe that does not pass at HEAD ` +
-          `(${detail}). The premise must be TRUE at creation (status here: ${status}). ` +
-          `If this item was carried from a previous run, its premise is gone — drop it as resolved. ` +
-          `Otherwise fix the probe to quote the exact current text.`,
-      );
-    }
-    // The two fields that make an item ANSWERABLE, enforced beside the probe
-    // rules that make it CLOSABLE. The contract calls both mandatory
-    // ("Every item carries them", "Every item gets one"); on 2026-07-29 18 items
-    // shipped with neither, because the contract only NAMED the fields and the
-    // renderer degrades silently (render-inbox.mjs:78 defaults options to [],
-    // :90-95 renders eli5 only when truthy). A named requirement is not a
-    // refusal — CLAUDE.md, auditor-agnostic robustness.
-    const options = Array.isArray(item?.options) ? item.options : [];
-    const malformed = options.filter(
-      (o) => typeof o?.label !== 'string' || !o.label.trim() ||
-             typeof o?.answer !== 'string' || !o.answer.trim(),
-    );
-    if (options.length === 0 || malformed.length > 0) {
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable options[] ` +
-          `(need [{label, answer}, ...] with non-empty strings; ` +
-          `${options.length === 0 ? 'none were supplied' : `${malformed.length} are malformed`}). ` +
-          `Without them the item renders as a bare text box and answering costs an essay ` +
-          `instead of a press. Offer the real alternatives including the do-nothing one.`,
-      );
-    }
-    if (typeof item?.eli5 !== 'string' || item.eli5.trim().length < 80) {
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable eli5 ` +
-          `(need full sentences for a non-expert reader: what the doc/backlog claims, ` +
-          `what the code does, why they diverge, and what each answer means going forward — ` +
-          `not an internal id or symbol-name shorthand).`,
-      );
-    }
-    // `title` is the same class of defect as `subject_key` above: the
-    // front-loaded one-line decision is what the inbox heading renders, so a
-    // title-less item reaches the owner as a bare id.
-    if (typeof item?.title !== 'string' || !item.title.trim()) {
-      throw new Error(
-        `writeOpenItems: item "${item?.id ?? '(no id)'}" carries no usable title ` +
-          `(need the front-loaded one-line decision — not a summary of the investigation, ` +
-          `and not the id restated). It is what the inbox heading renders.`,
-      );
-    }
-  }
-
-  const previous = readOpenItems(root);
-  const seenBefore = new Map(previous.items.map((it) => [it.subject_key, it]));
-  const today = new Date().toISOString().slice(0, 10);
-
-  const merged = normalized.map((item) => {
-    const prior = seenBefore.get(item.subject_key);
-    const firstSeen = item.first_seen ?? prior?.first_seen ?? today;
-    return {
-      ...item,
-      first_seen: firstSeen,
-      nights_open: nightsBetween(firstSeen, today),
-    };
-  });
-
-  const generatedAt = new Date().toISOString();
-  const payload = {
-    generated_at: generatedAt,
-    run,
-    items: merged,
-    applied: appliedReceipts,
-    skipped,
-  };
-  writeJson(join(root, OPEN_ITEMS_RELPATH), payload);
-
-  // The enumerable projection, folded through the ledger so it can never assert
-  // open what the ledger records settled. Written HERE, beside the store, so the
-  // two are one write — there is no ordering a caller can get wrong.
-  const { open } = partitionBySettled(merged, readDecisions(root), root);
-  mkdirSync(dirname(join(root, OPEN_ITEMS_INDEX_RELPATH)), { recursive: true });
-  writeFileSync(join(root, OPEN_ITEMS_INDEX_RELPATH), renderQueueIndex({ items: open, run }), 'utf8');
-
-  writeInbox(root);
-
-  return payload;
-}
-
-export function nightsBetween(fromDate, toDate) {
-  const a = Date.parse(`${fromDate}T00:00:00Z`);
-  const b = Date.parse(`${toDate}T00:00:00Z`);
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return 1;
-  return Math.max(1, Math.round((b - a) / 86_400_000) + 1);
 }
 
 // Drop items whose subject the owner has already settled, and — when a `root`

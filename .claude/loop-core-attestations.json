@@ -171,22 +171,6 @@
         "src/shared/submission/submissionLedger.ts": "27569dfd185f7e17e1d60c34b2c164f8a75b1c46"
       }
     },
-    "212b28a3d21bd167": {
-      "reviewed_by": "claude-opus-5-5",
-      "attester_class": "agent",
-      "checked": "edgeReasoning.ts imports edgeSignature from extractors/graph.ts; the deleted private copy was byte-identical; graph edge cache digest pin updated, GRAPH_EDGE_CACHE_KEY_VERSION unchanged because the key format is unchanged",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "4e21c69f7e4c97b00c44f2cf1175de4871fc4b2b",
-        "ran_at": "2026-11-16T20:41:08.976Z"
-      },
-      "attested_at": "2026-11-16T20:41:13.016Z",
-      "vouches": {
-        "src/audit/orchestrator/edgeReasoning.ts": "1e376a9b3cc6befd4feaa72d2d23e890c7c112cb"
-      }
-    },
     "339be913c2e2c76d": {
       "reviewed_by": "agy-refuter-818ea54a,opus-rounds-4-5-6-a00ad870db1f974a0",
       "attester_class": "agent",
@@ -443,6 +427,46 @@
         "src/audit/orchestrator/unitBuilder.ts": "128cbea3ca4352f7dfd37e2501ab827a7eb68733"
       }
     },
+    "74f5fdb4c95e9366": {
+      "reviewed_by": "OpenAI Codex with independent intake, close and recovery reviewers",
+      "attester_class": "agent",
+      "checked": "Fault-injected healthy and unreadable close reports and re-ran the real closing action counter. Its receipt prevents a second action. Real Git restore failures held HEAD and preserved separate staged and working bytes including a path-limited commit. Traced approved history identity, compiler environment and cancellation, copied result bindings, pre-binding versus on-disk prompt digests and cached graph traversal. Differentially checked ordered cycles across all four-node directed graphs and compiled all public type replacements downstream.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "b83cb25d96a8eee00bbbb847d0eadc623e318302",
+        "ran_at": "2026-11-20T00:01:08.512Z"
+      },
+      "attested_at": "2026-11-20T00:01:30.103Z",
+      "vouches": {
+        "src/audit/cli/fanoutLanes.ts": "3ecb7a50d2a28d45e718a867db13c6615779ae5b",
+        "src/audit/cli/nextStepHelpers.ts": "b4d8e7bf3eb2aa578580638f878f9bda682b9808",
+        "src/audit/io/rollover.ts": "7710fdd13a6b4a2b1be2c640094f2b0fec1da557",
+        "src/audit/orchestrator/advance.ts": "d011bcef1fdfdef647890c87597a7599f003b77e",
+        "src/audit/orchestrator/dependencyMap.ts": "59bb0fa80434dcfca1999d3ffa4983bc7b548ac6",
+        "src/audit/orchestrator/edgeReasoning.ts": "8e64570ceb3967f603ff1a448c53ee6bd4b33879",
+        "src/audit/orchestrator/executors.ts": "cf856b6eb28887f8f90d486079cdaa1a957c9670",
+        "src/audit/orchestrator/hostInputPause.ts": "4471c2ab32d755e80f932fdbd7dd3d7eb4d1a597",
+        "src/audit/orchestrator/ingestionExecutors.ts": "442fcfd82bbb856c062a683ae73e92ae9a1d5821",
+        "src/audit/orchestrator/planningExecutors.ts": "114e247ff54df8ae5ebe08e6dd5597dee86208dc",
+        "src/audit/orchestrator/reviewPacketMetrics.ts": "0e8ce38c6640ca9c9ae156a37b827e1ca6cdb8b2",
+        "src/audit/orchestrator/reviewPackets.ts": "de5a509f1243e4e11b21addaf0b18d84e2e15fbe",
+        "src/remediate/contractPipeline/runtimePlanAuthority.ts": "68097c115517673f7529110f5c6be4c25eed1f1e",
+        "src/remediate/droppedFindingsRecord.ts": "071036acbd2f4272b2206683430bbb4e8f4433dc",
+        "src/remediate/intent/intentPersistence.ts": "1325ec07262fd14a9b7e1a453a935563220dc9dc",
+        "src/remediate/review/reviewGate.ts": "94ff4162ad4e2440e959647b962bb75c4f417921",
+        "src/remediate/steps/contractPipeline.ts": "32dba46251804e22c45453150ba945b264e25edf",
+        "src/remediate/steps/contractPipelinePrompts.ts": "6388b5291074cba5106585473d4ecb95d4943bc4",
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "6626c112839939aa7ce4bd6ea49741a3a340c1a4",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "cadc3e123a5935d97d053c6226013ba37d133753",
+        "src/remediate/steps/nextStep.ts": "ab4b6d375cc7c317419ceeb4795a6e8f24b50525",
+        "src/remediate/steps/prompts.ts": "59c6c774ac16b2bbc392dd18b4777b74ddbdb370",
+        "src/remediate/steps/recoverIngest.ts": "596455817a5e1176781d2381a1e656644845068d",
+        "src/shared/submission/hostResultOutcomes.ts": "c6a4d910e9da50ad072d9d1c160799cd17a5a8eb",
+        "src/shared/submission/submissionLedger.ts": "545a2b34d94254b6c5e1eb7a1b6ade0b12f44cba"
+      }
+    },
     "92a14c6e9e3ff056": {
       "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
       "attester_class": "agent",
@@ -468,22 +492,6 @@
         "src/remediate/steps/dispatch/hostCorroboration.ts": "186399ba8fc976952f3aaeb2bfffc3be5ba00566",
         "src/remediate/steps/dispatch/hostHandoff.ts": "db0674ae8c063a91c0978e7c168cb9020f9b3536",
         "src/remediate/steps/nextStep.ts": "b1a1a5987bbc151afde71db8d9be3b5a77a3b563"
-      }
-    },
-    "9725aa73749b253a": {
-      "reviewed_by": "claude-opus-5-5 independent adversarial review subagent (P05 diff); AGY gemini-3.8-flash-high refuter run bee42243",
-      "attester_class": "agent",
-      "checked": "Behavior neutrality of every P05 change in src/audit/cli: B3 landed filter is dead (one lock hold, scan refuses accepted ids); A9 snapshot projections read no carried field; B1 binding-set read is equivalent; no prompt text, stderr, artifact or JSON output change. The A10 lineIndex cache and the C1 lane-projection helper were reverted byte-identical to d28d41fe after review found an stderr change (A10) and a pinned call-site text (C1). Full suite 8555 passed / 0 failed on this staged tree.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "e43668f8a1b7c5a7aa844cf4319556b9df2b34b8",
-        "ran_at": "2026-11-18T12:51:28.720Z"
-      },
-      "attested_at": "2026-11-18T12:51:38.516Z",
-      "vouches": {
-        "src/audit/cli/nextStepHelpers.ts": "e377e67e41654ccdb3de6f8d10e3ca428044f946"
       }
     },
     "9ae8f3b83f558bae": {
@@ -805,7 +813,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "5a1d216870700235"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/cli/foldTransaction.ts": {
       "baseline": "7b79934e86baf378"
@@ -820,7 +828,7 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "9725aa73749b253a"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/cli/prompts.ts": {
       "review": "4244b52bb0fdec45"
@@ -829,19 +837,16 @@
       "review": "5a1d216870700235"
     },
     "src/audit/io/rollover.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/io/runSnapshot.ts": {
       "review": "c15f5d5c1f74ca4f"
-    },
-    "src/audit/orchestrator/accessMemory.ts": {
-      "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/acquisitionExecutor.ts": {
       "review": "92a14c6e9e3ff056"
     },
     "src/audit/orchestrator/advance.ts": {
-      "review": "58a44ca3a3caea9d"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/advanceTypes.ts": {
       "review": "392554939aa89e3b"
@@ -886,7 +891,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "4244b52bb0fdec45"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
       "review": "f20b857654eebefb"
@@ -904,7 +909,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/edgeReasoning.ts": {
-      "review": "212b28a3d21bd167"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/executorResult.ts": {
       "review": "ad938761f1a24d50"
@@ -913,7 +918,7 @@
       "review": "58a44ca3a3caea9d"
     },
     "src/audit/orchestrator/executors.ts": {
-      "review": "58a44ca3a3caea9d"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/fileIntegrity.ts": {
       "review": "42e42270e8c264c9"
@@ -937,10 +942,10 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/hostInputPause.ts": {
-      "review": "c2fa0250dd9f5ee5"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/ingestionExecutors.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/intakeExecutors.ts": {
       "review": "392554939aa89e3b"
@@ -991,7 +996,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/planningExecutors.ts": {
-      "review": "42e42270e8c264c9"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1018,7 +1023,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPacketMetrics.ts": {
-      "review": "f20b857654eebefb"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/reviewPacketShared.ts": {
       "review": "f20b857654eebefb"
@@ -1027,7 +1032,7 @@
       "review": "f20b857654eebefb"
     },
     "src/audit/orchestrator/reviewPackets.ts": {
-      "review": "f20b857654eebefb"
+      "review": "74f5fdb4c95e9366"
     },
     "src/audit/orchestrator/runtimeCommand.ts": {
       "review": "92a14c6e9e3ff056"
@@ -1117,19 +1122,19 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/contractPipeline/runtimePlanAuthority.ts": {
-      "review": "41a055b0e3222d8a"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/droppedFindingsRecord.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/intent/intentPersistence.ts": {
-      "review": "41a055b0e3222d8a"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/review/filterDispositions.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/review/reviewGate.ts": {
-      "review": "41a055b0e3222d8a"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/review/reviewNecessity.ts": {
       "baseline": "7b79934e86baf378"
@@ -1141,13 +1146,13 @@
       "baseline": "7b79934e86baf378"
     },
     "src/remediate/steps/contractPipeline.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/contractPipelinePrompts.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
       "review": "e27b7c336e51764b"
@@ -1156,7 +1161,7 @@
       "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "e27b7c336e51764b"
@@ -1165,13 +1170,13 @@
       "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/prompts.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/recoverIngest.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "74f5fdb4c95e9366"
     },
     "src/shared/engine/obligationEngine.ts": {
       "review": "c2fa0250dd9f5ee5"
@@ -1195,7 +1200,7 @@
       "review": "9ae8f3b83f558bae"
     },
     "src/shared/submission/hostResultOutcomes.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "74f5fdb4c95e9366"
     },
     "src/shared/submission/ingestReport.ts": {
       "review": "d7acd796ff113751"
@@ -1210,7 +1215,7 @@
       "review": "0c6c1b84455cdb39"
     },
     "src/shared/submission/submissionLedger.ts": {
-      "review": "0c6c1b84455cdb39"
+      "review": "74f5fdb4c95e9366"
     },
     "src/shared/submission/submissionScan.ts": {
       "review": "e501ffc69df5ac27"

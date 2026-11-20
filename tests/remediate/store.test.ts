@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   StateStore,
+  validateRemediationState,
   RemediationState,
-  LOCK_TIMEOUT_MS,
   REMEDIATION_STATE_CONTRACT_VERSION,
 } from "../../src/remediate/state/store.js";
-import { SKIP_WRITE, STALE_LOCK_MS, SchemaVersionMismatchError } from "audit-tools/shared";
+import { LOCKED_JSON_STORE_TIMEOUT_MS, SKIP_WRITE, STALE_LOCK_MS, SchemaVersionMismatchError } from "audit-tools/shared";
 import { rm, mkdir, writeFile, utimes, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { dirname } from "node:path";
@@ -25,12 +25,19 @@ describe("StateStore", () => {
     await rm(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("LOCK_TIMEOUT_MS stays below the shared stale-lock threshold (no boundary race)", () => {
+  it("reports each malformed retained plan field once", () => {
+    const errors = validateRemediationState({ contract_version: REMEDIATION_STATE_CONTRACT_VERSION, status: "waiting_for_triage", plan: {}, items: {} });
+    const planErrors = errors.filter(message => message.startsWith("plan."));
+    expect(planErrors.length).toBeGreaterThan(0);
+    expect(planErrors).toEqual([...new Set(planErrors)]);
+  });
+
+  it("LOCKED_JSON_STORE_TIMEOUT_MS stays below the shared stale-lock threshold (no boundary race)", () => {
     // Derived programmatically as STALE_LOCK_MS - margin. A held-but-fresh lock must
     // time out before it could be reclaimed as stale, otherwise the timeout is a
     // load-sensitive race. This guards the relationship if either value changes.
-    expect(LOCK_TIMEOUT_MS).toBeGreaterThan(0);
-    expect(LOCK_TIMEOUT_MS).toBeLessThan(STALE_LOCK_MS);
+    expect(LOCKED_JSON_STORE_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(LOCKED_JSON_STORE_TIMEOUT_MS).toBeLessThan(STALE_LOCK_MS);
   });
 
   it("should return null if no state exists", async () => {

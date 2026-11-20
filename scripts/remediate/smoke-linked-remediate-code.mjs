@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "../shared/hermetic-state-dir.mjs";
 import { spawnSync } from "child_process";
-import { readFileSync, mkdtempSync, rmSync } from "fs";
+import { readFileSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { tmpdir } from "os";
@@ -79,59 +79,27 @@ check("--help mentions validate command", () => {
     throw new Error('missing "validate" in help output');
 });
 
-// ── next-step: well-formed JSON output (TST-97e61b4d) ────────────────────
+// sites-pinned: tests/remediate/smoke-fixtures.test.ts
+function checkStep(root, kind, status, ...args) {
+  const result = run("next-step", "--root", root, ...args);
+  if (result.status !== 0) throw new Error(`exit ${result.status}: ${result.stderr || result.error?.message}`);
+  const step = JSON.parse(result.stdout);
+  if (step?.contract_version !== "remediate-code-step/v1alpha1" || step.step_kind !== kind ||
+      step.status !== status || !Array.isArray(step.allowed_commands)) {
+    throw new Error(`Expected ${kind} (${status}) with the remediation step contract and allowed_commands, got ${result.stdout}`);
+  }
+}
+
 let nextStepTmp;
 try {
   nextStepTmp = mkdtempSync(join(tmpdir(), "remediate-smoke-next-step-"));
-  check("next-step exits 0 on fresh root", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0)
-      throw new Error(`exit ${r.status}; stderr: ${r.stderr.slice(0, 200)}`);
+  check("fresh next-step requests a starting point", () => {
+    checkStep(nextStepTmp, "collect_starting_point", "blocked");
   });
-
-  check("next-step stdout is valid JSON", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0) throw new Error(`exit ${r.status}`);
-    let parsed;
-    try {
-      parsed = JSON.parse(r.stdout);
-    } catch {
-      throw new Error(`stdout is not JSON: ${r.stdout.slice(0, 200)}`);
-    }
-    if (typeof parsed !== "object" || parsed === null)
-      throw new Error("parsed output is not an object");
-  });
-
-  check("next-step JSON has contract_version field", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0) throw new Error(`exit ${r.status}`);
-    const parsed = JSON.parse(r.stdout);
-    if (parsed.contract_version !== "remediate-code-step/v1alpha1")
-      throw new Error(`unexpected contract_version: ${parsed.contract_version}`);
-  });
-
-  check("next-step JSON has step_kind field", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0) throw new Error(`exit ${r.status}`);
-    const parsed = JSON.parse(r.stdout);
-    if (typeof parsed.step_kind !== "string" || !parsed.step_kind)
-      throw new Error(`missing or empty step_kind: ${JSON.stringify(parsed.step_kind)}`);
-  });
-
-  check("next-step JSON has status field", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0) throw new Error(`exit ${r.status}`);
-    const parsed = JSON.parse(r.stdout);
-    if (typeof parsed.status !== "string" || !parsed.status)
-      throw new Error(`missing or empty status: ${JSON.stringify(parsed.status)}`);
-  });
-
-  check("next-step JSON has allowed_commands array", () => {
-    const r = run("next-step", "--root", nextStepTmp);
-    if (r.status !== 0) throw new Error(`exit ${r.status}`);
-    const parsed = JSON.parse(r.stdout);
-    if (!Array.isArray(parsed.allowed_commands))
-      throw new Error(`allowed_commands is not an array: ${JSON.stringify(parsed.allowed_commands)}`);
+  check("supplying feedback advances next-step to intake synthesis", () => {
+    const input = join(nextStepTmp, "feedback.md");
+    writeFileSync(input, "# Feedback\n\nPlease improve the error message.\n");
+    checkStep(nextStepTmp, "synthesize_intake", "ready", "--input", input);
   });
 } finally {
   if (nextStepTmp) rmSync(nextStepTmp, { recursive: true, force: true });

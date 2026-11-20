@@ -13,18 +13,40 @@ export function emptyLoadFlakeRecord() {
   return { schema: LOAD_FLAKE_RECORD_SCHEMA, environments: {} };
 }
 
+// sites-pinned: tests/shared/load-flake-record.test.ts
+function isMap(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validObservation(value) {
+  return isMap(value) && Number.isSafeInteger(value.count) && value.count > 0 &&
+    Array.isArray(value.observed_trees) && value.observed_trees.length === value.count &&
+    value.observed_trees.every(tree => typeof tree === "string") &&
+    typeof value.first_observed_at === "string" && typeof value.last_observed_at === "string" &&
+    ((value.investigation_requested_at === null && value.investigation_report === null) ||
+      (typeof value.investigation_requested_at === "string" && value.investigation_requested_at.length > 0 &&
+       typeof value.investigation_report === "string" && value.investigation_report.length > 0));
+}
+
 export function readLoadFlakeRecord(path) {
+  let raw;
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
-    if (
-      parsed?.schema === LOAD_FLAKE_RECORD_SCHEMA &&
-      parsed.environments &&
-      typeof parsed.environments === "object"
-    ) {
-      return parsed;
+    raw = readFileSync(path, "utf8");
+  } catch (error) {
+    if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return emptyLoadFlakeRecord();
+    throw new Error(`Could not read load-flake record at ${path}`, { cause: error });
+  }
+  try {
+    const record = JSON.parse(raw);
+    if (record?.schema !== LOAD_FLAKE_RECORD_SCHEMA || !isMap(record.environments) ||
+        !Object.values(record.environments).every(bucket => isMap(bucket?.files) && Object.values(bucket.files).every(validObservation))) {
+      throw new Error("Invalid load-flake record schema or observation");
     }
-  } catch {}
-  return emptyLoadFlakeRecord();
+    return record;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid load-flake record at ${path}: ${reason}`, { cause: error });
+  }
 }
 
 export function observationFor(record, environment, file) {

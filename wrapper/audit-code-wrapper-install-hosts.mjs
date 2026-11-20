@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/smoke-fixture-root.test.ts, tests/audit/a7.test.ts
-import { mkdir, mkdtemp, readFile, rm, stat, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { assertDirectoryExists, collectVerifyCheck, ensureFile, getFlag, hasFlag, renderPromptFile, requireFlagValue, splitFrontmatter, toRepoRelativePath } from './shared-install-hosts.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import {
@@ -36,74 +37,6 @@ const INSTALL_MARKER_END = '<!-- audit-code:end -->';
 const INSTALL_GUIDE_FILENAME = 'GETTING-STARTED.md';
 const INSTALL_MANIFEST_FILENAME = 'manifest.json';
 const DEFAULT_INSTALL_HOST = 'all';
-
-function hasFlag(argv, name) {
-  return argv.includes(name);
-}
-
-function getFlag(argv, name) {
-  const index = argv.indexOf(name);
-  if (index < 0) return undefined;
-  return argv[index + 1];
-}
-
-function requireFlagValue(argv, name) {
-  const value = getFlag(argv, name);
-  if (!value) {
-    throw new Error(`${name} requires a value.`);
-  }
-  return value;
-}
-
-function normalizeNewlines(value) {
-  return value.replace(/\r\n/g, '\n');
-}
-
-function splitFrontmatter(markdown) {
-  const normalized = normalizeNewlines(markdown);
-  const match = normalized.match(/^---\n([\s\S]*?)\n---\n?/u);
-  if (!match) {
-    return { frontmatter: null, body: normalized };
-  }
-
-  return {
-    frontmatter: match[1],
-    body: normalized.slice(match[0].length),
-  };
-}
-
-function renderFrontmatter(fields) {
-  const entries = Object.entries(fields).filter(([, value]) => {
-    if (value === undefined || value === null) {
-      return false;
-    }
-
-    if (typeof value === 'string') {
-      return value.length > 0;
-    }
-
-    return true;
-  });
-  if (entries.length === 0) {
-    return '';
-  }
-
-  return [
-    '---',
-    ...entries.map(([key, value]) => `${key}: ${value}`),
-    '---',
-    '',
-  ].join('\n');
-}
-
-function renderPromptFile(fields, body) {
-  return `${renderFrontmatter(fields)}${body.trimStart()}`;
-}
-
-function toRepoRelativePath(root, targetPath) {
-  const value = relative(root, targetPath).replace(/\\/g, '/');
-  return value.length > 0 ? value : '.';
-}
 
 export function buildInstallDirective(relativePromptPath) {
   return [
@@ -473,51 +406,6 @@ export function renderInstallGuide({
 
   lines.push('');
   return lines.join('\n');
-}
-
-async function assertDirectoryExists(path, description) {
-  let stats;
-  try {
-    stats = await stat(path);
-  } catch {
-    throw new Error(`${description} does not exist: ${path}`);
-  }
-
-  if (!stats.isDirectory()) {
-    throw new Error(`${description} is not a directory: ${path}`);
-  }
-}
-
-async function collectVerifyCheck(target, id, fn) {
-  try {
-    const details = await fn();
-    target.push({
-      id,
-      status: 'ok',
-      ...(details ?? {}),
-    });
-  } catch (error) {
-    target.push({
-      id,
-      status: 'error',
-      summary: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-async function ensureFile(path, description) {
-  let stats;
-  try {
-    stats = await stat(path);
-  } catch {
-    throw new Error(`${description} does not exist: ${path}`);
-  }
-
-  if (!stats.isFile()) {
-    throw new Error(`${description} is not a file: ${path}`);
-  }
-
-  return stats;
 }
 
 export async function writeCoreInstallAssets(root, assetPaths, promptSource, skillSource) {

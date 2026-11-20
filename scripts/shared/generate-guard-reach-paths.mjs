@@ -42,6 +42,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isScriptEntry } from "./primitives.mjs";
 // The repo-wide argument rule. Without it a mistyped flag (`--chek`) is read as
 // consent to do the DEFAULT action, which here is a durable write to a tracked
 // file — the shape the guard exists to refuse.
@@ -174,11 +175,8 @@ function main({ check }) {
   console.log(`rewrote ${GENERATED_PATH}`);
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, "/")}`).href;
-
-if (invokedDirectly) {
+// sites-pinned: tests/shared/script-entry-regressions.test.ts
+if (isScriptEntry(import.meta.url, process.argv)) {
   const args = guardArgv(process.argv.slice(2), {
     name: "generate-guard-reach-paths",
     usage: "node scripts/shared/generate-guard-reach-paths.mjs [--check]",

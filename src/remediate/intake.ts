@@ -224,7 +224,7 @@ export async function writeRemediationBrief(
   await writeTextFile(path, content);
 }
 
-export function intakePaths(artifactsDir: string): {
+export interface IntakePaths {
   dir: string;
   sourceManifest: string;
   conversationStart: string;
@@ -237,7 +237,9 @@ export function intakePaths(artifactsDir: string): {
   findingEnumeration: string;
   riskSignal: string;
   projectFacts: string;
-} {
+}
+
+export function intakePaths(artifactsDir: string): IntakePaths {
   const dir = join(artifactsDir, "intake");
   return {
     dir,

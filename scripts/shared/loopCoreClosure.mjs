@@ -27,6 +27,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
+import { resolveWithinRoot } from "./primitives.mjs";
 
 /** Repo-relative, forward-slashed. The whole module speaks this one form. */
 function rel(root, file) {
@@ -124,8 +125,21 @@ export function buildImporterGraph(root, modules) {
 const IO_BUILTINS = /^node:(fs|fs\/promises|child_process)$/;
 
 /** A mutating filesystem call — the verbs that change state on disk. */
-const MUTATING_CALL =
-  /\b(?:writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|chmod|chmodSync|symlink|symlinkSync|truncate|truncateSync)\s*\(/;
+const MUTATING_CALLS = new Set([
+  'writeFile', 'writeFileSync', 'appendFile', 'appendFileSync', 'mkdir', 'mkdirSync',
+  'rm', 'rmSync', 'rmdir', 'rmdirSync', 'unlink', 'unlinkSync', 'rename', 'renameSync',
+  'copyFile', 'copyFileSync', 'chmod', 'chmodSync', 'symlink', 'symlinkSync', 'truncate', 'truncateSync',
+]);
+
+// sites-pinned: tests/shared/loop-core-closure.test.ts, tests/shared/script-entry-regressions.test.ts
+function containsMutatingCall(node) {
+  if (ts.isCallExpression(node)) {
+    const callee = node.expression;
+    const name = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
+    if (ts.isIdentifier(name) && MUTATING_CALLS.has(name.text)) return true;
+  }
+  return ts.forEachChild(node, containsMutatingCall);
+}
 
 /** The claim names, in strength order — for validation and for error text. */
 export const CLOSURE_CLAIMS = ['pure', 'reads-only', 'mutates'];
@@ -166,8 +180,9 @@ function resolveSpecifier(root, from, spec, known) {
   const trimmed = abs.replace(/\.(?:mjs|js|ts)$/, '');
   const candidates = abs.endsWith('.ts') ? [abs] : [`${trimmed}.ts`, `${trimmed}/index.ts`];
   for (const candidate of candidates) {
-    if (candidate.replace(/\\/g, '/').startsWith(root.replace(/\\/g, '/'))) {
-      const r = rel(root, candidate);
+    const inside = resolveWithinRoot(root, candidate, { allowRoot: false });
+    if (inside) {
+      const r = rel(root, inside);
       if (known.has(r)) return r;
     }
   }
@@ -237,7 +252,7 @@ export function checkDeclaredClaims(root, declared) {
     const ioModules = closure.filter((m) => {
       return (runtimeSpecifiers.get(m) ?? []).some((spec) => IO_BUILTINS.test(spec));
     });
-    const mutates = MUTATING_CALL.test(text);
+    const mutates = containsMutatingCall(ts.createSourceFile(module, text, ts.ScriptTarget.Latest));
 
     if (claim === 'pure' && ioModules.length > 0) {
       failures.push({

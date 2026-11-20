@@ -41,10 +41,10 @@ describe("committed host-asset no-drift guard", () => {
 });
 
 describe("runValidateCommand", () => {
-  it("returns 0 when type checking succeeds", () => {
+  it("returns 0 when type checking succeeds", async () => {
     const logs: string[] = [];
-    const code = runValidateCommand({
-      run: () => ({ status: 0 }) as any,
+    const code = await runValidateCommand({
+      run: async () => 0,
       log: (message) => logs.push(message),
       error: () => {},
     });
@@ -53,10 +53,10 @@ describe("runValidateCommand", () => {
     expect(logs[0]).toMatch(/types OK/);
   });
 
-  it("returns the child status when type checking fails", () => {
+  it("returns the child status when type checking fails", async () => {
     const errors: string[] = [];
-    const code = runValidateCommand({
-      run: () => ({ status: 17 }) as any,
+    const code = await runValidateCommand({
+      run: async () => 17,
       log: () => {},
       error: (message) => errors.push(message),
     });

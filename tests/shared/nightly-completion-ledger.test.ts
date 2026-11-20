@@ -1,3 +1,4 @@
+import { seedStoredQueue } from "../helpers/storedNightlyQueue.js";
 /**
  * ANSWERED is not DONE.
  *
@@ -28,7 +29,6 @@ const {
   answeredNotDone,
   partitionBySettled,
   readDecisions,
-  subjectKey,
   COMPLETION_TRACKING_SINCE,
 } = await import("../../scripts/nightly/items.mjs");
 
@@ -157,21 +157,21 @@ describe("partitionBySettled — a counter-question is still open", () => {
   const item = (key: string) => ({ id: "docs-1", subject_key: key, title: "t", path: "p", leg: "docs", nights_open: 1 });
 
   it("a `settled` decision closes the item", () => {
-    const k = subjectKey("p", "t");
+    const k = "1234567890abcdef";
     const { open, settled } = partitionBySettled([item(k)], { [k]: { disposition: "settled" } });
     expect(open).toEqual([]);
     expect(settled).toHaveLength(1);
   });
 
   it("a `question` decision leaves the item OPEN so it is asked again", () => {
-    const k = subjectKey("p", "t");
+    const k = "1234567890abcdef";
     const { open, settled } = partitionBySettled([item(k)], { [k]: { disposition: "question" } });
     expect(open, "an answer that asks back is not an answer").toHaveLength(1);
     expect(settled).toEqual([]);
   });
 
   it("a `wontfix` decision closes the item", () => {
-    const k = subjectKey("p", "t");
+    const k = "1234567890abcdef";
     const { open } = partitionBySettled([item(k)], { [k]: { disposition: "wontfix" } });
     expect(open).toEqual([]);
   });
@@ -182,7 +182,7 @@ describe("partitionBySettled — a counter-question is still open", () => {
     "settled",
     null,
   ])("a malformed decision fails OPEN instead of hiding the item: %j", (decision) => {
-    const k = subjectKey("p", "t");
+    const k = "1234567890abcdef";
     const { open, settled } = partitionBySettled([item(k)], { [k]: decision });
     expect(open).toHaveLength(1);
     expect(settled).toEqual([]);
@@ -193,6 +193,7 @@ describe("partitionBySettled — a counter-question is still open", () => {
 // skipped the render left them stale, and the commit gate refused until someone
 // ran render-inbox.mjs by hand (`answer.mjs --done`, 2026-10-01).
 describe("every ledger write re-renders the inbox", () => {
+  beforeEach(() => seedStoredQueue(root, { items: [] }));
   it.each([
     ["recordCompletion", () => recordCompletion(root, "k1", "abc1234 — landed")],
     ["recordDecision", () => recordDecision(root, "k1", { answer: "changed", disposition: "settled" })],

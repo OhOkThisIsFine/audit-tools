@@ -18,7 +18,7 @@ import {
 } from "../../src/audit/io/artifacts.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { readConceptualReviewRoundManifest } from "../../src/audit/types/conceptualAdjudication.js";
-import { persistAnalyzerConsent } from "../../src/shared/analyzerPolicy.js";
+import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
 import { toPromptPathToken } from "../../src/shared/tooling/exec.js";
 import { withTempRepo } from "./helpers/next-step-harness.js";
 
@@ -187,13 +187,7 @@ test("production systemic dispatch never advertises the deleted deep-review judg
     });
     await writeCoreArtifacts(artifactsDir, bundle);
     await persistDesignReviewSnapshots(artifactsDir, bundle);
-    await persistAnalyzerConsent(root, {
-      semgrep: "declined",
-      eslint: "declined",
-      knip: "declined",
-      jscpd: "declined",
-      "osv-scanner": "declined",
-    });
+    await prepareFixtureRun(root, { artifactsDir, declinedAnalyzerIds: ["semgrep", "eslint", "knip", "jscpd", "osv-scanner"], preflight: false });
 
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
 

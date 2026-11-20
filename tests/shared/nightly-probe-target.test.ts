@@ -2,7 +2,7 @@
 // targets that can carry evidence. `absent` — the verdict that CLOSES an item —
 // is git-evidenced, so a probe aimed at a path git cannot speak about (a
 // gitignored runtime artifact, a record file that quotes the code it is about)
-// must abstain (`untrackable`), and writeOpenItems must refuse to author it.
+// must abstain (untrackable).
 // Lives under tests/ because vitest excludes `.claude/**` and the other nightly
 // tests already sit here.
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   evaluateProbes,
   partitionBySettled,
-  writeOpenItems,
 } from "../../scripts/nightly/items.mjs";
 
 let root: string;
@@ -82,21 +81,6 @@ describe("premise probes only accept targets that can carry evidence", () => {
     expect(probes[0]?.state).toBe("present");
   });
 
-  it("refuses to WRITE an item probing an untracked target, naming why", () => {
-    expect(() =>
-      writeOpenItems(root, {
-        items: [
-          {
-            id: "x-1",
-            subject_key: "k1",
-            premise_probes: [
-              { file: ".audit-tools/remediation/state.json", contains: "status: implementing" },
-            ],
-          },
-        ],
-      }),
-    ).toThrow(/carries no evidence|tracked SOURCE file/);
-  });
 });
 
 // P12 (nightly sol-5, owner decision 2026-08-06): a divergence item carries one
@@ -139,37 +123,6 @@ describe("two-sided divergence probes", () => {
     expect(status).toBe("resolved");
   });
 
-  it("refuses to WRITE a negative probe whose string is already present", () => {
-    expect(() =>
-      writeOpenItems(root, {
-        items: [
-          {
-            id: "d-2",
-            subject_key: "kd2",
-            premise_probes: [
-              { file: "src/thing.ts", contains: "export const KEPT" },
-              { file: "src/thing.ts", absent: "export const KEPT" },
-            ],
-          },
-        ],
-      }),
-    ).toThrow(/does not pass at HEAD/);
-  });
-
-  it("refuses to WRITE an item carrying only negative probes", () => {
-    expect(() =>
-      writeOpenItems(root, {
-        items: [
-          {
-            id: "d-3",
-            subject_key: "kd3",
-            premise_probes: [{ file: "src/thing.ts", absent: "export const FIXED" }],
-          },
-        ],
-      }),
-    ).toThrow(/one probe per SIDE/);
-  });
-
   it("keeps the every-fragment-vanished rule for positive-only multi-probe items", () => {
     // One of two positive fragments vanished; the other still present -> open.
     writeFileSync(join(root, "src", "thing.ts"), "export const KEPT = 1;\n");
@@ -207,10 +160,6 @@ describe("record-path probes are refused by direction, not outright", () => {
     title: "This backlog entry may no longer describe live work",
     subject_key: "kb1",
     auto_close: false,
-    // P32 + the title/subject_key refusals: options[], eli5 and title are all
-    // refused at write when missing — the probe refusals under test here all
-    // fire BEFORE those, so the throw tests are unaffected, but the success-path
-    // writes need every mandatory field.
     eli5:
       "This backlog entry has no code side left to probe, so only the owner can say " +
       "whether it is still worth keeping or what it should turn into next.",
@@ -222,66 +171,12 @@ describe("record-path probes are refused by direction, not outright", () => {
     ...overrides,
   });
 
-  it("still refuses a record-path probe on an ordinary item (the flag is the only door)", () => {
-    seedRecord();
-    expect(() =>
-      writeOpenItems(root, { items: [escalation({ auto_close: undefined })] }),
-    ).toThrow(/carries no evidence|tracked SOURCE file/);
-  });
-
-  it("accepts a record-path contains probe when the item declares auto_close:false", () => {
-    seedRecord();
-    const payload = writeOpenItems(root, { items: [escalation()] });
-    expect(payload.items).toHaveLength(1);
-    expect(payload.items[0]?.auto_close).toBe(false);
-  });
-
-  it("still VERIFIES the premise at write — a fragment absent from the record is refused", () => {
-    seedRecord("- some other entry entirely\n");
-    expect(() => writeOpenItems(root, { items: [escalation()] })).toThrow(
-      /does not pass at HEAD/,
-    );
-  });
-
-  it("refuses auto_close:false when any probe targets a non-record path", () => {
-    seedRecord();
-    expect(() =>
-      writeOpenItems(root, {
-        items: [
-          escalation({
-            premise_probes: [
-              { file: RECORD, contains: FRAGMENT },
-              { file: "src/thing.ts", contains: "export const KEPT" },
-            ],
-          }),
-        ],
-      }),
-    ).toThrow(/declares auto_close:false but carries/);
-  });
-
-  it("refuses auto_close:false on a negative probe — a record cannot speak for the code side", () => {
-    seedRecord();
-    expect(() =>
-      writeOpenItems(root, {
-        items: [
-          escalation({
-            premise_probes: [
-              { file: RECORD, contains: FRAGMENT },
-              { file: RECORD, absent: "not in this record" },
-            ],
-          }),
-        ],
-      }),
-    ).toThrow(/declares auto_close:false but carries/);
-  });
-
   it("never auto-closes such an item, even once the quoted fragment is deleted", () => {
     // The guarantee the split must not buy its capability with. This is the
     // close path exactly as `partitionBySettled` walks it — no flag passed — so
     // the record probe abstains and `resolved` stays unreachable.
     seedRecord();
     const item = escalation();
-    writeOpenItems(root, { items: [item] });
 
     expect(evaluateProbes(root, item).status).not.toBe("resolved");
 
@@ -323,28 +218,6 @@ describe(".claude/hooks is probe-able source; the rest of .claude stays a record
     });
     expect(probes[0]?.state).toBe("present");
     expect(status).toBe("open");
-  });
-
-  it("accepts WRITING an ordinary auto-closing item probing a hook", () => {
-    seedHook();
-    const payload = writeOpenItems(root, {
-      items: [
-        {
-          id: "h-1",
-          title: "A guard hook still carries a rule the docs call retired",
-          subject_key: "kh1",
-          eli5:
-            "A guard hook still carries this rule while the docs say it was retired; " +
-            "either the rule should come out of the hook or the docs need to admit it.",
-          options: [
-            { label: "Keep the rule", answer: "The rule is live and wanted; fix the docs." },
-            { label: "Delete it", answer: "Remove the rule from the hook; the docs are right." },
-          ],
-          premise_probes: [{ file: HOOK, contains: FRAGMENT }],
-        },
-      ],
-    });
-    expect(payload.items).toHaveLength(1);
   });
 
   it("closes the hook item when the rule is genuinely deleted — a skill write-up quoting it does not hold it open", () => {

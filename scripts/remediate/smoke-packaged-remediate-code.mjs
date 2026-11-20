@@ -98,11 +98,14 @@ const fakeHome = join(installDir, "home");
 const nodeModulesDir = join(installDir, "node_modules");
 
 try {
-  spawnNpm(["init", "-y"], {
+  const initResult = spawnNpm(["init", "-y"], {
     cwd: installDir,
-    stdio: "ignore",
+    encoding: "utf8",
     env: isolatedNpmEnv(),
   });
+  if (initResult.status !== 0) {
+    throw new Error(`npm init -y failed (exit ${initResult.status ?? initResult.signal ?? "unavailable"}): ${initResult.stderr || initResult.error?.message || "no stderr"}`);
+  }
   const installStart = Date.now();
   // npm 12+ blocks dependency install scripts unless approved; the smoke exists
   // to verify OUR tarball's postinstall, and the install dir is hermetic — allow

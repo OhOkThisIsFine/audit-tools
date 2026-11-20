@@ -1,4 +1,4 @@
-import { readDecisionSnapshot, decisionContextDigest, type DecisionApplicationReceipt } from "../state/decisionConsumption.js";
+import { TRIAGE_RESOLUTION_FILENAME, readDecisionSnapshot, decisionContextDigest, type DecisionApplicationReceipt } from "../state/decisionConsumption.js";
 // sites-pinned: tests/remediate/phase-triage.test.ts
 import { runRequiredTest } from "../steps/dispatch/requiredTests.js";
 import { RemediationState } from "../state/store.js";
@@ -248,7 +248,7 @@ export async function runTriagePhase(
   );
 
   if (blockedItems.length > 0) {
-    const resolutionPath = join(options.artifactsDir, "triage_resolution.json");
+    const resolutionPath = join(options.artifactsDir, TRIAGE_RESOLUTION_FILENAME);
     const inputSnapshot = await readDecisionSnapshot(resolutionPath);
     const contextDigest = decisionContextDigest(state);
     let resolution: TriageResolution | null | undefined =
@@ -271,7 +271,7 @@ export async function runTriagePhase(
       resolution = undefined;
     }
 
-    if (resolution) {
+    if (resolution && inputSnapshot) {
       const triageIssues = validateTriageResolution(
         resolution,
         undefined,
@@ -288,12 +288,11 @@ export async function runTriagePhase(
       // Triage outcome artifact — records per-finding resolution actions.
       const triageOutcome: { unit_id: string; action: string }[] = [];
       const receipt: DecisionApplicationReceipt = {
-        input: "triage_resolution.json", input_sha256: inputSnapshot!.sha256, input_identity_sha256: inputSnapshot!.identity_sha256, context_sha256: contextDigest,
+        input: TRIAGE_RESOLUTION_FILENAME, input_sha256: inputSnapshot.sha256, input_identity_sha256: inputSnapshot.identity_sha256, context_sha256: contextDigest,
         run_id: state.plan!.plan_id, revision_sha256: state.plan!.review_revision_sha256,
         applied_at: new Date().toISOString(), retry_results: [],
         outcome: { resolved_at: new Date().toISOString(), items: triageOutcome },
       };
-      if (!inputSnapshot) throw new Error("Triage input changed during application; retry without accepting it.");
       (state.decision_applications ??= []).push(receipt);
 
       for (const res of resolution.items) {

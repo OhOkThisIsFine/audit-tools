@@ -15,17 +15,18 @@
  * consumers rely on (e.g. the grounding-status breakdown, where most findings
  * have no grounding verdict at all).
  */
+// sites-pinned: tests/shared/count-by.test.ts, tests/shared/findings-report-lens-coverage.test.ts
 export function countBy<T>(
   items: Iterable<T>,
   selectKey: (item: T) => string | undefined,
 ): Record<string, number> {
-  const breakdown: Record<string, number> = {};
+  const breakdown = new Map<string, number>();
   for (const item of items) {
     const key = selectKey(item);
     if (!key) {
       continue;
     }
-    breakdown[key] = (breakdown[key] ?? 0) + 1;
+    breakdown.set(key, (breakdown.get(key) ?? 0) + 1);
   }
-  return breakdown;
+  return Object.fromEntries(breakdown);
 }

@@ -28,6 +28,15 @@ function readerFrom(contents: Readonly<Record<string, string>>) {
 }
 
 describe("deriveDataStateCoupling — bibliographic coupling", () => {
+  it("keeps distinct endpoint pairs whose paths join to the same text", () => {
+    const imports = [
+      ["a b.ts", "t"], ["c.ts", "t"], ["a", "u"], ["b.ts c.ts", "u"],
+    ].map(([from, to]) => ({ from: from!, to: to! }));
+    expect(deriveDataStateCoupling({ graphs: { imports } }, { minSharedTargets: 1 })).toEqual([
+      { a: "a", b: "b.ts c.ts", weight: 1 },
+      { a: "a b.ts", b: "c.ts", weight: 1 },
+    ]);
+  });
   const bundle = {
     graphs: {
       imports: [
@@ -91,6 +100,13 @@ describe("extractCommentText — language-neutral lexing", () => {
 });
 
 describe("deriveCommentDecomposition — comment cross-references", () => {
+  it("preserves spaces in the paths at both ends of a reciprocal reference", async () => {
+    const contents = { "a b.ts": "// see x y.ts", "x y.ts": "// see a b.ts" };
+    const result = await deriveCommentDecomposition({
+      root: ".", files: Object.keys(contents), readFileText: readerFrom(contents),
+    });
+    expect(result.edges).toEqual([{ a: "a b.ts", b: "x y.ts", weight: 2 }]);
+  });
   it("edges files whose comments name another in-scope file by path", async () => {
     const result = await deriveCommentDecomposition({
       root: "/repo",

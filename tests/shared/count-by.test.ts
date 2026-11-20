@@ -17,6 +17,15 @@ test("preserves first-seen key insertion order", () => {
   expect(Object.keys(countBy(items, (x) => x))).toEqual(["z", "a", "m"]);
 });
 
+test("counts prototype names as own fields and preserves ordinary object enumeration", () => {
+  const keys = ["10", "__proto__", "constructor", "2", "toString", "__proto__"];
+  const counts = countBy(keys, (key) => key);
+  expect(Object.getPrototypeOf(counts)).toBe(Object.prototype);
+  expect(Object.entries(counts)).toEqual([
+    ["2", 1], ["10", 1], ["__proto__", 2], ["constructor", 1], ["toString", 1],
+  ]);
+});
+
 test("skips items whose selectKey returns undefined", () => {
   const items = [{ k: "a" }, { k: undefined }, { k: "a" }];
   expect(countBy(items, (x) => x.k)).toEqual({ a: 2 });

@@ -22,7 +22,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { resolveNightlyDecisionKeys } from '../../scripts/shared/nightlyDecisionKey.mjs';
-import { subjectKey } from '../../scripts/nightly/items.mjs';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -42,11 +41,8 @@ function makeRoot(ledger: unknown, { raw }: { raw?: string } = {}): string {
   return root;
 }
 
-// A REAL subject key, produced by the same function the ledger is keyed with —
-// never a hand-typed literal. That is the point: the key format is owned by
-// `subjectKey`, and a hand-copied 16-hex string here would be the very defect
-// this module exists to catch.
-const REAL_KEY = subjectKey('spec/audit/dependency-map.md', 'two dependency-map examples hand-list artifacts');
+// Historical subject keys are stored data; the resolver checks them against the ledger.
+const REAL_KEY = '984c6ea5bd9969c1';
 
 describe('a cited 16-hex key must resolve against the nightly ledger', () => {
   it('accepts a decision text citing a real key, and reports which one', () => {
@@ -109,7 +105,7 @@ describe('a cited 16-hex key must resolve against the nightly ledger', () => {
   });
 
   it('accepts every citation when a text cites several real keys', () => {
-    const other = subjectKey('docs/HANDOFF.md', 'a second settled question');
+    const other = '5e69050773a74c0b';
     const root = makeRoot({ [REAL_KEY]: {}, [other]: {} });
     const r = resolveNightlyDecisionKeys(root, `settles ${REAL_KEY} and also ${other}`);
     expect(r.ok).toBe(true);
@@ -118,7 +114,7 @@ describe('a cited 16-hex key must resolve against the nightly ledger', () => {
   });
 
   it('refuses on the FIRST bad key, so the caller learns one typo per lap', () => {
-    const good = subjectKey('docs/HANDOFF.md', 'a second settled question');
+    const good = '5e69050773a74c0b';
     const bad = 'fedcba9876543210';
     const root = makeRoot({ [REAL_KEY]: {}, [good]: {} });
     const r = resolveNightlyDecisionKeys(root, `settles ${REAL_KEY} and ${good} and ${bad}`);

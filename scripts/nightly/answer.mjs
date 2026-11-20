@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/stored-nightly-queue.test.ts, tests/shared/nightly-routine.test.ts
 //
 // Settle a nightly-routine item: record the owner's answer against the item's
 // SUBJECT so the question is never asked again.
@@ -48,9 +49,7 @@ const argv = process.argv.slice(2);
 // consent to settle something (2026-09-06). `--help`/`-h` print usage rather
 // than erroring, so the universal query flag is answered, never performed.
 //
-// The parsed form is used ONLY for that verdict: the settle path below keeps
-// its full argv, because an answer is free prose that may itself begin with a
-// dash (`answer.mjs DOC-1 -- "--keep the pin"` is a legitimate answer).
+// After the option delimiter, every token belongs to the answer text.
 const USAGE = [
   'Usage:',
   '  node scripts/nightly/answer.mjs <ID> "the answer"',
@@ -74,7 +73,6 @@ function fail(message) {
 let state;
 let decisions;
 try {
-  state = readOpenItems(ROOT);
   decisions = readDecisions(ROOT);
 } catch (err) {
   fail(
@@ -84,6 +82,11 @@ try {
       `prior decision. Recovery is manual: inspect the file named above, repair or restore it (e.g. from ` +
       `git history or a backup), then retry.`,
   );
+}
+try {
+  state = readOpenItems(ROOT);
+} catch (err) {
+  fail(String(err instanceof Error ? err.message : err));
 }
 const { open, resolved } = partitionBySettled(state.items, decisions, ROOT);
 
@@ -270,9 +273,7 @@ const rest = parsedArgv.positionals.slice(1);
 // executable in it — `partitionBySettled` keeps it in the open list. Two of the
 // eighteen determinations on 2026-07-28 were exactly this shape and were filed as
 // `settled`, which made them unaskable while carrying no answer anyone could act on.
-const wontfixAt = argv.indexOf('--wontfix');
-const questionAt = argv.indexOf('--question');
-const disposition = wontfixAt !== -1 ? 'wontfix' : questionAt !== -1 ? 'question' : 'settled';
+const disposition = parsedArgv.has('--wontfix') ? 'wontfix' : parsedArgv.has('--question') ? 'question' : 'settled';
 const answer = rest.join(' ').trim();
 
 if (!answer) {

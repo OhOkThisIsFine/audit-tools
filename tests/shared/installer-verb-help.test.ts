@@ -11,7 +11,7 @@
 // These are the published commands and the affected verbs are the first ones a
 // new operator touches; two of the four write into the repository and the home
 // directory. "Ask the tool what this does" must not install anything.
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,11 @@ describe("every installer verb of both shipped bins answers --help without doing
         expect(code, `stderr: ${stderr}`).toBe(0);
         expect(stdout).toContain(verb);
         expect(stdout).toContain(bin.product);
+        if (verb === "install" || verb === "install-host") {
+          expect(stdout).toMatch(/repo-local|repository/i);
+          expect(stdout).not.toContain("to the home directory");
+        }
+        if (verb === "install-host") expect(stdout).toContain("--host copilot");
         // The whole point: an informational flag performed no work. Nothing was
         // written to the working directory, and nothing to the home directory.
         expect(readdirSync(sandbox).filter((e) => e !== "home")).toEqual([]);
@@ -78,6 +83,45 @@ describe("every installer verb of both shipped bins answers --help without doing
     expect(readdirSync(sandbox).filter((e) => e !== "home")).toEqual([]);
     expect(readdirSync(home)).toEqual([]);
   });
+
+  for (const bin of BINS) {
+    it(`${bin.name} refuses a valued installer help flag without writing anything`, () => {
+      const out = runBin(bin.entry, ["install", "--root", sandbox, "--help=x"]);
+      expect(out.code).toBe(1);
+      expect(out.stderr).toContain("--help does not take a value");
+      expect(readdirSync(sandbox)).toEqual(["home"]);
+    });
+
+    it(`${bin.name} reports the missing installer root on stderr`, () => {
+      const missing = join(sandbox, "does not exist");
+      const out = runBin(bin.entry, ["install", "--root", missing]);
+      expect(out.code).toBe(1);
+      expect(out.stdout).toBe("");
+      expect(out.stderr).toContain(missing);
+      expect(out.stderr).toMatch(/ENOENT|not exist/i);
+      if (bin.name === "remediate-code") expect(out.stderr).toMatch(/^\s+at /m);
+    });
+  }
+
+  for (const [args, refusal] of [
+    [["--root", "--dry-run"], "--root requires a value"],
+    [["--artifacts-dir="], "--artifacts-dir requires a value"],
+    [["--help=unexpected"], "--help does not take a value"],
+  ] as const) {
+    it(`refuses ${args.join(" ")} before creating a run`, () => {
+      const out = runBin(BINS[0].entry, ["next-step", "--root", sandbox, ...args]);
+      expect(out.code).toBe(1);
+      expect(out.stderr).toContain(refusal);
+      expect(readdirSync(sandbox)).toEqual(["home"]);
+    });
+  }
+
+  it("accepts an explicit root whose name starts with two dashes", () => {
+    mkdirSync(join(sandbox, "--project"));
+    const out = runBin(BINS[0].entry, ["next-step", "--root=--project", "--help"]);
+    expect(out.code, out.stderr).toBe(0);
+    expect(existsSync(join(sandbox, "--project", ".audit-tools"))).toBe(false);
+  });
 });
 
 // The verb list AND each verb's one-line summary live in
@@ -94,7 +138,9 @@ describe("every installer verb of both shipped bins answers --help without doing
 describe("the installer verb list has ONE source, pinned across the copies", () => {
   it("remediate-code.mjs routes exactly the verbs the shared module declares", () => {
     const text = readFileSync(join(REPO_ROOT, "remediate-code.mjs"), "utf8");
-    const routed = [...text.matchAll(/verb === "([a-z-]+)"/g)].map((m) => m[1]);
+    const installerGate = /const verb = argv\[0\];\s*if \(([^)]+)\)/.exec(text);
+    expect(installerGate, "installer dispatch condition").not.toBeNull();
+    const routed = [...installerGate![1].matchAll(/verb === "([a-z-]+)"/g)].map((m) => m[1]);
     expect([...new Set(routed)].sort()).toEqual([...INSTALLER_VERBS].sort());
   });
 

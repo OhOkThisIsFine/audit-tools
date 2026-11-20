@@ -30,7 +30,7 @@
 //      a blocking non-verdict (`scoped_out`, `passed: false`), never a vacuous
 //      green. A missing monorepo marker must not suppress valid generic gates.
 import "../shared/hermetic-state-dir.mjs";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { pathToFileURL } from "url";
 import { tmpdir } from "os";
@@ -59,8 +59,10 @@ function assert(condition, message) {
 
 console.log("smoke:remediate-gate");
 
-if (!readFileSync(distGatePath, "utf8")) {
-  console.error(`  FAIL the built gate module is missing at ${distGatePath} — run npm run build first`);
+// sites-pinned: tests/remediate/smoke-fixtures.test.ts
+const gateFile = statSync(distGatePath, { throwIfNoEntry: false });
+if (!gateFile?.isFile() || gateFile.size === 0) {
+  console.error(`  FAIL the built gate module is missing or empty at ${distGatePath} — run npm run build from ${pkgRoot}`);
   process.exit(1);
 }
 const { runToolOwnedFinalGate, toolOwnedFinalGateCommands, writeFinalGateRedRecord } = await import(

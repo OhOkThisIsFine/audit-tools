@@ -27,14 +27,6 @@ import { join, dirname } from "node:path";
 
 export const STEP_CONTRACT_VERSION = "audit-code-step/v1alpha1";
 
-// Pause step kinds that next-step can emit before review dispatch is ready
-// (analyzer install decision, intent confirmation, design review passes,
-// optional edge reasoning), each at most once; allow extra headroom.
-const MAX_PRE_DISPATCH_PAUSES = 8;
-
-// Bound the number of next-step calls needed to finalize after ingestion.
-const MAX_FINALIZE_STEPS = 5;
-
 async function countLines(root, path) {
   const content = await readFile(join(root, path), "utf8");
   if (content.length === 0) {
@@ -121,15 +113,37 @@ async function submitIndependentReview(promptPath, resultPath) {
   await writeFile(resultPath, JSON.stringify(envelope, null, 2) + "\n");
 }
 
+// sites-pinned: tests/audit/smoke-progress.test.ts
+// Each CLI invocation gets a new agent slot. Compare the producer's actual
+// obligations and artifact content revisions across calls, excluding slot paths.
+async function* smokeSteps(runNextStep, log) {
+  const { computeArtifactStateSignature } = await import("../../dist/audit/orchestrator/artifactMetadata.js");
+  const { readOptionalJsonFile } = await import("../../dist/shared/io/json.js");
+  const seen = new Set();
+  for (;;) {
+    const step = JSON.parse((await runNextStep()).stdout);
+    assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
+    log.detail(`next-step -> ${step.step_kind} (${step.status})`);
+    const [metadata, state] = await Promise.all([
+      readOptionalJsonFile(join(step.artifacts_dir, "artifact_metadata.json")),
+      readOptionalJsonFile(join(step.artifacts_dir, "audit_state.json")),
+    ]);
+    const signature = JSON.stringify([step.step_kind, step.status, computeArtifactStateSignature({ artifact_metadata: metadata }),
+      state?.obligations?.map(obligation => [obligation.id, obligation.state]), step.submission_shortfall]);
+    if (seen.has(signature)) {
+      throw new Error(`Audit smoke made no progress: repeated ${step.step_kind} (${step.status}) with the same obligation and artifact state. ${step.progress?.summary ?? step.stop_condition ?? ""}`);
+    }
+    seen.add(signature);
+    yield step;
+  }
+}
+
 // Drive `next-step` past the host pause steps that precede review dispatch by
 // answering each pause with scripted host inputs (skip analyzer installs, confirm the default
 // scope, submit empty design-review findings). Returns the first
 // dispatch-ready step (dispatch_review).
 async function advanceToDispatchReady(runNextStep, log) {
-  for (let i = 0; i < MAX_PRE_DISPATCH_PAUSES; i++) {
-    const step = JSON.parse((await runNextStep()).stdout);
-    assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
-    log.detail(`next-step -> ${step.step_kind} (${step.status})`);
+  for await (const step of smokeSteps(runNextStep, log)) {
     if (step.step_kind === "functional_preflight") {
       const report = await emittedExample(step.prompt_path, "audit-functional-preflight/v1");
       const inspected = ["src/api/auth.ts", "src/lib/session.ts"];
@@ -211,18 +225,14 @@ async function advanceToDispatchReady(runNextStep, log) {
       .filter(Boolean)
       .join("\n  ");
     throw new Error(
-      `advanceToDispatchReady: unexpected step kind '${step.step_kind}' (iteration ${i})` +
+      `advanceToDispatchReady: unexpected step kind '${step.step_kind}'` +
         (why ? `\n  ${why}` : `\n  step: ${JSON.stringify(step)}`),
     );
   }
-  throw new Error("next-step did not reach a dispatch-ready step");
 }
 
 async function nextStepUntilPresentReport(runNextStep, log) {
-  for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
-    const step = JSON.parse((await runNextStep()).stdout);
-    assert.equal(step.contract_version, STEP_CONTRACT_VERSION);
-    log.detail(`next-step -> ${step.step_kind} (${step.status})`);
+  for await (const step of smokeSteps(runNextStep, log)) {
     if (step.step_kind === "synthesis_narrative") {
       const narrativeResultsPath = step.artifact_paths?.synthesis_narrative_results;
       assert.equal(
@@ -259,10 +269,8 @@ async function nextStepUntilPresentReport(runNextStep, log) {
       }
       return step;
     }
+    throw new Error(`nextStepUntilPresentReport: unexpected step kind '${step.step_kind}': ${step.progress?.summary ?? step.stop_condition ?? ""}`);
   }
-  throw new Error(
-    `next-step did not reach present_report within ${MAX_FINALIZE_STEPS} calls`,
-  );
 }
 
 function findHostGuidance(installedHost, host) {

@@ -161,7 +161,7 @@ export interface ExtractedFindingGrounding {
   findings: Finding[];
   /** Findings dropped because every cited path was phantom (post-repair). */
   dropped: { finding: Finding; phantomPaths: string[] }[];
-  /** Phantom paths stripped from kept findings, keyed by finding id. */
+  /** Phantom paths for each finding that cited them, including dropped findings. */
   phantomPathsByFinding: Map<string, string[]>;
   /** IDs of kept findings whose evidence has no real-path citation. */
   ungroundedFindingIds: string[];

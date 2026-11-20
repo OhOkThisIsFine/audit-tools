@@ -589,8 +589,7 @@ self-describing, so it earns the same deletion. What may NOT be deleted is a tra
   consumers). Do not rebuild this.
   ⚠ Converting a test file named in `scripts/shared/test-flake-baseline.json` must move its
   baseline key in the same commit, or the flake record orphans.
-  ⚠ Any future `.mjs`→`.ts` conversion runs `node scripts/shared/conversion-assertion-parity.mjs`
-  after `git mv`+edits, before commit — review ONLY the files it flags.
+  ⚠ For a test conversion, review the diff and run behavioral tests that exercise the converted assertions.
 
 - **Cite a SYMBOL, never a bare line number — and when no good symbol exists, cite the file alone.**
   Line numbers across the backlog drifted repo-wide while the symbol names beside them still resolved,

@@ -154,8 +154,12 @@ export async function readCanonicalPlan(artifactsDir: string): Promise<Canonical
 }
 
 export async function readPlanReviewHistory(artifactsDir: string): Promise<PlanReviewHistory> {
+  return await readExistingPlanReviewHistory(artifactsDir) ?? { counterexamples: [], accepted_ids: [], repair_rounds: 0 };
+}
+
+async function readExistingPlanReviewHistory(artifactsDir: string): Promise<PlanReviewHistory | undefined> {
   const raw = await readOptionalJsonFile<unknown>(executionPlanPaths(artifactsDir).history);
-  return raw === undefined ? { counterexamples: [], accepted_ids: [], repair_rounds: 0 } : z.object({
+  return raw === undefined ? undefined : z.object({
     counterexamples: z.array(PlanCounterexampleSchema), accepted_ids: z.array(text), repair_rounds: z.number().int().nonnegative(), repair_revision: digest.optional(), repair_reason: text.optional(),
   }).strict().parse(raw);
 }
@@ -362,7 +366,7 @@ export async function readPlanReview(artifactsDir: string, role: PlanReviewRole,
   return receipt.revision_sha256 === revision && receipt.role === role ? receipt : undefined;
 }
 
-export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{ canonical: CanonicalPlan; source: PlanSource } | undefined> {
+export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{ canonical: CanonicalPlan; source: PlanSource; history: PlanReviewHistory } | undefined> {
   const canonical = await readCanonicalPlan(artifactsDir);
   const source = await readPlanSource(artifactsDir);
   if (!canonical || !source || canonical.source_sha256 !== contentSha256(source)) return undefined;
@@ -378,9 +382,8 @@ export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{
   if (approval?.owner_decision_sha256 !== contentSha256(owner ?? null) || approval.risk_decision_sha256 !== contentSha256(risk ?? null)) return undefined;
   // An approved history is evidence, even when empty; absence is only a valid
   // default during initial authoring, never after an approval bound that record.
-  if (await readOptionalJsonFile<unknown>(paths.history) === undefined) return undefined;
-  const history=await readPlanReviewHistory(artifactsDir);
-  if(approval.history_sha256!==contentSha256(history))return undefined;
+  const history = await readExistingPlanReviewHistory(artifactsDir);
+  if (!history || approval.history_sha256 !== contentSha256(history)) return undefined;
   const receipts:Partial<Record<PlanReviewRole,PlanReviewReceipt>>={};
   for(const role of PLAN_REVIEW_ROLES){
     const receipt=await readPlanReview(artifactsDir,role,canonical.revision_sha256);
@@ -403,5 +406,5 @@ export async function readApprovedExecutionPlan(artifactsDir: string): Promise<{
     const decision=PlanRiskDecisionSchema.safeParse(risk);
     if(!decision.success || decision.data.revision_sha256!==canonical.revision_sha256 || residuals.some(entry=>!decision.data.accepted_counterexample_ids.includes(entry.counterexample_id)))return undefined;
   }
-  return { canonical, source };
+  return { canonical, source, history };
 }

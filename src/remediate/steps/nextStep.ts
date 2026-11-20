@@ -1,12 +1,13 @@
+import { backtickList } from "../../shared/reporting/markdown.js";
 import { readPlanClarificationResolutions, planClarificationRefusal, pausedClarifications, type PlanClarificationResolution } from "./clarificationResolution.js";
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
-import { readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
+import { CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME, readDecisionSnapshot, decisionContextDigest } from "../state/decisionConsumption.js";
 import { RemediationPlanAuthorityError } from "../contractPipeline/runtimePlanAuthority.js";
 import { reopenStaleTriageSuccesses } from "../phases/triageConformance.js";
 import { stateRunId, requireStateRunId, currentHostBoundaryState } from "../state/runIdentity.js";
 import { presentReportStep } from "./frictionCloseout.js";
 import { reviewFilterDispositionsPath, persistReviewFilterDispositions, type PersistedReviewFilterDispositions } from "../review/filterDispositions.js";
-import { INTENT_INTERPRETATION_FILENAME, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
+import { intentInterpretationPath, readPersistedIntentInterpretationSync, readOrRepairIntentInterpretation } from "../intent/intentPersistence.js";
 import { requestedFindingSelection, renderFindingSelection, type FindingSelectionOptions } from "../intakeSelection.js";
 import { parseCommandString } from "../../shared/tooling/commandShape.js";
 // sites-pinned: tests/remediate/path-a-source-provenance.test.ts, tests/remediate/path-a-phantom-source.test.ts, tests/remediate/next-step-replan-safety.test.ts, tests/remediate/close-plan-authority.test.ts, tests/remediate/friction-capture-closeout.test.ts, tests/remediate/next-step-lifecycle.test.ts, tests/remediate/next-step-pipeline-dispatch.test.ts, tests/remediate/next-step-outcomes-contract.test.ts, tests/remediate/integration-pipeline.test.ts, tests/remediate/outcomes-roundtrip.test.ts, tests/remediate/phase-close.test.ts, tests/remediate/grounding.test.ts, tests/remediate/clarification-round-contract.test.ts, tests/remediate/next-step-review-gate.test.ts, tests/remediate/n-r04-intent-checkpoint.test.ts, tests/remediate/final-gate-red-pause.test.ts, tests/remediate/deferred-clarification.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
@@ -18,7 +19,7 @@ import { loadRemediateSessionConfig } from "./sessionConfigLoad.js";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, rename } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { StateStore, OPERATOR_LIFECYCLE_FILENAME, type OperatorLifecycle, type OperatorLifecycleAction, type RemediationState } from "../state/store.js";
+import { StateStore, PHASE_LOCK_FILENAME, STATE_FILENAME, OPERATOR_LIFECYCLE_FILENAME, type OperatorLifecycle, type OperatorLifecycleAction, type RemediationState } from "../state/store.js";
 import type {
   Finding,
   RemediationItemState,
@@ -69,7 +70,7 @@ import {
 import type { CoverageLedger } from "../state/types.js";
 import { buildCoverageLedger } from "../phases/plan.js";
 import { runTriagePhase } from "../phases/triage.js";
-import { runClosePhase } from "../phases/close.js";
+import { retryIncompleteCloseReport, runClosePhase } from "../phases/close.js";
 import { hasBoundRemediationSubmission, ingestRemediationHostResults, hostDependencyLevels, permanentlyDeadPendingUnits, prepareRemediationHostHandoff, RemediationHostPreparationError, remediationIssueRemedy } from "./dispatch/hostHandoff.js";
 import { RETIRED_DISPATCH_SHAPE_MESSAGE, type RemediationHostIngestSummary } from "./dispatch/hostContracts.js";
 import {
@@ -124,7 +125,7 @@ import {
   writePathASeedFromFindings,
 } from "./contractPipeline.js";
 import { compareCodeUnits } from "../../shared/compareCodeUnits.js";
-import { executionPlanPaths, readCanonicalPlan, readPlanSource, readPlanReviewHistory } from "../contractPipeline/executionPlan.js";
+import { executionPlanPaths, readCanonicalPlan, readPlanSource } from "../contractPipeline/executionPlan.js";
 import type { ExecutionUnit } from "../../shared/types/executionPlan.js";
 import {
   buildReviewRequest,
@@ -182,9 +183,9 @@ import {
 // prompt copy. Previously these 11-lens / 5-severity lists were hand-copied as
 // backtick-quoted literals in three places in this file and would silently drift
 // from the canonical enum (the very drift `types/lens.ts` exists to prevent).
-const VALID_LENSES_PROSE = LENSES.map((lens) => `\`${lens}\``).join(", ");
-const VALID_SEVERITIES_PROSE = SEVERITIES.map((sev) => `\`${sev}\``).join(", ");
-const VALID_CLOSING_ACTIONS_PROSE = CLOSING_ACTIONS.map((action) => `\`${action}\``).join(", ");
+const VALID_LENSES_PROSE = backtickList(LENSES);
+const VALID_SEVERITIES_PROSE = backtickList(SEVERITIES);
+const VALID_CLOSING_ACTIONS_PROSE = backtickList(CLOSING_ACTIONS);
 
 export interface NextStepOptions extends FindingSelectionOptions {
   root?: string;
@@ -548,7 +549,7 @@ function allItemsTerminal(state: RemediationState): boolean {
 }
 
 /**
- * Reorder a finalized plan by the checkpoint's interpreted intent.
+ * Reorder execution units using the checkpoint's interpreted intent. Preserve source finding order.
  *
  * The checkpoint persists the operator's `free_form_intent` verbatim; the
  * structured `InterpretedIntent` is derived from it by the single shared
@@ -629,7 +630,7 @@ async function saveStateForPlan(
 ): Promise<RemediationState> {
   const { host_handoff: _staleHostHandoff, conformance_review: priorConformance, ...carryForwardState } = existing;
   const items: Record<string, RemediationItemState> = {};
-  const owner = await readOptionalJsonFile<{revision_sha256:string;declined_units:Array<{id:string;reason:string}>}>(join(executionPlanPaths(artifactsDir).directory,"owner-decision.json"));
+  const owner = await readOptionalJsonFile<{revision_sha256:string;declined_units:Array<{id:string;reason:string}>}>(executionPlanPaths(artifactsDir).ownerDecision);
   for (const unit of plan.units) {
     const prior = existing.plan?.units.find(entry => entry.id === unit.id);
     items[unit.id] = prior && stableStringify(prior) === stableStringify(unit) && existing.items?.[unit.id]
@@ -805,7 +806,7 @@ async function buildImplementDispatchStep(ctx: {
     });
   } catch (error) {
     if (!(error instanceof RemediationHostPreparationError)) throw error;
-    const sourcePath = join(artifactsDir, "state.json");
+    const sourcePath = join(artifactsDir, STATE_FILENAME);
     const diagnosticsPath = join(artifactsDir, "steps", "handoff-repair.json");
     await writeJsonFile(diagnosticsPath, { code: error.code, message: error.message, source: sourcePath });
     const excerpt = error.message.length <= 3_000 ? error.message : `${error.message.slice(0, 3_000)}… [excerpt truncated]`;
@@ -815,7 +816,7 @@ async function buildImplementDispatchStep(ctx: {
         stepKind: "repair_handoff", status: "blocked", runId, repoRoot: root, artifactsDir,
         prompt: `# Repair the planning output before dispatch\n\n${excerpt}\n\nFull validation details: ${diagnosticsPath}\n\n` +
           `Owning source: ${sourcePath} (plan.units and its generated handoff binding).\n` +
-          `Upstream planning input: ${join(artifactsDir, "extracted-plan.json")}.\n\n` +
+          `Upstream reviewed plan: ${executionPlanPaths(artifactsDir).canonical}.\n\n` +
           "The current run and completed work are preserved. This dispatch cannot safely repair its upstream producer. " +
           "Return the named validation errors to the planning producer; do not edit generated state, discard accepted work, or submit results under invalid bindings. " +
           "After the upstream producer has corrected the plan, run next-step again.\n",
@@ -998,7 +999,7 @@ async function activateApprovedPlan(
     findings: source.findings,
     ...(source.request ? { request: source.request } : {}),
     review_revision_sha256: canonical.revision_sha256,
-    review_counterexamples: (await readPlanReviewHistory(artifactsDir)).counterexamples.filter(example => canonical.plan.units.some(unit => unit.addresses_counterexample_ids.includes(example.id))),
+    review_counterexamples: approved.history.counterexamples.filter(example => canonical.plan.units.some(unit => unit.addresses_counterexample_ids.includes(example.id))),
     project_type: facts.project_type,
     candidate_closing_actions: facts.candidate_closing_actions,
     audit_read: source.audit_read,
@@ -1669,7 +1670,7 @@ async function handleInputConflict(
   const itemCount = state.items ? Object.keys(state.items).length : 0;
   const suppliedInline =
     inputResolution.checked.length > 0
-      ? inputResolution.checked.map((p) => `\`${p}\``).join(", ")
+      ? backtickList(inputResolution.checked)
       : "(new intake source via `--guidance-file`)";
   const selectionPrompt = selectionConflict ? [
     "# Finding selection changed during an existing intake", "",
@@ -1714,7 +1715,7 @@ Stop after presenting this choice. Do not advance the run until the user decides
     stopCondition:
       "Stop after presenting the resume-vs-restart choice to the user.",
     artifactPaths: {
-      state_file: join(artifactsDir, "state.json"),
+      state_file: join(artifactsDir, STATE_FILENAME),
     },
   });
 }
@@ -1765,7 +1766,7 @@ async function applyPlanClarificationResolution(
   store: StateStore,
 ): Promise<{ kind: "applied"; state: RemediationState } | { kind: "refused"; step: RemediationStep }> {
   if (!state.plan || !state.items) return { kind: "applied", state };
-  const resolutionPath = join(artifactsDir, "clarification_resolution.json");
+  const resolutionPath = join(artifactsDir, CLARIFICATION_RESOLUTION_FILENAME);
   const inputSnapshot = await readDecisionSnapshot(resolutionPath);
   const contextDigest = decisionContextDigest(state);
   const parsed = await readPlanClarificationResolutions(resolutionPath, inputSnapshot?.bytes);
@@ -1811,7 +1812,7 @@ async function applyPlanClarificationResolution(
   // outright). Mirrors the saveStateForPlan strip.
   if (appliedCount > 0) delete state.host_handoff;
   if (!inputSnapshot) throw new Error("Clarification input changed during application; retry without accepting it.");
-  (state.decision_applications ??= []).push({ input: "clarification_resolution.json", input_sha256: inputSnapshot.sha256, input_identity_sha256: inputSnapshot.identity_sha256,
+  (state.decision_applications ??= []).push({ input: CLARIFICATION_RESOLUTION_FILENAME, input_sha256: inputSnapshot.sha256, input_identity_sha256: inputSnapshot.identity_sha256,
     context_sha256: contextDigest, run_id: state.plan.plan_id, revision_sha256: state.plan.review_revision_sha256,
     applied_at: now, retry_results: [] });
   const remainingPending = state.plan.units.some(
@@ -1846,7 +1847,7 @@ async function handleWaitingForClarification(
   state: RemediationState,
   refusal?: string,
 ): Promise<RemediationStep> {
-  const resolutionPath = join(artifactsDir, "clarification_resolution.json");
+  const resolutionPath = join(artifactsDir, CLARIFICATION_RESOLUTION_FILENAME);
   return writeCurrentStep({
     stepKind: "collect_clarifications",
     status: "blocked",
@@ -1868,7 +1869,7 @@ async function handleWaitingForTriage(
   artifactsDir: string,
   state: RemediationState,
 ): Promise<RemediationStep> {
-  const resolutionPath = join(artifactsDir, "triage_resolution.json");
+  const resolutionPath = join(artifactsDir, TRIAGE_RESOLUTION_FILENAME);
   return writeCurrentStep({
     stepKind: "collect_triage",
     status: "blocked",
@@ -2438,7 +2439,7 @@ The deterministic fold ${stalled.cause}.
 
 - **Spinning obligation**: \`${stalled.spinning}\`
 - **Backstop that fired**: \`${stalled.stopped}\`
-- **State file**: \`${join(artifactsDir, "state.json")}\`
+- **State file**: \`${join(artifactsDir, STATE_FILENAME)}\`
 
 An obligation is re-selecting without clearing its own actionable state, so the
 engine stopped the fold rather than looping forever. This is a blocking
@@ -2477,7 +2478,7 @@ async function handleUnhandledState(
 The remediation workflow reached a state it has no transition for.
 
 - **State status**: \`${state.status}\`
-- **State file**: \`${join(artifactsDir, "state.json")}\`
+- **State file**: \`${join(artifactsDir, STATE_FILENAME)}\`
 
 ## Item Breakdown
 
@@ -2525,7 +2526,7 @@ export async function changeOperatorLifecycle(options: {
   const artifactsDir = resolveArtifactsDir(root, options.artifactsDir);
   await mkdir(artifactsDir, { recursive: true });
   const store = new StateStore(artifactsDir);
-  return withFileLock(join(artifactsDir, "phase.lock"), async () => {
+  return withFileLock(join(artifactsDir, PHASE_LOCK_FILENAME), async () => {
     const control = await store.setOperatorLifecycleUnderPhaseLock(options.action, options.hostReport);
     return buildOperatorControlStep(root, artifactsDir, await store.loadState(), control);
   });
@@ -2633,7 +2634,7 @@ async function buildConfirmResumeOrRestartStep(ctx: {
     stopCondition:
       "Stop after presenting the resume/restart/merge choice to the user and writing the ack.",
     artifactPaths: {
-      state_file: join(artifactsDir, "state.json"),
+      state_file: join(artifactsDir, STATE_FILENAME),
       confirm_resume_ack: ackPath,
     },
   });
@@ -2954,7 +2955,7 @@ export function buildPreIntakeObligations(
   const rejectedClosingAction = rejectedCheckpointFields.find(
     (field) => field.key === "closing_action",
   );
-  const interpretationPath = join(artifactsDir, INTENT_INTERPRETATION_FILENAME);
+  const interpretationPath = intentInterpretationPath(artifactsDir);
   const reportPath = join(dirname(artifactsDir), "remediation-report.md");
 
   return [
@@ -3242,9 +3243,9 @@ export function buildMainObligations(ctx: RemediateCtx): RemediateObligation[] {
   const { root, artifactsDir, options, runLogger, store } = ctx;
   const clarificationResolutionPath = join(
     artifactsDir,
-    "clarification_resolution.json",
+    CLARIFICATION_RESOLUTION_FILENAME,
   );
-  const triageResolutionPath = join(artifactsDir, "triage_resolution.json");
+  const triageResolutionPath = join(artifactsDir, TRIAGE_RESOLUTION_FILENAME);
 
   return [
     {
@@ -3477,7 +3478,7 @@ async function decideNextStepLoop(
   });
   try {
     return await withFileLock(
-      join(artifactsDir, "phase.lock"),
+      join(artifactsDir, PHASE_LOCK_FILENAME),
       () => advanceUnderPhaseLock({ root, artifactsDir, store, options, runLogger }),
       PHASE_LOCK_TIMEOUT_MS,
     );
@@ -3509,17 +3510,22 @@ async function advanceUnderPhaseLock(deps: {
   // Loaded FRESH under the mutex: a peer may have advanced and persisted state
   // between the entry read and this process winning the lock.
   let state = await store.loadState();
-  const reportOnlyRequest = state?.status === "complete" &&
-    options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
+  const bareRequest = options.input === undefined && options.severity === undefined && options.findingIds === undefined &&
     options.guidanceFile === undefined && options.guidanceText === undefined && options.verificationCommand === undefined &&
     options.guidanceFileSupplied !== true && options.forceReplan !== true && options.planOnly !== true && options.finalizeClosing !== true;
+  const reportOnlyRequest = state?.status === "complete" && bareRequest;
   // Only a potential complete/report-only request may inspect plan freshness
   // before baseline admission. No authority write can precede this fence.
   if (state && !reportOnlyRequest) admitRemediationDirtyBaseline(state);
   const currentCanonical = state?.plan ? await readCanonicalPlan(artifactsDir) : undefined;
   const pendingPlanSubmission = existsSync(executionPlanPaths(artifactsDir).submission);
   const revisionMismatch = Boolean(currentCanonical && currentCanonical.revision_sha256 !== state?.plan?.review_revision_sha256);
-  if (reportOnlyRequest && !pendingPlanSubmission && !revisionMismatch) return handleComplete(root, artifactsDir, state);
+  const unchangedPlan = !pendingPlanSubmission && !revisionMismatch;
+  // sites-pinned: tests/remediate/phase-close.test.ts
+  if (state && reportOnlyRequest && unchangedPlan) {
+    await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
+    return handleComplete(root, artifactsDir, state);
+  }
   if (state && reportOnlyRequest) admitRemediationDirtyBaseline(state);
   if (state) await store.reconcileDecisionApplications(state);
   let control = await store.loadOperatorLifecycle();
@@ -3532,6 +3538,10 @@ async function advanceUnderPhaseLock(deps: {
   if (control?.plan_only && isPlanOnlyBoundary(state) && !options.forceReplan) {
     control = await store.setOperatorLifecycleUnderPhaseLock("pause", undefined, "plan-only");
     return buildOperatorControlStep(root, artifactsDir, state, control);
+  }
+  if (state?.status === "closing" && bareRequest && unchangedPlan) {
+    const completed = await retryIncompleteCloseReport(state, { root, artifactsDir }, runLogger);
+    if (completed) return handleComplete(root, artifactsDir, await store.loadState());
   }
   if (options.guidanceFile && options.guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
   const boundSource = await readPlanSource(artifactsDir);

@@ -14,7 +14,7 @@ test("legacy durable declines cannot veto a new run's consent offer", async () =
     const policy = await loadAnalyzerPolicy(root);
     expect(policy.analyzers).toEqual({ knip: "repo" });
     const options = buildExternalAcquisitionOptions(policy);
-    expect(pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true, analyzerConsent: options.analyzerConsent }).map(c => c.id)).toContain("eslint");
+    expect(pendingAnalyzerConsent({ root, externalAcquisition: options }).map(c => c.id)).toContain("eslint");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

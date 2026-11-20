@@ -1,22 +1,13 @@
-// Best-effort import of shared OpenCode permission helpers.
-// On a fresh checkout before `npm run build`, the dist may not exist yet;
-// buildMergedOpenCodeProjectConfig throws a clear error in that case.
-let mergeOpenCodeAgentPermissionRule;
-let withoutOpenCodeWildcard;
-let migrateOpenCodeGlobalExternalDirectory;
-let composeOpenCodeBashCeiling;
-export let sharedOpenCodePermissions = false;
-
-try {
-  const shared = await import('audit-tools/shared');
-  mergeOpenCodeAgentPermissionRule = shared.mergeOpenCodeAgentPermissionRule;
-  withoutOpenCodeWildcard = shared.withoutOpenCodeWildcard;
-  migrateOpenCodeGlobalExternalDirectory = shared.migrateOpenCodeGlobalExternalDirectory;
-  composeOpenCodeBashCeiling = shared.composeOpenCodeBashCeiling;
-  sharedOpenCodePermissions = true;
-} catch {
-  // shared not yet built — callers that need merge logic will throw below
-}
+// sites-pinned: tests/shared/installer-host-compatibility.test.ts, tests/shared/install-bootstrap-opencode-stability.test.ts
+import {
+  mergeOpenCodeAgentPermissionRule,
+  withoutOpenCodeWildcard,
+  migrateOpenCodeGlobalExternalDirectory,
+  composeOpenCodeBashCeiling,
+  sharedOpenCodePermissions,
+  unavailableProjectPermissions,
+} from './shared-project-opencode.mjs';
+export { sharedOpenCodePermissions };
 
 export const OPENCODE_REMEDIATE_EDIT_PERMISSION = {
   '*': 'ask',
@@ -229,11 +220,7 @@ function collectAgentBashRuleSets(agentMap) {
 }
 
 export function buildMergedOpenCodeProjectConfig(existing, root) {
-  if (!sharedOpenCodePermissions) {
-    throw new Error(
-      'audit-tools/shared is not available. Run "npm run build" before deploying OpenCode config.',
-    );
-  }
+  if (!sharedOpenCodePermissions) unavailableProjectPermissions();
   const generated = renderOpenCodeProjectConfig(root);
   const mergedMcp = objectValue(existing.mcp);
   delete mergedMcp.remediator;

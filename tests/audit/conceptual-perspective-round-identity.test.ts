@@ -1,7 +1,8 @@
 import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
-import { charterExtractionLane } from "../../src/audit/cli/laneSubmissions.js";
-import { satisfyFunctionalPreflight } from "../helpers/functionalPreflightFixture.js";
+import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { prepareFixtureRun } from "../helpers/functionalPreflightFixture.js";
 /**
  * The deep conceptual pass's perspective lanes are ROUND-scoped, and the tool is
  * owed nothing on them.
@@ -37,9 +38,6 @@ const { prepareConceptualDispatch } = await import(
 );
 const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { writeCoreArtifacts } = await import("../../src/audit/io/artifacts.js");
-const { persistAnalyzerConsent } = await import(
-  "../../src/shared/analyzerPolicy.js"
-);
 const { expectedSubmissionsPath } = await import(
   "../../src/shared/io/auditToolsPaths.js"
 );
@@ -180,6 +178,26 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
       critical_flows: { flows: [], fallback_required: false },
       risk_register: { items: [] },
       analyzer_capability: { coverage: "not_applicable", analyzers: [] },
+      // This fixture starts after charter work. A new charter submission would invalidate the seeded review inputs.
+      charter_register: {
+        schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
+        generated_at: "2026-01-01T00:00:00.000Z",
+        target: "charter",
+        ceiling: { rung: "deep" },
+        ...EMPTY_REGISTER_BODY,
+      },
+      charter_clarification: {
+        generated_at: "2026-01-01T00:00:00.000Z",
+        target: "charter_clarification",
+        ceiling: { rung: "deep" },
+        attention: 0,
+        status: "omitted",
+        asked: [],
+        banked: [],
+        findings: [],
+        validation_issues: [],
+        ...REGISTER_V4_AFFIRMATION,
+      },
       design_assessment: {
         generated_at: "2026-01-01T00:00:00.000Z",
         findings: [],
@@ -213,34 +231,12 @@ describe("deep conceptual perspectives are round-scoped and never expected submi
     } as ArtifactBundle);
     await writeCoreArtifacts(dir, completed);
     await persistDesignReviewSnapshots(dir, completed);
-    await persistAnalyzerConsent(root, {
-      semgrep: "declined",
-      eslint: "declined",
-      knip: "declined",
-      jscpd: "declined",
-      "osv-scanner": "declined",
-    });
-
-    await satisfyFunctionalPreflight(root, dir);
+    await prepareFixtureRun(root, { artifactsDir: dir, declinedAnalyzerIds: ["semgrep", "eslint", "knip", "jscpd", "osv-scanner"], preflight: true });
     await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
     const firstStep = JSON.parse(
       await readFile(join(dir, "steps", "current-step.json"), "utf8"),
     );
-    if (firstStep.step_kind === "charter_extraction") {
-      // One EMPTY goal DAG per lane. A lane submission states NO kind: the tool
-      // stamps it at merge, from the lane-bound path the file arrived on (owner
-      // review of prompt 8, 2026-09-17). So every lane writes the same shape.
-      for (const kind of ["stated", "structural", "revealed"] as const) {
-        await writeBoundReviewFixture(dir, charterExtractionLane(kind), { inputs: [`charter-extraction-${kind}-packet.md`], nodes: [], edges: [] });
-      }
-      await cmdNextStep(["--root", root, "--artifacts-dir", dir]);
-      Object.assign(
-        firstStep,
-        JSON.parse(
-          await readFile(join(dir, "steps", "current-step.json"), "utf8"),
-        ),
-      );
-    }
+
     expect(firstStep.step_kind).toBe("design_review_conceptual");
     const firstManifest = JSON.parse(await readFile(firstStep.artifact_paths.conceptual_round_manifest, "utf8"));
     const firstPerspectivePaths = firstManifest.perspectives.map((p: { result_path: string }) => p.result_path) as string[];

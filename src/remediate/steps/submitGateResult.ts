@@ -1,3 +1,4 @@
+import { CLARIFICATION_RESOLUTION_FILENAME, TRIAGE_RESOLUTION_FILENAME } from "../state/decisionConsumption.js";
 // sites-pinned: tests/remediate/gate-submit.test.ts, tests/remediate/clarification-submit.test.ts
 import { join } from "node:path";
 import { contentSha256, isRecord, readSubmissionDocument, writeJsonFile } from "audit-tools/shared";
@@ -57,7 +58,7 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
     const parsed = parsePlanClarificationResolutions(value);
     const refusal = planClarificationRefusal(parsed, new Set(pending.map(question => question.unit_id)), "not waiting for a clarification");
     if (refusal !== null) return refuse("invalid_clarification", refusal);
-    return admit(join(params.artifactsDir, "clarification_resolution.json"));
+    return admit(join(params.artifactsDir, CLARIFICATION_RESOLUTION_FILENAME));
   }
   if (!state?.plan || !state.items ||
     (state.status !== "triage" && state.status !== "waiting_for_triage") ||
@@ -71,5 +72,5 @@ export async function submitRemediationGateResult(params: { artifactsDir: string
   if (isRecord(value) && typeof value.plan_id === "string" && value.plan_id !== state.plan.plan_id) {
     return refuse("stale_triage_plan", "Triage decisions do not name the live plan; obtain the current triage step.");
   }
-  return admit(join(params.artifactsDir, "triage_resolution.json"));
+  return admit(join(params.artifactsDir, TRIAGE_RESOLUTION_FILENAME));
 }

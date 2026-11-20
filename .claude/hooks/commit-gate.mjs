@@ -50,9 +50,8 @@
 //      delete anything not in the staged tree) → run the gate
 //   4. finally: restore worktree tree exactly + reset real index to staged tree
 //
-// Failure policy: FAIL-OPEN on infrastructure faults (can't capture/materialize/
-// restore, git error) — never wedge the session; FAIL-CLOSED on gate results
-// (a real `npm run check` / doc-contract failure blocks the commit).
+// Infrastructure faults before mutation may skip a check. Keep HEAD fixed
+// whenever restoration is pending so the next hook can safely retry.
 import { execSync, spawnSync } from 'node:child_process';
 import { rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -140,6 +139,8 @@ const {
   checkoutTreeExact,
   STATE_DIR,
   RT_JOURNAL,
+  activeIndexPath,
+  roundTripLockIsLive,
   acquireRoundTripLock,
   releaseRoundTripLock,
   recoverInterruptedRoundTrip,
@@ -177,7 +178,17 @@ const gateChildEnv = childEnvironmentWithoutGitLocals();
 const payloadSessionId = sanitizeSessionId(process.env.CLAUDE_CODE_SESSION_ID);
 const insideClaudeSession = Boolean(process.env.CLAUDE_PID || process.env.CLAUDE_CODE_SESSION_ID);
 
+// sites-pinned: tests/shared/pre-commit-gate-roundtrip-journal.test.ts, tests/shared/pre-commit-gate-commit-detection.test.ts
+function refusePendingRoundTrip() {
+  if (existsSync(RT_JOURNAL) || roundTripLockIsLive()) {
+    console.error('[commit gate] Commit blocked: a staged-snapshot round-trip is in flight or awaiting recovery. ' +
+      `Retry the commit after recovery so HEAD stays bound to the saved worktree and index (${RT_JOURNAL}).`);
+    process.exit(2);
+  }
+}
+
 recoverInterruptedRoundTrip();
+refusePendingRoundTrip();
 
 // ── Child-session refusal (Build 1 / P23) ────────────────────────────────────
 // A session with no record in .claude/hooks/.state/sessions/ while the registry
@@ -654,6 +665,7 @@ function workingTreeDivergesFromIndex() {
   return false;
 }
 
+// sites-pinned: tests/shared/pre-commit-gate-branch-strand.test.ts
 // ── Branch-strand refusal ────────────────────────────────────────────────────
 // A branch named `remediation/<runId>` used to be created by the TOOL — a
 // remediation run switched the PRIMARY checkout onto it at implement-dispatch
@@ -692,14 +704,9 @@ if (headBranchName.startsWith('remediation/')) {
       `commit gate: commit blocked — HEAD is the remediation run branch \`${headBranchName}\` and every ` +
         `staged path is docs/spec, so this commit would STRAND off main:\n` +
         stagedForStrand.map((p) => `  - ${p}`).join('\n') +
-        `\nA remediation run switches this checkout onto \`remediation/<runId>\` and leaves it there. Run ` +
-        `output is produced in the per-node linked worktrees, not here — so a prose-only commit from this ` +
-        `checkout is main-bound work that lost its branch. This has happened three times.\n` +
-        `Recovery — land it on main; the staged set follows the checkout:\n` +
-        `  git checkout main && git commit …\n` +
-        `then \`git checkout ${headBranchName}\` to resume the run. If the checkout refuses because a staged ` +
-        `path differs between the branches, \`git stash --include-untracked\` first, then \`git stash pop\` ` +
-        `on main.\n` +
+        `\nA host may have created this run branch. Use \`git worktree list\` to locate main.\n` +
+        `If main is free, switch to main with the staged changes and verify \`git diff --cached\` before committing.\n` +
+        `If a linked worktree holds main, transfer the intended staged diff there and verify it before committing.\n` +
         `If this prose genuinely belongs to the RUN, commit it together with the code change it documents.`,
     );
     process.exit(2);
@@ -743,13 +750,11 @@ if (!diverges) {
 // through a SCRATCH index file so the real staged index is never mutated by the
 // capture/checkout steps; the only real-index write is the final restore.
 //
-// Serialized: a second gate instance mid-round-trip means interleaved tree
-// surgery — fail OPEN instead (skip the check), never overlap.
+// A live holder or pending journal needs this HEAD for recovery. A lock
+// acquisition failure before mutation with neither present may skip the check.
 if (!acquireRoundTripLock()) {
-  console.error(
-    '[commit gate] another staged-snapshot round-trip is in flight — skipping the staged-snapshot ' +
-      'check for this commit (fail-open; retry if you need the gate to run).',
-  );
+  refusePendingRoundTrip();
+  noteFailOpen('could not acquire the staged-snapshot lock; no snapshot check ran');
   process.exit(0);
 }
 // Scratch index for the staged-snapshot round-trip. It MUST NOT live under
@@ -779,9 +784,8 @@ if (worktreeTree === null || !stagedWt.ok) {
 }
 const stagedTree = stagedWt.stdout.trim();
 
-// Union of paths across both trees — the prune candidate set for exact checkouts
-// (materialize removes untracked/unstaged-only files; restore removes anything
-// the worktree tree lacks).
+// sites-pinned: tests/shared/pre-commit-gate-roundtrip-journal.test.ts
+// Read both path lists before either checkout can mutate the worktree.
 const stagedPaths = listTreePaths(stagedTree);
 const worktreePaths = listTreePaths(worktreeTree);
 if (stagedPaths === null || worktreePaths === null) {
@@ -793,7 +797,6 @@ if (stagedPaths === null || worktreePaths === null) {
   );
   process.exit(0); // FAIL-OPEN on infra fault
 }
-const unionPaths = new Set([...stagedPaths, ...worktreePaths]);
 
 // Journal the round-trip BEFORE the first worktree mutation: if this process is
 // killed anywhere past this point, the next gate invocation restores both trees
@@ -811,17 +814,20 @@ try {
       {
         worktreeTree,
         stagedTree,
+        indexPath: activeIndexPath(),
         head: headRevForJournal.ok ? headRevForJournal.stdout.trim() : null,
         at: new Date().toISOString(),
       },
       null,
       2,
     ),
+    { flag: 'wx' },
   );
 } catch {
-  // Can't journal → don't take an unrecoverable risk: skip the check (fail-open).
+  // Exclusive creation can also detect a journal left between the two checks.
   removeBestEffort(scratchIndex);
   releaseRoundTripLock();
+  refusePendingRoundTrip();
   console.error(
     '[commit gate] could not write the round-trip recovery journal — skipping the staged-snapshot ' +
       'check for this commit (a crash mid-check would otherwise be unrecoverable).',
@@ -830,11 +836,16 @@ try {
 }
 
 // 2. Materialize the staged tree into the worktree.
-if (!checkoutTreeExact(scratchIndex, stagedTree, unionPaths)) {
-  checkoutTreeExact(scratchIndex, worktreeTree, unionPaths); // best-effort restore
+if (!checkoutTreeExact(scratchIndex, stagedTree, stagedPaths, worktreePaths)) {
+  const rolledBack = checkoutTreeExact(scratchIndex, worktreeTree, worktreePaths, stagedPaths);
   removeBestEffort(scratchIndex);
-  removeBestEffort(RT_JOURNAL);
+  if (rolledBack) removeBestEffort(RT_JOURNAL);
   releaseRoundTripLock();
+  if (!rolledBack) {
+    console.error(`[commit gate] Commit blocked: rollback failed. Recovery journal retained at ${RT_JOURNAL}.`);
+    process.exit(2);
+  }
+  refusePendingRoundTrip();
   console.error(
     `[commit gate] could not materialize the staged snapshot (git checkout-index failed) — ` +
       `skipping the staged-snapshot check for this commit.`,
@@ -856,7 +867,7 @@ try {
   // index to the staged tree (the checkout-index steps ran on the scratch index,
   // so the real index is already intact — this read-tree is a belt-and-suspenders
   // guarantee the staged snapshot is preserved verbatim).
-  const restoredWt = checkoutTreeExact(scratchIndex, worktreeTree, unionPaths);
+  const restoredWt = checkoutTreeExact(scratchIndex, worktreeTree, worktreePaths, stagedPaths);
   const restoredIdx = git(['read-tree', stagedTree]).ok;
   removeBestEffort(scratchIndex);
   if (restoredWt && restoredIdx) {
@@ -866,15 +877,13 @@ try {
   // recovery from the journaled SHAs.
   releaseRoundTripLock();
   if (!restoredWt || !restoredIdx) {
-    // Restoration hit an infra fault. Surface it loudly, but do NOT convert it
-    // into a spurious commit block (fail-open on infra): keep a real gate block
-    // if one was already decided, otherwise allow.
+    exitCode = 2;
     console.error(
-      `[commit gate] WARNING: could not fully restore your working tree/index after the ` +
-        `staged-snapshot check. Inspect \`git status\`; your staged changes and worktree edits ` +
-        `should be intact but verify before committing.`,
+      `[commit gate] Could not fully restore your working tree/index. Recovery journal retained at ${RT_JOURNAL}. ` +
+        'The next hook retries recovery. Inspect `git status` before committing.',
     );
   }
 }
 
+refusePendingRoundTrip();
 process.exit(exitCode);

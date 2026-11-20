@@ -263,6 +263,9 @@ export const RunRecoverySchema = z
     accepted_via_recovery: z.array(RecoveryMarkSchema),
     /** Ledger lines the close-phase read could not parse. See the writer. */
     dropped_lines: z.number(),
+    /** Whole-file read failure. Recovery counts are unknown until reporting is retried. */
+    // sites-pinned: tests/remediate/phase-close.test.ts
+    read_error: z.string().optional(),
   })
   .strict();
 export type RunRecovery = z.infer<typeof RunRecoverySchema>;

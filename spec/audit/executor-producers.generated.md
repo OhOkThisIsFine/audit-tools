@@ -12,7 +12,6 @@ refreshed by* = executors that rewrite it later in the pipeline (staleness-drive
 
 | Artifact | Primary producer | Also written / refreshed by |
 |---|---|---|
-| `access_memory.json` | `result_ingestion_executor` | — |
 | `analyzer_capability.json` | `graph_enrichment_executor` | — |
 | `audit-findings.json` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with the narrative) |
 | `audit-report.md` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with the narrative) |

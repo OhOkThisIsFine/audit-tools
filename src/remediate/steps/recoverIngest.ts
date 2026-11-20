@@ -23,15 +23,9 @@ const noStateError = (artifactsDir: string): Error =>
  *
  * ## Why this runs in two phases
  *
- * A required-test rerun is `spawnSync`, which blocks the event loop for its
- * whole duration. Run inside the state lock, it would starve the lock's own
- * heartbeat timer (`setInterval` in the shared fileLock) — the held lock's mtime
- * would stop being refreshed, a second acquirer would classify it as stale at
- * ~30s and steal it, and mutual exclusion would be gone precisely during the
- * longest critical section in the codebase. Holding a lock across a blocking
- * spawn is therefore not merely slow; it is unsound.
- *
- * So:
+ * Required tests run asynchronously outside the lock so other processes can
+ * access the state while repository commands execute. The second phase binds
+ * their results to the original HEAD and workload before applying them.
  *
  * - **Phase 1, UNLOCKED.** Snapshot the state, capture HEAD and the workload
  *   binding, and run every distinct required-test command exactly once
@@ -50,10 +44,8 @@ const noStateError = (artifactsDir: string): Error =>
  *   missing from the table fails closed.
  *
  * What remains inside the lock is git plumbing (ancestry, ref scan, diff-tree),
- * the ledger append, and the state write — sub-second work, comfortably inside
- * heartbeat coverage. The two unchanged-identity guards close the gap the phase
- * split opens; the operational protocol is still one writer at a time, now
- * enforced by a lock that cannot be stolen mid-hold instead of by convention.
+ * the ledger append, and the state write. The tracked git probes yield to the
+ * lock heartbeat.
  *
  * A recovery that changes nothing writes nothing: phase 2 returns the locked
  * store's `SKIP_WRITE` sentinel, which `StateStore.mutate` now honors, so the

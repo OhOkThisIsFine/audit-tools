@@ -24,7 +24,7 @@
 // (e.g. a JS private field) is never misread as a comment.
 
 import { join } from "node:path";
-import { couplingEdgesFromPairWeights, type CouplingEdge } from "./dataStateCoupling.js";
+import { couplingEdgesFromPairWeights, incrementCouplingPair, type CouplingEdge, type CouplingWeights } from "./dataStateCoupling.js";
 import { DEFAULT_MAX_BYTES, defaultReadFileText } from "./readFileText.js";
 import { toPosixPath } from "../../shared/paths.js";
 import { compareCodeUnits, uniqueSorted } from "../../shared/compareCodeUnits.js";
@@ -448,7 +448,7 @@ export async function deriveCommentDecomposition(
 
   const tokenOwner = buildTokenIndex(files);
 
-  const weightByPair = new Map<string, number>();
+  const weightByPair: CouplingWeights = new Map();
   let scannedFiles = 0;
   for (const file of files) {
     const text = await read(join(params.root, file));
@@ -463,9 +463,7 @@ export async function deriveCommentDecomposition(
       if (posixComments.includes(token)) referenced.add(owner);
     }
     for (const other of referenced) {
-      const [a, b] = compareCodeUnits(file, other) <= 0 ? [file, other] : [other, file];
-      const key = `${a} ${b}`;
-      weightByPair.set(key, (weightByPair.get(key) ?? 0) + 1);
+      incrementCouplingPair(weightByPair, file, other);
     }
   }
 

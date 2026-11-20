@@ -20,7 +20,6 @@ import {
   updateAuditTaskStatuses,
 } from "./resultIngestion.js";
 import { appendResultsToLedger } from "./ledger.js";
-import { deriveAccessMemory } from "./accessMemory.js";
 import {
   refreshResultBaselines,
   rekeyDriftedResults,
@@ -62,10 +61,12 @@ function reviewTaskArtifacts(
   const auditTasks = canonicalizeAuditTasks(
     reconcileArchitectureDiscoveryTasks({ ...bundle, audit_tasks: tasks }, lineIndex),
   );
+  const graph = buildTaskAffinityGraph(auditTasks, { graphBundle: bundle.graph_bundle });
   return {
     audit_tasks: auditTasks,
-    task_affinity_graph: buildTaskAffinityGraph(auditTasks, { graphBundle: bundle.graph_bundle }),
+    task_affinity_graph: graph,
     audit_plan_metrics: buildAuditPlanMetrics(auditTasks, {
+      affinityGraph: graph,
       graphBundle: bundle.graph_bundle,
       lineIndex,
       sizeIndex: sizeIndexFromManifest(bundle.repo_manifest),
@@ -262,14 +263,6 @@ export function runResultIngestionExecutor(
       ? { artifact_metadata: { ...priorMetadata, result_baselines: refreshedBaselines } }
       : {}),
   };
-  // Deterministic per-run access-memory: a pure summary of what the ingested
-  // result ledger covered, harvested in the same step that appends the ledger so
-  // it records the post-append audit_results revision (dependency-first). Raw
-  // counters only — the continuity ranking that consumes them is derived JIT at
-  // dispatch, never persisted. Fed the RAW `mergedResults` ledger (not
-  // `selectCurrentResults`) on purpose: re-dispatch/deepening touches are
-  // attention signal for a continuity bias (see deriveAccessMemory docs).
-  const accessMemory = deriveAccessMemory(mergedResults);
   const finalBundle: ArtifactBundle = {
     ...ledgerBundle,
     // Assembled against the post-append ledger and refreshed baselines: this
@@ -277,7 +270,6 @@ export function runResultIngestionExecutor(
     // derives must land with the write that is stamped against it.
     ...reviewTaskArtifacts(ledgerBundle, [...deepenedTasks, ...pendingRequeueTasks]),
     requeue_tasks: requeuePayload.tasks,
-    access_memory: accessMemory,
   };
 
   return {
@@ -292,7 +284,6 @@ export function runResultIngestionExecutor(
       "audit_plan_metrics.json",
       "task_affinity_graph.json",
       "requeue_tasks.json",
-      "access_memory.json",
     ],
     progress_summary:
       `Ingested ${results.length} audit result entries and refreshed dependent artifacts.` +

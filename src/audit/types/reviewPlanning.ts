@@ -68,9 +68,11 @@ export type ReviewPacket = z.infer<typeof ReviewPacketSchema>;
  * and referenced.
  */
 export const PacketQualitySchema = z.object({
+  // sites-pinned: tests/audit/review-packets.test.ts
   average_cohesion_score: z.number().min(0).max(1),
   boundary_crossing_count: z.number(),
-  merge_edge_kind_counts: z.record(z.string(), z.number()),
+  /** Present only on historical metrics. */
+  merge_edge_kind_counts: z.record(z.string(), z.number()).optional(),
   boundary_edge_kind_counts: z.record(z.string(), z.number()),
   orphan_task_count: z.number(),
   high_fan_in_file_count: z.number(),

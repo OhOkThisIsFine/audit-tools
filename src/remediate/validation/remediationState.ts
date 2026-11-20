@@ -1,10 +1,8 @@
 import { RemediationPlanSchema } from "../state/types.js";
-import { ExecutionUnitSchema, executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
+import { executionPlanReferenceIssues } from "../../shared/types/executionPlan.js";
 // sites-pinned: tests/remediate/validation.test.ts, tests/remediate/clarification-round-contract.test.ts
 import {
   type ValidationIssue,
-  VALID_SEVERITIES,
-  VALID_CONFIDENCES,
   isRecord,
   pushValidationIssue,
   requireKeys,
@@ -17,74 +15,6 @@ function schemaIssue(path: string, issue: ZodIssue): ValidationIssue {
 }
 
 const VALID_TRIAGE_ACTIONS: ReadonlySet<string> = new Set(["retry", "ignore", "halt"]);
-
-export function validateFinding(
-  value: unknown,
-  path = "finding",
-): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  issues.push(
-    ...requireKeys(value, path, [
-      "id",
-      "title",
-      "category",
-      "severity",
-      "confidence",
-      "lens",
-      "summary",
-      "affected_files",
-    ]),
-  );
-  if (!isRecord(value)) return issues;
-
-  if (
-    typeof value.severity === "string" &&
-    !VALID_SEVERITIES.has(value.severity)
-  ) {
-    pushValidationIssue(
-      issues,
-      `${path}.severity`,
-      `Invalid severity "${value.severity}"; expected one of ${[...VALID_SEVERITIES].join(", ")}.`,
-    );
-  }
-  if (
-    typeof value.confidence === "string" &&
-    !VALID_CONFIDENCES.has(value.confidence)
-  ) {
-    pushValidationIssue(
-      issues,
-      `${path}.confidence`,
-      `Invalid confidence "${value.confidence}"; expected one of ${[...VALID_CONFIDENCES].join(", ")}.`,
-    );
-  }
-  if (!Array.isArray(value.affected_files)) {
-    pushValidationIssue(issues, `${path}.affected_files`, "Expected an array.");
-  } else {
-    for (const [i, file] of value.affected_files.entries()) {
-      if (!isRecord(file) || typeof file.path !== "string") {
-        pushValidationIssue(
-          issues,
-          `${path}.affected_files[${i}]`,
-          "Each affected file must be an object with a string 'path' field.",
-        );
-      }
-    }
-  }
-  if (!Array.isArray(value.evidence) || value.evidence.length === 0) {
-    pushValidationIssue(
-      issues,
-      `${path}.evidence`,
-      "Expected a non-empty array.",
-      "error",
-    );
-  }
-  return issues;
-}
-
-export function validateExecutionUnit(value: unknown, path = "unit"): ValidationIssue[] {
-  const result = ExecutionUnitSchema.safeParse(value);
-  return result.success ? [] : result.error.issues.map(issue => schemaIssue(path, issue));
-}
 
 export function validateRemediationPlan(value: unknown, path = "remediation_plan"): ValidationIssue[] {
   const result = RemediationPlanSchema.safeParse(value);

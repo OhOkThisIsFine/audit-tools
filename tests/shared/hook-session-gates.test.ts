@@ -1121,6 +1121,17 @@ describe('closeout-challenge-gate: only a record THIS session wrote closes it', 
     expect(stderr).toContain('some-other-session');
   });
 
+  it("reports malformed render JSON once", async () => {
+    const { root, session, tree } = await armedRepo();
+    writeFileSync(join(root, 'own.txt'), 'work\n');
+    writeRecord(root, session, tree);
+    writeFileSync(join(root, '.claude', 'hooks', '.state', 'closeout-render', session + '.json'), '{');
+    const { code, stderr } = runHook(CLOSEOUT_GATE, stop(session), { root });
+    expect(code).toBe(2);
+    expect(stderr).toContain('could not be read');
+    expect(stderr).not.toContain('carries no session id');
+  });
+
   it("a record written for THIS session, describing this tree, closes the render check", async () => {
     const { root, session, tree } = await armedRepo();
     writeFileSync(join(root, 'own.txt'), 'this session did work\n');

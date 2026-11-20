@@ -78,7 +78,7 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
   it("lists applicable consent-gated candidates with no recorded decision", () => {
     const pending = pendingAnalyzerConsent({
       root: nodeRepo(),
-      externalAcquisitionEnabled: true,
+      externalAcquisition: { enabled: true },
     });
     const ids = pending.map((c) => c.id);
     expect(ids).toContain("eslint");
@@ -92,12 +92,11 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
 
   it("a recorded decision (granted OR declined) removes the candidate — declined is never re-offered", () => {
     const root = nodeRepo();
-    const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    const base = pendingAnalyzerConsent({ root, externalAcquisition: { enabled: true } });
     const first = base[0]!.id;
     const after = pendingAnalyzerConsent({
       root,
-      externalAcquisitionEnabled: true,
-      analyzerConsent: { [first]: "declined" },
+      externalAcquisition: { enabled: true, analyzerConsent: { [first]: "declined" } },
     });
     expect(after.map((c) => c.id)).not.toContain(first);
     expect(after).toHaveLength(base.length - 1);
@@ -105,7 +104,7 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
 
   it("a per-run SCOPED grant naming every applicable candidate empties the offer", () => {
     const root = nodeRepo();
-    const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    const base = pendingAnalyzerConsent({ root, externalAcquisition: { enabled: true } });
     expect(base.length).toBeGreaterThan(0);
     // Typed {@link AnalyzerConsentTokenGrant}, never a bare string: the grant
     // names EXACTLY the candidates it admits.
@@ -116,20 +115,18 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
     expect(
       pendingAnalyzerConsent({
         root,
-        externalAcquisitionEnabled: true,
-        acquisitionConsentToken: grant,
+        externalAcquisition: { enabled: true, consentToken: grant },
       }),
     ).toEqual([]);
   });
 
   it("a PARTIAL grant leaves every unnamed candidate owed — scope never widens to the run", () => {
     const root = nodeRepo();
-    const base = pendingAnalyzerConsent({ root, externalAcquisitionEnabled: true });
+    const base = pendingAnalyzerConsent({ root, externalAcquisition: { enabled: true } });
     const named = base[0]!.id;
     const after = pendingAnalyzerConsent({
       root,
-      externalAcquisitionEnabled: true,
-      acquisitionConsentToken: { value: "tok-part", tools: [named] },
+      externalAcquisition: { enabled: true, consentToken: { value: "tok-part", tools: [named] } },
     });
     expect(after.map((c) => c.id)).not.toContain(named);
     // Every candidate OUTSIDE the grant's `tools` is still owed its offer.
@@ -141,10 +138,10 @@ describe("pendingAnalyzerConsent — who is owed the offer", () => {
   it("acquisition disabled / no root / skip setting all empty the offer", () => {
     const root = nodeRepo();
     expect(pendingAnalyzerConsent({ root })).toEqual([]);
-    expect(pendingAnalyzerConsent({ externalAcquisitionEnabled: true })).toEqual([]);
+    expect(pendingAnalyzerConsent({ externalAcquisition: { enabled: true } })).toEqual([]);
     const withSkip = pendingAnalyzerConsent({
       root,
-      externalAcquisitionEnabled: true,
+      externalAcquisition: { enabled: true },
       analyzers: { eslint: "skip" },
     });
     expect(withSkip.map((c) => c.id)).not.toContain("eslint");
@@ -356,12 +353,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
     await withTempDir("consent-veto-", async (root: string) => {
       await writeFixtureRepo(root);
       await writeFileAsync(join(root, ".prettierrc.json"), "{}\n");
-      // The durable policy is where a real run's decisions live; the
-      // production dispatch reads them out of the loaded policy via the
-      // advance options.
-      await persistAnalyzerConsent(root, { prettier: "declined" });
-      const policy = { analyzers: {}, analyzer_consent: { prettier: "declined", eslint: "declined" } as const };
-      expect(policy.analyzer_consent?.prettier).toBe("declined");
+      // advanceAudit receives the fold's current-run decline map in its options.
 
       const result = await advanceAudit(bundleWith([
         "src/api/auth.ts",
@@ -372,8 +364,7 @@ describe("the local-tooling decline veto fires through the production dispatch",
         autoFix: { enabled: true },
         externalAcquisition: {
           enabled: true,
-          analyzers: policy.analyzers,
-          analyzerConsent: policy.analyzer_consent,
+          analyzerConsent: { prettier: "declined", eslint: "declined" },
         },
       });
 
@@ -419,13 +410,11 @@ describe("the local-tooling decline veto fires through the production dispatch",
       await writeFixtureRepo(root);
       // Flat config — the only form the runnable gate accepts.
       await writeFileAsync(join(root, "eslint.config.js"), "module.exports = [];\n");
-      await persistAnalyzerConsent(root, { eslint: "declined" });
-      const policy = { analyzers: {}, analyzer_consent: { prettier: "declined", eslint: "declined" } as const };
 
       const result = await runSyntaxResolutionExecutor(
         bundleWith(["src/api/auth.ts"]),
         root,
-        { analyzerConsent: policy.analyzer_consent },
+        { analyzerConsent: { prettier: "declined", eslint: "declined" } },
       );
 
       const statuses =

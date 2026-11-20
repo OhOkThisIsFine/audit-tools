@@ -795,7 +795,8 @@ function extractPerFileContribution(
  * never equal a key minted now, so a stale cache degrades to a full re-extraction
  * (fail-safe) instead of replaying contributions built under different rules.
  */
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v16";
+// sites-pinned: tests/audit/graph-edge-cache.test.ts
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v17";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".

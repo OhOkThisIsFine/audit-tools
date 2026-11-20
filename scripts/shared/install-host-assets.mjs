@@ -336,7 +336,7 @@ export function installOpenCodeGlobalConfig(
     // not a failure: counting it would trip the `failed > 0` exit-1 guard. Genuine
     // OpenCode write errors are still counted as failures.
     console.warn(
-      `${toolName}: audit-tools/shared is unavailable (build the shared workspace first); skipping OpenCode config deployment`,
+      `${toolName}: audit-tools/shared is unavailable (run "npm run build" from the audit-tools package root); skipping OpenCode config deployment`,
     );
     return;
   }

@@ -1,9 +1,7 @@
 import { canonicalPlanFixture, canonicalUnitFixture } from "./helpers/canonicalPlanFixture.js";
 import { describe, it, expect } from "vitest";
 import {
-  validateFinding,
   validateRemediationPlan,
-  validateExecutionUnit,
   validateTriageResolution,
 } from "../../src/remediate/validation/remediationState.js";
 import {
@@ -27,7 +25,8 @@ const validFinding = {
   evidence: ["Line 1: bad thing"],
 };
 
-describe("validateFinding", () => {
+describe("finding validation through the remediation plan", () => {
+  const validateFinding = (finding: unknown) => validateRemediationPlan({ ...canonicalPlanFixture(), findings: [finding] }).filter(issue => issue.path.includes(".findings."));
   it("passes a valid finding with no issues", () => {
     const issues = validateFinding(validFinding);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(0);
@@ -38,28 +37,14 @@ describe("validateFinding", () => {
     const issues = validateFinding(noLens);
     const errors = issues.filter((i) => i.severity === "error");
     expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.message.includes("lens"))).toBe(true);
+    expect(errors.some((e) => e.path.endsWith(".lens"))).toBe(true);
   });
 
   it("errors when category is missing", () => {
     const { category: _, ...noCategory } = validFinding;
     const issues = validateFinding(noCategory);
     const errors = issues.filter((i) => i.severity === "error");
-    expect(errors.some((e) => e.message.includes("category"))).toBe(true);
-  });
-
-  it("errors when evidence is missing (not just a warning)", () => {
-    const { evidence: _, ...noEvidence } = validFinding;
-    const issues = validateFinding(noEvidence);
-    const errors = issues.filter((i) => i.severity === "error");
-    expect(errors.length).toBeGreaterThan(0);
-    expect(
-      errors.some(
-        (e) =>
-          e.message.toLowerCase().includes("evidence") ||
-          e.path.includes("evidence"),
-      ),
-    ).toBe(true);
+    expect(errors.some((e) => e.path.endsWith(".category"))).toBe(true);
   });
 
   it("errors when evidence is not an array", () => {
@@ -130,7 +115,8 @@ describe("validateRemediationPlan", () => {
   });
 });
 
-describe("validateExecutionUnit", () => {
+describe("execution unit validation through the remediation plan", () => {
+  const validateExecutionUnit = (unit: unknown) => validateRemediationPlan({ ...canonicalPlanFixture(), units: [unit] }).filter(issue => issue.path.includes(".units."));
   it("accepts a complete unit and explicit empty write scope", () => {
     expect(validateExecutionUnit(canonicalUnitFixture("U-one"))).toEqual([]);
     expect(validateExecutionUnit(canonicalUnitFixture("U-one", { allowed_files: [] }))).toEqual([]);

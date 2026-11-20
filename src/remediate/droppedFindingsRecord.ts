@@ -1,3 +1,5 @@
+// sites-pinned: tests/remediate/dropped-findings-record.test.ts
+import { backtickList } from "../shared/reporting/markdown.js";
 // The durable, human-reviewable record of every finding the intake filter removed
 // before planning.
 //
@@ -77,7 +79,7 @@ export function renderDroppedFindingsRecord(
         "A finding that cited SOME real paths was kept, with only the phantom ones stripped.",
       entries: [...filter.droppedPhantomPaths.entries()].map(([id, paths]) => ({
         id,
-        detail: `cited: ${paths.map((path) => `\`${path}\``).join(", ")}`,
+        detail: `cited: ${backtickList(paths)}`,
       })),
     },
     {

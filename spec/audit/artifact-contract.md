@@ -106,7 +106,6 @@ audit-code into an implementation pipeline.
 | `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
 | `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed during planning packet composition. |
 | `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
-| `access_memory.json` | JSON | Per-run access-memory: deterministic path-level summary harvested from the ingested result ledger (frequency + step-ordinal recency + lenses) — a write-only record with no audit-side reader; reserved to bias later host-work composition toward continuity. |
 <!-- END GENERATED spec-mirror artifact-contract#execution -->
 
 Run-scoped host handoff adds `host-workload.json`, `host-result-map.json`,

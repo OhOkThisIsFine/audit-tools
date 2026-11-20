@@ -41,6 +41,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseArgv, refusalMessage, isHelpFlag, USAGE_EXIT } from '../../scripts/shared/argvGuard.mjs';
 import { listTrackedScripts, readScriptSource } from '../helpers/tracked-scripts.mjs';
+import { writeStoredQueueFixture } from '../helpers/storedNightlyQueue.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..', '..');
 const NIGHTLY = (...p: string[]) => join(REPO_ROOT, 'scripts', 'nightly', ...p);
@@ -155,6 +156,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // Seed and render a current projection first, so --check's verdict is about
     // freshness and not about a missing file; then prove it wrote nothing.
     const cwd = emptyRoot();
+    writeStoredQueueFixture(cwd, { items: [] });
     runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
     const before = readFileSync(join(cwd, 'docs', 'nightly-inbox.md'), 'utf8');
     const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.', '--check'], cwd);
@@ -166,6 +168,7 @@ describe('the reported incident: a query flag must not perform the write', () =>
     // The 2026-08-27 shape: the tracked queue still asserts an item open after
     // the ledger settles it. Nothing else reconciles the two, so --check must.
     const cwd = emptyRoot();
+    writeStoredQueueFixture(cwd, { items: [{ id: 'DOC-1', subject_key: 'abc', title: 'Stored item' }] });
     runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);
     // Settle a subject the queue is holding, WITHOUT re-rendering.
     writeFileSync(
@@ -263,7 +266,6 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
    */
   const ARGV_GUARD_GAP = [
     'scripts/attest-constitutional-doc-change.mjs',
-    'scripts/check-agents-region.mjs',
     'scripts/check-backlog-budget.mjs',
     'scripts/check-backlog-line-numbers.mjs',
     'scripts/check-backlog-status-tokens.mjs',
@@ -271,14 +273,11 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/check-doc-links.mjs',
     'scripts/check-doc-manifest.mjs',
     'scripts/check-generated-artifacts.mjs',
-    'scripts/check-guard-reach.mjs',
     'scripts/check-invariant-glossary.mjs',
     'scripts/check-loader-fragments.mjs',
     'scripts/remediate/smoke-remediate-gate.mjs',
-    'scripts/check-orphan-modules.mjs',
     'scripts/check-philosophy-brief.mjs',
     'scripts/check-readme-sample-report.mjs',
-    'scripts/check-shared-primitives.mjs',
     'scripts/check-version-gates.mjs',
     'scripts/release-and-publish.mjs',
     'scripts/remediate/generate-auditor-contract-fixture.mjs',
@@ -306,7 +305,15 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
     'scripts/shared/vitestShard.mjs',
   ];
 
-  const readsArgv = (source: string) => /process\.argv/.test(source);
+  // Checking Node's entry filename consumes no user-supplied CLI option.
+  const readsArgv = (source: string) =>
+    /process\.argv/.test(source.replaceAll('isScriptEntry(import.meta.url, process.argv)', ''));
+
+  it('entry identity alone consumes no user arguments, but an additional option read still counts', () => {
+    const entry = 'if (isScriptEntry(import.meta.url, process.argv)) main();';
+    expect(readsArgv(entry)).toBe(false);
+    expect(readsArgv(entry + '\nmain(process.argv.slice(2));')).toBe(true);
+  });
   const guarded = (source: string) => /argvGuard\.mjs/.test(source);
 
   it('every tracked argv-reading script is either guarded or on the declared gap', () => {
@@ -369,6 +376,7 @@ describe('reach — the guarded set is a ratchet, and the gap is declared', () =
 describe('the guard never breaks a clean invocation', () => {
   it('a declared-but-absent flag leaves the default path intact', () => {
     const cwd = emptyRoot();
+    writeStoredQueueFixture(cwd, { items: [] });
     // No --dry-run: the write IS expected here. This is the green half of the
     // pair — proving the refusal did not disable the script's real work.
     const res = runScriptCli(NIGHTLY('render-inbox.mjs'), ['--root', '.'], cwd);

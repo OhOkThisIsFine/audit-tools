@@ -27,7 +27,7 @@ import type {
 import type { AuditState } from "../types/auditState.js";
 import type { ArtifactMetadataManifest } from "../types/artifactMetadata.js";
 import type { AuditFindingsReport, FileDisposition, CriticalFlowManifest, CriticalFlowFallbackResult, GraphBundle, RiskRegister, SurfaceManifest, IntentCheckpoint, GitHistory } from "audit-tools/shared";
-import type { AccessMemory, SubmissionLedgerEvent } from "audit-tools/shared";
+import type { SubmissionLedgerEvent } from "audit-tools/shared";
 // Deep, not through the `audit-tools/shared` barrel, which does not re-export
 // this type. Adding it there is a one-line edit to a file outside this module's
 // write scope; the deep form is already the convention in this file (see the
@@ -135,7 +135,6 @@ type ArtifactPayloadMap = {
   audit_plan_metrics: AuditPlanMetrics;
   task_affinity_graph: TaskAffinityGraph;
   requeue_tasks: AuditTask[];
-  access_memory: AccessMemory;
 
   // --- Phase 4: Reporting ---
   audit_report: string;
@@ -334,7 +333,6 @@ export const ARTIFACT_DEFINITIONS = {
   audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
   task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
   requeue_tasks: jsonArtifact("requeue_tasks.json", "execution", AuditTaskSchema.array()),
-  access_memory: jsonArtifact("access_memory.json", "execution"),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
   audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting", AuditFindingsReportSchema),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),

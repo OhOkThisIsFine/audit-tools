@@ -1,3 +1,4 @@
+import { intakePaths } from "../../intake.js";
 import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 import { DecisionApplicationReceiptSchema } from "../../state/decisionConsumption.js";
 import { recordHostRootLogBoundary } from "../../../shared/observability/rootLogObservations.js";
@@ -17,7 +18,7 @@ import { assertApprovedRuntimePlan as assertCurrentPlanAuthority, RemediationPla
 //   host-handoff: the "landing gates" block fails when the close-owns-the-gates prompt line
 //   or the id-glossary write scope is reverted.
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 
 import {
   headCommit,
@@ -312,29 +313,29 @@ function assertBlockContract(root: string, block: ExecutionUnit): void {
     if (typeof raw !== "string" || raw.trim().length === 0) {
       throw new BlockContractError(
         block.id,
-        "touched_files carries an empty entry",
+        "allowed_files carries an empty entry",
       );
     }
     if (isAbsolute(raw)) {
       throw new BlockContractError(
         block.id,
-        `touched_files entry ${JSON.stringify(raw)} is absolute, not repository-relative`,
+        `allowed_files entry ${JSON.stringify(raw)} is absolute, not repository-relative`,
       );
     }
     let normalized: string;
     try {
-      const relative = repoRelativePath(root, raw, `${block.id}.touched_files[]`);
+      const relative = repoRelativePath(root, raw, `${block.id}.allowed_files[]`);
       normalized = raw.endsWith("/") ? `${relative}/` : relative;
     } catch {
       throw new BlockContractError(
         block.id,
-        `touched_files entry ${JSON.stringify(raw)} does not resolve beneath the repository root`,
+        `allowed_files entry ${JSON.stringify(raw)} does not resolve beneath the repository root`,
       );
     }
     if (normalized !== raw) {
       throw new BlockContractError(
         block.id,
-        `touched_files entry ${JSON.stringify(raw)} is not in normalized repo-relative form ` +
+        `allowed_files entry ${JSON.stringify(raw)} is not in normalized repo-relative form ` +
           `(${JSON.stringify(normalized)})`,
       );
     }
@@ -343,7 +344,7 @@ function assertBlockContract(root: string, block: ExecutionUnit): void {
     if (typeof command !== "string" || command.trim().length === 0) {
       throw new BlockContractError(
         block.id,
-        "targeted_commands carries an empty command",
+        "required_tests carries an empty command",
       );
     }
     // THE declared-command-shape rule (`audit-tools/shared`), not a local copy:
@@ -353,8 +354,8 @@ function assertBlockContract(root: string, block: ExecutionUnit): void {
     if (commandLeavesDeclaredShape(command)) {
       throw new BlockContractError(
         block.id,
-        `targeted_command ${JSON.stringify(command)} leaves the declared shape — it chains, ` +
-          "redirects or substitutes, and this boundary executes commands verbatim through a shell",
+        `required_tests entry ${JSON.stringify(command)} leaves the declared shape — it chains, ` +
+          "redirects or substitutes, and required tests must be executable as a single argv without a shell",
       );
     }
   }
@@ -1498,7 +1499,7 @@ export async function prepareRemediationHostHandoff(params: {
         throw new Error("The conformance review has begun but the trusted run policy is missing. Restore the run state before continuing; review cannot be silently disabled.");
       }
     }
-    const checkpoint = await readIntentCheckpoint(join(paths.artifactsDir, "intent_checkpoint.json"));
+    const checkpoint = await readIntentCheckpoint(intakePaths(paths.artifactsDir).intentCheckpoint);
     conformanceReview = { run_id: params.runId, enabled: checkpoint?.conformance_review === true,
       ...(checkpoint ? { checkpoint_sha256: contentSha256(checkpoint) } : {}) };
   }

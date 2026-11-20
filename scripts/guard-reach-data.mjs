@@ -1481,6 +1481,7 @@ export const GUARDS = [
   },
   { id: 'nightly-routine-test', kind: 'contract-test', impl: 'tests/shared/nightly-routine.test.ts' },
   { id: 'nightly-items-mandatory-fields-test', kind: 'contract-test', impl: 'tests/shared/nightly-items-mandatory-fields.test.ts' },
+  { id: 'stored-nightly-queue-test', kind: 'contract-test', impl: 'tests/shared/stored-nightly-queue.test.ts' },
   { id: 'script-argv-refusal-test', kind: 'contract-test', impl: 'tests/shared/script-argv-refusal.test.ts' },
   { id: 'hook-async-typecheck-test', kind: 'contract-test', impl: 'tests/shared/hook-async-typecheck.test.ts' },
   {
@@ -2320,15 +2321,13 @@ export const REACH = [
   {
     area: 'nightly routine',
     files: ['scripts/nightly/**'],
-    guardedBy: ['nightly-routine-test', 'nightly-items-mandatory-fields-test', 'check:lint', 'check:dup', 'check:scripts'],
+    guardedBy: ['nightly-routine-test', 'nightly-items-mandatory-fields-test', 'stored-nightly-queue-test', 'check:lint', 'check:dup', 'check:scripts'],
     note:
-      'the nightly run is retired (owner, 2026-11-16); what remains is the answer route for the ' +
-      'items it already produced. items.mjs, render-inbox.mjs, ingest-answers.mjs and answer.mjs are ' +
-      'exercised by tests/shared/nightly-routine.test.ts — subject-key identity, the settled/resolved ' +
-      'partition, premise probing, the inbox round-trip (a ticked box becomes a ledger entry) and its ' +
-      'refusals. The P32 answerability refusals in writeOpenItems (options[]/eli5), the subject_key ' +
-      'derive-or-refuse, the title refusal and the bounded queue index are pinned by ' +
-      'tests/shared/nightly-items-mandatory-fields.test.ts.',
+      'Stored queues support answering and completion. nightly-routine.test.ts exercises subject ' +
+      'identity, premise checks and the inbox round trip. nightly-items-mandatory-fields.test.ts ' +
+      'checks the compact open-item index. stored-nightly-queue.test.ts drives the actual answer ' +
+      'and regeneration commands through missing input and a failed projection write, then checks ' +
+      'the repaired snapshot, index, inbox and durable decisions.',
   },
   {
     area: 'script argv refusal',
@@ -2354,6 +2353,7 @@ export const REACH = [
       '.audit-tools/nightly/open-items-index.json',
       '.claude/nightly-decisions.json',
       'scripts/nightly/items.mjs',
+      'scripts/nightly/queue-files.mjs',
       'scripts/nightly/render-inbox.mjs',
     ],
     guardedBy: ['check:nightly-inbox'],

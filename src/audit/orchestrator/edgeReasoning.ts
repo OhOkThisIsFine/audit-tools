@@ -1,6 +1,6 @@
 import type { GraphBundle, GraphEdge } from "audit-tools/shared";
 import { hashContent, compareCodeUnits, edgeConfidence } from "audit-tools/shared";
-import { edgeSignature } from "../extractors/graph.js";
+import { edgeSignature } from "../extractors/graphPathUtils.js";
 
 /**
  * Phase 4B — optional, bounded edge-reasoning pass.

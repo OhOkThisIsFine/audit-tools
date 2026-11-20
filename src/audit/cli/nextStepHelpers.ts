@@ -580,12 +580,7 @@ export async function handleAnalyzerConsentBranch(
   const pending = pendingAnalyzerConsent({
     root: requireSourceRoot(params),
     analyzers: analyzersRef.value,
-    externalAcquisitionEnabled: params.externalAcquisition?.enabled,
-    analyzerConsent: params.externalAcquisition?.analyzerConsent,
-    // Typed as AnalyzerConsentTokenGrant end-to-end — the forwarding site takes
-    // the grant, never a bare string, so a candidate outside the grant's scope
-    // is still offered rather than silently admitted.
-    acquisitionConsentToken: params.externalAcquisition?.consentToken,
+    externalAcquisition: params.externalAcquisition,
   });
   if (pending.length === 0) return { action: "fallthrough" };
   const incoming = await consumeEnumMapSubmission(

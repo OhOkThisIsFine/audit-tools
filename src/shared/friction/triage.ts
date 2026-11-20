@@ -1,3 +1,4 @@
+import { backtickList } from "../reporting/markdown.js";
 // sites-pinned: tests/remediate/friction-capture-closeout.test.ts, tests/shared/friction-run-linkage.test.ts, tests/remediate/friction-capture-runid-injectivity.test.ts
 import {
   type FrictionCaptureArtifact,
@@ -539,9 +540,7 @@ export async function decideFrictionTriage(
  * the run may present complete.
  */
 export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string {
-  const dimensionList = FRICTION_NAMED_DIMENSIONS.map(
-    (d) => `\`${d}\``,
-  ).join(", ");
+  const dimensionList = backtickList(FRICTION_NAMED_DIMENSIONS);
 
   const pendingSection =
     triage.pending.length > 0
@@ -594,14 +593,14 @@ export function buildFrictionTriageBlock(triage: FrictionTriageDecision): string
   // record filed under a different key is visible to the walk instead of silently
   // orphaned.
   const runList = (ids: readonly string[]): string =>
-    ids.length > 0 ? ids.map((id) => `\`${id}\``).join(", ") : "none recorded";
+    ids.length > 0 ? backtickList(ids) : "none recorded";
   const relationLines = [
     `- step-envelope run(s): ${runList(triage.step_run_ids)}`,
     `- dispatch run(s): ${runList(triage.dispatch_run_ids)}`,
     ...(triage.related_record_keys.length > 0
       ? [
           `- other friction records reaching the same run(s): ` +
-            triage.related_record_keys.map((id) => `\`${id}\``).join(", "),
+            backtickList(triage.related_record_keys),
         ]
       : []),
   ].join("\n");

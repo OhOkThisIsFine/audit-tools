@@ -79,14 +79,13 @@ export function deriveDataStateCoupling(
   );
 
   // Accumulate shared-target counts per source pair, over non-generic targets.
-  const sharedByPair = new Map<string, number>();
+  const sharedByPair: CouplingWeights = new Map();
   for (const referrers of referrersByTarget.values()) {
     if (referrers.size < 2 || referrers.size > genericThreshold) continue;
     const members = uniqueSorted(referrers);
     for (let i = 0; i < members.length; i++) {
       for (let j = i + 1; j < members.length; j++) {
-        const key = `${members[i]} ${members[j]}`;
-        sharedByPair.set(key, (sharedByPair.get(key) ?? 0) + 1);
+        incrementCouplingPair(sharedByPair, members[i]!, members[j]!);
       }
     }
   }
@@ -94,19 +93,29 @@ export function deriveDataStateCoupling(
   return couplingEdgesFromPairWeights(sharedByPair, minSharedTargets);
 }
 
-/**
- * The coupling edges of a pair-weight map keyed `"<a> <b>"` (canonical `a < b`),
- * keeping each pair whose weight is at least `minWeight`, sorted by (a, b).
- */
+export type CouplingWeights = Map<string, Map<string, number>>;
+
+export function incrementCouplingPair(weights: CouplingWeights, left: string, right: string): void {
+  const [a, b] = compareCodeUnits(left, right) <= 0 ? [left, right] : [right, left];
+  let neighbors = weights.get(a);
+  if (!neighbors) {
+    neighbors = new Map();
+    weights.set(a, neighbors);
+  }
+  neighbors.set(b, (neighbors.get(b) ?? 0) + 1);
+}
+
+/** Emit pairs meeting the requested weight in stable endpoint order. */
 export function couplingEdgesFromPairWeights(
-  weightByPair: ReadonlyMap<string, number>,
+  weightByPair: CouplingWeights,
   minWeight = 0,
 ): CouplingEdge[] {
   const edges: CouplingEdge[] = [];
-  for (const [key, weight] of weightByPair) {
-    if (weight < minWeight) continue;
-    const idx = key.indexOf(" ");
-    edges.push({ a: key.slice(0, idx), b: key.slice(idx + 1), weight });
+  for (const [a, neighbors] of weightByPair) {
+    for (const [b, weight] of neighbors) {
+      if (weight < minWeight) continue;
+      edges.push({ a, b, weight });
+    }
   }
   edges.sort((x, y) => compareCodeUnits(x.a, y.a) || compareCodeUnits(x.b, y.b));
   return edges;
