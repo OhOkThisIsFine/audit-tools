@@ -26,7 +26,12 @@ const TOOLS = ["audit-code", "remediate-code"] as const;
 
 function runPostinstall(homeDir: string, options: { packageRoot?: string; npmLifecycle?: boolean; npmCli?: string } = {}): Promise<string> {
   const packageRoot = options.packageRoot ?? repoRoot;
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "npm_lifecycle_event"));
+  // npm lifecycle can leave an uppercase NPM_EXECPATH in Windows Vitest workers.
+  // Strip all variants so child_process cannot prefer real npm over the fixture.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => {
+    const normalized = key.toLowerCase();
+    return normalized !== "npm_lifecycle_event" && normalized !== "npm_execpath";
+  }));
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(packageRoot, "scripts", "postinstall.mjs")], {
       cwd: packageRoot,
