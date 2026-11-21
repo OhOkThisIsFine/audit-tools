@@ -59,7 +59,7 @@ export function conformanceIssue(paths: { request: string; response: string }, i
   return { ok: false, issue: { code, work_item_id: itemId, result_path: paths.response, review_request_path: paths.request, message } };
 }
 
-/** Called only AFTER mechanical result, obligation, commit, scope and test checks pass. */
+/** Checks the bound review subject after result, obligation, commit and scope corroboration. */
 export async function checkContractConformance(params: {
   root: string;
   artifactsDir: string;
