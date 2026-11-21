@@ -11,7 +11,7 @@
  * the Codex TOML gets an appended table, and an entry the user changed by hand
  * is left alone.
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,11 +24,15 @@ import { spawnHidden as spawn } from "../helpers/spawn.mjs";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TOOLS = ["audit-code", "remediate-code"] as const;
 
-function runPostinstall(homeDir: string): Promise<string> {
+function runPostinstall(homeDir: string, options: { packageRoot?: string; npmLifecycle?: boolean; npmCli?: string } = {}): Promise<string> {
+  const packageRoot = options.packageRoot ?? repoRoot;
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "npm_lifecycle_event"));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [join(repoRoot, "scripts", "postinstall.mjs")], {
-      cwd: repoRoot,
-      env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir, AUDIT_TOOLS_REPO_VISIBILITY: "private" },
+    const child = spawn(process.execPath, [join(packageRoot, "scripts", "postinstall.mjs")], {
+      cwd: packageRoot,
+      env: { ...env, HOME: homeDir, USERPROFILE: homeDir, INIT_CWD: homeDir,
+        npm_lifecycle_event: options.npmLifecycle ? "postinstall" : "",
+        ...(options.npmCli === undefined ? {} : { npm_execpath: options.npmCli }), AUDIT_TOOLS_REPO_VISIBILITY: "private" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
@@ -48,6 +52,57 @@ async function readJson(path: string): Promise<Record<string, any>> {
 }
 
 const CODEX_SEED = '# my own comment\nmodel = "x"\n\n[mcp_servers.other]\ncommand = "other"\n';
+
+test("source npm lifecycle keeps existing host config and assets untouched even with dist present", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-tools-mcp-source-"));
+  try {
+    await readFile(join(repoRoot, "dist", "shared", "index.js"));
+    const codexPath = join(homeDir, ".codex", "config.toml");
+    const opencodePath = join(homeDir, ".config", "opencode", "opencode.json");
+    await mkdir(dirname(codexPath), { recursive: true });
+    await mkdir(dirname(opencodePath), { recursive: true });
+    await writeFile(codexPath, CODEX_SEED);
+    await writeFile(opencodePath, '{ "mcp": { "mine": { "type": "local", "command": ["mine"] } } }');
+    const opencodeBefore = await readFile(opencodePath);
+    await runPostinstall(homeDir, { npmLifecycle: true });
+    expect(await readFile(codexPath, "utf8")).toBe(CODEX_SEED);
+    expect(await readFile(opencodePath)).toEqual(opencodeBefore);
+    expect((await readdir(homeDir)).sort()).toEqual([".codex", ".config"]);
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test.each(["source", "packaged"] as const)("npm postinstall respects %s layout regardless of parent path", async (layout) => {
+  const homeDir = await mkdtemp(join(tmpdir(), "audit-tools-mcp-layout-"));
+  // A development checkout may be reached through a link or a node_modules
+  // path. A packed distribution may be extracted outside node_modules.
+  const packageRoot = join(homeDir, layout === "source" ? "node_modules" : "dist-copy", "audit-tools");
+  try {
+    for (const tool of ["audit", "remediate"]) {
+      const scriptDir = join(packageRoot, "scripts", tool);
+      await mkdir(scriptDir, { recursive: true });
+      await writeFile(join(scriptDir, "postinstall.mjs"), `console.log("registered ${tool}")`);
+    }
+    await copyFile(join(repoRoot, "scripts", "postinstall.mjs"), join(packageRoot, "scripts", "postinstall.mjs"));
+    const npmCli = join(packageRoot, "fake-npm.cjs");
+    if (layout === "source") {
+      await mkdir(join(packageRoot, "src"));
+      await writeFile(join(packageRoot, "tsconfig.json"), "{}");
+      await writeFile(npmCli, 'const fs = require("node:fs"); fs.mkdirSync("dist/shared", { recursive: true }); fs.writeFileSync("dist/shared/index.js", "built locally");');
+    }
+    const output = await runPostinstall(homeDir, { packageRoot, npmLifecycle: true, npmCli });
+    if (layout === "source") {
+      expect(await readFile(join(packageRoot, "dist", "shared", "index.js"), "utf8")).toBe("built locally");
+      expect(output).not.toContain("registered");
+    } else {
+      expect(output).toContain("registered audit");
+      expect(output).toContain("registered remediate");
+    }
+  } finally {
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
 
 test("postinstall registers both submit servers with every documented host, idempotently", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "audit-tools-mcp-home-"));

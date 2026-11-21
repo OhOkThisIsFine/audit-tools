@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/postinstall-mcp-registration.test.ts
 // Single-package postinstall: deploy BOTH the audit-code and remediate-code host
 // assets (global slash commands, Codex/OpenCode/Antigravity skills, plugin
 // manifests). Each sub-deployer is self-contained — it computes its own package
@@ -8,19 +9,29 @@
 // corrupts the other's, and surface a non-zero exit if EITHER reports a failure
 // (INV-remediate-infra-08: a partial deploy must not report success).
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+// Source markers are excluded from the release manifest. Neither a parent
+// directory named node_modules nor a prebuilt dist identifies a packed install.
+const sourceCheckout =
+  statSync(new URL("../src", import.meta.url), { throwIfNoEntry: false })?.isDirectory() === true &&
+  statSync(new URL("../tsconfig.json", import.meta.url), { throwIfNoEntry: false })?.isFile() === true;
 let failed = false;
 
 // A published tarball already carries dist/. A source checkout does not, and
 // npm's postinstall runs only after dependencies are present, so this is the
 // first reliable point at which it can build the shared export. Without this
-// bootstrap a fresh checkout partially deployed host assets and skipped both
-// OpenCode config and artifact .gitignore management until a human happened to
-// rerun postinstall after the first build.
-if (!ensureSourceCheckoutBuilt()) failed = true;
+// bootstrap a fresh checkout cannot load the package's shared export.
+if (sourceCheckout && !ensureSourceCheckoutBuilt()) failed = true;
+
+// A development dependency install owns the checkout build, not host assets
+// or launch paths. Packaged installs and explicit host setup keep their
+// existing behavior. Stop here even when dist was already available.
+if (sourceCheckout && process.env.npm_lifecycle_event === "postinstall") {
+  process.exit(failed ? 1 : 0);
+}
 
 for (const script of ["./audit/postinstall.mjs", "./remediate/postinstall.mjs"]) {
   const scriptPath = fileURLToPath(new URL(script, import.meta.url));
@@ -46,10 +57,6 @@ process.exit(failed ? 1 : 0);
 function ensureSourceCheckoutBuilt() {
   const sharedEntry = fileURLToPath(new URL("../dist/shared/index.js", import.meta.url));
   if (existsSync(sharedEntry)) return true;
-
-  const sourceTree = fileURLToPath(new URL("../src", import.meta.url));
-  const tsconfig = fileURLToPath(new URL("../tsconfig.json", import.meta.url));
-  if (!existsSync(sourceTree) || !existsSync(tsconfig)) return true;
 
   const npmCli = process.env.npm_execpath;
   if (!npmCli) {
