@@ -171,6 +171,24 @@
         "src/shared/submission/submissionLedger.ts": "27569dfd185f7e17e1d60c34b2c164f8a75b1c46"
       }
     },
+    "185e1a9338c25bfc": {
+      "reviewed_by": "/root/serial_followup_review",
+      "attester_class": "agent",
+      "checked": "Independent source review: ordinary landed/no-change conformance follows structural proof and precedes required tests; red tests refuse, result/HEAD/plan freshness is rechecked, recovery order is unchanged.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "e9a636d5e4c3172154949b7931274f79736bb41e",
+        "ran_at": "2026-11-21T07:23:23.651Z"
+      },
+      "attested_at": "2026-11-21T07:25:53.274Z",
+      "vouches": {
+        "src/remediate/steps/dispatch/contractConformanceReview.ts": "5fe02c95edb7acd4f981dbb2cddc1e6cdb2f0ece",
+        "src/remediate/steps/dispatch/hostCorroboration.ts": "49bf9ede12500618fa2828f8c727b3321f6fc417",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "6a5a628c22cd6485fa36bcd8a7ed7b3c4a7b5e86"
+      }
+    },
     "339be913c2e2c76d": {
       "reviewed_by": "agy-refuter-818ea54a,opus-rounds-4-5-6-a00ad870db1f974a0",
       "attester_class": "agent",
@@ -1152,16 +1170,16 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/remediate/steps/dispatch/contractConformanceReview.ts": {
-      "review": "74f5fdb4c95e9366"
+      "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/hostContracts.ts": {
       "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/dispatch/hostCorroboration.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "74f5fdb4c95e9366"
+      "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
       "review": "e27b7c336e51764b"

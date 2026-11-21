@@ -119,9 +119,11 @@ provenance timestamps; this is not an identity over every repository byte.
 Remediation persists accepted domain content in the canonical artifact's `payload`
 with validated review provenance. Downstream prompts read that accepted payload;
 workers write only their separately emitted submission path. Optional per-result
-conformance review is another bound acceptance step after mechanical corroboration,
-not a replacement for commit, scope, test or obligation-evidence checks. Its run
-choice and result/contract binding cannot be disabled by changing a copied checkpoint.
+conformance review is a bound acceptance step. Ordinary ingestion requests it
+after structural corroboration and before required tests, then rechecks the
+binding before acceptance. Review does not replace commit, scope, test or
+obligation-evidence checks. Its run choice and result/contract binding cannot be
+disabled by changing a copied checkpoint.
 
 ## Provider-neutral host workload
 

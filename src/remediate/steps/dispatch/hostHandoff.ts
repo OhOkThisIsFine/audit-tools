@@ -8,7 +8,7 @@ import type { RemediationRequiredTestVerdicts } from "./requiredTests.js";
 import { corroborateHostResult, corroborateNoChangeClaim } from "./hostCorroboration.js";
 import { runRequiredTest, rerunRequiredTests, requiredTestIssue, requiredTestVerdictKey, type RequiredTestFailure } from "./requiredTests.js";
 import { readIntentCheckpoint } from "../../../shared/types/intentCheckpoint.js";
-import { checkContractConformance, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
+import { checkContractConformance, conformanceIssue, conformanceReviewPaths, type ConformanceReviewCheck } from "./contractConformanceReview.js";
 import type { ExecutionUnit, ExecutionRequirement } from "../../../shared/types/executionPlan.js";
 import { executionPlanReferenceIssues } from "../../../shared/types/executionPlan.js";
 import { executionPlanContextIssues } from "../../contractPipeline/executionPlan.js";
@@ -2030,6 +2030,19 @@ async function executeHostVerificationReruns(
     }
     const parsed = scan.parsed;
     const resultId = parsed.result.result_id;
+    const reviewFirst = state.conformance_review?.enabled === true && !ctx.recovery;
+    const reviewHead = reviewFirst ? await headCommit(paths.root) : null;
+    const checkReview = async () => {
+      // Both the structural preflight and execution must target the checkout
+      // for which we ask the reviewer to inspect the bound result.
+      if (reviewFirst && await headCommit(paths.root) !== reviewHead) {
+        return conformanceIssue(
+          conformanceReviewPaths(paths.artifactsDir, ctx.runId, workItem.id), workItem.id,
+          "conformance_review_required", "Repository HEAD changed during result verification. Re-run next-step on the reviewed checkout.",
+        );
+      }
+      return requiredConformanceReview(ctx, workItem, parsed.result);
+    };
 
     acc.resultIds.add(resultId);
     if (parsed.kind === "decision") {
@@ -2068,6 +2081,10 @@ async function executeHostVerificationReruns(
           });
           continue;
         }
+        if (reviewFirst) {
+          const review = await checkReview();
+          if (!review.ok) { acc.issues.push(review.issue); continue; }
+        }
         const failedTests = await rerunRequiredTests(
           paths.root,
           workItem.required_tests,
@@ -2079,7 +2096,7 @@ async function executeHostVerificationReruns(
         }
       }
       const review: ConformanceReviewCheck = outcome.status === "resolved_no_change"
-        ? await requiredConformanceReview(ctx, workItem, result) : { ok: true };
+        ? await checkReview() : { ok: true };
       if (!review.ok) { acc.issues.push(review.issue); continue; }
       verdicts.push({
         kind: "decision",
@@ -2111,8 +2128,10 @@ async function executeHostVerificationReruns(
       result,
       verdicts: ctx.requiredTestVerdicts,
       recovery: ctx.recovery,
+      ...(reviewFirst ? { beforeRequiredTests: checkReview } : {}),
     });
     if (!corroborated.ok) {
+      if (corroborated.reviewIssue) { acc.issues.push(corroborated.reviewIssue); continue; }
       acc.issues.push({
         code: corroborated.code,
         check: corroborated.check,
@@ -2122,7 +2141,7 @@ async function executeHostVerificationReruns(
       });
       continue;
     }
-    const review = await requiredConformanceReview(ctx, workItem, result);
+    const review = await checkReview();
     if (!review.ok) { acc.issues.push(review.issue); continue; }
     if (corroborated.usedRecovery) {
       // No acceptance without a record. The mark goes down BEFORE the item is

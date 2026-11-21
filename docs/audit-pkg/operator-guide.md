@@ -188,10 +188,18 @@ silently dropping other declared checks.
 To request independent per-result contract conformance review, set
 `conformance_review: true` in the confirmed intent checkpoint before the first
 implementation handoff. It is off by default. The tool binds that choice to the
-run; successful landed and no-change outcomes then require the bound review after
-mechanical checks. Changed result or contract content invalidates the review.
+run. In ordinary ingestion, landed and no-change results pass structural
+checks and bound independent review before required tests are run. A passing
+review never replaces those tests; the tool rechecks the binding afterward.
+Changed result or contract content invalidates the review.
 Insufficient evidence requests repair; unavailable independent review pauses.
 Accepted review declarations survive closeout in the outcomes and report.
+
+For one release with independent fixes, give each unit focused test commands,
+omit optional phase ordinals, and let native close run the full suite after
+the fixes have been merged and accepted. An explicit phase boundary can run
+its own checks. A previous external suite log, even one naming the merged
+commit, cannot substitute for native close verification.
 
 ## Generated deliverables
 

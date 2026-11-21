@@ -3,6 +3,7 @@ import { admitRemediationDirtyBaseline } from "../../state/dirtyBaseline.js";
 // sites-pinned: tests/remediate/host-handoff-corroboration.test.ts
 import { AUDIT_TOOLS_DIRNAME, normalizeRepoPath, repoRelativePath, runTrackedAsync, TRACKED_CHILD_DEADLINE_MS, uniqueSorted, type IngestionCheckId } from "audit-tools/shared";
 import type { CurrentRemediationHostState, RemediationHostWorkItem, RemediationHostResult, RemediationHostIngestIssue } from "./hostContracts.js";
+import type { ConformanceReviewCheck, ConformanceReviewIssue } from "./contractConformanceReview.js";
 import type { RemediationRequiredTestVerdicts } from "./requiredTests.js";
 import { rerunRequiredTests, requiredTestIssue } from "./requiredTests.js";
 
@@ -30,6 +31,7 @@ type CorroborationRefusal = {
   readonly code: RemediationHostIngestIssue["code"];
   readonly check: IngestionCheckId;
   readonly message: string;
+  readonly reviewIssue?: ConformanceReviewIssue;
 };
 
 type CorroboratedHostResult =
@@ -259,6 +261,7 @@ export async function corroborateHostResult(params: {
   readonly workItem: RemediationHostWorkItem;
   readonly result: RemediationHostResult;
   readonly verdicts: RemediationRequiredTestVerdicts | null;
+  readonly beforeRequiredTests?: () => Promise<ConformanceReviewCheck>;
   /** See `ingestRemediationHostResults`'s `recovery` option. */
   readonly recovery: boolean;
 }): Promise<CorroboratedHostResult> {
@@ -381,6 +384,11 @@ export async function corroborateHostResult(params: {
       message: `landed files overlap pre-existing run-start dirt: ${dirtyOverlap.join(", ")}`,
     };
   }
+  const review = await params.beforeRequiredTests?.();
+  if (review && !review.ok) return {
+    ok: false, code: review.issue.code, check: "required_tests",
+    message: review.issue.message, reviewIssue: review.issue,
+  };
   const failedTests = await rerunRequiredTests(
     root,
     workItem.required_tests,

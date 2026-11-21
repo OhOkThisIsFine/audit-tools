@@ -214,6 +214,10 @@ describe("independent conformance admission and captured verification evidence",
       if (twoBlocks) await writeFile(join(dir, "triage-counter.cjs"), "const fs = require('node:fs'); const p = '.audit-tools/remediation/triage-count'; const n = fs.existsSync(p) ? Number(fs.readFileSync(p)) : 0; fs.writeFileSync(p, String(n + 1)); process.exit(n === 0 ? 0 : 1);");
       if (requiredTest === "node .audit-tools/remediation/triage-mutate.cjs") await writeFile(join(dir, "triage-mutate.cjs"), "require('node:fs').appendFileSync('src/a.ts', '// changed\\n');");
       if (requiredTest === "node .audit-tools/remediation/triage-stable.cjs") await writeFile(join(dir, "triage-stable.cjs"), "process.exit(0);");
+      if (requiredTest === "node .audit-tools/remediation/record-test.cjs") {
+        await writeFile(join(dir, "record-test.cjs"),
+          "const fs = require('node:fs'); fs.appendFileSync('.audit-tools/remediation/test-count', 'run\\n'); process.exit(fs.existsSync('.audit-tools/remediation/test-red') ? 1 : 0);");
+      }
     } });
   }
   async function ingestConformance(value: Fixture) {
@@ -238,6 +242,37 @@ describe("independent conformance admission and captured verification evidence",
     }));
   }
   describe("opt-in independent contract conformance lifecycle", () => {
+    it.each(["landed", "no-change"] as const)(
+      "does not spawn required tests until the exact %s result is independently reviewed",
+      async mode => {
+        const value = await conformanceFixture("node .audit-tools/remediation/record-test.cjs");
+        if (mode === "landed") await writeConformanceResult(value);
+        else await writeResult(value, decisionFor(value, {
+          status: "resolved_no_change",
+          evidence: ["src/a.ts already preserves the required export and behavior"],
+        }));
+        const count = join(value.artifactsDir, "test-count");
+        const first = await ingestConformance(value);
+        expect(first.accepted_count).toBe(0);
+        expect(first.issues.map(issue => issue.code)).toContain("conformance_review_required");
+        await expect(readFile(count, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+        await answerConformance(value);
+        const redFlag = join(value.artifactsDir, "test-red");
+        if (mode === "landed") {
+          await writeFile(redFlag, "red");
+          const red = await ingestConformance(value);
+          expect(red.accepted_count).toBe(0);
+          expect(red.issues.map(issue => issue.code)).toContain("required_test_failed");
+          expect(await readFile(count, "utf8")).toBe("run\n");
+          await rm(redFlag);
+        }
+        const accepted = await ingestConformance(value);
+        expect(accepted.accepted_count).toBe(1);
+        expect(accepted.state.items.B1?.status).toBe(mode === "landed" ? "resolved" : "resolved_no_change");
+        expect(await readFile(count, "utf8")).toBe(mode === "landed" ? "run\nrun\n" : "run\n");
+      },
+    );
     it.each(["implementation", "triage"])("structured admission feeds the actual %s conformance consumer", async source => {
       const value = await conformanceFixture();
       const state: RemediationState = boundState(value);
