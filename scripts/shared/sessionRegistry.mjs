@@ -13,12 +13,13 @@
 // dialect (plain rows, kept verbatim for operator-facing refusal/warn lists),
 // not this identity parse.
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
   utimesSync,
@@ -216,35 +217,44 @@ export function runPorcelainStatus(root) {
   }
 }
 
-// Write `<sessionsDir>/<sessionId>.json` ATOMICALLY (same-directory temp +
-// rename, so a concurrent reader never sees a torn record). FIRST-WRITE-WINS:
-// a SessionStart re-fire on resume/clear with the same session_id must NOT
-// refresh the baseline — refreshing would reclassify the session's own
-// pre-resume dirt as foreign and silence the gate on real work. The skip path
-// DOES refresh the record's mtime so a resumed session stays ahead of the
-// prune horizon. Returns true if written, false if skipped/failed.
+/**
+ * Publish a complete record without replacing a concurrent winner. A resume
+ * keeps the original baseline but refreshes its mtime for stale pruning.
+ * Returns true only for the writer that installed the record.
+ */
 export function writeSessionRecord(root, record) {
+  let tmpPath;
   try {
     const sid = sanitizeSessionId(record?.session_id);
     if (!sid) return false;
     const dir = sessionsDir(root);
     const finalPath = join(dir, `${sid}.json`);
-    if (existsSync(finalPath)) {
+    if (!existsSync(finalPath)) {
+      mkdirSync(dir, { recursive: true });
+      tmpPath = join(dir, `${sid}.json.${process.pid}.${randomUUID()}.tmp`);
+      writeFileSync(tmpPath, JSON.stringify(record, null, 2));
       try {
-        const now = new Date();
-        utimesSync(finalPath, now, now);
-      } catch {
-        /* refresh is best-effort */
+        // Unlike rename, a hard link atomically publishes only if absent.
+        linkSync(tmpPath, finalPath);
+        return true;
+      } catch (error) {
+        // No replace/partial-write fallback if this filesystem cannot link.
+        if ((/** @type {NodeJS.ErrnoException} */ (error))?.code !== 'EEXIST') return false;
       }
-      return false;
     }
-    mkdirSync(dir, { recursive: true });
-    const tmpPath = join(dir, `${sid}.json.${process.pid}.tmp`);
-    writeFileSync(tmpPath, JSON.stringify(record, null, 2));
-    renameSync(tmpPath, finalPath);
-    return true;
+    const now = new Date();
+    utimesSync(finalPath, now, now);
+    return false;
   } catch {
     return false;
+  } finally {
+    if (tmpPath) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        // A cleanup fault must not change whether the record was published.
+      }
+    }
   }
 }
 
@@ -419,8 +429,8 @@ export function pruneStaleSessionRecords(root, maxAgeMs = 30 * 24 * 60 * 60 * 10
   }
   const cutoff = Date.now() - maxAgeMs;
   for (const name of names) {
-    // Records, plus `.json.<pid>.tmp` residue a process death between write and
-    // rename can strand — nothing else ever reaps those.
+    // Records, plus `.json.*.tmp` residue that an interrupted publication
+    // can strand — nothing else ever reaps those.
     if (!name.endsWith('.json') && !(name.includes('.json.') && name.endsWith('.tmp'))) continue;
     const recordPath = join(sessionsDir(root), name);
     try {

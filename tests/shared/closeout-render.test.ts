@@ -556,6 +556,31 @@ describe('render-closeout: the decisions section must ASK something', () => {
       expect(r.stdout).toContain('e978fad576fb2473');
     });
 
+    it('requires an array and renders one bullet per queued decision', () => {
+      const first = 'Decision A is open as aaaa111122223333.';
+      const second = 'Decision B is open as bbbb111122223333.';
+      const dir = repoWithQueue([openItem('aaaa111122223333'), openItem('bbbb111122223333')]);
+      const file = join(dir, 'in.json');
+      const run = (decisions: string | string[]) => {
+        writeFileSync(file, JSON.stringify(minimal({ decisions })), 'utf8');
+        return spawnSyncHidden(process.execPath, [SCRIPT, '--in', file], {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+          env: renderEnv(dir),
+        });
+      };
+
+      const prose = run(first + ' ' + second);
+      expect(prose.status).toBe(1);
+      expect(prose.stderr).toContain('ONE DECISION PER ELEMENT');
+
+      const itemized = run([first, second]);
+      expect(itemized.status, itemized.stderr).toBe(0);
+      expect(itemized.stdout.split(/\r?\n/)).toEqual(
+        expect.arrayContaining(['- ' + first, '- ' + second]),
+      );
+    });
+
     it('REFUSES a key that names no open item — the claim has to be checkable', () => {
       // The conservative direction, and deliberately the opposite of every
       // other check here. Those fail open because a readiness check that cannot

@@ -509,6 +509,22 @@
         "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
       }
     },
+    "af7d8f5510f9877b": {
+      "reviewed_by": "audit_recovery_independent",
+      "attester_class": "agent",
+      "checked": "Independently reviewed and byte matched the full-scope planner change: admit only bound production-file complexity cues, keep each cue distinct and non-verdict, retain delta and unbound exclusions. Verified native exact full-suite stamp from integration.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "b24e09a67b99c6f0241c779b52b1302e66102418",
+        "ran_at": "2026-11-22T15:18:42.966Z"
+      },
+      "attested_at": "2026-11-22T15:19:17.355Z",
+      "vouches": {
+        "src/audit/orchestrator/questionPlanning.ts": "ba06dc7e85d463d8a03341e85652ad94df0622c4"
+      }
+    },
     "be526ca9e4e1d631": {
       "reviewed_by": "Codex Windows qualification",
       "attester_class": "agent",
@@ -1022,7 +1038,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "51642764524969f9"
+      "review": "af7d8f5510f9877b"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"

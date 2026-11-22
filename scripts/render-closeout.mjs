@@ -268,29 +268,17 @@ for (const section of CLOSEOUT_SECTIONS) {
     emptied.push({ id: section.id, required: !!section.required, prompt: section.prompt });
     continue;
   }
-  // A section may declare that its content has to be a QUESTION. `prompt` could
-  // not carry this: it is shown only when a value is missing, so a section filled
-  // with the wrong KIND of content never met it.
-  if (section.requiresQuestion && !lines.join(' ').includes('?')) {
-    // …UNLESS it is satisfied by a queue item, which is the one other route by
-    // which a question genuinely reaches the owner. Verified, not trusted: the
-    // cited key must resolve to an item that is genuinely open in the queue, so
-    // a key naming nothing (or naming something already answered) is refused
-    // rather than accepted as a shortcut around asking.
-    if (section.acceptsQueueItem) {
-      const queue = queueItemVerdict(root, lines.join(' '));
-      if (queue.ok) {
-        disposition[section.id] = 'content';
-        rendered.push({ section, lines: lines.map((l) => (l.startsWith('- ') ? l : `- ${l}`)) });
-        continue;
-      }
+  const text = lines.join(' ');
+  if (section.requiresQuestion && !text.includes('?')) {
+    // An open queue item is the other way a question can reach the owner.
+    if (!section.acceptsQueueItem) {
+      fail(`section "${section.id}": ${section.requiresQuestion}`);
+    }
+    const queue = queueItemVerdict(root, text);
+    if (!queue.ok) {
       fail(`section "${section.id}": ${section.requiresQuestion}\n\n${queue.detail}`);
     }
-    fail(`section "${section.id}": ${section.requiresQuestion}`);
   }
-  // …and it may declare that its content is a LIST. A string renders as one
-  // bullet, which is right for a section that says one thing and wrong for the
-  // ones the owner acts on item by item.
   if (section.itemized && !Array.isArray(value)) {
     fail(`section "${section.id}": ${section.itemized}`);
   }

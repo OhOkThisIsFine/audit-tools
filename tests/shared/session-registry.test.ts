@@ -351,6 +351,33 @@ describe('writeSessionRecord: atomic, first-write-wins', () => {
     expect(readdirSync(sessionsDir(root)).filter((n) => n.endsWith('.tmp'))).toEqual([]);
   });
 
+  it('keeps the first completed writer when registration overlaps', () => {
+    const root = scratchRoot();
+    const sid = 'overlap';
+    const winner = record(sid, ['winner.txt']);
+    const contender = record(sid, ['contender.txt']);
+    let stateBeforePublish: string | undefined;
+    let installedWinner: boolean | undefined;
+
+    const installedContender = writeSessionRecord(root, {
+      ...contender,
+      toJSON() {
+        // The outer writer has checked for an existing record but is still
+        // serializing. Let a second writer publish before the outer one resumes.
+        stateBeforePublish = readSessionRecord(root, sid).state;
+        installedWinner = writeSessionRecord(root, winner);
+        return contender;
+      },
+    });
+
+    expect(stateBeforePublish).toBe('absent');
+    expect(installedWinner).toBe(true);
+    expect(installedContender).toBe(false);
+    expect(readSessionRecord(root, sid).record).toEqual(winner);
+    expect(readdirSync(sessionsDir(root))).toEqual([sid + '.json']);
+  });
+
+
   it('refreshes the record mtime on the skip path so a resumed session outlives the prune horizon', () => {
     const root = scratchRoot();
     writeSessionRecord(root, record('resumed', ['keep.txt']));

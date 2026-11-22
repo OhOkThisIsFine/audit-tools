@@ -9,7 +9,7 @@
 // landing branch unique to HEAD, the required checks on that exact commit, then a
 // fast-forward of the default branch to it.
 //
-// It refuses first, before anything leaves the machine, when:
+// It refuses before any remote write when:
 //   - the worktree has uncommitted changes (the landed commit would not be
 //     what the suite ran on),
 //   - HEAD does not descend from the remote default branch (not a fast-forward),
@@ -57,15 +57,27 @@ const slug = url.match(/github\.com[/:]([^/]+)\/(.+?)(?:\.git)?$/);
 if (!slug) refuse(`cannot read a GitHub repository from the remote URL ${url}.`);
 const repoSlug = `${slug[1]}/${slug[2]}`;
 
-if (!git(["fetch", "--quiet", remote]).ok) refuse(`could not fetch ${remote}.`);
-const symref = git(["symbolic-ref", `refs/remotes/${remote}/HEAD`]);
-const defaultBranch = symref.ok ? symref.out.replace(`refs/remotes/${remote}/`, "") : "main";
-
 const dirty = git(["status", "--porcelain"]);
 if (!dirty.ok || dirty.out) refuse("the worktree has uncommitted changes; commit or remove them first.");
 
+// Fetch need not refresh the cached remote HEAD. Bind the landing base to the
+// server's advertised branch and commit instead of guessing from local refs.
+const advertised = git(["ls-remote", "--symref", remote, "HEAD"]);
+const head = advertised.ok && advertised.out.match(
+  /^ref: refs\/heads\/([^\s]+)\tHEAD\r?\n([0-9a-f]{40}|[0-9a-f]{64})\tHEAD$/,
+);
+if (!head || !git(["check-ref-format", `refs/heads/${head[1]}`]).ok) {
+  refuse(`could not verify the default branch of ${remote} from its advertised HEAD.`);
+}
+const [, defaultBranch, advertisedCommit] = head;
+
+if (!git(["fetch", "--quiet", remote]).ok) refuse(`could not fetch ${remote}.`);
+const fetched = git(["show-ref", "--verify", "--hash", `refs/remotes/${remote}/${defaultBranch}`]);
+if (!fetched.ok || fetched.out !== advertisedCommit) {
+  refuse(`${remote}/${defaultBranch} does not match its advertised HEAD after fetch; retry with an up-to-date fetch configuration.`);
+}
+const target = fetched.out;
 const sha = git(["rev-parse", "HEAD"]).out;
-const target = git(["rev-parse", `refs/remotes/${remote}/${defaultBranch}`]).out;
 if (sha === target) refuse(`HEAD already equals ${remote}/${defaultBranch}; nothing to land.`);
 if (!git(["merge-base", "--is-ancestor", target, sha]).ok) {
   refuse(`HEAD does not descend from ${remote}/${defaultBranch}; rebase onto it, run the suite again, then land.`);

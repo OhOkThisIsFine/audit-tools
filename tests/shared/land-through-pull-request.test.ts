@@ -617,6 +617,72 @@ describe("deleteLandingBranch", () => {
   });
 });
 
+describe("npm run land verifies the advertised default branch", () => {
+  const LAND = resolve(import.meta.dirname, "..", "..", "scripts", "land.mjs");
+  const sha = "a".repeat(40);
+  const newHead = (branch: string) => `ref: refs/heads/${branch}\tHEAD\n${sha}\tHEAD\n`;
+
+  function run(advertisement: string, trackingSha = sha, status = 0, permitsFetch = true) {
+    const dir = mkdtempSync(join(tmpdir(), "land-default-"));
+    try {
+      const preload = join(dir, "git-argv.cjs");
+      writeFileSync(preload, `
+const cp = require('node:child_process');
+const commands = ${JSON.stringify({
+        "rev-parse --show-toplevel": dir,
+        remote: "origin",
+        "remote get-url origin": "https://github.com/example/repo.git",
+        "ls-remote --symref origin HEAD": advertisement,
+        "check-ref-format refs/heads/new/default": "",
+        "check-ref-format refs/heads/topic^0": "",
+        "check-ref-format refs/heads/topic~0": "",
+        ...(permitsFetch ? { "fetch --quiet origin": "" } : {}),
+        "symbolic-ref refs/remotes/origin/HEAD": "refs/remotes/origin/main",
+        "status --porcelain": "",
+        "rev-parse HEAD": sha,
+        "rev-parse refs/remotes/origin/main": sha,
+        "show-ref --verify --hash refs/remotes/origin/new/default": trackingSha,
+      })};
+cp.spawnSync = (command, args) => {
+  const key = args.join(' ');
+  if (command !== 'git' || !Object.hasOwn(commands, key)) throw Error('Unexpected command: ' + command + ' ' + key);
+  const exit = key === 'ls-remote --symref origin HEAD' ? ${status}
+    : key === 'check-ref-format refs/heads/topic^0' || key === 'check-ref-format refs/heads/topic~0' ? 1 : 0;
+  return { status: exit, stdout: commands[key], stderr: '' };
+};
+require('node:module').syncBuiltinESMExports();
+`);
+      return spawnSyncHidden(process.execPath, ["--require", preload, LAND], { cwd: dir, encoding: "utf8" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("ignores cached main when the remote advertises a renamed default", () => {
+    const result = run(newHead("new/default"));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("HEAD already equals origin/new/default; nothing to land");
+  });
+
+  it.each([
+    ["an OID without a symbolic target", `${sha}\tHEAD\n`, 0],
+    ["a failed lookup", newHead("new/default"), 128],
+    ["a commit-peeling expression instead of a branch", newHead("topic^0"), 0],
+    ["an ancestry expression instead of a branch", newHead("topic~0"), 0],
+    ["an ambiguous advertisement", newHead("new/default") + newHead("other/default"), 0],
+  ])("refuses %s without guessing main", (_case, advertisement, status) => {
+    const result = run(advertisement, sha, status, false);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("could not verify the default branch of origin");
+  });
+
+  it("refuses when the fetched branch does not match the advertised HEAD commit", () => {
+    const result = run(newHead("new/default"), "b".repeat(40));
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("origin/new/default does not match its advertised HEAD");
+  });
+});
+
 // The CLI's refusals all come before any push or `gh` call, so a local bare
 // repository whose path contains `github.com/<owner>/<repo>.git` is a complete
 // remote for them.

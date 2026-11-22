@@ -129,6 +129,45 @@ describe("question-led audit planning", () => {
     expect(revised.questions.find(q => q.question_id === group.question_id)?.revision_id).not.toBe(group.revision_id);
   });
 
+  it("assigns fully bound file-wide complexity in full scope without treating unbound cues as reviewable", () => {
+    const bundle = fixture();
+    const ref = (path: string) => ({ path });
+    const claim = (id: string, paths: string[], category = "complexity_hotspot"): Finding => ({
+      id, title: id, category, severity: "low", confidence: "medium", lens: "architecture",
+      summary: `Check the structural cue ${id}.`, affected_files: paths.map(ref),
+    });
+    const config = "src/runtime-config.ts", fallback = "src/importer.ts";
+    bundle.repo_manifest!.files.push({ path: fallback, size_bytes: 100, language: "typescript", hash: "importer" });
+    bundle.file_disposition!.files.push({ path: fallback, status: "included" });
+    bundle.design_assessment = {
+      generated_at: "x", contract_reviewed: false, conceptual_reviewed: false,
+      findings: [claim("config-a", [config]), claim("config-b", [config]), claim("other-file", [fallback]),
+        claim("missing", ["src/not-in-snapshot.ts"]), claim("partially-bound", [config, "src/not-in-snapshot.ts"]),
+        claim("test", ["test/resume.test.ts"]), claim("docs", ["docs/resume.md"]),
+        claim("representative", [config], "orphan_units"), claim("unbound-seam", [config, "src"], "architectural_seam")],
+    };
+    const scope = { mode: "full" as const, since: null, seed_files: [], expanded_files: [], budget: { max_files: 20 } };
+    const plan = buildReviewQuestionPlan(bundle, { snapshotId: "a", scope });
+    expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);
+    const disposition = (id: string, source = plan) => source.signal_dispositions!.find(item => item.signal_id === `design-lead:${id}`)!;
+    const first = disposition("config-a"), grouped = disposition("config-b");
+    expect(first).toMatchObject({ outcome: "promoted", source_refs: [ref(config)] });
+    expect(grouped).toMatchObject({ outcome: "grouped", question_id: first.question_id });
+    expect(disposition("other-file").question_id).not.toBe(first.question_id);
+    const question = plan.questions.find(q => q.question_id === first.question_id)!;
+    expect(question.expected_outcome).toContain("metric is a cue, not a finding");
+    expect(question.requested_parts.map(p => p.part_id)).toEqual(["design-lead:config-a", "design-lead:config-b"]);
+    expect(question.evidence_dependencies.map(dep => dep.key)).toEqual(["design-lead:config-a", "design-lead:config-b"]);
+    for (const id of ["missing", "partially-bound", "test", "docs", "representative", "unbound-seam"]) {
+      expect(disposition(id)).toMatchObject({ outcome: "not_promoted" });
+      expect(disposition(id)).not.toHaveProperty("question_id");
+    }
+    expect(disposition("representative").reason).toContain("representative file");
+    const delta = buildReviewQuestionPlan(bundle, { snapshotId: "a", scope: { ...scope,
+      mode: "delta", since: "baseline", seed_files: [config] } });
+    expect(disposition("config-a", delta)).toMatchObject({ outcome: "not_promoted" });
+  });
+
   it("assigns all applicable playbooks and retains an unmapped registered surface", () => {
     const plan = buildReviewQuestionPlan(fixture(), { snapshotId: "snapshot-a" });
     expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);

@@ -348,9 +348,11 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     disposition(key, "promoted", `Accepted ${lane} claim preserved for verification, not treated as proof.`, refs, target);
   }
 
-  // Group by the actual relationship endpoints or the exact in-file site.
-  // A file-wide metric alone does not identify a reviewable mechanism.
-  const groups = new Map<string, { operation?: Operation; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
+  // Prefer actual relationship endpoints, exact in-file sites, or a unique
+  // workflow. Full scope can also verify a file-wide complexity cue without
+  // mistaking the metric for a particular mechanism or a verdict.
+  const fullScope = (options.scope ?? bundle.scope)?.mode === "full";
+  const groups = new Map<string, { operation?: Operation; fileWide?: boolean; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
   const namedRelationship = new Set(["architectural_seam", "dependency_cycle", "hidden_coupling"]);
   const metricFamily = new Set(["complexity_hotspot", "code_duplication"]);
   const pathMetrics = new Map<string, number>();
@@ -390,9 +392,12 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       pathMetrics.get(stableStringify([lead.category, paths[0]])) === 1;
     const operation = refs.length && allPathsBound && !relationship && (!exactSites || oneMetricPerFile)
       ? workflowFor(paths) : undefined;
-    if (lead.lens !== "architecture" || (!relationship && !exactSites && !operation)) {
+    const fileWide = fullScope && lead.category === "complexity_hotspot" && allPathsBound &&
+      paths.length === 1 && !isTestPath(paths[0]!) && !exactSites && !operation;
+    if (lead.lens !== "architecture" || (!relationship && !exactSites && !operation && !fileWide)) {
       disposition(key, "not_promoted", !refs.length ? "No resolved in-scope source anchor."
         : lead.lens !== "architecture" ? "Signal is not an architecture verification question."
+          : lead.category === "orphan_units" ? "No bound unit-wide locator: a representative file does not establish reachability of the unit."
           : "Needs a locator: no concrete site, fully bound relationship, or unique discovered workflow. Record a named caller or source span to verify it.", refs);
       continue;
     }
@@ -400,12 +405,12 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     // call establishes ownership, not an equivalence across subcomponents.
     const component = ordered(paths.map(path => path.slice(0, path.lastIndexOf("/"))));
     const mechanism = stableStringify(operation ? [lead.category, operation.id, component]
-      : exactSites ? [lead.category, refs] : [lead.category, paths]);
-    const group = groups.get(mechanism) ?? { operation, items: [] };
+      : fileWide ? [lead.category, "file-wide", paths] : exactSites ? [lead.category, refs] : [lead.category, paths]);
+    const group = groups.get(mechanism) ?? { operation, fileWide, items: [] };
     group.items.push({ lead, refs });
     groups.set(mechanism, group);
   }
-  for (const [mechanism, { operation, items: group }] of groups) {
+  for (const [mechanism, { operation, fileWide, items: group }] of groups) {
     group.sort((a, b) => compareCodeUnits(a.lead.id, b.lead.id));
     const first = group[0]!.lead;
     const entry = operation?.refs.find(ref => ref.path === operation.entry);
@@ -414,6 +419,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     const topic = first.category.replaceAll("_", " ");
     const decision = "Decide whether the actual caller makes this an avoidable cost, demonstrates a necessary boundary, or leaves specific evidence missing. A justified or disproven signal is an answered question.";
     const expectation = operation ? `Review ${topic} within ${operation.title}, entered at ${operation.entry}. Answer each source cue separately; do not count a suggested mechanism as a verdict. ${decision}`
+      : fileWide ? `Use the named file to locate the relevant routine and its caller. A file-wide complexity metric is a cue, not a finding. Answer each source cue separately. ${decision}`
       : `Trace the actual callers and contract at this ${topic}. ${decision}`;
     const parts = group.map(({ lead, refs }) => ({ part_id: `design-lead:${lead.id}`,
       expectation: `${lead.summary} Inspect ${refs.map(ref => ref.start_line !== undefined
@@ -424,6 +430,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     for (const [index, { lead, refs }] of group.entries()) {
       disposition(`design-lead:${lead.id}`, index ? "grouped" : "promoted",
         operation ? `Same signal family in the discovered ${operation.title} workflow; independent requested part.`
+          : fileWide ? "Fully bound file-wide complexity cue in full scope; verify the actual routine and caller as a distinct requested part."
           : index ? "Same source relationship or exact site and mechanism." : "Concrete structural mechanism for review.", refs, target);
     }
   }

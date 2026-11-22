@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { spawnSyncHidden } from "../helpers/spawn.mjs";
 import { ingestAnswers } from "../../scripts/nightly/ingest-answers.mjs";
 import { checkInbox, writeInbox } from "../../scripts/nightly/render-inbox.mjs";
-import { INBOX_RELPATH, OPEN_ITEMS_RELPATH, OPEN_ITEMS_INDEX_RELPATH, readDecisions } from "../../scripts/nightly/items.mjs";
+import { DECISIONS_RELPATH, INBOX_RELPATH, OPEN_ITEMS_RELPATH, OPEN_ITEMS_INDEX_RELPATH, readDecisions } from "../../scripts/nightly/items.mjs";
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), "stored-queue-")); });
@@ -35,6 +35,60 @@ it("treats disposition flags after the delimiter as literal answer text", () => 
   const result = answer("A", "--", "--question", "--wontfix");
   expect(result.status, result.stderr).toBe(0);
   expect(readDecisions(root)[a.subject_key]).toMatchObject({ disposition: "settled", answer: "--question --wontfix" });
+});
+
+it("prints usage or rejects invalid invocations before reading corrupt inputs", () => {
+  saveStoredQueue();
+  const ledger = join(root, DECISIONS_RELPATH);
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeFileSync(ledger, "{invalid ledger");
+  writeFileSync(join(root, OPEN_ITEMS_RELPATH), "{invalid queue");
+  for (const args of [[], ["--help"]]) {
+    const result = answer(...args);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Usage:");
+  }
+  for (const args of [["--list", "--settled"], ["A", "--wontfix", "--question", "prose"]]) {
+    const result = answer(...args);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Choose one mode");
+  }
+  const invalid = [
+    { args: ["--question"], status: 1, error: "Not an item id" },
+    { args: ["A", "--wontfix"], status: 1, error: "An answer is required" },
+    { args: ["--"], status: 1, error: "Not an item id" },
+    { args: ["--done"], status: 1, error: "--done needs a SUBJECT KEY" },
+    { args: ["--done", "key"], status: 1, error: "--done needs a ref" },
+    { args: ["--list", "bogus"], status: 2, error: "--list does not take positional arguments" },
+  ];
+  for (const { args, status, error } of invalid) {
+    const result = answer(...args);
+    expect(result.status).toBe(status);
+    expect(result.stderr).toContain(error);
+  }
+  expect(readFileSync(ledger, "utf8")).toBe("{invalid ledger");
+  expect(readFileSync(join(root, OPEN_ITEMS_RELPATH), "utf8")).toBe("{invalid queue");
+});
+
+it("reads only the decisions for --settled, even when the stored queue is corrupt", () => {
+  const [a] = saveStoredQueue();
+  const recorded = answer(a.id, "Keep the proposal");
+  expect(recorded.status, recorded.stderr).toBe(0);
+  writeFileSync(join(root, OPEN_ITEMS_RELPATH), "{invalid queue");
+  const settled = answer("--settled");
+  expect(settled.status, settled.stderr).toBe(0);
+  expect(settled.stdout).toContain(a.subject_key);
+  expect(answer("--list").stderr).toContain("Cannot read stored queue");
+});
+
+it("dispatches --done by its parsed mode and preserves the queue projection", () => {
+  const [a] = saveStoredQueue();
+  const recorded = answer(a.id, "Keep the proposal");
+  expect(recorded.status, recorded.stderr).toBe(0);
+  const completed = answer(a.subject_key, "--done", "landed");
+  expect(completed.status, completed.stderr).toBe(0);
+  expect(readDecisions(root)[a.subject_key].completed_ref).toBe("landed");
+  expect(checkInbox(root).fresh).toBe(true);
 });
 
 it("refuses a missing or corrupt queue without manufacturing an empty snapshot", () => {

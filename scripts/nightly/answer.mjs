@@ -65,12 +65,71 @@ function fail(message) {
   process.exit(1);
 }
 
-// CFG-7aa5185c — fail-closed at the CLI boundary too: readDecisions now
-// REFUSES (throws) on a malformed ledger rather than degrading to {}, so every
-// branch below — --list, --done, --settled, and the default settle path —
-// must surface that refusal usably instead of letting an uncaught exception
-// (or, before this fix, a silently-empty ledger) stand in for a real answer.
-let state;
+// One union spec: which flag is present selects the branch below, and the
+// variadic tail is the answer (or `--done`'s ref). An unrecognized flag is
+// refused rather than absorbed, and the parsed positionals — not raw argv — are
+// what the settle path records, so the `--` data separator never lands in the
+// answer text.
+const modes = ['--list', '--settled', '--done', '--wontfix', '--question'];
+const parsedArgv = parseArgv(argv, {
+  flags: modes,
+  positionals: Infinity,
+});
+if (argv.length === 0 || parsedArgv.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (!parsedArgv.ok) {
+  const refusal = refusalMessage(parsedArgv, {
+    name: 'answer',
+    usage: 'node scripts/nightly/answer.mjs --help   (prose starting with "-" goes after `--`)',
+  });
+  if (refusal) process.stderr.write(refusal);
+  process.exit(USAGE_EXIT);
+}
+
+const selectedModes = modes.filter((flag) => parsedArgv.has(flag));
+if (selectedModes.length > 1) {
+  console.error(`answer: Choose one mode, not ${selectedModes.join(', ')}. Run with --help for usage.`);
+  process.exit(USAGE_EXIT);
+}
+const [mode = 'answer'] = selectedModes;
+const [key, ...rest] = parsedArgv.positionals;
+if ((mode === '--list' || mode === '--settled') && key !== undefined) {
+  console.error(`answer: ${mode} does not take positional arguments. Run with --help for usage.`);
+  process.exit(USAGE_EXIT);
+}
+
+const text = rest.join(' ').trim();
+if (mode === '--done') {
+  const ref = text;
+  if (!key) fail('--done needs a SUBJECT KEY (see --list or --settled).');
+  if (!ref) fail('--done needs a ref: a commit sha, a PR, or "verified already true at HEAD".');
+  try {
+    recordCompletion(ROOT, key, ref);
+  } catch (err) {
+    fail(String(/** @type {any} */ (err).message ?? err));
+  }
+  console.log(`Marked ${key} DONE (${ref}) → ${DECISIONS_RELPATH}`);
+  process.exit(0);
+}
+
+if (mode !== '--list' && mode !== '--settled') {
+  if (!key || key.startsWith('-')) {
+    fail(`Not an item id: "${key ?? ''}" (a leading "-" is a flag). Run with --help for usage.`);
+  }
+
+  if (!text) {
+    // An empty answer would suppress the question while recording nothing about
+    // why — the exact shape that makes a ledger untrustworthy a month later.
+    fail(
+      `An answer is required: it is what the routine reads next run.\n` +
+        `  node scripts/nightly/answer.mjs ${key} "keep it as it is — the version pin is a deliberate anchor"`,
+    );
+  }
+}
+
+// A bad durable ledger is a refusal, never an empty decision history.
 let decisions;
 try {
   decisions = readDecisions(ROOT);
@@ -83,39 +142,26 @@ try {
       `git history or a backup), then retry.`,
   );
 }
+
+if (mode === '--settled') {
+  const entries = Object.entries(decisions);
+  if (entries.length === 0) {
+    console.log('No settled subjects yet.');
+    process.exit(0);
+  }
+  for (const [key, d] of entries) {
+    console.log(`${key}\t${d.disposition}\t${d.path || '(no path)'}\t${(d.answer || '').slice(0, 80)}`);
+  }
+  process.exit(0);
+}
+
+let state;
 try {
   state = readOpenItems(ROOT);
 } catch (err) {
   fail(String(err instanceof Error ? err.message : err));
 }
 const { open, resolved } = partitionBySettled(state.items, decisions, ROOT);
-
-if (argv.length === 0) {
-  console.log(USAGE);
-  process.exit(0);
-}
-
-// One union spec: which flag is present selects the branch below, and the
-// variadic tail is the answer (or `--done`'s ref). An unrecognized flag is
-// refused rather than absorbed, and the parsed positionals — not raw argv — are
-// what the settle path records, so the `--` data separator never lands in the
-// answer text.
-const parsedArgv = parseArgv(argv, {
-  flags: ['--list', '--settled', '--done', '--wontfix', '--question'],
-  positionals: Infinity,
-});
-if (parsedArgv.help) {
-  console.log(USAGE);
-  process.exit(0);
-}
-if (!parsedArgv.ok) {
-  const refusal = refusalMessage(parsedArgv, {
-    name: 'answer',
-    usage: 'node scripts/nightly/answer.mjs --help   (prose starting with "-" goes after `--`)',
-  });
-  if (refusal) process.stderr.write(refusal);
-  process.exit(USAGE_EXIT);
-}
 
 // An answered decision often implies a CODE fix, and a remediation run in flight
 // may already claim the file that fix would touch. Applying into a claimed file
@@ -161,7 +207,7 @@ function openRunWriteScope(root) {
   return rows.length > 0 ? rows : null;
 }
 
-if (argv[0] === '--list') {
+if (mode === '--list') {
   const { actionable, grandfathered } = answeredNotDone(decisions);
   if (open.length === 0 && actionable.length === 0) {
     console.log('No open nightly items, and every tracked answer is recorded as done.');
@@ -218,40 +264,7 @@ A REMEDIATION RUN IS OPEN — ${scope.length} item(s) still claim a write scope.
   process.exit(0);
 }
 
-if (argv[0] === '--done') {
-  const key = parsedArgv.positionals[0];
-  const ref = parsedArgv.positionals.slice(1).join(' ').trim();
-  if (!key) fail('--done needs a SUBJECT KEY (see --list or --settled).');
-  if (!ref) fail('--done needs a ref: a commit sha, a PR, or "verified already true at HEAD".');
-  try {
-    recordCompletion(ROOT, key, ref);
-  } catch (err) {
-    fail(String(/** @type {any} */ (err).message ?? err));
-  }
-  console.log(`Marked ${key} DONE (${ref}) → ${DECISIONS_RELPATH}`);
-  process.exit(0);
-}
-
-if (argv[0] === '--settled') {
-  const entries = Object.entries(decisions);
-  if (entries.length === 0) {
-    console.log('No settled subjects yet.');
-    process.exit(0);
-  }
-  for (const [key, d] of entries) {
-    console.log(`${key}\t${d.disposition}\t${d.path || '(no path)'}\t${(d.answer || '').slice(0, 80)}`);
-  }
-  process.exit(0);
-}
-
-// The id is the FIRST POSITIONAL, so the guard has already refused any flag
-// this CLI does not declare — a mistyped flag can never be recorded as a
-// decision about a subject that does not exist.
-const id = parsedArgv.positionals[0];
-if (!id || id.startsWith('-')) {
-  fail(`Not an item id: "${id ?? ''}" (a leading "-" is a flag). Run with --help for usage.`);
-}
-
+const id = key;
 const item = open.find((it) => it.id === id) || state.items.find((it) => it.id === id);
 if (!item) {
   const known = open.map((it) => it.id).join(', ') || '(none open)';
@@ -267,26 +280,15 @@ if (resolved.some((it) => it.id === id)) {
 // The answer is the variadic tail after the id, with the `--` data separator
 // already consumed by the guard — so prose beginning with a dash is carried
 // verbatim instead of being read as a flag.
-const rest = parsedArgv.positionals.slice(1);
 // `--question` is an answer that asks something BACK. It is recorded (so the
 // exchange is not lost) but does NOT settle the subject, because there is nothing
 // executable in it — `partitionBySettled` keeps it in the open list. Two of the
 // eighteen determinations on 2026-07-28 were exactly this shape and were filed as
 // `settled`, which made them unaskable while carrying no answer anyone could act on.
-const disposition = parsedArgv.has('--wontfix') ? 'wontfix' : parsedArgv.has('--question') ? 'question' : 'settled';
-const answer = rest.join(' ').trim();
-
-if (!answer) {
-  // An empty answer would suppress the question while recording nothing about
-  // why — the exact shape that makes a ledger untrustworthy a month later.
-  fail(
-    `An answer is required: it is what the routine reads next run.\n` +
-      `  node scripts/nightly/answer.mjs ${id} "keep it as it is — the version pin is a deliberate anchor"`,
-  );
-}
+const disposition = mode === '--wontfix' ? 'wontfix' : mode === '--question' ? 'question' : 'settled';
 
 recordDecision(ROOT, item.subject_key, {
-  answer,
+  answer: text,
   disposition,
   subject: item.title,
   path: item.path,
