@@ -105,8 +105,8 @@ vi.mock("node:child_process", () => ({
     else if (cmd === `gh api repos/test/repo/commits/${fixture.head}/status?per_page=100 --paginate --slurp`) stdout = JSON.stringify([{ sha: fixture.head, total_count: 0, statuses: [] }]);
     else if (cmd.startsWith("gh pr view ")) stdout = JSON.stringify({ state: "MERGED" });
     else if (cmd.startsWith("gh release view ")) return { status: 1, stdout: "", stderr: "release not found" };
-    else if (cmd.startsWith("gh release create ")) stdout = "";
-    else if (cmd === "gh workflow view publish-package.yml") stdout = "";
+    else if (cmd === "gh release create v0.52.1 --repo test/repo --title v0.52.1 --generate-notes") stdout = "";
+    else if (cmd === "gh workflow view publish-package.yml --repo test/repo") stdout = "";
     else if (cmd.includes("actions/workflows/publish-package.yml/runs?")) stdout = JSON.stringify({
       total_count: 1,
       workflow_runs: [{ id: 17, run_number: 17, head_sha: fixture.head, head_branch: "v0.52.1", created_at: "2026-09-19T00:00:00Z", html_url: "https://github.com/test/repo/actions/runs/17" }],
@@ -199,7 +199,7 @@ test("main resumes an unfinished landing: the recorded bump commit lands, then t
   expect(fixture.calls).toContain(`git push origin ${sha}:refs/heads/release/v0.52.1`);
   expect(landMain).toBeGreaterThan(-1);
   expect(tagPush).toBeGreaterThan(landMain);
-  expect(fixture.calls.some((cmd) => cmd.startsWith("gh release create v0.52.1"))).toBe(true);
+  expect(fixture.calls).toContain("gh release create v0.52.1 --repo test/repo --title v0.52.1 --generate-notes");
   expect(fixture.calls.some((cmd) => /npm version|git (tag|commit)|verify:checks|actions\/runs\?head_sha=/.test(cmd))).toBe(false);
   expect(fixture.journal.phases).toHaveProperty("land");
   expect(fixture.journal.phases).toHaveProperty("tag+release");

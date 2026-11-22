@@ -126,7 +126,7 @@ test("one-command release helper wires the trusted publishing path", async () =>
   expect(helper).toMatch(/classifyCiInFlight/);
   expect(helper).toMatch(/watching them to conclusion rather than/);
   expect(helper).toMatch(/run\("git", \["push", remoteName, tag\]\)/);
-  expect(helper).toMatch(/run\("gh", \["release", "create", tag, "--title", tag, "--generate-notes"\]\)/);
+  expect(helper).toMatch(/run\("gh", \["release", "create", tag, "--repo", repoSlug, "--title", tag, "--generate-notes"\]\)/);
   expect(helper).toMatch(/publish-package\.yml/);
   expect(helper).toMatch(/waitForRegistryVersion/);
   expect(helper).toMatch(/commandName\("npm"\)/);

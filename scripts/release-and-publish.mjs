@@ -681,7 +681,7 @@ export async function waitForReleaseRun(
 ) {
   const startedAt = Date.now();
   const deadline = startedAt + detectionTimeoutMs;
-  run("gh", ["workflow", "view", "publish-package.yml"], {
+  run("gh", ["workflow", "view", "publish-package.yml", "--repo", repoSlug], {
     timeoutMs: discoveryRemainingMs(deadline),
   });
   discoveryRemainingMs(deadline);
@@ -1543,7 +1543,7 @@ async function runRelease() {
         console.log(`[release] GitHub Release ${tag} already exists — leaving it untouched.`);
       } else {
         console.log(`[release] creating GitHub Release ${tag}`);
-        run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+        run("gh", ["release", "create", tag, "--repo", repoSlug, "--title", tag, "--generate-notes"]);
       }
     });
     recordReleasePhase(repoRoot, "tag+release", { tag, headSha, tagPushedAtMs });
