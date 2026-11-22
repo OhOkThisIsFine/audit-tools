@@ -1,5 +1,7 @@
 // sites-pinned: tests/audit/status-command.test.ts
 import { join } from "node:path";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import type { AuditTask } from "../types.js";
 import type { AuditState, ObligationState } from "../types/auditState.js";
@@ -12,6 +14,11 @@ import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
+  await withArtifactTreeHold(artifactsDir, undefined, () => reportHeldStatus(artifactsDir));
+}
+
+async function reportHeldStatus(artifactsDir: string): Promise<void> {
+  await assertNoPendingFoldReceipt(artifactsDir);
   const auditStatePath = join(artifactsDir, ARTIFACT_DEFINITIONS.audit_state.fileName);
 
   // 1. Read audit_state.json
