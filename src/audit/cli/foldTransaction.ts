@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/submission-staging.test.ts
 /**
  * The `next-step` fold's TRANSACTION — the mechanics of ONE CORE WRITE BOUNDARY
  * under ONE artifact-tree hold (CX-02 landings 2 and 3).

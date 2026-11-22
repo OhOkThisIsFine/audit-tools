@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/submission-staging.test.ts
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError } from "../../shared/io/json.js";

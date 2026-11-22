@@ -52,6 +52,7 @@ import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/syste
 import { loadArtifactBundle, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { foldReceiptPath } from "../../src/audit/io/foldReceiptPath.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
+import { cmdValidate } from "../../src/audit/cli/validateCommand.js";
 import { cmdStatus } from "../../src/audit/cli/statusCommand.js";
 import { runSample } from "../../src/audit/cli/sampleRunCommand.js";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
@@ -488,6 +489,7 @@ test("a pending receipt blocks competing reads and cleanup and replays the exact
     expect(receipt.applied[0]).toMatchObject({ lane: LANE, acceptedMessage: "retained across restart" });
     expect((await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "accepted")).toEqual([]);
     await expect(loadArtifactBundle(artifactsDir)).rejects.toThrow("incomplete fold receipt");
+    await expect(cmdValidate(["--artifacts-dir", artifactsDir])).rejects.toThrow("incomplete fold receipt");
     await expect(cmdStatus(["--artifacts-dir", artifactsDir])).rejects.toThrow("incomplete fold receipt");
     await expect(runSample(["--artifacts-dir", artifactsDir, "--force"])).rejects.toThrow("incomplete fold receipt");
     await expect(cleanupStaleArtifactsDir(artifactsDir, { force: true })).resolves.toMatchObject({ action: "skipped" });

@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/validate-command.test.ts, tests/audit/submission-staging.test.ts
 import { join } from "node:path";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import {
