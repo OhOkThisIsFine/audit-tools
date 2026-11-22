@@ -309,6 +309,24 @@
         "src/audit/reporting/criticalFlowFallbackPrompt.ts": "bacda78481a44508d215c5d7160ea80d4d587ffc"
       }
     },
+    "51642764524969f9": {
+      "reviewed_by": "tutor_systemic_4f7",
+      "attester_class": "agent",
+      "checked": "Independently compared exact staged blobs to base; replayed frozen Tutor Sync planner, challenged generic hub and test-import grouping; verified distinct leaf coverage and 24 accepted claims, binding priority only and unchanged identities; verified systemic artifact dependency and matching generated mirror; confirmed final cache pin-only qualification delta.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "d284cdfd2c9b18051fb4817e44ffd5e9b2c81781",
+        "ran_at": "2026-11-22T09:38:24.901Z"
+      },
+      "attested_at": "2026-11-22T09:38:36.244Z",
+      "vouches": {
+        "src/audit/cli/questionWorkloadBindings.ts": "48a9ba64db941ad0038e4887125fdfb031e5330f",
+        "src/audit/orchestrator/dependencyMap.ts": "96a4a3523ee97339435794b413d747db0f7f1080",
+        "src/audit/orchestrator/questionPlanning.ts": "52bdd49525e73ec8ef606e638e84e17401d171fe"
+      }
+    },
     "58a44ca3a3caea9d": {
       "reviewed_by": "claude-opus-5-5",
       "attester_class": "agent",
@@ -816,7 +834,7 @@
       "review": "daa728eac345f91f"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "daa728eac345f91f"
+      "review": "51642764524969f9"
     },
     "src/audit/cli/submitCommand.ts": {
       "review": "daa728eac345f91f"
@@ -876,7 +894,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/dependencyMap.ts": {
-      "review": "e36223304299f9c6"
+      "review": "51642764524969f9"
     },
     "src/audit/orchestrator/dependencySlices.ts": {
       "review": "e36223304299f9c6"
@@ -984,7 +1002,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "e36223304299f9c6"
+      "review": "51642764524969f9"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"

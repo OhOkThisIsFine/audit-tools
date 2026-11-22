@@ -130,8 +130,8 @@ const SHORT_CIRCUIT_OPERATORS = new Set(["&&", "||", "??"]);
  * code outside every function counts as one more routine. Iterative, so a
  * deeply nested expression cannot exhaust the call stack.
  */
-function maxFunctionComplexity(root: TsNode): number {
-  const counters: Array<{ decisions: number }> = [{ decisions: 0 }];
+function maxFunctionComplexity(root: TsNode): Pick<NodeMetric, "value" | "sites"> {
+  const counters: Array<{ decisions: number; routine: TsNode }> = [{ decisions: 0, routine: root }];
   const stack: Array<{ node: TsNode; counter: { decisions: number } }> = [
     { node: root, counter: counters[0]! },
   ];
@@ -139,7 +139,7 @@ function maxFunctionComplexity(root: TsNode): number {
     const { node, counter } = stack.pop()!;
     for (const child of node.namedChildren) {
       if (FUNCTION_NODE_TYPES.has(child.type)) {
-        const own = { decisions: 0 };
+        const own = { decisions: 0, routine: child };
         counters.push(own);
         stack.push({ node: child, counter: own });
         continue;
@@ -154,7 +154,15 @@ function maxFunctionComplexity(root: TsNode): number {
       stack.push({ node: child, counter });
     }
   }
-  return counters.reduce((max, c) => Math.max(max, c.decisions + 1), 1);
+  const winner = counters.reduce((a, b) => b.decisions > a.decisions ||
+    (b.decisions === a.decisions && a.routine !== root &&
+      (b.routine.startPosition?.row ?? Infinity) < (a.routine.startPosition?.row ?? Infinity)) ? b : a);
+  const { routine } = winner;
+  const first = routine.startPosition, last = routine.endPosition;
+  const sites = routine !== root && first && last
+    ? [{ line_start: first.row + 1, line_end: Math.max(first.row + 1, last.row + (last.column === 0 ? 0 : 1)) }]
+    : undefined;
+  return { value: winner.decisions + 1, ...(sites ? { sites } : {}) };
 }
 
 // Branch / decision keywords used by the lexical file-level proxy. Counting
@@ -185,7 +193,7 @@ export function computeComplexityMetric(
     try {
       tree = parser.parse(source);
       return {
-        value: maxFunctionComplexity(tree.rootNode),
+        ...maxFunctionComplexity(tree.rootNode),
         measure: "cyclomatic-max-function",
         reach: "js-ts-effective",
       };
@@ -237,19 +245,25 @@ export function computeDuplicationMetric(
   source: string,
 ): NodeMetric | undefined {
   if (!isJsTsPath(path)) return undefined;
-  const lines: string[] = [];
-  for (const rawLine of source.split(/\r?\n/)) {
+  const lines: string[] = [], sourceLines: number[] = [];
+  for (const [index, rawLine] of source.split(/\r?\n/).entries()) {
     const normalized = normalizeLine(rawLine);
-    if (normalized.length >= 3) lines.push(normalized);
+    if (normalized.length >= 3) { lines.push(normalized); sourceLines.push(index + 1); }
   }
   const firstStart = new Map<string, number>();
   const duplicated = new Set<number>();
+  let pair: NodeMetric["sites"];
   for (let start = 0; start + CLONE_MIN_LINES <= lines.length; start += 1) {
     const block = lines.slice(start, start + CLONE_MIN_LINES).join("\n");
     const earlier = firstStart.get(block);
     if (earlier === undefined) {
       firstStart.set(block, start);
     } else if (earlier + CLONE_MIN_LINES <= start) {
+      // Retain a reproducible, exact example of this aggregate metric. The
+      // whole-file total does not imply that this pair accounts for every line.
+      pair ??= [earlier, start].map(at => ({
+        line_start: sourceLines[at]!, line_end: sourceLines[at + CLONE_MIN_LINES - 1]!,
+      }));
       for (let line = start; line < start + CLONE_MIN_LINES; line += 1) duplicated.add(line);
     }
   }
@@ -257,6 +271,7 @@ export function computeDuplicationMetric(
     value: duplicated.size,
     measure: "duplicate-block-lines",
     reach: "js-ts-effective",
+    ...(pair ? { sites: pair } : {}),
   };
 }
 

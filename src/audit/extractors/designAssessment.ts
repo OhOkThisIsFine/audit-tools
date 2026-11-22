@@ -288,7 +288,7 @@ function detectComplexityHotspots(
       confidence: "medium",
       lens: "architecture" as const,
       summary: `${m.node} has a ${m.measure} of ${m.value} (reach: ${m.reach}). High structural complexity is hard to test and change safely.`,
-      affected_files: [{ path: m.node }],
+      affected_files: m.sites?.map(site => ({ path: m.node, ...site })) ?? [{ path: m.node }],
       systemic: false,
     })),
   }];
@@ -315,8 +315,8 @@ function detectDuplication(
       severity: "low",
       confidence: "medium",
       lens: "architecture" as const,
-      summary: `${m.node} has a ${m.measure} of ${m.value} (reach: ${m.reach}). Duplicated code multiplies the cost of every future change to that logic.`,
-      affected_files: [{ path: m.node }],
+      summary: `${m.node} has a ${m.measure} of ${m.value} (reach: ${m.reach}). ${m.sites ? "The named pair is one exact example; check whether it shares one responsibility before consolidating." : "Locate a concrete repeated block before deciding whether it shares one responsibility."}`,
+      affected_files: m.sites?.map(site => ({ path: m.node, ...site })) ?? [{ path: m.node }],
       systemic: false,
     })),
   }];

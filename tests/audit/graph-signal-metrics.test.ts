@@ -13,6 +13,7 @@ const { buildGraphBundle, buildGraphBundleFromFs } = await import(
   "../../src/audit/extractors/graph.js"
 );
 const { GraphBundleSchema } = await import("../../src/shared/index.js");
+const { buildDesignAssessment } = await import("../../src/audit/extractors/designAssessment.js");
 const { computeNodeMetricsForFile, loadFunctionComplexityParsers } = await import(
   "../../src/audit/extractors/analyzers/complexityDuplication.js"
 );
@@ -82,6 +83,9 @@ test("duplication counts repeated blocks, never repeated boilerplate lines", () 
   const cloned = ["function f() {", ...block, "}", "function g() {", ...block, "}"].join("\n");
   // The second copy of the five-line block is duplicated; the first is the original.
   expect(computeNodeMetricsForFile("c.ts", cloned)!.duplication!.value).toBe(block.length);
+  expect(computeNodeMetricsForFile("c.ts", cloned)!.duplication!.sites).toEqual([
+    { line_start: 2, line_end: 6 }, { line_start: 9, line_end: 13 },
+  ]);
 
   // A shorter repeated run is below the block size and is not a clone.
   const short = ["function f() {", ...block.slice(0, 4), "}", "function g() {", ...block.slice(0, 4), "}"].join("\n");
@@ -135,9 +139,30 @@ test("the filesystem graph build measures complexity per function", async () => 
       value: 2,
       measure: "cyclomatic-max-function",
       reach: "js-ts-effective",
+      sites: [{ line_start: 1, line_end: 1 }],
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("native complexity and clone locators survive graph validation and design lead production", async () => {
+  const parsers = await loadFunctionComplexityParsers();
+  try {
+    const body = Array.from({ length: 11 }, (_, i) => `if (check${i}()) handle${i}();`);
+    const content = ["// owner handler", "function run() {", ...body, "}", "",
+      "function second() {", ...body.slice(0, 5), "}"].join("\n");
+    const path = "src/operation.ts";
+    const graph = buildGraphBundle(manifest([{ path, content }]), undefined,
+      { fileContents: { [path]: content }, complexityParsers: parsers });
+    const assessment = buildDesignAssessment({ graphBundle: GraphBundleSchema.parse(graph),
+      unitManifest: { units: [] }, criticalFlows: { flows: [] }, riskRegister: { items: [] } });
+    expect(assessment.findings.find(finding => finding.category === "complexity_hotspot")?.affected_files)
+      .toEqual([{ path, line_start: 2, line_end: 14 }]);
+    expect(assessment.findings.find(finding => finding.category === "code_duplication")?.affected_files)
+      .toEqual([{ path, line_start: 3, line_end: 7 }, { path, line_start: 17, line_end: 21 }]);
+  } finally {
+    for (const parser of Object.values(parsers)) parser?.delete();
   }
 });
 

@@ -1,7 +1,8 @@
 import type { GraphBundle, GraphEdge, NodeMetric } from "audit-tools/shared";
-import { compareCodeUnits } from "audit-tools/shared";
+import { compareCodeUnits, NodeMetricSchema } from "audit-tools/shared";
 import { GIT_CO_CHANGE_CATEGORY } from "./gitHistory.js";
 
+// sites-pinned: tests/audit/graph-signal-metrics.test.ts
 /** A per-node structural metric surfaced as a flat, deterministically sorted row. */
 export interface NodeMetricSignal {
   /** Repo-path node id the metric was computed for. */
@@ -12,6 +13,7 @@ export interface NodeMetricSignal {
   measure: string;
   /** Scope of source the measure actually covered. */
   reach: NodeMetric["reach"];
+  sites?: NodeMetric["sites"];
 }
 
 /**
@@ -285,7 +287,7 @@ function readNodeMetricSignals(
     if (!entry || typeof entry !== "object") continue;
     const metric = (entry as Record<string, unknown>)[kind];
     if (!metric || typeof metric !== "object") continue;
-    const { value, measure, reach } = metric as Record<string, unknown>;
+    const { value, measure, reach, sites } = metric as Record<string, unknown>;
     if (
       typeof value !== "number" ||
       !Number.isFinite(value) ||
@@ -294,11 +296,13 @@ function readNodeMetricSignals(
     ) {
       continue;
     }
+    const locations = NodeMetricSchema.shape.sites.safeParse(sites);
     signals.push({
       node,
       value,
       measure,
       reach: reach as NodeMetric["reach"],
+      ...(locations.success && locations.data?.length ? { sites: locations.data } : {}),
     });
   }
   signals.sort((a, b) => compareCodeUnits(a.node, b.node));

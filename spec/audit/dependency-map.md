@@ -137,7 +137,7 @@ three writers).
 <!-- BEGIN GENERATED spec-mirror dependency-map#phase-3 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
-| `review_plan.json` | `repo_manifest.json`, `file_disposition.json`, `scope.json`, `intent_checkpoint.json`, `surface_manifest.json`, `critical_flows.json`, `unit_manifest.json`, `graph_bundle.json`, `charter_register.json`, `design_assessment.json`, `external_analyzer_results.json` |
+| `review_plan.json` | `repo_manifest.json`, `file_disposition.json`, `scope.json`, `intent_checkpoint.json`, `surface_manifest.json`, `critical_flows.json`, `unit_manifest.json`, `graph_bundle.json`, `charter_register.json`, `design_assessment.json`, `systemic_challenge.json`, `external_analyzer_results.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-3 -->
 
 `scope.json` records full scope or, for `--since`, the changed seed and expanded

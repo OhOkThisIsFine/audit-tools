@@ -19,6 +19,8 @@ import { pathToFileURL } from "node:url";
 export interface TsNode {
   type: string;
   text: string;
+  startPosition?: { row: number; column: number };
+  endPosition?: { row: number; column: number };
   namedChildren: TsNode[];
   childForFieldName(field: string): TsNode | null;
   descendantsOfType(type: string | string[]): TsNode[];

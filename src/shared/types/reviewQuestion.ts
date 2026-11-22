@@ -76,11 +76,22 @@ export const ReviewQuestionSchema = z.strictObject({
 );
 export type ReviewQuestion = z.infer<typeof ReviewQuestionSchema>;
 
-export const ReviewPlanSchema = z.strictObject({
+// Planning dispositions retain the exact candidate without claiming a review decision.
+export const ReviewSignalDispositionSchema = z.strictObject({
+  signal_id: id,
+  outcome: z.enum(["promoted", "grouped", "not_promoted"]),
+  reason: value,
+  question_id: id.optional(),
+  source_refs: z.array(ReviewSourceRefSchema).optional(),
+}).refine(row => (row.outcome === "not_promoted") === (row.question_id === undefined),
+  "promoted or grouped signals must name a question; unpromoted signals must not");
+
+export const ReviewPlanObjectSchema = z.strictObject({
   ...version,
   snapshot_id: id,
   inventory: z.array(ReviewInventoryItemSchema),
   questions: z.array(ReviewQuestionSchema),
+  signal_dispositions: z.array(ReviewSignalDispositionSchema).optional(),
   omissions: z.array(z.strictObject({
     surface_id: id,
     source_refs: z.array(ReviewSourceRefSchema),
@@ -92,6 +103,13 @@ export const ReviewPlanSchema = z.strictObject({
     reason: value,
   })),
 });
+export const ReviewPlanSchema = ReviewPlanObjectSchema.refine(plan => {
+  if (!plan.signal_dispositions) return true;
+  const questionIds = new Set(plan.questions.map(row => row.question_id));
+  const signals = new Set(plan.signal_dispositions.map(row => row.signal_id));
+  return signals.size === plan.signal_dispositions.length &&
+    plan.signal_dispositions.every(row => row.question_id === undefined || questionIds.has(row.question_id));
+}, { path: ["signal_dispositions"], message: "signal IDs must be unique and linked questions must be planned" });
 export type ReviewPlan = z.infer<typeof ReviewPlanSchema>;
 
 export const ReviewAssignmentSchema = z.strictObject({

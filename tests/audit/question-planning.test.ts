@@ -5,6 +5,10 @@ import { buildGraphBundle } from "../../src/audit/extractors/graph.js";
 import { buildSurfaceManifest } from "../../src/audit/extractors/surfaces.js";
 import { buildCriticalFlowManifest } from "../../src/audit/extractors/flows.js";
 import { ReviewPlanSchema } from "../../src/shared/types/reviewQuestion.js";
+import type { Finding } from "../../src/shared/types/finding.js";
+import { questionWorkloadBindings } from "../../src/audit/cli/questionWorkloadBindings.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 
 function fixture(): ArtifactBundle {
   const paths = ["src/manual.ts", "src/scheduled.ts", "src/resume-store.ts", "test/resume.test.ts",
@@ -29,6 +33,102 @@ function fixture(): ArtifactBundle {
 }
 
 describe("question-led audit planning", () => {
+  it("carries accepted claims, distinguishes material charter gaps, and accounts for every structural signal", async () => {
+    const bundle = fixture();
+    const related = { path: "src/manual-detail.ts", language: "text", size_bytes: 100, hash: "manual-detail" };
+    const transitive = { path: "src/transitive-detail.ts", language: "text", size_bytes: 100, hash: "transitive-detail" };
+    bundle.repo_manifest!.files.push(related, transitive);
+    bundle.file_disposition!.files.push(...[related, transitive].map(({ path }) => ({ path, status: "included" as const })));
+    bundle.critical_flows!.flows[0]!.paths.push(related.path, transitive.path);
+    bundle.graph_bundle = buildGraphBundle(bundle.repo_manifest!);
+    bundle.graph_bundle.graphs.calls = [{ from: "src/manual.ts", to: related.path, kind: "resolved-call" }];
+    bundle.graph_bundle.graphs.imports = [{ from: "test/resume.test.ts", to: "src/manual.ts" }];
+    const claim = (id: string, category: string, affected_files: Finding["affected_files"]): Finding =>
+      ({ id, title: category, category, severity: "medium", confidence: "high", lens: "architecture",
+        summary: `Check the observed decision ${category}.`, affected_files });
+    const site = [{ path: "src/manual.ts", line_start: 3, line_end: 6 }];
+    const seam = [{ path: "src/manual.ts" }, { path: "src/resume-store.ts" }];
+    bundle.design_assessment = {
+      generated_at: "x", contract_reviewed: true, conceptual_reviewed: true,
+      contract_findings: [{ ...claim("DR-001", "contract gap", site), severity: "low" }],
+      conceptual_findings: [claim("DR-001", "design simplification", site)],
+      findings: [
+        claim("seam-a", "architectural_seam", seam),
+        claim("seam-b", "architectural_seam", [...seam].reverse()),
+        claim("other-seam", "architectural_seam", [{ path: "src/scheduled.ts" }, seam[1]!]),
+        claim("site-a", "complexity_hotspot", site),
+        claim("site-b", "complexity_hotspot", [{ ...site[0]!, line_start: 4 }]),
+        claim("file-count", "complexity_hotspot", [{ path: site[0]!.path }]),
+        claim("workflow-fixture-count", "complexity_hotspot", [{ path: related.path }]),
+        claim("transitive-only", "complexity_hotspot", [{ path: transitive.path }]),
+        claim("test-import-only", "complexity_hotspot", [{ path: "test/resume.test.ts" }]),
+        claim("need-locator", "complexity_hotspot", [{ path: "src/runtime-config.ts" }]),
+        claim("unbound", "architectural_seam", [{ path: "not-frozen" }, seam[1]!]),
+      ],
+    };
+    bundle.systemic_challenge = { generated_at: "x", target: "systemic_challenge", ceiling: { rung: "deep" },
+      rounds: [], converged: true, findings: [claim("DR-001", "systemic cost", site)], validation_issues: [] };
+    type Difference = NonNullable<ArtifactBundle["charter_register"]>["differences"][number];
+    const difference = (id: string, relation: Difference["relation"], ref: string): Difference =>
+      ({ difference_id: id, correspondence_id: `corr-${id}`, relation, dimension: "purpose",
+        routed_to: relation === "incompatible" ? "human" : "none", finding_candidate: relation === "incompatible",
+        gap: "Older changes are missed.",
+        accounts: [
+          { kind: "stated", claim: "Older changes are included.", provenance: [{ kind: "doc", ref: "docs/resume.md:1" }] },
+          { kind: "revealed", claim: "Only a recent window is considered.", provenance: [{ kind: "code", ref }] },
+        ] });
+    bundle.charter_register = { schema_version: CHARTER_REGISTER_SCHEMA_VERSION, generated_at: "x", target: "charter",
+      ceiling: { rung: "deep" }, ...EMPTY_REGISTER_BODY,
+      differences: [
+      difference("equivalent", "equivalent", "src/manual.ts:3-6"),
+      difference("complement", "complementary", "src/manual.ts:3-6"),
+      { ...difference("material", "incompatible", "src/manual.ts:3-6"),
+        fidelity: { verdict: "interpretation", rationale: "The stated source may have been over-read.", decided_by: "lane" } },
+      difference("missing", "incompatible", "not-frozen"),
+    ] };
+
+    const plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot-a" });
+    expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);
+    const bySignal = new Map(plan.signal_dispositions!.map(row => [row.signal_id, row]));
+    expect(bySignal.size).toBe(18);
+    function target(key: string) {
+      return plan.questions.find(q => q.question_id === bySignal.get(key)?.question_id)!;
+    }
+    for (const key of ["charter:equivalent", "charter:complement", "charter:missing", "design-lead:need-locator", "design-lead:unbound", "design-lead:transitive-only", "design-lead:test-import-only"]) {
+      expect(bySignal.get(key)).toMatchObject({ outcome: "not_promoted" });
+      expect(bySignal.get(key)).not.toHaveProperty("question_id");
+    }
+    expect(target("charter:material").expected_outcome).toContain("stated: Older changes are included.");
+    expect(target("charter:material").expected_outcome).toContain("Prior fidelity review (interpretation)");
+    expect(bySignal.get("design-lead:seam-b")).toMatchObject({ outcome: "grouped" });
+    const group = target("design-lead:seam-a");
+    expect(target("design-lead:seam-b")).toBe(group);
+    expect(target("design-lead:other-seam")).not.toBe(group);
+    expect(group.evidence_dependencies.map(d => d.key)).toEqual(["design-lead:seam-a", "design-lead:seam-b"]);
+    expect(target("design-lead:site-a")).not.toBe(target("design-lead:site-b"));
+    const groupedWorkflow = target("design-lead:file-count");
+    expect(target("design-lead:workflow-fixture-count")).toBe(groupedWorkflow);
+    expect(groupedWorkflow.requested_parts).toEqual([
+      expect.objectContaining({ part_id: "design-lead:file-count", expectation: expect.stringContaining("src/manual.ts") }),
+      expect.objectContaining({ part_id: "design-lead:workflow-fixture-count", expectation: expect.stringContaining(related.path) }),
+    ]);
+    const accepted = ["design-contract:DR-001", "design-conceptual:DR-001", "design-systemic:DR-001"].map(target);
+    expect(new Set(accepted.map(q => q.question_id)).size).toBe(3);
+    for (const q of accepted) expect(plan.inventory.find(i => i.inventory_item_id === q.inventory_item_ids[0])?.source_refs)
+      .toEqual([{ path: "src/manual.ts", start_line: 3, end_line: 6 }]);
+    bundle.review_plan = plan;
+    const bindings = await questionWorkloadBindings(bundle, "frozen-fixture", [], bundle.repo_manifest!.files.map(file =>
+      ({ path: file.path, fingerprint: file.hash!, line_count: 10 })));
+    expect(bindings.slice(0, 4).map(b => b.question.question_id))
+      .toEqual(expect.arrayContaining([...accepted, target("charter:material")].map(q => q.question_id)));
+    const issued = bindings.find(b => b.question.question_id === accepted[0]!.question_id)!;
+    expect(issued.assignment.suggested_sources).toEqual([{ path: "src/manual.ts", start_line: 3, end_line: 6 }]);
+    expect(issued.dependencies).toContainEqual(expect.objectContaining({ key: "design-contract:DR-001", kind: "evidence" }));
+    bundle.design_assessment.findings[1]!.summary = "Updated evidence for the same seam.";
+    const revised = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot-b" });
+    expect(revised.questions.find(q => q.question_id === group.question_id)?.revision_id).not.toBe(group.revision_id);
+  });
+
   it("assigns all applicable playbooks and retains an unmapped registered surface", () => {
     const plan = buildReviewQuestionPlan(fixture(), { snapshotId: "snapshot-a" });
     expect(ReviewPlanSchema.safeParse(plan).success).toBe(true);

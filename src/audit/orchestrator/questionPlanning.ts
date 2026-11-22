@@ -19,6 +19,13 @@ type BuiltInLens = keyof typeof REVIEW_LENS_PLAYBOOKS;
 type Lens = ReviewQuestion["lens"];
 type InventoryKind = ReviewInventoryItem["kind"];
 type Part = ReviewQuestion["requested_parts"][number];
+type SignalDisposition = {
+  signal_id: string;
+  outcome: "promoted" | "grouped" | "not_promoted";
+  reason: string;
+  question_id?: string;
+  source_refs?: ReviewSourceRef[];
+};
 type PlanOptions = {
   snapshotId: string;
   scope?: AuditScopeManifest;
@@ -65,6 +72,9 @@ const source = (path: string): ReviewSourceRef => ({ path });
 const sourceRefs = (paths: Iterable<string>) => ordered(paths).map(source);
 const ids = (namespace: string, value: string) => `${namespace}:${hashContent(value, { length: 24 })}`;
 const isBuiltIn = (value: string): value is BuiltInLens => Object.hasOwn(REVIEW_LENS_PLAYBOOKS, value);
+const claimLens = (lens: string): BuiltInLens => isBuiltIn(lens) ? lens :
+  lens === "correctness" || lens === "reliability" || lens === "data_integrity" ? "behavior" :
+    lens === "observability" ? "operability" : "architecture";
 
 function classifyConfiguration(path: string): "release" | "runtime" | undefined {
   if (/(?:^|\/)(?:\.github\/workflows\/|\.gitlab-ci\.ya?ml$|Jenkinsfile$|Dockerfile(?:\.[^/]+)?$|(?:docker-)?compose\.ya?ml$|render\.ya?ml$)/iu.test(path)) return "release";
@@ -133,6 +143,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   const subjects: Subject[] = [];
   const inventory: ReviewInventoryItem[] = [];
   const omissions: ReviewPlan["omissions"] = [];
+  const signalDispositions: SignalDisposition[] = [];
   const owners = new Map<string, Set<string>>();
   for (const unit of bundle.unit_manifest?.units ?? []) for (const path of unit.files) {
     const units = owners.get(path) ?? new Set<string>();
@@ -150,6 +161,12 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     subjects.push({ lens, inventory: item, expectation,
       parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],
       membership: linked?.membership, evidence: linked?.evidence });
+    return ids(lens, item.inventory_item_id);
+  };
+  const disposition = (signal_id: string, outcome: SignalDisposition["outcome"], reason: string,
+    refs: ReviewSourceRef[], question_id?: string) => {
+    signalDispositions.push({ signal_id, outcome, reason,
+      ...(refs.length ? { source_refs: refs } : {}), ...(question_id ? { question_id } : {}) });
   };
   const operationRows: Operation[] = [];
   const routeCandidates = new Map<string, Set<string>>();
@@ -277,27 +294,138 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       })) });
   }
 
+  const distinctRefs = (refs: readonly ReviewSourceRef[]) => [...new Map(
+    refs.map(ref => [stableStringify(ref), ref]),
+  ).entries()].sort(([a], [b]) => compareCodeUnits(a, b)).map(([, ref]) => ref);
   for (const difference of bundle.charter_register?.differences ?? []) {
-    if (difference.relation === "complementary") continue;
+    const key = `charter:${difference.difference_id}`;
     const refs = difference.accounts.flatMap((account) => account.provenance
       .flatMap(({ ref }) => resolveRef(ref) ?? []));
-    const sources = sourceRefs(refs.filter(({ path }) => sourceStatus(path) === undefined).map(({ path }) => path));
-    if (sources.length === 0) continue;
-    const contract = sourceRefs(refs.filter(({ path }) => sourceStatus(path, true) === undefined).map(({ path }) => path));
-    add("architecture", `charter:${difference.difference_id}`, "invariant", "Charter and implementation fit", sources, contract,
-      `Resolve what the evidence establishes about this recorded divergence: ${difference.gap}`,
-      { evidence: [[`charter:${difference.difference_id}`, digest(difference)]] });
+    const sources = distinctRefs(refs.filter(({ path }) => sourceStatus(path) === undefined));
+    const contract = distinctRefs(refs.filter(({ path }) => sourceStatus(path, true) === undefined));
+    const material = difference.finding_candidate && (difference.relation === "incompatible" || difference.covered_channel_gap === true);
+    if (!material || sources.length === 0) {
+      disposition(key, "not_promoted", !material ? "Agreement or complementary context, not a material disagreement."
+        : "Material charter difference lacks a resolved in-scope source anchor.", contract);
+      continue;
+    }
+    const target = add("architecture", key, "invariant", "Charter and implementation fit", sources, contract,
+      [`Decide whether this material charter gap changes the supported operation: ${difference.gap}`,
+        ...difference.accounts.map(account => `${account.kind}: ${account.claim}`),
+        ...(difference.fidelity ? [`Prior fidelity review (${difference.fidelity.verdict}): ${difference.fidelity.rationale}`] : []),
+        "Identify the governing account and the source-backed discrepancy, or explain agreement or which evidence is missing."].join("\n"),
+      { evidence: [[key, digest(difference)]] });
+    disposition(key, "promoted", "Material charter comparison with reviewable source.", contract, target);
   }
 
-  // The existing structural pass supplies local architecture leads even when
-  // the implicated code is in one unit. Do not turn its signal into a verdict.
-  for (const lead of bundle.design_assessment?.findings ?? []) {
-    if (lead.lens !== "architecture") continue;
-    const refs = sourceRefs(lead.affected_files.map(({ path }) => path).filter((path) => sourceStatus(path) === undefined));
-    if (refs.length === 0) continue;
-    add("architecture", `design-lead:${lead.id}`, "invariant", lead.title, refs, [],
-      "Check the indicated structural or maintainability cost against actual callers, ownership and a concrete alternative; retain the justification for necessary complexity.",
-      { evidence: [[`design-lead:${lead.id}`, digest(lead)]] });
+  type Finding = NonNullable<ArtifactBundle["design_assessment"]>["findings"][number];
+  const anchors = (finding: Finding) => distinctRefs(finding.affected_files.flatMap(location => {
+    const item = typeof location === "string" ? resolveRef(location) : {
+      path: location.path,
+      ...(location.line_start ? { start_line: location.line_start } : {}),
+      ...(location.line_end ? { end_line: location.line_end } : {}),
+      ...(location.symbol ? { symbol: location.symbol } : {}),
+    };
+    return item && sourceStatus(item.path) === undefined ? [item] : [];
+  }));
+  const lanes = [
+    ["contract", bundle.design_assessment?.contract_reviewed ? bundle.design_assessment.contract_findings : []],
+    ["conceptual", bundle.design_assessment?.conceptual_reviewed ? bundle.design_assessment.conceptual_findings : []],
+    ["systemic", bundle.systemic_challenge?.findings],
+  ] as const;
+  for (const [lane, claims] of lanes) for (const claim of claims ?? []) {
+    const key = `design-${lane}:${claim.id}`, refs = anchors(claim);
+    if (!refs.length || claim.grounding?.status === "refuted" || claim.severity === "info") {
+      disposition(key, "not_promoted", !refs.length ? "Accepted claim lacks a resolved in-scope source anchor."
+        : claim.grounding?.status === "refuted" ? "Prior executable evidence refuted the claim."
+          : "Informational context is not a verification obligation.", refs);
+      continue;
+    }
+    const lens = claimLens(claim.lens);
+    const expectation = `Verify the accepted ${lane} claim without assuming its conclusion: ${claim.title}. ${claim.summary}\n` +
+      "Trace the implicated callers and resulting state. Decide whether the claimed consequence is supported, current behavior is justified, or essential evidence is missing.";
+    const target = add(lens, key, "invariant", claim.title, refs, [], expectation, { evidence: [[key, digest(claim)]] });
+    disposition(key, "promoted", `Accepted ${lane} claim preserved for verification, not treated as proof.`, refs, target);
+  }
+
+  // Group by the actual relationship endpoints or the exact in-file site.
+  // A file-wide metric alone does not identify a reviewable mechanism.
+  const groups = new Map<string, { operation?: Operation; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
+  const namedRelationship = new Set(["architectural_seam", "dependency_cycle", "hidden_coupling"]);
+  const metricFamily = new Set(["complexity_hotspot", "code_duplication"]);
+  const pathMetrics = new Map<string, number>();
+  const structural = bundle.design_assessment?.findings ?? [];
+  for (const lead of structural) {
+    const paths = ordered(anchors(lead).map(ref => ref.path));
+    if (paths.length === 1) {
+      const key = stableStringify([lead.category, paths[0]]);
+      pathMetrics.set(key, (pathMetrics.get(key) ?? 0) + 1);
+    }
+  }
+  const directCalls = new Map<string, Set<string>>();
+  for (const edge of bundle.graph_bundle?.graphs.calls ?? []) {
+    const targets = directCalls.get(edge.from) ?? new Set<string>();
+    targets.add(edge.to);
+    directCalls.set(edge.from, targets);
+  }
+  // A flow's broad path inventory is not proof of ownership. Its entry
+  // must be the site itself or call the site directly. Imports from tests
+  // are not evidence that the subject executes there. Ambiguity leaves the
+  // signal independent or in need of a locator.
+  const workflowFor = (paths: string[]) => {
+    const operations = operationRows.filter(op => paths.every(path =>
+      op.refs.some(ref => ref.path === path) &&
+      (path === op.entry || directCalls.get(op.entry)?.has(path))));
+    const direct = operations.filter(op => paths.includes(op.entry));
+    const candidates = direct.length > 0 ? direct : operations;
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+  for (const lead of structural) {
+    const key = `design-lead:${lead.id}`, refs = anchors(lead);
+    const paths = ordered(refs.map(ref => ref.path));
+    const allPathsBound = new Set(lead.affected_files.map(item => typeof item === "string" ? item : item.path)).size === paths.length;
+    const relationship = namedRelationship.has(lead.category) && paths.length > 1 && allPathsBound;
+    const exactSites = refs.length > 0 && refs.every(ref => ref.start_line !== undefined || ref.symbol !== undefined);
+    const oneMetricPerFile = paths.length === 1 && metricFamily.has(lead.category) &&
+      pathMetrics.get(stableStringify([lead.category, paths[0]])) === 1;
+    const operation = refs.length && allPathsBound && !relationship && (!exactSites || oneMetricPerFile)
+      ? workflowFor(paths) : undefined;
+    if (lead.lens !== "architecture" || (!relationship && !exactSites && !operation)) {
+      disposition(key, "not_promoted", !refs.length ? "No resolved in-scope source anchor."
+        : lead.lens !== "architecture" ? "Signal is not an architecture verification question."
+          : "Needs a locator: no concrete site, fully bound relationship, or unique discovered workflow. Record a named caller or source span to verify it.", refs);
+      continue;
+    }
+    // Separate unrelated families in a multipurpose entrypoint; a direct
+    // call establishes ownership, not an equivalence across subcomponents.
+    const component = ordered(paths.map(path => path.slice(0, path.lastIndexOf("/"))));
+    const mechanism = stableStringify(operation ? [lead.category, operation.id, component]
+      : exactSites ? [lead.category, refs] : [lead.category, paths]);
+    const group = groups.get(mechanism) ?? { operation, items: [] };
+    group.items.push({ lead, refs });
+    groups.set(mechanism, group);
+  }
+  for (const [mechanism, { operation, items: group }] of groups) {
+    group.sort((a, b) => compareCodeUnits(a.lead.id, b.lead.id));
+    const first = group[0]!.lead;
+    const entry = operation?.refs.find(ref => ref.path === operation.entry);
+    const refs = distinctRefs([...(entry ? [entry] : []), ...group.flatMap(item => item.refs)]);
+    const evidence = group.map(({ lead }) => [`design-lead:${lead.id}`, digest(lead)] as const);
+    const topic = first.category.replaceAll("_", " ");
+    const decision = "Decide whether the actual caller makes this an avoidable cost, demonstrates a necessary boundary, or leaves specific evidence missing. A justified or disproven signal is an answered question.";
+    const expectation = operation ? `Review ${topic} within ${operation.title}, entered at ${operation.entry}. Answer each source cue separately; do not count a suggested mechanism as a verdict. ${decision}`
+      : `Trace the actual callers and contract at this ${topic}. ${decision}`;
+    const parts = group.map(({ lead, refs }) => ({ part_id: `design-lead:${lead.id}`,
+      expectation: `${lead.summary} Inspect ${refs.map(ref => ref.start_line !== undefined
+        ? `${ref.path}:${ref.start_line}${ref.end_line === undefined ? "" : `-${ref.end_line}`}`
+        : ref.symbol ? `${ref.path}#${ref.symbol}` : ref.path).join(", ")}. ${decision}` }));
+    const target = add("architecture", `design-mechanism:${mechanism}`, "invariant",
+      operation ? `${operation.title}: ${topic}` : first.title, refs, operation?.contract ?? [], expectation, { evidence, parts });
+    for (const [index, { lead, refs }] of group.entries()) {
+      disposition(`design-lead:${lead.id}`, index ? "grouped" : "promoted",
+        operation ? `Same signal family in the discovered ${operation.title} workflow; independent requested part.`
+          : index ? "Same source relationship or exact site and mechanism." : "Concrete structural mechanism for review.", refs, target);
+    }
   }
 
   const transitionPaths = [...files.keys()].filter((path) => sourceStatus(path) === undefined && classifyConfiguration(path) !== undefined);
@@ -361,8 +489,13 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     omissions.push({ surface_id: item.inventory_item_id, source_refs: item.source_refs,
       reason: "Applicable question lies outside the selected lens scope." });
   }
+  const signal_dispositions = signalDispositions.map(({ question_id, ...item }): SignalDisposition =>
+    question_id && questions.has(question_id) ? { ...item, question_id }
+      : question_id ? { ...item, outcome: "not_promoted", reason: "Verification is outside the selected lens scope." } : item)
+    .sort((a, b) => compareCodeUnits(a.signal_id, b.signal_id));
   return { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: options.snapshotId,
     inventory: inventory.sort((a, b) => compareCodeUnits(a.inventory_item_id, b.inventory_item_id)),
     questions: [...questions.values()].sort((a, b) => compareCodeUnits(a.question_id, b.question_id)),
-    omissions: omissions.sort((a, b) => compareCodeUnits(a.surface_id, b.surface_id)), lens_decisions: lensDecisions };
+    omissions: omissions.sort((a, b) => compareCodeUnits(a.surface_id, b.surface_id)), lens_decisions: lensDecisions,
+    ...(signal_dispositions.length ? { signal_dispositions } : {}) };
 }

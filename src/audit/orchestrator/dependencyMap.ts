@@ -177,6 +177,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "graph_bundle.json",
     "charter_register.json",
     "design_assessment.json",
+    "systemic_challenge.json",
     "external_analyzer_results.json",
   ],
 

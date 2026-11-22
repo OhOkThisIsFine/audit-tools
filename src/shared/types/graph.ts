@@ -27,11 +27,14 @@ export type RouteEdge = z.infer<typeof RouteEdgeSchema>;
  * guess units), and `reach` records the scope of source the measure actually
  * covered — currently only `'js-ts-effective'` (computed over JS/TS source).
  */
+// sites-pinned: tests/audit/graph-signal-metrics.test.ts
 export const NodeMetricSchema = z
   .object({
     value: z.number(),
     measure: z.string(),
     reach: z.literal("js-ts-effective"),
+    sites: z.array(z.object({ line_start: z.number().int().positive(), line_end: z.number().int().positive() })
+      .strict().refine(site => site.line_end >= site.line_start)).optional(),
   })
   .strict();
 export type NodeMetric = z.infer<typeof NodeMetricSchema>;

@@ -51,7 +51,15 @@ export async function questionWorkloadBindings(
   // The publisher freezes this entire shared source binding, not just the
   // files named by one question. Hash it once rather than once per assignment.
   const sourceBinding = hashContent(stableStringify({ sourceRoot: toPosixPath(sourceRoot), sourceFiles }));
-  return plan.questions.filter(q => q.plan_status === "pending" || q.plan_status === "active").map(question => {
+  // Verify accepted claims and meaningful intent conflicts before heuristic
+  // leads. This is scheduling order only; it does not change any binding.
+  const priority = (question: typeof plan.questions[number]) => {
+    const keys = question.evidence_dependencies.map(dep => dep.key);
+    if (keys.some(key => /^(?:design-(?:contract|conceptual|systemic)|charter):/u.test(key))) return 0;
+    return keys.some(key => key.startsWith("design-lead:")) ? 2 : 1;
+  };
+  return plan.questions.filter(q => q.plan_status === "pending" || q.plan_status === "active")
+    .sort((a, b) => priority(a) - priority(b)).map(question => {
     const suggested_sources = sourcesFor(question.inventory_item_ids);
     const scopedEvidence = evidence.filter(record => record.snapshot_id === plan.snapshot_id &&
       record.source_refs.every(ref => measured.has(ref.path)) &&

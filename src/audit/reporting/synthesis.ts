@@ -59,7 +59,10 @@ import {
   QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION,
   QuestionAuditFindingsReportSchema,
   type QuestionReviewReport,
+  canonicalQuestionFindingId, questionClaimKey, questionPartHasSupport,
 } from "../../shared/types/questionReviewReport.js";
+
+import { severityRank, confidenceRank } from "../../shared/types/lens.js";
 
 const CONCEPTUAL_ATTRIBUTION_IDS = Symbol("conceptual-attribution-ids");
 const CONCEPTUAL_ID_MARKER_PREFIX = "\u0000audit-tools:conceptual-final-id:";
@@ -1684,6 +1687,50 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
       .map(([state, count]) => `${state}: ${count}`).join(", ");
     lines.push(`- ${lens.lens}: ${lens.decision}. ${lens.reason}${counts ? ` (${counts})` : ""}`);
   }
+  const questions = new Map(review.questions.map(row => [row.question_id, row]));
+  const evidence = new Map(review.evidence.map(row => [row.evidence_id, row]));
+  const opportunityIds = new Set(review.accepted.flatMap(({ submission, dependency_bindings }) => {
+    const row = questions.get(submission.question_id);
+    if (!dependency_bindings.length || !row || row.plan_status === "blocked" || row.plan_status === "deferred" ||
+        row.state === "conflicted" ||
+        row.revision_id !== submission.revision_id || !row.accepted_answer_ids.includes(submission.submission_id)) return [];
+    return submission.answer.findings.filter(claim => claim.kind === "design_opportunity" && claim.source_refs.length > 0 &&
+      claim.question_id === submission.question_id && claim.revision_id === submission.revision_id &&
+      submission.answer.findings.filter(other => other.finding_id === claim.finding_id).length === 1 &&
+      submission.answer.parts.some(part => part.outcome === "findings" &&
+        row.parts.some(projected => projected.part_id === part.part_id && projected.state === "findings" &&
+          projected.accepted_answer_ids.includes(submission.submission_id)) &&
+        questionPartHasSupport(submission.answer, part, evidence, claim.observation_ids ?? [])))
+      .map(claim => canonicalQuestionFindingId([questionClaimKey(submission.submission_id, claim.finding_id)]));
+  }));
+  const opportunities = review.findings.filter(group => opportunityIds.has(group.canonical_finding_id) &&
+    group.kind === "design_opportunity" && !group.actionable).sort((a, b) =>
+    severityRank(b.sources[0]!.severity) - severityRank(a.sources[0]!.severity) ||
+    confidenceRank(b.sources[0]!.confidence) - confidenceRank(a.sources[0]!.confidence) ||
+    compareCodeUnits(a.canonical_finding_id, b.canonical_finding_id));
+  if (opportunities.length) {
+    lines.push("", "## Supported design opportunities", "",
+      "These are prioritized evidence-supported improvements with source references, not confirmed defects or automatic remediation inputs.", "");
+    for (const group of opportunities) {
+      const source = group.sources[0]!;
+      lines.push(`- ${group.canonical_finding_id} (${source.finding_id}; ${source.severity}; ${source.confidence} confidence), question ${source.question_id}: ${source.claim}`,
+        `  - Effect: ${source.consequence}`, `  - Next step: ${source.next_step}`,
+        `  - Sources: ${source.source_refs.map(ref => ref.start_line === undefined ? ref.path : `${ref.path}:${ref.start_line}`).join(", ")}`);
+    }
+  }
+  if (review.signal_dispositions?.length) {
+    lines.push("", "## Candidate dispositions", "",
+      "Planning decisions and linked review outcomes are separate; one grouped candidate does not independently confirm the finding.", "");
+    for (const signal of review.signal_dispositions) {
+      const question = signal.question_id && questions.get(signal.question_id);
+      const part = question ? question.parts.find(row => row.part_id === signal.signal_id) : undefined;
+      const state = part?.state ?? (signal.signal_id.startsWith("design-lead:") ? undefined : (question || undefined)?.state);
+      const linked = question ? ` Linked question ${question.question_id}${part ? " review part" : ""}: ${state === "clean"
+        ? "scoped clean / no change substantiated" : state ?? "no matching review part"}.` : "";
+      lines.push(`- ${signal.signal_id}: ${signal.outcome.replaceAll("_", " ")}. ${signal.reason}.${linked}`);
+      if (signal.source_refs?.length) lines.push(`  - Sources: ${signal.source_refs.map(ref => ref.start_line === undefined ? ref.path : `${ref.path}:${ref.start_line}`).join(", ")}`);
+    }
+  }
   lines.push("", "## Questions and review limits", "");
   for (const row of review.questions) {
     lines.push(`### ${row.question_id} (${row.lens}): ${row.state}`, "", row.expected_outcome);
@@ -1721,6 +1768,7 @@ function renderQuestionReport(report: RenderableAuditReport, review: QuestionRev
   for (const omission of review.omissions) lines.push(`- ${omission.surface_id}: ${omission.reason}`);
   lines.push("", "## Findings and leads", "");
   for (const group of review.findings) {
+    if (opportunities.includes(group)) continue;
     const finding = report.findings.find(row => row.id === group.canonical_finding_id);
     lines.push(`- ${group.canonical_finding_id}: ${group.kind} (${finding ? `actionable; ${finding.severity}` : "not actionable"}).`);
     for (const source of group.sources) {

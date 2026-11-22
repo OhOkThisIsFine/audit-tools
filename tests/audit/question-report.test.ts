@@ -116,7 +116,7 @@ test("consolidates only recorded same-repair claims and retains their separate o
   expect(report.findings.find(row => row.question_review_sources?.length === 2)
     ?.question_review_sources?.flatMap(source => source.verification.map(v => v.obligation_id)).sort())
     .toEqual(["verify-a-finding", "verify-b-finding"]);
-  expect(renderAuditReportMarkdown(report)).toContain("design_opportunity (not actionable)");
+  expect(renderAuditReportMarkdown(report)).toContain("Supported design opportunities");
   expect(QuestionAuditFindingsReportSchema.safeParse({
     ...report, question_review: { ...report.question_review, consolidations: [] },
   }).success).toBe(false);
@@ -441,4 +441,68 @@ test("surviving v2 machine marker prevents presentation and rollover without pla
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("reports current grounded design opportunities separately and keeps candidate disposition provenance", () => {
+  const a = answer("current", [finding("current-design", "design_opportunity")]);
+  const old = answer("obsolete", [finding("obsolete-design", "design_opportunity")]);
+  old.submission.revision_id = "older";
+  old.submission.answer.findings[0]!.revision_id = "older";
+  const workspacePlan = { ...plan, questions: [{ ...plan.questions[0]!, plan_status: "pending" as const }], signal_dispositions: [
+    { signal_id: "contract:001", outcome: "promoted" as const, reason: "Material boundary", question_id: "resume", source_refs: [src] },
+    { signal_id: "systemic:004", outcome: "grouped" as const, reason: "Same mechanism", question_id: "resume" },
+    { signal_id: "charter:002", outcome: "not_promoted" as const, reason: "No contract change", source_refs: [src] },
+  ] };
+  const report = QuestionAuditFindingsReportSchema.parse(buildQuestionAuditFindingsReport({
+    plan: workspacePlan, accepted: [old, a], evidence: [], dependenciesByQuestion, auditRead: null,
+  }));
+  expect(report.findings).toEqual([]);
+  expect(report.question_review.signal_dispositions).toEqual(workspacePlan.signal_dispositions);
+  const markdown = renderAuditReportMarkdown(report);
+  const priority = markdown.split("## Supported design opportunities")[1]?.split("## ")[0];
+  expect(priority).toContain("current-design");
+  expect(priority).not.toContain("obsolete-design");
+  expect(markdown.split("## Findings and leads")[1]).toContain("obsolete-design");
+  expect(markdown).toContain("systemic:004: grouped");
+  expect(markdown).toContain("charter:002: not promoted");
+  expect(markdown).toContain("src/resume.ts:1");
+  for (const plan_status of ["blocked", "deferred"] as const) {
+    const inactive = buildQuestionAuditFindingsReport({
+      plan: { ...workspacePlan, questions: [{ ...workspacePlan.questions[0]!, plan_status, plan_reason: "Unavailable" }] },
+      accepted: [a], evidence: [], dependenciesByQuestion, auditRead: null,
+    });
+    expect(renderAuditReportMarkdown(inactive)).not.toContain("## Supported design opportunities");
+    expect(inactive.findings).toEqual([]);
+  }
+});
+
+test("reports exact grouped leaf outcomes without borrowing another part's conclusion", () => {
+  const a = answer("grouped", [finding("current-design", "design_opportunity")]);
+  const originalObservation = a.submission.answer.observations[0]!;
+  a.submission.answer.observations = [
+    { ...originalObservation, part_id: "design-lead:verified" },
+    { ...originalObservation, part_id: "design-lead:justified", observation_id: "why-necessary" },
+  ];
+  a.submission.answer.parts = [
+    { part_id: "design-lead:verified", outcome: "findings", observation_ids: ["manual-check"] },
+    { part_id: "design-lead:justified", outcome: "clean", observation_ids: ["why-necessary"], reason: "Separate retention policy requires it." },
+    { part_id: "design-lead:unknown", outcome: "inconclusive", observation_ids: [], reason: "Missing paired evidence." },
+  ];
+  const leaves = ["verified", "justified", "unknown", "missing"];
+  const planWithGroup = {
+    ...plan,
+    questions: [{ ...plan.questions[0]!, requested_parts: leaves.slice(0, 3).map(leaf =>
+      ({ part_id: `design-lead:${leaf}`, expectation: leaf })) }],
+    signal_dispositions: leaves.map(leaf =>
+      ({ signal_id: `design-lead:${leaf}`, outcome: "grouped" as const, reason: "Common source boundary", question_id: binding.question_id })),
+  };
+  const report = buildQuestionAuditFindingsReport({
+    plan: planWithGroup, accepted: [a], evidence: [], dependenciesByQuestion, auditRead: null,
+  });
+  expect(report.question_review.questions[0]?.state).toBe("inconclusive");
+  const rows = renderAuditReportMarkdown(report).split("\n").filter(line => line.startsWith("- design-lead:"));
+  expect(rows.find(line => line.includes("design-lead:verified"))).toContain("review part: findings");
+  expect(rows.find(line => line.includes("design-lead:justified"))).toContain("review part: scoped clean / no change substantiated");
+  expect(rows.find(line => line.includes("design-lead:unknown"))).toContain("review part: inconclusive");
+  expect(rows.find(line => line.includes("design-lead:missing"))).toContain("no matching review part");
 });

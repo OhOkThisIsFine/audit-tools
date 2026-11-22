@@ -14,7 +14,7 @@ import {
   ReviewEvidenceSchema,
   ReviewFindingClaimSchema,
   ReviewLensSchema,
-  ReviewPlanSchema,
+  ReviewPlanObjectSchema,
   ReviewQuestionPlanStatusSchema,
   ReviewReopenEventSchema,
 } from "./reviewQuestion.js";
@@ -37,9 +37,10 @@ export const QuestionReviewReportSchema = z.strictObject({
   schema_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION),
   snapshot_id: id,
   completion: z.enum(["complete", "incomplete"]),
-  inventory: ReviewPlanSchema.shape.inventory,
-  omissions: ReviewPlanSchema.shape.omissions,
-  lens_decisions: ReviewPlanSchema.shape.lens_decisions,
+  inventory: ReviewPlanObjectSchema.shape.inventory,
+  omissions: ReviewPlanObjectSchema.shape.omissions,
+  lens_decisions: ReviewPlanObjectSchema.shape.lens_decisions,
+  signal_dispositions: ReviewPlanObjectSchema.shape.signal_dispositions,
   questions: z.array(z.strictObject({
     question_id: id,
     revision_id: id,
@@ -192,6 +193,12 @@ export const QuestionAuditFindingsReportSchema = z.intersection(
   const issue = (message: string) => ctx.addIssue({
     code: z.ZodIssueCode.custom, path: ["question_review", "findings"], message,
   });
+  const dispositions = report.question_review.signal_dispositions;
+  if (dispositions && (new Set(dispositions.map(row => row.signal_id)).size !== dispositions.length ||
+      dispositions.some(row => row.question_id !== undefined && !questionsById.has(row.question_id)))) {
+    ctx.addIssue({ code: "custom", path: ["question_review", "signal_dispositions"],
+      message: "signal IDs must be unique and linked questions must be present" });
+  }
   if (byId.size !== findings.length) issue("canonical finding IDs must be unique");
   if (new Set(report.findings.map((finding) => finding.id)).size !== report.findings.length ||
     actionable.length !== report.findings.length) {

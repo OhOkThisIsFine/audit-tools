@@ -449,8 +449,8 @@ test("inv-2: GRAPH_EDGE_CACHE_KEY_VERSION is pinned to the extractor module set 
       "would now replay contributions built under the OLD rules, so bump " +
       "GRAPH_EDGE_CACHE_KEY_VERSION in src/audit/extractors/graph.ts (which " +
       "invalidates every prior entry) and update this pin in the same commit.",
-  ).toBe("b28dd8dbc11b42fd5e1702a4d57a0f16c385eba9470038af5d58558c87451af6");
-  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v17");
+  ).toBe("48d7bed1a5928e3407d4c57686edb4b91a57ff0e2ad0057fd34cfda5081a829c");
+  expect(GRAPH_EDGE_CACHE_KEY_VERSION, "bump this alongside the digest above").toBe("v18");
 });
 
 test("a pathLookup change (file added) invalidates the ENTIRE prior cache", () => {

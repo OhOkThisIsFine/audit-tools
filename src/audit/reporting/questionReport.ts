@@ -198,6 +198,7 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
     completion, questions, findings: groups.map(({ row }) => row), consolidations, adjudications, accepted,
     ...(input.reopens?.length ? { reopens: [...input.reopens] } : {}),
     inventory: input.plan.inventory, omissions: input.plan.omissions, lens_decisions: input.plan.lens_decisions,
+    ...(input.plan.signal_dispositions === undefined ? {} : { signal_dispositions: input.plan.signal_dispositions }),
     evidence: [...input.evidence],
   };
   const currentAnswerIds = new Set(questions.flatMap(row => row.accepted_answer_ids));

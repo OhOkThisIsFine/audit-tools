@@ -929,7 +929,8 @@ async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | 
       (ledger.reopens !== undefined && !Array.isArray(ledger.reopens)))) return undefined;
   const sorted = (rows: readonly unknown[]) => rows.map(row => stableStringify(row)).sort();
   const actual = report.data.question_review;
-  if (stableStringify(sorted(actual.accepted)) !== stableStringify(sorted(ledger?.answers ?? [])) ||
+  if (stableStringify(actual.signal_dispositions ?? []) !== stableStringify(plan.data.signal_dispositions ?? []) ||
+      stableStringify(sorted(actual.accepted)) !== stableStringify(sorted(ledger?.answers ?? [])) ||
       stableStringify(sorted(actual.adjudications)) !== stableStringify(sorted(ledger?.adjudications ?? [])) ||
       stableStringify(sorted(actual.consolidations)) !== stableStringify(sorted(ledger?.consolidations ?? [])) ||
       stableStringify(actual.reopens ?? []) !== stableStringify(ledger?.reopens ?? [])) return undefined;
