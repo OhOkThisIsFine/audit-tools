@@ -1,10 +1,10 @@
 // sites-pinned: tests/audit/resynthesize-command.test.ts
 import { join } from "node:path";
-import { getFlag, getRootDir } from "./args.js";
+import { getArtifactsDir, getFlag } from "./args.js";
 import { readQuestionReportCharterOptions, readQuestionReportReflections } from "../io/artifacts.js";
 import { renderAuditReportMarkdown } from "../reporting/synthesis.js";
 import {
-  AUDIT_FINDINGS_FILENAME, auditArtifactsDir, promotedAuditFindingsPath, promotedAuditReportPath,
+  AUDIT_FINDINGS_FILENAME, promotedAuditFindingsPath, promotedAuditReportPath,
   readOptionalTextFile, stableStringify, writeTextFile,
 } from "audit-tools/shared";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
@@ -15,7 +15,7 @@ import { outputJson } from "./cliHelpers.js";
 
 /** Render only from the current promoted machine report. Never restamp or import another audit. */
 export async function cmdResynthesize(argv: string[]): Promise<void> {
-  const artifactsDir = auditArtifactsDir(getRootDir(argv));
+  const artifactsDir = getArtifactsDir(argv);
   const findingsPath = promotedAuditFindingsPath(artifactsDir);
   const inputPath = getFlag(argv, "--input") ?? findingsPath;
   try {

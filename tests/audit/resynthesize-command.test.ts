@@ -256,6 +256,40 @@ test("resynthesize permits an exact explicit copy of the active owned report", a
   });
 });
 
+test("resynthesize refreshes only the selected artifact tree's promoted Markdown", async () => {
+  await withTempRoot(async root => {
+    const defaultDir = join(root, ".audit-tools");
+    const selectedDir = join(root, "selected-output");
+    const active = join(selectedDir, "review");
+    await mkdir(defaultDir);
+    await mkdir(active, { recursive: true });
+    const defaultMarkdown = join(defaultDir, "audit-report.md");
+    const selectedMarkdown = join(selectedDir, "audit-report.md");
+    const selectedFindings = join(selectedDir, "audit-findings.json");
+    const workingFindings = join(active, "audit-findings.json");
+    const plan = makePlan("selected");
+    const bytes = JSON.stringify(currentReport(plan));
+    await writeFile(defaultMarkdown, "default report");
+    await writeFile(selectedMarkdown, "previous selected report");
+    await writeFile(selectedFindings, bytes);
+    await writeFile(workingFindings, bytes);
+    await writeFile(join(active, "review_plan.json"), JSON.stringify(plan));
+
+    const result = await runResynthesize([
+      process.execPath, "cli.ts", "resynthesize", "--root", root, "--artifacts-dir", active,
+    ]);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      source: selectedFindings, findings_output: selectedFindings, report_output: selectedMarkdown,
+    });
+    expect(await readFile(selectedMarkdown, "utf8")).toContain("Snapshot: selected");
+    expect(await readFile(defaultMarkdown, "utf8")).toBe("default report");
+    expect(await readFile(selectedFindings, "utf8")).toBe(bytes);
+    expect(await readFile(workingFindings, "utf8")).toBe(bytes);
+  });
+});
+
 test("resynthesize refuses a dangling --input rather than silently choosing a default", async () => {
   await withTempRoot(async (root) => {
     const auditToolsDir = join(root, ".audit-tools");
