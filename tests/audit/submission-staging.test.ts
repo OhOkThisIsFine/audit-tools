@@ -478,7 +478,11 @@ test("a pending receipt blocks competing reads and cleanup and replays the exact
       if (!(await stat(staged.staged.stagingPath).catch(() => undefined))) throw new Error("interrupted");
     };
     await expect(commitFold(artifactsDir, { audit_report: report }, tx, ordinaryStop)).rejects.toThrow("interrupted");
-    const receipt = JSON.parse(await readFile(foldReceiptPath(artifactsDir), "utf8"));
+    const receiptBytes = await readFile(foldReceiptPath(artifactsDir), "utf8");
+    const receipt = JSON.parse(receiptBytes);
+    await expect(commitFold(artifactsDir, { audit_report: "unrelated" }, createFoldTransaction()))
+      .rejects.toThrow("incomplete fold receipt");
+    expect(await readFile(foldReceiptPath(artifactsDir), "utf8")).toBe(receiptBytes);
     expect(receipt.applied[0]).toMatchObject({ lane: LANE, acceptedMessage: "retained across restart" });
     expect((await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "accepted")).toEqual([]);
     await expect(loadArtifactBundle(artifactsDir)).rejects.toThrow("incomplete fold receipt");

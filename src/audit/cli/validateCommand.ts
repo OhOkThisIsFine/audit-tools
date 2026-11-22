@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import {
   SESSION_INTENT_RELATIVE_PATH,
   loadSessionIntent,
@@ -10,7 +11,7 @@ import { getArtifactsDir, getRootDir } from "./args.js";
 export async function cmdValidate(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   const root = getRootDir(argv);
-  const bundle = await loadArtifactBundle(artifactsDir);
+  const bundle = await withArtifactTreeHold(artifactsDir, undefined, () => loadArtifactBundle(artifactsDir));
   const sessionIntent = await loadSessionIntent(root);
   const issues = validateArtifactBundle(bundle);
 

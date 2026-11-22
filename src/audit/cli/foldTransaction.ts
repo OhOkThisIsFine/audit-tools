@@ -520,19 +520,18 @@ export async function commitFold(
   tx: FoldTransaction,
   assertOwnership: () => Promise<void> = ownNoop,
 ): Promise<void> {
-  if (!(await recoverFoldReceipt(artifactsDir, assertOwnership))) {
-    const receipt: FoldReceipt = {
-      version: 1,
-      core: planCoreArtifacts(bundle, true),
-      snapshots: tx.pendingSnapshots,
-      applied: tx.staged.filter(staged => staged.applied).map(({ lane, contentHash, acceptedMessage }) => ({
-        lane, contentHash, acceptedMessage, submissionId: laneSubmissionId(lane, AUDIT_GATE_SUBMISSION_SCOPE),
-      })),
-    };
-    await assertOwnership();
-    await writeJsonFile(foldReceiptPath(artifactsDir), receipt);
-    await applyFoldReceipt(artifactsDir, receipt, assertOwnership);
-  }
+  await assertNoPendingFoldReceipt(artifactsDir);
+  const receipt: FoldReceipt = {
+    version: 1,
+    core: planCoreArtifacts(bundle, true),
+    snapshots: tx.pendingSnapshots,
+    applied: tx.staged.filter(staged => staged.applied).map(({ lane, contentHash, acceptedMessage }) => ({
+      lane, contentHash, acceptedMessage, submissionId: laneSubmissionId(lane, AUDIT_GATE_SUBMISSION_SCOPE),
+    })),
+  };
+  await assertOwnership();
+  await writeJsonFile(foldReceiptPath(artifactsDir), receipt);
+  await applyFoldReceipt(artifactsDir, receipt, assertOwnership);
   tx.pendingSnapshots.length = 0;
   for (const staged of tx.staged) {
     if (!staged.applied) {
