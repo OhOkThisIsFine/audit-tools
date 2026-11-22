@@ -316,8 +316,10 @@ export function markSubmissionApplied(
  * newer submission supersedes the one the crashed fold held) and record the
  * refusal so the supersession is on the ledger, not silent.
  */
+// sites-pinned: tests/audit/next-step-question-workload.test.ts
 export async function recoverStagedSubmissions(
   artifactsDir: string,
+  recoverLane: (lane: string) => boolean = () => true,
 ): Promise<void> {
   let entries: string[];
   try {
@@ -328,7 +330,7 @@ export async function recoverStagedSubmissions(
   }
   for (const fileName of entries) {
     const lane = laneFromStagedFileName(fileName);
-    if (lane === null) continue;
+    if (lane === null || !recoverLane(lane)) continue;
     const stagingPath = join(submissionStagingDir(artifactsDir), fileName);
     const boundPath = laneSubmissionPath(artifactsDir, lane);
     let boundOccupied = true;

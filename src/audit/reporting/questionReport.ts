@@ -4,7 +4,7 @@ import type { AuditRead } from "../../shared/types/finding.js";
 import {
   REVIEW_QUESTION_CONTRACT_VERSION,
   type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence,
-  type ReviewFindingClaim, type ReviewPlan, type ReviewQuestion,
+  type ReviewFindingClaim, type ReviewPlan, type ReviewQuestion, type ReviewReopenEvent,
 } from "../../shared/types/reviewQuestion.js";
 import {
   QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION,
@@ -26,6 +26,7 @@ export interface QuestionReportInput {
   dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
   adjudications?: readonly ReviewAdjudication[];
   consolidations?: readonly Decisions[number][];
+  reopens?: readonly ReviewReopenEvent[];
   auditRead: AuditRead | null;
 }
 
@@ -120,7 +121,8 @@ export function projectQuestionForReport(
 function groupClaims(
   claims: Claim[], decisions: Decisions, accepted: ReadonlyMap<string, ReviewAcceptedAnswer>,
 ): Array<{ row: FindingRow; answerIds: string[] }> {
-  const pending = new Map(claims.map(claim => [questionClaimKey(claim.answerId, claim.source.finding_id), claim]));
+  const currentClaims = new Map(claims.map(claim => [questionClaimKey(claim.answerId, claim.source.finding_id), claim]));
+  const pending = new Map(currentClaims);
   if (pending.size !== claims.length) throw new Error("Duplicate finding claim within an accepted submission.");
   const groups: Claim[][] = [];
   const groupedKeys = new Set<string>();
@@ -133,13 +135,14 @@ function groupClaims(
         historical.some(rows => rows.length !== 1 || rows[0]!.kind !== historical[0]?.[0]?.kind)) {
       throw new Error(`Consolidation ${decision.decision_id} must name distinct available claims of one kind.`);
     }
+    // Check currency independently of grouping: the claims already consumed by
+    // an applicable decision can still make a later overlapping one invalid.
+    const rows = keys.flatMap(key => currentClaims.get(key) ?? []);
+    // Old decisions remain history without consuming surviving individual claims.
+    if (rows.length !== keys.length || rows.some(row => !row.actionable)) continue;
     if (keys.some(key => groupedKeys.has(key))) {
       throw new Error(`Consolidation ${decision.decision_id} overlaps a current decision.`);
     }
-    const rows = keys.flatMap(key => pending.get(key) ?? []);
-    // The decision is historical even after its sources cease to be current.
-    // Do not hide current independent findings behind an obsolete repair.
-    if (rows.length !== keys.length || rows.some(row => !row.actionable)) continue;
     for (const key of keys) groupedKeys.add(key);
     groups.push(rows);
     for (const key of keys) pending.delete(key);
@@ -193,6 +196,7 @@ export function buildQuestionAuditFindingsReport(input: QuestionReportInput): Qu
   const question_review: QuestionReviewReport = {
     schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: input.plan.snapshot_id,
     completion, questions, findings: groups.map(({ row }) => row), consolidations, adjudications, accepted,
+    ...(input.reopens?.length ? { reopens: [...input.reopens] } : {}),
     inventory: input.plan.inventory, omissions: input.plan.omissions, lens_decisions: input.plan.lens_decisions,
     evidence: [...input.evidence],
   };

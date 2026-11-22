@@ -101,6 +101,7 @@ import {
 } from "../state/itemStatus.js";
 import { applyIntentOrdering } from "../intent/intentOrdering.js";
 import { resolveIntakeStep } from "./intakeResolver.js";
+import { hasStaleReopenedWorkingReport } from "../../audit/cli/questionReviewSession.js";
 import {
   RUNTIME_RESIDUAL_DECLARATION,
   finalGateDisabledReason,
@@ -317,10 +318,15 @@ function inputValues(input?: string | string[]): string[] {
   return Array.isArray(input) ? input : [input];
 }
 
-function resolveInputPaths(
+async function resolveInputPaths(
   root: string,
   input?: string | string[],
-): InputResolution {
+): Promise<InputResolution> {
+  const auditDir = auditArtifactsDir(root);
+  const workingReportPaths = new Set([auditFindingsPath(auditDir), auditReportPath(auditDir)]);
+  const staleWorking = (paths: readonly string[]) =>
+    paths.some(candidate => workingReportPaths.has(candidate)) ? hasStaleReopenedWorkingReport(auditDir) : false;
+  const staleMessage = "The working audit report predates reopened review answers. Run audit-code next-step to refresh it.";
   const values = inputValues(input).filter((value) => value.trim().length > 0);
   if (values.length > 0) {
     // First-wins dedup by resolved absolute path so a repeated `--input`
@@ -335,6 +341,7 @@ function resolveInputPaths(
       checked.push(resolved);
     }
     const existing = checked.filter((candidate) => existsSync(candidate));
+    if (await staleWorking(existing)) throw new Error(staleMessage);
     return {
       supplied: true,
       existing,
@@ -350,7 +357,11 @@ function resolveInputPaths(
   // highest-priority match — never feed both the structured contract and its
   // markdown render — so a lone .json input takes the lossless structured
   // fast-path instead of being demoted to multi-source LLM extraction.
-  const allExisting = checked.filter((candidate) => existsSync(candidate));
+  let allExisting = checked.filter((candidate) => existsSync(candidate));
+  if (await staleWorking(allExisting)) {
+    if (allExisting[0] && workingReportPaths.has(allExisting[0])) throw new Error(staleMessage);
+    allExisting = allExisting.filter(candidate => !workingReportPaths.has(candidate));
+  }
   const best = allExisting[0];
   return {
     supplied: false,
@@ -1591,7 +1602,7 @@ async function handlePendingIntake(
     );
   }
 
-  const inputResolution = resolveInputPaths(root, options.input);
+  const inputResolution = await resolveInputPaths(root, options.input);
   const intakeResult = await resolveIntakeStep({
     root,
     artifactsDir,
@@ -3559,7 +3570,7 @@ async function advanceUnderPhaseLock(deps: {
     await store.saveState(current);
   };
 
-  const inputResolution = resolveInputPaths(root, options.input);
+  const inputResolution = await resolveInputPaths(root, options.input);
 
   // Preamble — forceReplan re-grounds from existing intake. The whole decide loop
   // runs once per host call (the engine folds planning → implementing → … through

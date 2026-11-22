@@ -91,6 +91,8 @@ import {
 } from "./reviewRun.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { lookupRunSince } from "../io/runSnapshot.js";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
 import { writeCurrentStep, STEP_CONTRACT_VERSION } from "./steps.js";
 import {
@@ -339,6 +341,16 @@ async function cmdNextStepBody(
   root: string,
   artifactsDir: string,
 ): Promise<void> {
+  const guidanceFile = getFlag(argv, "--guidance-file");
+  const guidanceText = getFlag(argv, "--guidance");
+  if (guidanceFile && guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
+  const changesGuidance = guidanceFile !== undefined || guidanceText !== undefined;
+  const requireMutableGuidance = async () => {
+    if (await readQuestionReviewRunId(artifactsDir)) {
+      throw new Error("An active question review cannot change guidance.");
+    }
+  };
+  if (changesGuidance) await requireMutableGuidance();
   // Rollover (owner decision 2026-10-08, "keep the artifacts dir"): a run that
   // ENDED — its terminal step presented a promoted report — becomes this run's
   // starting point: its derived work stays for the staleness DAG to judge, and
@@ -362,12 +374,14 @@ async function cmdNextStepBody(
   // Single-step bootstrap: fold an optional guidance file into
   // intake/conversation-start.md in this same invocation, then decide the step —
   // no separate write-then-call dance for the host to remember.
-  const guidanceFile = getFlag(argv, "--guidance-file");
-  const guidanceText = getFlag(argv, "--guidance");
-  if (guidanceFile && guidanceText !== undefined) throw new Error("Choose --guidance or --guidance-file, not both.");
-  if (guidanceText !== undefined) applyGuidanceText(artifactsDir, guidanceText);
-  if (guidanceFile) {
-    applyGuidanceFile(artifactsDir, guidanceFile);
+  if (changesGuidance) {
+    await withArtifactTreeHold(artifactsDir, undefined, async () => {
+      // Recheck under the same lock as review dispatch. Do not bootstrap
+      // new intent once a question plan has already been issued.
+      await requireMutableGuidance();
+      if (guidanceText !== undefined) applyGuidanceText(artifactsDir, guidanceText);
+      if (guidanceFile) applyGuidanceFile(artifactsDir, guidanceFile);
+    });
   }
 
   let analyzerPolicy: AnalyzerPolicy;
@@ -1739,6 +1753,7 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
       prompt: [
         "# Review the issued questions",
         "Read the workload at: " + toPromptPathToken(result.workloadPath),
+        "Capture each work item by its exact assignment_id, not array position. Keep using this manifest and its result paths for dispatched work; next-step can issue a different manifest with a different pending order.",
         ...(rejected ? [
           "## Saved results not accepted",
           rejectionSummary + " Rejections did not change any accepted answers.",

@@ -4,30 +4,35 @@ import { submitGateResult, SUPPORTED_GATE_SUBMISSIONS } from "./submitGateResult
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getArtifactsDir, getFlag, getRootDir } from "./args.js";
-import { consolidateAuditQuestionFindings, readAuditQuestionWorkload, submitAuditQuestionResult } from "./dispatch/hostHandoff.js";
+import { consolidateAuditQuestionFindings, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "./dispatch/hostHandoff.js";
 import { loadArtifactBundle } from "../io/artifacts.js";
 import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { computeStaleArtifacts } from "../orchestrator/staleness.js";
 import { readRunSourceRoot } from "../io/runSnapshot.js";
-import { deriveCurrentQuestionBindings, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { assertQualifiedReviewStillCurrent, deriveCurrentQuestionBindings, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { ReviewReopenRequestSchema, type ReviewToolingTransition } from "../../shared/types/reviewQuestion.js";
 import { ReviewFindingConsolidationSchema } from "../../shared/types/questionReviewReport.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { stableStringify } from "../../shared/stableStringify.js";
 import { toPosixPath } from "../../shared/paths.js";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 
-async function verifyCurrentQuestionInputs(root: string, artifactsDir: string) {
-  const bundle = await loadArtifactBundle(artifactsDir);
+async function verifyCurrentQuestionInputs(root: string, artifactsDir: string, requestedTooling?: ReviewToolingTransition) {
+  const bundle = await loadArtifactBundle(artifactsDir, { requestedTooling });
   if (bundle.audit_state?.status === "complete") throw new Error("The finished report cannot be changed.");
   if (!bundle.repo_manifest || !bundle.review_plan || computeStaleArtifacts(bundle, { emit: false }).has("review_plan.json")) {
     throw new Error("The review plan is missing or stale; run next-step to refresh it.");
   }
   const sourceRoot = await readRunSourceRoot(root, artifactsDir);
-  const scope = reviewSourceScope(bundle, bundle.scope);
-  const admitted = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
-  if (!(await checkFileIntegrity(sourceRoot, bundle.repo_manifest, admitted)).is_clean) {
-    throw new Error("The frozen source changed; run next-step before submitting.");
+  if (bundle.review_tooling_qualification) {
+    await assertQualifiedReviewStillCurrent(bundle, sourceRoot);
+  } else {
+    const scope = reviewSourceScope(bundle, bundle.scope);
+    const admitted = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
+    if (!(await checkFileIntegrity(sourceRoot, bundle.repo_manifest, admitted)).is_clean) {
+      throw new Error("The frozen source changed; run next-step before submitting.");
+    }
   }
   return { bundle, sourceRoot };
 }
@@ -56,7 +61,8 @@ export async function submitWorkItemResult(params: {
     if (workload.source_root !== toPosixPath(sourceRoot)) {
       throw new Error("The issued snapshot is no longer current; run next-step before submitting.");
     }
-    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot, workload.source_files);
+    const ledger = await readAuditQuestionLedger(boundary);
+    const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot, workload.source_files, ledger.reopens);
     const current = bindings.find(({ assignment }) => assignment.assignment_id === params.workItemId);
     if (!current || stableStringify(issued.binding) !== stableStringify({
       question: current.question, assignment: current.assignment, dependencies: current.dependencies,
@@ -168,6 +174,28 @@ export async function cmdConsolidateFindings(argv: string[]): Promise<void> {
       decision, questions: context.bindings.map(binding => binding.question),
       dependenciesByQuestion: context.dependenciesByQuestion, evidence: context.evidence });
     return { run_id: runId, decision_id: decision.decision_id, disposition };
+  });
+  outputJson(receipt);
+}
+
+/** Reopen exactly the named current answers. Normal next-step emits replacement work. */
+export async function cmdReopenQuestions(argv: string[]): Promise<void> {
+  const from = getFlag(argv, "--from");
+  if (!from) throw new Error("reopen-questions requires --from <operator-approved reopen JSON>");
+  const request = ReviewReopenRequestSchema.parse(JSON.parse(await readFile(from, "utf8")));
+  const artifactsDir = getArtifactsDir(argv);
+  const root = getRootDir(argv);
+  const receipt = await withArtifactTreeHold(artifactsDir, undefined, async () => {
+    const runId = await readQuestionReviewRunId(artifactsDir);
+    if (!runId) throw new Error("No active question-review run; finished reports are immutable.");
+    const { bundle, sourceRoot } = await verifyCurrentQuestionInputs(root, artifactsDir, request.tooling_transition);
+    const context = await deriveQuestionCycleUnlocked({ root, artifactsDir, sourceRoot, bundle, readOnlyRunId: runId });
+    const disposition = await reopenAuditQuestions({
+      root, artifactsDir, runId, request, qualification: bundle.review_tooling_qualification,
+      questions: context.bindings.map(({ question }) => question),
+      dependenciesByQuestion: context.dependenciesByQuestion,
+    });
+    return { run_id: runId, reopen_id: request.reopen_id, disposition, next: "Run audit-code next-step to issue replacement assignments." };
   });
   outputJson(receipt);
 }

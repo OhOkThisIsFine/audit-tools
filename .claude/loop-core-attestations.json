@@ -571,6 +571,31 @@
         "src/shared/observability/rootLogObservations.ts": "c7497a421c8fa84a6b19c713bc0b0bfdc9ea6ef6"
       }
     },
+    "daa728eac345f91f": {
+      "reviewed_by": "dot-independent-review",
+      "attester_class": "agent",
+      "checked": "Verified the exact staged patch against the qualified compatibility revision; traced the stale epoch fence, append-only supersession, current report freshness, both guidance lock orders and preserved historical tooling; checked that restricted recovery restores only the eligible synthesis lane and leaves the staged upstream fallback untouched.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "554f54cf5b3ab64f1e60c339e632eb51f62dbaaa",
+        "ran_at": "2026-11-22T08:42:44.156Z"
+      },
+      "attested_at": "2026-11-22T08:43:00.923Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "d408be0b3a8827d541a2734495c6126413230a9c",
+        "src/audit/cli/dispatch/questionReviewAcceptance.ts": "e0738318bccce6030fe78e2a2eef7e85a100c886",
+        "src/audit/cli/foldTransaction.ts": "41f3a4166cc01878ae498b5149fa33f612fcbee7",
+        "src/audit/cli/nextStepCommand.ts": "05ba4f75eb6dac9be89a2cb2831f2ef4c1214b4a",
+        "src/audit/cli/nextStepHelpers.ts": "8121035e45bc9020895426ddc72ca855ed79841e",
+        "src/audit/cli/questionReviewCycle.ts": "dd1ef22fb0c07b6a2228ed5d23b7e43db2b7c9fc",
+        "src/audit/cli/questionWorkloadBindings.ts": "c340e6525b484a1344c51021e2b8825d5c34d075",
+        "src/audit/cli/submitCommand.ts": "68831f525f17955b585ec730df510f1daf2f5a2b",
+        "src/audit/orchestrator/executorRunners.ts": "43d3ff1a079d7f8f65ae845a11e992a37a3b412f",
+        "src/remediate/steps/nextStep.ts": "e8d48778eb2bcd88562db99e1664e5643005af0e"
+      }
+    },
     "e27b7c336e51764b": {
       "reviewed_by": "agent:ad6fa6c7fef1d8cd9-independent-diff-review,agent:p08-file-group-reviewers-and-refuter",
       "attester_class": "agent",
@@ -758,19 +783,19 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
     },
     "src/audit/cli/dispatch/questionReviewAcceptance.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/fanoutLanes.ts": {
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/cli/foldTransaction.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/laneSubmissions.ts": {
       "review": "5a1d216870700235"
@@ -779,22 +804,22 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/questionReviewCycle.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/submitCommand.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/cli/submitGateResult.ts": {
       "review": "e36223304299f9c6"
@@ -875,7 +900,7 @@
       "review": "ad938761f1a24d50"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "e36223304299f9c6"
@@ -1130,7 +1155,7 @@
       "review": "e27b7c336e51764b"
     },
     "src/remediate/steps/nextStep.ts": {
-      "review": "e36223304299f9c6"
+      "review": "daa728eac345f91f"
     },
     "src/remediate/steps/prompts.ts": {
       "review": "e36223304299f9c6"

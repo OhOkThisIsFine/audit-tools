@@ -88,13 +88,16 @@ export async function runAuditStep(
   // Host semantic review never runs here: it is emitted as a workload and this
   // lock only covers local artifact derivation and result ingestion.
   return await withArtifactTreeHold(options.artifactsDir, runLogger, async () => {
+    // Check admitted tooling policy before an unsupported standalone executor
+    // can restore, create or change the qualified review's frozen snapshot.
+    const bundle = await loadArtifactBundle(options.artifactsDir);
     // The run's frozen snapshot is run state: created once per run, under the
     // hold, and read by every content reader of this step.
     const sourceRoot = await ensureRunSourceRoot(options.root, options.artifactsDir);
     const since = options.since === undefined
       ? undefined
       : await resolveRunSince(options.root, options.artifactsDir, options.since);
-    return runAuditStepLocked({ ...options, since }, runLogger, sourceRoot);
+    return runAuditStepLocked({ ...options, since }, runLogger, sourceRoot, bundle);
   });
 }
 
@@ -131,8 +134,8 @@ async function runAuditStepLocked(
   options: RunAuditStepOptions,
   runLogger: RunLogger,
   sourceRoot: string,
+  bundle: ArtifactBundle,
 ): Promise<AdvanceAuditResult> {
-  const bundle = await loadArtifactBundle(options.artifactsDir);
   const result = await executeAdvance(options, bundle, runLogger, sourceRoot);
   // Prune: result.updated_bundle is the full accumulated bundle, so an artifact
   // an executor cleared to `undefined` must be removed from disk (not left to

@@ -16,6 +16,7 @@ import {
   ReviewLensSchema,
   ReviewPlanSchema,
   ReviewQuestionPlanStatusSchema,
+  ReviewReopenEventSchema,
 } from "./reviewQuestion.js";
 
 export const QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION = "audit-tools/audit-findings/v2";
@@ -70,6 +71,7 @@ export const QuestionReviewReportSchema = z.strictObject({
   consolidations: z.array(ReviewFindingConsolidationSchema),
   accepted: z.array(ReviewAcceptedAnswerSchema),
   adjudications: z.array(ReviewAdjudicationSchema),
+  reopens: z.array(ReviewReopenEventSchema).optional(),
   evidence: z.array(ReviewEvidenceSchema),
 });
 export type QuestionReviewReport = z.infer<typeof QuestionReviewReportSchema>;

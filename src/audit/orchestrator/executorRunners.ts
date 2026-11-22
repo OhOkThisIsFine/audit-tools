@@ -99,7 +99,7 @@ async function synthesisReadInputs(
       : null,
     charter: options.artifactsDir ? await readQuestionReportCharterOptions(options.artifactsDir) : undefined,
     questionReview: { accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
-      dependenciesByQuestion: cycle.dependenciesByQuestion, consolidations: cycle.consolidations },
+      dependenciesByQuestion: cycle.dependenciesByQuestion, consolidations: cycle.consolidations, reopens: cycle.reopens ?? [] },
   };
 }
 

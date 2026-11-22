@@ -99,6 +99,11 @@ test("issued question assignments bind their scope, submission and fallback path
     await writeFile(workloadPath, JSON.stringify(tampered));
     await expect(fold()).rejects.toThrow(/result path differs from its issued assignment/u);
     await expect(submit(submission)).rejects.toThrow(/result path differs from its issued assignment/u);
+    const changedQuestion = structuredClone(workload);
+    changedQuestion.work_items[0]!.binding.question.expected_outcome = "A changed obligation under an intact result path.";
+    await writeFile(workloadPath, JSON.stringify(changedQuestion));
+    await expect(fold()).rejects.toThrow(/no longer matches its issued digest/u);
+    await expect(submit(submission)).rejects.toThrow(/no longer matches its issued digest/u);
     await writeFile(workloadPath, workloadBytes);
 
     await writeFile(destination, JSON.stringify(submission));

@@ -5,7 +5,7 @@ import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harne
 import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { REVIEW_QUESTION_CONTRACT_VERSION as version, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
-test("explicit same-repair decision after answer compaction reaches the normal durable report", async () => {
+async function exerciseConsolidation(reopen: boolean) {
   await withTempRepo(async root => {
     const run = (args: string[]) => runWrapper(args, { cwd: root }).then(result => JSON.parse(result.stdout));
     const step = await advancePastDesignReview(root);
@@ -61,12 +61,35 @@ test("explicit same-repair decision after answer compaction reaches the normal d
     const ledger = JSON.parse(await readFile(join(root, ".audit-tools/audit", "runs", run_id, "host-accepted-results-ledger.json"), "utf8"));
     expect(ledger.answers.map(({ submission }: { submission: ReviewSubmission }) => submission)).toEqual(accepted);
     expect(ledger.consolidations).toEqual([decision]);
+    const decisions = [decision];
+    if (reopen) {
+      const target = accepted[0]!;
+      const reopenFile = join(root, ".audit-tools", "reopen-one.json");
+      await writeFile(reopenFile, JSON.stringify({ reopen_id: "bad-answer", reason: "Review used the wrong subject.",
+        questions: [{ question_id: target.question_id, revision_id: target.revision_id, snapshot_id: target.snapshot_id,
+          expected_submission_ids: [target.submission_id] }] }));
+      await run(["reopen-questions", "--from", reopenFile]);
+      const reissued = await run(["next-step"]);
+      const active = JSON.parse(await readFile(reissued.artifact_paths.host_workload, "utf8")) as { work_items: typeof work_items };
+      const replacement = active.work_items.find(item => item.binding.question.question_id === target.question_id)!;
+      const newAnswer = makeAnswer(replacement.binding, true);
+      await put(replacement, newAnswer);
+      await run(["next-step"]);
+      const combined = { ...decision, decision_id: "replacement-repair",
+        sources: [decision.sources[1]!, { answer_id: newAnswer.submission_id, finding_id: "claim" }] };
+      await writeFile(file, JSON.stringify(combined));
+      expect(await run(["consolidate-findings", "--from", file])).toMatchObject({ disposition: "accepted" });
+      decisions.push(combined);
+    }
     await Promise.all(rest.map(item => put(item, makeAnswer(item.binding, false))));
     const finished = await run(["next-step"]);
     const report = JSON.parse(await readFile(join(root, ".audit-tools/audit", "audit-findings.json"), "utf8"));
     expect(finished.step_kind).not.toBe("dispatch_review");
-    expect(report.question_review.consolidations).toEqual([decision]);
+    expect(report.question_review.consolidations).toEqual(decisions);
     expect(report.findings).toHaveLength(1);
     expect(report.findings[0].question_review_sources).toHaveLength(2);
   });
-});
+}
+
+test("a current same-repair decision survives answer compaction", () => exerciseConsolidation(false));
+test("reopening allows a surviving claim to consolidate with its replacement", () => exerciseConsolidation(true));

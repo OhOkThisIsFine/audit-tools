@@ -1,5 +1,6 @@
 // sites-pinned: tests/audit/question-review-acceptance.test.ts
 import { compareCodeUnits, pathMatchesPrefix, stableStringify } from "audit-tools/shared";
+import { questionReopenKey } from "../../../shared/types/reviewQuestion.js";
 import type { ReviewAcceptedAnswer, ReviewAdjudication, ReviewAnswer, ReviewAssignment, ReviewEvidence, ReviewQuestion, ReviewSourceRef, ReviewSubmission } from "../../../shared/types/reviewQuestion.js";
 
 export interface AuditQuestionBinding {
@@ -159,7 +160,8 @@ export function projectQuestionReview(question: ReviewQuestion, answers: readonl
   adjudications: readonly ReviewAdjudication[] = [],
 ) {
   const currentBindings = new Set(dependencies?.map((row) => dependencyIdentity([row])));
-  const required = [...question.source_dependencies, ...question.evidence_dependencies];
+  const required = [...question.source_dependencies, ...question.evidence_dependencies,
+    ...dependencies?.filter(item => item.kind === "membership" && item.key === questionReopenKey(question.question_id)) ?? []];
   const sameQuestion = answers.filter((row) => row.submission.question_id === question.question_id)
     .sort((a, b) => compareCodeUnits(a.submission.submission_id, b.submission.submission_id));
   const current = sameQuestion.filter((row) => dependencies !== undefined &&

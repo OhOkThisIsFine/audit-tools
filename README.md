@@ -238,6 +238,22 @@ Run them from anywhere inside the target repository — each resolves that repos
 from the working directory. `--root <repo>` is the explicit override for running from outside
 it (or for targeting a sub-project inside a larger repo).
 
+If an accepted answer in an **active** audit addressed the wrong question, run
+`audit-code reopen-questions --from <review-reopen.json>` with a unique `reopen_id`,
+a `reason`, and a `questions` array. Each entry names the exact `question_id`,
+`revision_id`, `snapshot_id`, and `expected_submission_ids` (all current answer IDs
+for that question). This preserves the old answers and decisions as history.
+Run `audit-code next-step` to issue replacement assignments; do not reuse old
+assignment IDs or result paths. Exact request replay is a no-op. Finished audits
+are not changed by this command.
+
+If a **review-only tooling upgrade** would stale the active plan, an explicit
+`tooling_transition` in that request may qualify the existing evidence. Give
+`prior_implementation_hash`, `current_implementation_hash`, and a `reason`
+for reusing the historical evidence. Both hashes, the frozen source, scope,
+intent, and analyzer evidence must match. This authorizes continuing review
+under the new host, not rerunning analysis or recertifying old findings.
+
 ## Develop
 
 TypeScript, Node 22+. From the repo root:

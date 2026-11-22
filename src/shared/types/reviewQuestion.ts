@@ -225,3 +225,45 @@ export const ReviewAdjudicationSchema = z.strictObject({
   selected_submission_ids: z.array(id),
 });
 export type ReviewAdjudication = z.infer<typeof ReviewAdjudicationSchema>;
+
+const toolingDigest = z.string().regex(/^[0-9a-f]{64}$/u);
+const reviewToolingManifest = z.strictObject({
+  generated_at: value, package_root: value, package_version: z.string().nullable(),
+  implementation_hash: toolingDigest, inputs: z.array(value),
+});
+const ReviewToolingTransitionSchema = z.strictObject({
+  prior_implementation_hash: toolingDigest, current_implementation_hash: toolingDigest, reason: value,
+});
+export type ReviewToolingTransition = z.infer<typeof ReviewToolingTransitionSchema>;
+const ReviewToolingQualificationSchema = z.strictObject({
+  policy: z.literal("source-stable-question-review/v1"),
+  run_id: id, snapshot_id: id,
+  prior: reviewToolingManifest, current: reviewToolingManifest,
+  input_hashes: z.record(z.string(), toolingDigest.nullable()),
+});
+export type ReviewToolingQualification = z.infer<typeof ReviewToolingQualificationSchema>;
+
+/** Explicit operator transaction; answer IDs are a compare-and-set, not a deletion. */
+export const ReviewReopenRequestSchema = z.strictObject({
+  reopen_id: id,
+  reason: value,
+  tooling_transition: ReviewToolingTransitionSchema.optional(),
+  questions: z.array(z.strictObject({
+    ...questionBinding,
+    expected_submission_ids: z.array(id).min(1),
+  })).min(1),
+});
+export type ReviewReopenRequest = z.infer<typeof ReviewReopenRequestSchema>;
+export const ReviewReopenEventSchema = ReviewReopenRequestSchema.extend({
+  reopened_at: z.string().datetime({ offset: true }),
+  tooling_qualification: ReviewToolingQualificationSchema.optional(),
+});
+export type ReviewReopenEvent = z.infer<typeof ReviewReopenEventSchema>;
+
+export const questionReopenKey = (questionId: string): string => "question-reopen:" + questionId;
+
+export function questionReopenDependencies(events: readonly ReviewReopenEvent[]): ReadonlyMap<string, ReviewDependency> {
+  return new Map(events.flatMap(event => event.questions.map(({ question_id }) => [question_id, {
+    kind: "membership" as const, key: questionReopenKey(question_id), fingerprint: event.reopen_id,
+  }] as const)));
+}

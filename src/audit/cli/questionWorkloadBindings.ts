@@ -2,7 +2,7 @@
 import { compareCodeUnits, hashContent, stableStringify, toPosixPath } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewEvidence, type ReviewSourceRef } from "../../shared/types/reviewQuestion.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewEvidence, type ReviewReopenEvent, type ReviewSourceRef, questionReopenDependencies } from "../../shared/types/reviewQuestion.js";
 import type { AuditQuestionBinding } from "./dispatch/questionReviewAcceptance.js";
 import { buildLineIndexForPaths } from "./lineIndex.js";
 
@@ -13,6 +13,7 @@ export async function questionWorkloadBindings(
   sourceRoot: string,
   evidence: readonly ReviewEvidence[],
   verifiedSourceFiles?: AuditQuestionBinding["sourceFiles"],
+  reopens: readonly ReviewReopenEvent[] = [],
 ): Promise<AuditQuestionBinding[]> {
   const plan = bundle.review_plan;
   if (!plan) throw new Error("Plan review questions before publishing an assignment");
@@ -46,6 +47,7 @@ export async function questionWorkloadBindings(
     return [...new Map(refs.map(ref => [stableStringify(ref), ref])).values()];
   };
   const authorized_scope = { include: includes, exclude: [] };
+  const epochs = questionReopenDependencies(reopens);
   // The publisher freezes this entire shared source binding, not just the
   // files named by one question. Hash it once rather than once per assignment.
   const sourceBinding = hashContent(stableStringify({ sourceRoot: toPosixPath(sourceRoot), sourceFiles }));
@@ -56,7 +58,8 @@ export async function questionWorkloadBindings(
       (record.source_refs.some(ref => suggested_sources.some(suggestion => ref.path === suggestion.path)) ||
        question.evidence_dependencies.some(dep => record.dependencies.some(bound => stableStringify(dep) === stableStringify(bound)))))
       .sort((a, b) => compareCodeUnits(a.evidence_id, b.evidence_id));
-    const dependencies = [...question.source_dependencies, ...question.evidence_dependencies];
+    const epoch = epochs.get(question.question_id);
+    const dependencies = [...question.source_dependencies, ...question.evidence_dependencies, ...(epoch ? [epoch] : [])];
     const issued = {
       schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
       question_id: question.question_id, revision_id: question.revision_id, snapshot_id: question.snapshot_id,

@@ -7,8 +7,8 @@ import { STEP_CONTRACT_VERSION } from "../steps.js";
 // asked for it, the enforcement of every property the prompt states, and the
 // task-bindings version bump whose refusal names the remedy)
 import type { ArtifactBundle } from "../../io/artifacts.js";
-import { acceptQuestionReview, validateQuestionAdjudication, validateQuestionSource, type AuditQuestionBinding } from "./questionReviewAcceptance.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, ReviewAcceptedAnswerSchema, ReviewAdjudicationSchema, ReviewAssignmentSchema, ReviewDependencySchema, ReviewEvidenceSchema, ReviewQuestionSchema, ReviewSubmissionSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewQuestion } from "../../../shared/types/reviewQuestion.js";
+import { acceptQuestionReview, projectQuestionReview, validateQuestionAdjudication, validateQuestionSource, type AuditQuestionBinding } from "./questionReviewAcceptance.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, ReviewAcceptedAnswerSchema, ReviewAdjudicationSchema, ReviewAssignmentSchema, ReviewDependencySchema, ReviewEvidenceSchema, ReviewQuestionSchema, ReviewReopenEventSchema, ReviewReopenRequestSchema, ReviewSubmissionSchema, questionReopenDependencies, type ReviewReopenEvent, type ReviewReopenRequest, type ReviewToolingQualification, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewQuestion } from "../../../shared/types/reviewQuestion.js";
 import { projectQuestionForReport } from "../../reporting/questionReport.js";
 import { questionClaimKey, ReviewFindingConsolidationSchema, type ReviewFindingConsolidation } from "../../../shared/types/questionReviewReport.js";
 import { z } from "zod";
@@ -635,6 +635,7 @@ const QuestionLedgerSchema = z.strictObject({
   answers: z.array(ReviewAcceptedAnswerSchema),
   adjudications: z.array(ReviewAdjudicationSchema),
   consolidations: z.array(ReviewFindingConsolidationSchema).default([]),
+  reopens: z.array(ReviewReopenEventSchema).default([]),
 });
 type QuestionBoundary = Pick<Parameters<typeof resolveBoundaryPaths>[0], "root" | "artifactsDir" | "runId">;
 type QuestionWorkload = z.infer<typeof QuestionWorkloadSchema>;
@@ -643,12 +644,25 @@ function hydrateQuestionBinding(workload: QuestionWorkload, binding: z.infer<typ
   return { ...binding, sourceFiles: workload.source_files, evidence: workload.evidence.filter((item) => binding.assignment.available_evidence_ids.includes(item.evidence_id)) };
 }
 
+const questionWorkloadPointer = (paths: ResolvedBoundaryPaths) => join(paths.runDir, "question-workload-current.json");
+const questionWorkloadSnapshot = (paths: ResolvedBoundaryPaths, digest: string) =>
+  join(paths.runDir, "question-workloads", digest, "host-workload.json");
+const questionWorkloadDigest = (workload: QuestionWorkload) => contentSha256(workload);
+
 async function readQuestionWorkload(paths: ResolvedBoundaryPaths) {
-  const workload = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(paths.workloadPath));
+  let digest: string | undefined;
+  try {
+    digest = z.strictObject({ sha256: z.string().regex(/^[0-9a-f]{64}$/u) })
+      .parse(await readJsonFile<unknown>(questionWorkloadPointer(paths))).sha256;
+  } catch (error) { if (!isFileMissingError(error)) throw error; }
+  // Preserve the old mutable filename as read-only legacy dispatch input.
+  const workload = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(
+    digest ? questionWorkloadSnapshot(paths, digest) : paths.workloadPath));
   if (workload.run_id !== paths.runId) throw new Error("Question workload belongs to a different run");
   for (const item of workload.work_items) {
     if (item.result_path !== resultPathFor(paths, item.binding.assignment.assignment_id)) throw new Error("Question result path differs from its issued assignment");
   }
+  if (digest && digest !== questionWorkloadDigest(workload)) throw new Error("Question workload no longer matches its issued digest");
   return workload;
 }
 
@@ -657,7 +671,7 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
   try { raw = await readJsonFile<unknown>(paths.acceptedLedgerPath); }
   catch (error) {
     if (!isFileMissingError(error)) throw error;
-    return { contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, answers: [] as ReviewAcceptedAnswer[], adjudications: [] as ReviewAdjudication[], consolidations: [] as ReviewFindingConsolidation[] };
+    return { contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, answers: [] as ReviewAcceptedAnswer[], adjudications: [] as ReviewAdjudication[], consolidations: [] as ReviewFindingConsolidation[], reopens: [] as ReviewReopenEvent[] };
   }
   const ledger = QuestionLedgerSchema.parse(raw);
   if (ledger.run_id !== paths.runId) throw new Error("Question acceptance ledger belongs to a different run");
@@ -698,6 +712,8 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
       return { binding: { question, assignment, dependencies: binding.dependencies }, result_path: resultPathFor(paths, assignment.assignment_id) };
     }),
   });
+  const digest = questionWorkloadDigest(workload);
+  const snapshot = questionWorkloadSnapshot(paths, digest);
   await withFileLock(paths.acceptedLockPath, async () => {
     try {
       const prior = await readQuestionWorkload(paths);
@@ -709,9 +725,18 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
         }
       }
     } catch (error) { if (!isFileMissingError(error)) throw error; }
-    await writeJsonFile(paths.workloadPath, workload);
+    // Pin bytes before advancing the internal current pointer. A crash between
+    // writes leaves a harmless immutable snapshot, never a partial dispatch.
+    try {
+      const prior = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(snapshot));
+      if (questionWorkloadDigest(prior) !== digest) throw new Error("Question workload no longer matches its issued digest");
+    } catch (error) {
+      if (!isFileMissingError(error)) throw error;
+      await writeJsonFile(snapshot, workload);
+    }
+    await writeJsonFile(questionWorkloadPointer(paths), { sha256: digest });
   });
-  return { workload, workload_path: paths.workloadPath };
+  return { workload, workload_path: snapshot };
 }
 
 export async function readAuditQuestionWorkload(params: QuestionBoundary) {
@@ -723,6 +748,65 @@ export async function readAuditQuestionWorkload(params: QuestionBoundary) {
 export async function readAuditQuestionLedger(params: QuestionBoundary) {
   const paths = resolveBoundaryPaths(params);
   return withFileLock(paths.acceptedLockPath, () => readQuestionLedger(paths));
+}
+
+function isCurrentQuestionEpoch(
+  binding: z.infer<typeof QuestionHandoffBindingSchema>,
+  epochs: ReturnType<typeof questionReopenDependencies>,
+): boolean {
+  const epoch = epochs.get(binding.question.question_id);
+  return epoch === undefined || binding.dependencies.some(item => item.kind === epoch.kind &&
+    item.key === epoch.key && item.fingerprint === epoch.fingerprint);
+}
+
+/** One atomic ledger write preserves original submissions and reopens every
+ * selected question, or none. Exact replay cannot invalidate the replacement. */
+export async function reopenAuditQuestions(params: QuestionBoundary & {
+  request: ReviewReopenRequest;
+  qualification?: ReviewToolingQualification;
+  questions: readonly ReviewQuestion[];
+  dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+}) {
+  const paths = resolveBoundaryPaths(params);
+  const request = ReviewReopenRequestSchema.parse(params.request);
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const ledger = await readQuestionLedger(paths);
+    const prior = ledger.reopens.find(event => event.reopen_id === request.reopen_id);
+    if (prior) {
+      const { reopened_at: _timestamp, tooling_qualification: _qualification, ...original } = prior;
+      if (stableStringify(original) !== stableStringify(request)) throw new Error("Conflicting reopen ID.");
+      return "replay" as const;
+    }
+    if (request.tooling_transition && (!params.qualification || params.qualification.run_id !== params.runId ||
+        params.qualification.prior.implementation_hash !== request.tooling_transition.prior_implementation_hash ||
+        params.qualification.current.implementation_hash !== request.tooling_transition.current_implementation_hash)) {
+      throw new Error("Tooling transition was not qualified on this review run.");
+    }
+    const questions = new Map(params.questions.map(question => [question.question_id, question]));
+    const selected = new Set<string>();
+    for (const target of request.questions) {
+      if (selected.has(target.question_id)) throw new Error("Duplicate reopen question.");
+      selected.add(target.question_id);
+      const question = questions.get(target.question_id);
+      if (!question || question.revision_id !== target.revision_id || question.snapshot_id !== target.snapshot_id ||
+          (question.plan_status !== "pending" && question.plan_status !== "active")) {
+        throw new Error("Reopen target is not an active question revision in this run.");
+      }
+      const current = projectQuestionReview(question, ledger.answers, params.dependenciesByQuestion.get(question.question_id)).current;
+      const actual = uniqueSorted(current.map(row => row.submission.submission_id));
+      const expected = uniqueSorted(target.expected_submission_ids);
+      if (!actual.length || expected.length !== target.expected_submission_ids.length || !sameStrings(expected, actual)) {
+        throw new Error("Reopen must name exactly the current accepted submission IDs.");
+      }
+    }
+    await writeJsonFile(paths.acceptedLedgerPath, {
+      ...ledger, reopens: [...ledger.reopens, {
+        ...request, reopened_at: new Date().toISOString(),
+        ...(request.tooling_transition ? { tooling_qualification: params.qualification } : {}),
+      }],
+    });
+    return "accepted" as const;
+  });
 }
 
 // sites-pinned: tests/audit/question-review-acceptance.test.ts, tests/audit/question-consolidation-cli.test.ts
@@ -745,8 +829,6 @@ export async function consolidateAuditQuestionFindings(params: QuestionBoundary 
       if (stableStringify(prior) !== stableStringify(decision)) throw new Error("Conflicting consolidation decision ID.");
       return "replay" as const;
     }
-    const consumed = new Set(ledger.consolidations.flatMap(row => row.sources.map(key)));
-    if ([...keys].some(id => consumed.has(id))) throw new Error("An accepted claim is already in a consolidation.");
     const evidence = new Map(params.evidence.map(item => [item.evidence_id, item]));
     const actionable = new Set(params.questions.flatMap(question => projectQuestionForReport(
       question, ledger.answers.filter(({ submission }) => submission.question_id === question.question_id),
@@ -755,6 +837,11 @@ export async function consolidateAuditQuestionFindings(params: QuestionBoundary 
     if ([...keys].some(id => !actionable.has(id))) {
       throw new Error("Consolidation must reference distinct current actionable confirmed-defect claims.");
     }
+    const consumed = new Set(ledger.consolidations.flatMap(row => {
+      const sources = row.sources.map(key);
+      return sources.every(id => actionable.has(id)) ? sources : [];
+    }));
+    if ([...keys].some(id => consumed.has(id))) throw new Error("An accepted claim is already in a consolidation.");
     await writeJsonFile(paths.acceptedLedgerPath, {
       ...ledger, consolidations: [...ledger.consolidations, decision],
     });
@@ -771,7 +858,9 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
     const item = workload.work_items.find((entry) => entry.binding.assignment.assignment_id === params.assignmentId);
-    if (!item) throw new Error("Review assignment is not in the current issued workload");
+    if (!item || !isCurrentQuestionEpoch(item.binding, questionReopenDependencies(ledger.reopens))) {
+      throw new Error("Review assignment is not in the current issued workload");
+    }
     const accepted = acceptQuestionReview(ledger.answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
     if (accepted.kind === "accepted") await writeJsonFile(paths.acceptedLedgerPath,
       { ...ledger, answers: [...ledger.answers, accepted.record] });
@@ -785,11 +874,13 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
     const answers = [...ledger.answers];
+    const epochs = questionReopenDependencies(ledger.reopens);
     const issues: { assignment_id: string; reason: string }[] = [];
     for (const item of workload.work_items) {
       // A re-intake or evidence refresh can supersede an issued answer before
       // the next workload is published. Do not read or admit its old result.
-      if (currentAssignmentIds && !currentAssignmentIds.has(item.binding.assignment.assignment_id)) continue;
+      if (!isCurrentQuestionEpoch(item.binding, epochs) ||
+          (currentAssignmentIds && !currentAssignmentIds.has(item.binding.assignment.assignment_id))) continue;
       try {
         const submission = ReviewSubmissionSchema.parse(await readJsonFile<unknown>(
           resolveContainedPath(paths.root, item.result_path, "issued question result path")));
@@ -802,7 +893,7 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
     }
     const accepted_count = answers.length - ledger.answers.length;
     if (accepted_count) await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers });
-    return { accepted_count, answers, adjudications: ledger.adjudications, consolidations: ledger.consolidations, issues };
+    return { accepted_count, answers, adjudications: ledger.adjudications, consolidations: ledger.consolidations, reopens: ledger.reopens, issues };
   });
 }
 
@@ -813,7 +904,9 @@ export async function adjudicateAuditQuestionResult(params: QuestionBoundary & {
   return withFileLock(paths.acceptedLockPath, async () => {
     const workload = await readQuestionWorkload(paths);
     const ledger = await readQuestionLedger(paths);
-    const candidates = workload.work_items.map(({ binding }) => hydrateQuestionBinding(workload, binding)).filter(({ question }) =>
+    const epochs = questionReopenDependencies(ledger.reopens);
+    const candidates = workload.work_items.filter(({ binding }) => isCurrentQuestionEpoch(binding, epochs))
+      .map(({ binding }) => hydrateQuestionBinding(workload, binding)).filter(({ question }) =>
       question.question_id === adjudication.question_id && question.revision_id === adjudication.revision_id &&
       question.snapshot_id === adjudication.snapshot_id);
     const question = candidates[0]?.question;

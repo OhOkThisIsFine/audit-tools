@@ -71,6 +71,7 @@ export const RUNTIME_ARTIFACT_NAMES = [
   "plan.input.json",
   "plan.json",
   "project-facts.json",
+  "question-workload-current.json",
   "remediation-brief.md",
   "remediation-closing-result.json",
   "remediation-outcomes.json",

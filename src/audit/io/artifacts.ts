@@ -55,11 +55,11 @@ import type { CharterClarificationRegister } from "../types/charterClarification
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import { ReviewPlanSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewPlan, type ReviewQuestion } from "../../shared/types/reviewQuestion.js";
+import { ReviewPlanSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewPlan, type ReviewQuestion, type ReviewReopenEvent, type ReviewToolingQualification, type ReviewToolingTransition } from "../../shared/types/reviewQuestion.js";
 import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION, type ReviewFindingConsolidation } from "../../shared/types/questionReviewReport.js";
 import { readVerifiedCharterPacketIndex } from "../orchestrator/charterPacketArchive.js";
 import { renderAuditReportMarkdown, type RenderAuditReportOptions } from "../reporting/synthesis.js";
-import { readQuestionReviewRunId } from "../cli/questionReviewSession.js";
+import { qualifyQuestionReviewTooling, readQuestionReviewRunId } from "../cli/questionReviewSession.js";
 import { stableStringify } from "audit-tools/shared";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import {
@@ -164,6 +164,8 @@ type ArtifactPayloadMap = {
  * delete a file the orchestrator does not own).
  */
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
+  /** Historical producer binding for an explicitly qualified active review. */
+  review_tooling_qualification?: ReviewToolingQualification;
   /** Transient projection from the one accepted ledger, owned by this fold. */
   question_cycle?: {
     pending: readonly { question: ReviewQuestion }[];
@@ -172,6 +174,7 @@ export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
     adjudications: readonly ReviewAdjudication[];
     dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
     consolidations: readonly ReviewFindingConsolidation[];
+    reopens?: readonly ReviewReopenEvent[];
   };
   agent_reflections?: AgentReflection[];
   /**
@@ -350,6 +353,7 @@ export function getArtifactValue(
 
 export async function loadArtifactBundle(
   root: string,
+  review?: { requestedTooling?: ReviewToolingTransition },
 ): Promise<ArtifactBundle> {
   const bundle: ArtifactBundle = {};
   const bundleRecord = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
@@ -367,7 +371,20 @@ export async function loadArtifactBundle(
       bundle.audit_findings = QuestionAuditFindingsReportSchema.parse(bundle.audit_findings);
     }
   }
-  bundle.tooling_manifest = await buildToolingManifest();
+  const currentTooling = await buildToolingManifest();
+  const qualification = await qualifyQuestionReviewTooling({
+    artifactsDir: root,
+    snapshotId: bundle.review_plan?.snapshot_id,
+    prior: bundle.tooling_manifest,
+    current: currentTooling,
+    recordedToolingHash: bundle.artifact_metadata?.artifacts?.["tooling_manifest.json"]?.content_hash,
+    requested: review?.requestedTooling,
+    allowQualifiedReview: review !== undefined,
+  });
+  if (qualification) bundle.review_tooling_qualification = qualification;
+  // Existing graph/evidence keeps its proved producer identity. The running
+  // tool's different identity is recorded in the append-only qualification.
+  bundle.tooling_manifest = qualification?.prior ?? currentTooling;
 
   // Design-review snapshots (B2 parity port): loaded specially so
   // deriveAuditState can key each pass's staleness on the
@@ -455,6 +472,7 @@ export async function writeCoreArtifacts(
   }
   for (const entry of ARTIFACT_ENTRIES) {
     const [key, definition] = entry;
+    if (key === "tooling_manifest" && bundle.review_tooling_qualification) continue;
     const value = bundleRecord[key];
     const path = join(root, definition.fileName);
     if (value !== undefined) {
@@ -903,16 +921,18 @@ async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | 
   const runId = await readQuestionReviewRunId(artifactsDir, { includeEnded: true });
   if (!runId) return undefined;
   const ledger = await readOptionalJsonFile<{
-    contract_version: string; run_id: string; answers: unknown[]; adjudications: unknown[]; consolidations?: unknown[];
+    contract_version: string; run_id: string; answers: unknown[]; adjudications: unknown[]; consolidations?: unknown[]; reopens?: unknown[];
   }>(join(artifactsDir, "runs", runId, "host-accepted-results-ledger.json"));
   if (ledger !== undefined && (ledger.contract_version !== "audit-tools/question-review/v1" ||
       ledger.run_id !== runId || !Array.isArray(ledger.answers) || !Array.isArray(ledger.adjudications) ||
-      (ledger.consolidations !== undefined && !Array.isArray(ledger.consolidations)))) return undefined;
+      (ledger.consolidations !== undefined && !Array.isArray(ledger.consolidations)) ||
+      (ledger.reopens !== undefined && !Array.isArray(ledger.reopens)))) return undefined;
   const sorted = (rows: readonly unknown[]) => rows.map(row => stableStringify(row)).sort();
   const actual = report.data.question_review;
   if (stableStringify(sorted(actual.accepted)) !== stableStringify(sorted(ledger?.answers ?? [])) ||
       stableStringify(sorted(actual.adjudications)) !== stableStringify(sorted(ledger?.adjudications ?? [])) ||
-      stableStringify(sorted(actual.consolidations)) !== stableStringify(sorted(ledger?.consolidations ?? []))) return undefined;
+      stableStringify(sorted(actual.consolidations)) !== stableStringify(sorted(ledger?.consolidations ?? [])) ||
+      stableStringify(actual.reopens ?? []) !== stableStringify(ledger?.reopens ?? [])) return undefined;
   return renderAuditReportMarkdown(report.data, {
     reflections: await readQuestionReportReflections(artifactsDir),
     ...await readQuestionReportCharterOptions(artifactsDir),

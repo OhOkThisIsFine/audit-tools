@@ -1,4 +1,4 @@
-import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
 import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import { preservesSourceIndexes } from "../orchestrator/executorRunners.js";
 import type { SpawnDeadline } from "../../shared/tooling/exec.js";
@@ -51,7 +51,7 @@ import {
   hasWorkingQuestionReportMarker,
   isWorkingDirFullyPromoted,
 } from "../io/artifacts.js";
-import { ensureRunSourceRoot, removeRunSnapshot, resolveRunSince } from "../io/runSnapshot.js";
+import { ensureRunSourceRoot, readRunSourceRoot, removeRunSnapshot, resolveRunSince } from "../io/runSnapshot.js";
 import { markRunEnded } from "../io/rollover.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import {
@@ -2998,6 +2998,7 @@ function trackFoldBundle(obligations: AuditObligationDef[]): AuditObligationDef[
   return obligations.map((obligation) => ({
     ...obligation,
     execute: async (bundle: ArtifactBundle, ctx: AuditNextStepCtx) => {
+      if (bundle.review_tooling_qualification) assertQualifiedReviewObligation(obligation.id);
       // Liveness for the LONG deterministic drain (the >2min stale-artifact
       // re-extraction next-step that blew a caller timeout with no output). The
       // per-execution label is set HERE because this is the one place every fold
@@ -3136,14 +3137,20 @@ async function runDeterministicFold(
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
       let intakeExecutions = 0;
-      await recoverStagedSubmissions(params.artifactsDir);
+      let startBundle = await loadArtifactBundle(params.artifactsDir, {});
+      if (startBundle.review_tooling_qualification) {
+        if (params.since !== undefined || params.autoFix?.enabled !== undefined || params.autoFix?.dryRun) {
+          throw new Error("Qualified question review cannot change source scope or formatting consent.");
+        }
+        params.sourceRoot = await readRunSourceRoot(params.root, params.artifactsDir);
+        await assertQualifiedReviewStillCurrent(startBundle, params.sourceRoot, params.scopeIndexMemo);
+        // A verified review can resume its interrupted report synthesis only.
+        await recoverStagedSubmissions(params.artifactsDir, lane => lane === GATE_LANES.synthesis_narrative);
+      } else {
+        await recoverStagedSubmissions(params.artifactsDir);
+        params.sourceRoot = await ensureRunSourceRoot(params.root, params.artifactsDir);
+      }
       const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
-      // The run's frozen snapshot, under the same hold as the consent record it
-      // shares a lifetime with: created at run start, re-checked out on resume.
-      // Every content read of this fold uses it (`requireSourceRoot`); the
-      // complete-run rule lives in `ensureRunSourceRoot`, shared with every
-      // standalone step command.
-      params.sourceRoot = await ensureRunSourceRoot(params.root, params.artifactsDir);
       if (params.since !== undefined) {
         params.since = await resolveRunSince(params.root, params.artifactsDir, params.since);
       }
@@ -3152,7 +3159,6 @@ async function runDeterministicFold(
         : await updateRunConsentUnlocked(params.root, params.artifactsDir, {}, params.autoFix?.enabled, params.autoFix?.dryRun);
       if (params.externalAcquisition?.enabled) applyRunConsent(params.externalAcquisition, consent);
       params.autoFix = { enabled: consent.auto_fix, dryRun: consent.dry_run };
-      let startBundle = await loadArtifactBundle(params.artifactsDir);
       if (consent.auto_fix && !previousConsent.auto_fix && !consent.dry_run) {
         delete startBundle.auto_fixes_applied;
       }
@@ -3160,7 +3166,7 @@ async function runDeterministicFold(
       try {
         // Check the same frozen read set that the active review stage uses.
         // Before question planning, deep charter lanes also bind admitted source.
-        if (startBundle.audit_state?.status !== "complete" && startBundle.repo_manifest) {
+        if (!startBundle.review_tooling_qualification && startBundle.audit_state?.status !== "complete" && startBundle.repo_manifest) {
           let admittedFiles: string[] = [];
           if (startBundle.review_plan) {
             const scope = reviewSourceScope(startBundle);
@@ -3311,7 +3317,7 @@ async function runDeterministicFold(
   // budget makes unreachable in practice — a backstop firing IS the anomaly).
   const stalled = describeStoppedFold(outcome);
   if (stalled) {
-    const bundle = await loadArtifactBundle(params.artifactsDir);
+    const bundle = await loadArtifactBundle(params.artifactsDir, {});
     const decision = decideNextStep(bundle);
     return {
       kind: "blocked",
@@ -3328,7 +3334,7 @@ async function runDeterministicFold(
   // the state to complete and every obligation is now satisfied). Build the
   // terminal: `complete` when the state is complete / a report is rendered,
   // else blocked. A complete state's summary is the decision's own reason.
-  const bundle = await loadArtifactBundle(params.artifactsDir);
+  const bundle = await loadArtifactBundle(params.artifactsDir, {});
   const decision = decideNextStep(bundle);
   const state = decision.state;
   return buildTerminalStep(

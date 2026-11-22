@@ -25,7 +25,7 @@ import { cmdImportExternalAnalyzer } from "./cli/importExternalAnalyzerCommand.j
 import { cmdIntake } from "./cli/intakeCommand.js";
 import { cmdPlan } from "./cli/planCommand.js";
 import { cmdValidate } from "./cli/validateCommand.js";
-import { cmdConsolidateFindings, cmdMcp, cmdSubmit } from "./cli/submitCommand.js";
+import { cmdConsolidateFindings, cmdMcp, cmdReopenQuestions, cmdSubmit } from "./cli/submitCommand.js";
 import { cmdSynthesize } from "./cli/synthesizeCommand.js";
 import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
 import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
@@ -76,6 +76,7 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["validate", cmdValidate, {}],
   ["submit", cmdSubmit, { values: ["--work-item", "--from"] }],
   ["consolidate-findings", cmdConsolidateFindings, { values: ["--from"] }],
+  ["reopen-questions", cmdReopenQuestions, { values: ["--from"] }],
   ["mcp", cmdMcp, {}],
   ["synthesize", cmdSynthesize, {}],
   ["force-synthesis", cmdForceSynthesis, {}],

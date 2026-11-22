@@ -7,6 +7,7 @@ import { runWrapper } from "./helpers/run-wrapper.mjs";
 import { runBounded } from "../helpers/spawn.mjs";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
 import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 test("the normal next-step path dispatches questions bound to a snapshot rather than required file lenses", async () => {
@@ -95,8 +96,134 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     const repeated = await workloadFor(await next());
     expect(repeated.run_id).toBe(resumed.run_id);
     expect(await accepted()).toEqual([firstAnswer]);
+    const lateGuidance = join(base, "intake", "conversation-start.md");
+    const beforeLateGuidance = await readFile(lateGuidance, "utf8").catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    expect(beforeLateGuidance).toBeNull();
+    await expect(runWrapper(["next-step", "--guidance", "First guidance after dispatch"], { cwd: root }))
+      .rejects.toThrow(/active question review cannot change guidance/u);
+    await expect(readFile(lateGuidance, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const request = join(base, "reopen.json");
+    const decision = {
+      reopen_id: "fix-misassigned-answer", reason: "The first answer was bound to the wrong review question.",
+      questions: [{ question_id: firstAnswer.question_id, revision_id: firstAnswer.revision_id,
+        snapshot_id: firstAnswer.snapshot_id, expected_submission_ids: [firstAnswer.submission_id] }],
+    };
+    // Reconstruct the pre-upgrade producer record as F1 would have stamped it:
+    // only the recorded tooling value differs, not the frozen project or evidence.
+    const toolingFile = join(base, "tooling_manifest.json");
+    const metadataFile = join(base, "artifact_metadata.json");
+    const liveTooling = JSON.parse(await readFile(toolingFile, "utf8"));
+    const priorTooling = { ...liveTooling, implementation_hash: "f".repeat(64) };
+    const metadata = JSON.parse(await readFile(metadataFile, "utf8"));
+    metadata.artifacts["tooling_manifest.json"].content_hash = hashArtifactValue("tooling_manifest.json", priorTooling);
+    const historicalBytes = JSON.stringify(priorTooling);
+    await writeFile(toolingFile, historicalBytes);
+    await writeFile(metadataFile, JSON.stringify(metadata));
+    const reopen = () => runWrapper(["reopen-questions", "--from", request], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
+    await writeFile(request, JSON.stringify(decision));
+    await expect(reopen()).rejects.toThrow(/review plan is missing or stale/u);
+    expect(await accepted()).toEqual([firstAnswer]);
+    const tooling_transition = {
+      prior_implementation_hash: priorTooling.implementation_hash, current_implementation_hash: liveTooling.implementation_hash,
+      reason: "Only the question-review host changed; retain the verified frozen inputs.",
+    };
+    await writeFile(request, JSON.stringify({ ...decision, tooling_transition: {
+      ...tooling_transition, current_implementation_hash: "e".repeat(64),
+    } }));
+    await expect(reopen()).rejects.toThrow(/exact historical and current implementation/u);
+    expect(await accepted()).toEqual([firstAnswer]);
+    await writeFile(request, JSON.stringify({ ...decision, tooling_transition }));
+    expect(await reopen()).toMatchObject({ disposition: "accepted" });
+    expect(await reopen()).toMatchObject({ disposition: "replay" });
+    expect(await accepted()).toEqual([firstAnswer]);
+    const remediate = fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url));
+    const { CLAUDECODE: _cc, ...env } = process.env;
+    const nextRemediation = () => runBounded(process.execPath, [remediate, "next-step"], { cwd: root, env })
+      .then(({ stdout }) => JSON.parse(stdout));
+    const obsoleteWorking = join(base, "audit-findings.json");
+    await writeFile(obsoleteWorking, JSON.stringify({ contract_version: "audit-tools/audit-findings/v2" }));
+    await expect(nextRemediation()).rejects.toThrow(/working audit report predates reopened review answers/u);
+    await unlink(obsoleteWorking);
+    const staged = join(base, "submission-staging");
+    await mkdir(staged, { recursive: true });
+    const oldUpstreamSubmission = join(staged, "critical_flow_fallback.json");
+    const oldUpstreamBytes = JSON.stringify({ stale: "left by a previous acquisition fold" });
+    await writeFile(oldUpstreamSubmission, oldUpstreamBytes);
+    const redispatched = await workloadFor(await next());
+    expect(await readFile(oldUpstreamSubmission, "utf8")).toBe(oldUpstreamBytes);
+    expect(await readFile(toolingFile, "utf8")).toBe(historicalBytes);
+    const snapshotPath = join(base, "run-snapshot.json");
+    const preservedSnapshot = await readFile(snapshotPath, "utf8");
+    const preservedMetadata = await readFile(metadataFile, "utf8");
+    await expect(runWrapper(["intake"], { cwd: root })).rejects.toThrow(/not standalone analysis/u);
+    await expect(runWrapper(["next-step", "--since", "HEAD"], { cwd: root }))
+      .rejects.toThrow(/cannot change source scope or formatting consent/u);
+    expect(await readFile(snapshotPath, "utf8")).toBe(preservedSnapshot);
+    expect(await readFile(metadataFile, "utf8")).toBe(preservedMetadata);
+    const guidancePath = join(base, "intake", "conversation-start.md");
+    const readGuidance = () => readFile(guidancePath, "utf8").catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    const originalGuidance = await readGuidance();
+    const alternativeGuidance = join(base, "different-guidance.md");
+    await writeFile(alternativeGuidance, "Do a different audit.\n");
+    await expect(runWrapper(["next-step", "--guidance", "A different task"], { cwd: root }))
+      .rejects.toThrow(/cannot change guidance/u);
+    await expect(runWrapper(["next-step", "--guidance-file", alternativeGuidance], { cwd: root }))
+      .rejects.toThrow(/cannot change guidance/u);
+    expect(await readGuidance()).toBe(originalGuidance);
+    await mkdir(dirname(guidancePath), { recursive: true });
+    try {
+      await writeFile(guidancePath, "An out-of-band intent edit.\n");
+      await expect(next()).rejects.toThrow(/qualified review tooling inputs changed/u);
+    } finally {
+      if (originalGuidance !== null) await writeFile(guidancePath, originalGuidance);
+      else await unlink(guidancePath);
+    }
+    const snapshotRoot = JSON.parse(preservedSnapshot).source_root as string;
+    const frozenFile = join(snapshotRoot, "src", "resume.ts");
+    const frozenBytes = await readFile(frozenFile);
+    try {
+      await writeFile(frozenFile, "export const differentFrozenSource = true;\n");
+      await expect(next()).rejects.toThrow(/Qualified question review.*frozen source changed/u);
+    } finally {
+      await writeFile(frozenFile, frozenBytes);
+    }
+    const beforeEvidenceChange = await readFile(join(base, "external_analyzer_results.json")).catch(() => undefined);
+    const evidencePath = join(base, "external_analyzer_results.json");
+    try {
+      await writeFile(evidencePath, JSON.stringify([{ unexpected: "different analysis" }]));
+      await expect(next()).rejects.toThrow(/qualified review tooling inputs changed/u);
+    } finally {
+      if (beforeEvidenceChange !== undefined) await writeFile(evidencePath, beforeEvidenceChange);
+      else await unlink(evidencePath);
+    }
+    const docs = join(base, "docs_digest.json");
+    const docsBytes = await readFile(docs);
+    try {
+      await unlink(docs);
+      await expect(next()).rejects.toThrow(/non-report inputs|cannot derive upstream obligation/u);
+    } finally {
+      await writeFile(docs, docsBytes);
+    }
+    expect(await readFile(metadataFile, "utf8")).toBe(preservedMetadata);
+    const afterNegativeCases = await workloadFor(await next());
+    expect(afterNegativeCases.work_items).toEqual(redispatched.work_items);
+    const replacement = redispatched.work_items.find(item => item.binding.question.question_id === firstAnswer.question_id)!;
+    expect(replacement.binding.assignment.assignment_id).not.toBe(firstAnswer.assignment_id);
+    expect(replacement.result_path).not.toBe(first.result_path);
+    const untouched = redispatched.work_items.find(item => item.binding.question.question_id === repeated.work_items[0]!.binding.question.question_id);
+    expect(untouched).toEqual(repeated.work_items[0]);
+    const replacementAnswer = await put(replacement);
+    const submitted = await runWrapper(["submit", "--work-item", replacementAnswer.assignment_id,
+      "--from", resolve(root, replacement.result_path)], { cwd: root });
+    expect(JSON.parse(submitted.stdout)).toMatchObject({ disposition: "accepted", submission_id: replacementAnswer.submission_id });
     const secondAnswer = await put(repeated.work_items[0]!);
-    for (const item of repeated.work_items.slice(1)) await put(item);
+    for (const item of redispatched.work_items.filter(item => item !== replacement && item !== untouched)) await put(item);
     const trail: string[] = [];
     let complete = false;
     for (let i = 0; i < 8; i++) {
@@ -105,8 +232,9 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
       if (step.step_kind === "synthesis_narrative") {
         const target = step.artifact_paths.synthesis_narrative_results;
         expect(typeof target).toBe("string");
-        await mkdir(dirname(target), { recursive: true });
-        await writeFile(target, JSON.stringify({ themes: [], top_risks: [] }));
+        // Simulate interruption after the narrative result was staged. This
+        // qualified fold may recover narrative, but not the older upstream lane.
+        await writeFile(join(staged, "synthesis_narrative.json"), JSON.stringify({ themes: [], top_risks: [] }));
       } else if (step.step_kind === "present_report") {
         if (step.status === "complete") { complete = true; break; }
         const friction = step.artifact_paths.friction_record;
@@ -125,14 +253,13 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     expect(report.question_review.completion).toBe("incomplete");
     expect(report.question_review.accepted.map(({ submission }) => submission)).toEqual(expect.arrayContaining([firstAnswer, secondAnswer]));
     const row = report.question_review.questions.find(({ question_id }) => question_id === firstAnswer.question_id);
-    expect(row).toMatchObject({ state: "inconclusive", accepted_answer_ids: [firstAnswer.submission_id] });
+    expect(row).toMatchObject({ state: "inconclusive", accepted_answer_ids: [replacementAnswer.submission_id] });
+    expect(report.question_review.reopens?.map(event => event.reopen_id)).toEqual(["fix-misassigned-answer"]);
+    await expect(reopen()).rejects.toThrow(/finished|immutable/u);
+    expect(await readFile(reportPath, "utf8")).toBe(reportBytes);
     expect(row?.parts.some(part => part.state === "clean")).toBe(false);
     expect(report.findings).toEqual([]);
     expect(validateSuppliedInput(reportPath, reportBytes)).toEqual({ ok: true });
-    const remediate = fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url));
-    const { CLAUDECODE: _cc, ...env } = process.env;
-    const nextRemediation = () => runBounded(process.execPath, [remediate, "next-step"], { cwd: root, env })
-      .then(({ stdout }) => JSON.parse(stdout));
     const discover = await nextRemediation();
     expect(discover).toMatchObject({ step_kind: "confirm_auto_discovered_input" });
     const ack = discover.artifact_paths.confirm_auto_discovered_input_ack;

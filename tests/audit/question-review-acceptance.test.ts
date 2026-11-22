@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { projectQuestionReview, reviewAnswerDisposition, type AuditQuestionBinding } from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
-import { adjudicateAuditQuestionResult, consolidateAuditQuestionFindings, ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
-import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+import { adjudicateAuditQuestionResult, consolidateAuditQuestionFindings, ingestAuditQuestionResults, publishAuditQuestionWorkload, readAuditQuestionLedger, readAuditQuestionWorkload, reopenAuditQuestions, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, questionReopenDependencies, type ReviewEvidence, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
 const v = REVIEW_QUESTION_CONTRACT_VERSION;
 const identity = { schema_version: v, question_id: "resume", revision_id: "r1", snapshot_id: "s1" } as const;
@@ -284,3 +284,68 @@ it("refuses findings parts without a linked claim and accepts a linked lead", as
     });
   });
 });
+it("keeps the issued manifest stable when a pending subset is published", async () => fixture(async root => {
+  const boundary = { root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-run" };
+  const a = makeBinding("a"), b = makeBinding("b");
+  const first = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [a, b] });
+  const original = await readFile(first.workload_path, "utf8");
+  await submitAuditQuestionResult({ ...boundary, assignmentId: "a", source: JSON.stringify(submission("a", "clean")) });
+  const second = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [b] });
+  expect(second.workload_path).not.toBe(first.workload_path);
+  expect(await readFile(first.workload_path, "utf8")).toBe(original);
+  expect(second.workload.work_items[0]).toEqual(first.workload.work_items[1]);
+  const destination = join(root, first.workload.work_items[1]!.result_path);
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, JSON.stringify(submission("b", "clean")));
+  expect((await ingestAuditQuestionResults(boundary)).accepted_count).toBe(1);
+}));
+
+it("reopens only an exact set of current answers and fences old work before republishing", async () => fixture(async root => {
+  const boundary = { root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-run" };
+  const old = makeBinding("old"), unaffected = makeBinding("unaffected");
+  unaffected.question.question_id = unaffected.assignment.question_id = "unaffected";
+  const original = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [old, unaffected] });
+  const oldReply = submission("old", "findings");
+  const unaffectedReply = submission("unaffected", "clean");
+  unaffectedReply.question_id = unaffectedReply.answer.observations[0]!.question_id = "unaffected";
+  const submit = (reply: ReviewSubmission) => submitAuditQuestionResult({
+    ...boundary, assignmentId: reply.assignment_id, source: JSON.stringify(reply),
+  });
+  await submit(oldReply);
+  await submit(unaffectedReply);
+  const initial = await readAuditQuestionLedger(boundary);
+  const reopen = (reopen_id: string, expected: string, dependencies = [membership, source] as AuditQuestionBinding["dependencies"]) =>
+    reopenAuditQuestions({ ...boundary, questions: [old.question, unaffected.question],
+      dependenciesByQuestion: new Map([[old.question.question_id, dependencies], [unaffected.question.question_id, [membership, source]]]),
+      request: { reopen_id, reason: "Prior worker answered a different question.",
+        questions: [{ ...identity, expected_submission_ids: [expected] }].map(({ schema_version: _version, ...target }) => target) },
+    });
+  await expect(reopen("bad-id", "response-no-such-answer")).rejects.toThrow(/exactly the current/);
+  expect(await readAuditQuestionLedger(boundary)).toEqual(initial);
+  await expect(reopen("one", oldReply.submission_id)).resolves.toBe("accepted");
+  const after = await readAuditQuestionLedger(boundary);
+  expect(after.answers).toEqual(initial.answers);
+  expect(after.reopens).toHaveLength(1);
+  const epoch = questionReopenDependencies(after.reopens).get(old.question.question_id)!;
+  expect(projectQuestionReview(old.question, after.answers, [membership, source, epoch]).current).toEqual([]);
+  expect(projectQuestionReview(unaffected.question, after.answers, [membership, source]).current)
+    .toEqual([initial.answers[1]]);
+  await expect(submit(oldReply)).rejects.toThrow(/not in the current issued/);
+  const oldFile = join(root, original.workload.work_items[0]!.result_path);
+  await mkdir(dirname(oldFile), { recursive: true });
+  await writeFile(oldFile, JSON.stringify({ ...oldReply, submission_id: "late-staged" }));
+  expect((await ingestAuditQuestionResults(boundary)).accepted_count).toBe(0);
+  const fresh = makeBinding("new");
+  fresh.dependencies = [...fresh.dependencies, epoch];
+  await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [fresh] });
+  const newReply = submission("new", "clean");
+  await submit(newReply);
+  await expect(reopen("one", oldReply.submission_id, [membership, source, epoch])).resolves.toBe("replay");
+  await expect(reopen("one", newReply.submission_id, [membership, source, epoch])).rejects.toThrow(/Conflicting reopen ID/);
+  await expect(reopen("two", oldReply.submission_id, [membership, source, epoch])).rejects.toThrow(/exactly the current/);
+  await expect(reopen("two", newReply.submission_id, [membership, source, epoch])).resolves.toBe("accepted");
+  const last = await readAuditQuestionLedger(boundary);
+  expect(last.reopens.map(event => event.reopen_id)).toEqual(["one", "two"]);
+  expect(last.answers.map(record => record.submission)).toEqual([oldReply, unaffectedReply, newReply]);
+  await expect(submit(newReply)).rejects.toThrow(/not in the current issued/);
+}));
