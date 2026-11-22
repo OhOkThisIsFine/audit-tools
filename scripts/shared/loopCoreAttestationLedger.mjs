@@ -211,23 +211,42 @@ function recordId(record) {
 }
 
 /**
+ * Validate and hash a record once within this pass. Citation IDs and path
+ * coverage are still checked at each call site.
+ * @param {(record: unknown) => string | null} defect
+ */
+function memoizeRecordCheck(defect) {
+  /** @type {Map<Review | Baseline, { problem: string | null, hash: string | null }>} */
+  const checked = new Map();
+  /** @param {Review | Baseline} record */
+  return (record) => {
+    const cached = checked.get(record);
+    if (cached) return cached;
+    const problem = defect(record);
+    const result = { problem, hash: problem ? null : recordId(record) };
+    checked.set(record, result);
+    return result;
+  };
+}
+
+/**
  * The two record kinds, so every walk over them is one loop.
  * @param {Ledger} ledger
  */
 function kinds(ledger) {
   return /** @type {const} */ ([
-    { kind: 'review', records: ledger.reviews, defect: reviewDefect },
-    { kind: 'baseline', records: ledger.baselines, defect: baselineDefect },
+    { kind: 'review', records: ledger.reviews, check: memoizeRecordCheck(reviewDefect) },
+    { kind: 'baseline', records: ledger.baselines, check: memoizeRecordCheck(baselineDefect) },
   ]);
 }
 
 /**
  * The record an entry cites, or why it cites none that is admissible.
- * @param {Ledger} ledger
+ * @param {ReturnType<typeof kinds>} recordKinds
  * @param {LedgerEntry | undefined} entry
  * @returns {{ kind: 'review'|'baseline', id: string, record: any } | { error: string }}
  */
-function citedRecord(ledger, entry) {
+function citedRecord(recordKinds, entry) {
   if (!entry || typeof entry !== 'object') return { error: 'no attestation entry' };
   const keys = Object.keys(entry);
   if (keys.length !== 1 || (keys[0] !== 'review' && keys[0] !== 'baseline')) {
@@ -235,10 +254,11 @@ function citedRecord(ledger, entry) {
   }
   const k = /** @type {'review'|'baseline'} */ (keys[0]);
   const id = /** @type {any} */ (entry)[k];
-  const { records, defect } = kinds(ledger).find((x) => x.kind === k) ?? kinds(ledger)[0];
+  const { records, check } = recordKinds.find((x) => x.kind === k) ?? recordKinds[0];
   const record = Object.hasOwn(records, id) ? records[id] : undefined;
   if (!record) return { error: `the entry cites ${k} ${JSON.stringify(id)}, which the ledger does not hold` };
-  if (defect(record) || recordId(record) !== id) return { error: `the entry cites ${k} ${id}, which is not admissible (see above)` };
+  const { problem, hash } = check(record);
+  if (problem || hash !== id) return { error: `the entry cites ${k} ${id}, which is not admissible (see above)` };
   return { kind: k, id, record };
 }
 
@@ -269,14 +289,15 @@ export function verifyLedger({ git, rev, concernsBlock }) {
   }
   if (loaded.kind === 'corrupt') return { fault: null, problems: [`${LEDGER_PATH} is unreadable: ${loaded.reason}`], ...counts };
   const ledger = loaded.ledger;
+  const recordKinds = kinds(ledger);
   const problems = [];
-  for (const { kind, records, defect } of kinds(ledger)) {
+  for (const { kind, records, check } of recordKinds) {
     for (const [id, record] of Object.entries(records).sort(([a], [b]) => compareCodeUnits(a, b))) {
-      const d = defect(record);
-      if (d) problems.push(`${kind} ${id} ${d}`);
-      else if (recordId(record) !== id) {
+      const { problem, hash } = check(record);
+      if (problem) problems.push(`${kind} ${id} ${problem}`);
+      else if (hash !== id) {
         problems.push(
-          `${kind} ${id} does not hash to its own key (its record says ${recordId(record)}): it was edited after ` +
+          `${kind} ${id} does not hash to its own key (its record says ${hash}): it was edited after ` +
             `it was filed, so it vouches for nothing — new content needs a new review (re-attest)`,
         );
       }
@@ -290,7 +311,7 @@ export function verifyLedger({ git, rev, concernsBlock }) {
     if (entry && typeof entry === 'object') {
       for (const [k, id] of Object.entries(entry)) cited.add(`${k}:${id}`);
     }
-    const found = citedRecord(ledger, entry);
+    const found = citedRecord(recordKinds, entry);
     if ('error' in found) {
       problems.push(`${path}: ${found.error}`);
       continue;
@@ -320,7 +341,7 @@ export function verifyLedger({ git, rev, concernsBlock }) {
   for (const path of Object.keys(ledger.entries).sort(compareCodeUnits)) {
     if (!blobs.has(path)) problems.push(`${path}: the entry names a path that is not a tracked loop-core file (re-attest to drop it)`);
   }
-  for (const { kind, records } of kinds(ledger)) {
+  for (const { kind, records } of recordKinds) {
     for (const id of Object.keys(records).sort(compareCodeUnits)) {
       if (!cited.has(`${kind}:${id}`)) problems.push(`${kind} ${id} is cited by no entry (re-attest to drop it)`);
     }
@@ -421,9 +442,10 @@ export function seedBaseline(ledger, { commit, commitBlobs, blobs, notes }) {
  */
 export function unvouchedPaths(ledger, blobs) {
   if (!ledger) return [...blobs.keys()].sort(compareCodeUnits);
+  const recordKinds = kinds(ledger);
   return [...blobs.keys()]
     .filter((p) => {
-      const found = citedRecord(ledger, ledger.entries[p]);
+      const found = citedRecord(recordKinds, ledger.entries[p]);
       return 'error' in found || found.record.vouches[p] !== blobs.get(p);
     })
     .sort(compareCodeUnits);

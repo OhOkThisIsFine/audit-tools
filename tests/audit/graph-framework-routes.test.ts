@@ -1,5 +1,9 @@
 import { test, expect } from "vitest";
-import { buildGraphBundle } from "../../src/audit/extractors/graph.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { buildGraphBundle, buildGraphBundleFromFs } from "../../src/audit/extractors/graph.js";
+import { getTreeSitterParser } from "../../src/audit/extractors/analyzers/treeSitter.js";
+import { scratchDir } from "../helpers/scratch.js";
 import {
   extractConventionalRouteEvidence,
   extractFrameworkRouteEvidence,
@@ -275,6 +279,78 @@ test("sibling router identities follow constructor and re-export aliases", () =>
   expect(routesOf(files).filter((r) => r.handler === "app/handlers.py")).toEqual([
     { method: "GET", path: "/orders", handler: "app/handlers.py" },
   ]);
+});
+
+test("filesystem graph uses Python module scope with modern syntax and continued async definitions", async () => {
+  const root = scratchDir("graph-framework-routes-python-scope");
+  await mkdir(join(root, "app"), { recursive: true });
+  const files = {
+    "app/service.py": [
+      "from fastapi import (",
+      "    APIRouter as Router,",
+      ")",
+      'label = f"{payload["("]}"',
+      "if enabled:",
+      "    router = Router(",
+      "        prefix=label,",
+      "    )",
+      "try:",
+      "    alternate = Router()",
+      "except ValueError:",
+      "    alternate = Router()",
+      "async " + "\\",
+      "def helper(",
+      "    current=None,",
+      "):",
+      "    router = object()",
+      "    local = Router()",
+      '    @local.get("/local")',
+      "    def local_handler(): ...",
+      "class Helper:",
+      "    alternate = object()",
+    ].join("\r\n"),
+    "app/handlers.py": [
+      "from . import service as api",
+      '@api.router.get("/orders")',
+      "def orders(): ...",
+      '@api.alternate.get("/alternate")',
+      "def alternate(): ...",
+    ].join("\n"),
+  };
+  await Promise.all(Object.entries(files).map(([path, source]) => writeFile(join(root, path), source)));
+
+  const result = await buildGraphBundleFromFs(manifest(Object.keys(files)), root);
+  expect(result.graphs?.routes).toEqual([
+    { path: "/alternate", method: "GET", handler: "app/handlers.py" },
+    { path: "/orders", method: "GET", handler: "app/handlers.py" },
+  ]);
+});
+
+test("Python route identity falls back when scope evidence is unavailable or the parse is unusable", async () => {
+  const path = "app/handlers.py";
+  const files = { [path]: [
+    "from fastapi import APIRouter",
+    "router = APIRouter()",
+    '@router.get("/orders")',
+    "def orders(): ...",
+    "scoped = APIRouter()",
+    '@scoped.get("/scoped")',
+    "def scoped_route(): ...",
+    "def helper():",
+    "    scoped = object()",
+    "def incomplete(",
+  ].join("\n") };
+  const expected = [{ path: "/orders", method: "GET", handler: path }];
+  expect(routesOf(files)).toEqual(expected);
+
+  const parser = await getTreeSitterParser("python");
+  expect(parser).toBeDefined();
+  try {
+    const result = buildGraphBundle(manifest([path]), undefined, { fileContents: files, pythonRouteParser: parser });
+    expect(result.graphs?.routes).toEqual(expected);
+  } finally {
+    parser?.delete();
+  }
 });
 
 test("unrelated framework imports and comments do not establish router identities", () => {

@@ -22,6 +22,7 @@ export interface TsNode {
   startPosition?: { row: number; column: number };
   endPosition?: { row: number; column: number };
   namedChildren: TsNode[];
+  hasError?: boolean;
   childForFieldName(field: string): TsNode | null;
   descendantsOfType(type: string | string[]): TsNode[];
 }

@@ -189,6 +189,22 @@
         "src/remediate/steps/dispatch/hostHandoff.ts": "6a5a628c22cd6485fa36bcd8a7ed7b3c4a7b5e86"
       }
     },
+    "28c87df21837318a": {
+      "reviewed_by": "audit_recovery_independent",
+      "attester_class": "agent",
+      "checked": "Independent exact source review: cache shape and canonical hash only per invocation and kind; preserve raw citation IDs, own-record lookup, per-path content and verdict checks, diagnostics and counters. Confirmed exact-suite evidence on combined tree.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "1d790ea4a5f495742d35aae7b50d473a1c6f7402",
+        "ran_at": "2026-11-22T16:26:27.424Z"
+      },
+      "attested_at": "2026-11-22T16:27:08.985Z",
+      "vouches": {
+        "scripts/shared/loopCoreAttestationLedger.mjs": "980bc485edb5cea323f05cf00629f8448b1d43bb"
+      }
+    },
     "392554939aa89e3b": {
       "reviewed_by": "a2b9be05ae07da55c-opus-round3",
       "attester_class": "agent",
@@ -819,7 +835,7 @@
       "review": "4318b8e7432c3e06"
     },
     "scripts/shared/loopCoreAttestationLedger.mjs": {
-      "review": "4318b8e7432c3e06"
+      "review": "28c87df21837318a"
     },
     "src/audit/cli/charterClarificationPrompt.ts": {
       "review": "d261aef2988bbeb5"

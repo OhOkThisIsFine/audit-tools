@@ -1,5 +1,6 @@
 import { buildGraphPathIndex, type GraphPathIndex } from "./graphPathIndex.js";
 // sites-pinned: tests/audit/graph-framework-routes.test.ts, tests/audit/graph-edge-cache.test.ts
+import type { TsParser } from "./analyzers/treeSitter.js";
 import { maskCommentSpans } from "./commentDecomposition.js";
 import { pythonLogicalLines, splitPythonImportList, resolvePythonModuleSpecifier } from "./graphPythonImports.js";
 
@@ -67,14 +68,51 @@ const FRAMEWORKS = new Set(["fastapi", "flask", "starlette", "quart", "sanic", "
 const CONSTRUCTORS = new Set(["FastAPI", "APIRouter", "Flask", "Blueprint", "Starlette", "Quart", "Sanic", "Litestar"]);
 type Binding = { kind: "constructor" } | { kind: "router" } | { kind: "alias" | "construct"; target: string };
 
+/** Use only clean grammar evidence; an unavailable or unusable parse keeps the legacy floor. */
+function pythonModuleBindings(source: string, parser?: TsParser): string | undefined {
+  if (!parser) return undefined;
+  try {
+    const tree = parser.parse(source);
+    try {
+      if (tree.rootNode.hasError !== false) return undefined;
+
+      const bindings: string[] = [];
+      const pending = [tree.rootNode];
+      while (pending.length > 0) {
+        const node = pending.pop()!;
+        if (node.type === "function_definition" || node.type === "class_definition") continue;
+        if (node.type === "import_statement" || node.type === "import_from_statement") {
+          bindings.push(node.text);
+          continue;
+        }
+        const children = node.namedChildren;
+        if (node.type === "expression_statement") {
+          // Match only the assignment syntax the legacy resolver handles, not
+          // source lines inside Python strings, parameter lists or expressions.
+          const assignment = children.find((child) => child.type === "assignment");
+          if (assignment) bindings.push(assignment.text.split(/\r?\n/u, 1)[0]!);
+          continue;
+        }
+        for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]!);
+      }
+      return bindings.join("\n");
+    } finally {
+      tree.delete();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 /** Resolve identities once, with a monotone worklist (cycles cannot invent roots). */
-export function pythonRouterIdentities(files: Record<string, string>, lookup: Map<string, string>, pathIndex: GraphPathIndex = buildGraphPathIndex(lookup)): Map<string, Set<string>> {
+export function pythonRouterIdentities(files: Record<string, string>, lookup: Map<string, string>, pathIndex: GraphPathIndex = buildGraphPathIndex(lookup), parser?: TsParser): Map<string, Set<string>> {
   const bindings = new Map<string, Binding>();
   const key = (path: string, name: string): string => `${path}\0${name}`;
   const entries = Object.entries(files).filter(([path]) => /\.py$/i.test(path) && lookup.has(path.toLowerCase()));
   for (const [path, source] of entries) {
     const content = maskCommentSpans(source, path);
-    for (const line of pythonLogicalLines(content)) {
+    const bindingsSource = pythonModuleBindings(source, parser) ?? content;
+    for (const line of pythonLogicalLines(bindingsSource)) {
       const from = /^from\s+([.\w]+)\s+import\s+(.+)$/.exec(line);
       const plain = /^import\s+(.+)$/.exec(line);
       for (const item of splitPythonImportList(from?.[2] ?? plain?.[1] ?? "")) {
@@ -112,6 +150,8 @@ export function pythonRouterIdentities(files: Record<string, string>, lookup: Ma
           kind: "alias", target: module.target + receiver.slice(dot + 1),
         });
       }
+    }
+    for (const line of bindingsSource.split(/\r?\n/)) {
       const assignment = /^\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*(\()?/.exec(line);
       if (assignment) bindings.set(key(path, assignment[1]!), {
         kind: assignment[3] ? "construct" : "alias", target: key(path, assignment[2]!),

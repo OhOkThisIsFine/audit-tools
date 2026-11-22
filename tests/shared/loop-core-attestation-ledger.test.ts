@@ -7,7 +7,7 @@
 // release gates run it — judges the whole tree that landed.
 //
 // Drives the REAL attest hook and the REAL check script in a throwaway repo.
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,8 @@ import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { g as gIn, initGateRepo, runAttest as runAttestIn, STAGED_LOOP_CORE_PATH } from "./pre-commit-gate-harness.js";
 import { catalogGates } from "../../scripts/shared/verify-steps.mjs";
 import { buildPreCommitLegs } from "../../scripts/shared/derived-file-preflight.mjs";
-import { LEDGER_PATH } from "../../scripts/shared/loopCoreAttestationLedger.mjs";
+import { LEDGER_PATH, seedBaseline, serializeLedger, unvouchedPaths, verifyLedger } from "../../scripts/shared/loopCoreAttestationLedger.mjs";
+import * as primitives from "../../scripts/shared/primitives.mjs";
 import { isLoopCorePath } from "../../.claude/hooks/loop-core-patterns.mjs";
 
 const CHECK = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../scripts/check-loop-core-attestations.mjs");
@@ -192,6 +193,44 @@ describe("a baseline records starting content and claims no review", () => {
     const r = check(["--rev", "HEAD"], { GITHUB_REF: "refs/heads/main" });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).toContain("0 loop-core file(s) reviewed; 1 still baseline-only");
+  });
+
+  test("checks a shared record once per invocation without sharing path or later record verdicts", () => {
+    const paths = Array.from({ length: 4 }, (_, i) => `src/shared/engine/fixture-${i}.ts`);
+    const blobs = new Map(paths.map((path) => [path, "1".repeat(40)]));
+    const seeded = seedBaseline(null, { commit: "2".repeat(40), commitBlobs: blobs, blobs });
+    if ("error" in seeded) throw new Error(seeded.error);
+    const { ledger } = seeded;
+    const hash = vi.spyOn(primitives, "hashContent");
+    try {
+      const [first] = paths;
+      const changed = new Map(blobs).set(first, "3".repeat(40));
+      const git = ([command]: string[]) => ({
+        ok: true,
+        stdout: command === "ls-files"
+          ? Array.from(changed, ([path, blob]) => `100644 ${blob} 0\t${path}\0`).join("")
+          : serializeLedger(ledger),
+      });
+      const result = verifyLedger({ git, concernsBlock: true });
+      expect(result.baselineOnly).toBe(3);
+      expect(result.problems).toHaveLength(1);
+      expect(result.problems[0]).toContain(`${first}: content changed since the baseline`);
+      expect(hash).toHaveBeenCalledTimes(1);
+
+      hash.mockClear();
+      expect(unvouchedPaths(ledger, changed)).toEqual([first]);
+      expect(hash).toHaveBeenCalledTimes(1);
+
+      // The old record key now describes different content. No verdict may
+      // survive a call boundary, even when the same ledger object is supplied.
+      const [baseline] = Object.values(ledger.baselines);
+      baseline.vouches[first] = "3".repeat(40);
+      hash.mockClear();
+      expect(unvouchedPaths(ledger, changed)).toEqual(paths);
+      expect(hash).toHaveBeenCalledTimes(1);
+    } finally {
+      hash.mockRestore();
+    }
   });
 
   test("changed content under a baseline entry is refused", () => {

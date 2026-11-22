@@ -18,6 +18,7 @@ import {
   loadFunctionComplexityParsers,
   type FunctionComplexityParsers,
 } from "./analyzers/complexityDuplication.js";
+import { getTreeSitterParser, type TsParser } from "./analyzers/treeSitter.js";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import { buildDispositionMap, isAuditExcludedStatus } from "./disposition.js";
 import {
@@ -95,6 +96,8 @@ export interface BuildGraphBundleOptions {
    * loads them; the synchronous build cannot (grammar loading is async).
    */
   complexityParsers?: FunctionComplexityParsers;
+  /** Optional scope evidence; synchronous callers can keep the legacy lexical floor. */
+  pythonRouteParser?: TsParser;
 }
 
 /** One file's cached per-file edge contribution (everything the per-file loop body produces). */
@@ -587,9 +590,14 @@ export async function buildGraphBundleFromFs(
   }
 
   const complexityParsers = await loadFunctionComplexityParsers();
+  let pythonRouteParser: TsParser | undefined;
   try {
-    return buildGraphBundle(repoManifest, disposition, { ...options, fileContents, complexityParsers });
+    if (Object.keys(fileContents).some((path) => /\.py$/i.test(path))) {
+      pythonRouteParser = await getTreeSitterParser("python");
+    }
+    return buildGraphBundle(repoManifest, disposition, { ...options, fileContents, complexityParsers, pythonRouteParser });
   } finally {
+    pythonRouteParser?.delete();
     for (const parser of Object.values(complexityParsers)) parser?.delete();
   }
 }
@@ -796,7 +804,7 @@ function extractPerFileContribution(
  * (fail-safe) instead of replaying contributions built under different rules.
  */
 // sites-pinned: tests/audit/graph-edge-cache.test.ts
-export const GRAPH_EDGE_CACHE_KEY_VERSION = "v18";
+export const GRAPH_EDGE_CACHE_KEY_VERSION = "v19";
 
 /**
  * The ONE definition of "this file's content was available to the extractors".
@@ -1030,7 +1038,7 @@ export function buildGraphBundle(
       ? options.priorEdgeCache.entries
       : undefined;
   const freshEntries: Record<string, GraphEdgeCacheEntry> = {};
-  const routerIdentities = pythonRouterIdentities(options.fileContents ?? {}, pathLookup, pathIndex);
+  const routerIdentities = pythonRouterIdentities(options.fileContents ?? {}, pathLookup, pathIndex, options.pythonRouteParser);
 
   for (const file of repoManifest.files) {
     const status = dispositionMap.get(file.path);
