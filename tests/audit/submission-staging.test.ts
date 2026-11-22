@@ -201,6 +201,43 @@ test("the recovery sweep quarantines the staged copy when the host has resubmitt
   });
 });
 
+test("restoring an un-applied submission retains a different result already in the bound slot", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    const prior = JSON.stringify({ themes: ["first"] });
+    const current = JSON.stringify({ themes: ["second"] });
+    await writeFile(bound, prior);
+    const tx = createFoldTransaction();
+    await stageLaneSubmission(tx, artifactsDir, LANE);
+    await writeFile(bound, current);
+
+    await commitFold(artifactsDir, {}, tx);
+    expect(await readFile(bound, "utf8")).toBe(current);
+    expect(await readdir(submissionStagingDir(artifactsDir))).toEqual([]);
+    const [saved] = await readdir(join(artifactsDir, "quarantine"));
+    expect(await readFile(join(artifactsDir, "quarantine", saved!), "utf8")).toBe(prior);
+    const outcomes = (await readSubmissionLedger(artifactsDir)).filter((e) => e.kind !== "expected");
+    expect(outcomes.map((e) => e.kind)).toEqual(["rejected"]);
+  });
+});
+
+test("restoring identical bytes is idempotent and leaves the bound result intact", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    const payload = JSON.stringify({ themes: ["same"] });
+    await writeFile(bound, payload);
+    const tx = createFoldTransaction();
+    await stageLaneSubmission(tx, artifactsDir, LANE);
+    await writeFile(bound, payload);
+
+    await recoverStagedSubmissions(artifactsDir);
+    await recoverStagedSubmissions(artifactsDir);
+    expect(await readFile(bound, "utf8")).toBe(payload);
+    expect(await readdir(submissionStagingDir(artifactsDir))).toEqual([]);
+    expect((await readSubmissionLedger(artifactsDir)).filter((e) => e.kind !== "expected")).toEqual([]);
+  });
+});
+
 test("a re-entered commit RESUMES: an entry the first attempt processed is never re-recorded", async () => {
   await withArtifactsDir(async (artifactsDir) => {
     const acceptedLane = GATE_LANES.synthesis_narrative;

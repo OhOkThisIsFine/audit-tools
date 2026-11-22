@@ -30,6 +30,7 @@
  */
 
 import {
+  link,
   mkdir,
   readFile,
   readdir,
@@ -309,13 +310,64 @@ export function markSubmissionApplied(
 // no second bookkeeping call a gate could forget.
 
 /**
- * Fold-start recovery sweep, run under the hold BEFORE the bundle loads: a
- * file still in staging means a previous fold crashed mid-consumption. Restore
- * it to its bound path so the fold re-consumes it; if the host has meanwhile
- * resubmitted over the bound path, quarantine the staged copy instead (the
- * newer submission supersedes the one the crashed fold held) and record the
- * refusal so the supersession is on the ledger, not silent.
+ * Restore complete bytes only into a free bound slot. A rename can replace a
+ * newer result, and a check before rename cannot protect unlocked submitters.
+ * Both paths are under the artifact root. If hard links are unsupported, keep
+ * the staged copy and surface the error rather than falling back to overwrite.
  */
+async function restoreStagedSubmission(
+  artifactsDir: string,
+  lane: string,
+  stagingPath: string,
+  boundPath: string,
+): Promise<void> {
+  try {
+    await link(stagingPath, boundPath);
+  } catch (error) {
+    if (isFileMissingError(error)) {
+      // ENOENT can also mean the bound directory is missing.
+      try {
+        await stat(stagingPath);
+      } catch (statError) {
+        if (isFileMissingError(statError)) return;
+        throw statError;
+      }
+      throw error;
+    }
+    if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+    // A retry after linking but before removing staging sees identical bytes.
+    // An identical resubmission is likewise already available in the slot.
+    let staged: Buffer;
+    try {
+      staged = await readFile(stagingPath);
+    } catch (readError) {
+      if (isFileMissingError(readError)) return;
+      throw readError;
+    }
+    if (!staged.equals(await readFile(boundPath))) {
+      const quarantine = await quarantineSubmissionFile(artifactsDir, stagingPath, lane);
+      await recordLaneOutcome(artifactsDir, lane, {
+        kind: "rejected",
+        issueCode: "submission_rejected",
+        message:
+          `a fold held this submission staged while a newer one arrived at the bound path; ` +
+          `the staged copy is ${quarantineLocationPhrase(quarantine)} and the newer submission is ` +
+          `retained` + quarantineSurvivalNote(quarantine),
+      });
+      if (quarantine.sourceSurvived) {
+        throw new Error("Superseded submission could not leave staging; retry after resolving the filesystem error.");
+      }
+      return;
+    }
+  }
+  try {
+    await unlink(stagingPath);
+  } catch (error) {
+    if (!isFileMissingError(error)) throw error;
+  }
+}
+
+/** Fold-start recovery under the hold, before the staged input can be consumed. */
 // sites-pinned: tests/audit/next-step-question-workload.test.ts
 export async function recoverStagedSubmissions(
   artifactsDir: string,
@@ -331,33 +383,12 @@ export async function recoverStagedSubmissions(
   for (const fileName of entries) {
     const lane = laneFromStagedFileName(fileName);
     if (lane === null || !recoverLane(lane)) continue;
-    const stagingPath = join(submissionStagingDir(artifactsDir), fileName);
-    const boundPath = laneSubmissionPath(artifactsDir, lane);
-    let boundOccupied = true;
-    try {
-      await readFile(boundPath);
-    } catch (error) {
-      if (!isFileMissingError(error)) throw error;
-      boundOccupied = false;
-    }
-    if (boundOccupied) {
-      const quarantine = await quarantineSubmissionFile(
-        artifactsDir,
-        stagingPath,
-        lane,
-      );
-      await recordLaneOutcome(artifactsDir, lane, {
-        kind: "rejected",
-        issueCode: "submission_rejected",
-        message:
-          `a crashed fold held this submission staged while a newer one arrived at the bound path; ` +
-          `the staged copy is ${quarantineLocationPhrase(quarantine)} and the newer submission is ` +
-          `consumed instead` +
-          quarantineSurvivalNote(quarantine),
-      });
-      continue;
-    }
-    await moveFile(stagingPath, boundPath);
+    await restoreStagedSubmission(
+      artifactsDir,
+      lane,
+      join(submissionStagingDir(artifactsDir), fileName),
+      laneSubmissionPath(artifactsDir, lane),
+    );
   }
 }
 
@@ -422,11 +453,7 @@ export async function commitFold(
         ingestHistory,
       );
     } else {
-      try {
-        await moveFile(staged.stagingPath, staged.boundPath);
-      } catch (error) {
-        if (!isFileMissingError(error)) throw error;
-      }
+      await restoreStagedSubmission(artifactsDir, staged.lane, staged.stagingPath, staged.boundPath);
     }
     tx.staged.shift();
   }
