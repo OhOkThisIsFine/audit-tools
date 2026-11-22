@@ -18,8 +18,8 @@
  * This test fails whenever either side diverges from the shared interface:
  *
  *   A. EXHAUSTIVENESS: every kind in runDeterministicForNextStep's return union
- *      is emitted by a row of the dispatch table or by its single documented
- *      fallback. Both sides are IMPORTED from the production modules, never
+ *      is emitted by an explicit dispatch-table row. Both sides are IMPORTED
+ *      from the production modules, never
  *      transcribed — a guard that compares two hand-copied sets agrees with
  *      itself while both drift away from the source it claims to guard.
  *
@@ -46,7 +46,7 @@
  * Finding: N-TEST-SEAM-host-only-next-step
  */
 
-import { test, expect } from "vitest";
+import { test, expect, expectTypeOf } from "vitest";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -126,25 +126,6 @@ const RETURN_KINDS_FROM_NEXT_STEP_HELPERS: ReadonlySet<string> = new Set(
 );
 const CMD_NEXT_STEP_HANDLED_KINDS: ReadonlySet<string> = NEXT_STEP_EMISSION_KINDS;
 
-/**
- * The return kinds the emission table has NO row for, and which therefore reach
- * the scaffold's single `fallback`. nextStepCommand.ts names exactly one such
- * kind (its fallback casts the result to `NextStepResultOf<"semantic_review">`),
- * so this is one name, not a copy of a set — and it is pinned from two sides:
- *
- *   • `satisfies readonly FallbackRoutedKind[]` — a compile error the moment the
- *     table gains a row for this kind (the residual would become `never`);
- *   • A2 below — a runtime failure the moment the residual is anything else,
- *     which is what deleting a real table row produces.
- */
-type FallbackRoutedKind = Exclude<
-  NextStepResult["kind"],
-  keyof typeof NEXT_STEP_EMISSION_TABLE
->;
-const FALLBACK_ROUTED_KINDS = [
-  "semantic_review",
-] as const satisfies readonly FallbackRoutedKind[];
-
 test("A1: the emission table handles no phantom kind absent from the return union", () => {
   for (const kind of CMD_NEXT_STEP_HANDLED_KINDS) {
     expect(
@@ -154,16 +135,12 @@ test("A1: the emission table handles no phantom kind absent from the return unio
   }
 });
 
-test("A2: every return kind is emitted by a table row or the single documented fallback", () => {
-  const residual = [...RETURN_KINDS_FROM_NEXT_STEP_HELPERS]
+test("A2: every declared return kind is emitted by an explicit table row", () => {
+  expectTypeOf<Exclude<NextStepResult["kind"], keyof typeof NEXT_STEP_EMISSION_TABLE>>().toBeNever();
+  const missing = [...RETURN_KINDS_FROM_NEXT_STEP_HELPERS]
     .filter((kind) => !CMD_NEXT_STEP_HANDLED_KINDS.has(kind))
     .sort();
-  expect(
-    residual,
-    `the return kinds with no step-emission row must be exactly the documented fallback kind(s). ` +
-      `A kind that appears here unexpectedly lost its handler; one that disappeared gained a row ` +
-      `without this guard being updated.`,
-  ).toEqual([...FALLBACK_ROUTED_KINDS].sort());
+  expect(missing, "declared return kinds with no explicit step-emission row").toEqual([]);
 });
 
 test("A3: both imported kind sets are non-empty and account for the whole union", () => {
@@ -176,8 +153,8 @@ test("A3: both imported kind sets are non-empty and account for the whole union"
   expect(
     RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size,
     `kind-set size mismatch: the return union has ${RETURN_KINDS_FROM_NEXT_STEP_HELPERS.size} kinds, ` +
-      `the emission table handles ${CMD_NEXT_STEP_HANDLED_KINDS.size} and the fallback ${FALLBACK_ROUTED_KINDS.length}`,
-  ).toBe(CMD_NEXT_STEP_HANDLED_KINDS.size + FALLBACK_ROUTED_KINDS.length);
+      `the emission table handles ${CMD_NEXT_STEP_HANDLED_KINDS.size}`,
+  ).toBe(CMD_NEXT_STEP_HANDLED_KINDS.size);
 });
 
 test("A4: the exported handled-kinds set IS the emission table's own key set", () => {

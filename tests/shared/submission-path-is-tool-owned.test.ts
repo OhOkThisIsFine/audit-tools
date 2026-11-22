@@ -49,8 +49,6 @@ import {
   releaseLock,
   repoRelativePath,
   resolveContainedPath,
-  resolveHostHandoffPaths,
-  hostHandoffResultPath,
   RunLogger,
   submissionPathFor,
   deriveLaneDemand,
@@ -180,24 +178,13 @@ describe("the submission path is tool-owned", () => {
         const contractResult = slashed(step.artifact_paths.contract_results!);
         expect(contractResult).toMatch(/\/submissions\/[0-9a-f]{64}\.json$/);
         expect(writePaths).toContain(contractResult);
-        const workloadPath = step.artifact_paths.host_workload;
-        expect(workloadPath, "ready scoped inspection should accompany the architecture lane").toBeTruthy();
-        const workload = JSON.parse(await readFile(workloadPath!, "utf8")) as {
-          run_id: string; work_items: Array<{ id: string; result_path: string }>;
-        };
-        const boundPaths = resolveHostHandoffPaths({ root, artifactsDir, runId: workload.run_id, runDirSegments: [] });
-        expect(slashed(workloadPath!)).toBe(slashed(boundPaths.workloadPath));
-        const inspectionResults = workload.work_items.map(item => {
-          const expected = hostHandoffResultPath(boundPaths, item.id);
-          expect(item.result_path).toBe(expected);
-          return slashed(resolveContainedPath(root, expected, "inspection result"));
-        });
-        expect(inspectionResults.length).toBeGreaterThan(0);
         expect(new Set(writePaths)).toEqual(new Set([contractResult]));
-        for (const writePath of inspectionResults) {
-          expect(writePath).toMatch(/\/host-results\/[0-9a-f]{64}\.json$/);
+        // Architecture runs before the current question frontier. Its review
+        // must not expose a question worklist, result paths, or the ledger.
+        expect(step.artifact_paths.host_workload).toBeUndefined();
+        for (const text of [packetText, hostPromptText]) {
+          expect(text).not.toMatch(/host-workload\.json|host-results|host-accepted-results-ledger\.json/u);
         }
-        expect(packetText, "the blind architectural packet must not include the scoped workload").not.toContain(workloadPath);
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }

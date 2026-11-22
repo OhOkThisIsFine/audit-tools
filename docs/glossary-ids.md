@@ -31,8 +31,8 @@ is deleted too.
 | INV-O2 | Immutable audit-result ledger records plus versioned intent/result baselines. | `src/audit/orchestrator/resultBaseline.ts`; `src/audit/orchestrator/intentCheckpointGate.ts`; `src/audit/types/artifactMetadata.ts` |
 | INV-PENDING-SINGLE-SOURCE | One pending-task partition feeds both audit workload emission and completion state. | `src/audit/orchestrator/pendingTasks.ts`; `src/audit/orchestrator/state.ts` |
 | INV-PHASE | Lower remediation phases complete before higher phases become ready. | `src/remediate/steps/nextStep.ts` |
-| INV-PLAN-FROZEN-ESTIMATES | Planned audit tasks persist provider-neutral token and risk estimates. | `src/audit/orchestrator/planningExecutors.ts` |
-| INV-PLAN-PERSIST-COMPLETE | Audit planning persists the complete merged task set used by later workload emission. | `src/audit/orchestrator/planningExecutors.ts` |
+| INV-PLAN-FROZEN-ESTIMATES | Historical per-file planner invariant; retired when questions replaced file tasks. | Retired |
+| INV-PLAN-PERSIST-COMPLETE | Audit planning persists the complete, snapshot-bound question plan before later workload emission. | `src/audit/orchestrator/questionPlanExecutor.ts`; `src/audit/cli/questionWorkloadBindings.ts` |
 | INV-RCI | The generated OpenCode permission ceiling is the deterministic union of agent rules. | `src/shared/opencodePermissions.ts` |
 | INV-READY-STEP-CONTINUATION | A ready audit step that requests another advance carries the executable continuation command. | `src/audit/cli/nextStepCommand.ts` |
 | INV-RNF-NO-CANONICAL-PAIR-WRITE | The remediate next-step module writes the canonical `.audit-tools/audit-findings.json` + `audit-report.md` pair nowhere; autonomous leftover deliverables land on remediation-owned paths, so a remediation run can never destructively overwrite the audit deliverables it consumes. | `src/remediate/steps/nextStep.ts` |

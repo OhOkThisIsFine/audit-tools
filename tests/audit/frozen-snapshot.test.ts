@@ -1,17 +1,17 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { expect, test } from "vitest";
 import { hashContent } from "audit-tools/shared";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { advanceToDispatchReady, callNextStep } from "./helpers/completion-harness.js";
+import { readAcceptedAnswers, readQuestionWorkload } from "./helpers/question-completion-harness.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import { git } from "./helpers/submoduleRepo.mjs";
 import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepCommand.js";
 import { countLines } from "../../src/audit/cli/args.js";
 import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
-import { cmdValidateResults } from "../../src/audit/cli/validateResultsCommand.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
-import { buildSyntheticResults } from "./helpers/fixture.mjs";
-import { captureConsole } from "./helpers/captureConsole.mjs";
 import { existsSync } from "node:fs";
 
 // The frozen-snapshot property (docs/backlog/forward-tracks.md): no edit to the
@@ -24,7 +24,7 @@ test.each(["git", "non-git"])("a live edit during a run leaves the run's inputs 
       await git(root, ["add", "-A"]);
       await git(root, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "fixture"]);
     }
-    expect((await advancePastDesignReview(root)).step_kind).toBe("dispatch_review");
+    expect((await advanceToDispatchReady(root)).step_kind).toBe("dispatch_review");
     const artifactsDir = join(root, ".audit-tools", "audit");
     const source = join(root, "src", "api", "auth.ts");
     const atStart = hashContent(await readFile(source));
@@ -44,60 +44,59 @@ test.each(["git", "non-git"])("a live edit during a run leaves the run's inputs 
   });
 });
 
-// The host side of the same property: a work item names the snapshot, and its
-// result is judged (line counts, cited text) against the snapshot — so a live
-// edit after run start neither misdirects the lane nor refuses its honest result.
-test("a host result measured against the snapshot is accepted after the live file changed", async () => {
+// Two independently issued questions share the same frozen file. The
+// unchanged source span is accepted, while the new live-only span is not.
+test("bound question source spans are measured against the frozen snapshot, not the live edit", async () => {
   await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
+    const path = "src/api/auth.ts";
     const artifactsDir = join(root, ".audit-tools", "audit");
+    const step = await advanceToDispatchReady(root);
+    const workload = await readQuestionWorkload(step);
     const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
-    const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
-    const item = workload.work_items.find((entry: { scope: { files: string[] } }) => entry.scope.files.includes("src/api/auth.ts"));
-    expect(item.prompt.text).toContain(sourceRoot.replace(/\\/g, "/"));
-    const fileCoverage = await Promise.all(item.scope.files.map(async (path: string) => {
-      const lines = await countLines(join(sourceRoot, path));
-      return { path, reviewed_lines: lines, total_lines: lines };
+    const frozen = await countLines(join(sourceRoot, path));
+    const durableWorkload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
+    expect(durableWorkload.source_root).toBe(sourceRoot.replace(/\\/g, "/"));
+    expect(durableWorkload.source_files).toContainEqual(expect.objectContaining({
+      path, line_count: frozen, fingerprint: hashContent(await readFile(join(sourceRoot, path))),
     }));
-    // The live file gains ten lines AFTER the snapshot — a material divergence, so a
-    // live-root line count would refuse the result.
-    const live = join(root, "src", "api", "auth.ts");
+    const picked = workload.work_items.filter(({ binding }) => binding.assignment.suggested_sources
+      .some(ref => ref.path === path));
+    expect(picked.length).toBeGreaterThanOrEqual(2);
+    const live = join(root, path);
     await writeFile(live, (await readFile(live, "utf8")) + "export const extra = 1;\n".repeat(10));
-    await writeFile(join(root, item.result_path), JSON.stringify({ contract_version: "audit-host-result/v1alpha1",
-      result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`, run_id: workload.run_id,
-      work_item_id: item.id, prompt_sha256: item.prompt.sha256, file_coverage: fileCoverage, findings: [] }));
-    await runDeterministicForNextStep({ root, artifactsDir, selfCliPath: "audit-code", timeoutMs: 30_000,
-      narrativeEnabled: false, graphLlmEdgeReasoning: false,
-      analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
-    expect((await loadArtifactBundle(artifactsDir)).audit_results?.length).toBeGreaterThan(0);
-  });
-});
 
-// The standalone validator judges a result by the same frozen tree: a live edit
-// after run start does not turn an honest snapshot-measured result into an error.
-test("validate-results measures line counts against the run's snapshot", async () => {
-  await withTempRepo(async (root) => {
-    await advancePastDesignReview(root);
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
-    const tasks = (await loadArtifactBundle(artifactsDir)).audit_tasks ?? [];
-    expect(tasks.length).toBeGreaterThan(0);
-    const lineIndex: Record<string, number> = {};
-    for (const path of new Set(tasks.flatMap((task) => task.file_paths))) lineIndex[path] = await countLines(join(sourceRoot, path));
-    const live = join(root, "src", "api", "auth.ts");
-    await writeFile(live, (await readFile(live, "utf8")) + "export const extra = 1;\n".repeat(10));
-    const resultsPath = join(root, "results.json");
-    await writeFile(resultsPath, JSON.stringify(buildSyntheticResults(tasks, lineIndex)));
-    const { stdout } = await captureConsole(() => cmdValidateResults(["--root", root, "--results", resultsPath]));
-    const report = JSON.parse(stdout) as { issues: Array<{ severity: string; message: string }> };
-    expect(report.issues.filter((issue) => /line/i.test(issue.message))).toEqual([]);
+    async function put(item: typeof picked[number], line: number): Promise<ReviewSubmission> {
+      const { question, assignment } = item.binding;
+      const ref = { path, start_line: line };
+      const identity = { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: question.question_id,
+        revision_id: question.revision_id, snapshot_id: question.snapshot_id } as const;
+      const part_id = question.requested_parts[0]!.part_id;
+      const answer: ReviewSubmission = {
+        ...identity, assignment_id: assignment.assignment_id, submission_id: "fixture-" + assignment.assignment_id,
+        inspected_sources: [ref], evidence_ids: [], limitations: [],
+        answer: { outcome: "clean", findings: [],
+          parts: [{ part_id, outcome: "clean", observation_ids: ["seen"] }],
+          observations: [{ ...identity, observation_id: "seen", part_id, kind: "source_confirmed",
+            statement: "Synthetic frozen source observation", source_refs: [ref], evidence_refs: [] }],
+        },
+      };
+      const target = resolve(root, item.result_path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, JSON.stringify(answer));
+      return answer;
+    }
+    const accepted = await put(picked[0]!, 1);
+    await put(picked[1]!, frozen + 1);
+    const resumed = await callNextStep(root, artifactsDir);
+    expect(resumed.step_kind).toBe("dispatch_review");
+    expect(resumed.progress.summary).toContain("Could not accept 1 saved question result");
+    expect(await readAcceptedAnswers(artifactsDir, workload.run_id)).toEqual([accepted]);
   });
 });
 
 test("cleanup removes the run's snapshot with its artifacts dir", async () => {
   await withTempRepo(async (root) => {
-    await advancePastDesignReview(root);
+    await advanceToDispatchReady(root);
     const artifactsDir = join(root, ".audit-tools", "audit");
     const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as { source_root: string };
     expect(existsSync(sourceRoot)).toBe(true);

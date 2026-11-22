@@ -167,6 +167,7 @@ export const SubmittedDesignFindingSchema = FindingSchema.omit({
   severity_downgraded_from: true,
   evidence_lane: true,
   lead_lineage: true,
+  question_review_sources: true,
 });
 
 export const ConceptualFinalFindingShareSchema = z
@@ -349,6 +350,7 @@ const TOOL_OWNED_FINDING_VERDICTS = [
   "verification_status",
   "evidence_lane",
   "lead_lineage",
+  "question_review_sources",
 ] as const;
 
 /**

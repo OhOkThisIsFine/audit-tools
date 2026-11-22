@@ -1,9 +1,10 @@
 // sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts, tests/audit/seam-atomic-promote-findings.test.ts
-import type { ZodTypeAny } from "zod";
-import { AuditTaskSchema, AuditResultSchema, CoverageMatrixSchema } from "../types.js";
-import { cp, readFile, unlink } from "node:fs/promises";
+import { z, type ZodTypeAny } from "zod";
+import { cp, lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { errorMessage } from "../../shared/io/json.js";
+import { hashContent } from "../../shared/hash.js";
+import { auditRunConsentPath } from "../../shared/analyzerRunConsent.js";
 import {
   AuditFindingsReportSchema,
   AUDIT_REPORT_FILENAME,
@@ -54,6 +55,12 @@ import type { CharterClarificationRegister } from "../types/charterClarification
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
+import { ReviewPlanSchema, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
+import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
+import { readVerifiedCharterPacketIndex } from "../orchestrator/charterPacketArchive.js";
+import { renderAuditReportMarkdown, type RenderAuditReportOptions } from "../reporting/synthesis.js";
+import { readQuestionReviewRunId } from "../cli/questionReviewSession.js";
+import { stableStringify } from "audit-tools/shared";
 import type { ToolingManifest } from "../types/toolingManifest.js";
 import {
   loadDesignReviewSnapshots,
@@ -70,18 +77,15 @@ import {
   isFileMissingError,
   parseReflectionsNdjson,
   readOptionalJsonFile,
-  readOptionalNdjsonFile,
   readOptionalTextFile,
   reportDiscardedReflections,
   throwOnSchemaVersionMismatch,
   writeJsonFile,
-  writeNdjsonFile,
   writeTextFile,
   type AgentReflection,
 } from "audit-tools/shared";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../types/charterRegister.js";
 import { buildToolingManifest } from "./toolingManifest.js";
-import { canonicalizeAffinityArtifactValue } from "../../shared/affinityArtifacts.js";
 
 // ---------------------------------------------------------------------------
 // Schema-version guard (ARC-dd468422)
@@ -124,6 +128,7 @@ type ArtifactPayloadMap = {
 
   // --- Phase 3: Audit execution ---
   scope: AuditScopeManifest;
+  review_plan: ReviewPlan;
   coverage_matrix: CoverageMatrix;
   runtime_validation_tasks: RuntimeValidationTaskManifest;
   runtime_validation_report: RuntimeValidationReport;
@@ -159,6 +164,8 @@ type ArtifactPayloadMap = {
  * delete a file the orchestrator does not own).
  */
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
+  /** Transient projection from the one accepted ledger, owned by this fold. */
+  question_cycle?: Awaited<ReturnType<typeof import("../cli/questionReviewCycle.js").deriveQuestionCycleUnlocked>>;
   agent_reflections?: AgentReflection[];
   /**
    * The design-review pass snapshots (B2 parity port), keyed by pass. Loaded
@@ -243,30 +250,6 @@ function jsonArtifact<K extends ArtifactBundleKey>(
   };
 }
 
-function ndjsonArtifact<K extends ArtifactBundleKey>(
-  fileName: string,
-  phase: ArtifactPhase,
-  schema?: ZodTypeAny,
-): ArtifactDefinition<K> {
-  type NdjsonItem = ArtifactPayloadMap[K] extends Array<infer Item>
-    ? Item
-    : never;
-  const validate = schema ? (value: unknown): void => { schema.parse(value); } : undefined;
-  return {
-    fileName,
-    phase,
-    validate,
-    read: (path) =>
-      readOptionalNdjsonFile<NdjsonItem>(path) as Promise<
-        ArtifactPayloadMap[K] | undefined
-      >,
-    write: async (path, value) => {
-      validate?.(value);
-      await writeNdjsonFile(path, value as NdjsonItem[]);
-    },
-  };
-}
-
 function textArtifact<K extends ArtifactBundleKey>(
   fileName: string,
   phase: ArtifactPhase,
@@ -289,7 +272,6 @@ export const ARTIFACT_DEFINITIONS = {
   surface_manifest: jsonArtifact("surface_manifest.json", "analysis"),
   critical_flows: jsonArtifact("critical_flows.json", "analysis"),
   critical_flow_fallback: jsonArtifact("critical-flow-fallback.json", "analysis"),
-  flow_coverage: jsonArtifact("flow_coverage.json", "analysis"),
   risk_register: jsonArtifact("risk_register.json", "analysis"),
   git_history: jsonArtifact("git_history.json", "analysis"),
   design_assessment: jsonArtifact("design_assessment.json", "analysis"),
@@ -307,15 +289,6 @@ export const ARTIFACT_DEFINITIONS = {
   systemic_challenge: jsonArtifact("systemic_challenge.json", "analysis"),
   analyzer_capability: jsonArtifact("analyzer_capability.json", "analysis"),
   scope: jsonArtifact("scope.json", "execution"),
-  coverage_matrix: jsonArtifact("coverage_matrix.json", "execution", CoverageMatrixSchema),
-  runtime_validation_tasks: jsonArtifact(
-    "runtime_validation_tasks.json",
-    "execution",
-  ),
-  runtime_validation_report: jsonArtifact(
-    "runtime_validation_report.json",
-    "execution",
-  ),
   external_analyzer_results: jsonArtifact(
     "external_analyzer_results.json",
     "execution",
@@ -328,22 +301,23 @@ export const ARTIFACT_DEFINITIONS = {
     "syntax_resolution_status.json",
     "execution",
   ),
-  audit_results: ndjsonArtifact("audit_results.jsonl", "execution", AuditResultSchema.array()),
-  audit_tasks: jsonArtifact("audit_tasks.json", "execution", AuditTaskSchema.array()),
-  audit_plan_metrics: jsonArtifact("audit_plan_metrics.json", "execution"),
-  task_affinity_graph: jsonArtifact("task_affinity_graph.json", "execution"),
-  requeue_tasks: jsonArtifact("requeue_tasks.json", "execution", AuditTaskSchema.array()),
+  review_plan: jsonArtifact("review_plan.json", "execution", ReviewPlanSchema),
   audit_report: textArtifact(AUDIT_REPORT_FILENAME, "reporting"),
-  audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting", AuditFindingsReportSchema),
+  audit_findings: jsonArtifact(AUDIT_FINDINGS_FILENAME, "reporting", z.union([
+    QuestionAuditFindingsReportSchema,
+    AuditFindingsReportSchema.refine((report) => report.contract_version !== QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION),
+  ])),
   synthesis_narrative: jsonArtifact("synthesis-narrative.json", "reporting"),
   audit_state: jsonArtifact("audit_state.json", "supervisor"),
   artifact_metadata: jsonArtifact("artifact_metadata.json", "supervisor"),
   tooling_manifest: jsonArtifact("tooling_manifest.json", "supervisor"),
-} as const satisfies { [K in ArtifactBundleKey]: ArtifactDefinition<K> };
+} as const satisfies Partial<{ [K in ArtifactBundleKey]: ArtifactDefinition<K> }>;
+
+type ActiveArtifactKey = keyof typeof ARTIFACT_DEFINITIONS;
 
 type ArtifactDefinitionEntry = {
-  [K in ArtifactBundleKey]: [K, ArtifactDefinition<K>];
-}[ArtifactBundleKey];
+  [K in ActiveArtifactKey]: [K, ArtifactDefinition<K>];
+}[ActiveArtifactKey];
 
 const ARTIFACT_ENTRIES = Object.entries(
   ARTIFACT_DEFINITIONS,
@@ -380,6 +354,12 @@ export async function loadArtifactBundle(
     }
   }
 
+  if (bundle.review_plan !== undefined) {
+    bundle.review_plan = ReviewPlanSchema.parse(bundle.review_plan);
+    if (bundle.audit_findings !== undefined) {
+      bundle.audit_findings = QuestionAuditFindingsReportSchema.parse(bundle.audit_findings);
+    }
+  }
   bundle.tooling_manifest = await buildToolingManifest();
 
   // Design-review snapshots (B2 parity port): loaded specially so
@@ -471,11 +451,7 @@ export async function writeCoreArtifacts(
     const value = bundleRecord[key];
     const path = join(root, definition.fileName);
     if (value !== undefined) {
-      const canonicalValue = canonicalizeAffinityArtifactValue(
-        definition.fileName,
-        value,
-      );
-      await definition.write(path, canonicalValue as never);
+      await definition.write(path, value as never);
     } else if (options.prune) {
       // The bundle is authoritative. An executor that clears an artifact to
       // `undefined` (to force a downstream rebuild — e.g. planning/ingestion
@@ -545,6 +521,89 @@ async function archiveVerified(
   return verifyArchivedBytes(to, sourceBytes);
 }
 
+// Archive-only v1 bytes; never load these into an active question bundle.
+const RETIRED_RUN_FILES = [
+  "audit_plan_metrics.json",
+  "audit_results.jsonl",
+  "audit_tasks.json",
+  "coverage_matrix.json",
+  "flow_coverage.json",
+  "requeue_tasks.json",
+  "runtime_validation_report.json",
+  "runtime_validation_tasks.json",
+  "task_affinity_graph.json",
+] as const;
+
+// sites-pinned: tests/audit/rollover-legacy-archive.test.ts
+async function optionalArchiveStat(path: string) {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (!isFileMissingError(error)) throw error;
+    return undefined;
+  }
+}
+
+async function ensurePlainArchiveDir(path: string, verifyOnly: boolean): Promise<void> {
+  if (!verifyOnly && !(await optionalArchiveStat(path))) await mkdir(path);
+  if (!(await lstat(path)).isDirectory()) throw new Error(`Not an archive directory: ${path}`);
+}
+
+/** Archive-only v1 bytes. Never feed these files back into an audit bundle. */
+async function archiveRetiredRunFiles(
+  artifactsDir: string,
+  outputDir: string,
+  copy: typeof cp,
+  verifyOnly: boolean,
+): Promise<void> {
+  const sources: Array<{ name: string; path: string }> = [];
+  for (const name of RETIRED_RUN_FILES) {
+    const path = join(artifactsDir, name);
+    const stat = await optionalArchiveStat(path);
+    if (!stat) continue;
+    if (!stat.isFile()) throw new Error(`Not a regular historical file: ${path}`);
+    sources.push({ name, path });
+  }
+  if (sources.length === 0) return;
+
+  const consentPath = auditRunConsentPath(artifactsDir);
+  const consentStat = await optionalArchiveStat(consentPath);
+  if (consentStat && !consentStat.isFile()) throw new Error("Run identity is not a regular file");
+  const runId: unknown = consentStat ? JSON.parse(await readFile(consentPath, "utf8"))?.run_id : undefined;
+  if (runId !== undefined && !z.string().uuid().safeParse(runId).success) {
+    throw new Error("Historical audit run identity is not a UUID");
+  }
+  const archiveId = typeof runId === "string" ? runId.toLowerCase() : `legacy-${hashContent(JSON.stringify(
+    await Promise.all(sources.map(async ({ name, path }) => [name, hashContent(await readFile(path))])),
+  ))}`;
+  const archiveRoot = join(outputDir, "archive");
+  const runArchive = join(archiveRoot, archiveId);
+  if (!(await lstat(outputDir)).isDirectory()) throw new Error(`Not an archive parent directory: ${outputDir}`);
+  await ensurePlainArchiveDir(archiveRoot, verifyOnly);
+  await ensurePlainArchiveDir(runArchive, verifyOnly);
+  for (const { name, path } of sources) {
+    const target = join(runArchive, name);
+    const prior = await optionalArchiveStat(target);
+    if (prior && !prior.isFile()) throw new Error(`Not a regular historical archive member: ${target}`);
+    const mismatch = prior || verifyOnly
+      ? await verifyArchivedBytes(target, await readFile(path))
+      : await archiveVerified((from, to) => copy(from, to, { force: false, errorOnExist: true }), path, target);
+    if (mismatch) throw new Error(mismatch);
+  }
+}
+
+
+/** The junk-dir sweep cannot infer custody from a not_started state marker. */
+export async function retiredRunEvidenceIsArchived(artifactsDir: string): Promise<boolean> {
+  try {
+    await archiveRetiredRunFiles(artifactsDir, dirname(promotedAuditReportPath(artifactsDir)), cp, true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
 /**
  * Archive the run's append-only diagnostics one level up — agent feedback,
  * friction records and the submission ledger — and name every member that did
@@ -557,6 +616,7 @@ export async function archiveRunDiagnostics(params: {
 }, options: {
   copy?: typeof cp;
   warn?: (message: string) => void;
+  verifyOnly?: boolean;
 } = {}): Promise<{ lost: string[]; ledger_dropped: SubmissionLedgerDrop[] }> {
   const lost: string[] = [];
   const destination = promotedAuditReportPath(params.artifactsDir);
@@ -661,6 +721,13 @@ export async function archiveRunDiagnostics(params: {
       );
     }
   }
+  try {
+    await archiveRetiredRunFiles(
+      params.artifactsDir, dirname(destination), copy, options.verifyOnly === true,
+    );
+  } catch (error) {
+    lost.push(`historical audit evidence (${errorMessage(error)})`);
+  }
   return { lost, ledger_dropped: [...ledgerDropped] };
 }
 
@@ -679,6 +746,7 @@ export async function promoteFinalAuditReport(params: {
 }, options: {
   copy?: typeof cp;
   warn?: (message: string) => void;
+  verifyOnly?: boolean;
 } = {}): Promise<{
   promoted: boolean;
   /** Every archive member is verified one level up (INV 1). */
@@ -700,6 +768,11 @@ export async function promoteFinalAuditReport(params: {
 }> {
   const lost: string[] = [];
   const source = auditReportPath(params.artifactsDir);
+  if (!(await hasCurrentQuestionReport(params.artifactsDir))) {
+    const warning = "Current question review has no valid matching machine report; promotion refused.";
+    options.warn?.(warning);
+    return { promoted: false, archived: false, warning };
+  }
   const destination = promotedAuditReportPath(params.artifactsDir);
   const copy = options.copy ?? cp;
   const warn = options.warn ?? ((message) => process.stderr.write(`${message}\n`));
@@ -742,7 +815,7 @@ export async function promoteFinalAuditReport(params: {
       );
     }
   }
-  const diagnostics = await archiveRunDiagnostics({ artifactsDir: params.artifactsDir }, { copy, warn });
+  const diagnostics = await archiveRunDiagnostics({ artifactsDir: params.artifactsDir }, { copy, warn, verifyOnly: options.verifyOnly });
   lost.push(...diagnostics.lost);
   const ledgerDropped = diagnostics.ledger_dropped;
   const dropped = ledgerDropped.length > 0 ? { ledger_dropped: ledgerDropped } : {};
@@ -779,6 +852,91 @@ export async function promoteFinalAuditReport(params: {
  * A missing in-place member of the tolerant set (findings, feedback, ledger,
  * friction records) is what promotion itself tolerates: nothing to archive.
  */
+export async function readQuestionReportReflections(artifactsDir: string): Promise<AgentReflection[]> {
+  const feedback = await readOptionalTextFile(join(artifactsDir, AGENT_FEEDBACK_FILENAME));
+  return feedback === undefined ? [] : parseReflectionsNdjson(feedback).reflections;
+}
+
+export type QuestionReportCharterOptions = Pick<RenderAuditReportOptions,
+  "charter_evidence_coverage" | "charter_packet_archive">;
+
+export async function readQuestionReportCharterOptions(
+  artifactsDir: string,
+): Promise<QuestionReportCharterOptions> {
+  const registry = discardOnSchemaVersionMismatch(
+    await readOptionalJsonFile<CharterRegister>(join(artifactsDir, "charter_register.json")),
+    CHARTER_REGISTER_SCHEMA_VERSION);
+  return {
+    charter_evidence_coverage: registry?.evidence_coverage,
+    charter_packet_archive: await readVerifiedCharterPacketIndex(artifactsDir),
+  };
+}
+
+/** A surviving working machine contract still identifies the run even if its plan and session were lost. */
+export async function hasWorkingQuestionReportMarker(artifactsDir: string): Promise<boolean> {
+  const raw = await readOptionalJsonFile<unknown>(auditFindingsPath(artifactsDir));
+  return z.object({ contract_version: z.literal(QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) }).safeParse(raw).success;
+}
+
+// null denotes a legacy run without any question markers; undefined means a v2 mismatch.
+async function expectedQuestionMarkdown(artifactsDir: string): Promise<string | null | undefined> {
+  const unparsed = await readOptionalJsonFile<unknown>(join(artifactsDir, ARTIFACT_DEFINITIONS.review_plan.fileName));
+  if (unparsed === undefined) {
+    const questionRun = await readQuestionReviewRunId(artifactsDir, { includeEnded: true }) ||
+      await hasWorkingQuestionReportMarker(artifactsDir);
+    return questionRun ? undefined : null;
+  }
+  const plan = ReviewPlanSchema.safeParse(unparsed);
+  if (!plan.success) return undefined;
+  const report = QuestionAuditFindingsReportSchema.safeParse(await readOptionalJsonFile<unknown>(auditFindingsPath(artifactsDir)));
+  if (!report.success || report.data.question_review.snapshot_id !== plan.data.snapshot_id) return undefined;
+  const revisions = new Map(report.data.question_review.questions.map(q => [q.question_id, q.revision_id]));
+  if (revisions.size !== plan.data.questions.length ||
+      !plan.data.questions.every(q => revisions.get(q.question_id) === q.revision_id)) return undefined;
+  const runId = await readQuestionReviewRunId(artifactsDir, { includeEnded: true });
+  if (!runId) return undefined;
+  const ledger = await readOptionalJsonFile<{
+    contract_version: string; run_id: string; answers: unknown[]; adjudications: unknown[]; consolidations?: unknown[];
+  }>(join(artifactsDir, "runs", runId, "host-accepted-results-ledger.json"));
+  if (ledger !== undefined && (ledger.contract_version !== "audit-tools/question-review/v1" ||
+      ledger.run_id !== runId || !Array.isArray(ledger.answers) || !Array.isArray(ledger.adjudications) ||
+      (ledger.consolidations !== undefined && !Array.isArray(ledger.consolidations)))) return undefined;
+  const sorted = (rows: readonly unknown[]) => rows.map(row => stableStringify(row)).sort();
+  const actual = report.data.question_review;
+  if (stableStringify(sorted(actual.accepted)) !== stableStringify(sorted(ledger?.answers ?? [])) ||
+      stableStringify(sorted(actual.adjudications)) !== stableStringify(sorted(ledger?.adjudications ?? [])) ||
+      stableStringify(sorted(actual.consolidations)) !== stableStringify(sorted(ledger?.consolidations ?? []))) return undefined;
+  return renderAuditReportMarkdown(report.data, {
+    reflections: await readQuestionReportReflections(artifactsDir),
+    ...await readQuestionReportCharterOptions(artifactsDir),
+  });
+}
+
+export async function hasCurrentQuestionReport(artifactsDir: string): Promise<boolean> {
+  const expected = await expectedQuestionMarkdown(artifactsDir);
+  return expected === null || (expected !== undefined &&
+    await readOptionalTextFile(auditReportPath(artifactsDir)) === expected);
+}
+
+/** Rollover holds the artifact-tree lock. An ended v2 run no longer has a
+ * frozen checkout: refresh only the human render from the verified promoted
+ * machine report and current render-only evidence, without rewriting the
+ * accepted ledger, question plan, or machine report. */
+export async function refreshEndedQuestionReport(artifactsDir: string): Promise<boolean> {
+  const expected = await expectedQuestionMarkdown(artifactsDir);
+  if (expected === null) return true;
+  if (expected === undefined) return false;
+  const working = await readFile(auditFindingsPath(artifactsDir));
+  if (await verifyArchivedBytes(promotedAuditFindingsPath(artifactsDir), working) !== null) return false;
+
+  const workingReport = auditReportPath(artifactsDir);
+  const promotedReport = promotedAuditReportPath(artifactsDir);
+  if (await readOptionalTextFile(workingReport) !== expected) await writeTextFile(workingReport, expected);
+  if (await readOptionalTextFile(promotedReport) !== expected) await writeTextFile(promotedReport, expected);
+  return await verifyArchivedBytes(workingReport, Buffer.from(expected)) === null &&
+    await verifyArchivedBytes(promotedReport, Buffer.from(expected)) === null;
+}
+
 export async function isWorkingDirFullyPromoted(artifactsDir: string): Promise<boolean> {
   const verifyOnly: typeof cp = async (from, to) => {
     // ENOENT from the SOURCE propagates as-is: promotion's own catch reads it as
@@ -801,7 +959,7 @@ export async function isWorkingDirFullyPromoted(artifactsDir: string): Promise<b
   };
   const result = await promoteFinalAuditReport(
     { artifactsDir },
-    { copy: verifyOnly, warn: () => {} },
+    { copy: verifyOnly, warn: () => {}, verifyOnly: true },
   );
   return result.promoted && result.archived;
 }

@@ -48,7 +48,6 @@ const SuggestedInputSchema = z
     flag: z.enum([
       "--results",
       "--batch-results",
-      "--updates",
       "--external-analyzer-results",
     ]),
     suggested_path: z.string(),

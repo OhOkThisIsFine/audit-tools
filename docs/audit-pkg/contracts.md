@@ -102,9 +102,8 @@ Missing, malformed or differently bound reports return to this entry step;
 
 An independence-required review prompt asks for `review-submission/v1`, containing
 its exact `prompt_sha256`, a `review` declaration (`mode` and `reason`), and the
-complete domain object in `result`. Do not send that envelope to an ordinary
-workload item unless its own prompt asks for it. It is distinct from the
-`audit-host-result/v1alpha1` work-item contract below.
+complete domain object in `result`. Use this only when the current step asks for
+it, not for ordinary question answers.
 
 The tool's current binding determines the requirement. An independent lane cannot
 accept `degraded` or `unavailable` as success; explicitly permitted light remediation
@@ -125,33 +124,28 @@ binding before acceptance. Review does not replace commit, scope, test or
 obligation-evidence checks. Its run choice and result/contract binding cannot be
 disabled by changing a copied checkpoint.
 
-## Provider-neutral host workload
+## Current question review
 
-When semantic review is ready, audit-tools writes a complete
-`audit-host-workload` artifact (revision defined by `WORKLOAD_CONTRACT_VERSION` in
-`src/audit/cli/dispatch/hostHandoff.ts`). Each work item contains:
+An ordinary `question_review` step publishes provider-neutral assignments. Read
+the prompt named by `audit-code next-step` for the current workload and exact
+submission binding. Answer the issued question and its requested parts; the files
+suggested by the assignment help locate evidence, but reading a file is not an
+answer by itself. State limitations and use the inconclusive outcome when
+evidence is insufficient. Treat analyzer leads as leads, and do not label a
+static inference as an executed observation.
 
-- a stable id and lens
-- the shared provider-neutral lane demand ranking (size, complexity, risk) beside
-  a deterministic token estimate
-- the complete prompt text plus its SHA-256 binding
-- the file and unit scope
-- the repository-contained result path
+Submit the bound answer with
+`audit-code submit --work-item <id> --from <file>`, or the equivalent host tool
+when the prompt directs you to it. The submission binds the assignment,
+question, revision, and snapshot; do not reuse an old answer by editing its IDs.
+Then call `audit-code next-step` to continue. No backend, model, routing, or quota
+configuration belongs in the answer.
 
-A `v1alpha1` workload — which carried a `{complexity, risk}` pair instead of the
-demand ranking — refuses closed as STALE (`workload_stale`): its work items
-cannot be re-derived against the current builder, so no submission can be
-accepted against it. Re-prepare the handoff to publish a current workload.
+## Legacy ingestion reference
 
-A companion `audit-host-result-map/v1alpha1` binds each work-item id, prompt
-digest, and result path. No backend, model, routing, quota, transport, launch
-command, or worker identity is part of either contract.
-
-The host writes `audit-host-result/v1alpha1` records. Ingestion verifies every
-result before it accepts it; the mechanical check set below is rendered from
-the registry both the audit and the remediation ingest cite on every refusal.
-Malformed, fabricated, stale, or replayed-with-different-bytes records do not
-advance the run.
+The generated table below retains the older per-file audit checks alongside
+remediation checks; the audit rows are not a template for answering a current
+question.
 
 <!-- BEGIN GENERATED INGESTION CHECKS — scripts/shared/generate-ingestion-checks.mjs — DO NOT EDIT BY HAND -->
 
@@ -181,34 +175,11 @@ advance the run.
 
 <!-- END GENERATED INGESTION CHECKS -->
 
-Per-result audit-results validation runs at acceptance, before the accepted
-pair is written: a failing result is classified-rejected (warnings ride a
-separate advisory channel, never the rejection list) and is re-read from its
-bound path on the next `next-step`. Each later ingest validates again every
-accepted entry of a still-pending task, against the tree that fold will
-replay it into; an entry that now fails is withdrawn from the pair and
-reported as `result_validation_failed`, so one stale acceptance cannot stop
-the run. `unaccept-results` removes an accepted entry so its result is
-re-ingested from scratch.
+## Archived per-file results
 
-## AuditResult
-
-The normalized ingested form follows `schemas/audit_result.schema.json`.
-Important invariants are:
-
-- `task_id`, `unit_id`, `pass_id`, and `lens` match the assigned task
-- every finding uses the assigned lens
-- `file_coverage` contains assigned files only
-- `file_coverage[].total_lines` matches current source
-- affected files are structured entries and evidence is plain text
-- verification-only tasks may return no findings with explicit verification
-  metadata
-
-Validate recovery input before ingestion:
-
-```bash
-audit-code validate-results --results /path/to/results.json
-```
+`schemas/audit_result.schema.json` describes per-file results retained in old
+reports. New reviews submit answers to issued questions with `audit-code submit`.
+The former standalone per-file validator is not a current command.
 
 ## Artifact bundle
 
@@ -216,8 +187,8 @@ Resumable state lives under `.audit-tools/audit/`. The registry-backed contract
 in [`spec/audit/artifact-contract.md`](https://github.com/OhOkThisIsFine/audit-tools/blob/HEAD/spec/audit/artifact-contract.md)
 (repository-only, so the link is absolute) covers the
 complete set. Representative artifacts include repository and unit manifests,
-file disposition, graph and critical-flow data, coverage, risk, audit tasks,
-runtime validation, accepted host results, synthesis narrative, and the final
+file disposition, graph and critical-flow data, question plans and evidence,
+accepted answers, synthesis narrative, and the final
 deliverables.
 
 <!-- doc-citation-exempt: historical run artifact retired from the current registry -->

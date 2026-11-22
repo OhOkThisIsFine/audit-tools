@@ -1,6 +1,8 @@
 import { test, expect } from "vitest";
 import { AuditFindingsReportSchema } from "audit-tools/shared";
 import type { AuditFindingsReport, SynthesisNarrative } from "audit-tools/shared";
+import { buildSampleAuditBundle, SAMPLE_REPORT_FINDING } from "../../src/audit/cli/sampleRunCommand.js";
+import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
 import type { AuditResult } from "../../src/audit/types.js";
 
 function assertMatchesJsonSchema(_schema: unknown, value: unknown, label: string): void {
@@ -238,19 +240,41 @@ test("runSynthesisNarrativeExecutor applies a provider narrative", () => {
   assertMatchesJsonSchema(null, run.updated.audit_findings, "appliedFindings");
 });
 
-test("advanceAudit forced synthesis_narrative_executor applies and records the narrative", async () => {
+test("forced narrative refuses an archival result without a current question cycle", async () => {
   const results = syntheticResults();
   const synth = runSynthesisExecutor({ audit_results: results }, results).updated;
-
-  const advanced = await advanceAudit(synth, {
+  await expect(advanceAudit(synth, {
     preferredExecutor: "synthesis_narrative_executor",
     narrativeResults: syntheticNarrative(synth.audit_findings!),
-  });
+  })).rejects.toThrow("Question review must reach report-ready state before synthesis");
+});
 
+test("advanceAudit applies a narrative to the current question report without altering evidence", async () => {
+  const { plan, auditFindings } = buildSampleAuditBundle([SAMPLE_REPORT_FINDING]);
+  const review = auditFindings.question_review;
+  const dependenciesByQuestion = new Map(review.accepted.map(answer => [
+    answer.submission.question_id, answer.dependency_bindings,
+  ]));
+  const before = structuredClone(auditFindings);
+  const findingId = auditFindings.findings[0]!.id;
+  const advanced = await advanceAudit({
+    review_plan: plan, audit_findings: auditFindings,
+    question_cycle: { runId: "sample-narrative", bindings: [], pending: [], evidence: review.evidence,
+      dependenciesByQuestion, accepted_count: 1, answers: review.accepted, adjudications: review.adjudications,
+      consolidations: review.consolidations, issues: [] },
+  }, {
+    preferredExecutor: "synthesis_narrative_executor",
+    narrativeResults: {
+      themes: [{ theme_id: "T-1", title: "Queue counting", root_cause: "Only ready entries are counted.",
+        finding_ids: [findingId], suggested_fix_pattern: "Count each state once." }],
+      executive_summary: "The queue count is incomplete.",
+    },
+  });
   expect(advanced.selected_executor).toBe("synthesis_narrative_executor");
-  expect(advanced.updated_bundle.synthesis_narrative!.status).toBe("applied");
-  expect(advanced.updated_bundle.audit_findings!.themes!.length).toBe(1);
-  const tokenId = idOf(synth.audit_findings!, "Token check is weak");
-  const f1 = advanced.updated_bundle.audit_findings!.findings.find((f) => f.id === tokenId);
-  expect(f1!.theme_id).toBe("T-1");
+  expect(advanced.updated_bundle.synthesis_narrative?.status).toBe("applied");
+  const updated = QuestionAuditFindingsReportSchema.parse(advanced.updated_bundle.audit_findings);
+  expect(updated.themes?.[0]?.finding_ids).toEqual([findingId]);
+  expect(updated.findings).toEqual(before.findings);
+  expect(updated.question_review).toEqual(before.question_review);
+  expect(auditFindings).toEqual(before);
 });

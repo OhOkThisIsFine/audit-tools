@@ -7,6 +7,11 @@ import { STEP_CONTRACT_VERSION } from "../steps.js";
 // asked for it, the enforcement of every property the prompt states, and the
 // task-bindings version bump whose refusal names the remedy)
 import type { ArtifactBundle } from "../../io/artifacts.js";
+import { acceptQuestionReview, validateQuestionAdjudication, validateQuestionSource, type AuditQuestionBinding } from "./questionReviewAcceptance.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, ReviewAcceptedAnswerSchema, ReviewAdjudicationSchema, ReviewAssignmentSchema, ReviewDependencySchema, ReviewEvidenceSchema, ReviewQuestionSchema, ReviewSubmissionSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewQuestion } from "../../../shared/types/reviewQuestion.js";
+import { projectQuestionForReport } from "../../reporting/questionReport.js";
+import { questionClaimKey, ReviewFindingConsolidationSchema, type ReviewFindingConsolidation } from "../../../shared/types/questionReviewReport.js";
+import { z } from "zod";
 import { ActiveReviewRunSchema } from "../../contracts/wrapperResponse.js";
 import { sourceTreeInstruction } from "../../io/runSnapshot.js";
 import { CURRENT_TASK_FILENAME } from "../../supervisor/operatorHandoff.js";
@@ -607,6 +612,221 @@ function resultPathFor(paths: ResolvedBoundaryPaths, workItemId: string): string
   // the core shape passes through whole — no re-flattening step that could drop
   // a field the shared rule later starts reading.
   return hostHandoffResultPath(paths, workItemId);
+}
+
+// sites-pinned: tests/audit/question-review-acceptance.test.ts
+const QuestionSourceFileSchema = z.strictObject({ path: z.string().min(1), line_count: z.number().int().nonnegative(), fingerprint: z.string().min(1) });
+const QuestionHandoffBindingSchema = z.strictObject({
+  question: ReviewQuestionSchema,
+  assignment: ReviewAssignmentSchema,
+  dependencies: z.array(ReviewDependencySchema),
+});
+const QuestionWorkloadSchema = z.strictObject({
+  contract_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION),
+  run_id: z.string().min(1),
+  source_root: z.string().min(1),
+  source_files: z.array(QuestionSourceFileSchema),
+  evidence: z.array(ReviewEvidenceSchema),
+  work_items: z.array(z.strictObject({ binding: QuestionHandoffBindingSchema, result_path: z.string().min(1) })),
+});
+const QuestionLedgerSchema = z.strictObject({
+  contract_version: z.literal(REVIEW_QUESTION_CONTRACT_VERSION),
+  run_id: z.string().min(1),
+  answers: z.array(ReviewAcceptedAnswerSchema),
+  adjudications: z.array(ReviewAdjudicationSchema),
+  consolidations: z.array(ReviewFindingConsolidationSchema).default([]),
+});
+type QuestionBoundary = Pick<Parameters<typeof resolveBoundaryPaths>[0], "root" | "artifactsDir" | "runId">;
+type QuestionWorkload = z.infer<typeof QuestionWorkloadSchema>;
+
+function hydrateQuestionBinding(workload: QuestionWorkload, binding: z.infer<typeof QuestionHandoffBindingSchema>): AuditQuestionBinding {
+  return { ...binding, sourceFiles: workload.source_files, evidence: workload.evidence.filter((item) => binding.assignment.available_evidence_ids.includes(item.evidence_id)) };
+}
+
+async function readQuestionWorkload(paths: ResolvedBoundaryPaths) {
+  const workload = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(paths.workloadPath));
+  if (workload.run_id !== paths.runId) throw new Error("Question workload belongs to a different run");
+  for (const item of workload.work_items) {
+    if (item.result_path !== resultPathFor(paths, item.binding.assignment.assignment_id)) throw new Error("Question result path differs from its issued assignment");
+  }
+  return workload;
+}
+
+async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
+  let raw: unknown;
+  try { raw = await readJsonFile<unknown>(paths.acceptedLedgerPath); }
+  catch (error) {
+    if (!isFileMissingError(error)) throw error;
+    return { contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, answers: [] as ReviewAcceptedAnswer[], adjudications: [] as ReviewAdjudication[], consolidations: [] as ReviewFindingConsolidation[] };
+  }
+  const ledger = QuestionLedgerSchema.parse(raw);
+  if (ledger.run_id !== paths.runId) throw new Error("Question acceptance ledger belongs to a different run");
+  return ledger;
+}
+
+export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
+  sourceRoot: string; bindings: readonly AuditQuestionBinding[];
+}) {
+  const paths = resolveBoundaryPaths(params);
+  const ids = new Set<string>();
+  const sourceFiles = [...(params.bindings[0]?.sourceFiles ?? [])].sort((a, b) => compareCodeUnits(a.path, b.path));
+  if (new Set(sourceFiles.map((item) => item.path)).size !== sourceFiles.length) throw new Error("Duplicate issued source path");
+  const sourceWire = stableStringify(sourceFiles);
+  const evidence = new Map<string, AuditQuestionBinding["evidence"][number]>();
+  for (const binding of params.bindings) {
+    if (stableStringify([...binding.sourceFiles].sort((a, b) => compareCodeUnits(a.path, b.path))) !== sourceWire) {
+      throw new Error("Every issued assignment must use the same pinned source inventory; constrain each assignment through its authorized scope");
+    }
+    for (const item of binding.evidence) {
+      const prior = evidence.get(item.evidence_id);
+      if (prior && stableStringify(prior) !== stableStringify(item)) throw new Error("Conflicting issued evidence identity");
+      evidence.set(item.evidence_id, item);
+    }
+  }
+  const workload = QuestionWorkloadSchema.parse({
+    contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, source_root: toPosixPath(params.sourceRoot),
+    source_files: sourceFiles,
+    evidence: [...evidence.values()].sort((a, b) => compareCodeUnits(a.evidence_id, b.evidence_id)),
+    work_items: params.bindings.map((binding) => {
+      const { question, assignment } = binding;
+      if (ids.has(assignment.assignment_id) || assignment.question_id !== question.question_id ||
+          assignment.revision_id !== question.revision_id || assignment.snapshot_id !== question.snapshot_id) {
+        throw new Error("Duplicate or misbound review assignment");
+      }
+      ids.add(assignment.assignment_id);
+      for (const ref of assignment.suggested_sources) validateQuestionSource(binding, ref);
+      return { binding: { question, assignment, dependencies: binding.dependencies }, result_path: resultPathFor(paths, assignment.assignment_id) };
+    }),
+  });
+  await withFileLock(paths.acceptedLockPath, async () => {
+    try {
+      const prior = await readQuestionWorkload(paths);
+      for (const item of workload.work_items) {
+        const old = prior.work_items.find((entry) => entry.binding.assignment.assignment_id === item.binding.assignment.assignment_id);
+        if (old && (prior.source_root !== workload.source_root ||
+            stableStringify(hydrateQuestionBinding(prior, old.binding)) !== stableStringify(hydrateQuestionBinding(workload, item.binding)))) {
+          throw new Error("Changed question binding requires a newly issued assignment ID");
+        }
+      }
+    } catch (error) { if (!isFileMissingError(error)) throw error; }
+    await writeJsonFile(paths.workloadPath, workload);
+  });
+  return { workload, workload_path: paths.workloadPath };
+}
+
+export async function readAuditQuestionWorkload(params: QuestionBoundary) {
+  const paths = resolveBoundaryPaths(params);
+  return withFileLock(paths.acceptedLockPath, () => readQuestionWorkload(paths));
+}
+
+/** Operator inspection never folds queued worker results. */
+export async function readAuditQuestionLedger(params: QuestionBoundary) {
+  const paths = resolveBoundaryPaths(params);
+  return withFileLock(paths.acceptedLockPath, () => readQuestionLedger(paths));
+}
+
+// sites-pinned: tests/audit/question-review-acceptance.test.ts, tests/audit/question-consolidation-cli.test.ts
+export async function consolidateAuditQuestionFindings(params: QuestionBoundary & {
+  decision: ReviewFindingConsolidation;
+  questions: readonly ReviewQuestion[];
+  evidence: readonly ReviewEvidence[];
+  dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+}) {
+  const paths = resolveBoundaryPaths(params);
+  const decision = ReviewFindingConsolidationSchema.parse(params.decision);
+  if (!decision.reason.trim() || !decision.decided_by.trim()) throw new Error("Consolidation requires a named reviewer and a reason.");
+  const key = ({ answer_id, finding_id }: typeof decision.sources[number]) => questionClaimKey(answer_id, finding_id);
+  const keys = new Set(decision.sources.map(key));
+  if (keys.size !== decision.sources.length) throw new Error("Consolidation requires distinct accepted claim references.");
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const ledger = await readQuestionLedger(paths);
+    const prior = ledger.consolidations.find(row => row.decision_id === decision.decision_id);
+    if (prior) {
+      if (stableStringify(prior) !== stableStringify(decision)) throw new Error("Conflicting consolidation decision ID.");
+      return "replay" as const;
+    }
+    const consumed = new Set(ledger.consolidations.flatMap(row => row.sources.map(key)));
+    if ([...keys].some(id => consumed.has(id))) throw new Error("An accepted claim is already in a consolidation.");
+    const evidence = new Map(params.evidence.map(item => [item.evidence_id, item]));
+    const actionable = new Set(params.questions.flatMap(question => projectQuestionForReport(
+      question, ledger.answers.filter(({ submission }) => submission.question_id === question.question_id),
+      ledger.adjudications, evidence, params.dependenciesByQuestion.get(question.question_id),
+    ).claims.filter(claim => claim.actionable).map(({ answerId, source }) => questionClaimKey(answerId, source.finding_id))));
+    if ([...keys].some(id => !actionable.has(id))) {
+      throw new Error("Consolidation must reference distinct current actionable confirmed-defect claims.");
+    }
+    await writeJsonFile(paths.acceptedLedgerPath, {
+      ...ledger, consolidations: [...ledger.consolidations, decision],
+    });
+    return "accepted" as const;
+  });
+}
+
+/** Submit and fold share the normal run's lock and its canonical ledger. */
+export async function submitAuditQuestionResult(params: QuestionBoundary & { assignmentId: string; source: string }) {
+  const paths = resolveBoundaryPaths(params);
+  const submission = ReviewSubmissionSchema.parse(JSON.parse(params.source));
+  if (params.assignmentId !== submission.assignment_id) throw new Error("Result assignment differs from its destination");
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const workload = await readQuestionWorkload(paths);
+    const ledger = await readQuestionLedger(paths);
+    const item = workload.work_items.find((entry) => entry.binding.assignment.assignment_id === params.assignmentId);
+    if (!item) throw new Error("Review assignment is not in the current issued workload");
+    const accepted = acceptQuestionReview(ledger.answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
+    if (accepted.kind === "accepted") await writeJsonFile(paths.acceptedLedgerPath,
+      { ...ledger, answers: [...ledger.answers, accepted.record] });
+    return accepted;
+  });
+}
+
+export async function ingestAuditQuestionResults(params: QuestionBoundary, currentAssignmentIds?: ReadonlySet<string>) {
+  const paths = resolveBoundaryPaths(params);
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const workload = await readQuestionWorkload(paths);
+    const ledger = await readQuestionLedger(paths);
+    const answers = [...ledger.answers];
+    const issues: { assignment_id: string; reason: string }[] = [];
+    for (const item of workload.work_items) {
+      // A re-intake or evidence refresh can supersede an issued answer before
+      // the next workload is published. Do not read or admit its old result.
+      if (currentAssignmentIds && !currentAssignmentIds.has(item.binding.assignment.assignment_id)) continue;
+      try {
+        const submission = ReviewSubmissionSchema.parse(await readJsonFile<unknown>(
+          resolveContainedPath(paths.root, item.result_path, "issued question result path")));
+        if (submission.assignment_id !== item.binding.assignment.assignment_id) throw new Error("Result assignment differs from its destination");
+        const decision = acceptQuestionReview(answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
+        if (decision.kind === "accepted") answers.push(decision.record);
+      } catch (error) {
+        if (!isFileMissingError(error)) issues.push({ assignment_id: item.binding.assignment.assignment_id, reason: errorMessage(error) });
+      }
+    }
+    const accepted_count = answers.length - ledger.answers.length;
+    if (accepted_count) await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, answers });
+    return { accepted_count, answers, adjudications: ledger.adjudications, consolidations: ledger.consolidations, issues };
+  });
+}
+
+/** Record an operator-authorized decision separately from the immutable answers. */
+export async function adjudicateAuditQuestionResult(params: QuestionBoundary & { adjudication: ReviewAdjudication }) {
+  const paths = resolveBoundaryPaths(params);
+  const adjudication = ReviewAdjudicationSchema.parse(params.adjudication);
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const workload = await readQuestionWorkload(paths);
+    const ledger = await readQuestionLedger(paths);
+    const candidates = workload.work_items.map(({ binding }) => hydrateQuestionBinding(workload, binding)).filter(({ question }) =>
+      question.question_id === adjudication.question_id && question.revision_id === adjudication.revision_id &&
+      question.snapshot_id === adjudication.snapshot_id);
+    const question = candidates[0]?.question;
+    if (!question) throw new Error("Adjudication question is not current in this review run");
+    const dependencies = candidates.flatMap((binding) => [
+      ...binding.dependencies,
+      ...binding.sourceFiles.map((source) => ({ kind: "source" as const, key: source.path, fingerprint: source.fingerprint })),
+      ...binding.evidence.flatMap((evidence) => evidence.dependencies),
+    ]);
+    const decision = validateQuestionAdjudication(ledger.answers, ledger.adjudications, adjudication, question, dependencies);
+    if (decision === "accepted") await writeJsonFile(paths.acceptedLedgerPath, { ...ledger, adjudications: [...ledger.adjudications, adjudication] });
+    return decision;
+  });
 }
 
 /** The boundary's source root; a prompt or a grounding without one would read the live tree. */
@@ -1492,7 +1712,7 @@ class StaleAuditHostWorkloadError extends Error {
  * It exists as a CLASS and not as a plain throw because of what the fold does
  * with an uncaught error: `runHostDelegationObligation` rethrows everything that
  * is not ENOENT, and it ingests BEFORE the one path that re-prepares
- * (`ensureSemanticReviewRunUnlocked` → `renderSemanticReviewStep` →
+ * (`ensureSemanticReviewRunUnlocked` → the retired semantic review step →
  * `prepareAuditHostHandoff`, the ONLY writer of this file). A bare throw
  * therefore aborted the fold before the re-prepare, the blocked-step backstop
  * wrote a blocked step, and every later `next-step` failed identically with the

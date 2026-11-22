@@ -1,14 +1,13 @@
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
-import { loadArtifactBundle, writeCoreArtifacts } from "../../src/audit/io/artifacts.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { advanceToDispatchReady } from "./helpers/completion-harness.js";
+import { readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
+import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { runDeterministicForNextStep } from "../../src/audit/cli/nextStepCommand.js";
-import { buildPendingAuditTasks } from "../../src/audit/cli/dispatch/packetFilter.js";
 import { hashContent } from "audit-tools/shared";
 import { MAX_DRAIN_STEPS } from "../../src/audit/orchestrator/advance.js";
-import { runWrapper } from "./helpers/run-wrapper.mjs";
-import { countLines } from "../../src/audit/cli/args.js";
 import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
 
 const observation = vi.hoisted(() => ({ intake: 0, holds: 0, failAfterIntake: false, engineBudget: 0 }));
@@ -52,21 +51,16 @@ function resume(root: string) {
     analyzers: { typescript: "skip", python: "skip", css: "skip", html: "skip", sql: "skip" } });
 }
 
-test("same-line-count pending source edit refreshes returned and persisted authority", async () => {
+test("same-line-count issued source edit refreshes returned and persisted authority", async () => {
   await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
+    const step = await advanceToDispatchReady(root);
     expect(step.step_kind).toBe("dispatch_review");
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
-    const pending = buildPendingAuditTasks(before);
-    expect(pending, JSON.stringify(before.audit_tasks)).not.toHaveLength(0);
-    expect(pending.some((task) => task.file_paths.includes("src/api/auth.ts"))).toBe(true);
-    // Exercise the existing enriched pending-task form that the integrity
-    // preamble checks (ordinary planned tasks need not carry line counts).
-    for (const task of before.audit_tasks ?? []) {
-      task.file_line_counts = Object.fromEntries(task.file_paths.map((path) => [path, path === "src/api/auth.ts" ? 4 : 2]));
-    }
-    await writeCoreArtifacts(artifactsDir, before);
+    const issued = await readQuestionWorkload(step);
+    expect(issued.work_items.some(({ binding }) => binding.assignment.suggested_sources
+      .some(({ path }) => path === "src/api/auth.ts"))).toBe(true);
+    expect(before.review_plan?.snapshot_id).toBeDefined();
     observation.intake = 0;
     observation.holds = 0;
     const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
@@ -91,10 +85,10 @@ test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commit
   await withTempRepo(async (root) => {
     // Deletion keeps a second auditable source, so intake remains valid.
     await writeFile(join(root, "src", "api", "other.ts"), "export const other = 1;\n");
-    expect((await advancePastDesignReview(root)).step_kind).toBe("dispatch_review");
+    expect((await advanceToDispatchReady(root)).step_kind).toBe("dispatch_review");
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
-    expect(buildPendingAuditTasks(before).some((task) => task.file_paths.includes("src/api/auth.ts"))).toBe(true);
+    expect(before.review_plan?.questions.some(q => q.source_dependencies.some(dep => dep.key === "src/api/auth.ts"))).toBe(true);
     observation.intake = 0;
     const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
     if (scenario === "deleted file") await unlink(source);
@@ -111,56 +105,54 @@ test.each(["line-count edit", "deleted file", "post-intake failure"])("%s commit
   });
 });
 
-test.each([false, true])("bound old result acceptance with changed source = %s", async (changed) => {
+test.each([false, true])("bound question answer acceptance with changed frozen source = %s", async (changed) => {
   await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
-    const item = workload.work_items.find((entry: { scope: { files: string[] } }) => entry.scope.files.includes("src/api/auth.ts"));
-    expect(item).toBeTruthy();
-    const fileCoverage = await Promise.all(item.scope.files.map(async (path: string) => {
-      const lines = await countLines(join(await runSourceRoot(root), path));
-      return { path, reviewed_lines: lines, total_lines: lines };
-    }));
-    await writeFile(join(root, item.result_path), JSON.stringify({ contract_version: "audit-host-result/v1alpha1",
-      result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`, run_id: workload.run_id,
-      work_item_id: item.id, prompt_sha256: item.prompt.sha256, file_coverage: fileCoverage, findings: [] }));
+    const issued = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const old = issued.work_items.find(({ binding }) => binding.assignment.suggested_sources
+      .some(({ path }) => path === "src/api/auth.ts"));
+    expect(old).toBeDefined();
+    const [answer] = await submitQuestions(root, [old!]);
     const artifactsDir = join(root, ".audit-tools", "audit");
     const before = await loadArtifactBundle(artifactsDir);
     const source = join(await runSourceRoot(root), "src", "api", "auth.ts");
     if (changed) await writeFile(source, (await readFile(source, "utf8")).replace("length > 0", "length > 1"));
     await resume(root);
     const after = await loadArtifactBundle(artifactsDir);
-    expect(after.repo_manifest?.files.find((file) => file.path === "src/api/auth.ts")?.hash).toBe(hashContent(await readFile(source)));
+    const currentHash = hashContent(await readFile(source));
+    expect(after.repo_manifest?.files.find((file) => file.path === "src/api/auth.ts")?.hash).toBe(currentHash);
+    const ledgerPath = join(artifactsDir, "runs", issued.run_id, "host-accepted-results-ledger.json");
+    const readSavedQuestionAnswerLedgerForFixture = () => readFile(ledgerPath, "utf8").then(raw => JSON.parse(raw), (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return { answers: [] };
+      throw error;
+    });
     if (!changed) {
-      expect(after.audit_results?.length).toBeGreaterThan(0);
+      expect((await readSavedQuestionAnswerLedgerForFixture()).answers).toEqual([expect.objectContaining({ submission: answer })]);
       return;
     }
-    expect(after.audit_results ?? []).toHaveLength(0);
-    const emitted = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
-    expect(emitted.step_kind).toBe("dispatch_review");
-    {
-      const current = JSON.parse(await readFile(emitted.artifact_paths.host_workload, "utf8"));
-      const refreshedItems = current.work_items.filter((entry: { scope: { files: string[] } }) => entry.scope.files.includes("src/api/auth.ts"));
-      expect(refreshedItems.length).toBeGreaterThan(0);
-      for (const entry of refreshedItems) {
-        expect(entry.prompt.text).toContain(hashContent(await readFile(source)));
-        expect(entry.prompt.sha256).not.toBe(item.prompt.sha256);
-      }
-    }
+    expect((await readSavedQuestionAnswerLedgerForFixture()).answers).toEqual([]);
+    const current = await readQuestionWorkload(await advanceToDispatchReady(root));
+    expect((await readSavedQuestionAnswerLedgerForFixture()).answers).toEqual([]);
+    expect(current.work_items.some(({ binding }) => binding.assignment.assignment_id === old!.binding.assignment.assignment_id)).toBe(false);
+    expect(current.work_items.some(({ binding }) => binding.question.source_dependencies.some(dep =>
+      dep.kind === "source" && dep.key === "src/api/auth.ts" && dep.fingerprint === currentHash,
+    ))).toBe(true);
     expect(before.repo_manifest).not.toEqual(after.repo_manifest);
   });
 });
 
-test("failed integrity intake commits its named failure without accepting old work", async () => {
+test("failed integrity intake commits its named failure without accepting queued work", async () => {
   await withTempRepo(async (root) => {
-    expect((await advancePastDesignReview(root)).step_kind).toBe("dispatch_review");
+    const issued = await readQuestionWorkload(await advanceToDispatchReady(root));
+    await submitQuestions(root, [issued.work_items[0]!]);
     await unlink(join(await runSourceRoot(root), "src", "api", "auth.ts"));
     await unlink(join(await runSourceRoot(root), "package.json"));
     await expect(resume(root)).rejects.toThrow("No auditable files found");
-    const after = await loadArtifactBundle(join(root, ".audit-tools", "audit"));
+    const dir = join(root, ".audit-tools", "audit");
+    const after = await loadArtifactBundle(dir);
     expect(after.audit_state?.last_executor).toBe("intake_executor");
     expect(after.audit_state?.last_obligation).toBe("forced:intake_executor");
-    expect(after.audit_results ?? []).toHaveLength(0);
+    expect(after.audit_state?.status).not.toBe("complete");
+    const ledger = join(dir, "runs", issued.run_id, "host-accepted-results-ledger.json");
+    await expect(readFile(ledger, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

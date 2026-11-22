@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: none — the generated README sample report is checked by the executable check:readme-sample-report gate
 // README sample-report reconciliation gate (docs-4, nightly 2026-08-25).
 //
 // The README's sample audit-report block used to be hand-typed and showed
@@ -39,7 +40,7 @@ export function sliceSection(lines, heading) {
 }
 
 /**
- * The excerpt: H1 + Summary + Findings (one fixture finding). Every line is a
+ * The excerpt: H1 + Lens coverage + Findings and leads (one fixture finding). Every line is a
  * verbatim renderer line; a renderer heading change reds this gate instead of
  * silently drifting the README.
  */
@@ -55,8 +56,8 @@ export async function renderSampleExcerpt() {
   const excerpt = [
     lines[h1],
     '',
-    ...sliceSection(lines, '## Summary'),
-    ...sliceSection(lines, '## Findings'),
+    ...sliceSection(lines, '## Lens coverage'),
+    ...sliceSection(lines, '## Findings and leads'),
   ];
   while (excerpt.length > 0 && excerpt[excerpt.length - 1].trim() === '') excerpt.pop();
   // Backticks are stripped: inside the README's ```text fence they would
@@ -70,7 +71,7 @@ export async function renderReadmeBlock() {
   return [
     README_BEGIN,
     '',
-    '*(Illustrative excerpt — rendered by the real report renderer from a fabricated sample repo and one fixture finding; the cited src/api/auth.ts path belongs to that fabricated repo, not to this repository. A real report carries more sections between Summary and Findings.)*',
+    '*(Illustrative excerpt — rendered by the real report renderer from a fabricated sample repo and one fixture finding; the cited src/queue.ts path belongs to that fabricated repo, not to this repository. A real report carries more sections between Lens coverage and Findings and leads.)*',
     '',
     '```text',
     await renderSampleExcerpt(),

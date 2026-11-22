@@ -39,12 +39,17 @@ test("PRIORITY holds its endpoint + relative-ordering invariants", () => {
     "structure_decomposition_current",
     "docs_digest_current",
     "intent_checkpoint_current",
-    "planning_artifacts",
+    "intent_equivalence_current",
     "charter_extraction_current",
+    "charter_comparison_current",
+    "charter_fidelity_current",
     "design_review_contract_completed",
     "design_review_conceptual_completed",
     "charter_clarification_current",
     "systemic_challenge_current",
+    "planning_artifacts",
+    "audit_tasks_completed",
+    "synthesis_current",
     "synthesis_narrative_current",
   ]);
 });

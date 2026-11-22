@@ -55,12 +55,7 @@ const cmdModuleMap = [
   ["import-external-analyzer", "importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
   ["intake", "intakeCommand.js", "cmdIntake"],
   ["plan", "planCommand.js", "cmdPlan"],
-  ["ingest-results", "ingestResultsCommand.js", "cmdIngestResults"],
-  ["explain-task", "explainTaskCommand.js", "cmdExplainTask"],
-  ["update-runtime-validation", "updateRuntimeValidationCommand.js", "cmdUpdateRuntimeValidation"],
   ["validate", "validateCommand.js", "cmdValidate"],
-  ["validate-results", "validateResultsCommand.js", "cmdValidateResults"],
-  ["requeue", "requeueCommand.js", "cmdRequeue"],
   ["synthesize", "synthesizeCommand.js", "cmdSynthesize"],
   ["force-synthesis", "forceSynthesisCommand.js", "cmdForceSynthesis"],
   ["resynthesize", "resynthesizeCommand.js", "cmdResynthesize"],
@@ -68,8 +63,8 @@ const cmdModuleMap = [
   ["status", "statusCommand.js", "cmdStatus"],
   ["score-audit", "scoreAuditCommand.js", "cmdScoreAudit"],
   ["recover-submission", "recoverSubmissionCommand.js", "cmdRecoverSubmission"],
-  ["unaccept-results", "unacceptResultsCommand.js", "cmdUnacceptResults"],
   ["submit", "submitCommand.js", "cmdSubmit"],
+  ["consolidate-findings", "submitCommand.js", "cmdConsolidateFindings"],
   ["mcp", "submitCommand.js", "cmdMcp"],
 ];
 
@@ -105,4 +100,22 @@ test.each(["--help", "-h"])("top-level help remains available: %s", async flag =
   const result = await captureConsole(() => runCli([process.execPath, "cli.js", flag]));
   expect(result.code).toBe(0);
   expect(result.stdout).toContain("Usage: audit-code <command>");
+});
+
+test.each(["explain-task", "requeue", "update-runtime-validation", "validate-results"])(
+  "retired command %s is not recognized or advertised", async (verb) => {
+    const result = await captureConsole(() => runCli([process.execPath, "cli.js", verb]));
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`Unknown command: ${verb}`);
+    expect(KNOWN_COMMANDS).not.toContain(verb);
+  },
+);
+
+test("bare backend invocation shows help without invoking sample-run", async () => {
+  const result = await captureConsole(() => runCli([process.execPath, "cli.js"]));
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("Usage: audit-code <command>");
+  expect(result.stdout).toContain("sample-run");
+  expect(result.stdout).not.toContain("artifacts_dir");
+  expect(result.stderr).toBe("");
 });

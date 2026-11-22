@@ -5,10 +5,11 @@ import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { decideNextStep } from "../../src/audit/orchestrator/nextStep.js";
 import { computeScopePreDigest } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
 import { renderConfirmIntentPrompt, proposeConceptualDepth } from "../../src/audit/cli/confirmIntentStep.js";
-import { MANDATORY_LENSES } from "../../src/audit/orchestrator/lensSelection.js";
+import { BUILT_IN_REVIEW_LENSES } from "../../src/shared/types/reviewQuestion.js";
 import { DEFAULT_CONCEPTUAL_PERSPECTIVES } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { validateArtifactBundle } from "../../src/audit/validation/artifacts.js";
-import { applyIntentExclusionsToCoverage } from "../../src/audit/orchestrator/scope.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { applyIntentExclusionsToCoverage, fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.js";
 import { runIntentEquivalenceResolve, deriveIntentEquivalenceStatus } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
@@ -118,17 +119,13 @@ await test("decideNextStep selects intent_checkpoint after design assessment, be
   expect(decision.selected_executor).toBe("intent_checkpoint_executor");
 });
 
-await test("confirmed intent opens scoped planning before charter and design inquiry", async () => {
-  // DD-9: the intent-equivalence baseline is settled first — otherwise
-  // intent_equivalence_current (directly after the checkpoint) is selected.
+await test("confirmed intent opens charter and design inquiry before question dispatch", async () => {
   const bundle = settleIntentBaseline({ ...readyForIntentBundle(), intent_checkpoint: validCheckpoint() });
-  expect(decideNextStep(bundle).selected_obligation).toBe("planning_artifacts");
-  const planned = settleIntentBaseline({ ...bundle,
-    coverage_matrix: { files: [] }, flow_coverage: { flows: [] }, runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [], requeue_tasks: [],
-  });
+  expect(decideNextStep(bundle).selected_obligation).toBe("charter_extraction_current");
+  // A saved plan is not completion of either independent inquiry.
+  const planned = settleIntentBaseline(buildQuestionPlanArtifacts(bundle, fullAuditScope()).updated);
   expect(decideNextStep(planned).selected_obligation).toBe("charter_extraction_current");
-  const withCharters = { ...planned, charter_register: omittedCharterRegister() };
+  const withCharters = settleIntentBaseline({ ...planned, charter_register: omittedCharterRegister() });
   expect(decideNextStep(withCharters).selected_obligation).toBe("design_review_contract_completed");
 });
 
@@ -199,20 +196,16 @@ await test("computeScopePreDigest reads design_assessment: a lens-tagged structu
           category: "code_duplication",
           severity: "low",
           confidence: "medium",
-          lens: "maintainability",
+          lens: "architecture",
           summary: "src/a.ts duplication evidence from the deterministic assessment",
           affected_files: [{ path: "src/a.ts" }],
         },
       ],
     },
   };
-  // Today buildLensPropositions receives only unit manifest + paths +
-  // disposition (intentCheckpointExecutor.ts), so maintainability stays an
-  // unconditional recommend_exclude even when the deterministic design
-  // assessment carries direct lens-tagged evidence for it.
   const pre = await computeScopePreDigest(bundle, "/repo");
   expect(
-    pre.lens_propositions.find((p) => p.lens === "maintainability")?.disposition,
+    pre.lens_propositions.find((p) => p.lens === "architecture")?.disposition,
   ).toBe("recommend_include");
 });
 
@@ -223,7 +216,7 @@ await test("the evidence-overlay reason names what it counted: pre-review struct
     category,
     severity: "low" as const,
     confidence: "medium" as const,
-    lens: "maintainability" as const,
+    lens: "architecture" as const,
     summary: "deterministic structural signal",
     affected_files: [{ path: "src/a.ts" }],
   });
@@ -240,14 +233,14 @@ await test("the evidence-overlay reason names what it counted: pre-review struct
     },
   };
   const pre = await computeScopePreDigest(bundle, "/repo");
-  const row = pre.lens_propositions.find((p) => p.lens === "maintainability");
+  const row = pre.lens_propositions.find((p) => p.lens === "architecture");
   expect(row?.disposition).toBe("recommend_include");
-  // The self-audit read "design assessment carries 1899 maintainability-tagged
+  // The self-audit read the structural leads as findings
   // finding(s)" before any review ran: every one was a deterministic heuristic
   // lead (complexity hotspots + duplication), not a reviewed finding.
   expect(row?.reason).toBe(
-    "structural design assessment (deterministic, pre-review) flagged 3 maintainability-tagged lead(s): " +
-      "code_duplication 2, complexity_hotspot 1; design review carries 1 maintainability-tagged finding(s)",
+    "structural design assessment (deterministic, pre-review) flagged 3 architecture-tagged lead(s): " +
+      "code_duplication 2, complexity_hotspot 1; design review carries 1 architecture-tagged finding(s)",
   );
 });
 
@@ -387,7 +380,7 @@ await test("renderConfirmIntentPrompt includes the scope picture, target path, a
   expect(statusChoices).toEqual(FileDispositionStatusSchema.options);
 });
 
-await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDATORY_LENSES, not hardcoded (MNT-df8c4551)", async () => {
+await test("renderConfirmIntentPrompt explains the seven selectable questions with no mandatory minimum", async () => {
   const prompt = renderConfirmIntentPrompt(
     {
       mode: "full",
@@ -396,7 +389,7 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
       scope_dirs: [{ dir: "src", files: 2 }],
       excluded_summary: [],
       disposition_override_proposals: [],
-      // A lens proposition so the table + the mandatory-set prose render.
+      // A lens proposition so the table renders.
       lens_propositions: [{ lens: "operability", disposition: "recommend_exclude", reason: "no ops surface" }],
       docs_digest: [],
       mis_scope_smells: [],
@@ -406,13 +399,12 @@ await test("renderConfirmIntentPrompt mandatory-lens prose is derived from MANDA
       continueCommand: "audit-code next-step",
     },
   );
-  // Every mandatory lens name must appear verbatim in the rendered guidance;
-  // if MANDATORY_LENSES changes, this fails unless the prose follows.
-  for (const lens of MANDATORY_LENSES) {
-    expect(prompt.includes(lens), `rendered prompt must name mandatory lens "${lens}"`).toBeTruthy();
+  for (const lens of BUILT_IN_REVIEW_LENSES) {
+    expect(prompt).toContain(`**${lens}**`);
   }
-  // The exact joined list rendered in both prose locations.
-  expect(prompt).toMatch(new RegExp(`Mandatory lenses \\(${MANDATORY_LENSES.join(", ")}\\)`));
+  expect(prompt).toContain("no lens is mandatory");
+  expect(prompt).toContain("omission_reasons");
+  expect(prompt).not.toContain("always-on mandatory set");
 });
 
 await test("renderConfirmIntentPrompt proposes deep for a bare full audit and offers it in the JSON shape", async () => {
@@ -688,9 +680,13 @@ await test("renderAuditReportMarkdown omits the excluded section without exclusi
 
 // ── AU-5: observability lens rationale (evidence-grounded) ─────────────────────
 
-await test("buildLensPropositions detects logging/metrics surfaces and makes observability recommendation evidence-based", async () => {
+await test("buildLensPropositions treats logging/metrics surfaces as operability evidence, not a second lens", async () => {
+  const base = readyForIntentBundle();
+  const diagnostics = ["src/logging/ledger.ts", "src/metrics/exporter.ts"];
+  base.repo_manifest!.files.push(...diagnostics.map((path) => ({ path, language: "typescript", size_bytes: 100 })));
+  base.file_disposition!.files.push(...diagnostics.map((path) => ({ path, status: "included" as const })));
   const bundle: ArtifactBundle = {
-    ...readyForIntentBundle(),
+    ...base,
     unit_manifest: {
       units: [
         {
@@ -698,25 +694,26 @@ await test("buildLensPropositions detects logging/metrics surfaces and makes obs
           name: "logging surface",
           kind: "logging_surface",
           files: ["src/logging/ledger.ts"],
-          required_lenses: ["observability"],
+          required_lenses: [],
         },
         {
           unit_id: "u-met",
           name: "metrics exporter",
           kind: "metrics_exporter",
           files: ["src/metrics/exporter.ts"],
-          required_lenses: ["observability"],
+          required_lenses: [],
         },
       ],
     },
   };
   const pre = await computeScopePreDigest(bundle, "/repo");
-  const obs = pre.lens_propositions.find((p) => p.lens === "observability");
+  const obs = pre.lens_propositions.find((p) => p.lens === "operability");
   expect(obs?.disposition).toBe("recommend_include");
-  expect(obs?.reason).toContain("detected in scope");
+  expect(obs?.reason).toContain("diagnostic signal detected");
+  expect(pre.lens_propositions.map(({ lens }) => lens)).toEqual(BUILT_IN_REVIEW_LENSES);
 });
 
-await test("buildLensPropositions marks observability as heuristic exclude when no evidence (au-5)", async () => {
+await test("buildLensPropositions recommends omission when no operator decision surface is detected", async () => {
   // When no logging/metrics surfaces are detected, the rationale must state
   // it is a heuristic default (no assertion of factual absence).
   const bundle: ArtifactBundle = {
@@ -724,7 +721,7 @@ await test("buildLensPropositions marks observability as heuristic exclude when 
     unit_manifest: { units: [] },
   };
   const pre = await computeScopePreDigest(bundle, "/repo");
-  const obs = pre.lens_propositions.find((p) => p.lens === "observability");
+  const obs = pre.lens_propositions.find((p) => p.lens === "operability");
   expect(obs?.disposition).toBe("recommend_exclude");
   // The rationale should NOT claim absence as fact, only as heuristic default
   expect(obs?.reason).not.toMatch(/no logging.*detected/);
@@ -760,12 +757,8 @@ test("present unbound design review returns to confirmation rather than downgrad
   }
 });
 
-await test("the architecture proposition states it is reviewed whole-system, never by a blanket per-file inspection sweep", async () => {
-  // Per-file inspection never carries the architecture lens (no file category
-  // requires it); the design review, the charter and the discovery follow-ups
-  // do. An operator who includes the lens must be told where it is reviewed, or
-  // a workload with no architecture item reads as a dropped lens.
+await test("the architecture proposition considers charter scenarios and local maintainability", async () => {
   const pre = await computeScopePreDigest(readyForIntentBundle(), "/repo");
   const row = pre.lens_propositions.find((p) => p.lens === "architecture");
-  expect(row?.reason).toMatch(/whole-system.*design review.*not by a blanket per-file inspection sweep/u);
+  expect(row?.reason).toMatch(/charter scenario or local maintainability concern/u);
 });

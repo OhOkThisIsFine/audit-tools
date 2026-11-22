@@ -103,8 +103,7 @@ export interface ArtifactMetadataManifest {
    * artifact_metadata, OUTSIDE the coverage artifact — so the planning executor
    * can preserve completion for files whose audit inputs are unchanged on a
    * re-plan without mutating the coverage matrix. Carried forward across runs
-   * exactly like `result_baselines` (same CE-007 F1-current gate). See
-   * `src/audit/orchestrator/coverageElementBaseline.ts`.
+   * exactly like `result_baselines` (same CE-007 F1-current gate).
    */
   coverage_element_baselines?: Record<string, string>;
   /**

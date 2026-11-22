@@ -337,14 +337,15 @@ test("a PRIORITY order that puts a slice-projected downstream first is REPORTED"
   expect(violations[0]!.reason).toMatch(/at or after the downstream/);
 });
 
-test("a declared late-input edge whose upstream is scheduled before its downstream is REPORTED", () => {
-  // systemic_challenge.json is a LATE input of audit_tasks.json; moving its pass
-  // ahead of planning makes it an ordinary early edge, which must be declared so.
-  const reordered = PRIORITY.filter((id) => id !== "systemic_challenge_current");
-  reordered.splice(reordered.indexOf("planning_artifacts"), 0, "systemic_challenge_current");
-  const violations = findPriorityOrderingViolations(reordered);
-  expect(violations.some((v) => v.downstream === "audit_tasks.json" &&
-    v.upstream === "systemic_challenge.json" && /late-input/.test(v.reason))).toBe(true);
+test("charter evidence is ready before the review plan and has no late-input deferral", () => {
+  const planning = PRIORITY.indexOf("planning_artifacts");
+  expect(planning).toBeGreaterThan(-1);
+  for (const obligation of ["charter_extraction_current", "charter_comparison_current", "charter_fidelity_current"]) {
+    const upstream = PRIORITY.indexOf(obligation);
+    expect(upstream).toBeGreaterThan(-1);
+    expect(upstream).toBeLessThan(planning);
+  }
+  expect(LATE_INPUT_EDGES["review_plan.json"]).toBeUndefined();
 });
 
 test("a slice participant whose producing obligation is absent from the order is REPORTED, never assumed safe", () => {

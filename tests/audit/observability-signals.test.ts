@@ -341,6 +341,8 @@ test("runRuntimeValidationExecutor: all tasks share one command → uniqueComman
     expect(result.progress_summary, "summary mentions total task count").toMatch(/3 task\(s\)/);
     expect(result.progress_summary, "only 1 unique command").toMatch(/1 unique command\(s\) run/);
     expect(result.progress_summary, "task count minus 1 are dedup hits").toMatch(/2 served from deduplication cache/);
+    expect(result.updated.runtime_validation_report?.results.map(row => row.status))
+      .toEqual(["inconclusive", "inconclusive", "inconclusive"]);
   });
 });
 

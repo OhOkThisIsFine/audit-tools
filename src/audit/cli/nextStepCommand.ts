@@ -89,7 +89,6 @@ import { ensureSupervisorDirs } from "../io/runArtifacts.js";
 import {
   persistConfigErrorHandoff,
 } from "./reviewRun.js";
-import { renderSemanticReviewStep, prepareSemanticReviewWorkload } from "./semanticReviewStep.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { lookupRunSince } from "../io/runSnapshot.js";
 import { renderConfirmIntentPrompt } from "./confirmIntentStep.js";
@@ -433,7 +432,6 @@ async function cmdNextStepBody(
   // dispatch table, so it decorates whichever row emits, including the
   // semantic-review fallback.
   await NEXT_STEP_EMISSION.emit(result.kind, {
-    advisoryNotice: result.advisoryNotice,
     argv,
     root,
     sourceRoot: result.sourceRoot,
@@ -469,26 +467,13 @@ interface NextStepEmitContext {
    */
   analyzerPolicy: AnalyzerPolicy | null;
   result: NextStepResult;
-  /**
-   * The fold's carried advisories as prompt lines, when it drained a non-empty
-   * carry onto a result kind with no advisory channel of its own. Read from the
-   * RESULT ({@link NextStepResult.advisoryNotice}) rather than kept beside it —
-   * one value, one home — and applied uniformly below the dispatch table.
-   */
-  advisoryNotice?: readonly string[];
+
 }
 
-/**
- * What to emit, never how to write it. Three writers exist (the step-contract
- * writer, the blocked-step writer, and the semantic-review renderer that
- * publishes the host workload), and each is called from exactly ONE place —
- * `writeAuditStep` — so the emit contract has a single edit site per writer.
- */
+/** What to emit; the one writer dispatch owns contract persistence. */
 type AuditStepPlan =
   | { via: "current"; params: Parameters<typeof writeCurrentStep>[0] }
-  | { via: "blocked"; params: Parameters<typeof writeBlockedStepContract>[0] }
-  | { via: "semantic_review"; params: Parameters<typeof renderSemanticReviewStep>[0] };
-
+  | { via: "blocked"; params: Parameters<typeof writeBlockedStepContract>[0] };
 type EmittedAuditStep =
   | Awaited<ReturnType<typeof writeCurrentStep>>
   | Awaited<ReturnType<typeof writeBlockedStepContract>>;
@@ -503,12 +488,6 @@ function blockedStepPlan(
   params: Parameters<typeof writeBlockedStepContract>[0],
 ): AuditStepPlan {
   return { via: "blocked", params };
-}
-
-function semanticReviewPlan(
-  params: Parameters<typeof renderSemanticReviewStep>[0],
-): AuditStepPlan {
-  return { via: "semantic_review", params };
 }
 
 /**
@@ -587,51 +566,6 @@ function operatorHandoffBlock(
   };
 }
 
-// sites-pinned: tests/audit/audit-frontier.test.ts
-/** The host can progress inspection without handing its evidence to blind readers. */
-async function withReadyInspection(
-  plan: AuditStepPlan,
-  ctx: NextStepEmitContext | undefined,
-): Promise<AuditStepPlan> {
-  const inspectionRun = ctx?.result.inspectionRun;
-  if (plan.via !== "current" || !ctx || !inspectionRun) return plan;
-  const { handoff } = await prepareSemanticReviewWorkload({
-    root: ctx.root, sourceRoot: ctx.sourceRoot, artifactsDir: ctx.artifactsDir,
-    bundle: ctx.result.bundle, activeReviewRun: inspectionRun,
-  });
-  return {
-    ...plan,
-    params: {
-      ...plan.params,
-      artifactPaths: {
-        ...plan.params.artifactPaths,
-        host_workload: handoff.workload_path,
-        host_result_map: handoff.result_map_path,
-        host_coherence_groups: handoff.coherence_groups_path,
-        active_review_run: inspectionRun.review_run_path,
-        pending_audit_tasks: inspectionRun.pending_audit_tasks_path,
-      },
-      prompt: plan.params.prompt + [
-        "", "## Ready scoped inspection", "",
-        "Execute this scoped-inspection workload alongside the architectural inquiry above:",
-        handoff.workload_path,
-        "Use separate worker contexts. Give every blind architectural reader ONLY its own prompt and packet; never pass this host envelope or inspection results to a blind reader.",
-        "Each inspection worker follows its bound prompt and writes its bound result. The continuation above describes the architectural workload alone; you may also call next-step as scoped results arrive, without waiting for pending architecture work. Keep independent work running.",
-      ].join("\n"),
-      stopCondition: "Progress the independent ready workloads and call next-step as results arrive.",
-      access: {
-        // The snapshot is where every inspection prompt sends its worker to read;
-        // the coherence groups are the scheduling facts beside the workload.
-        read_paths: [...(plan.params.access?.read_paths ?? []), handoff.workload_path, handoff.result_map_path,
-          inspectionRun.pending_audit_tasks_path, handoff.coherence_groups_path, ctx.sourceRoot],
-        // Inspection workers own their workload item's bound result_path; those
-        // sibling outputs do not widen this architectural step's write scope.
-        write_paths: plan.params.access?.write_paths ?? [],
-      },
-    },
-  };
-}
-
 /** The ONE writer dispatch. Each underlying writer is called exactly once here. */
 async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
   switch (plan.via) {
@@ -639,83 +573,10 @@ async function writeAuditStep(plan: AuditStepPlan): Promise<EmittedAuditStep> {
       return await writeCurrentStep(plan.params);
     case "blocked":
       return await writeBlockedStepContract(plan.params);
-    case "semantic_review":
-      return await renderSemanticReviewStep(plan.params);
   }
 }
 
-/**
- * The task above can end with "run next-step and follow only the new prompt",
- * and the carry is stated on one step only, so the lead tells the reader to act
- * on the report first.
- */
-const CARRIED_REPORT_LEAD =
-  "Before you run next-step, read the report below on results from earlier work.";
-
-/**
- * Append the fold's drained advisory lines AFTER a prompt's own instructions.
- *
- * The lines report on OTHER work — the results of an earlier review step — so
- * they do not qualify this step's instructions, and the step states its own
- * task first (owner, 2026-10-06, after the 2026-10-05 dogfood run put hundreds
- * of carried lines between a design-review heading and its instructions).
- */
-function withAdvisoryNoticeInPrompt(
-  prompt: string,
-  advisoryNotice: readonly string[] | undefined,
-): string {
-  if (advisoryNotice === undefined || advisoryNotice.length === 0) return prompt;
-  return [prompt.trimEnd(), "", CARRIED_REPORT_LEAD, "", ...advisoryNotice].join("\n");
-}
-
-/**
- * Apply the fold's drained advisory lines to a step plan.
- *
- * The ONE application point for the carry, by construction: it decorates the
- * PLAN, so it reaches whichever writer the plan selects (`current`-kind steps,
- * the semantic-review renderer, the blocked contract) without a second splice
- * per row — the property the single-emission-site scaffold exists to hold.
- *
- * The blocked arm has no `prompt` parameter: its prompt is DERIVED from
- * `reason` by the shared writer, so the lines are appended to the reason and
- * render through the same single source.
- */
-function withAdvisoryNotice(
-  plan: AuditStepPlan,
-  advisoryNotice: readonly string[] | undefined,
-): AuditStepPlan {
-  switch (plan.via) {
-    case "current":
-      return {
-        via: "current",
-        params: {
-          ...plan.params,
-          prompt: withAdvisoryNoticeInPrompt(plan.params.prompt, advisoryNotice),
-        },
-      };
-    case "blocked":
-      return {
-        via: "blocked",
-        params: {
-          ...plan.params,
-          reason:
-            advisoryNotice === undefined || advisoryNotice.length === 0
-              ? plan.params.reason
-              : `${plan.params.reason}\n\n${advisoryNotice.join("\n")}`,
-        },
-      };
-    case "semantic_review":
-      // Unreachable by construction: a carry drained onto a semantic-review
-      // result rides that result's advisory CHANNEL as data (the fold's
-      // `withFoldAdvisories`), so it never arrives here as lines. Passed
-      // through unchanged rather than spliced, because
-      // `renderSemanticReviewStep` owns where those sections land in the
-      // prompt — a second splice would render one advisory twice.
-      return plan;
-  }
-}
-
-type NextStepEmissionKind = Exclude<NextStepResult["kind"], "semantic_review">;
+type NextStepEmissionKind = NextStepResult["kind"];
 type NextStepResultOf<K extends NextStepResult["kind"]> = Extract<
   NextStepResult,
   { kind: K }
@@ -1852,8 +1713,7 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
 /**
  * The step-emission dispatch table: exactly one row per host-actionable result
  * kind. Typed as a TOTAL record over the kind union, so a kind added upstream
- * with no row here is a compile error rather than a step that silently falls
- * through to the semantic-review dispatch.
+ * with no row here is a compile error rather than a step that silently falls back to a different workload.
  *
  * Exported together with the handled-kinds set below so a drift guard imports
  * the real thing instead of reconstructing it by reading a branch chain.
@@ -1861,6 +1721,40 @@ const emitSynthesisNarrative = emissionRow<"synthesis_narrative">(
 export const NEXT_STEP_EMISSION_TABLE: Readonly<
   Record<NextStepEmissionKind, NextStepEmissionRow>
 > = {
+  question_review: async ({ result, root, artifactsDir }) => {
+    if (result.kind !== "question_review") throw new Error("Expected a question review step");
+    const next = nextStepCommand(root, artifactsDir);
+    const rejected = result.rejectedCount > 0;
+    const rejectionSummary = `Could not accept ${result.rejectedCount} saved question ${result.rejectedCount === 1 ? "result" : "results"}.`;
+    return { via: "current", params: {
+      artifactsDir, repoRoot: root, stepKind: "dispatch_review", status: "ready", runId: result.runId,
+      allowedCommands: [next],
+      progress: {
+        summary: rejected ? rejectionSummary + " See the prompt for how to correct pending results."
+          : "Review questions are ready for the host.",
+        pending_tasks: result.pendingCount,
+      },
+      stopCondition: "Submit the bound question answers and then run next-step.",
+      artifactPaths: { host_workload: result.workloadPath },
+      prompt: [
+        "# Review the issued questions",
+        "Read the workload at: " + toPromptPathToken(result.workloadPath),
+        ...(rejected ? [
+          "## Saved results not accepted",
+          rejectionSummary + " Rejections did not change any accepted answers.",
+          ...result.rejections.map(({ assignmentId, guidance }) => "- `" + assignmentId + "`: " + guidance),
+          ...(result.rejectedCount > result.rejections.length
+            ? ["Some rejections are not listed above. Use only assignments in the current workload."] : []),
+          "For pending assignments, correct the saved result at the matching workload item's result_path, or submit the corrected bound answer through MCP.",
+        ] : []),
+        "Use the frozen source, question scope and supplied evidence in each binding. Suggested source files are starting points, not the review boundary.",
+        "Record scoped supported observations and any unanswered parts. Do not convert missing evidence into a clean answer.",
+        "Copy the exact assignment_id, question_id, revision_id and snapshot_id into the answer. Use a distinct submission_id for each independent answer and replay only the same answer under the same ID.",
+        "For each part marked findings, include at least one claim linked by observation_ids to a supported observation in that part. This applies to leads and design opportunities as well as confirmed defects; a claim on a different part does not count.",
+        "For MCP submit_result, set work_item_id to the issued assignment_id and pass the answer as the result JSON object. Without MCP, write the answer to that item's result_path (relative to the repository root). Then run: " + next,
+      ].join("\n\n"),
+    }};
+  },
   complete: emitComplete,
   blocked: emitBlocked,
   design_review_parallel: emitDesignReviewParallel,
@@ -1882,7 +1776,7 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
 
 /**
  * The one emission site for `audit-code next-step`. Rows return plans; this
- * writes and logs exactly once, whichever row (or the fallback) produced it.
+ * writes and logs exactly once, whichever row produced it.
  */
 const NEXT_STEP_EMISSION = createStepEmissionScaffold<
   NextStepEmitContext,
@@ -1890,29 +1784,10 @@ const NEXT_STEP_EMISSION = createStepEmissionScaffold<
   EmittedAuditStep
 >({
   table: NEXT_STEP_EMISSION_TABLE,
-  // `semantic_review` is deliberately the FALLBACK rather than a row: the
-  // validation boundary here has always been "anything unmatched is a
-  // semantic-review dispatch", never an error on an unrecognized kind.
   fallback: (ctx) => {
-    const result = ctx.result as NextStepResultOf<"semantic_review">;
-    return semanticReviewPlan({
-      root: ctx.root,
-      sourceRoot: ctx.sourceRoot,
-      artifactsDir: ctx.artifactsDir,
-      activeReviewRun: result.activeReviewRun,
-      bundle: result.bundle,
-      selectedExecutor: result.selectedExecutor,
-      inProcessMadeProgress: result.inProcessMadeProgress,
-      ingestIssues: result.ingestIssues,
-      validationWarnings: result.validationWarnings,
-    });
+    throw new Error("No audit step emitter for kind: " + ctx.result.kind);
   },
-  // The drained advisory lines decorate the PLAN inside the one writer, so
-  // they reach every row (and the fallback) without a second splice per row.
-  // They decorate LAST: the ready-inspection section is part of this step's
-  // own task, and the carried report follows the whole task.
-  write: async (plan, ctx) =>
-    writeAuditStep(withAdvisoryNotice(await withReadyInspection(plan, ctx), ctx?.advisoryNotice)),
+  write: writeAuditStep,
   // The tool's only externally-observable per-invocation contract.
   log: (step) => {
     console.log(JSON.stringify(step, null, 2));

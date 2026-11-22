@@ -2,8 +2,12 @@ import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
+import { hashContent } from "audit-tools/shared";
 
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
+import { computeStaleArtifacts } from "../../src/audit/orchestrator/staleness.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type {
   AuditResult,
@@ -14,7 +18,6 @@ import type {
   AuditObligation,
   AuditState,
 } from "../../src/audit/types/auditState.js";
-import type { AuditPlanMetrics } from "../../src/audit/types/reviewPlanning.js";
 
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const {
@@ -33,50 +36,6 @@ const { buildSelectiveDeepeningTasks } =
   await import("../../src/audit/orchestrator/selectiveDeepening/index.js");
 const { ingestAuditResults } =
   await import("../../src/audit/orchestrator/resultIngestion.js");
-
-/**
- * A contract-complete, all-zero `AuditPlanMetrics`. Only its PRESENCE matters to
- * the import-executor test below (which asserts planning-derived outputs are
- * cleared), so every numeric field is 0 and every collection empty.
- */
-const ZERO_PLAN_METRICS: AuditPlanMetrics = {
-  generated_at: "2026-04-22T00:00:00Z",
-  task_count: 0,
-  packet_count: 0,
-  estimated_agent_reduction: 0,
-  estimated_agent_reduction_ratio: 0,
-  unique_file_count: 0,
-  task_file_reference_count: 0,
-  repeated_file_reference_count: 0,
-  total_task_lines: 0,
-  total_packet_lines: 0,
-  repeated_line_reference_count: 0,
-  min_task_lines: 0,
-  max_task_lines: 0,
-  average_task_lines: 0,
-  lens_task_counts: {},
-  priority_task_counts: {},
-  packet_quality: {
-    average_cohesion_score: 0,
-    boundary_crossing_count: 0,
-    boundary_edge_kind_counts: {},
-    orphan_task_count: 0,
-    high_fan_in_file_count: 0,
-    high_fan_out_file_count: 0,
-    weakly_explained_gap_counts: {},
-    weakly_explained_file_extension_counts: {},
-    weakly_explained_packet_count: 0,
-    weakly_explained_packet_ids: [],
-    weakly_explained_packet_samples: [],
-    largest_unexplained_packet_files: 0,
-  },
-  packet_size: {
-    single_task_packets: 0,
-    multi_task_packets: 0,
-    max_tasks_per_packet: 0,
-    max_files_per_packet: 0,
-  },
-};
 
 function findObligation(
   state: AuditState,
@@ -140,42 +99,6 @@ test("runtime validation runs package-manager shims through the Windows shell", 
   expect(resolveRuntimeValidationSpawnCommand(["npm", "test"], "linux")).toEqual({ command: "npm", args: ["test"] });
 });
 
-test("deriveAuditState marks audit tasks complete when every task has a result", () => {
-  const state = deriveAuditState({
-    repo_manifest: {
-      repository: { name: "fixture" },
-      generated_at: "2026-04-22T00:00:00Z",
-      files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 12 }],
-    },
-    audit_tasks: [
-      {
-        task_id: "src-api-auth:security",
-        unit_id: "src-api-auth",
-        pass_id: "pass:security",
-        lens: "security",
-        file_paths: ["src/api/auth.ts"],
-        rationale: "Audit auth",
-        priority: "high",
-        status: "pending",
-      },
-    ],
-    audit_results: [
-      {
-        task_id: "src-api-auth:security",
-        unit_id: "src-api-auth",
-        pass_id: "pass:security",
-        lens: "security",
-        file_coverage: [{ path: "src/api/auth.ts", total_lines: 12 }],
-        findings: [],
-        reviewed_clean: true,
-      },
-    ],
-  });
-
-  expect(findObligation(state, "audit_tasks_completed")?.state).toBe("satisfied");
-  expect(findObligation(state, "audit_results_ingested")?.state).toBe("satisfied");
-});
-
 test("deriveAuditState requires syntax-resolution marker instead of imported analyzer results", () => {
   const importedOnly = deriveAuditState({
     repo_manifest: {
@@ -208,27 +131,25 @@ test("deriveAuditState requires syntax-resolution marker instead of imported ana
   expect(findObligation(withMarker, "syntax_resolved")?.state).toBe("satisfied");
 });
 
-test("external analyzer import clears planning-derived outputs in memory", () => {
-  const run = runExternalAnalyzerImportExecutor(
-    {
-      coverage_matrix: { files: [] },
-      flow_coverage: { flows: [] },
-      audit_tasks: [],
-      audit_plan_metrics: ZERO_PLAN_METRICS,
-      requeue_tasks: [],
-      audit_report: "# stale\n",
-    },
-    {
-      tool: "semgrep",
-      results: [],
-    },
-  );
+test("external analyzer import invalidates current plan inputs without erasing the existing plan", () => {
+  const path = "src/api/auth.ts";
+  const bundle = buildQuestionPlanArtifacts({
+    repo_manifest: { repository: { name: "fixture" }, generated_at: "2026-04-22T00:00:00Z",
+      files: [{ path, language: "typescript", size_bytes: 12, hash: hashContent("source body\n") }] },
+    file_disposition: { files: [{ path, status: "included" }] },
+    surface_manifest: { surfaces: [{ id: "auth", kind: "interface", entrypoint: path }] },
+    external_analyzer_results: [],
+    audit_report: "# stale\n",
+  }, fullAuditScope()).updated;
+  expect(bundle.review_plan?.questions.length).toBeGreaterThan(0);
+  bundle.artifact_metadata = computeArtifactMetadata(bundle);
+  expect(computeStaleArtifacts(bundle, { emit: false }).has("review_plan.json")).toBe(false);
 
-  expect(run.updated.external_analyzer_results![0].tool).toBe("semgrep");
-  expect(run.updated.coverage_matrix).toBe(undefined);
-  expect(run.updated.audit_tasks).toBe(undefined);
-  expect(run.updated.requeue_tasks).toBe(undefined);
-  expect(run.updated.audit_report).toBe(undefined);
+  const run = runExternalAnalyzerImportExecutor(bundle, { tool: "semgrep", results: [] });
+  expect(run.updated.external_analyzer_results).toEqual([{ tool: "semgrep", results: [] }]);
+  expect(run.updated.review_plan).toBe(bundle.review_plan);
+  expect(computeStaleArtifacts(run.updated, { emit: false }).has("review_plan.json")).toBe(true);
+  expect(run.updated.audit_report).toBeUndefined();
 });
 
 test("deriveAuditState keeps explicit pending follow-up tasks actionable after coverage is complete", () => {
@@ -1867,96 +1788,38 @@ test("conflictGroups keeps group when confidenceSpread >= 2 even if severitySpre
 
 // ── requeue folding ────────────────────────────────────────────────────────
 
-const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
+test("the active question plan uses frozen source without legacy line counts or requeue tasks", () => {
+  const path = "src/api/auth.ts";
+  const bundle: ArtifactBundle = {
+    repo_manifest: {
+      repository: { name: "test-repo" },
+      generated_at: "2026-01-01T00:00:00Z",
+      files: [{ path, language: "ts", size_bytes: 11, hash: hashContent("synthetic!") }],
+    },
+    file_disposition: { files: [{ path, status: "included" }] },
+    surface_manifest: { surfaces: [{ id: "fixture-entry", kind: "interface", entrypoint: path }] },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1", confirmed_at: "2026-01-01T00:00:00Z",
+      confirmed_by: "host", scope_summary: "Fixture source", intent_summary: "Review behavior",
+      lens_selection: { include: ["behavior"] },
+    },
+  };
+  const scope = fullAuditScope();
+  const planned = buildQuestionPlanArtifacts(bundle, scope).updated.review_plan!;
+  const questions = planned.questions.filter(row => row.source_dependencies.some(dep => dep.key === path));
+  expect(questions.length).toBeGreaterThan(0);
+  expect([...new Set(questions.map(row => row.lens))]).toEqual(["behavior"]);
 
-// TST-c7bdc07c: runPlanningExecutor with an empty lineIndex — exercises the
-// path-resolution branch where no file has a known line count.
-test("planning executor completes with an empty lineIndex (no line counts available)", async () => {
-  const tmpRoot = await mkdtemp(join(tmpdir(), "planning-empty-lineindex-"));
-  try {
-    const bundle: ArtifactBundle = {
-      repo_manifest: {
-        repository: { name: "test-repo" },
-        generated_at: "2026-01-01T00:00:00Z",
-        files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
-      },
-      file_disposition: { files: [] },
-      unit_manifest: {
-        units: [
-          {
-            unit_id: "src-api-auth",
-            name: "Auth",
-            files: ["src/api/auth.ts"],
-            required_lenses: ["security"],
-          },
-        ],
-      },
-      surface_manifest: { surfaces: [] },
-      critical_flows: { flows: [] },
-      risk_register: { items: [] },
-    };
-
-    // Empty lineIndex — no file has a known line count.
-    const result = await runPlanningExecutor(bundle, tmpRoot, {});
-
-    expect(result, "executor must return a result").toBeTruthy();
-    expect(Array.isArray(result.updated.task_affinity_graph?.nodes), "must produce a task-affinity graph").toBeTruthy();
-    // With zero line counts the task is still planned (may have 0-line estimate)
-    // but must NOT throw.
-    expect(typeof result.updated === "object", "updated bundle must be an object").toBeTruthy();
-  } finally {
-    await rm(tmpRoot, { recursive: true, force: true });
-  }
-});
-
-test("planning executor folds pending requeue tasks into the dispatch surface", async () => {
-  const tmpRoot = await mkdtemp(join(tmpdir(), "planning-requeue-"));
-  try {
-    const bundle: ArtifactBundle = {
-      repo_manifest: {
-        repository: { name: "test-repo" },
-        generated_at: "2026-01-01T00:00:00Z",
-        files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
-      },
-      file_disposition: { files: [] },
-      unit_manifest: {
-        units: [
-          {
-            unit_id: "src-api-auth",
-            name: "Auth",
-            files: ["src/api/auth.ts"],
-            required_lenses: ["security"],
-          },
-        ],
-      },
-      surface_manifest: { surfaces: [] },
-      critical_flows: { flows: [] },
-      risk_register: { items: [] },
-    };
-
-    const lineIndex = { "src/api/auth.ts": 50 };
-    const result = await runPlanningExecutor(bundle, tmpRoot, lineIndex);
-
-    // Packets are partitioned just-in-time at dispatch (never persisted); the
-    // planning-time dispatch surface is the task-affinity graph.
-    expect(Array.isArray(result.updated.task_affinity_graph?.nodes)).toBeTruthy();
-    expect(result.updated.task_affinity_graph!.nodes.length > 0, "expected at least one task-affinity node").toBeTruthy();
-
-    // The requeue payload is built before folding; any pending requeue task
-    // file paths must appear in the dispatch surface
-    const dispatchFilePaths = new Set(
-      result.updated.task_affinity_graph!.nodes.flatMap((n) => n.file_paths),
-    );
-    for (const requeueTask of (result.updated.requeue_tasks ?? []).filter(
-      (t) => t.status === "pending",
-    )) {
-      for (const path of requeueTask.file_paths) {
-        expect(dispatchFilePaths.has(path), `requeue task path "${path}" must appear in the task-affinity graph`).toBeTruthy();
-      }
-    }
-  } finally {
-    await rm(tmpRoot, { recursive: true, force: true });
-  }
+  // Historical file/lens requeue work cannot change the admitted question cohort.
+  const requeueTask: AuditTask = {
+    task_id: `requeue:security:${path}`, unit_id: `requeue:${path}`,
+    pass_id: "requeue:security", lens: "security", file_paths: [path],
+    rationale: "Legacy pending work", priority: "medium", status: "pending",
+  };
+  const resumed = buildQuestionPlanArtifacts({ ...bundle, requeue_tasks: [requeueTask] }, scope);
+  expect(resumed.updated.review_plan).toEqual(planned);
+  expect(resumed.updated.requeue_tasks).toEqual([requeueTask]);
+  expect(resumed.artifacts_written).toEqual(["scope.json", "review_plan.json"]);
 });
 
 test("ingestion executor folds pending requeue tasks for uncovered files into the dispatch surface", () => {

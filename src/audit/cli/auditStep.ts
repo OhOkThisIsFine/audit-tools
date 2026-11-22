@@ -4,13 +4,10 @@ import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./re
 import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import { access } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import {
-  createMemoizedSourceReader,
-  enumerateTrackedFilePaths,
   readJsonFile,
   RunLogger,
-  groundFinding,
   CharterExtractionMergedSchema,
   CharterComparisonSubmissionSchema,
   CharterFidelitySubmissionSchema,
@@ -23,25 +20,14 @@ import {
   writeCoreArtifacts,
 } from "../io/artifacts.js";
 import { advanceAudit } from "../orchestrator/advance.js";
-import { decideNextStep } from "../orchestrator/nextStep.js";
-import { deriveAuditState } from "../orchestrator/state.js";
 import type { AdvanceAuditResult } from "../orchestrator/advanceTypes.js";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import { IntentEquivalenceVerdictSchema } from "../orchestrator/intentEquivalenceExecutor.js";
 import type { EdgeReasoningResults } from "../orchestrator/edgeReasoning.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
-import { partitionOrphanedAuditResults } from "../orchestrator/resultIngestion.js";
-import {
-  validateAuditResults,
-  formatAuditResultIssues,
-} from "../validation/auditResults.js";
-import { formatAuditResultValidationError } from "./workerResult.js";
 import { laneSubmissionPath } from "./laneSubmissions.js";
-import { looksLikeCliFlag, listBatchResultFiles } from "./args.js";
 import { buildLineIndex } from "./lineIndex.js";
-import type { AuditResult } from "../types.js";
-import type { AnalyzerSetting, Finding, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
-import type { RuntimeValidationReport } from "../types/runtimeValidation.js";
+import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } from "audit-tools/shared";
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
@@ -55,22 +41,7 @@ export interface RunAuditStepOptions {
    * one it resolved under its hold; {@link runAuditStep} resolves it itself.
    */
   sourceRoot?: string;
-  /**
-   * Overwrite every supplied finding's `grounding` with the tool's own re-check
-   * against the source root, before validation (the CLI batch lane's half of the
-   * S7 grounding contract — see {@link stampToolComputedGrounding}).
-   */
-  groundAuditResults?: boolean;
   preferredExecutor?: string;
-  auditResultsPath?: string;
-  /**
-   * Already-validated host-handoff results. This is the in-process counterpart
-   * to `auditResultsPath`: the zero-adapter host boundary validates and binds
-   * each untrusted result before handing the normalized AuditResult objects to
-   * the ordinary result-ingestion executor.
-   */
-  auditResultsData?: AuditResult[];
-  runtimeUpdatesPath?: string;
   /** Provide a file path OR an already-parsed object; path is only read when the object is absent. */
   externalAnalyzerPath?: string;
   externalAnalyzerData?: ExternalAnalyzerResults;
@@ -189,73 +160,6 @@ async function executeAdvance(
   const sizeIndex = bundle.repo_manifest
     ? sizeIndexFromManifest(bundle.repo_manifest)
     : undefined;
-  if (looksLikeCliFlag(options.auditResultsPath)) {
-    throw new Error(
-      `Invalid audit results path '${options.auditResultsPath}'. This looks like a CLI flag rather than a file path.`,
-    );
-  }
-  if (options.auditResultsPath !== undefined && options.auditResultsData !== undefined) {
-    throw new Error("Provide either auditResultsPath or auditResultsData, not both.");
-  }
-  let auditResults: unknown =
-    options.auditResultsData ??
-    (options.auditResultsPath
-      ? await readJsonFile<unknown>(options.auditResultsPath)
-      : undefined);
-  if (options.groundAuditResults === true && Array.isArray(auditResults)) {
-    await stampToolComputedGrounding(sourceRoot, auditResults);
-  }
-  if (auditResults !== undefined) {
-    // Partition results whose task_id is no longer in the active manifest — e.g.
-    // selective-deepening tasks pruned by a later re-plan. Only the RETAINED
-    // (task-known) subset is validated below: an orphan cannot be validated
-    // against a task that no longer exists, and would otherwise abort the whole
-    // batch at the validation gate and strand every valid result. But O2's
-    // RETAIN-UNASSIGNED invariant means an orphan is NEVER pruned from the
-    // ledger — so the FULL set (retained + orphaned) still flows to advanceAudit,
-    // where the append-only ledger keeps the orphan, just un-associated.
-    const partition = partitionOrphanedAuditResults(
-      auditResults,
-      new Set((bundle.audit_tasks ?? []).map((task) => task.task_id)),
-    );
-    const orphaned = partition && partition.orphanedTaskIds.length > 0 ? partition : null;
-    const resultsToValidate = orphaned ? orphaned.retained : auditResults;
-    if (orphaned) {
-      process.stderr.write(
-        `audit-results ingestion: ${orphaned.orphanedTaskIds.length} result(s) whose task_id ` +
-          `is not in the active manifest (orphaned by re-planning) retained in the ledger but skipped at the validation gate: ${orphaned.orphanedTaskIds.join(", ")}\n`,
-      );
-    }
-    const issues = validateAuditResults(resultsToValidate, bundle.audit_tasks ?? [], {
-      lineIndex,
-    });
-    const errors = issues.filter((issue) => issue.severity === "error");
-    const warnings = issues.filter((issue) => issue.severity === "warning");
-
-    if (warnings.length > 0) {
-      // Cap the per-warning detail so a run with many out-of-scope-evidence
-      // warnings (each listing the task's full assigned-file set) doesn't bury
-      // the rest of the output. The count is exact; the detail is a sample.
-      const WARNING_DETAIL_CAP = 10;
-      const moreSuffix =
-        warnings.length > WARNING_DETAIL_CAP
-          ? `\n  ... (+${warnings.length - WARNING_DETAIL_CAP} more warning(s) suppressed)`
-          : "";
-      process.stderr.write(
-        `[${new Date().toISOString()}] audit-results validation (artifacts: ${options.artifactsDir}): ${warnings.length} warning(s):\n` +
-          formatAuditResultIssues(warnings.slice(0, WARNING_DETAIL_CAP)) +
-          moreSuffix +
-          "\n",
-      );
-    }
-
-    if (errors.length > 0) {
-      throw new Error(formatAuditResultValidationError(errors));
-    }
-  }
-  const runtimeValidationUpdates = options.runtimeUpdatesPath
-    ? await readJsonFile<RuntimeValidationReport>(options.runtimeUpdatesPath)
-    : undefined;
   const externalAnalyzerResults =
     options.externalAnalyzerData ??
     (options.externalAnalyzerPath
@@ -305,8 +209,6 @@ async function executeAdvance(
     artifactsDir: options.artifactsDir,
     lineIndex,
     sizeIndex,
-    auditResults: auditResults as AuditResult[] | undefined,
-    runtimeValidationUpdates,
     externalAnalyzerResults,
     narrativeResults,
     criticalFlowFallbackResults,
@@ -339,93 +241,4 @@ async function executeAdvance(
     },
     runLogger,
   });
-}
-
-/**
- * The CLI batch lane's half of the S7 grounding contract (docs-16): overwrite
- * every finding's `grounding` with the TOOL's own re-check before the payload
- * reaches validation or the ledger.
- *
- * OVERWRITE, not refuse: unlike the host-handoff boundary — whose worker
- * submissions are raw and where a supplied verdict is rejected outright — this
- * lane also carries results a previous ingest already grounded, so a refusal
- * would reject legitimate re-imports. Recomputing is idempotent on those and
- * strips a self-reported verdict from the rest. Runs BEFORE `validateAuditResults`
- * and shape-guards its own traversal, so a malformed payload still fails at the
- * validation gate with its normal message instead of throwing here.
- *
- * Exported so the contract is tested against THIS mechanism directly: the only
- * alternative seam is the multi-minute end-to-end batch-ingest fixture, and a
- * test that cannot reach the code it names is not a guard.
- */
-export async function stampToolComputedGrounding(
-  root: string,
-  results: readonly unknown[],
-): Promise<void> {
-  const readSource = createMemoizedSourceReader();
-  // Enumerate once when there are findings; empty submissions need no git call.
-  let knownPaths: ReadonlySet<string> | undefined;
-  for (const result of results) {
-    if (typeof result !== "object" || result === null) continue;
-    const findings = (result as { findings?: unknown }).findings;
-    if (!Array.isArray(findings)) continue;
-    for (const finding of findings) {
-      if (typeof finding !== "object" || finding === null) continue;
-      const typed = finding as Finding;
-      knownPaths ??= await enumerateTrackedFilePaths(root);
-      await groundFinding(root, typed, readSource, knownPaths);
-    }
-  }
-}
-
-export async function ingestBatchAuditResults(options: {
-  root: string;
-  artifactsDir: string;
-  batchDir: string;
-}) {
-  const batchFiles = await listBatchResultFiles(options.batchDir);
-  // A batch directory is one host submission boundary. Ingest every canonical
-  // file atomically so partial files cannot trigger selective-deepening/requeue
-  // derivation between siblings and manufacture new pending review tasks before
-  // the rest of the same batch is visible.
-  const payloads = await Promise.all(
-    batchFiles.map((batchFile) => readJsonFile<unknown>(batchFile)),
-  );
-  const auditResultsData = payloads.flatMap((payload) =>
-    Array.isArray(payload) ? payload : [payload],
-  ) as AuditResult[];
-  const step = batchFiles.length > 0
-    ? await runAuditStep({
-        root: options.root,
-        artifactsDir: options.artifactsDir,
-        preferredExecutor: "result_ingestion_executor",
-        auditResultsData,
-        groundAuditResults: true,
-      })
-    : null;
-
-  const bundle =
-    step?.updated_bundle ??
-    (await loadArtifactBundle(options.artifactsDir));
-  const state = deriveAuditState(bundle);
-  const decision = decideNextStep(bundle);
-
-  return {
-    batchFiles,
-    bundle,
-    audit_state: state,
-    selected_obligation:
-      step?.selected_obligation ?? decision.selected_obligation,
-    selected_executor:
-      step?.selected_executor ?? "result_ingestion_executor",
-    progress_made: step?.progress_made ?? false,
-    artifacts_written: step?.artifacts_written ?? [],
-    progress_summary:
-      `Imported ${batchFiles.length} batch result file${batchFiles.length === 1 ? "" : "s"} from ${options.batchDir}.` +
-      (step
-        ? `\n${batchFiles.map((file) => basename(file)).join(", ")}: ${step.progress_summary}`
-        : ""),
-    next_likely_step:
-      state.status === "complete" ? null : decision.selected_obligation,
-  };
 }

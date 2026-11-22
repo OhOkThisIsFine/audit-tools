@@ -207,12 +207,13 @@ test("PARITY-4: all downstream filenames in ARTIFACT_DEPENDENTS_MAP are known ar
 
 // ── PARITY-5: specific high-value edges (regression guards) ──────────────────
 
-test("PARITY-5a: planning executor writes scope.json AND scope.json → coverage_matrix.json, audit_tasks.json edges exist", () => {
-  // ARC-cebe3421-3 regression guard.
-  expect(ALL_EXECUTOR_WRITTEN.has("scope.json"), "planning executor must list scope.json in artifacts_written").toBeTruthy();
-  const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"];
-  expect(Array.isArray(scopeDeps) && scopeDeps.includes("coverage_matrix.json"), "scope.json → coverage_matrix.json direct edge must exist in ARTIFACT_DEPENDENTS_MAP").toBeTruthy();
-  expect(Array.isArray(scopeDeps) && scopeDeps.includes("audit_tasks.json"), "scope.json → audit_tasks.json direct edge must exist (ARC-cebe3421-3: scope change with identical coverage must still re-stale tasks)").toBeTruthy();
+test("PARITY-5a: scope and question-plan writes agree with the current direct DAG edges", () => {
+  expect(ALL_EXECUTOR_WRITTEN.has("scope.json")).toBe(true);
+  expect(ALL_EXECUTOR_WRITTEN.has("review_plan.json")).toBe(true);
+  expect(ARTIFACT_DEPENDENTS_MAP["scope.json"]).toContain("review_plan.json");
+  expect(ARTIFACT_DEPENDENTS_MAP["review_plan.json"]).toEqual(expect.arrayContaining([
+    "audit-findings.json", AUDIT_REPORT_FILENAME,
+  ]));
 });
 
 test("PARITY-5b: structure executor writes graph_bundle.json AND graph_bundle.json → analyzer_capability.json edge exists", () => {

@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/functional-preflight.test.ts, tests/audit/host-handoff-unaccept-results.test.ts
+// sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/functional-preflight.test.ts
 import { validateAuditArguments, auditArgumentNames, NEXT_STEP_ARGUMENTS, type AuditArgumentContract } from "./cli/argumentContract.js";
 import { requireFunctionalPreflight } from "./cli/functionalPreflight.js";
 import { resolve } from "node:path";
@@ -24,20 +24,14 @@ import { runSample } from "./cli/sampleRunCommand.js";
 import { cmdImportExternalAnalyzer } from "./cli/importExternalAnalyzerCommand.js";
 import { cmdIntake } from "./cli/intakeCommand.js";
 import { cmdPlan } from "./cli/planCommand.js";
-import { cmdIngestResults } from "./cli/ingestResultsCommand.js";
-import { cmdExplainTask, EXPLAIN_TASK_ARGUMENTS } from "./cli/explainTaskCommand.js";
-import { cmdUpdateRuntimeValidation } from "./cli/updateRuntimeValidationCommand.js";
 import { cmdValidate } from "./cli/validateCommand.js";
-import { cmdValidateResults } from "./cli/validateResultsCommand.js";
-import { cmdMcp, cmdSubmit } from "./cli/submitCommand.js";
-import { cmdRequeue } from "./cli/requeueCommand.js";
+import { cmdConsolidateFindings, cmdMcp, cmdSubmit } from "./cli/submitCommand.js";
 import { cmdSynthesize } from "./cli/synthesizeCommand.js";
 import { cmdForceSynthesis } from "./cli/forceSynthesisCommand.js";
 import { cmdResynthesize } from "./cli/resynthesizeCommand.js";
 import { cmdCleanup } from "./cli/cleanupCommand.js";
 import { cmdScoreAudit } from "./cli/scoreAuditCommand.js";
 import { cmdRecoverSubmission } from "./cli/recoverSubmissionCommand.js";
-import { cmdUnacceptResults } from "./cli/unacceptResultsCommand.js";
 
 export const cliTestUtils = {
   defaults: DIRECT_CLI_DEFAULTS,
@@ -57,7 +51,7 @@ export const cliTestUtils = {
  * inside a tool-created worktree (its own review snapshot / implement checkout)
  * — result-scoped submission and validation, whose targets are explicit
  * (`--task` payload, `--artifacts-dir-b64`). Every OTHER command — including
- * the bare-invocation `sample-run` default and any future command — is refused
+ * explicit `sample-run` and any future command — is refused
  * from a node-worktree context: deny by default, never silently exposed
  * (backlog "shared-state clobber from node context", live 2026-07-22). The
  * packaged wrapper spawns this backend with cwd at the PACKAGE root, so the
@@ -79,14 +73,10 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["import-external-analyzer", cmdImportExternalAnalyzer, { values: ["--external-analyzer-results"] }],
   ["intake", cmdIntake, {}],
   ["plan", cmdPlan, { values: ["--since"] }],
-  ["ingest-results", cmdIngestResults, { values: ["--results", "--batch-results"], acceptsSemanticResults: true }],
-  ["explain-task", cmdExplainTask, EXPLAIN_TASK_ARGUMENTS],
-  ["update-runtime-validation", cmdUpdateRuntimeValidation, { values: ["--updates"], acceptsSemanticResults: true }],
   ["validate", cmdValidate, {}],
-  ["validate-results", cmdValidateResults, { values: ["--results"] }],
   ["submit", cmdSubmit, { values: ["--work-item", "--from"] }],
+  ["consolidate-findings", cmdConsolidateFindings, { values: ["--from"] }],
   ["mcp", cmdMcp, {}],
-  ["requeue", cmdRequeue, {}],
   ["synthesize", cmdSynthesize, {}],
   ["force-synthesis", cmdForceSynthesis, {}],
   ["resynthesize", cmdResynthesize, { values: ["--input"] }],
@@ -94,15 +84,14 @@ export const COMMAND_ROUTES: ReadonlyArray<
   ["status", cmdStatus, {}],
   ["score-audit", cmdScoreAudit, { values: ["--findings", "--labels", "--baseline", "--out"] }],
   ["recover-submission", cmdRecoverSubmission, { values: ["--lane", "--submission-id", "--from"], acceptsSemanticResults: true }],
-  ["unaccept-results", cmdUnacceptResults, { values: ["--work-item", "--run-id"], switches: ["--all"] }],
 ];
 
 async function main(argv: string[]): Promise<void> {
-  const command = argv[2] ?? "sample-run";
+  const command = argv[2];
   const route = COMMAND_ROUTES.find(([verb]) => verb === command);
   const delimiter = argv.indexOf("--", 2);
   const helpArgs = argv.slice(2, delimiter < 0 ? undefined : delimiter);
-  if (helpArgs.some((arg) => arg === "--help" || arg === "-h")) {
+  if (command === undefined || helpArgs.some((arg) => arg === "--help" || arg === "-h")) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
     if (route) console.log(`Options: ${auditArgumentNames(route[2]).join(", ")}`);
     console.log(

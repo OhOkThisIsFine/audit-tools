@@ -12,6 +12,7 @@ import {
   FindingSchema,
   FindingLocationObjectSchema,
   LensSchema,
+  ReviewSubmissionSchema,
 } from "audit-tools/shared";
 import {
   AuditTaskSchema,
@@ -100,6 +101,8 @@ export const WORKER_REFUSED_FINDING_VERDICTS = {
     "evidence_lane is tool-derived at ingest and must not be supplied",
   lead_lineage:
     "lead_lineage is stamped by the deterministic producer and must not be supplied",
+  question_review_sources:
+    "question_review_sources is derived from accepted question submissions and must not be supplied",
 } as const;
 
 export const WorkerFindingSchema = FindingSchema.omit({
@@ -108,6 +111,7 @@ export const WorkerFindingSchema = FindingSchema.omit({
   severity_downgraded_from: true,
   evidence_lane: true,
   lead_lineage: true,
+  question_review_sources: true,
 })
   .extend({
     category: z.string().min(1),
@@ -191,6 +195,10 @@ export const WORKER_SCHEMA_SOURCES: Record<
     schema: WorkerAuditResultsSchema,
     title: "Audit Results",
   },
+  "review_submission.schema.json": {
+    schema: ReviewSubmissionSchema,
+    title: "Question Review Submission",
+  },
   // The audit-code/v1alpha1 wrapper CLI response envelope (wrapperResponse.ts).
   "audit-code-v1alpha1.schema.json": {
     schema: AuditCodeResponseSchema,
@@ -238,6 +246,7 @@ export const CONTRACT_SCHEMA_PRODUCERS: Record<
       "severity_downgraded_from",
       "evidence_lane",
       "lead_lineage",
+      "question_review_sources",
     ],
     requiredOverride: ["evidence", "affected_files"],
     added: [],

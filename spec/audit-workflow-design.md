@@ -303,6 +303,17 @@ file completeness is reported separately. `validateAuditFindingsReport` holds no
 checks internal consistency only — it abstains on the `clean`/`not_run`
 distinction it cannot establish.
 
+An explicit architecture selection also plans one bounded source sample when an
+in-scope critical workflow has a source entry point and crosses component units.
+The sample uses frozen source inputs and checks workflow contracts, ownership,
+and hand-offs; it does not add an architecture requirement to each file. For this
+selection, a broad design snapshot and the source sample retain independent
+coverage evidence.
+The architecture row's `source_sample` distinguishes `not_planned`,
+`planned_not_run`, `reviewed_no_findings`, and `reviewed_with_findings`.
+An empty, current accepted review is clean only for that sample. Finding
+classifications remain independent of that status.
+
 **No N-file task cap:** `max_task_files` is a degenerate guard only; the token
 budget (`max_task_lines`, byte-based `sizeIndex` sizing) is the real constraint.
 

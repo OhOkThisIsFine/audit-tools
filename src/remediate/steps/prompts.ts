@@ -308,6 +308,9 @@ sources itself: do not write a source manifest, and do not edit source files.
 
 - **Documents.** Pass each path with \`--input\`. Repeat \`--input\` once for each
   document. An \`audit-findings.json\` report is read as structured findings.
+  Only confirmed defects in the current question-review report are candidates.
+  An archived report needs a new audit report; opportunities and open questions
+  remain context and cannot grant write scope.
 
   \`${loaderCommand("next-step --input <path> --input <path>")}\`
 

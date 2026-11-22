@@ -5,102 +5,68 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
 import { loadArtifactBundle } from "../../src/audit/io/artifacts.js";
-import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
 import { buildTerminalStep } from "../../src/audit/cli/nextStepHelpers.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import {
   withTempRepo,
   advanceToDispatchReady,
-  buildSyntheticResults,
-  seedEmptyNarrative,
-  callIngestResults,
-  nextStepUntilPresentReport,
 } from "./helpers/completion-harness.js";
+import { presentQuestionReport, readAcceptedAnswers, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
 
-// Owner decision 2026-10-08 ("keep the artifacts dir"; design record
-// docs/reviews/frozen-snapshot-design-2026-10-08.md, plan
-// docs/reviews/artifacts-dir-rollover-plan-2026-10-08.md): a completed audit's
-// working dir survives completion, and the next run reuses every derived
-// artifact whose inputs did not change — so only the edited file is reviewed
-// again — while inheriting nothing that belongs to the previous run.
-test("the next audit reviews only what changed since the completed one", async () => {
+test("a completed question audit rolls over without carrying the prior run's answers", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools", "audit");
-    await advanceToDispatchReady(root);
-    const tasks = JSON.parse(await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"));
-    const metricsPath = join(artifactsDir, "audit_plan_metrics.json");
-    const historicalMetrics = JSON.parse(await readFile(metricsPath, "utf8"));
-    expect(historicalMetrics.packet_quality).not.toHaveProperty("merge_edge_kind_counts");
-    historicalMetrics.packet_quality.merge_edge_kind_counts = {};
-    await writeFile(metricsPath, JSON.stringify(historicalMetrics));
-    const metadataPath = join(artifactsDir, "artifact_metadata.json");
-    const historicalMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
-    historicalMetadata.artifacts["audit_plan_metrics.json"].content_hash = hashArtifactValue("audit_plan_metrics.json", historicalMetrics);
-    const memoryPath = join(artifactsDir, "access_memory.json");
-    const oldMemory = { version: 1, total_ordinals: 0, paths: [] };
-    await writeFile(memoryPath, JSON.stringify(oldMemory));
-    historicalMetadata.artifacts["access_memory.json"] = {
-      revision: 1, content_hash: hashArtifactValue("access_memory.json", oldMemory),
-      dependency_revisions: { "audit_results.jsonl": historicalMetadata.artifacts["audit_results.jsonl"]?.revision ?? 0 },
-    };
-    await writeFile(metadataPath, JSON.stringify(historicalMetadata));
-    expect((await loadArtifactBundle(artifactsDir)).audit_plan_metrics).toEqual(historicalMetrics);
-    await seedEmptyNarrative(artifactsDir);
-    // Outside the audited tree: a results file in the root would be a new file the next run reviews.
-    const resultsPath = join(root, ".audit-tools", "results.json");
-    await writeFile(resultsPath, JSON.stringify(await buildSyntheticResults(tasks, root), null, 2));
-    await callIngestResults(["--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath]);
-    expect(await readFile(memoryPath, "utf8")).toBe(JSON.stringify(oldMemory));
-    expect(JSON.parse(await readFile(metadataPath, "utf8")).artifacts).not.toHaveProperty(["access_memory.json"]);
-    expect(JSON.parse(await readFile(metricsPath, "utf8")).packet_quality).not.toHaveProperty("merge_edge_kind_counts");
-    const done = await nextStepUntilPresentReport(root);
-    expect(done.status).toBe("complete");
-
-    // Completion keeps the derived work and the staleness baselines.
-    expect(existsSync(join(artifactsDir, "audit_tasks.json"))).toBe(true);
+    const first = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const firstSnapshot = first.work_items[0]!.binding.question.snapshot_id;
+    const firstAnswers = await submitQuestions(root, first.work_items);
+    expect((await presentQuestionReport(root)).status).toBe("complete");
+    const reportPath = join(root, ".audit-tools", "audit-findings.json");
+    expect((await readQuestionFindings(reportPath)).question_review.accepted.map(({ submission }) => submission))
+      .toEqual(expect.arrayContaining(firstAnswers));
+    expect(existsSync(join(artifactsDir, "review_plan.json"))).toBe(true);
     expect(existsSync(join(artifactsDir, "artifact_metadata.json"))).toBe(true);
     const firstConsent = JSON.parse(await readFile(join(artifactsDir, "run-consent.json"), "utf8")) as { run_id: string };
 
-    // The operator's durable intent survives; an unknown entry does not (allow-list).
-    await writeFile(join(artifactsDir, "session-config.json"), JSON.stringify({ review_mode: "attended" }));
-    await writeFile(join(artifactsDir, "stray-run-record.json"), "{}");
-    const edited = join(root, "src", "lib", "session.ts");
-    await writeFile(edited, (await readFile(edited, "utf8")) + "export const extra = 1;\n");
+    const promotedDir = join(root, ".audit-tools");
+    const promotedReportPath = join(promotedDir, "audit-report.md");
+    const previousReport = await readFile(promotedReportPath, "utf8");
+    const previousMachineReport = await readFile(reportPath);
+    const feedback = Buffer.from(JSON.stringify({
+      task_id: "late-rollover-reflection", lens: "security", instruction_clarity: "ambiguous",
+      severity: "medium", tool_friction: ["late valid reflection rendered exactly once"],
+    }) + "\nnot-json-late-raw-diagnostic\n");
+    await writeFile(join(artifactsDir, "agent-feedback.jsonl"), feedback);
 
-    const step = await advanceToDispatchReady(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    // Nothing of the previous run is inherited.
+    const sessionPath = join(artifactsDir, "session-config.json");
+    const strayPath = join(artifactsDir, "stray-run-record.json");
+    await writeFile(sessionPath, JSON.stringify({ review_mode: "attended" }));
+    await writeFile(strayPath, "{}");
+    const edited = join(root, "src", "lib", "session.ts");
+    await writeFile(edited, (await readFile(edited, "utf8")) + "\nexport const extra = 1;\n");
+
+    const second = await readQuestionWorkload(await advanceToDispatchReady(root));
+    expect(previousReport).not.toContain("late valid reflection");
+    const refreshed = await readFile(promotedReportPath, "utf8");
+    expect(refreshed.match(/late valid reflection rendered exactly once/g)).toHaveLength(1);
+    expect(refreshed).not.toContain("not-json-late-raw-diagnostic");
+    expect(await readFile(join(promotedDir, "audit-agent-feedback.jsonl"))).toEqual(feedback);
+    expect(await readFile(reportPath)).toEqual(previousMachineReport);
+    expect(second.run_id).not.toBe(first.run_id);
+    expect(second.work_items[0]!.binding.question.snapshot_id).not.toBe(firstSnapshot);
     const secondConsent = JSON.parse(await readFile(join(artifactsDir, "run-consent.json"), "utf8")) as { run_id: string };
     expect(secondConsent.run_id).not.toBe(firstConsent.run_id);
-    expect(existsSync(join(artifactsDir, "session-config.json"))).toBe(true);
-    expect(existsSync(join(artifactsDir, "stray-run-record.json"))).toBe(false);
-    expect(existsSync(memoryPath)).toBe(false);
-    // Only the edited file is reviewed again.
-    const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as {
-      work_items: Array<{ scope: { files: string[] } }>;
-    };
-    expect(workload.work_items.length).toBeGreaterThan(0);
-    for (const item of workload.work_items) expect(item.scope.files).toContain("src/lib/session.ts");
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(strayPath)).toBe(false);
+    await expect(readAcceptedAnswers(artifactsDir, first.run_id)).rejects.toMatchObject({ code: "ENOENT" });
 
-    // The second run's results are accepted under the second run's identity —
-    // no review-run id, wave or result key of the first run swallows them — and
-    // the second run completes with its own report.
-    const secondTasks = (JSON.parse(await readFile(join(artifactsDir, "audit_tasks.json"), "utf8")) as Array<{ file_paths: string[] }>)
-      .filter((task) => task.file_paths.includes("src/lib/session.ts"));
-    expect(secondTasks.length).toBeGreaterThan(0);
-    const resultCount = async () => (await readFile(join(artifactsDir, "audit_results.jsonl"), "utf8")).trim().split("\n").length;
-    const before = await resultCount();
-    await seedEmptyNarrative(artifactsDir);
-    await writeFile(resultsPath, JSON.stringify(await buildSyntheticResults(secondTasks as never, root), null, 2));
-    await callIngestResults(["--root", root, "--artifacts-dir", artifactsDir, "--results", resultsPath]);
-    expect(await resultCount()).toBe(before + secondTasks.length);
-    expect(existsSync(memoryPath)).toBe(false);
-    const second = await nextStepUntilPresentReport(root);
-    expect(second.status).toBe("complete");
+    const secondAnswers = await submitQuestions(root, second.work_items);
+    expect((await presentQuestionReport(root)).status).toBe("complete");
+    expect((await readQuestionFindings(reportPath)).question_review.accepted.map(({ submission }) => submission))
+      .toEqual(expect.arrayContaining(secondAnswers));
+    expect(await readAcceptedAnswers(artifactsDir, second.run_id)).toHaveLength(secondAnswers.length);
   });
 });
-
 // The gate is the run-ended marker the terminal step writes after a successful
 // promotion — never byte identity between the dir and the archive, which a
 // host's later append or an operator's resynthesize legitimately breaks.

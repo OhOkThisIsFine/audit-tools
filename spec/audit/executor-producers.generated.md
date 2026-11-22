@@ -15,13 +15,9 @@ refreshed by* = executors that rewrite it later in the pipeline (staleness-drive
 | `analyzer_capability.json` | `graph_enrichment_executor` | — |
 | `audit-findings.json` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with the narrative) |
 | `audit-report.md` | `synthesis_executor` | `synthesis_narrative_executor` (re-render with the narrative) |
-| `audit_plan_metrics.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening), `runtime_validation_update_executor` (selective deepening; preferredExecutor only) |
-| `audit_results.jsonl` | `result_ingestion_executor` (appends validated results returned through semantic_review_executor) | — |
-| `audit_tasks.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening), `runtime_validation_update_executor` (selective deepening; preferredExecutor only) |
 | `auto_fixes_applied.json` | `auto_fix_executor` | — |
 | `charter_clarification.json` | `charter_clarification_executor` | — |
 | `charter_register.json` | `charter_extraction_executor` | `charter_comparison_executor` (settles the register's pending comparison (correspondences + differences)), `charter_fidelity_executor` (stamps the fidelity verdicts and surfaces the supported differences as findings) |
-| `coverage_matrix.json` | `planning_executor` | `result_ingestion_executor` |
 | `critical-flow-fallback.json` | `critical_flow_fallback_executor` (durable host input the structure phase merges on the next fold) | — |
 | `critical_flows.json` | `structure_executor` (merges the persisted critical-flow-fallback.json when one exists) | — |
 | `design_assessment.json` | `design_assessment_executor` | `design_review_conceptual` (merges the consumed pass verdict at the CLI ingestion site), `design_review_contract` (merges the consumed pass verdict at the CLI ingestion site) |
@@ -29,22 +25,18 @@ refreshed by* = executors that rewrite it later in the pipeline (staleness-drive
 | `external_analyzer_acquisition.json` | `external_analyzer_acquisition_executor` | — |
 | `external_analyzer_results.json` | `syntax_resolution_executor` | `external_analyzer_acquisition_executor` (upserts each tool's normalized findings, and declares the artifact ONLY when a tool actually contributed, so an unchanged results array never churns its downstreams), `external_analyzer_import_executor` (preferredExecutor only) |
 | `file_disposition.json` | `intake_executor` | `structure_executor` |
-| `flow_coverage.json` | `planning_executor` | `result_ingestion_executor` |
 | `git_history.json` | `structure_executor` | — |
 | `graph_bundle.json` | `structure_executor` | `graph_enrichment_executor` (merges analyzer edges) |
 | `intent_checkpoint.json` | `intent_checkpoint_executor` (written by the host at the confirm-intent pause, at the path the CLI binds) | — |
 | `repo_manifest.json` | `intake_executor` | — |
-| `requeue_tasks.json` | `planning_executor` | `result_ingestion_executor` |
+| `review_plan.json` | `planning_executor` | — |
 | `risk_register.json` | `structure_executor` | — |
-| `runtime_validation_report.json` | `runtime_validation_executor` | `planning_executor` (when runtime-validation tasks exist), `result_ingestion_executor`, `runtime_validation_update_executor` (preferredExecutor only) |
-| `runtime_validation_tasks.json` | `planning_executor` | `result_ingestion_executor` |
 | `scope.json` | `planning_executor` | — |
 | `structure_decomposition.json` | `structure_decomposition_executor` | — |
 | `surface_manifest.json` | `structure_executor` | — |
 | `syntax_resolution_status.json` | `syntax_resolution_executor` | — |
 | `synthesis-narrative.json` | `synthesis_narrative_executor` | — |
 | `systemic_challenge.json` | `systemic_challenge_executor` | — |
-| `task_affinity_graph.json` | `planning_executor` | `result_ingestion_executor`, `runtime_validation_executor` (selective deepening), `runtime_validation_update_executor` (selective deepening; preferredExecutor only) |
 | `unit_manifest.json` | `structure_executor` | — |
 
 ## Written outside every executor

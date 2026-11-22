@@ -1332,6 +1332,7 @@ const EXPECTED_EMISSION_KINDS = [
   "design_review_parallel",
   "edge_reasoning",
   "intent_equivalence",
+  "question_review",
   "synthesis_narrative",
   "systemic_challenge",
 ];
@@ -1340,8 +1341,7 @@ test("the emission table carries exactly one row per host-actionable result kind
   expect(Object.keys(NEXT_STEP_EMISSION_TABLE).sort()).toEqual(
     EXPECTED_EMISSION_KINDS,
   );
-  // `semantic_review` is deliberately NOT a row: it is the fallback, which is
-  // what preserves "anything unmatched is a semantic-review dispatch".
+  // Retired file-task dispatch is not a fallback.
   expect(Object.keys(NEXT_STEP_EMISSION_TABLE)).not.toContain("semantic_review");
 });
 
@@ -1382,6 +1382,7 @@ test("every row returns a PLAN — a row cannot write or log a step itself", asy
       analyzer_install: { unresolved: [] },
       analyzer_consent: { pending: [] },
       edge_reasoning: { candidates: [] },
+      question_review: { runId: "fixture", pendingCount: 1, rejectedCount: 0, rejections: [], workloadPath: join(artifactsDir, "host-workload.json") },
     };
 
     for (const kind of Object.keys(NEXT_STEP_EMISSION_TABLE)) {

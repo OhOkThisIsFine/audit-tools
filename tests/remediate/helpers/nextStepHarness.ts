@@ -16,7 +16,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSyncHidden as spawnSync } from "../../helpers/spawn.mjs";
 import { dirname, join, isAbsolute } from "node:path";
-import { fileURLToPath } from "node:url";
 import { StateStore } from "../../../src/remediate/state/store.js";
 import type { RemediationState } from "../../../src/remediate/state/store.js";
 import { intakeSummaryFixture } from "./intakeSummaryFixture.js";
@@ -37,15 +36,6 @@ import {
   type ToolOwnedFinalGateResult,
 } from "../../../src/remediate/steps/finalGate.js";
 
-const HELPERS_DIR = dirname(fileURLToPath(import.meta.url));
-const TESTS_DIR = dirname(HELPERS_DIR);
-
-/** Path to the canonical structured audit-findings fixture (simple two-finding). */
-export const AUDIT_FIXTURE = join(
-  TESTS_DIR,
-  "fixtures",
-  "audit-findings-simple.json",
-);
 // ---------------------------------------------------------------------------
 // Pure state builders — no filesystem dependency, safe to share verbatim.
 // ---------------------------------------------------------------------------

@@ -54,13 +54,16 @@ The intended workflow is:
 
 1. The user invokes `/audit-code`.
 2. The prompt runs `audit-code ensure --quiet`.
-3. Deterministic backend steps build or refresh artifacts.
-4. The backend emits complete provider-neutral host work items when semantic
-   judgment is required.
-5. The active conversation assigns them through its native facilities and
-   returns prompt-bound `AuditResult` objects.
-6. The backend ingests results, performs selective deepening and runtime
-   validation when needed, and writes the final `audit-report.md`.
+3. `audit-code next-step` builds or refreshes the artifacts and names the
+   current prompt to follow.
+4. When the backend emits a question review, the active conversation uses its
+   native review facilities (or answers itself as directed) and submits the
+   bound question answers.
+5. The backend accepts eligible answers, carries forward their limitations, and
+   emits the next step. Continue until the current prompt says to stop.
+6. The final `audit-report.md` distinguishes findings, answered questions
+   without findings, and incomplete evidence. A static answer does not imply that
+   a runtime check ran.
 
 Semantic execution belongs entirely to the active host conversation. audit-tools
 does not configure, rank, probe, instantiate, or account for execution backends;
@@ -106,23 +109,14 @@ graph with lower-confidence edges. Deterministic tool runners should be
 project-config aware — e.g. ESLint syntax-resolution runs only when the repo has
 local ESLint configuration, not merely because the binary is installed.
 
-## Packet planning
+## Question planning
 
-`AuditTask` is the deterministic coverage identity and the host-facing unit of
-understanding. Planning aims for work items that read as
-coherent code-ownership or execution-flow units, not merely budget-sized bundles:
-
-- build packets around coherent subsystems and execution flows
-- keep shared fan-in files visible as context rather than merging large parts of
-  the repo into one packet
-- distinguish strong (deterministic) edges from weak or heuristic ones
-- group tests with the code they verify when it aids review
-- carry packet rationale, key edges, entrypoints, and boundary files
-- prefer the generic ownership-root contract (analyzers naming module roots) over
-  a new parser per ecosystem, and keep graph/manifest parsing modular
-
-Planner observability (`audit_plan_metrics.json`: cohesion, fan-in/out, boundary
-crossings, weak-packet gaps) is how extraction gaps are found and prioritized.
+The selected lenses determine what needs to be answered. Plans attach questions
+to scoped inventory and evidence, rather than treating every file as an
+independent review obligation. Graph edges and ownership can help group related
+evidence and point the reviewer toward callers, boundaries and tests. Suggestions
+are not proof of coverage; the submitted answer records what was actually
+inspected and what could not be established.
 
 ## Non-goals
 

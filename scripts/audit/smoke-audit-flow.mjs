@@ -3,8 +3,8 @@
 //
 // `smoke-linked-audit-code.mjs` and `smoke-packaged-audit-code.mjs` differ only
 // in how the CLI is installed (npm link vs. a packed tarball). Everything after
-// that — the bootstrap assertions, the next-step drive, the synthetic result
-// ingest, finalization — is one flow, and it used to exist as two ~900-line
+// that — the bootstrap assertions, the next-step drive, the bound question
+// submissions, finalization — is one flow, and it used to exist as two ~900-line
 // copies that had already drifted (only the packaged copy answered the
 // present_report friction gate).
 //
@@ -650,16 +650,12 @@ export async function runInstallPhase({
   log.elapsed("verify generated host assets", stepStart);
 }
 
-// next-step → dispatch-ready → ingest synthetic results → present_report →
-// rerun starts a fresh audit. `distCliPath` is the CLI entry the ingest runs
-// through (the repo's dist for linked, the installed package's for packaged).
+// Drive the installed wrapper from question dispatch through report and rollover.
 export async function runAuditFlowPhase({
   runCommand,
   auditCodeCommand,
   root,
   log,
-  smokeLabel,
-  distCliPath,
 }) {
   const runNextStep = () =>
     runCommand(
@@ -680,44 +676,53 @@ export async function runAuditFlowPhase({
   assert.equal(dispatchStep.status, "ready");
   assert.equal(dispatchStep.step_kind, "dispatch_review");
   assert.ok(dispatchStep.run_id);
-  const tasks = JSON.parse(
-    await readFile(join(root, ".audit-tools", "audit", "audit_tasks.json"), "utf8"),
-  );
-  assert.ok(tasks.length > 0);
+  const workload = JSON.parse(await readFile(dispatchStep.artifact_paths.host_workload, "utf8"));
+  assert.equal(workload.contract_version, "audit-tools/question-review/v1");
+  assert.equal(workload.run_id, dispatchStep.run_id);
+  assert.ok(workload.work_items.length > 0);
   log.elapsed("next-step until dispatch_review", stepStart);
 
   stepStart = Date.now();
-  log.step("ingest synthetic results");
-  const resultsPath = join(root, "audit_results.json");
-  await writeFile(
-    resultsPath,
-    JSON.stringify(await buildSyntheticResults(tasks, root, smokeLabel), null, 2),
-  );
-  const ingested = JSON.parse(
-    (
-      await runCommand(
-        process.execPath,
-        [
-          distCliPath,
-          "ingest-results",
-          "--root",
-          root,
-          "--artifacts-dir",
-          join(root, ".audit-tools", "audit"),
-          "--results",
-          resultsPath,
-        ],
-        {
-          cwd: root,
-          label: "ingest-results --results <synthetic-results>",
-          failureHint:
-            "Inspect the generated audit_results.json file and .audit-tools/audit contents if ingestion fails unexpectedly.",
+  log.step("submit bound inconclusive answers");
+  const submittedIds = [];
+  const submissionDir = await mkdtemp(join(tmpdir(), "audit-smoke-answer-"));
+  try {
+    const answerPath = join(submissionDir, "answer.json");
+    for (const item of workload.work_items) {
+      const { question, assignment } = item.binding;
+      const submission = {
+        schema_version: workload.contract_version,
+        submission_id: `fixture-${assignment.assignment_id}`,
+        assignment_id: assignment.assignment_id,
+        question_id: question.question_id,
+        revision_id: question.revision_id,
+        snapshot_id: question.snapshot_id,
+        inspected_sources: [],
+        evidence_ids: [],
+        limitations: ["This smoke verifies submission and report wiring, not repository behavior."],
+        answer: {
+          outcome: "inconclusive",
+          findings: [],
+          observations: [],
+          parts: question.requested_parts.map(({ part_id }) => ({
+            part_id, outcome: "inconclusive", observation_ids: [],
+            reason: "The synthetic smoke did not establish this part.",
+          })),
         },
-      )
-    ).stdout,
-  );
-  assert.equal(ingested.selected_executor, "result_ingestion_executor");
-  log.elapsed("ingest synthetic results", stepStart);
+      };
+      await writeFile(answerPath, JSON.stringify(submission));
+      const receipt = JSON.parse((await runCommand(auditCodeCommand, ["submit", "--work-item", assignment.assignment_id, "--from", answerPath], {
+        cwd: root,
+        label: "audit-code submit --work-item <id> --from <answer>",
+      })).stdout);
+      assert.equal(receipt.disposition, "accepted");
+      assert.equal(receipt.submission_id, submission.submission_id);
+      submittedIds.push(submission.submission_id);
+    }
+  } finally {
+    await rm(submissionDir, { recursive: true, force: true });
+  }
+  log.elapsed("submit bound inconclusive answers", stepStart);
 
   stepStart = Date.now();
   log.step("next-step until present_report (expect completion + promotion)");
@@ -729,11 +734,15 @@ export async function runAuditFlowPhase({
     ),
     true,
   );
-  await stat(join(root, ".audit-tools", "audit-findings.json"));
+  const report = JSON.parse(await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8"));
+  assert.equal(report.question_review.completion, "incomplete");
+  assert.deepEqual(report.findings, []);
+  assert.deepEqual(report.question_review.accepted.map(({ submission }) => submission.submission_id).sort(), submittedIds.sort());
+  assert.ok(report.question_review.questions.every(({ parts }) => parts.every(({ state }) => state !== "clean")));
   // Completion KEEPS the working artifacts and marks the run ended: the next
   // next-step rolls them over into a fresh audit (owner decision 2026-10-08,
   // "keep the artifacts dir"), which the rerun below checks.
-  await stat(join(root, ".audit-tools", "audit", "audit_tasks.json"));
+  await stat(join(root, ".audit-tools", "audit", "review_plan.json"));
   await stat(join(root, ".audit-tools", "audit", "run-ended.json"));
   log.elapsed("next-step until present_report", stepStart);
 

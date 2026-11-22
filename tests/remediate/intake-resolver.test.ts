@@ -17,6 +17,7 @@ import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
 import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
 import { scratchDir } from "../helpers/scratch.js";
+import { buildSampleAuditBundle, SAMPLE_REPORT_FINDING } from "../../src/audit/cli/sampleRunCommand.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEST_DIR = scratchDir(".test-intake-resolver");
@@ -156,7 +157,7 @@ describe("resolveIntakeStep", () => {
     const auditFindingsPath = join(TEST_DIR, "audit-findings.json");
     await writeFile(
       auditFindingsPath,
-      await readFile(new URL("./fixtures/audit-findings-fast-path-eligible.json", import.meta.url), "utf8"),
+      JSON.stringify(buildSampleAuditBundle([SAMPLE_REPORT_FINDING]).auditFindings),
       "utf8",
     );
 
@@ -202,29 +203,7 @@ describe("resolveIntakeStep", () => {
     const auditFindingsPath = join(TEST_DIR, "audit-findings-ready.json");
     await writeFile(
       auditFindingsPath,
-      JSON.stringify({
-        contract_version: "audit-findings/v1alpha1",
-        findings: [
-          {
-            id: "AUD-001",
-            title: "Structured finding",
-            category: "correctness",
-            severity: "medium",
-            confidence: "high",
-            lens: "correctness",
-            summary: "Fix structured issue.",
-            affected_files: [{ path: "src/a.ts" }],
-            evidence: ["evidence"],
-          },
-        ],
-        work_blocks: [
-          {
-            id: "WB-001",
-            finding_ids: ["AUD-001"],
-            depends_on: [],
-          },
-        ],
-      }),
+      JSON.stringify(buildSampleAuditBundle([SAMPLE_REPORT_FINDING]).auditFindings),
       "utf8",
     );
     await writeFile(
@@ -248,7 +227,7 @@ describe("resolveIntakeStep", () => {
         intakeSummaryFixture({
           source_type: "structured_audit",
           goals: ["Remediate the structured audit findings."],
-          affected_files: [{ path: "src/a.ts" }],
+          affected_files: [{ path: SAMPLE_REPORT_FINDING.source_refs[0]!.path }],
         }),
       ),
       "utf8",
@@ -1362,6 +1341,6 @@ describe("validateSuppliedInput", () => {
       "file.json",
       JSON.stringify({ schema_version: "audit-findings/v1alpha1" }),
     );
-    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/file\.json.*regenerate.*audit-tools\/audit-findings\/v1alpha2/i) });
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/file\.json.*regenerate.*audit-tools\/audit-findings\/v2/i) });
   });
 });

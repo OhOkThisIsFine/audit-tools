@@ -34,9 +34,10 @@
  * row and no dependency-map node — the precedent `design-review-snapshots/` set.
  * Nothing reads it as input, so it adds no DAG edge and cannot re-stale anything.
  */
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  CharterKindSchema,
   compareCodeUnits,
   hashContent,
   laneAssetsDir,
@@ -107,6 +108,33 @@ export async function readCharterPacketIndex(
     charterPacketIndexPath(artifactsDir),
   );
   return Array.isArray(rows) ? rows : [];
+}
+
+/** Snapshot of the retention index for display. An index row is not proof that
+ * its bytes still exist or match. Never read paths supplied by an index row. */
+export async function readVerifiedCharterPacketIndex(artifactsDir: string): Promise<CharterPacketArchiveRow[] | undefined> {
+  try {
+    const rows = await readCharterPacketIndex(artifactsDir);
+    const verified: CharterPacketArchiveRow[] = [];
+    if (rows.length > 0 && !(await lstat(charterPacketArchiveDir(artifactsDir))).isDirectory()) return undefined;
+    for (const row of rows) {
+      if (!row || !CharterKindSchema.safeParse(row.kind).success ||
+          typeof row.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(row.sha256) ||
+          typeof row.archived !== "boolean" || !Number.isSafeInteger(row.byte_length) || row.byte_length < 0) return undefined;
+      if (!row.archived) {
+        verified.push({ ...row, reason: "archive was not verified at retention time" });
+        continue;
+      }
+      const file = join(charterPacketArchiveDir(artifactsDir), charterPacketArchiveFilename(row.kind, row.sha256));
+      const bytes = await lstat(file).then(stat => stat.isFile() && stat.size === row.byte_length
+        ? readFile(file) : undefined).catch(() => undefined);
+      verified.push(bytes?.byteLength === row.byte_length && hashContent(bytes) === row.sha256
+        ? row : { ...row, archived: false, reason: "retained bytes are missing, unreadable, or do not match the index" });
+    }
+    return verified.length === 0 ? undefined : sortRows(verified);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Stable order: kind, then content digest. Never insertion or IO-completion order. */

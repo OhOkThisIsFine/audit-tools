@@ -1,3 +1,4 @@
+// sites-pinned: none — the changed line only describes the completed smoke command in its success message
 // Linked smoke: `npm link` this checkout, then run the whole audit flow through
 // the global bin. Flow + assertions live in ./smoke-audit-flow.mjs, shared with
 // the packaged smoke; this file owns only the linked installation shape.
@@ -21,7 +22,6 @@ import {
 
 const SMOKE_LABEL = "linked";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const distCliPath = join(repoRoot, "dist", "audit", "cli.js");
 const packageJsonPath = join(repoRoot, "package.json");
 const packageVersion = JSON.parse(
   await readFile(packageJsonPath, "utf8"),
@@ -76,13 +76,11 @@ async function main() {
       auditCodeCommand,
       root,
       log,
-      smokeLabel: SMOKE_LABEL,
-      distCliPath,
     });
   });
 
   log.success(
-    `Validated npm link installation, linked host bootstrap surfaces, and the next-step/ingest-results/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
+    `Validated npm link installation, linked host bootstrap surfaces, and the next-step/submit/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
   );
 }
 

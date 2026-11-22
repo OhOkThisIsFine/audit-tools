@@ -1,85 +1,37 @@
-// The CALL-BOUNDARY half of the contract described in
-// `host-delegation-fold-carries-advisories.test.ts` (split out so no single
-// file dominates the suite's wall). The same-fold case is one call that ingests
-// and emits; the case that broke is a transition that ENDS the call — the budget
-// cap, the drain's budget stop, any fold boundary — where the in-memory carry
-// died with the call and the advisories were never stated at all. The property
-// is "stated on exactly ONE emitted step, WHICHEVER call emits it", and
-// "whichever" is the half a memory-only carry cannot satisfy.
-//
-// The carry file is seeded DIRECTLY rather than produced by actually driving
-// the drain to a budget stop: what is under test is the read-and-drain half
-// (the emission that follows picks the carry up and consumes it), and the
-// write half is the same file the ingest path already writes. Seeding keeps
-// the test's cost off the ~20-obligation walk a real budget stop would need.
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { expect, test } from "vitest";
+import { advanceToDispatchReady, callNextStep, withTempRepo } from "./helpers/completion-harness.js";
+import { readAcceptedAnswers, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
 
-import { afterEach, describe, expect, it } from "vitest";
+test("next-step re-derives a saved rejection across calls and clears it on repair", async () => {
+  await withTempRepo(async root => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const current = await readQuestionWorkload(await advanceToDispatchReady(root));
+    const item = current.work_items[0]!;
+    const assignmentId = item.binding.assignment.assignment_id;
+    const [valid] = await submitQuestions(root, [item]);
+    const resultPath = resolve(root, item.result_path);
+    const staleRevision = "synthetic-outdated-revision-must-not-leak";
+    await writeFile(resultPath, JSON.stringify({ ...valid, revision_id: staleRevision }));
 
-import {
-  advanceToDispatchReview,
-  callNextStep,
-  carryFileStillPresent,
-  cleanupFoldFixtures,
-  CONTRACT_NAME,
-  setup,
-} from "./helpers/foldAdvisoryFixture.js";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const next = await callNextStep(root, artifactsDir);
+      const pending = await readQuestionWorkload(next);
+      expect(pending.run_id).toBe(current.run_id);
+      expect(pending.work_items.map(entry => entry.binding.assignment.assignment_id)).toContain(assignmentId);
+      const prompt = await readFile(next.artifact_paths.current_prompt, "utf8");
+      expect(prompt).toContain("`" + assignmentId + "`: Binding mismatch.");
+      expect(prompt).not.toContain(staleRevision);
+    }
 
-afterEach(cleanupFoldFixtures);
-
-describe(CONTRACT_NAME, () => {
-  it("states a carry persisted by an EARLIER call, drains it, and never restates it", async () => {
-    const { root, artifactsDir } = await setup();
-    const first = (await advanceToDispatchReview(root, artifactsDir)) as {
-      step_kind: string;
-    };
-    expect(first.step_kind).toBe("dispatch_review");
-
-    const carriedMessage = "carried from a call that ended at its budget cap";
-    const carryPath = join(artifactsDir, "steps", "pending-advisories.json");
-    await writeFile(
-      carryPath,
-      JSON.stringify({
-        ingestIssues: [],
-        validationWarnings: [
-          {
-            work_item_id: "wi-carried-by-an-earlier-call",
-            result_path:
-              ".audit-tools/audit/runs/earlier/host-results/wi-carried.json",
-            message: carriedMessage,
-          },
-        ],
-      }),
-      "utf8",
-    );
-
-    await callNextStep(root, artifactsDir);
-    const prompt = await readFile(
-      join(artifactsDir, "steps", "current-prompt.md"),
-      "utf8",
-    );
-    expect(
-      prompt,
-      "an advisory a PREVIOUS call persisted must be stated by THIS call's emission",
-    ).toContain(carriedMessage);
-
-    // Drained, not merely read: presence is the signal, so an emission that
-    // stated the carry must leave nothing behind for the next one.
-    expect(
-      await carryFileStillPresent(carryPath),
-      "the emission that stated the carry must drain it",
-    ).toBe(false);
-
-    // …so a LATER emission states it zero more times.
-    await callNextStep(root, artifactsDir);
-    const nextPrompt = await readFile(
-      join(artifactsDir, "steps", "current-prompt.md"),
-      "utf8",
-    );
-    expect(
-      nextPrompt,
-      "an advisory is stated on exactly ONE emitted step, never restated",
-    ).not.toContain(carriedMessage);
+    await writeFile(resultPath, JSON.stringify(valid));
+    const repaired = await callNextStep(root, artifactsDir);
+    expect(repaired.step_kind).toBe("dispatch_review");
+    const remaining = JSON.parse(await readFile(repaired.artifact_paths.host_workload, "utf8")) as typeof current;
+    expect(remaining.run_id).toBe(current.run_id);
+    expect(remaining.work_items.map(entry => entry.binding.assignment.assignment_id)).not.toContain(assignmentId);
+    expect(await readAcceptedAnswers(artifactsDir, current.run_id)).toEqual([valid]);
+    expect(await readFile(repaired.artifact_paths.current_prompt, "utf8")).not.toContain("## Saved results not accepted");
   });
 });

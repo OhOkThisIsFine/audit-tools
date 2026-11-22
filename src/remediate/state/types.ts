@@ -18,7 +18,7 @@ import type {
 import { AuditReadSchema, FindingSchema } from "audit-tools/shared";
 export type { Finding };
 
-import { EvidenceSchema, MechanicalVerificationSchema } from "../../shared/types/remediationOutcome.js";
+import { EvidenceSchema, MechanicalObligationVerificationSchema, MechanicalVerificationSchema } from "../../shared/types/remediationOutcome.js";
 import { PER_FINDING_DISPOSITIONS } from "./disposition.js";
 
 /** A full-length lowercase hex SHA-256 digest. */
@@ -47,6 +47,7 @@ export const SourceVerificationSchema = z.object({
   evidence: EvidenceSchema.optional(),
   recorded_by_module: z.string().min(1).optional(),
   mechanical_verification: MechanicalVerificationSchema.optional(),
+  mechanical_obligation_verifications: z.array(MechanicalObligationVerificationSchema).optional(),
   review_revision_sha256: Sha256Hex.optional(),
   source_sha256: Sha256Hex.optional(),
   head_commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u).nullable().optional(),

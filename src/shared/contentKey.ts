@@ -277,7 +277,7 @@ function baseDiscriminator(input: ResultContentDiscriminatorInput): string {
 /**
  * Derive the per-split discriminator component from a task_id (INV-CK-2).
  * Audit chunk task_ids are `${scope}:${lens}:set-<file-set digest>` and oversized-file
- * task_ids `${scope}:${lens}:<filePath>` (taskBuilder.ts `addTaskBlock`); a task_id that
+ * task_ids `${scope}:${lens}:<filePath>` (legacy task planner); a task_id that
  * ends at `${scope}:${lens}` is a lone task with no split tail. The component is the
  * suffix AFTER the trailing `:${lens}` segment — empty for a lone task (⇒
  * byte-identical lone-base key), the split-distinguishing tail otherwise. Returns

@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/step-contract-writer.test.ts, tests/audit/semantic-review-step.test.ts
+// sites-pinned: tests/shared/step-contract-writer.test.ts
 // (the prompt-path helpers decide how every written prompt states a path;
 // broadening the match corrupts non-path text, narrowing it leaves a
 // backslashed path in the body)

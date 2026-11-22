@@ -1,7 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -10,7 +9,8 @@ import {
   type ArtifactBundle,
 } from "../../src/audit/io/artifacts.js";
 import { runResultIngestionExecutor } from "../../src/audit/orchestrator/ingestionExecutors.js";
-import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import {
   buildTaskAffinityGraph,
   TaskAffinityGraphSchema,
@@ -23,10 +23,6 @@ import { stableStringify } from "../../src/shared/stableStringify.js";
 
 const RED_SIGNATURE =
   "contract:stable-task-affinity-artifacts:not-yet-satisfied";
-const missingProjectRoot = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "__missing_task_affinity_project__",
-);
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -178,9 +174,8 @@ function requireGraph(bundle: ArtifactBundle): TaskAffinityGraph {
   };
 }
 
-async function persistedAffinityBytes(bundle: ArtifactBundle): Promise<{
-  readonly tasks: string;
-  readonly graph: string;
+async function persistedAffinityFiles(bundle: ArtifactBundle): Promise<{
+  readonly files: string[];
 }> {
   const root = await mkdtemp(join(tmpdir(), "audit-tools-affinity-"));
   try {
@@ -189,8 +184,7 @@ async function persistedAffinityBytes(bundle: ArtifactBundle): Promise<{
       task_affinity_graph: bundle.task_affinity_graph,
     });
     return {
-      tasks: await readFile(join(root, "audit_tasks.json"), "utf8"),
-      graph: await readFile(join(root, "task_affinity_graph.json"), "utf8"),
+      files: await readdir(root),
     };
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -205,10 +199,11 @@ function makePlanningBundle(reverse: boolean): ArtifactBundle {
     repo_manifest: {
       repository: { name: "affinity-fixture" },
       generated_at: "2026-08-11T00:00:00.000Z",
-      files: paths.map((path, index) => ({
+      files: paths.map((path) => ({
         path,
         language: "ts",
-        size_bytes: 100 + index,
+        size_bytes: 100,
+        hash: "a".repeat(64),
       })),
     },
     file_disposition: {
@@ -224,7 +219,7 @@ function makePlanningBundle(reverse: boolean): ArtifactBundle {
         },
       ],
     },
-    surface_manifest: { surfaces: [] },
+    surface_manifest: { surfaces: [{ id: "S1", kind: "interface", entrypoint: "src/a.ts" }] },
     critical_flows: { flows: [] },
     risk_register: { items: [] },
   };
@@ -308,7 +303,7 @@ describe("stable task-affinity artifacts", () => {
     }
   });
 
-  it("keeps ingestion bytes and metadata hashes canonical for task permutations", async () => {
+  it("canonicalizes archival ingestion permutations without writing retired task artifacts", async () => {
     const forward = deepFreeze(makeTasks(false));
     const reverse = deepFreeze(makeTasks(true));
     const forwardBefore = stableStringify(forward);
@@ -366,53 +361,36 @@ describe("stable task-affinity artifacts", () => {
       expect(persisted?.file_line_counts).not.toBe(source.file_line_counts);
     }
 
-    expect(await persistedAffinityBytes(reverseResult.updated)).toEqual(
-      await persistedAffinityBytes(forwardResult.updated),
-    );
+    for (const result of [forwardResult, reverseResult]) {
+      expect((await persistedAffinityFiles(result.updated)).files).not.toContain("audit_tasks.json");
+      expect((await persistedAffinityFiles(result.updated)).files).not.toContain("task_affinity_graph.json");
+    }
   });
 
-  it("keeps planning persistence canonical across reversed source artifacts", async () => {
+  it("persists the same question plan for reordered frozen source artifacts", async () => {
     const forwardBundle = deepFreeze(makePlanningBundle(false));
     const reverseBundle = deepFreeze(makePlanningBundle(true));
     const forwardBefore = stableStringify(forwardBundle);
     const reverseBefore = stableStringify(reverseBundle);
-    const lineIndex = {
-      "src/a.ts": 30,
-      "src/shared.ts": 40,
-      "src/z.ts": 20,
-    };
 
-    const forwardResult = await runPlanningExecutor(
-      forwardBundle,
-      missingProjectRoot,
-      lineIndex,
-    );
-    const reverseResult = await runPlanningExecutor(
-      reverseBundle,
-      missingProjectRoot,
-      lineIndex,
-    );
-    const forwardTasks = requireTasks(forwardResult.updated);
-    const reverseTasks = requireTasks(reverseResult.updated);
-    const forwardGraph = requireGraph(forwardResult.updated);
-    const reverseGraph = requireGraph(reverseResult.updated);
-
-    expectCanonicalTasks(forwardTasks);
-    expectCanonicalTasks(reverseTasks);
-    expectCanonicalGraph(forwardGraph);
-    expectCanonicalGraph(reverseGraph);
-    expect(stableStringify(reverseTasks)).toBe(stableStringify(forwardTasks));
-    expect(stableStringify(reverseGraph)).toBe(stableStringify(forwardGraph));
-    expect(hashArtifactValue("audit_tasks.json", reverseTasks)).toBe(
-      hashArtifactValue("audit_tasks.json", forwardTasks),
-    );
-    expect(hashArtifactValue("task_affinity_graph.json", reverseGraph)).toBe(
-      hashArtifactValue("task_affinity_graph.json", forwardGraph),
+    const forward = buildQuestionPlanArtifacts(forwardBundle, fullAuditScope());
+    const reverse = buildQuestionPlanArtifacts(reverseBundle, fullAuditScope());
+    expect(forward.artifacts_written).toEqual(["scope.json", "review_plan.json"]);
+    expect(forward.updated.review_plan?.questions.length).toBeGreaterThan(0);
+    expect(stableStringify(reverse.updated.review_plan)).toBe(
+      stableStringify(forward.updated.review_plan),
     );
     expect(stableStringify(forwardBundle)).toBe(forwardBefore);
     expect(stableStringify(reverseBundle)).toBe(reverseBefore);
-    expect(await persistedAffinityBytes(reverseResult.updated)).toEqual(
-      await persistedAffinityBytes(forwardResult.updated),
-    );
+
+    const root = await mkdtemp(join(tmpdir(), "audit-tools-question-stability-"));
+    try {
+      await writeCoreArtifacts(root, { review_plan: forward.updated.review_plan });
+      const bytes = await readFile(join(root, "review_plan.json"), "utf8");
+      await writeCoreArtifacts(root, { review_plan: reverse.updated.review_plan });
+      expect(await readFile(join(root, "review_plan.json"), "utf8")).toBe(bytes);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

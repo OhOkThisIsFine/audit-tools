@@ -10,9 +10,8 @@ import type {
 } from "../types/auditState.js";
 import { computeStaleArtifacts } from "./staleness.js";
 import { deriveIntentEquivalenceStatus } from "./intentEquivalenceExecutor.js";
-import { derivePendingTaskPartition } from "./pendingTasks.js";
+import { questionLensSelectionIssue } from "./lensSelection.js";
 // sites-pinned: tests/audit/runtime-validation-source.test.ts
-import { runtimeValidationSourceIsCurrent } from "./runtimeValidation.js";
 import {
   unresolvedConstraintClauses,
 } from "./intentInterpreter.js";
@@ -243,14 +242,15 @@ export function deriveAuditState(
       ? unresolvedConstraintClauses(bundle.intent_checkpoint)
       : [];
   const reviewBinding = resolveDesignReviewBinding(bundle.intent_checkpoint);
-  const needsReviewConfirmation = reviewBinding.kind === "unbound";
+  const lensIssue = questionLensSelectionIssue(bundle.intent_checkpoint?.lens_selection);
+  const needsReviewConfirmation = reviewBinding.kind === "unbound" || lensIssue !== undefined;
   obligations.push(
     obligation(
       "intent_checkpoint_current",
       unresolvedClauses.length > 0 || needsReviewConfirmation ? "missing" : intentCheckpointBase,
       unresolvedClauses.length > 0
         ? `${unresolvedClauses.length} free_form_intent clause(s) could not be encoded as planning signals and need a host answer in constraint_clauses before planning proceeds.`
-        : needsReviewConfirmation ? `Confirm design-review choices again: ${reviewBinding.reason}` : undefined,
+        : lensIssue ?? (reviewBinding.kind === "unbound" ? `Confirm design-review choices again: ${reviewBinding.reason}` : undefined),
     ),
   );
 
@@ -446,96 +446,12 @@ export function deriveAuditState(
     ),
   );
 
-  const planningReady =
-    has(bundle.coverage_matrix) &&
-    has(bundle.flow_coverage) &&
-    has(bundle.runtime_validation_tasks) &&
-    has(bundle.audit_tasks) &&
-    has(bundle.requeue_tasks);
-  obligations.push(
-    obligation(
-      "planning_artifacts",
-      staleOrSatisfied(
-        staleArtifacts,
-        [
-          "external_analyzer_results.json",
-          "coverage_matrix.json",
-          "flow_coverage.json",
-          "runtime_validation_tasks.json",
-          "audit_tasks.json",
-          "requeue_tasks.json",
-        ],
-        planningReady,
-      ),
-    ),
-  );
-
-  // The pending set is the shared partition (INV-PENDING-SINGLE-SOURCE,
-  // ./pendingTasks.ts) — the SAME derivation dispatch's buildPendingAuditTasks
-  // consumes, so the gate and dispatch can never disagree on which tasks still
-  // need work. It already folds in the consume half of the O3 staleness gate:
-  // a task whose CURRENT (supersession-resolved) result has DRIFTED from its
-  // recorded content-key baseline re-dispatches even though its stale result
-  // left it status `complete`.
-  const { pendingTasks } = derivePendingTaskPartition(bundle);
-  const hasPendingAuditTasks = pendingTasks.length > 0;
-
-  // Emitted on EVERY bundle, like each other PRIORITY id. An absent task plan
-  // is "missing": no audit task has run, so no result exists. Omission is not
-  // neutral — `deriveObligationState` reads an id it cannot find as
-  // "satisfied", so a silent skip here claimed the audit was done before
-  // planning had run (pinned by obligation-emission-covers-priority.test.ts).
-  if (hasPendingAuditTasks || !has(bundle.audit_tasks)) {
-    obligations.push(obligation("audit_tasks_completed", "missing"));
-  } else {
-    obligations.push(obligation("audit_tasks_completed", "satisfied"));
-  }
-
-  // An EMPTY input set is `not_applicable`, never `satisfied`. Nothing was
-  // planned, so no result is owed and none was produced — and this arm did not
-  // even carry a reason string, so the artifact asserted a success it had not
-  // measured with nothing beside it to say otherwise.
-  const plannedAuditTasks = bundle.audit_tasks?.length ?? 0;
-  obligations.push(
-    plannedAuditTasks === 0
-      ? obligation(
-          "audit_results_ingested",
-          "not_applicable",
-          "No audit tasks were planned, so no results are owed.",
-        )
-      : obligation(
-          "audit_results_ingested",
-          has(bundle.audit_results) ? "satisfied" : "missing",
-        ),
-  );
-  const runtimeTasks = bundle.runtime_validation_tasks?.tasks ?? [];
-  const runtimeResults = bundle.runtime_validation_report?.results ?? [];
-  // Same empty-set shape as `audit_results_ingested` four lines above, and the
-  // instance the live run surfaced: `runtime_validation_current: satisfied` was
-  // recorded while `planning_artifacts` was still `missing` — the gate passed
-  // because zero tasks existed to validate. The `reason` here was already
-  // honest; only the `state` was not.
-  const runtimeReady = runtimeValidationSourceIsCurrent(bundle) && runtimeTasks.every((task) =>
-    runtimeResults.some(
-      (result) => result.task_id === task.id && result.status !== "pending",
-    ),
-  );
-  obligations.push(
-    runtimeTasks.length === 0
-      ? obligation(
-          "runtime_validation_current",
-          "not_applicable",
-          "No deterministic runtime validation tasks were planned.",
-        )
-      : obligation(
-          "runtime_validation_current",
-          runtimeReady
-            ? "satisfied"
-            : has(bundle.runtime_validation_report)
-              ? "stale"
-              : "missing",
-        ),
-  );
+  const planningReady = has(bundle.review_plan);
+  obligations.push(obligation("planning_artifacts",
+    staleOrSatisfied(staleArtifacts, ["review_plan.json"], planningReady)));
+  const pendingReview = bundle.question_cycle?.pending.length;
+  obligations.push(obligation("audit_tasks_completed",
+    !planningReady || pendingReview === undefined || pendingReview > 0 ? "missing" : "satisfied"));
   obligations.push(
     obligation(
       "synthesis_current",

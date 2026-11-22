@@ -212,10 +212,10 @@ test("cmdStatus includes pending task counts from the ACTIVE run, not the newest
 
     const parsed = JSON.parse(result.stdout);
 
-    expect(parsed.pending_tasks !== null, "pending_tasks should not be null").toBeTruthy();
-    expect(parsed.pending_tasks.total).toBe(3);
-    expect(parsed.pending_tasks.remaining).toBe(2);
-    expect(parsed.pending_tasks.run_id).toBe(activeRunId);
+    expect(parsed.archived_pending_tasks !== null, "pending_tasks should not be null").toBeTruthy();
+    expect(parsed.archived_pending_tasks.total).toBe(3);
+    expect(parsed.archived_pending_tasks.remaining).toBe(2);
+    expect(parsed.archived_pending_tasks.run_id).toBe(activeRunId);
   });
 });
 
@@ -239,7 +239,7 @@ test("cmdStatus degrades to no run when the active review-run manifest is malfor
     // run — and a stack trace says nothing an operator can use.
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    expect(parsed.pending_tasks).toBe(null);
+    expect(parsed.archived_pending_tasks).toBe(null);
     expect(parsed.status).toBe("active");
   });
 });
@@ -265,7 +265,7 @@ test("cmdStatus degrades to no run when no active review run exists, even with r
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
-    expect(parsed.pending_tasks).toBe(null);
+    expect(parsed.archived_pending_tasks).toBe(null);
   });
 });
 
@@ -340,5 +340,32 @@ test("cmdStatus surfaces blockers when audit status is blocked", async () => {
     expect(Array.isArray(parsed.blockers), "blockers should be an array").toBeTruthy();
     expect(parsed.blockers.length > 0, "blockers should be non-empty when status is blocked").toBeTruthy();
     expect(parsed.blockers[0]).toMatch(/No auditable files/);
+  });
+});
+
+test("cmdStatus separates a bound question plan from historical task counts", async () => {
+  await withTempDir(async (artifactsDir) => {
+    await writeFile(join(artifactsDir, "audit_state.json"), JSON.stringify({ status: "active" }));
+    const planPath = join(artifactsDir, "review_plan.json");
+    await writeFile(planPath, JSON.stringify({
+      schema_version: "audit-tools/question-review/v1",
+      snapshot_id: "snapshot-one",
+      inventory: [], questions: [], omissions: [], lens_decisions: [],
+    }));
+    await writeFile(join(artifactsDir, "review_session.json"), JSON.stringify({
+      schema_version: "audit-tools/question-review-session/v1",
+      run_id: "question-review-first",
+    }));
+    const status = JSON.parse((await runStatus(artifactsDir)).stdout);
+    expect(status.question_review).toEqual({
+      run_id: "question-review-first", snapshot_id: "snapshot-one", planned_questions: 0,
+    });
+    expect(status.archived_pending_tasks).toBeNull();
+    expect(status.question_review_unreadable).toBe(false);
+
+    await writeFile(planPath, "not valid JSON");
+    const malformed = JSON.parse((await runStatus(artifactsDir)).stdout);
+    expect(malformed.question_review).toBeNull();
+    expect(malformed.question_review_unreadable).toBe(true);
   });
 });

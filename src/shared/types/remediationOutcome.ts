@@ -306,6 +306,12 @@ export const MechanicalVerificationSchema = z
   .strict();
 export type MechanicalVerification = z.infer<typeof MechanicalVerificationSchema>;
 
+export const MechanicalObligationVerificationSchema = MechanicalVerificationSchema.extend({
+  source_finding_id: z.string().min(1),
+  obligation_id: z.string().min(1),
+}).strict();
+export type MechanicalObligationVerification = z.infer<typeof MechanicalObligationVerificationSchema>;
+
 export const RemediationOutcomeSchema = z
   .object({
     finding_id: z.string(),
@@ -341,6 +347,7 @@ export const RemediationOutcomeSchema = z
     duration_ms: z.number().optional(),
     /** Item C — mechanical re-verify verdict for analyzer-born findings. */
     mechanical_verification: MechanicalVerificationSchema.optional(),
+    mechanical_obligation_verifications: z.array(MechanicalObligationVerificationSchema).optional(),
     /**
      * The per-finding verification-evidence triple (INV-ISC-EVIDENCE-EMITTED).
      * Optional at the schema level — a non-terminal (force-closed/blocked)

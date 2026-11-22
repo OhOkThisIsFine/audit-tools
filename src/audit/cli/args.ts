@@ -1,6 +1,5 @@
 // sites-pinned: tests/audit/cli-args-utils.test.ts, tests/audit/functional-preflight.test.ts
 import { createReadStream, existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import { join, resolve } from "node:path";
 
@@ -153,24 +152,4 @@ export async function countLines(path: string): Promise<number> {
     });
     stream.on("error", reject);
   });
-}
-
-export async function listBatchResultFiles(batchDir: string): Promise<string[]> {
-  const entries = await readdir(batchDir, { withFileTypes: true });
-  const files = entries
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.toLowerCase().endsWith(".json") &&
-        isCanonicalResultFilename(entry.name),
-    )
-    .map((entry) => join(batchDir, entry.name))
-    .sort();
-
-  if (files.length === 0) {
-    throw new Error(
-      `No canonical audit result files (<stem>_<digest>.json) found in ${batchDir}.`,
-    );
-  }
-  return files;
 }

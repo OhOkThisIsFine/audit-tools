@@ -3,6 +3,8 @@ import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
+import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
 import { countLines } from "./helpers/countLines.mjs";
 import type { AnalyzerSetting } from "audit-tools/shared";
 
@@ -52,6 +54,10 @@ async function buildFixtureLineIndex(root: string): Promise<Record<string, numbe
 test("committed fixture repo supports external analyzer import and deterministic planning without synthetic runtime placeholders", async () => {
   await withFixtureRepo(async (root) => {
     const lineIndex = await buildFixtureLineIndex(root);
+    const analyzerPath = "src/api/auth.ts";
+    const source = await readFile(join(root, analyzerPath), "utf8");
+    const snippetHash = hashAnalyzerSnippet(source, 1, 4);
+    expect(snippetHash).toBeTruthy();
     const options = { root, lineIndex, analyzers: SKIP_ANALYZERS };
 
     // Build the real pre-planning frontier through the shared scripted-host
@@ -74,9 +80,10 @@ test("committed fixture repo supports external analyzer import and deterministic
             id: "sg-auth-1",
             category: "security",
             severity: "warning",
-            path: "src/api/auth.ts",
+            path: analyzerPath,
             line_start: 1,
             line_end: 4,
+            provenance: { analyzer_id: "semgrep", path: analyzerPath, snippet_hash: snippetHash! },
             summary:
               "Authentication path may be missing structured audit logging.",
           },
@@ -88,37 +95,24 @@ test("committed fixture repo supports external analyzer import and deterministic
 
     const planning = await advanceAudit(bundle, { ...options, preferredExecutor: "planning_executor" });
     expect(planning.selected_executor).toBe("planning_executor");
-    if (planning.updated_bundle.audit_tasks === undefined) {
-      throw new Error("expected audit_tasks on the planning result's bundle");
-    }
-    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
-
-    const analyzerDrivenTask = planning.updated_bundle.audit_tasks.find(
-      (task) =>
-        task.lens === "security" &&
-        task.file_paths.includes("src/api/auth.ts") &&
-        task.tags?.includes("external_analyzer_signal"),
-    );
-    expect(analyzerDrivenTask).toBeTruthy();
-    if (analyzerDrivenTask === undefined) {
-      throw new Error("expected an analyzer-driven security task");
-    }
-    expect(analyzerDrivenTask.priority).toBe("high");
-    if (analyzerDrivenTask.tags === undefined) {
-      throw new Error("expected analyzerDrivenTask.tags");
-    }
-    expect(analyzerDrivenTask.tags.includes("external_analyzer_signal")).toBeTruthy();
-    if (planning.updated_bundle.runtime_validation_tasks === undefined) {
-      throw new Error("expected runtime_validation_tasks on the planning result's bundle");
-    }
-    expect(planning.updated_bundle.runtime_validation_tasks.tasks.length).toBe(0);
-    expect(planning.updated_bundle.runtime_validation_report).toBe(undefined);
-    // Zero planned tasks: the gate has nothing to check, so it reports
-    // `not_applicable` rather than the `satisfied` that used to read as
-    // "checked, and it passed".
-    expect(planning.audit_state.obligations.find(
-        (item) => item.id === "runtime_validation_current",
-      )?.state).toBe("not_applicable");
+    const plan = planning.updated_bundle.review_plan!;
+    expect(plan.questions.length).toBeGreaterThan(0);
+    const cycle = await deriveQuestionCycleUnlocked({
+      root, sourceRoot: root, artifactsDir: join(root, ".audit-tools", "audit"), bundle: planning.updated_bundle,
+    });
+    const security = cycle.bindings.find(binding => binding.question.lens === "security" &&
+      binding.assignment.suggested_sources.some(ref => ref.path === analyzerPath));
+    expect(security).toBeDefined();
+    expect(security?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: "source", status: "observed", snapshot_id: plan.snapshot_id,
+      source_refs: [{ path: analyzerPath, start_line: 1, end_line: 4 }],
+    })]));
+    expect(security?.assignment.available_evidence_ids).toEqual(security?.evidence.map(row => row.evidence_id));
+    // Analyzer evidence is invitation to inspect, not an answer or a run test.
+    expect(cycle.evidence.some(row => row.kind === "command")).toBe(false);
+    expect(cycle.answers).toEqual([]);
+    expect(cycle.pending).toContain(security);
+    expect(planning.artifacts_written).not.toContain("runtime_validation_tasks.json");
   });
 });
 

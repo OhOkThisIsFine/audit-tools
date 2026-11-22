@@ -35,7 +35,7 @@
 
 - **The lock heartbeat only logs a stolen lock (2026-10-06, low).** `startLockHeartbeat` (`src/shared/io/fileLock.ts`) logs `lock_heartbeat_stolen` and returns, every tick; the interval keeps running and `fn()` is neither aborted nor told. P3 of the [canonical implementation plan](../reviews/audit-tools-canonical-implementation-plan-2026-10-07.md) replaces this protocol. **Property:** a holder that loses its lock stops its writes and learns of the loss.
 
-- **`explain-task` takes the first token after the verb as the task id (2026-10-06, low).** `src/audit/cli/explainTaskCommand.ts` falls back to `argv[3]`, so `explain-task --root X T1` asks for task `--root`. **Property:** a flag is never read as the task id.
+- **`explain-task` takes the first token after the verb as the task id (2026-10-06, low).** The now-retired per-file command fell back to `argv[3]`, so `explain-task --root X T1` asked for task `--root`. **Property:** a flag is never read as the task id.
 
 - **A fractional positive-integer flag becomes 0 (2026-10-06, low).** `normalizePositiveInteger` (`src/audit/cli/args.ts`) passes 0.5 and floors it to 0, so `--timeout 0.5` skips the default and sets a 0 ms timeout. **Property:** a value that floors to 0 is refused or falls back to the default.
 

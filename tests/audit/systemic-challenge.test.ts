@@ -101,7 +101,7 @@ describe("aggregateMetricsDigest", () => {
     expect(byLabel["Analysis units"]).toBe(3);
     expect(byLabel["Consensus subsystems"]).toBe(1);
     expect(byLabel["Contested subsystems"]).toBe(2);
-    expect(byLabel["Planned audit tasks"]).toBe(4);
+    expect(byLabel).not.toHaveProperty("Planned audit tasks");
     expect(digest.total_edges).toBe(3);
     // node `a` has out-degree 2 (the max fan-out).
     expect(digest.max_fan_out).toBe(2);
@@ -620,8 +620,9 @@ describe("runSystemicChallengeExecutor", () => {
   ] as const;
 
   /** Open a deep loop, then fold `count` consecutive NON-dry rounds into it. */
-  function foldBusyRounds(count: number): ArtifactBundle {
+  function foldBusyRounds(count: number, evidence: ArtifactBundle = {}): ArtifactBundle {
     let bundle: ArtifactBundle = runSystemicChallengeExecutor({
+      ...evidence,
       intent_checkpoint: checkpoint("deep"),
       repo_manifest: repoManifest,
     }).updated as ArtifactBundle;
@@ -636,6 +637,7 @@ describe("runSystemicChallengeExecutor", () => {
             ]),
           ],
         },
+        String(index + 1).padStart(64, "0"),
       );
       bundle = run.updated as ArtifactBundle;
     }
@@ -874,6 +876,45 @@ describe("runSystemicChallengeExecutor", () => {
     // The carry is the observable half: a changed token would have reset both.
     expect(restamped.rounds).toHaveLength(1);
     expect(restamped.findings).toHaveLength(1);
+  });
+
+  test("a reload with only metadata changes preserves a completed round ceiling", () => {
+    const accepted = adjudication("2026-01-01T00:00:00.000Z")!;
+    const bundle = foldBusyRounds(SYSTEMIC_ROUND_CEILING, {
+      conceptual_review_adjudication: accepted,
+    });
+    const saved = JSON.parse(JSON.stringify(bundle)) as ArtifactBundle;
+    const prior = saved.systemic_challenge!;
+    expect(prior.stop_reason).toBe("round_ceiling");
+
+    const reloaded = runSystemicChallengeExecutor({
+      ...saved,
+      conceptual_review_adjudication: { ...accepted, generated_at: "2026-03-03T09:09:09.000Z" },
+    }).updated.systemic_challenge!;
+    expect(reloaded.round_token).toBe(prior.round_token);
+    expect(reloaded.stop_reason).toBe("round_ceiling");
+    expect(reloaded.converged).toBe(true);
+    expect(reloaded.rounds).toEqual(prior.rounds);
+    expect(reloaded.findings).toEqual(prior.findings);
+    expect(reloaded.folded_submission_hashes).toEqual(prior.folded_submission_hashes);
+    expect(reloaded.folded_submission_hashes).toHaveLength(SYSTEMIC_ROUND_CEILING);
+
+    const changed = runSystemicChallengeExecutor({
+      ...saved,
+      conceptual_review_adjudication: {
+        ...accepted,
+        contributors: accepted.contributors.map((contributor) => ({
+          ...contributor,
+          perspective: "architecture",
+        })),
+      },
+    }).updated.systemic_challenge!;
+    expect(changed.round_token).not.toBe(prior.round_token);
+    expect(changed.rounds).toEqual([]);
+    expect(changed.findings).toEqual([]);
+    expect(changed.folded_submission_hashes).toBeUndefined();
+    expect(changed.stop_reason).toBeUndefined();
+    expect(changed.converged).toBe(false);
   });
 
   test("a register from a DIFFERENT premise does not carry its rounds into this run", () => {

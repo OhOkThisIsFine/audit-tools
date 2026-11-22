@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/artifacts-dir-rollover.test.ts
+// sites-pinned: tests/audit/artifacts-dir-rollover.test.ts, tests/audit/rollover-legacy-archive.test.ts
 /**
  * The rollover of a finished audit's working dir into the next run (owner
  * decision 2026-10-08, "keep the artifacts dir"; record
@@ -34,11 +34,7 @@
  *   guidance, the snapshot record.
  * - `tooling_manifest.json`: never read from disk; every bundle load rebuilds it.
  *
- * Measured (2026-10-08): over an UNCHANGED tree the next run re-derives only
- * deterministic planning (`audit_tasks`, `audit_plan_metrics`,
- * `task_affinity_graph`); the re-intaken manifest differs only in its
- * non-semantic `generated_at`, so the analysis artifacts and the host-judged
- * ones (charter, design assessment, systemic challenge) keep their revisions.
+ * Retired v1 review evidence is archived, never carried as a current input.
  */
 import { existsSync } from "node:fs";
 import { readdir, rm, writeFile } from "node:fs/promises";
@@ -51,7 +47,7 @@ import {
 } from "audit-tools/shared";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import type { RunLogger } from "../../shared/observability/runLog.js";
-import { ARTIFACT_DEFINITIONS, archiveRunDiagnostics } from "./artifacts.js";
+import { ARTIFACT_DEFINITIONS, archiveRunDiagnostics, refreshEndedQuestionReport } from "./artifacts.js";
 import { removeRunSnapshot } from "./runSnapshot.js";
 import { CHARTER_PACKET_ARCHIVE_DIRNAME } from "../orchestrator/charterPacketArchive.js";
 import { SNAPSHOT_DIRNAME } from "../orchestrator/designReviewSnapshot.js";
@@ -60,12 +56,10 @@ import { graphEdgeCachePath } from "../orchestrator/graphEdgeCache.js";
 /** Registry artifacts derived from the run's inputs, each staleness-judged by the DAG. */
 const CARRIED_ARTIFACTS = [
   "artifact_metadata",
-  "audit_results",
   "unit_manifest",
   "graph_bundle",
   "surface_manifest",
   "critical_flows",
-  "flow_coverage",
   "risk_register",
   "git_history",
   "design_assessment",
@@ -76,13 +70,6 @@ const CARRIED_ARTIFACTS = [
   "charter_clarification",
   "systemic_challenge",
   "analyzer_capability",
-  "coverage_matrix",
-  "runtime_validation_tasks",
-  "runtime_validation_report",
-  "audit_tasks",
-  "audit_plan_metrics",
-  "task_affinity_graph",
-  "requeue_tasks",
   "synthesis_narrative",
 ] as const satisfies ReadonlyArray<keyof typeof ARTIFACT_DEFINITIONS>;
 
@@ -130,6 +117,10 @@ export async function rollOverFinishedRun(artifactsDir: string, root?: string, r
   if (!existsSync(runEndedPath(artifactsDir))) return false;
   return await withArtifactTreeHold(artifactsDir, runLogger, async () => {
     if (!existsSync(runEndedPath(artifactsDir))) return false;
+    if (!(await refreshEndedQuestionReport(artifactsDir))) {
+      warn("the finished question review was not rolled over: its current report pair is not fully promoted");
+      return false;
+    }
     // The machine contract is promoted at the terminal step, never re-copied
     // here (an operator may have resynthesized the promoted pair). An in-place
     // contract with no promoted copy is the only copy: keep the dir.

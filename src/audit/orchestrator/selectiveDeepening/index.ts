@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/selective-deepening-conflicts.test.ts, tests/audit/selective-deepening-handoff.test.ts
+// sites-pinned: tests/audit/selective-deepening-conflicts.test.ts
 import { compareCodeUnits } from "audit-tools/shared";
 import type { AuditTask } from "../../types.js";
 import {

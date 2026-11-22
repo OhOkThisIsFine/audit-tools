@@ -11,7 +11,7 @@ const { submissionsDir } = await import(
   "../../src/shared/io/auditToolsPaths.js"
 );
 
-test.concurrent("next-step emits present_report for a complete audit", async () => {
+test.concurrent("next-step presents an already-completed historical audit render", async () => {
   await withTempRepo(async (root) => {
     const artifactsDir = join(root, ".audit-tools/audit");
     await mkdir(artifactsDir, { recursive: true });

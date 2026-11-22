@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/source-read-only-executors.test.ts
-import type { ArtifactBundle } from "../io/artifacts.js";
+import { readQuestionReportCharterOptions, type ArtifactBundle } from "../io/artifacts.js";
 import { EXECUTOR_REGISTRY } from "./executors.js";
 import { readRunSnapshotLinks } from "../io/runSnapshot.js";
 import type { ExecutorRunResult } from "./executorResult.js";
@@ -13,21 +13,16 @@ import {
   runDocsDigestExecutor,
   runStructureDecompositionExecutor,
 } from "./structureExecutors.js";
-import { runPlanningExecutor } from "./planningExecutors.js";
-import { readPublishedAuditTaskIds } from "../cli/dispatch/hostHandoff.js";
+import { buildQuestionPlanArtifacts } from "./questionPlanExecutor.js";
 import {
-  runResultIngestionExecutor,
-  runRuntimeValidationExecutor,
-  runRuntimeValidationUpdateExecutor,
   runExternalAnalyzerImportExecutor,
 } from "./ingestionExecutors.js";
 import {
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
+  runQuestionSynthesisExecutor,
+  runQuestionSynthesisNarrativeExecutor,
 } from "./synthesisExecutors.js";
 import { runCriticalFlowFallbackExecutor } from "./criticalFlowFallbackExecutor.js";
 import { runCharterExtractionExecutor } from "./charterExtractionExecutor.js";
-import { readCharterPacketIndex } from "./charterPacketArchive.js";
 import { runCharterComparisonExecutor } from "./charterComparisonExecutor.js";
 import { runCharterFidelityExecutor } from "./charterFidelityExecutor.js";
 import { runCharterClarificationExecutor } from "./charterClarificationExecutor.js";
@@ -93,17 +88,18 @@ function requireRoot(root: string | undefined, executorName: string): string {
 async function synthesisReadInputs(
   bundle: ArtifactBundle,
   options: AdvanceAuditOptions,
-): Promise<Parameters<typeof runSynthesisExecutor>[2]> {
+): Promise<Parameters<typeof runQuestionSynthesisExecutor>[1]> {
+  const cycle = bundle.question_cycle;
+  if (!cycle || cycle.pending.length > 0) throw new Error("Question review must reach report-ready state before synthesis");
   return {
     auditRead: options.root
       ? await readAuditReadState(options.root, bundle.audit_findings?.audit_read, {
           excludePaths: options.artifactsDir ? await readRunSnapshotLinks(options.artifactsDir) : [],
         })
       : null,
-    sizeIndex: options.sizeIndex,
-    packetArchive: options.artifactsDir
-      ? await readCharterPacketIndex(options.artifactsDir)
-      : [],
+    charter: options.artifactsDir ? await readQuestionReportCharterOptions(options.artifactsDir) : undefined,
+    questionReview: { accepted: cycle.answers, evidence: cycle.evidence, adjudications: cycle.adjudications,
+      dependenciesByQuestion: cycle.dependenciesByQuestion, consolidations: cycle.consolidations },
   };
 }
 
@@ -193,47 +189,18 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
           ? `delta since ${plannedScope.since}: ${plannedScope.seed_files.length} changed + ${plannedScope.expanded_files.length} neighbors; full audit advised before release`
           : "full audit scope",
     });
-    return runPlanningExecutor(
-      bundle,
-      root,
-      options.lineIndex ?? {},
-      options.sizeIndex,
-      plannedScope,
-      options.artifactsDir ? await readPublishedAuditTaskIds({ root: options.repositoryRoot ?? root, sourceRoot: root, artifactsDir: options.artifactsDir,
-        tasks: bundle.audit_tasks ?? [], manifest: bundle.repo_manifest, lineIndex: options.lineIndex ?? {}, logger: log }) : new Set(),
-    );
+    return buildQuestionPlanArtifacts(bundle, plannedScope);
   },
-  result_ingestion_executor: async (bundle, { options }) =>
-    runResultIngestionExecutor(
-      bundle,
-      options.auditResults ?? bundle.audit_results ?? [],
-    ),
-  runtime_validation_executor: async (bundle, { options }) =>
-    runRuntimeValidationExecutor(
-      bundle,
-      requireRoot(options.root, "runtime_validation_executor"),
-    ),
   // The PRIOR report's `audit_read` is handed in so a re-synthesis over an
   // unchanged tree keeps it byte-identical and does not re-stale the narrative
   // pass.
   synthesis_executor: async (bundle, { options }) =>
-    runSynthesisExecutor(bundle, options.auditResults, await synthesisReadInputs(bundle, options)),
+    runQuestionSynthesisExecutor(bundle, await synthesisReadInputs(bundle, options)),
   // The narrative executor reads `auditRead` only on the fallback where no base
   // report exists yet; a persisted report's own `audit_read` rides through
   // `applyNarrative` untouched.
   synthesis_narrative_executor: async (bundle, { options }) =>
-    runSynthesisNarrativeExecutor(bundle, options.narrativeResults, await synthesisReadInputs(bundle, options)),
-  runtime_validation_update_executor: async (bundle, { options }) => {
-    if (!options.runtimeValidationUpdates) {
-      throw new Error(
-        "advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates",
-      );
-    }
-    return runRuntimeValidationUpdateExecutor(
-      bundle,
-      options.runtimeValidationUpdates,
-    );
-  },
+    runQuestionSynthesisNarrativeExecutor(bundle, options.narrativeResults, await synthesisReadInputs(bundle, options)),
   external_analyzer_import_executor: async (bundle, { options }) => {
     if (!options.externalAnalyzerResults) {
       throw new Error(

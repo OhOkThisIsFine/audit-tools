@@ -36,8 +36,6 @@ export const PRIORITY: string[] = [
   // of it (charters, coverage, tasks all derive at/below the charter slot), so
   // a pending prose judgment pauses the cascade instead of racing it.
   "intent_equivalence_current",
-  // Inspection needs confirmed scope and structure, not completed architecture inquiry.
-  "planning_artifacts",
   "charter_extraction_current",
   "charter_comparison_current",
   "charter_fidelity_current",
@@ -45,9 +43,8 @@ export const PRIORITY: string[] = [
   "design_review_conceptual_completed",
   "charter_clarification_current",
   "systemic_challenge_current",
+  "planning_artifacts",
   "audit_tasks_completed",
-  "audit_results_ingested",
-  "runtime_validation_current",
   "synthesis_current",
   "synthesis_narrative_current",
 ];

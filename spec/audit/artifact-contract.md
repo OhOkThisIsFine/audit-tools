@@ -62,7 +62,6 @@ generator.
 | `critical_flows.json` | JSON | Identified critical execution/data flows. |
 | `critical-flow-fallback.json` | JSON | Durable host input: the LLM fallback flow enrichment authored when `critical_flows.fallback_required` is set. Merged into `critical_flows.json` by the structure phase. REGISTERED in `ARTIFACT_DEFINITIONS` and a declared leaf of the staleness DAG — the file itself is the durable input. |
 | <!-- doc-citation-exempt: transient host submission — written and deleted at runtime --> `intent-equivalence-verdict.json` | JSON | **Transient host submission** — NOT registered, NOT a staleness-DAG participant: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. Written by the host to the tool-computed path its step contract binds (`submissions/<sha256(submission_id)>.json`), validated, and — once applied — consumed and DELETED; a submission that validates but cannot be applied is quarantined and recorded, never dropped; the accepted judgment is materialized into `artifact_metadata.intent_baseline`, which is the revision authority. Per DD-9 no verdict-pair cache is persisted, so the executor writes no artifact — do not "fix" its absence from the registry by adding a row. |
-| `flow_coverage.json` | JSON | Coverage of critical flows by ingested results. |
 | `risk_register.json` | JSON | Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list). |
 | `git_history.json` | JSON | Deterministic co-change/churn/authorship mined from the commit log. |
 | `design_assessment.json` | JSON | Deterministic + optional host-delegated design assessment (see below). |
@@ -75,10 +74,6 @@ generator.
 | `analyzer_capability.json` | JSON | Marker: what the optional graph-enrichment pass actually produced (`coverage`, in the shared measured-outcome vocabulary, derived from the entries over the analyzers that were ASKED FOR) + per-analyzer provenance. |
 | `external_analyzer_acquisition.json` | JSON | Marker: external-analyzer acquisition run record over the curated `EXTERNAL_ANALYZER_CANDIDATES` registry in `src/shared/analyzers/candidates.ts` — `defaultRun: true` members run without the per-run consent token; every other candidate requires it. |
 <!-- END GENERATED spec-mirror artifact-contract#analysis -->
-
-`flow_coverage.json` is listed here at `analysis` phase per `ARTIFACT_DEFINITIONS`
-even though it's computed after execution — the phase tag reflects where it's
-declared in the registry, not a strict pipeline-order guarantee.
 
 The design-assessment portion may include observational contract assessment.
 That mode infers existing contracts from the repository artifacts and inspected
@@ -96,22 +91,18 @@ audit-code into an implementation pipeline.
 | Artifact | Format | Purpose |
 |---|---|---|
 | `scope.json` | JSON | How this run was scoped (`full` vs. `delta` with `--since` seed/expanded file sets). |
-| `coverage_matrix.json` | JSON | Task allocation matrix (files × lens buckets) that tracks which are queued/complete. |
-| `runtime_validation_tasks.json` | JSON | Runtime-validation task specs derived from risk + coverage. |
-| `runtime_validation_report.json` | JSON | Runtime-validation results (initial + import-refreshed). |
+| `review_plan.json` | JSON | Current snapshot-bound review questions, their scoped evidence and assignments, and recorded coverage omissions. |
 | `external_analyzer_results.json` | JSON | Normalized findings from acquired external analyzers. |
 | `syntax_resolution_status.json` | JSON | Per-file syntax-parse status and failures. |
-| `audit_results.jsonl` | **NDJSON** | Ingested `AuditResult` records, one per line — not a `.json` array. |
-| `audit_tasks.json` | JSON | Task specifications for external (host-delegated) audit execution. |
-| `audit_plan_metrics.json` | JSON | Planning metrics and cost estimates for the current task set. |
-| `task_affinity_graph.json` | JSON | Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed during planning packet composition. |
-| `requeue_tasks.json` | JSON | Re-audit tasks derived from coverage/flow-coverage gaps. |
 <!-- END GENERATED spec-mirror artifact-contract#execution -->
 
-Run-scoped host handoff adds `host-workload.json`, `host-result-map.json`,
-`host-task-bindings.json`, host result files, and the accepted-results ledger.
-Their tool-owned bindings and content hashes are the authority for ingestion;
-file presence alone is not acceptance.
+The current host handoff writes a run-scoped `host-workload.json` with each
+issued question's binding, source scope, evidence references, and result path.
+An answer must match its assignment, question, revision, and snapshot; a file
+at the result path is not itself acceptance. Accepted answers, adjudications,
+and explicit finding consolidations live in `host-accepted-results-ledger.json`.
+The old per-file result map and task bindings are not part of current question
+dispatch.
 
 ### Reporting
 
@@ -124,8 +115,18 @@ file presence alone is not acceptance.
 <!-- END GENERATED spec-mirror artifact-contract#reporting -->
 
 `audit-report.md` and `audit-findings.json` are co-produced by
-`synthesis_executor` in one call — `audit-report.md` is the render of
-`audit-findings.json`, not an independently-derived artifact.
+`synthesis_executor` in one call. The machine report records question coverage,
+omissions, accepted answers and findings; Markdown renders that report with
+human-only charter retention notes and worker reflections. Inconclusive and
+unfinished review remains visible, not clean coverage.
+
+#### Historical per-file evidence
+
+Retired per-file task, coverage, result, requeue, and runtime-validation
+artifacts are not inputs to a current question review. Before ordinary rollover
+removes working copies, it verifies a byte-identical archive under
+`.audit-tools/archive/` for the run or a content-derived legacy key. If custody
+cannot be verified, ordinary cleanup preserves the working evidence.
 
 #### `audit_read` — what the audit read
 
@@ -196,8 +197,9 @@ extraction lanes actually read, archived at ingest and keyed by content —
 `<kind>-<first 12 of sha256>.md`, with a `index.json` of <!-- doc-citation-exempt: runtime artifact names under .audit-tools/, not tracked files -->
 `{ kind, sha256, byte_length, archived_at, source_filename, archived }` rows
 sorted by kind then digest. It follows the precedent `design-review-snapshots/` <!-- doc-citation-exempt: runtime artifact directory under .audit-tools/, not a tracked path -->
-set: loaded specially, not a dependency-map node, and never read as input by any
-production module, so it adds no DAG edge and can re-stale nothing. The prune in
+set: loaded outside the core registry and not a dependency-map node.
+The question report verifies retained packet bytes for display; they do not
+supply question answers or become a planning dependency. The prune in
 `writeCoreArtifacts` unlinks only registry filenames and never enumerates a
 directory, so it cannot reach these files.
 

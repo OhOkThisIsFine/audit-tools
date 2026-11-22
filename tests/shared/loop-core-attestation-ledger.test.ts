@@ -318,6 +318,9 @@ describe("the gate runs at every boundary a landing path crosses", () => {
 
   test("workload composition counts as loop-core", () => {
     expect(isLoopCorePath("src/audit/cli/nextStepCommand.ts")).toBe(true);
-    expect(isLoopCorePath("src/audit/cli/semanticReviewStep.ts")).toBe(true);
+    expect(isLoopCorePath("src/audit/cli/questionReviewCycle.ts")).toBe(true);
+    expect(isLoopCorePath("src/audit/cli/questionWorkloadBindings.ts")).toBe(true);
+    expect(isLoopCorePath("src/audit/cli/submitCommand.ts")).toBe(true);
+    expect(isLoopCorePath("src/audit/cli/submitGateResult.ts")).toBe(true);
   });
 });

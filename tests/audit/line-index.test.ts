@@ -11,15 +11,6 @@ const {
   UNMEASURED_LINE_COUNT,
   isUnmeasuredLineCount,
 } = await import("../../src/audit/cli/lineIndex.js");
-const { buildFileDisposition } = await import(
-  "../../src/audit/extractors/disposition.js"
-);
-const { buildUnitManifest } = await import(
-  "../../src/audit/orchestrator/unitBuilder.js"
-);
-const { initializeCoverageFromPlan } = await import(
-  "../../src/audit/orchestrator/planning.js"
-);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -157,22 +148,18 @@ test("isUnmeasuredLineCount treats a key absent from the index the same as a fai
 // uses — initializeCoverageFromPlan seeds coverage.files[].path verbatim from
 // repoManifest.files[].path, so a lookup against a coverage path always finds
 // its buildLineIndex entry (no normalization mismatch / lookup miss).
-test("buildLineIndex keys round-trip against coverage.files[].path (same repo_manifest source, mixed case/space path)", async () => {
+test("buildLineIndex preserves a mixed-case manifest path containing spaces", async () => {
   const dir = setup();
   try {
     const weirdPath = "src/Weird Dir/File Name.TS";
     writeLines(dir, weirdPath, 3);
     const manifest = makeManifest([weirdPath]);
-    const disposition = await buildFileDisposition(manifest);
-    const unitManifest = buildUnitManifest(manifest, disposition);
-    const coverage = initializeCoverageFromPlan(manifest, unitManifest, disposition);
-
     const result = await buildLineIndex(dir, manifest);
 
-    const coveragePaths = coverage.files.map((f) => f.path).sort();
-    expect(Object.keys(result).sort()).toEqual(coveragePaths);
-    for (const p of coveragePaths) {
-      expect(Object.prototype.hasOwnProperty.call(result, p), `coverage path '${p}' must resolve in the line index`).toBeTruthy();
+    const manifestPaths = manifest.files.map((f) => f.path).sort();
+    expect(Object.keys(result).sort()).toEqual(manifestPaths);
+    for (const p of manifestPaths) {
+      expect(Object.prototype.hasOwnProperty.call(result, p), `manifest path '${p}' must resolve in the line index`).toBeTruthy();
       expect(isUnmeasuredLineCount(result[p]), `the actually-written file '${p}' must be measured, not unmeasured`).toBe(false);
     }
   } finally {

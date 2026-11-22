@@ -8,8 +8,7 @@ import {
   type TaskAffinityGraph,
 } from "../../src/audit/orchestrator/taskAffinityGraph.js";
 import { buildUnitManifest } from "../../src/audit/orchestrator/unitBuilder.js";
-import { buildChunkedAuditTasks } from "../../src/audit/orchestrator/taskBuilder.js";
-import type { AuditTask, CoverageMatrix, RepoManifest } from "../../src/audit/types.js";
+import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
 
 const GRAPH: TaskAffinityGraph = {
   schema_version: "task-affinity-graph/v1",
@@ -98,17 +97,8 @@ test("permuted graph arrays yield byte-stable projected packets", () => {
 // bounded by the UNIT partition, because at task granularity the evidence
 // classes that fire across unit boundaries cannot union anything.
 //
-// It runs the real pipeline (repo manifest → unit manifest → coverage matrix →
-// chunked audit tasks → affinity graph → coherence partition) over a synthetic
-// multi-unit tree, so a future change to `KIND_WEIGHT` or the eligibility rule
-// that reintroduces collapse fails here rather than in a live run. The live-tree
-// measurement that motivated it is recorded on `TASK_DRAW_COHERENCE_POLICY`.
+// Exercise the real unit, affinity, and coherence algorithms with explicit tasks.
 
-/**
- * A repo manifest with `4 * unitCount` files under `src/u<k>/` — enough files
- * per unit that the task builder emits several tasks, so cross-unit union is
- * observable rather than a single-task-per-unit artefact.
- */
 function multiUnitManifest(unitCount: number): RepoManifest {
   const files = [];
   for (let unit = 0; unit < unitCount; unit += 1) {
@@ -123,26 +113,21 @@ function multiUnitManifest(unitCount: number): RepoManifest {
   return { repository: { name: "measured" }, generated_at: "2026-09-10T00:00:00.000Z", files };
 }
 
-function pipelineTasks(unitCount: number): AuditTask[] {
-  const unitManifest = buildUnitManifest(multiUnitManifest(unitCount));
-  const coverageMatrix: CoverageMatrix = {
-    files: unitManifest.units.flatMap((unit) =>
-      unit.files.map((path) => ({
-        path,
-        unit_ids: [unit.unit_id],
-        classification_status: "classified" as const,
-        audit_status: "pending",
-        required_lenses: unit.required_lenses.length > 0 ? unit.required_lenses : ["correctness"],
-        completed_lenses: [],
-      })),
-    ),
-  };
-  const lineIndex = Object.fromEntries(coverageMatrix.files.map((file) => [file.path, 40]));
-  return buildChunkedAuditTasks(coverageMatrix, lineIndex);
+function unitTasks(unitCount: number): AuditTask[] {
+  const { units } = buildUnitManifest(multiUnitManifest(unitCount));
+  return units.flatMap((unit) => unit.files.map((path, index) => ({
+    task_id: `${unit.unit_id}:${index}`,
+    unit_id: unit.unit_id,
+    pass_id: "fixture",
+    lens: "correctness",
+    file_paths: [path],
+    rationale: "Fixture for unit coherence",
+    priority: "medium",
+    status: "pending",
+  })));
 }
-
 test("task components are bounded by the unit partition — the disjunctive draw does not collapse", () => {
-  const tasks = pipelineTasks(24);
+  const tasks = unitTasks(24);
   expect(tasks.length).toBeGreaterThan(24);
 
   const partition = buildTaskCoherencePartition(buildTaskAffinityGraph(tasks));
@@ -190,9 +175,9 @@ test("a cross-unit relation is the ONLY way a task component grows past one unit
   // are `call_import_reference_adjacency` (70), `same_flow` (60) and
   // `shared_file` (100). `buildTaskAffinityGraph` derives `call_adjacent` only
   // from a supplied graph bundle and `same_flow` only from a `critical_flow:`
-  // tag — both absent by construction from `pipelineTasks` — so on a repo with
+  // tag — both absent by construction from `unitTasks` — so on a repo with
   // no such signal the unit partition IS the coherence partition.
-  const tasks = pipelineTasks(8);
+  const tasks = unitTasks(8);
   const partition = buildTaskCoherencePartition(buildTaskAffinityGraph(tasks));
   const unitOf = new Map(tasks.map((task) => [task.task_id, task.unit_id]));
 

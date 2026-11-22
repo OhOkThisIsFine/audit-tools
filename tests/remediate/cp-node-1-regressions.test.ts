@@ -47,8 +47,8 @@ import { writeCurrentStep } from "../../src/remediate/steps/stepWriter.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import {
   createNextStepHarness,
-  AUDIT_FIXTURE,
 } from "./helpers/nextStepHarness.js";
+import { buildQuestionAuditReportFixture } from "./helpers/questionAuditReportFixture.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 
 // ── CP-NODE-2 static imports (INV-ISC inv-8) ────────────────────────────────
@@ -612,7 +612,15 @@ describe("COR-227a02ae review-gate replay honours the recorded approved_ids", ()
 
   it("NEGATIVE: a decision approving only a subset must not re-approve the leftovers on replay", async () => {
     await h.resetTestRepo();
-    await h.writeReadyStructuredAuditIntake(AUDIT_FIXTURE);
+    const input = join(h.REPO_DIR, "question-audit.json");
+    const { report, ids } = buildQuestionAuditReportFixture([
+      mkFinding("F-001", "src/a.ts", { lens: "behavior" }),
+      mkFinding("F-002", "src/b.ts", { lens: "behavior", title: "Distinct second repair", summary: "The independent export loses the result." }),
+    ]);
+    const approvedId = ids.get("F-001")!;
+    expect(report.findings).toHaveLength(2);
+    await writeFile(input, JSON.stringify(report));
+    await h.writeReadyStructuredAuditIntake(input);
     // An autonomous-shaped decision: approved subset, declined EMPTY (leftovers
     // live but NOT approved). The replay must key on approved_ids, not declined.
     await writeFile(
@@ -620,7 +628,7 @@ describe("COR-227a02ae review-gate replay honours the recorded approved_ids", ()
       JSON.stringify({
         schema_version: "remediate-code-review-decision/v1",
         plan_id: "REVIEW-REPLAY",
-        approved_ids: ["F-001"],
+        approved_ids: [approvedId],
         declined: [],
         created_at: new Date().toISOString(),
       }),
@@ -640,7 +648,7 @@ describe("COR-227a02ae review-gate replay honours the recorded approved_ids", ()
     const approved = JSON.parse(await readFile(approvedPath, "utf8")) as {
       findings: Array<{ id: string }>;
     };
-    expect(approved.findings.map((f) => f.id)).toEqual(["F-001"]);
+    expect(approved.findings.map((f) => f.id)).toEqual([approvedId]);
   });
 });
 

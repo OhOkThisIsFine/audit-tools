@@ -60,7 +60,7 @@ test("multiple unchanged dispatches share one line scan and changed manifest ide
   });
 });
 
-for (const executor of ["auto_fix_executor", "syntax_resolution_executor", "runtime_validation_executor", "external_analyzer_acquisition_executor", "graph_enrichment_executor"]) {
+for (const executor of ["auto_fix_executor", "syntax_resolution_executor", "external_analyzer_acquisition_executor", "graph_enrichment_executor"]) {
   for (const throws of [false, true]) {
     test(`${executor} invalidates cached lines after a ${throws ? "partial failure" : "write"}`, async () => {
       await fixture(async (root, bundle) => {
@@ -102,7 +102,7 @@ test("forced graph submission outside executeAndRecord drops manifest identity",
 });
 
 for (const exitCode of [0, 1]) {
-  test(`real auto-fix formatter exit ${exitCode} refreshes downstream planning line hints`, async () => {
+  test(`real auto-fix formatter exit ${exitCode} refreshes the line index used by the next read-only executor`, async () => {
     await fixture(async (root, bundle) => {
       const { runStructureExecutor } = await import("../../src/audit/orchestrator/structureExecutors.js");
       bundle.file_disposition = { files: [{ path: "a.ts", status: "included" }] };
@@ -120,21 +120,14 @@ for (const exitCode of [0, 1]) {
       expect(run.getBundle().auto_fixes_applied).toMatchObject(exitCode === 0
         ? { executed_tools: ["prettier"], failed_tools: [] }
         : { executed_tools: [], failed_tools: ["prettier"] });
-      const beforePlanning = run.getBundle();
-      await run.dispatch("planning_executor");
-      const { runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
-      const fresh = await runPlanningExecutor(beforePlanning, root,
-        await lineIndexes.buildLineIndex(root, beforePlanning.repo_manifest!));
-      expect(run.getBundle().audit_tasks).toEqual(fresh.updated.audit_tasks);
-      expect(run.getBundle().coverage_matrix).toEqual(fresh.updated.coverage_matrix);
-      expect(run.getBundle().audit_plan_metrics?.total_packet_lines)
-        .toBe(fresh.updated.audit_plan_metrics?.total_packet_lines);
-      expect(run.getBundle().coverage_matrix?.files.find((file) => file.path === "a.ts")?.audit_status)
-        .toBe("pending");
-      const tasks = run.getBundle().audit_tasks ?? [];
-      expect(tasks.length).toBeGreaterThan(0);
-      expect(tasks.some((task) => task.file_paths.includes("a.ts"))).toBe(true);
-      expect(run.getBundle().audit_plan_metrics?.total_packet_lines).toBeGreaterThanOrEqual(3);
+      // Exercise the same index cache through a current deterministic CLI runner.
+      // A fresh scan is the independent oracle for the options passed to it.
+      const fresh = await lineIndexes.buildLineIndex(root, run.getBundle().repo_manifest!);
+      expect(fresh["a.ts"]).toBe(3);
+      const previousCalls = run.reads.mock.calls.length;
+      await run.dispatch("design_assessment_executor");
+      expect(run.reads).toHaveBeenCalledTimes(previousCalls + 1);
+      expect(run.counts).toEqual([1, fresh["a.ts"]]);
     });
   });
 }

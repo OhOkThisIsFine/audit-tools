@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/ingest-report.test.ts, tests/audit/semantic-review-step.test.ts, tests/remediate/ingest-issues-recorded-before-exit.test.ts
+// sites-pinned: tests/shared/ingest-report.test.ts, tests/remediate/ingest-issues-recorded-before-exit.test.ts
 // (each draw passes its own remedy map, so inverting an entry moves a work
 // item to the wrong heading in the host prompt of that draw)
 /**

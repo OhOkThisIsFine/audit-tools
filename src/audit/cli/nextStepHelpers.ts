@@ -1,3 +1,5 @@
+import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import { preservesSourceIndexes } from "../orchestrator/executorRunners.js";
 import type { SpawnDeadline } from "../../shared/tooling/exec.js";
 import { designReviewInputRevision } from "../orchestrator/designReviewProjection.js";
@@ -45,9 +47,13 @@ import {
   type ArtifactBundle,
   loadArtifactBundle,
   promoteFinalAuditReport,
+  hasCurrentQuestionReport,
+  hasWorkingQuestionReportMarker,
+  isWorkingDirFullyPromoted,
 } from "../io/artifacts.js";
 import { ensureRunSourceRoot, removeRunSnapshot, resolveRunSince } from "../io/runSnapshot.js";
 import { markRunEnded } from "../io/rollover.js";
+import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import {
   auditReportPath,
   groundDesignFindings,
@@ -134,8 +140,7 @@ import {
   decideNextStep,
   PRIORITY,
 } from "../orchestrator/nextStep.js";
-import { isHostDelegationExecutor } from "../orchestrator/executors.js";
-import { resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
+import { ceilingRequestsCharters, resolveCharterCeiling } from "../orchestrator/charterExtractionExecutor.js";
 import { systemicChallengeSchemaForBundle } from "../orchestrator/systemicChallengeExecutor.js";
 import { deriveObligationState } from "../orchestrator/obligationDerive.js";
 import { deriveAuditState } from "../orchestrator/state.js";
@@ -148,30 +153,20 @@ import {
 } from "../orchestrator/hostInputPause.js";
 import type { AnalyzerPlanEntry } from "../extractors/analyzers/types.js";
 import type { ExternalAnalyzerCandidate } from "audit-tools/shared";
-import type { ActiveReviewRun } from "../supervisor/operatorHandoff.js";
 import { runAuditStepUnlocked } from "./auditStep.js";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import {
   writeHandoffOnly,
-  ensureSemanticReviewRunUnlocked,
-  loadCurrentActiveReviewRun,
 } from "./reviewRun.js";
 import { sizeIndexFromManifest } from "../orchestrator/reviewPackets.js";
-import { buildPendingAuditTasks } from "./dispatch/packetFilter.js";
+import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
 import { buildLineIndex } from "./lineIndex.js";
 import { errorMessage } from "../../shared/io/json.js";
 import {
-  ingestAuditHostResults,
-  type AuditHostValidationWarning,
-} from "./dispatch/hostHandoff.js";
-import {
-  auditIngestRemedy,
-  type AuditHostIngestIssue,
-} from "../validation/ingestIssueCodes.js";
-import {
   buildCharterPacketManifest,
   carriedCharterLane,
+  charterPacketReadSet,
   materializeCharterPacket,
   type MaterializedCharterPacket,
 } from "../orchestrator/charterPackets.js";
@@ -188,7 +183,6 @@ import {
   recordLaneOutcome,
   systemicChallengeLane,
 } from "./laneSubmissions.js";
-import { recordHostResultOutcomes, renderIngestReportLines } from "audit-tools/shared";
 
 // ── Gate submission helper ────────────────────────────────────────────────────
 
@@ -342,28 +336,7 @@ export interface CarriedAdvisoryNotice {
 }
 
 export type NextStepResult = (
-  | {
-      kind: "semantic_review";
-      state: AuditState;
-      bundle: ArtifactBundle;
-      activeReviewRun: ActiveReviewRun;
-      selectedExecutor?: string | null;
-      inProcessMadeProgress?: boolean;
-      /**
-       * Failures the just-completed ingest classified — a bound result that
-       * never arrived, would not parse, or failed the contract. Carried to the
-       * emitted step so the host is TOLD which items to repair instead of
-       * receiving an identical workload with no statement of what went wrong.
-       */
-      ingestIssues?: readonly AuditHostIngestIssue[];
-      /**
-       * Advisory validation findings on results that WERE accepted. Sibling of
-       * {@link ingestIssues}: informational only — an accepted-with-warning
-       * result needs no repair and must not read as one that could not be
-       * accepted.
-       */
-      validationWarnings?: readonly AuditHostValidationWarning[];
-    }
+  | { kind: "question_review"; state: AuditState; bundle: ArtifactBundle; runId: string; workloadPath: string; pendingCount: number; rejectedCount: number; rejections: readonly { assignmentId: string; guidance: string }[] }
   | { kind: "design_review_parallel"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_contract"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "design_review_conceptual"; state: AuditState; bundle: ArtifactBundle }
@@ -381,7 +354,7 @@ export type NextStepResult = (
   | { kind: "synthesis_narrative"; state: AuditState; bundle: ArtifactBundle }
   | { kind: "complete"; state: AuditState; bundle: ArtifactBundle; finalReportPath: string }
   | { kind: "blocked"; state: AuditState; bundle: ArtifactBundle; reason: string }
-) & { inspectionRun?: ActiveReviewRun } &
+) &
   /**
    * Advisories an EARLIER fold iteration carried, rendered as prompt lines.
    *
@@ -409,7 +382,7 @@ export type NextStepResult = (
 const NEXT_STEP_RETURN_KIND_TABLE: Readonly<
   Record<NextStepResult["kind"], true>
 > = {
-  semantic_review: true,
+  question_review: true,
   design_review_parallel: true,
   design_review_contract: true,
   design_review_conceptual: true,
@@ -459,6 +432,7 @@ async function promoteCompletedReport(root: string, artifactsDir: string): Promi
   // run's report and this run's render sat only under `.audit-tools/audit/`.
   // Identity, not existence: promoted content must equal the in-place render.
   const inPlacePath = auditReportPath(artifactsDir);
+  if (!(await hasCurrentQuestionReport(artifactsDir))) return inPlacePath;
   const [promotedText, inPlaceText] = await Promise.all([
     readFile(promotedPath, "utf8").catch(() => null),
     readFile(inPlacePath, "utf8").catch(() => null),
@@ -481,11 +455,12 @@ async function promoteCompletedReport(root: string, artifactsDir: string): Promi
   const findingsCurrent =
     inPlaceFindings === null || (promotedFindings !== null && inPlaceFindings.equals(promotedFindings));
   let findingsArchived = true;
-  if (!alreadyPromoted || !findingsCurrent) {
+  if (!alreadyPromoted || !findingsCurrent || !(await isWorkingDirFullyPromoted(artifactsDir))) {
     const promoted = await promoteFinalAuditReport({ artifactsDir });
     if (!promoted.promoted) return inPlacePath;
     findingsArchived = !(promoted.unarchived ?? []).some((member) => member.startsWith(AUDIT_FINDINGS_FILENAME));
   }
+  if (!findingsArchived || !(await isWorkingDirFullyPromoted(artifactsDir))) return inPlacePath;
   // A presented, promoted report ENDS the run, whatever its status (a rendered
   // report on a stopped fold included — re-reading the same frozen snapshot
   // would only stop it again): its snapshot goes, and the marker lets the next
@@ -528,7 +503,16 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  const finalReportPath = await promoteCompletedReport(params.root, params.artifactsDir);
+  const questionRun = bundle.review_plan !== undefined ||
+    Boolean(await readQuestionReviewRunId(params.artifactsDir, { includeEnded: true })) ||
+    await hasWorkingQuestionReportMarker(params.artifactsDir);
+  const finalReportPath = questionRun
+    ? await withArtifactTreeHold(params.artifactsDir, undefined, () => promoteCompletedReport(params.root, params.artifactsDir))
+    : await promoteCompletedReport(params.root, params.artifactsDir);
+  if (questionRun && finalReportPath === auditReportPath(params.artifactsDir)) {
+    return { kind: "blocked", state, bundle,
+      reason: "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept." };
+  }
   return {
     kind: "complete",
     state,
@@ -2604,55 +2588,6 @@ export async function checkFinalizationCycle(ctx: {
  * block, and the cycle-guard bookkeeping (transition counter + the no-progress /
  * finalization-cycle sets the two guards mutate).
  */
-/**
- * The advisory payload one fold iteration classified but could not render: an
- * ingest that ends in a `transition` (accepted results for still-pending
- * tasks) returns before any emission, so its `validation_warnings` and
- * classified ingest `issues` would otherwise die with the outcome.
- *
- * DURABLE, not fold-local. The carry used to live only on a `{ value }` ref on
- * {@link AuditNextStepCtx}, which handled a transition followed by an emission
- * in the SAME call — but a transition that ENDS the call (the budget cap, the
- * drain's budget stop, any fold boundary) took the ref with it, and the
- * advisories were gone. The property is "stated on exactly ONE emitted step,
- * whichever call emits it", and "whichever call" is the half a memory-only carry
- * cannot satisfy.
- *
- * So it persists to `steps/pending-advisories.json` and is drained by the next
- * emission, in this call or a later one. This is NOT a second durable record
- * competing with the ledger (`recordHostResultOutcomes`, which stays the only
- * place a refusal/acceptance is recorded): what persists here is only the
- * PROMPT STATEMENT of advisories the ledger already holds, and it is drained
- * (deleted) the moment it is rendered, so it can neither accumulate nor become
- * a source of truth. A crash between persist and drain re-states an advisory the
- * ledger already recorded — the safe direction, and the one the ledger's own
- * idempotence is built around.
- */
-interface FoldAdvisories {
-  ingestIssues: AuditHostIngestIssue[];
-  validationWarnings: AuditHostValidationWarning[];
-}
-
-/**
- * A FRESH empty carry — a factory, never a shared constant. The carry is
- * MUTATED in place (`mergeFoldAdvisoriesInto` appends to both arrays), so two
- * holders that received the same object would alias: the persistent carry is
- * read as `emptyFoldAdvisories()`, merged into, and persisted, and a shared
- * constant would mean the "empty" sentinel itself grew the advisories — after
- * which every `writePendingAdvisories(emptyFoldAdvisories())` call is no longer
- * empty, stops deleting the file, and re-states the advisory on EVERY later
- * emission. That is not hypothetical: it is what a shallow spread of the
- * constant did, and it turned the once-only property into once-per-emission.
- */
-function emptyFoldAdvisories(): FoldAdvisories {
-  return { ingestIssues: [], validationWarnings: [] };
-}
-
-/** `<artifactsDir>/steps/pending-advisories.json` — the drainable prompt carry. */
-function pendingAdvisoriesPath(artifactsDir: string): string {
-  return join(artifactsDir, "steps", "pending-advisories.json");
-}
-
 /** The progress marker a filesystem-watching host reads (see `executeAndRecord`). */
 function deterministicProgressPath(artifactsDir: string): string {
   return join(artifactsDir, "steps", "deterministic-progress.json");
@@ -2662,117 +2597,6 @@ type ManifestIndexes = { lineIndex?: Record<string, number>; sizeIndex?: Record<
 type ManifestIndexCache = WeakMap<object, ManifestIndexes>;
 /** Dispatch-local failure attribution; `null` until a dispatch throws. */
 type FailureAttribution = { executor: string | null; obligation: string | null } | null;
-
-/**
- * Read the persisted carry. Lenient by design: an absent or unreadable file is
- * an empty carry, because this is a PROMPT convenience over a ledger that
- * remains authoritative — a bookkeeping file must never be able to fail the
- * call it decorates. Shape-checked rather than schema-parsed for the same
- * reason: unrecognized entries are dropped, never thrown on.
- */
-async function readPendingAdvisories(
-  artifactsDir: string,
-): Promise<FoldAdvisories> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await readFile(pendingAdvisoriesPath(artifactsDir), "utf8"));
-  } catch {
-    return emptyFoldAdvisories();
-  }
-  if (!isRecord(raw)) return emptyFoldAdvisories();
-  const take = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
-  return {
-    ingestIssues: take<AuditHostIngestIssue>(raw.ingestIssues),
-    validationWarnings: take<AuditHostValidationWarning>(raw.validationWarnings),
-  };
-}
-
-/**
- * Persist the carry, or DELETE it when empty. Deleting rather than writing an
- * empty object is what keeps presence a signal: a later fold reads "nothing
- * pending" from absence, and no reader has to distinguish `[]` from "not yet
- * written".
- */
-async function writePendingAdvisories(
-  artifactsDir: string,
-  advisories: FoldAdvisories,
-): Promise<void> {
-  const path = pendingAdvisoriesPath(artifactsDir);
-  if (advisoriesEmpty(advisories)) {
-    try {
-      await unlink(path);
-    } catch (error) {
-      if (!isFileMissingError(error)) throw error;
-    }
-    return;
-  }
-  await writeJsonFile(path, advisories);
-}
-
-/**
- * Append one fold iteration's advisories to the pending carry. Dedupe by
- * identity signature keeps an issue the SAME ingest re-classifies on a later
- * iteration (it will, while the submission stays broken) from rendering twice;
- * the consuming drain ({@link takeFoldAdvisories}) is the once-per-emit half.
- */
-function mergeFoldAdvisoriesInto(
-  carried: FoldAdvisories,
-  fresh: {
-    readonly issues: readonly AuditHostIngestIssue[];
-    readonly validationWarnings: readonly AuditHostValidationWarning[];
-  },
-): void {
-  appendUnseen(carried.ingestIssues, fresh.issues);
-  appendUnseen(carried.validationWarnings, fresh.validationWarnings);
-}
-
-/** Append each advisory whose signature is not already in `target`, in order. */
-function appendUnseen<T extends AuditHostIngestIssue | AuditHostValidationWarning>(
-  target: T[],
-  incoming: readonly T[],
-): void {
-  const seen = new Set(target.map(advisorySignature));
-  for (const advisory of incoming) {
-    const signature = advisorySignature(advisory);
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    target.push(advisory);
-  }
-}
-
-function advisoriesEmpty(advisories: FoldAdvisories): boolean {
-  return advisories.ingestIssues.length === 0 && advisories.validationWarnings.length === 0;
-}
-
-/**
- * Drain the carry: what the NEXT emission must state, now consumed. Clears the
- * in-memory ref AND the persisted copy TOGETHER, so the once-only property holds
- * across a call boundary exactly as it does within one call — a ref cleared
- * without the file would re-state on the next call, and a file left behind after
- * a render would do the same.
- */
-async function takeFoldAdvisories(
-  artifactsDir: string,
-  ref: { value: FoldAdvisories },
-): Promise<FoldAdvisories> {
-  const taken: FoldAdvisories = {
-    ingestIssues: ref.value.ingestIssues,
-    validationWarnings: ref.value.validationWarnings,
-  };
-  ref.value = emptyFoldAdvisories();
-  await writePendingAdvisories(artifactsDir, emptyFoldAdvisories());
-  return taken;
-}
-
-/** Content identity of one advisory, across both channels. */
-function advisorySignature(
-  advisory: AuditHostIngestIssue | AuditHostValidationWarning,
-): string {
-  const workItemId =
-    "work_item_id" in advisory ? (advisory.work_item_id ?? "") : "";
-  const code = "code" in advisory ? advisory.code : "warning";
-  return `${code}|${workItemId}|${advisory.message}`;
-}
 
 interface AuditNextStepCtx {
   params: NextStepParams;
@@ -2787,15 +2611,6 @@ interface AuditNextStepCtx {
    * cascade — the live 2026-07-17 dogfood case.
    */
   heartbeat?: AdvanceHeartbeat;
-  /**
-   * Advisories an ingest classified on a fold iteration that ended in a
-   * `transition` (see {@link runHostDelegationObligation}): the transition
-   * returns before any emission, and the next ingest skips already-accepted
-   * bindings, so without this carry the warnings and that fold's classified
-   * issues never reach the emitted prompt. The next semantic-review emit
-   * merges + consumes them (once — see {@link mergeFoldAdvisories}).
-   */
-  foldAdvisoriesRef: { value: FoldAdvisories };
   /**
    * 0-based ordinal of DETERMINISTIC DISPATCHES this fold call has made — the
    * guards' `index` and the marker protocol's `iteration` source. Under the
@@ -3113,241 +2928,62 @@ async function runDesignReviewObligation(
   return { kind: "transition", state: branch.bundle };
 }
 
-/** Consume available inspection results once at the full fold boundary, whatever inquiry is pending. */
-async function ingestAvailableInspectionResults(
-  bundle: ArtifactBundle,
-  ctx: AuditNextStepCtx,
-): Promise<ArtifactBundle> {
-  // First fold every strictly-bound result that still belongs to the pending
-  // set. Filtering against bundle truth makes crash recovery idempotent: an
-  // accepted ledger written before core ingestion is retried, while results
-  // already reflected in coverage are not replayed.
-  const currentRun = await loadCurrentActiveReviewRun(ctx.params.artifactsDir);
-  let ingestIssues: readonly AuditHostIngestIssue[] = [];
-  let rawIngestIssues: readonly AuditHostIngestIssue[] = [];
-  let validationWarnings: readonly AuditHostValidationWarning[] = [];
-  if (currentRun) {
-    let acceptedResults: Awaited<
-      ReturnType<typeof ingestAuditHostResults>
-    >["accepted_results"] = [];
-    let completedIds: readonly string[] = [];
-    // The line index is built HERE (once per fold) rather than inside the ingest
-    // so the accept decision sees the same disk truth `runAuditStep`'s batch gate
-    // validates against; the audit-task manifest comes from the same bundle.
-    const lineIndexForIngest = bundle.repo_manifest
-      ? await buildLineIndex(requireSourceRoot(ctx.params), bundle.repo_manifest)
-      : undefined;
-    // The set replayed below. The ingest validates those entries again against
-    // this same tree, so the batch gate cannot refuse what it is handed.
-    const pendingIds = new Set(
-      buildPendingAuditTasks(bundle).map((task) => task.task_id),
-    );
-    try {
-      const ingested = await ingestAuditHostResults({
-        root: ctx.params.root,
-        sourceRoot: requireSourceRoot(ctx.params),
-        artifactsDir: ctx.params.artifactsDir,
-        runId: currentRun.run_id,
-        auditTasks: bundle.audit_tasks ?? [],
-        lineIndex: lineIndexForIngest,
-        pendingTaskIds: pendingIds,
-      });
-      acceptedResults = ingested.accepted_results;
-      ingestIssues = ingested.issues;
-      rawIngestIssues = ingested.raw_issues;
-      validationWarnings = ingested.validation_warnings;
-      completedIds = ingested.completed_work_item_ids;
-    } catch (error) {
-      // No handoff exists on the first visit, or prepare was interrupted before
-      // all binding artifacts landed. Re-preparing below restores it exactly:
-      // the prepare writes the workload, result map and binding set together,
-      // so a partial trio is overwritten whole.
-      //
-      // A STALE binding set is deliberately NOT in this class and must not be
-      // added to it: the ingest already classifies it and returns an issue
-      // WITHOUT throwing (see `StaleAuditHostTaskBindingsError`), precisely so
-      // the fold reaches the re-prepare below instead of aborting here. An
-      // error that arrives at this line was not classified by the ingest, and
-      // swallowing it would turn an unreadable handoff into a silent one.
-      if (!isFileMissingError(error)) throw error;
-    }
-    // The ingest CLASSIFIES every failed read — a submission that never
-    // arrived, unreadable bytes (an EACCES or a directory at the bound path
-    // reads as malformed WITH the OS detail in its message), a body that fails
-    // the contract, a replayed result id. Those classifications used to die in
-    // the caller that computed them; they now land on the ledger and, below,
-    // in the re-emitted step the host actually reads. The completed set rides
-    // along so a repaired item closes its own record.
-    await recordHostResultOutcomes(ctx.params.artifactsDir, currentRun.run_id, {
-      issues: rawIngestIssues,
-      acceptedIds: completedIds,
-    });
-
-    // Even a refused-only arrival must be visible on the next host step.
-    mergeFoldAdvisoriesInto(ctx.foldAdvisoriesRef.value, { issues: ingestIssues, validationWarnings });
-    await writePendingAdvisories(ctx.params.artifactsDir, ctx.foldAdvisoriesRef.value);
-
-    const pendingAccepted = acceptedResults.filter((result) =>
-      pendingIds.has(result.task_id),
-    );
-    if (pendingAccepted.length > 0) {
-      // Forced, lock-free, against the CARRIED bundle: the fold owns the one
-      // hold and the one persist.
-      const ingested = await runAuditStepUnlocked(
-        {
-          root: ctx.params.root,
-          sourceRoot: requireSourceRoot(ctx.params),
-          artifactsDir: ctx.params.artifactsDir,
-          preferredExecutor: "result_ingestion_executor",
-          auditResultsData: [...pendingAccepted],
-        },
-        bundle,
-      );
-      return ingested.updated_bundle;
-    }
+/** Raw fallback errors may quote submitted text, paths, or schema values. */
+function questionResultCorrection(reason: string): string {
+  if (reason === "Result assignment differs from its destination" ||
+      reason === "Review submission does not match the current issued assignment, question revision and snapshot") {
+    return "Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.";
   }
-
-  return bundle;
+  if (reason.startsWith("Source is outside this assignment:")) {
+    return "Source is outside the assignment. Use only source admitted in the current binding.";
+  }
+  if (reason.startsWith("Source span is outside the issued file:")) {
+    return "Source lines are outside the issued file. Check the span against the frozen source.";
+  }
+  if (reason.startsWith("Evidence was not issued for this assignment:") ||
+      reason.startsWith("Observation links unavailable or unissued evidence:")) {
+    return "Evidence is unavailable or unissued for this assignment. Check the current evidence and observation IDs.";
+  }
+  if (reason === "Conflicting reuse of an accepted review submission ID") {
+    return "Submission ID already used for different content. Replay only the exact accepted answer under that ID.";
+  }
+  if (reason.startsWith("Unknown or duplicate requested part:") ||
+      reason.startsWith("Review part has unsupported observation links:")) {
+    return "Requested part or observation links are invalid. Check the parts and links against the current binding.";
+  }
+  return "Could not accept the result. Check that it is readable JSON and meets the current answer contract.";
 }
 
 async function runHostDelegationObligation(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
 ): Promise<AuditOutcome> {
-  const decision = decideNextStep(bundle, { emitStaleness: false });
-  const state = decision.state;
-  if (!decision.selected_executor) {
-    return emitNoExecutorBlocked(bundle, ctx, decision);
-  }
-  if (!isHostDelegationExecutor(decision.selected_executor)) {
-    return runDeterministicExecutor(bundle, ctx);
-  }
-
-  // The UNLOCKED variant: the fold already holds the artifact-tree lock, and
-  // `withFileLock` is non-reentrant — taking the artifact-tree hold here would
-  // be a deterministic FileLockTimeoutError on the audit loop's most common
-  // exit path. Its blocked core state rides the emit's `state` below, so the
-  // fold's single commit persists it (the pause's own persist was the split's
-  // other half).
-  const review = await ensureSemanticReviewRunUnlocked({
-    root: ctx.params.root,
-    sourceRoot: requireSourceRoot(ctx.params),
-    artifactsDir: ctx.params.artifactsDir,
-    bundle,
-    state,
-    obligationId: decision.selected_obligation,
+  const sourceRoot = requireSourceRoot(ctx.params);
+  const cycle = await deriveQuestionCycleUnlocked({
+    root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, bundle,
   });
-  // What THIS ingest saw. Deliberately NOT drained here: the carried advisories
-  // are taken at the fold's single emission boundary (`runDeterministicForNextStep`),
-  // which every emitted step kind passes through — draining at this obligation
-  // would state them only for a semantic-review emission and silently drop them
-  // the moment the run's next step happened to be a different kind
-  // (design_review_conceptual, charter_*, synthesis_narrative…).
+  const carried = { ...bundle, question_cycle: cycle };
+  if (bundle.audit_findings !== undefined && !(await hasCurrentQuestionReport(ctx.params.artifactsDir))) {
+    // A new accepted answer may not change plan membership or source revision.
+    // Re-synthesize rather than repeatedly presenting a no-longer-current pair.
+    delete carried.audit_findings;
+    delete carried.audit_report;
+    delete carried.synthesis_narrative;
+  }
+  if (cycle.pending.length === 0) return { kind: "transition", state: carried };
+  const pendingIds = new Set(cycle.pending.map(({ assignment }) => assignment.assignment_id));
+  const rejections = cycle.issues.filter(issue => pendingIds.has(issue.assignment_id)).slice(0, 8)
+    .map(issue => ({ assignmentId: issue.assignment_id, guidance: questionResultCorrection(issue.reason) }));
+  const published = await publishAuditQuestionWorkload({
+    root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
+  });
   return {
     kind: "emit",
-    step: {
-      kind: "semantic_review" as const,
-      selectedExecutor: decision.selected_executor,
-      ...review,
-    },
-    // The pause's blocked core state — the fold's single commit persists it
-    // (the locking variant's own write was the other half of the split).
-    state: review.bundle,
+    step: { kind: "question_review", state: deriveAuditState(carried, { emitStaleness: false }), bundle: carried,
+      runId: cycle.runId, workloadPath: published.workload_path, pendingCount: cycle.pending.length,
+      rejectedCount: cycle.issues.length, rejections },
+    state: carried,
   };
-}
-
-/**
- * State the fold's carried advisories on the step about to be emitted, and
- * DRAIN them.
- *
- * THE single emission-boundary drain. It lives here, not at any one obligation,
- * because the property is "stated on exactly one emitted step, whichever call
- * and whichever step kind emits it": a carry produced by a call-ending
- * transition must survive to a later fold, and that fold's step may be ANY
- * kind. Hanging the drain off the semantic-review obligation made it correct
- * only for as long as the next step happened to be a semantic review.
- *
- * Advisories are only ever RENDERED by the semantic-review step today (the
- * other kinds carry no advisory channel), so a carry drained onto one of them
- * still reaches the operator — as a stated line in this step's prompt — rather
- * than being lost. A step with nothing carried is returned untouched.
- */
-async function withFoldAdvisories(
-  step: NextStepResult,
-  ctx: AuditNextStepCtx,
-): Promise<NextStepResult> {
-  const carried = await takeFoldAdvisories(
-    ctx.params.artifactsDir,
-    ctx.foldAdvisoriesRef,
-  );
-  if (advisoriesEmpty(carried)) return step;
-  if (step.kind !== "semantic_review") {
-    return {
-      ...step,
-      // An architecture step that carries a ready-inspection run names that
-      // run's workload in its own task, above the carried report (the
-      // `withReadyInspection` section); the pending items are in it.
-      advisoryNotice: renderCarriedAdvisoryLines(
-        carried,
-        step.inspectionRun !== undefined && step.kind !== "blocked"
-          ? "named_above"
-          : "next_call",
-      ),
-    };
-  }
-  return {
-    ...step,
-    ingestIssues: [...(step.ingestIssues ?? []), ...carried.ingestIssues],
-    validationWarnings: [
-      ...(step.validationWarnings ?? []),
-      ...carried.validationWarnings,
-    ],
-  };
-}
-
-/**
- * The advisory lines a step that carries no advisory CHANNEL still states. A
- * carried advisory is never dropped on the floor because the run happened to
- * move on to a different step kind — it is rendered as text, in the same
- * wording the semantic-review step's own sections use.
- *
- * "The same wording" is now MECHANICAL: both callers render through the one
- * {@link renderIngestReportLines}. This function used to hand-copy the split,
- * the bullet format and the headings, and the copy had already gone stale
- * against the section it claimed to match.
- *
- * The report rides a step of another kind and follows its whole task, so the
- * workload is `named_above` when that task names a ready-inspection workload,
- * and `next_call` otherwise.
- */
-function renderCarriedAdvisoryLines(
-  carried: FoldAdvisories,
-  workload: "named_above" | "next_call",
-): string[] {
-  return renderIngestReportLines({
-    issues: carried.ingestIssues,
-    remedy: auditIngestRemedy,
-    workload,
-    advisories: carried.validationWarnings,
-  });
-}
-
-/** Emit the no-executor blocked step (the hand loop's `!selected_executor` arm). */
-async function emitNoExecutorBlocked(
-  bundle: ArtifactBundle,
-  ctx: AuditNextStepCtx,
-  decision: ReturnType<typeof decideNextStep>,
-): Promise<AuditOutcome> {
-  const state = decision.state;
-  const reason = ctx.lastSummaryRef.value || decision.reason;
-  await writeHandoffOnly({
-    root: ctx.params.root,
-    artifactsDir: ctx.params.artifactsDir,
-    bundle,
-    audit_state: state,
-    progress_summary: reason,
-  });
-  return { kind: "emit", step: { kind: "blocked", state, bundle, reason }, state: bundle };
 }
 
 /**
@@ -3451,12 +3087,6 @@ export async function runDeterministicForNextStep(
   }
 }
 
-const ARCHITECTURE_WORK_STEPS: ReadonlySet<string> = new Set([
-  "charter_extraction", "charter_comparison", "charter_fidelity",
-  "design_review_parallel", "design_review_contract", "design_review_conceptual",
-  "charter_clarification", "systemic_challenge",
-]);
-
 async function runDeterministicFold(
   params: NextStepParams,
   heartbeat: AdvanceHeartbeat,
@@ -3475,7 +3105,6 @@ async function runDeterministicFold(
     analyzersRef,
     lastSummaryRef: { value: "" },
     heartbeat,
-    foldAdvisoriesRef: { value: emptyFoldAdvisories() },
     dispatchOrdinalRef: { value: 0 },
     dispatchedSignatures: new Set<string>(),
     seenStateSignatures: new Set<string>(),
@@ -3506,7 +3135,6 @@ async function runDeterministicFold(
       // `finally` below runs on the throw path too, still under the hold.
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
-      let ingestionExecutions = 0;
       let intakeExecutions = 0;
       await recoverStagedSubmissions(params.artifactsDir);
       const previousConsent = await readRunConsentUnlocked(params.root, params.artifactsDir);
@@ -3524,28 +3152,25 @@ async function runDeterministicFold(
         : await updateRunConsentUnlocked(params.root, params.artifactsDir, {}, params.autoFix?.enabled, params.autoFix?.dryRun);
       if (params.externalAcquisition?.enabled) applyRunConsent(params.externalAcquisition, consent);
       params.autoFix = { enabled: consent.auto_fix, dryRun: consent.dry_run };
-      // The PERSISTED carry, read back under the hold. A transition that ENDED
-      // an earlier call left its advisories on disk for the next emission to
-      // state, and that emission may be this call's — the ctx ref starts empty
-      // per call, so without this read the durable half would be write-only and
-      // the advisories would still die at the call boundary. Seeding the ref
-      // (rather than merging at the emit site) keeps ONE drain point, so the
-      // once-only property is the same one the in-call path already relies on.
-      ctx.foldAdvisoriesRef.value = await readPendingAdvisories(
-        params.artifactsDir,
-      );
       let startBundle = await loadArtifactBundle(params.artifactsDir);
       if (consent.auto_fix && !previousConsent.auto_fix && !consent.dry_run) {
         delete startBundle.auto_fixes_applied;
       }
       ctx.currentBundleRef.value = startBundle;
       try {
-        // Observe source integrity against the fresh carried authority, under
-        // the same hold and before any old host submission can be ingested.
+        // Check the same frozen read set that the active review stage uses.
+        // Before question planning, deep charter lanes also bind admitted source.
         if (startBundle.audit_state?.status !== "complete" && startBundle.repo_manifest) {
-          const taskFiles = [...new Set(buildPendingAuditTasks(startBundle).flatMap((task) => task.file_paths))];
-          if (taskFiles.length > 0) {
-            const integrity = await checkFileIntegrity(requireSourceRoot(params), startBundle.repo_manifest, taskFiles);
+          let admittedFiles: string[] = [];
+          if (startBundle.review_plan) {
+            const scope = reviewSourceScope(startBundle);
+            admittedFiles = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
+          } else if (ceilingRequestsCharters(resolveCharterCeiling(startBundle.intent_checkpoint))) {
+            const { memberPaths, docPaths } = charterPacketReadSet(startBundle);
+            admittedFiles = [...memberPaths, ...docPaths];
+          }
+          if (admittedFiles.length > 0) {
+            const integrity = await checkFileIntegrity(requireSourceRoot(params), startBundle.repo_manifest, admittedFiles);
             if (!integrity.is_clean) {
               process.stderr.write(
                 `[audit-code] nextStep: integrity check - ${integrity.changed_files.length} changed, ` +
@@ -3562,14 +3187,6 @@ async function runDeterministicFold(
             }
           }
         }
-        if (startBundle.audit_tasks && startBundle.audit_state?.status !== "complete" &&
-            deriveAuditState(startBundle, { emitStaleness: false }).obligations.find((obligation) =>
-              obligation.id === "planning_artifacts")?.state === "satisfied") {
-          const beforeIngest = startBundle;
-          startBundle = await ingestAvailableInspectionResults(startBundle, ctx);
-          ingestionExecutions = startBundle === beforeIngest ? 0 : 1;
-          ctx.currentBundleRef.value = startBundle;
-        }
         const engineOutcome = await advance(
           {
             priority: PRIORITY,
@@ -3579,21 +3196,10 @@ async function runDeterministicFold(
           ctx,
           {
             maxTransitions: engineMaxTransitions(),
-            maxExecutions: MAX_DRAIN_STEPS - ingestionExecutions - intakeExecutions,
+            maxExecutions: MAX_DRAIN_STEPS - intakeExecutions,
           },
         );
-        chargedExecutions = engineOutcome.executions + ingestionExecutions + intakeExecutions;
-        if (engineOutcome.step && engineOutcome.step.kind !== "terminal_intent" && ARCHITECTURE_WORK_STEPS.has(engineOutcome.step.kind) &&
-            buildPendingAuditTasks(engineOutcome.state).length > 0) {
-          const inspection = await ensureSemanticReviewRunUnlocked({
-            root: params.root, sourceRoot: requireSourceRoot(params), artifactsDir: params.artifactsDir,
-            bundle: engineOutcome.state,
-            state: deriveAuditState(engineOutcome.state, { emitStaleness: false }),
-            obligationId: "audit_tasks_completed",
-            emittedStepKind: engineOutcome.step.kind,
-          });
-          engineOutcome.step = { ...engineOutcome.step, inspectionRun: inspection.activeReviewRun };
-        }
+        chargedExecutions = engineOutcome.executions + intakeExecutions;
         await assertOwnership();
         await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
         return engineOutcome;
@@ -3664,7 +3270,7 @@ async function runDeterministicFold(
   // conversion below promotes — the carry has nowhere left to be stated, and
   // the run is over.
   if (outcome.step && outcome.step.kind !== "terminal_intent") {
-    return await withFoldAdvisories(outcome.step, ctx);
+    return outcome.step;
   }
 
   if (outcome.step) {
@@ -3705,16 +3311,6 @@ async function runDeterministicFold(
   // budget makes unreachable in practice — a backstop firing IS the anomaly).
   const stalled = describeStoppedFold(outcome);
   if (stalled) {
-    // The engine's bound is its runaway backstop, and audit deliberately
-    // supplies no stateSignature (cycle detection lives in ctx-level guards with
-    // tolerance windows). A cause those guards miss — observed 2026-07-30: an
-    // errored rolling packet left `audit_tasks_completed` actionable while its
-    // error-shaped result files made the pending frontier look answered — used
-    // to CRASH next-step with exit 1, where the same class of stall
-    // (no_capable_pool) gets a graceful resumable pause. The engine now REPORTS
-    // the non-convergence instead of throwing it, so the pause is built from the
-    // outcome's own fields — no error message is parsed to learn either that the
-    // bound fired or which obligation was spinning.
     const bundle = await loadArtifactBundle(params.artifactsDir);
     const decision = decideNextStep(bundle);
     return {
@@ -3724,9 +3320,7 @@ async function runDeterministicFold(
       reason:
         `The deterministic fold ${stalled.cause} — an obligation is re-selecting without clearing its own ` +
         `actionable state (${stalled.spinning}). ` +
-        "The run is paused resumably, not crashed: inspect the run's task-results/ for error-shaped " +
-        "result files whose tasks never completed (delete them to re-dispatch those tasks), or hand " +
-        "results in with `audit-code ingest-results --results <file>`; then re-run next-step.",
+        "The run is paused. Inspect its current question workload and recorded errors, then re-run next-step.",
     };
   }
 

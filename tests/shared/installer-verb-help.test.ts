@@ -6,7 +6,7 @@
 // never sees them. `remediate-code install --help` therefore RAN the installer
 // and wrote four files; `audit-code install --help` did the same, because its
 // leading-flag scan deliberately stops at the first non-flag token (it must, or
-// `explain-task -v` would print the wrapper's version instead of forwarding it).
+// `status -v` would print the wrapper's version instead of forwarding it).
 //
 // These are the published commands and the affected verbs are the first ones a
 // new operator touches; two of the four write into the repository and the home

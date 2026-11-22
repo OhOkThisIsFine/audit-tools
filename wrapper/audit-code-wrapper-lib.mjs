@@ -42,7 +42,7 @@ async function readPackageVersion() {
 // Informational flags (--help/--version) short-circuit the wrapper only when
 // they appear BEFORE the first non-flag token (the command). A whole-argv scan
 // hijacks post-command tokens that belong to the dist CLI — e.g.
-// `audit-code explain-task -v` printed the wrapper's version instead of
+// `audit-code status -v` printed the wrapper's version instead of
 // forwarding `-v` to the dist command (CE-007).
 function hasLeadingFlag(argv, name) {
   for (const token of argv) {
@@ -242,10 +242,6 @@ function printHelp({ usageName, preferredEntrypoint }) {
     '- mcp serves the submit-only MCP tool (submit_result) over stdio',
     '- submit --work-item ID --from FILE checks one work item result and writes it to its bound path only when it passes',
     '- validate checks the current artifact bundle and canonical session intent and exits non-zero when issues exist',
-    '- validate-results --results FILE validates AuditResult payloads against the active task manifest without ingesting them',
-    '- explain-task <task_id> prints the resolved file coverage and current status for a task id',
-    '- ingest-results --results FILE validates and ingests canonical AuditResult payloads',
-    '- unaccept-results --work-item <id> (repeatable) or --all removes entries from the accepted host-results pair so a poisoned acceptance can be re-ingested after repair',
     '- status summarizes deterministic audit state and pending review work',
     '',
     'Defaults:',

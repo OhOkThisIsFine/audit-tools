@@ -41,6 +41,7 @@ export interface GateSubmitToolRequest {
 export interface SubmitServerOptions {
   readonly name: string;
   readonly version: string;
+  readonly submissionDescription?: string;
   readonly gateSubmission?: {
     readonly lanes: readonly [string, ...string[]];
     readonly description?: string;
@@ -72,7 +73,7 @@ export function createSubmitMcpServer(options: SubmitServerOptions): McpServer {
   server.registerTool(
     "submit_result",
     {
-      description: SUBMIT_TOOL_DESCRIPTION,
+      description: options.submissionDescription ?? SUBMIT_TOOL_DESCRIPTION,
       inputSchema: {
         root: z.string().describe("Absolute path of the repository root your prompt names"),
         artifacts_dir: z

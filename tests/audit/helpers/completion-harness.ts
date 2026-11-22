@@ -5,47 +5,17 @@
 // finalize loop the split files share.
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { walkStepsUntilTerminal } from "./step-driver.js";
 import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
-import { buildSyntheticResults as buildSyntheticResultsImpl } from "../../../scripts/audit/smoke-audit-flow.mjs";
-import type { AuditTask } from "../../../src/audit/types.js";
 
-const { GATE_LANES, laneSubmissionPath } = await import(
-  "../../../src/audit/cli/laneSubmissions.js"
-);
 const { currentStepPath } = await import("audit-tools/shared");
 
 const { cmdNextStep } = await import("../../../src/audit/cli/nextStepCommand.js");
-const { cmdIngestResults } = await import("../../../src/audit/cli/ingestResultsCommand.js");
-
-/**
- * Synthesize one AuditResult per assigned task — by calling the PRODUCTION
- * producer, never by re-building the payload here.
- *
- * This file hand-built the AuditResult, byte-identical in shape to
- * `scripts/audit/smoke-audit-flow.mjs`'s producer and equally invisible to every
- * typechecker and contract sweep. That is the class
- * `tests/audit/smoke-producer-contract.test.ts` records as having failed RELEASE
- * CI: `reviewed_clean` was added to the contract, a `tests/**` fixture sweep went
- * green, and the hand-built producers were missed because a payload built
- * without consulting the contract cannot fail on it.
- *
- * The production producer validates its own output against the contract, so
- * routing through it means a contract change breaks here — at `npm test`,
- * cheaply — rather than in a packaged smoke.
- *
- * `tests/shared/test-mirrors-production.test.ts` is the invariant that keeps a
- * third construction site from appearing.
- */
-export async function buildSyntheticResults(tasks: AuditTask[], root: string) {
-  return buildSyntheticResultsImpl(tasks, root, "wrapper integration coverage");
-}
 
 // Capture console.log output (and silence the non-git-repo warning + the
 // per-derivation staleness JSONL record every handler call emits against a
-// fixture temp dir) around an in-process handler call. cmdIngestResults/
-// cmdIngestResults prints its JSON result via console.log — NOT
+// fixture temp dir) around an in-process handler call. cmdNextStep prints its JSON result via console.log — NOT
 // process.stdout.write. Vitest's own per-test console
 // interception sits between console.log and process.stdout.write, so
 // overriding process.stdout.write here would silently capture nothing).
@@ -89,11 +59,6 @@ export async function callNextStep(
     cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir, ...extraArgs]),
   );
   return JSON.parse(await readFile(currentStepPath(artifactsDir), "utf8"));
-}
-
-export async function callIngestResults(args: string[]) {
-  const stdout = await captureConsoleLog(() => cmdIngestResults(args));
-  return JSON.parse(stdout);
 }
 
 export async function withTempRepo<T>(fn: (root: string) => Promise<T>): Promise<T> {
@@ -171,52 +136,4 @@ export async function advanceToDispatchReady(root: string) {
     terminalKinds: new Set(["dispatch_review"]),
     label: "advanceToDispatchReady",
   });
-}
-
-// Seed the host's valid empty optional narrative result so completion remains
-// deterministic without transport-owned configuration.
-export async function seedEmptyNarrative(artifactsDir: string) {
-  const path = laneSubmissionPath(artifactsDir, GATE_LANES.synthesis_narrative);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(
-    path,
-    JSON.stringify({ themes: [], top_risks: [] }, null, 2) + "\n",
-  );
-}
-
-// Bound the number of next-step calls needed to finalize after ingestion.
-const MAX_FINALIZE_STEPS = 10;
-
-export async function nextStepUntilPresentReport(root: string, extraArgs: string[] = []) {
-  const artifactsDir = join(root, ".audit-tools/audit");
-  for (let i = 0; i < MAX_FINALIZE_STEPS; i++) {
-    const step = await callNextStep(root, artifactsDir, extraArgs);
-    if (step.step_kind === "present_report") {
-      // Friction triage pending: the tool materialized the record and set status
-      // "ready" so the host can add open_observations. Simulate the host adding
-      // one observation, then loop so the next call emits status:"complete".
-      if (step.status === "ready" && step.artifact_paths?.friction_record) {
-        let record: {
-          category_attestations?: Array<{ category: string; note?: string }>;
-        } = {};
-        try {
-          record = JSON.parse(await readFile(step.artifact_paths.friction_record, "utf8"));
-        } catch { /* new record, start empty */ }
-        record.category_attestations = [
-          { category: "ambiguous_direction", note: "none this run" },
-          { category: "tool_should_decide", note: "none this run" },
-          { category: "inefficient_feeding", note: "none this run" },
-        ];
-        // The friction dir may not exist yet; create the friction
-        // subdir so the write and the subsequent next-step call both succeed.
-        await mkdir(dirname(step.artifact_paths.friction_record), { recursive: true });
-        await writeFile(step.artifact_paths.friction_record, JSON.stringify(record) + "\n");
-        continue;
-      }
-      return step;
-    }
-  }
-  throw new Error(
-    `next-step did not reach present_report within ${MAX_FINALIZE_STEPS} calls`,
-  );
 }

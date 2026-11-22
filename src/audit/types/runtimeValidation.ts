@@ -29,6 +29,9 @@ export const RuntimeValidationTaskSchema = z
     command: z.array(z.string()).optional(),
     suggested_checks: z.array(z.string()).optional(),
     source_artifacts: z.array(z.string()).optional(),
+    // An argv identifies a shared command, not a test that proves this task's check.
+    // sites-pinned: tests/audit/schema-contracts.test.ts
+    evidence_requirements: z.array(z.string()).optional(),
   })
   .strict();
 export type RuntimeValidationTask = z.infer<typeof RuntimeValidationTaskSchema>;
@@ -51,6 +54,11 @@ export const RuntimeValidationResultSchema = z
     summary: z.string(),
     evidence: z.array(z.string()).optional(),
     notes: z.array(z.string()).optional(),
+    // sites-pinned: tests/audit/runtime-validation-source.test.ts
+    verification: z.object({
+      source_key: z.string().min(1),
+      observations: z.array(z.string().trim().min(1)).min(1),
+    }).strict().optional(),
   })
   .strict();
 export type RuntimeValidationResult = z.infer<

@@ -44,24 +44,7 @@ test("requireRoot throws with canonical message for syntax_resolution_executor w
   );
 });
 
-test("requireRoot throws with canonical message for runtime_validation_executor when root is absent", async () => {
-  await assert.rejects(
-    () => advanceAudit(EMPTY_BUNDLE, { preferredExecutor: "runtime_validation_executor" }),
-    /advanceAudit runtime_validation_executor requires root/,
-  );
-});
-
 // ── missing required option guards ───────────────────────────────────────────
-
-test("runtime_validation_update_executor throws when runtimeValidationUpdates is missing", async () => {
-  await assert.rejects(
-    () =>
-      advanceAudit(EMPTY_BUNDLE, {
-        preferredExecutor: "runtime_validation_update_executor",
-      }),
-    /advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates/,
-  );
-});
 
 test("external_analyzer_import_executor throws when externalAnalyzerResults is missing", async () => {
   await assert.rejects(
@@ -149,14 +132,14 @@ test("zero-dispatch advanceAudit (complete bundle) still emits exactly one oblig
 // ── formatExecutorFailure preserves error cause chain ────────────────────────
 
 test("formatExecutorFailure preserves error cause chain", async () => {
-  // Trigger the catch block via the runtime_validation_update_executor guard
-  // (no runtimeValidationUpdates supplied). The source code in advance.ts
+  // Trigger the catch block via the external_analyzer_import_executor guard
+  // (no externalAnalyzerResults supplied). The source code in advance.ts
   // catches the inner throw and re-wraps it via formatExecutorFailure, which
   // sets { cause: error }.
   let caught;
   try {
     await advanceAudit(EMPTY_BUNDLE, {
-      preferredExecutor: "runtime_validation_update_executor",
+      preferredExecutor: "external_analyzer_import_executor",
     });
     assert.fail("advanceAudit should have thrown");
   } catch (err) {
@@ -167,10 +150,10 @@ test("formatExecutorFailure preserves error cause chain", async () => {
   expect(caught instanceof Error, "thrown value should be an Error").toBeTruthy();
 
   // The wrapper message matches the formatExecutorFailure pattern.
-  expect(caught.message).toMatch(/advanceAudit runtime_validation_update_executor failed while resolving/);
+  expect(caught.message).toMatch(/advanceAudit external_analyzer_import_executor failed while resolving/);
 
   // The cause chain is preserved and points to the original inner error.
   expect(caught.cause instanceof Error, "error.cause should be an Error").toBeTruthy();
   if (!(caught.cause instanceof Error)) throw caught.cause;
-  expect(caught.cause.message).toMatch(/advanceAudit runtime_validation_update_executor requires runtimeValidationUpdates/);
+  expect(caught.cause.message).toMatch(/advanceAudit external_analyzer_import_executor requires externalAnalyzerResults/);
 });

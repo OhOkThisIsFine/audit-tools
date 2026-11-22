@@ -1,23 +1,3 @@
-/**
- * An obligation whose INPUT SET IS EMPTY reports `not_applicable`, never
- * `satisfied`.
- *
- * Two gates in `deriveAuditState` were `satisfied` on nothing:
- * `runtime_validation_current` (`runtimeTasks.length === 0 || …`) and
- * `audit_results_ingested` (`(audit_tasks?.length ?? 0) === 0 || …`). Both
- * carried — or should have carried — an honest `reason` beside a dishonest
- * `state`, and the state vocabulary had no member that could say the true
- * thing. The measured run that prompted this recorded
- * `runtime_validation_current: satisfied` while `planning_artifacts` was still
- * `missing`: the gate passed because zero tasks existed to validate.
- *
- * The change is deliberately INERT for the drain (the engine selects only
- * `missing`/`stale`) — what it changes is what the artifact SAYS. The two
- * assertions below that are not about `state.ts` exist because "inert" is a
- * claim about every consumer, and two consumers hold the vocabulary in a shape
- * a widened union cannot break at compile time: a `Set<ObligationState>` and a
- * hand-written `z.enum([...])` projected into the SHIPPED host-facing schema.
- */
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -29,9 +9,6 @@ import type { AuditState } from "../../src/audit/types/auditState.js";
 const { deriveAuditState } = await import(
   "../../src/audit/orchestrator/state.js"
 );
-const { runRuntimeValidationUpdateExecutor } = await import(
-  "../../src/audit/orchestrator/ingestionExecutors.js"
-);
 const { buildAuditCodeHandoff } = await import(
   "../../src/audit/supervisor/operatorHandoff.js"
 );
@@ -41,61 +18,21 @@ const { ObligationStateSchema } = await import(
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
-function stateOf(state: AuditState, id: string): string | undefined {
-  return state.obligations.find((item) => item.id === id)?.state;
-}
-
-function reasonOf(state: AuditState, id: string): string | undefined {
-  return state.obligations.find((item) => item.id === id)?.reason;
-}
-
-describe("a gate with an empty input set is not_applicable", () => {
-  it("reports both vacuous audit gates as not_applicable, each with its reason", () => {
-    // No runtime validation tasks were planned, and no audit tasks exist. The
-    // old answer was `satisfied` for both — a success-shaped empty.
-    const state = deriveAuditState({} as ArtifactBundle);
-
-    expect(stateOf(state, "runtime_validation_current")).toBe("not_applicable");
-    expect(reasonOf(state, "runtime_validation_current")).toBe(
-      "No deterministic runtime validation tasks were planned.",
-    );
-    expect(stateOf(state, "audit_results_ingested")).toBe("not_applicable");
-    // The audit_results_ingested arm carried NO reason string at all, which is
-    // how the same defect sat four lines above the one that was noticed.
-    expect(reasonOf(state, "audit_results_ingested")).toBe(
-      "No audit tasks were planned, so no results are owed.",
-    );
-  });
-
-  it("still reports a NON-empty input set as satisfied", () => {
-    // A nonempty task set with source-bound observations remains satisfied.
+describe("non-actionable obligations", () => {
+  it("does not revive retired executor obligations from historical artifacts", () => {
     const bundle: ArtifactBundle = {
-      repo_manifest: {
-        repository: { name: "fixture" },
-        generated_at: "2026-11-04T00:00:00Z",
-        files: [{ path: "src/api/auth.ts", language: "typescript", size_bytes: 100, hash: "a".repeat(64) }],
-      },
-      runtime_validation_tasks: {
-        tasks: [
-          {
-            id: "rv-task-1",
-            kind: "unit-risk-check",
-            target_paths: ["src/api/auth.ts"],
-            reason: "Confirm auth risk mitigation.",
-            priority: "medium",
-          },
-        ],
-      },
-      runtime_validation_report: {
-        results: [
-          { task_id: "rv-task-1", status: "confirmed", summary: "Confirmed." },
-        ],
-      },
+      audit_tasks: [],
+      runtime_validation_tasks: { tasks: [{
+        id: "historical-runtime-check", kind: "unit-risk-check",
+        target_paths: ["src/fixture.ts"], reason: "Archived evidence.", priority: "medium",
+      }] },
     };
-    const observed = runRuntimeValidationUpdateExecutor(bundle, bundle.runtime_validation_report!);
-    expect(stateOf(deriveAuditState(observed.updated), "runtime_validation_current")).toBe(
-      "satisfied",
-    );
+    const ids = deriveAuditState(bundle).obligations.map(({ id }) => id);
+    expect(ids).not.toContain("audit_results_ingested");
+    expect(ids).not.toContain("runtime_validation_current");
+    expect(ids).toEqual(expect.arrayContaining([
+      "planning_artifacts", "audit_tasks_completed", "synthesis_current", "synthesis_narrative_current",
+    ]));
   });
 
   it("does not report a not_applicable obligation as PENDING on the operator handoff", () => {
@@ -111,8 +48,7 @@ describe("a gate with an empty input set is not_applicable", () => {
       state: {
         status: "active",
         obligations: [
-          { id: "runtime_validation_current", state: "not_applicable" },
-          { id: "audit_results_ingested", state: "not_applicable" },
+          { id: "synthesis_narrative_current", state: "not_applicable" },
           { id: "synthesis_current", state: "missing" },
         ],
       } as AuditState,

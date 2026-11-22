@@ -7,24 +7,20 @@ import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charter
  *   1. Batch-deterministic block — all five sub-steps complete in a single
  *      next-step invocation; no intermediate deterministic pauses returned.
  *   2. Intent-checkpoint gating — planning_artifacts stays missing until the
- *      checkpoint is written; disposition overrides prune files before coverage
- *      initialises; lens_selection restricts tasks to effective lenses only.
+ *      checkpoint is written; a disposition override leaves an explicit
+ *      omission, not an assigned question; explicit lens allowlists stay exact.
  *   3. Parallel design review — both contract and conceptual host_delegation
  *      entries are present before either is consumed.
- *   4. Semantic review — ingestion folds inline; synthesis follows directly
- *      after results; semantic_review_executor owns audit_tasks_completed.
+ *   4. Semantic review - the ledger-derived question frontier owns completion;
+ *      a retired whole-file task cannot satisfy it.
  *   5. Narrative omission — synthesis_narrative writes status='omitted' when no
  *      optional narrative is submitted; the run terminates cleanly.
  */
 import { test, expect } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   type IntentCheckpoint,
 } from "audit-tools/shared";
 
-import type { AuditTask } from "../../src/audit/types.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
@@ -34,14 +30,15 @@ import {
   runSynthesisExecutor,
   runSynthesisNarrativeExecutor,
 } from "../../src/audit/orchestrator/synthesisExecutors.js";
-import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import {
   renderContractReviewPrompt,
   renderConceptualReviewPrompt,
 } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { runIntentEquivalenceResolve } from "../../src/audit/orchestrator/intentEquivalenceExecutor.js";
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
-import { resolveEffectiveLenses } from "../../src/audit/orchestrator/lensSelection.js";
+import { resolveIntentLensSelection } from "../../src/audit/orchestrator/lensSelection.js";
 
 // Settle the DD-9 intent-equivalence baseline: stamp artifact_metadata.intent_baseline
 // from the live checkpoint (deterministic first-contact arm) so
@@ -269,90 +266,38 @@ test("S2: planning_artifacts obligation advances past intent_checkpoint once the
   expect(decision.selected_obligation, "After checkpoint, the next obligation should be planning_artifacts").toBe("planning_artifacts");
 });
 
-test("S2: disposition_override excludes a file before coverage initialises — that file never appears in audit_tasks", async () => {
-  const tmpDir = await mkdtemp(join(tmpdir(), "pipeline-s2-override-"));
-  try {
-    const bundle = makePostDesignReviewBundle({
-      checkpointOverrides: {
-        disposition_overrides: [
-          { path: "src/b.ts", status: "excluded", reason: "manual override" },
-        ],
-      },
-      extra: {
-        // Minimal unit_manifest needed by planning
-        unit_manifest: { units: [] },
-        surface_manifest: { surfaces: [] },
-        critical_flows: { flows: [] },
-        risk_register: { items: [] },
-        graph_bundle: { graphs: {} },
-        analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-      },
-    });
-
-    const result = await runPlanningExecutor(bundle, tmpDir, {});
-    const tasks = result.updated.audit_tasks ?? [];
-    const overriddenTask = tasks.find((t) =>
-      t.file_paths?.some((p) => p === "src/b.ts"),
-    );
-    expect(overriddenTask, "src/b.ts was overridden to excluded — must not appear in any audit_task").toBe(undefined);
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true });
-  }
+test("S2: an excluded operation stays visible with its reason but never acquires a question", () => {
+  const bundle = makePostDesignReviewBundle({ checkpointOverrides: {
+    lens_selection: { include: ["behavior"] },
+    disposition_overrides: [{ path: "src/b.ts", status: "excluded", reason: "manual override" }],
+  } });
+  const paths = ["src/a.ts", "src/b.ts"];
+  bundle.repo_manifest!.files = paths.map(path => ({ path, language: "typescript", size_bytes: 100, hash: path }));
+  bundle.file_disposition!.files = paths.map(path => ({ path, status: "included" }));
+  bundle.surface_manifest = { surfaces: paths.map((path, index) => ({
+    id: `operation-${index}`, kind: "interface", entrypoint: path,
+  })) };
+  const result = buildQuestionPlanArtifacts(bundle, fullAuditScope());
+  const plan = result.updated.review_plan!;
+  expect(result.artifacts_written).toEqual(["scope.json", "review_plan.json"]);
+  expect(plan.questions).toHaveLength(1);
+  expect(plan.questions[0]!.source_dependencies.map(({ key }) => key)).toEqual(["src/a.ts"]);
+  expect(plan.inventory.find(item => item.source_refs.some(ref => ref.path === "src/b.ts"))).toMatchObject({
+    scope: "excluded", scope_reason: "manual override",
+  });
+  expect(plan.omissions).toContainEqual({
+    surface_id: "operation-1", source_refs: [{ path: "src/b.ts" }], reason: "manual override",
+  });
+  expect(result.updated.audit_tasks).toBeUndefined();
 });
 
-type TaskWithOptionalRequiredLenses = AuditTask & { required_lenses?: string[] };
-
-test("S2: lens_selection restricts tasks to effective lenses (mandatory always included)", async () => {
-  const tmpDir = await mkdtemp(join(tmpdir(), "pipeline-s2-lens-"));
-  try {
-    const bundle = makePostDesignReviewBundle({
-      checkpointOverrides: {
-        lens_selection: { include: ["performance"] },
-      },
-      extra: {
-        unit_manifest: { units: [] },
-        surface_manifest: { surfaces: [] },
-        critical_flows: { flows: [] },
-        risk_register: { items: [] },
-        graph_bundle: { graphs: {} },
-        analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-      },
-    });
-
-    const result = await runPlanningExecutor(bundle, tmpDir, {});
-    const tasks: TaskWithOptionalRequiredLenses[] = result.updated.audit_tasks ?? [];
-    // All tasks must only use lenses in the effective set (performance + mandatory)
-    const MANDATORY = new Set(["security", "correctness", "reliability", "data_integrity"]);
-    const ALLOWED = new Set(["performance", ...MANDATORY]);
-    for (const task of tasks) {
-      if (task.lens) {
-        expect(ALLOWED.has(task.lens), `task ${task.task_id} has lens "${task.lens}" which is not in the allowed set`).toBeTruthy();
-      }
-      if (task.required_lenses) {
-        for (const l of task.required_lenses) {
-          expect(ALLOWED.has(l), `task ${task.task_id} has required_lens "${l}" which is not in the allowed set`).toBeTruthy();
-        }
-      }
-    }
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test("S2: mandatory lenses cannot be excluded — correctness always in effective set", async () => {
-  // This tests the resolveEffectiveLenses invariant that mandatory lenses survive
-  // the exclude filter — the planning executor honours this via resolveEffectiveLenses.
-  // Even if the user explicitly includes and then excludes correctness,
-  // resolveEffectiveLenses re-unions mandatory lenses after the exclude filter.
-  const baseSelected = ["performance", "correctness"];
-  const resolved = resolveEffectiveLenses(baseSelected);
-  const afterExclude = resolved.filter((l) => l !== "correctness");
-  const reResolved = resolveEffectiveLenses(afterExclude);
-
-  expect(reResolved.includes("correctness"), "correctness (mandatory) must be present even after exclude — resolveEffectiveLenses invariant").toBeTruthy();
-  expect(reResolved.includes("security"), "security (mandatory) must always be present").toBeTruthy();
-  expect(reResolved.includes("reliability"), "reliability (mandatory) must always be present").toBeTruthy();
-  expect(reResolved.includes("data_integrity"), "data_integrity (mandatory) must always be present").toBeTruthy();
+test("S2: the confirmed question lens allowlist does not acquire extra lenses", () => {
+  const bundle = makePostDesignReviewBundle({
+    checkpointOverrides: {
+      lens_selection: { include: ["performance"], omission_reasons: { security: "targeted workload" } },
+    },
+  });
+  expect(resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection)).toEqual(["performance"]);
 });
 
 // ── Scenario 3: Parallel design review ───────────────────────────────────────
@@ -416,7 +361,7 @@ test("S3: both design review obligations are present as host_delegation before e
   expect(conceptualOblState?.state, "design_review_conceptual_completed must be missing before conceptual review").toBe("missing");
 });
 
-test("S3: contract completion preserves conceptual review while scoped planning remains ready", () => {
+test("S3: completing contract review does not bypass conceptual evidence before question planning", () => {
   const bundle = settleIntentBaseline({
     ...makePostDesignAssessmentBundle(),
     intent_checkpoint: makeValidCheckpoint(),
@@ -428,7 +373,7 @@ test("S3: contract completion preserves conceptual review while scoped planning 
     },
   });
   const decision = decideNextStep(bundle);
-  expect(decision.selected_obligation, "Independent scoped planning can proceed before conceptual review").toBe("planning_artifacts");
+  expect(decision.selected_obligation, "Conceptual review remains a separate host pause before question planning").toBe("design_review_conceptual_completed");
   expect(decision.state.obligations.find(obligation => obligation.id === "design_review_contract_completed")?.state).toBe("satisfied");
   expect(decision.state.obligations.find(obligation => obligation.id === "design_review_conceptual_completed")?.state).toBe("missing");
 });
@@ -444,44 +389,25 @@ test("S4: semantic_review_executor is the sole owner of audit_tasks_completed", 
   expect(owners[0].kind).toBe("host_delegation");
 });
 
-test("S4: result_ingestion_executor is deterministic (ingestion folds inline, not a separate host pause)", () => {
-  const ingestionEntry = EXECUTOR_REGISTRY.find(
-    (e) => e.id === "result_ingestion_executor",
-  );
-  expect(ingestionEntry, "result_ingestion_executor must exist").toBeTruthy();
-  expect(ingestionEntry!.kind).toBe("deterministic");
+test("S4: retired completed file tasks cannot close an unprojected question frontier", () => {
+  const planned = buildQuestionPlanArtifacts(makePostDesignReviewBundle(), fullAuditScope()).updated;
+  const bundle = settleIntentBaseline({ ...planned, audit_tasks: [
+    { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "archived file review", status: "complete" },
+  ] });
+  expect(deriveAuditState(bundle).obligations.find((o) => o.id === "audit_tasks_completed")?.state).toBe("missing");
+  const projected: ArtifactBundle = { ...bundle, question_cycle: {
+    runId: "question-run", bindings: [], pending: [], evidence: [], dependenciesByQuestion: new Map(),
+    accepted_count: 0, answers: [], adjudications: [], consolidations: [], issues: [],
+  } };
+  expect(deriveAuditState(projected).obligations.find((o) => o.id === "audit_tasks_completed")?.state).toBe("satisfied");
 });
 
-test("S4: after review completion, audit_results_ingested is next toward synthesis", () => {
-  const bundle = settleIntentBaseline({
-    ...makePostDesignReviewBundle(),
-    coverage_matrix: { files: [] },
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      { task_id: "T1", unit_id: "U1", pass_id: "P1", lens: "security", file_paths: ["src/a.ts"], rationale: "security test", status: "complete" as const },
-    ],
-    requeue_tasks: [],
-  });
-  const decision = decideNextStep(bundle);
-  const state = deriveAuditState(bundle);
-  const auditTasksObl = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(auditTasksObl?.state, "audit_tasks_completed must be satisfied").toBe("satisfied");
-  expect(decision.selected_obligation).toBe("audit_results_ingested");
-});
-
-test("S4: synthesis follows ingestion without an intermediate host pause between them", () => {
-  // Verify PRIORITY chain: audit_results_ingested comes before synthesis_current
-  const ingestionIdx = PRIORITY.indexOf("audit_results_ingested");
+test("S4: synthesis follows question review and is not a second host review", () => {
+  const reviewIdx = PRIORITY.indexOf("audit_tasks_completed");
   const synthesisIdx = PRIORITY.indexOf("synthesis_current");
-  expect(ingestionIdx >= 0, "audit_results_ingested must be in PRIORITY").toBeTruthy();
-  expect(synthesisIdx >= 0, "synthesis_current must be in PRIORITY").toBeTruthy();
-  expect(ingestionIdx < synthesisIdx, `audit_results_ingested (${ingestionIdx}) must precede synthesis_current (${synthesisIdx})`).toBeTruthy();
-
-  // Both ingestion and synthesis executors are deterministic
-  const ingestEntry = EXECUTOR_REGISTRY.find((e) => e.id === "result_ingestion_executor");
+  expect(reviewIdx).toBeGreaterThanOrEqual(0);
+  expect(synthesisIdx).toBeGreaterThan(reviewIdx);
   const synthEntry = EXECUTOR_REGISTRY.find((e) => e.id === "synthesis_executor");
-  expect(ingestEntry?.kind).toBe("deterministic");
   expect(synthEntry?.kind).toBe("deterministic");
 });
 

@@ -48,7 +48,7 @@ beforeEach(async () => {
   ctx = {
     params: { root: dir, sourceRoot: dir, artifactsDir: dir, selfCliPath: "unused", timeoutMs: 1000, scopeIndexMemo: {} },
     analyzersRef: { value: undefined }, lastSummaryRef: { value: "" },
-    foldAdvisoriesRef: { value: { ingestIssues: [], validationWarnings: [] } }, dispatchOrdinalRef: { value: 0 },
+    dispatchOrdinalRef: { value: 0 },
     dispatchedSignatures: new Set(), seenStateSignatures: new Set(), obligationTrail: [],
     tx: createFoldTransaction(), currentBundleRef: { value: input }, failureRef: { value: null },
     manifestIndexCache: new WeakMap(),

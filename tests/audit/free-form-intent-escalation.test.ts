@@ -1,7 +1,9 @@
 import { test, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { answerHostPause } from "./helpers/step-driver.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditObligation } from "../../src/audit/types/auditState.js";
 import type { IntentCheckpoint } from "../../src/shared/types/intentCheckpoint.js";
@@ -11,8 +13,8 @@ import type { IntentCheckpoint } from "../../src/shared/types/intentCheckpoint.j
 //
 // Regression for the silent-drop gap: the clause-aware shared interpreter is
 // WIRED so an unencodable free_form_intent clause escalates to a BLOCKING
-// confirm_intent checkpoint question, while encodable clauses still drive lens
-// weighting. The shared interpreter (shared/src/intent/*) is the single
+// confirm_intent checkpoint question, while the interpreter still recognizes lens
+// signals without changing the confirmed question lens selection. The shared interpreter (shared/src/intent/*) is the single
 // encodability authority.
 // ---------------------------------------------------------------------------
 
@@ -22,11 +24,8 @@ const {
   interpretFreeFormIntentForAudit,
   unresolvedConstraintClauses,
 } = await import("../../src/audit/orchestrator/intentInterpreter.js");
-const { interpretFreeFormIntent, runPlanningExecutor } = await import("../../src/audit/orchestrator/planningExecutors.js");
 const { renderConfirmIntentPrompt } = await import("../../src/audit/cli/confirmIntentStep.js");
 
-const here = dirname(fileURLToPath(import.meta.url));
-const auditCodeRoot = join(here, "..", "..");
 
 // A clause that maps to no lens / scope / priority signal — must escalate.
 const UNENCODABLE = "ensure the mascot stays cheerful";
@@ -149,59 +148,6 @@ await test("encodable clause is encoded and does not block (no silent drop)", ()
   expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("satisfied");
 });
 
-await test("planning interprets free_form_intent via the shared authority (encodable → lens boost)", () => {
-  // The planning-path helper is now a thin wrapper over the shared interpreter.
-  expect(interpretFreeFormIntent(ENCODABLE)).toEqual(["security"]);
-  expect(interpretFreeFormIntent("")).toEqual([]);
-});
-
-await test("free_form_intent='security audit' still boosts security tasks end-to-end", async () => {
-  const bundle = {
-    repo_manifest: {
-      repository: { name: "fixture" },
-      generated_at: "2026-01-01T00:00:00.000Z",
-      files: [{ path: "src/auth.ts", language: "typescript", size_bytes: 1 }],
-    },
-    file_disposition: { files: [{ path: "src/auth.ts", status: "included" }] },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "unit-1",
-          name: "unit-1",
-          files: ["src/auth.ts"],
-          risk_score: 5,
-          required_lenses: ["correctness", "security"],
-        },
-      ],
-    },
-    surface_manifest: { surfaces: [] },
-    critical_flows: { flows: [] },
-    risk_register: { items: [] },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      free_form_intent: "security audit",
-    },
-  } satisfies ArtifactBundle;
-  const lineIndex = { "src/auth.ts": 100 };
-  const result = await runPlanningExecutor(
-    bundle,
-    join(here, "__nonexistent_root__"),
-    lineIndex,
-  );
-  if (!result.updated.audit_tasks) throw new Error("Expected planned audit tasks");
-  const secTasks = result.updated.audit_tasks.filter((t) => t.lens === "security");
-  expect(secTasks.length > 0, "should produce security tasks").toBeTruthy();
-  for (const task of secTasks) {
-    expect(task.priority, "security task should be boosted to high").toBe("high");
-  }
-});
-
-// ── 3. Resolving the clause closes the escalation ───────────────────────────
-
 await test("answering the checkpoint question via constraint_clauses satisfies the obligation", () => {
   const question = interpretFreeFormIntentForAudit(UNENCODABLE).checkpoint_questions[0];
   if (!question) throw new Error("Expected checkpoint question");
@@ -230,34 +176,57 @@ await test("an empty host_answer does NOT resolve the blocking clause", () => {
   expect(obligationState(bundle, "intent_checkpoint_current").state).toBe("missing");
 });
 
-// ── 4. Single interpreter authority guard ───────────────────────────────────
 
-await test("single authority: only the shared module defines a LENS_KEYWORD_MAP", async () => {
-  // The canonical LENS_KEYWORD_MAP lives in src/shared/intent/sharedIntentData.ts.
-  // Import it (proving it is reachable from exactly one module) and assert the
-  // audit planning interpreter carries NO declaration of its own — it must
-  // delegate. This replaces a recursive readdirSync regex-walk of src/ (the
-  // structural invariant — single authority + no audit-side redeclaration — is
-  // captured by the import plus the negative guard, with no full-tree walk).
-  const { LENS_KEYWORD_MAP } = await import(
-    "../../src/shared/intent/sharedIntentData.js"
-  );
-  expect(Array.isArray(LENS_KEYWORD_MAP) && LENS_KEYWORD_MAP.length > 0, "the shared LENS_KEYWORD_MAP must be the single, non-empty authority").toBeTruthy();
-
-  const planningSrc = readFileSync(
-    join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
-    "utf8",
-  );
-  expect(planningSrc, "audit planning interpreter must delegate to the shared LENS_KEYWORD_MAP, never declare its own").not.toMatch(/\b(?:const|let|var|export\s+const)\s+LENS_KEYWORD_MAP\b/);
-});
-
-await test("single authority: audit-code planning interpreter delegates to interpretFreeFormIntentForAudit", () => {
-  // Guard the wiring at the source level — the planning interpreter must call
-  // the shared-backed bridge, not reintroduce an inline keyword scan.
-  const src = readFileSync(
-    join(auditCodeRoot, "src", "audit", "orchestrator", "planningExecutors.ts"),
-    "utf8",
-  );
-  expect(src, "planningExecutors must delegate to interpretFreeFormIntentForAudit").toMatch(/interpretFreeFormIntentForAudit/);
-  expect(src, "planningExecutors must not declare its own keyword→lens map").not.toMatch(/KEYWORD_LENS_MAP/);
+test("normal CLI blocks on unresolved free-form intent and then publishes only confirmed questions", async () => {
+  await withTempRepo(async (root) => {
+    const dir = join(root, ".audit-tools/audit");
+    const raw = `${ENCODABLE}. ${UNENCODABLE}.`;
+    const checkpoint: IntentCheckpoint = {
+      ...bundleWithCheckpoint().intent_checkpoint,
+      free_form_intent: raw,
+      lens_selection: { include: ["behavior"] },
+    };
+    let confirmations = 0;
+    const transport = async () => {
+      const step = JSON.parse((await runWrapper(["next-step"], { cwd: root })).stdout);
+      if (step.step_kind === "confirm_intent") {
+        confirmations++;
+        const path = step.artifact_paths.intent_checkpoint;
+        expect(typeof path).toBe("string");
+        if (confirmations === 2) {
+          const prompt = await readFile(step.prompt_path, "utf8");
+          expect(prompt).toContain(UNENCODABLE);
+          expect(prompt).toMatch(/Blocking: unencodable intent clauses/);
+          const unresolved = unresolvedConstraintClauses(checkpoint);
+          expect(unresolved).toHaveLength(1);
+          checkpoint.constraint_clauses = unresolved.map(clause => ({
+            ...clause, host_answer: "Treat as a non-functional note; no extra weighting.",
+          }));
+        } else {
+          expect(confirmations).toBe(1);
+        }
+        await writeFile(path, JSON.stringify(checkpoint));
+        // Handle this pause here, not through the default fixture checkpoint.
+        return { ...step, step_kind: "intent_fixture_answered" };
+      }
+      return step;
+    };
+    let step: Awaited<ReturnType<typeof transport>> | undefined;
+    for (let i = 0; i < 18; i++) {
+      step = await transport();
+      if (step.step_kind === "dispatch_review") break;
+      if (step.step_kind !== "intent_fixture_answered") expect(await answerHostPause(step), step.step_kind).toBe(true);
+    }
+    expect(confirmations).toBe(2);
+    expect(step?.step_kind).toBe("dispatch_review");
+    const persisted = JSON.parse(await readFile(join(dir, "intent_checkpoint.json"), "utf8"));
+    expect(persisted.constraint_clauses).toEqual(checkpoint.constraint_clauses);
+    const bytes = await readFile(step!.artifact_paths.host_workload, "utf8");
+    expect(bytes).not.toContain(raw);
+    const workload = JSON.parse(bytes);
+    expect(workload.contract_version).toBe("audit-tools/question-review/v1");
+    expect(workload.work_items.length).toBeGreaterThan(0);
+    expect(workload.work_items.map((item: { binding: { question: { lens: string } } }) => item.binding.question.lens))
+      .toEqual(workload.work_items.map(() => "behavior"));
+  });
 });

@@ -1,62 +1,31 @@
-// Split from the former single audit-code-completion.test.ts (wall-clock brief
-// T4: no single test file may dominate a CI shard). Test bodies are a verbatim
-// move; the shared fixture lives in helpers/completion-harness.ts.
-import { test, expect } from "vitest";
-import { writeFile, readFile, access } from "node:fs/promises";
+import { expect, test } from "vitest";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  withTempRepo,
-  advanceToDispatchReady,
-  buildSyntheticResults,
-  seedEmptyNarrative,
-  callIngestResults,
-  nextStepUntilPresentReport,
-} from "./helpers/completion-harness.js";
+import { advanceToDispatchReady, withTempRepo } from "./helpers/completion-harness.js";
+import { presentQuestionReport, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
 
-test("next-step reaches dispatch_review, ingest-results consumes synthetic results, and completion promotes the report bundle", async () => {
+test("accepted question answers replace the previous promoted report bundle without deleting working state", async () => {
   await withTempRepo(async (root) => {
-    const artifactsDir = join(root, ".audit-tools/audit");
+    const dir = join(root, ".audit-tools/audit");
     const step = await advanceToDispatchReady(root);
     expect(step.contract_version).toBe("audit-code-step/v1alpha1");
     expect(step.status).toBe("ready");
+    const workload = await readQuestionWorkload(step);
+    const reportPath = join(root, ".audit-tools", "audit-report.md");
+    const findingsPath = join(root, ".audit-tools", "audit-findings.json");
+    await writeFile(reportPath, "# Prior audit marker\n");
+    await writeFile(findingsPath, JSON.stringify({ old: true }));
+    const answers = await submitQuestions(root, workload.work_items);
 
-    const tasks = JSON.parse(
-      await readFile(join(artifactsDir, "audit_tasks.json"), "utf8"),
-    );
-    expect(tasks.length > 0).toBeTruthy();
-    const resultsPath = join(root, "audit_results.json");
-    await writeFile(
-      resultsPath,
-      JSON.stringify(await buildSyntheticResults(tasks, root), null, 2),
-    );
-    await seedEmptyNarrative(artifactsDir);
-
-    const ingested = await callIngestResults([
-      "--root",
-      root,
-      "--artifacts-dir",
-      artifactsDir,
-      "--results",
-      resultsPath,
-    ]);
-    expect(ingested.selected_executor).toBe("result_ingestion_executor");
-
-    const presented = await nextStepUntilPresentReport(root);
+    const presented = await presentQuestionReport(root);
     expect(presented.status).toBe("complete");
-
-    // Completion promotes the machine contract and the human render to the
-    // artifacts dir's parent (.audit-tools/).
-    const auditReport = await readFile(
-      join(root, ".audit-tools", "audit-report.md"),
-      "utf8",
-    );
-    expect(auditReport).toMatch(/# Audit Report/);
-    await access(join(root, ".audit-tools", "audit-findings.json"));
-
-    // The audit working state is KEPT for the next run to roll over (owner
-    // decision 2026-10-08, "keep the artifacts dir"), and the present_report
-    // step scaffolding lets the host read and follow `prompt_path`.
-    await access(join(artifactsDir, "audit_tasks.json"));
+    const rendered = await readFile(reportPath, "utf8");
+    expect(rendered).not.toContain("Prior audit marker");
+    expect(rendered).toMatch(/# Audit Report/i);
+    const report = await readQuestionFindings(findingsPath);
+    expect(report.question_review.accepted.map(row => row.submission)).toEqual(expect.arrayContaining(answers));
+    expect(report.question_review.accepted).toHaveLength(answers.length);
+    await access(join(dir, "runs", workload.run_id, "host-accepted-results-ledger.json"));
     expect(await readFile(presented.prompt_path, "utf8")).toMatch(/present report/i);
   });
 });

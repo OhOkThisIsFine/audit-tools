@@ -1,19 +1,98 @@
-import { withArchitectureFollowupEvidence } from "./architectureDiscovery.js";
+import { isArchitectureSourceSampleResult, projectArchitectureSourceSample, withArchitectureFollowupEvidence } from "./architectureDiscovery.js";
 // sites-pinned: tests/audit/audit-read-synthesis.test.ts, tests/audit/lens-coverage-real-report.test.ts
 import { AUDIT_REPORT_FILENAME } from "../io/artifacts.js";
-import type { ArtifactBundle } from "../io/artifacts.js";
+import type { ArtifactBundle, QuestionReportCharterOptions } from "../io/artifacts.js";
 import type { AuditResult } from "../types.js";
 import type { ExecutorRunResult } from "./executorResult.js";
 import {
   applyNarrative,
   buildAuditFindingsReport,
   buildAuditReportModel,
-  canonicalizeConceptualAttributionIds,
+  conceptualAttributionNeedsIdSource,
   renderAuditReportMarkdown,
+  type RenderableAuditReport,
 } from "../reporting/synthesis.js";
 import type { AuditRead, SynthesisNarrative } from "audit-tools/shared";
 import type { SynthesisNarrativeRecord } from "../types/synthesisNarrative.js";
 import type { CharterPacketArchiveRow } from "./charterPacketArchive.js";
+import { buildQuestionAuditFindingsReport, type QuestionReportInput } from "../reporting/questionReport.js";
+import type { ReviewPlan } from "../../shared/types/reviewQuestion.js";
+import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
+import { stableStringify } from "audit-tools/shared";
+
+type QuestionBundle = ArtifactBundle & { review_plan?: ReviewPlan };
+export type QuestionSynthesisOptions = Pick<SynthesisOptions, "auditRead"> & {
+  charter?: QuestionReportCharterOptions;
+  questionReview: Omit<QuestionReportInput, "plan" | "auditRead">;
+};
+
+function currentQuestionReport(bundle: QuestionBundle, options: QuestionSynthesisOptions) {
+  if (!bundle.review_plan) throw new Error("Question synthesis requires a current review_plan.");
+  return QuestionAuditFindingsReportSchema.parse(buildQuestionAuditFindingsReport({
+    ...options.questionReview,
+    plan: bundle.review_plan,
+    auditRead: options.auditRead,
+  }));
+}
+
+export function runQuestionSynthesisExecutor(
+  bundle: QuestionBundle,
+  options: QuestionSynthesisOptions,
+): ExecutorRunResult {
+  const report = currentQuestionReport(bundle, options);
+  return {
+    updated: {
+      ...bundle,
+      audit_findings: report,
+      audit_report: renderAuditReportMarkdown(report, { reflections: bundle.agent_reflections, ...options.charter }),
+    },
+    artifacts_written: ["audit-findings.json", AUDIT_REPORT_FILENAME],
+    progress_summary: `Rendered ${report.question_review.completion} coverage for ${report.question_review.questions.length} review question(s).`,
+  };
+}
+
+export function runQuestionSynthesisNarrativeExecutor(
+  bundle: QuestionBundle,
+  narrative: SynthesisNarrative | undefined,
+  options: QuestionSynthesisOptions,
+): ExecutorRunResult {
+  const current = currentQuestionReport(bundle, options);
+  const persisted = QuestionAuditFindingsReportSchema.parse(bundle.audit_findings);
+  const { themes: _themes, executive_summary: _summary, top_risks: _risks, ...deterministic } = persisted;
+  if (stableStringify(deterministic) !== stableStringify(current)) {
+    throw new Error("Synthesis narrative refers to stale question evidence. Regenerate the deterministic report first.");
+  }
+  const hasNarrative = Boolean(narrative && (
+    narrative.themes?.length || narrative.executive_summary?.trim() || narrative.top_risks?.length));
+  if (!hasNarrative) {
+    return {
+      updated: { ...bundle, synthesis_narrative: {
+        status: "omitted", theme_count: 0, executive_summary_present: false, top_risk_count: 0,
+      } },
+      artifacts_written: ["synthesis-narrative.json"],
+      progress_summary: "Synthesis narrative omitted; deterministic question report retained.",
+    };
+  }
+  // Reuse theme validation but do not adopt its legacy mutations to finding rows.
+  const { themes, executive_summary, top_risks } = applyNarrative(current, narrative!);
+  const report = QuestionAuditFindingsReportSchema.parse({
+    ...current,
+    ...(themes ? { themes } : {}),
+    ...(executive_summary ? { executive_summary } : {}),
+    ...(top_risks ? { top_risks } : {}),
+  });
+  return {
+    updated: {
+      ...bundle, audit_findings: report, audit_report: renderAuditReportMarkdown(report, { reflections: bundle.agent_reflections, ...options.charter }),
+      synthesis_narrative: {
+        status: "applied", theme_count: themes?.length ?? 0,
+        executive_summary_present: Boolean(executive_summary?.trim()), top_risk_count: top_risks?.length ?? 0,
+      },
+    },
+    artifacts_written: ["audit-findings.json", AUDIT_REPORT_FILENAME, "synthesis-narrative.json"],
+    progress_summary: "Synthesis narrative applied without changing question coverage or findings.",
+  };
+}
 
 interface SynthesisOptions {
   /**
@@ -40,6 +119,9 @@ function buildBaseFindingsReport(
 ) {
   bundle = withArchitectureFollowupEvidence({ ...bundle, audit_results: results });
   results = bundle.audit_results ?? results;
+  const architectureSourceSample = projectArchitectureSourceSample(bundle);
+  results = results.filter((result) => !isArchitectureSourceSampleResult(result) ||
+    (architectureSourceSample && "taskId" in architectureSourceSample && result.task_id === architectureSourceSample.taskId));
   const report = buildAuditFindingsReport(
     buildAuditReportModel({
       results,
@@ -60,6 +142,7 @@ function buildBaseFindingsReport(
       // one site that mints the summary — was never passed it, so nothing at
       // synthesis could compare what was selected against what was produced.
       intentCheckpoint: bundle.intent_checkpoint,
+      architectureSourceSample,
     }),
     options.auditRead,
   );
@@ -71,35 +154,16 @@ function buildBaseFindingsReport(
     : report;
 }
 
-function migratePersistedConceptualAttribution(
+/** Rebuild the ephemeral finding identity map without changing the saved artifacts. */
+export function rebuildConceptualAttributionIdSource(
   bundle: ArtifactBundle,
-  report: NonNullable<ArtifactBundle["audit_findings"]>,
-  results: AuditResult[],
+  report: RenderableAuditReport,
   options: SynthesisOptions,
-): void {
-  const adjudication = bundle.conceptual_review_adjudication;
-  if (!adjudication) return;
-
-  const canonicalIds = new Set([
-    ...report.findings.map((finding) => finding.id),
-    ...(report.quarantined_findings ?? []).map((finding) => finding.id),
-  ]);
-  const referencedIds = [
-    ...adjudication.final_finding_shares.map(
-      (share) => share.final_finding_id,
-    ),
-    ...adjudication.candidate_dispositions.flatMap(
-      (disposition) => disposition.target_final_finding_ids,
-    ),
-  ];
-  if (referencedIds.every((id) => canonicalIds.has(id))) return;
-
-  // Pre-fix persisted bundles contain canonical audit findings but judge-local
-  // attribution ids. Rebuild only the deterministic identity carrier from the
-  // still-authoritative design assessment/results, then apply it to the
-  // persisted report. Nothing extra enters audit-findings.json.
-  const identitySource = buildBaseFindingsReport(bundle, results, options);
-  canonicalizeConceptualAttributionIds(report, adjudication, identitySource);
+): RenderableAuditReport | undefined {
+  if (!conceptualAttributionNeedsIdSource(report, bundle.conceptual_review_adjudication)) {
+    return undefined;
+  }
+  return buildBaseFindingsReport(bundle, bundle.audit_results ?? [], options);
 }
 
 export function runSynthesisExecutor(
@@ -154,14 +218,6 @@ export function runSynthesisNarrativeExecutor(
     bundle.audit_findings ??
     buildBaseFindingsReport(bundle, bundle.audit_results ?? [], options);
   const needsBaseWrite = !bundle.audit_findings;
-  if (bundle.audit_findings) {
-    migratePersistedConceptualAttribution(
-      bundle,
-      baseReport,
-      bundle.audit_results ?? [],
-      options,
-    );
-  }
 
   const hasNarrative = Boolean(
     narrative &&
@@ -208,6 +264,9 @@ export function runSynthesisNarrativeExecutor(
         intent_checkpoint: bundle.intent_checkpoint,
         reflections: bundle.agent_reflections,
         conceptual_adjudication: bundle.conceptual_review_adjudication,
+        conceptual_attribution_id_source: bundle.audit_findings
+          ? rebuildConceptualAttributionIdSource(bundle, baseReport, options)
+          : undefined,
         submission_ledger: bundle.submission_ledger,
         analyzer_capability: bundle.analyzer_capability,
         charter_evidence_coverage: bundle.charter_register?.evidence_coverage,

@@ -1,3 +1,4 @@
+import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
 import { STATE_FILENAME } from "../state/store.js";
 // sites-pinned: tests/remediate/executable-plan-identity.test.ts, tests/remediate/executable-plan-safety.test.ts, tests/remediate/contract-review-independence.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 import { randomUUID } from "node:crypto";
@@ -45,7 +46,7 @@ async function sourceDigests(paths: readonly string[]): Promise<PlanSource["sour
 }
 
 export async function writePathASeedFromFindings(artifactsDir: string, sourcePath: string, payload: unknown, guidancePaths: string[] = []): Promise<void> {
-  const raw = payload as { findings?: unknown[]; audit_read?: unknown };
+  const raw = payload as { findings?: unknown[]; audit_read?: unknown; contract_version?: unknown };
   const findings = (raw.findings ?? []).map(finding => FindingSchema.parse(finding));
   const paths = executionPlanPaths(artifactsDir);
   const existing = await readPlanSource(artifactsDir);
@@ -63,6 +64,7 @@ export async function writePathASeedFromFindings(artifactsDir: string, sourcePat
   } : undefined;
   await writeJsonFile(paths.source, PlanSourceSchema.parse({
     plan_id: `plan-${randomUUID()}`, findings, audit_read: audit.success ? audit.data : null,
+    ...(raw.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION ? { question_report: true } : {}),
     sources, request, intent: await readExecutionIntent(artifactsDir),
   }));
 }

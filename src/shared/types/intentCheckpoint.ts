@@ -133,14 +133,15 @@ export const IntentCheckpointSchema = z
       )
       .optional(),
     /**
-     * Accepted or modified lens set from the host, derived from the
-     * lens proposition table in the scope pre-digest. `include` is additive (always
-     * merged with mandatory lenses); `exclude` removes non-mandatory lenses.
+     * Accepted question scope from the host. An explicit include is an
+     * allowlist, not an addition to a mandatory set. Omission reasons record
+     * the operator's rationale separately from planner-determined applicability.
      */
     lens_selection: z
       .object({
         include: z.array(z.string()).optional(),
         exclude: z.array(z.string()).optional(),
+        omission_reasons: z.record(z.string()).optional(),
       })
       .strict()
       .optional(),

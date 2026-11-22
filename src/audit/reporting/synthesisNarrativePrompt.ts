@@ -7,6 +7,7 @@
 
 import type { AuditFindingsReport } from "audit-tools/shared";
 import { severityRank } from "audit-tools/shared";
+import type { QuestionReviewReport } from "../../shared/types/questionReviewReport.js";
 
 const MAX_RENDERED_FINDINGS = 120;
 
@@ -45,7 +46,7 @@ function summarizeFinding(finding: AuditFindingsReport["findings"][number]): str
  *     repairs — `applyNarrative` is the enforcer.
  */
 export function renderSynthesisNarrativePrompt(
-  report: AuditFindingsReport,
+  report: AuditFindingsReport & { question_review?: QuestionReviewReport },
   /**
    * Host-facing path of the complete findings report. The overflow line points
    * the reader here, and the emitting step grants it read access — so this is
@@ -77,12 +78,16 @@ export function renderSynthesisNarrativePrompt(
   return [
     "# Synthesis narrative",
     "",
-    "The deterministic audit is complete. Group its findings into a small number of root-cause themes, write a short executive summary, and list the top risks. Reference every finding by its exact `id`.",
+    "A deterministic report was recorded; its coverage may be incomplete. Group only its findings into root-cause themes, write a short executive summary, and list the top risks. Reference every finding by its exact `id`. Do not restate unreviewed, stale, disputed, or inconclusive parts as clean.",
     "",
     "## Summary",
     "",
     `- Findings: ${report.summary.finding_count}`,
     `- Work blocks: ${report.summary.work_block_count}`,
+    ...(report.question_review ? [
+      `- Question coverage: ${report.question_review.completion}`,
+      `- Read the scope, limitations, and outstanding questions in ${findingsPath} before summarizing the result.`,
+    ] : []),
     "",
     "## Findings",
     "",

@@ -1,5 +1,4 @@
-import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
-import { EMPTY_REGISTER_BODY, REGISTER_V4_AFFIRMATION } from "../helpers/charterRegisterFixture.js";
+import type { AnalyzerSetting } from "audit-tools/shared";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -7,33 +6,22 @@ import { join } from "node:path";
 import {
   FIXTURE_LINE_INDEX,
   writeFixtureRepo,
-  buildSyntheticResults,
   advanceFixtureToPlanning,
 } from "./helpers/fixture.mjs";
-import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { AuditState } from "../../src/audit/types/auditState.js";
 import type {
-  AuditTask,
-  CoverageMatrix,
   RepoManifest,
   UnitManifest,
 } from "../../src/audit/types.js";
-import type { AnalyzerSetting } from "audit-tools/shared";
 
 const { decideNextStep, PRIORITY } = await import("../../src/audit/orchestrator/nextStep.js");
 const { EXECUTOR_REGISTRY } = await import("../../src/audit/orchestrator/executors.js");
 const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
 const { RunLogger } = await import("audit-tools/shared");
 const {
-  computeArtifactMetadata,
-} = await import("../../src/audit/orchestrator/artifactMetadata.js");
-const {
   buildAuditReportModel: buildAuditReportModelRaw,
   renderAuditReportMarkdown,
 } = await import("../../src/audit/reporting/synthesis.js");
-const { CHARTER_REGISTER_SCHEMA_VERSION } = await import(
-  "../../src/audit/types/charterRegister.js"
-);
 const buildAuditReportModel = (
   params: Parameters<typeof buildAuditReportModelRaw>[0],
 ) => buildAuditReportModelRaw(params);
@@ -70,127 +58,6 @@ function createUnitManifest(): UnitManifest {
   };
 }
 
-function createCoverageMatrix({ completed = false } = {}): CoverageMatrix {
-  return {
-    files: [
-      {
-        path: "src/api/auth.ts",
-        unit_ids: ["src-auth"],
-        classification_status: "classified",
-        audit_status: completed ? "complete" : "pending",
-        required_lenses: ["security"],
-        completed_lenses: completed ? ["security"] : [],
-      },
-    ],
-  };
-}
-
-function createAuditTask(
-  status: NonNullable<AuditTask["status"]> = "pending",
-): AuditTask {
-  return {
-    task_id: "src-auth:security",
-    unit_id: "src-auth",
-    pass_id: "pass:security",
-    lens: "security",
-    file_paths: ["src/api/auth.ts"],
-    rationale: "Audit authentication paths.",
-    status,
-  };
-}
-
-function createDecisionBundle(overrides: ArtifactBundle = {}): ArtifactBundle {
-  return captureCompletedDesignReviews({
-    repo_manifest: createRepoManifest(),
-    file_disposition: { files: [] },
-    auto_fixes_applied: { applied: [] },
-    external_analyzer_results: [{ tool: "eslint", results: [] }],
-    external_analyzer_acquisition: { enabled: false, tool_statuses: [] },
-    syntax_resolution_status: {
-      tool: "syntax_resolution_executor",
-      completed_at: "2026-04-22T00:00:00Z",
-    },
-    unit_manifest: createUnitManifest(),
-    surface_manifest: { surfaces: [] },
-    graph_bundle: { graphs: { imports: [], calls: [] } },
-    critical_flows: { flows: [], fallback_required: false },
-    risk_register: { items: [] },
-    analyzer_capability: { coverage: "not_applicable", analyzers: [] },
-    design_assessment: { generated_at: "2026-04-22T00:00:00Z", findings: [], contract_reviewed: true, conceptual_reviewed: true },
-    docs_digest: { generated_at: "2026-04-22T00:00:00Z", docs: [] },
-    structure_decomposition: {
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "structure",
-      node_universe_size: 0,
-      source_ids: [],
-      consensus: [],
-      contested: [],
-      findings: [],
-    },
-    charter_register: {
-      schema_version: CHARTER_REGISTER_SCHEMA_VERSION,
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "charter",
-      ceiling: { rung: "shallow" },
-      status: "omitted",
-      ...EMPTY_REGISTER_BODY,
-    },
-    charter_clarification: {
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "charter_clarification",
-      ceiling: { rung: "shallow" },
-      attention: 0,
-      status: "omitted",
-      asked: [],
-      banked: [],
-      findings: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
-    },
-    // Phase E systemic challenge loop: an omitted (shallow-ceiling), converged register
-    // so systemic_challenge_current is satisfied and the decision reaches the planning
-    // / dispatch obligations these decisions target.
-    systemic_challenge: {
-      generated_at: "2026-01-01T00:00:00.000Z",
-      target: "systemic_challenge",
-      ceiling: { rung: "shallow" },
-      status: "omitted",
-      rounds: [],
-      converged: true,
-      findings: [],
-      validation_issues: [],
-      ...REGISTER_V4_AFFIRMATION,
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-04-22T00:00:00Z",
-      confirmed_by: "host",
-      scope_summary: "test scope",
-      intent_summary: "full-audit",
-    },
-    coverage_matrix: createCoverageMatrix(),
-    flow_coverage: { flows: [] },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [createAuditTask()],
-    requeue_tasks: [],
-    ...overrides,
-  });
-}
-
-const { runIntentEquivalenceResolve } = await import(
-  "../../src/audit/orchestrator/intentEquivalenceExecutor.js"
-);
-
-function withArtifactMetadata(bundle: ArtifactBundle): ArtifactBundle {
-  // DD-9: settle the intent-equivalence baseline (deterministic first-contact
-  // stamp) so intent_equivalence_current is satisfied and decisions reach the
-  // dispatch/synthesis obligations these tests target.
-  return runIntentEquivalenceResolve({
-    ...bundle,
-    artifact_metadata: computeArtifactMetadata(bundle),
-  }).updated;
-}
-
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 function findObligation(state: AuditState, id: string) {
@@ -217,66 +84,23 @@ test("decideNextStep covers representative priority states", () => {
   });
   expect(structureDecision.selected_obligation).toBe("structure_artifacts");
   expect(structureDecision.selected_executor).toBe("structure_executor");
-
-  const agentDecision = decideNextStep(
-    withArtifactMetadata(createDecisionBundle()),
-  );
-  expect(agentDecision.selected_obligation).toBe("audit_tasks_completed");
-  expect(agentDecision.selected_executor).toBe("semantic_review_executor");
-
-  const synthesisDecision = decideNextStep(
-    withArtifactMetadata(
-      createDecisionBundle({
-        coverage_matrix: createCoverageMatrix({ completed: true }),
-        audit_tasks: [createAuditTask("complete")],
-        audit_results: [
-          {
-            task_id: "src-auth:security",
-            unit_id: "src-auth",
-            pass_id: "pass:security",
-            lens: "security",
-            file_coverage: [{ path: "src/api/auth.ts", total_lines: 4 }],
-            findings: [],
-            reviewed_clean: true,
-          },
-        ],
-      }),
-    ),
-  );
-  expect(synthesisDecision.selected_obligation).toBe("synthesis_current");
-  expect(synthesisDecision.selected_executor).toBe("synthesis_executor");
 });
 
-test("shared helper advanceFixtureToPlanning returns planning bundle and lineIndex", async () => {
+test("real planning emits a scoped question plan and preserves the fixture source index", async () => {
   await withTempDir("audit-code-orchestration-", async (root) => {
     await writeFixtureRepo(root);
 
     const { planning, lineIndex } = await advanceFixtureToPlanning(root);
 
-    if (!planning.updated_bundle.audit_tasks) {
-      throw new Error("Planning did not produce audit_tasks.");
-    }
     expect(planning.selected_executor).toBe("planning_executor");
-    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
-    expect(lineIndex).toBe(FIXTURE_LINE_INDEX);
-  });
-});
-
-test("advanceAudit planning stage builds tasks without requiring runtime validation", async () => {
-  await withTempDir("audit-code-orchestration-", async (root) => {
-    await writeFixtureRepo(root);
-
-    const { planning } = await advanceFixtureToPlanning(root);
-
-    if (!planning.updated_bundle.audit_tasks) {
-      throw new Error("Planning did not produce audit_tasks.");
-    }
-    expect(planning.selected_executor).toBe("planning_executor");
-    expect(planning.updated_bundle.audit_tasks.length > 0).toBeTruthy();
-    // No runtime validation tasks were planned, so the gate is `not_applicable`
-    // — an empty input set is never a success member.
-    expect(findObligation(planning.audit_state, "runtime_validation_current")?.state).toBe("not_applicable");
+    expect(planning.artifacts_written).toContain("scope.json");
+    expect(planning.artifacts_written).toContain("review_plan.json");
+    const { review_plan } = planning.updated_bundle;
+    expect(review_plan?.questions.length).toBeGreaterThan(0);
+    expect(review_plan?.questions.every(q => q.snapshot_id === review_plan.snapshot_id)).toBe(true);
+    expect(findObligation(planning.audit_state, "planning_artifacts")?.state).toBe("satisfied");
     expect(planning.next_likely_step).toBe("audit_tasks_completed");
+    expect(lineIndex).toBe(FIXTURE_LINE_INDEX);
   });
 });
 
@@ -382,80 +206,20 @@ test("advanceAudit pauses on semantic_review_executor handoff after planning art
   });
 });
 
-test("advanceAudit ingests explicit audit results and advances toward synthesis", async () => {
+test("advanceAudit refuses synthesis before a bound question cycle is report-ready and names executor context", async () => {
   await withTempDir("audit-code-orchestration-", async (root) => {
     await writeFixtureRepo(root);
-
-    const { planning, lineIndex } = await advanceFixtureToPlanning(root);
-    const results = await buildSyntheticResults(
-      planning.updated_bundle.audit_tasks,
-      lineIndex,
+    const { planning } = await advanceFixtureToPlanning(root);
+    await assert.rejects(
+      () => advanceAudit(planning.updated_bundle, { preferredExecutor: "synthesis_executor" }),
+      (error) => {
+        if (!(error instanceof Error)) return false;
+        expect(error.message).toMatch(/advanceAudit synthesis_executor failed while resolving forced:synthesis_executor/i);
+        expect(error.message).toMatch(/Question review must reach report-ready state before synthesis/i);
+        return true;
+      },
     );
-
-    const ingest = await advanceAudit(planning.updated_bundle, {
-      preferredExecutor: "result_ingestion_executor",
-      auditResults: results,
-    });
-
-    if (!ingest.updated_bundle.audit_results) {
-      throw new Error("Result ingestion did not produce audit_results.");
-    }
-    expect(ingest.selected_executor).toBe("result_ingestion_executor");
-    expect(ingest.selected_obligation).toBe("forced:result_ingestion_executor");
-    expect(findObligation(ingest.audit_state, "audit_tasks_completed")?.state).toBe("satisfied");
-    expect(ingest.updated_bundle.audit_results.length).toBe(results.length);
-    expect(ingest.next_likely_step).toBe("synthesis_current");
   });
-});
-
-test("advanceAudit renders a final audit report after synthesis", async () => {
-  await withTempDir("audit-code-orchestration-", async (root) => {
-    await writeFixtureRepo(root);
-
-    const { planning, lineIndex } = await advanceFixtureToPlanning(root);
-    const ingest = await advanceAudit(planning.updated_bundle, {
-      preferredExecutor: "result_ingestion_executor",
-      auditResults: await buildSyntheticResults(
-        planning.updated_bundle.audit_tasks,
-        lineIndex,
-      ),
-    });
-
-    const synthesis = await advanceAudit(ingest.updated_bundle, {
-      preferredExecutor: "synthesis_executor",
-    });
-
-    expect(synthesis.selected_executor).toBe("synthesis_executor");
-    expect(synthesis.selected_obligation).toBe("forced:synthesis_executor");
-    expect(synthesis.updated_bundle.audit_report).toMatch(/# Audit Report/);
-    // Findings are re-keyed to content-derived ids at synthesis, so match the
-    // (stable) title in the rendered section header rather than a packet id.
-    expect(synthesis.updated_bundle.audit_report).toMatch(/### \S+ — Auth path lacks structured rejection telemetry/);
-    expect(findObligation(synthesis.audit_state, "synthesis_current")?.state).toBe("satisfied");
-  });
-});
-
-test("advanceAudit reports missing mid-flow prerequisites with executor context", async () => {
-  await assert.rejects(
-    () =>
-      advanceAudit(
-        {
-          audit_tasks: [createAuditTask()],
-        },
-        {
-          preferredExecutor: "result_ingestion_executor",
-          auditResults: [],
-        },
-      ),
-    (error) => {
-      if (!(error instanceof Error)) {
-        return false;
-      }
-      expect(error.message).toMatch(/advanceAudit result_ingestion_executor failed while resolving forced:result_ingestion_executor/i);
-      expect(error.message).toMatch(/Cannot ingest results without coverage_matrix/i);
-      return true;
-    },
-  );
 });
 
 test("buildAuditReportModel handles empty inputs and unmatched runtime results cleanly", () => {

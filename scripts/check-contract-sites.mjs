@@ -92,6 +92,7 @@ export const FORBIDDEN_MARKER_FIELDS = [
   'grounding',
   'severity_downgraded_from',
   'lead_lineage',
+  'question_review_sources',
 ];
 
 /** The declared field set of a contract type, out of the registry (data, not zod). */

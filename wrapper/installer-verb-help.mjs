@@ -6,7 +6,7 @@
 // command it owns — never sees them. That left `remediate-code install --help`
 // running the installer and writing four files, and `audit-code install --help`
 // doing the same, because audit's `hasLeadingFlag` deliberately stops at the
-// first non-flag token (it must, or `explain-task -v` would print the wrapper's
+// first non-flag token (it must, or `status -v` would print the wrapper's
 // version instead of forwarding `-v`). Two reasonable local decisions adding up
 // to the same surprise on the commands a new operator touches first, two of
 // which write into the repository.

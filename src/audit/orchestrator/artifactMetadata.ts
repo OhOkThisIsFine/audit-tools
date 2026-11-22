@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/coverage-element-baseline.test.ts, tests/audit/intent-equivalence-executor.test.ts, tests/audit/advance-drain-loop.test.ts
+// sites-pinned: tests/audit/intent-equivalence-executor.test.ts, tests/audit/advance-drain-loop.test.ts
 import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,

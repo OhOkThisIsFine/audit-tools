@@ -1,9 +1,10 @@
 import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFixture.js";
 import { writeBoundReviewFixture } from "./helpers/reviewSubmissionFixture.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { captureConsole } from "./helpers/captureConsole.mjs";
 
 import type { Finding } from "../../src/audit/types.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
@@ -24,6 +25,8 @@ const { handleDesignReviewBranch } = await import(
 const { commitFold, createFoldTransaction } = await import(
   "../../src/audit/cli/foldTransaction.js"
 );
+const { cmdResynthesize } = await import("../../src/audit/cli/resynthesizeCommand.js");
+const { systemicPremiseToken } = await import("../../src/audit/orchestrator/systemicChallengeExecutor.js");
 const { readJsonFile } = await import("../../src/shared/io/json.js");
 const { canonicalizeConceptualAttributionIds, renderAuditReportMarkdown } = await import(
   "../../src/audit/reporting/synthesis.js"
@@ -557,7 +560,7 @@ describe("conceptual review adjudication", () => {
     expect(markdown).toContain("Judge (design_review_conceptual)");
   });
 
-  it("renders conceptual attribution against the canonical synthesis finding id", () => {
+  it("renders conceptual attribution against the canonical synthesis finding id", async () => {
     const submission = validSubmission();
     const adjudication = buildConceptualReviewAdjudication({
       manifest,
@@ -565,6 +568,9 @@ describe("conceptual review adjudication", () => {
       submission,
       generatedAt: "now",
     });
+    const accepted = JSON.stringify(adjudication);
+    Object.freeze(adjudication);
+    const premise = systemicPremiseToken({ conceptual_review_adjudication: adjudication });
     const run = runSynthesisExecutor({
       design_assessment: {
         generated_at: "now",
@@ -576,6 +582,8 @@ describe("conceptual review adjudication", () => {
       conceptual_review_adjudication: adjudication,
     }, undefined, { auditRead: null });
 
+    expect(JSON.stringify(run.updated.conceptual_review_adjudication)).toBe(accepted);
+    expect(systemicPremiseToken(run.updated)).toBe(premise);
     const canonicalId = run.updated.audit_findings?.findings[0]?.id;
     expect(canonicalId).toBeDefined();
     expect(canonicalId).not.toBe("FINAL-001");
@@ -589,12 +597,12 @@ describe("conceptual review adjudication", () => {
     expect(
       run.updated.conceptual_review_adjudication?.final_finding_shares[0]
         ?.final_finding_id,
-    ).toBe(canonicalId);
+    ).toBe("FINAL-001");
     expect(
       run.updated.conceptual_review_adjudication?.candidate_dispositions.map(
         (disposition) => disposition.target_final_finding_ids,
       ),
-    ).toEqual([[canonicalId], [canonicalId]]);
+    ).toEqual([["FINAL-001"], ["FINAL-001"]]);
     expect(run.updated.audit_report).toContain("55%");
     expect(run.updated.audit_report).toContain("modified 60%");
     expect(run.updated.audit_report).toContain(
@@ -611,6 +619,26 @@ describe("conceptual review adjudication", () => {
       `targets ${canonicalId}.`,
     );
     expect(narrativeRun.updated.audit_report).not.toContain("FINAL-001");
+    expect(JSON.stringify(narrativeRun.updated.conceptual_review_adjudication)).toBe(accepted);
+    expect(systemicPremiseToken(narrativeRun.updated)).toBe(premise);
+
+    const root = await mkdtemp(join(tmpdir(), "conceptual-resynthesize-"));
+    cleanups.push(root);
+    const artifacts = join(root, ".audit-tools", "audit");
+    await mkdir(artifacts, { recursive: true });
+    const adjudicationPath = join(artifacts, "conceptual_review_adjudication.json");
+    const input = join(root, "input.json");
+    await writeFile(adjudicationPath, accepted);
+    await writeFile(join(artifacts, "design_assessment.json"), JSON.stringify(reloaded.design_assessment));
+    await writeFile(input, JSON.stringify(reloaded.audit_findings));
+    await writeFile(join(root, ".audit-tools", "audit-findings.json"), JSON.stringify(reloaded.audit_findings));
+    const markdown = join(root, ".audit-tools", "audit-report.md");
+    await writeFile(markdown, "Archived conceptual report");
+    const blocked = await captureConsole(() => cmdResynthesize(["node", "cli", "resynthesize", "--root", root, "--input", input]));
+    expect(blocked.code).toBe(1);
+    expect(blocked.stderr).toContain("Archived reports are left unchanged");
+    expect(await readFile(markdown, "utf8")).toBe("Archived conceptual report");
+    expect(await readFile(adjudicationPath, "utf8")).toBe(accepted);
   });
 
   it("coalesces judge-final shares that dedupe to one canonical finding", () => {
@@ -633,8 +661,9 @@ describe("conceptual review adjudication", () => {
     }, undefined, { auditRead: null });
 
     const canonicalId = run.updated.audit_findings?.findings[0]?.id;
-    const canonicalShares =
-      run.updated.conceptual_review_adjudication?.final_finding_shares;
+    const reportAttribution = canonicalizeConceptualAttributionIds(run.updated.audit_findings!, adjudication);
+    const canonicalShares = reportAttribution.final_finding_shares;
+    expect(run.updated.conceptual_review_adjudication?.final_finding_shares).toHaveLength(2);
     expect(run.updated.audit_findings?.findings).toHaveLength(1);
     expect(canonicalShares).toHaveLength(1);
     expect(canonicalShares?.[0]?.final_finding_id).toBe(canonicalId);
@@ -685,7 +714,7 @@ describe("conceptual review adjudication", () => {
       contributors.get(manifest.judge.contributor_id)?.rationale,
     ).toContain("FINAL-002 (60%): Judge reconciled FINAL-002.");
     expect(
-      run.updated.conceptual_review_adjudication?.candidate_dispositions,
+      reportAttribution.candidate_dispositions,
     ).toMatchObject([
       {
         target_final_finding_ids: [canonicalId],
@@ -700,7 +729,7 @@ describe("conceptual review adjudication", () => {
     ]);
   });
 
-  it("migrates pre-fix persisted local attribution ids before narrative render", () => {
+  it("renders from persisted local attribution ids without rewriting them", () => {
     const submission = validSubmission();
     const designAssessment = {
       generated_at: "now",
@@ -736,7 +765,7 @@ describe("conceptual review adjudication", () => {
     expect(
       migrated.updated.conceptual_review_adjudication?.final_finding_shares[0]
         ?.final_finding_id,
-    ).toBe(canonicalId);
+    ).toBe("FINAL-001");
   });
 
   it("keeps largest-remainder collision allocations bounded and exactly 100%", () => {
@@ -821,8 +850,8 @@ describe("conceptual review adjudication", () => {
     }, undefined, { auditRead: null });
 
     const contributors =
-      run.updated.conceptual_review_adjudication?.final_finding_shares[0]
-        ?.contributors ?? [];
+      canonicalizeConceptualAttributionIds(run.updated.audit_findings!, adjudication)
+        .final_finding_shares[0]?.contributors ?? [];
     expect(contributors).toHaveLength(8);
     expect(
       contributors.every(

@@ -23,10 +23,9 @@ canonical (upstream) direction for the same reason.
 The four phase tables below are GENERATED from `ARTIFACT_DEPENDS_ON_MAP` by
 `scripts/shared/generate-spec-mirrors.mjs` (`npm run check:spec-mirrors` gates
 them) — every cell is registry-derived, and only which phase a row is filed under
-is declared, in `scripts/shared/spec-mirror-data.mjs` (the DAG phases are not the
-artifact registry's phases: `flow_coverage.json` is registry-phase `analysis` and
-DAG-phase 3). Never hand-edit between the markers; edit the map and re-run the
-generator.
+is declared, in `scripts/shared/spec-mirror-data.mjs`. These headings group the
+dependency rows and do not define executor order. Never hand-edit between the
+markers; edit the map and re-run the generator.
 
 ### Phase 1 — intake
 
@@ -138,63 +137,36 @@ three writers).
 <!-- BEGIN GENERATED spec-mirror dependency-map#phase-3 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
-| `coverage_matrix.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json`, `audit_results.jsonl` |
-| `audit_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `scope.json`, `design_assessment.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `audit_results.jsonl` |
-| `audit_plan_metrics.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `audit_tasks.json`, `audit_results.jsonl` |
-| `task_affinity_graph.json` | `audit_tasks.json` |
-| `flow_coverage.json` | `repo_manifest.json`, `file_disposition.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `audit_results.jsonl` |
-| `requeue_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `critical_flows.json`, `intent_checkpoint.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
-| `runtime_validation_tasks.json` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
-| `runtime_validation_report.json` | `repo_manifest.json`, `file_disposition.json`, `critical_flows.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `audit_results.jsonl` |
+| `review_plan.json` | `repo_manifest.json`, `file_disposition.json`, `scope.json`, `intent_checkpoint.json`, `surface_manifest.json`, `critical_flows.json`, `unit_manifest.json`, `graph_bundle.json`, `charter_register.json`, `design_assessment.json`, `external_analyzer_results.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-3 -->
 
-`scope.json` records how a run was scoped (the `--since` delta mode): `full`
-(default) or `delta` with the seed (changed) + expanded (graph-neighbour) file
-sets. It is a *direct* input to `audit_tasks.json` (not just transitively via
-`coverage_matrix.json`) so a scope change that produces an identical coverage
-matrix (same files/buckets) still re-stales tasks. No cycle: planning writes
-`scope.json`, `coverage_matrix.json`, and `audit_tasks.json` in one
-`advanceAudit` call, dependency-first.
+`scope.json` records full scope or, for `--since`, the changed seed and expanded
+neighbor file sets. It is a direct input to `review_plan.json`; planning writes
+both in one call, dependency-first. The selected lenses and admitted evidence
+determine the questions. A suggested file is a starting point, not a completed
+review obligation.
 
-`audit_tasks.json` also stores the architecture-discovery tasks, derived from
-`design_assessment.json`, `charter_register.json`, `charter_clarification.json`,
-`systemic_challenge.json` and `audit_results.jsonl`; each is a declared input, so
-a change to any of them re-stales the task set through this DAG. Result ingestion
-writes `audit_results.jsonl` and `audit_tasks.json` in one call, so it re-derives
-that task family before the write is stamped. The charter, clarification and
-systemic inputs are re-derived *after* planning in the drain, so those three
-edges are late-input edges (`LATE_INPUT_EDGES` in `dependencyMap.ts`) carrying
-slice projections: a pending upstream defers `audit_tasks.json` instead of
-staling it, and once the upstream re-derives only a change in what discovery
-reads re-stales it.
-
-`task_affinity_graph.json` is the provider-neutral task-affinity graph derived
-from `audit_tasks.json`; planning's packet composition consumes it
-(`buildReviewPacketPlanningData` / plan metrics in `src/audit/orchestrator/reviewPackets.ts`)
-to form complete bounded work items and persists no executor choice — see
-[`audit-workflow-design.md`](../audit-workflow-design.md).
-
-Findings land in `audit_results.jsonl` (NDJSON, one `AuditResult` per line) —
-note the extension: this is **not** a `.json` array.
+The run-scoped accepted-answer ledger is outside this DAG. Question dispatch
+and synthesis project it against the current plan, so neither a stale binding
+nor a legacy per-file result can close current work. Retired per-file artifacts
+are raw archival evidence, not dependency inputs.
 
 ### Phase 4 — reporting
 
 <!-- BEGIN GENERATED spec-mirror dependency-map#phase-4 — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Artifact | Depends on |
 |---|---|
-| `audit-report.md` | `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `conceptual_review_adjudication.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `coverage_matrix.json`, `flow_coverage.json`, `runtime_validation_report.json`, `audit_results.jsonl`, `agent-feedback.jsonl` |
+| `audit-report.md` | `review_plan.json`, `repo_manifest.json`, `file_disposition.json`, `unit_manifest.json`, `surface_manifest.json`, `critical_flows.json`, `design_assessment.json`, `conceptual_review_adjudication.json`, `structure_decomposition.json`, `charter_register.json`, `charter_clarification.json`, `systemic_challenge.json`, `syntax_resolution_status.json`, `external_analyzer_results.json`, `agent-feedback.jsonl` |
+| `audit-findings.json` | `review_plan.json` |
 | `synthesis-narrative.json` | `audit-findings.json` |
 <!-- END GENERATED spec-mirror dependency-map#phase-4 -->
 
-The human render (`audit-report.md`) depends on every analysis artifact plus
-`agent-feedback.jsonl` (see below). The canonical machine contract
-(`audit-findings.json`) is co-produced by the same synthesis executor as
-`audit-report.md` but is **not itself a row in this table** — it has no declared
-upstream dependency of its own; it is written alongside `audit-report.md` by
-`synthesis_executor` in one `advanceAudit` call. `synthesis-narrative.json` is
-the marker recording whether the optional narrative pass (themes / executive
-summary / top risks) was `applied` or `omitted`; it tracks `audit-findings.json`
-so a re-synthesized contract re-stales the narrative pass and it regenerates.
+`review_plan.json` is a declared dependency of both `audit-findings.json` and
+`audit-report.md`. Synthesis writes the machine report and its Markdown render
+together. An accepted answer, adjudication, or consolidation can change
+reporting without changing the plan revision: current-pair verification also
+checks the accepted ledger. The optional narrative marker tracks the machine
+report; narrative changes do not close unanswered questions or add findings.
 
 ### `agent-feedback.jsonl` (not a registry entry)
 
@@ -231,17 +203,15 @@ one.
 
 ### Example 2
 
-If `audit_results.jsonl` changes (new findings ingested), every artifact whose
-generated row lists `audit_results.jsonl` is stale — the generated tables above
-carry the current set — but `audit-findings.json` is not a row in this map, so
-its own staleness follows from the synthesis executor's obligation logic, not
-this DAG.
+If the confirmed scope changes, the question plan becomes stale, and so do its
+dependent reports. Earlier structure inputs do not become stale solely because
+the scope changed.
 
 ### Example 3
 
-If `runtime_validation_report.json` changes, the reporting rows that list it are
-stale, but upstream planning artifacts such as `coverage_matrix.json` and
-`audit_tasks.json` are not — the dependency only runs downstream.
+If an answer is accepted for the same question revision, the plan need not
+change. An older report pair no longer matches the accepted ledger and must
+be regenerated before it can be presented as current.
 
 ## Implementation note
 

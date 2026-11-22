@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { createNextStepHarness } from "./helpers/nextStepHarness.js";
+import { buildQuestionAuditReportFixture } from "./helpers/questionAuditReportFixture.js";
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { readPlanSource } from "../../src/remediate/contractPipeline/executionPlan.js";
@@ -15,13 +16,18 @@ const paths = intakePaths(ARTIFACTS_DIR);
 const inputPath = join(REPO_DIR, "audit-findings.json");
 const guidancePath = join(REPO_DIR, "guidance.md");
 let report: AuditFindingsReport;
+let archived: AuditFindingsReport;
 let guidance: string;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
-  // Frozen outputs from the 2026-10-19 public audit/remediation exercise. The
-  // original fixture stays read-only; all CLI writes land in this test's repo.
-  report = JSON.parse(await readFile(new URL("./fixtures/audit-findings-real-mixed.json", import.meta.url), "utf8"));
+  // Keep the actual frozen report for archival refusal. For current intake,
+  // rebuild synthetic question answers from its claims using the live producer.
+  archived = JSON.parse(await readFile(new URL("./fixtures/audit-findings-real-mixed.json", import.meta.url), "utf8"));
+  report = buildQuestionAuditReportFixture(
+    archived.findings.map(finding => ({ ...finding, lens: "behavior" })),
+    archived.audit_read,
+  ).report;
   guidance = await readFile(new URL("./fixtures/audit-guidance-real-mixed.md", import.meta.url), "utf8");
   await writeFile(inputPath, JSON.stringify(report));
   await writeFile(guidancePath, guidance);
@@ -58,14 +64,16 @@ async function readyMixedIntake(declinedFindingId?: string) {
   return step;
 }
 
-test.each([false, true])("public intake refuses a retired audit report with guidance=%s", async withGuidance => {
-  await writeFile(inputPath, JSON.stringify({ schema_version: "audit-findings/v1alpha1", findings: [] }));
+test.each([
+  ["v1alpha1", false], ["v1alpha1", true], ["v1alpha2", false], ["v1alpha2", true],
+] as const)("public intake refuses a retired %s audit report with guidance=%s", async (version, withGuidance) => {
+  await writeFile(inputPath, JSON.stringify(version === "v1alpha2" ? archived : { schema_version: "audit-findings/v1alpha1", findings: [] }));
   const result = cli("--input", inputPath, ...(withGuidance ? ["--guidance-file", guidancePath] : []));
   expect(result.status, result.stderr).toBe(0);
   const step = JSON.parse(result.stdout);
   expect(step.step_kind).toBe("collect_starting_point");
   expect(step.stop_condition).toContain(inputPath);
-  expect(step.stop_condition).toMatch(/regenerate.*audit-tools\/audit-findings\/v1alpha2/i);
+  expect(step.stop_condition).toMatch(/regenerate.*audit-tools\/audit-findings\/v2/i);
 });
 
 for (const selected of [false, true]) {
@@ -99,7 +107,7 @@ for (const selected of [false, true]) {
 test("mixed review decline keeps guidance bound without restoring the original audit source", async () => {
   const result = cli("--input", inputPath, "--guidance-file", guidancePath);
   expect(result.status, result.stderr).toBe(0);
-  const declinedId = report.findings[0]!.id;
+  const declinedId = report.findings.find(finding => finding.severity === "high")!.id;
   await readyMixedIntake(declinedId);
   const source = (await readPlanSource(ARTIFACTS_DIR))!;
   expect(source.findings).toEqual(report.findings.filter(finding => finding.id !== declinedId));

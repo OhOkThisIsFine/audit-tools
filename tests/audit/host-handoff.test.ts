@@ -1782,15 +1782,8 @@ describe(FAILURE_SIGNATURE, () => {
 
   // ── …and the FOLD turns that refusal into a re-prepare, never a wedge ─────
   //
-  // The refusal above is only sound where something downstream re-prepares. On
-  // the real fold the ingest sits BEFORE `ensureSemanticReviewRunUnlocked` — the
-  // one path to `prepareAuditHostHandoff`, the only writer of the bindings file
-  // — and the fold's catch rethrows everything that is not ENOENT. So a bare
-  // throw here aborted the fold before the re-prepare, the blocked-step backstop
-  // wrote a blocked step and rethrew, and EVERY later `next-step` failed the
-  // same way with the bindings file still at the old version. The run was wedged
-  // by a file the tool had written itself.
-  it("re-prepares the workload and advances when the persisted bindings are the old version", async () => {
+  // Current dispatch must not repair or replay an archived workload.
+  it("issues current questions without rewriting retired file-task bindings", async () => {
     const root = await mkdtemp(join(tmpdir(), "audit-host-old-bindings-fold-"));
     cleanupRoots.push(root);
     await mkdir(join(root, "src"), { recursive: true });
@@ -1925,29 +1918,20 @@ describe(FAILURE_SIGNATURE, () => {
       "utf8",
     );
 
-    // THE REAL ENTRY POINT, not the helper: `runDeterministicForNextStep`
-    // returns the PLAN, and the re-prepare lives in the emission the CLI entry
-    // performs (`cmdNextStep` → `writeAuditStep` → `renderSemanticReviewStep` →
-    // `prepareAuditHostHandoff`). Driving the helper would leave the file
-    // untouched no matter how the ingest classified it.
+    const historicalBytes = await readFile(bindingsPath);
     const { cmdNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
     await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
 
-    // (1) It did NOT throw — the wedge is gone. (2) The step it wrote is a live
-    //     host step, not the blocked contract the wedge produced.
     const step = JSON.parse(
       await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
-    ) as { step_kind: string; status: string };
-    expect(step.step_kind, JSON.stringify(step)).toBe("dispatch_review");
+    ) as { step_kind: string; status: string; run_id: string; artifact_paths: { host_workload: string } };
+    expect(step.step_kind).toBe("dispatch_review");
     expect(step.status).toBe("ready");
-    // (3) The binding set is at the CURRENT version afterwards: the fold reached
-    //     the re-prepare, so the next ingest reads a contract it understands.
-    const reparsed = JSON.parse(await readFile(bindingsPath, "utf8")) as {
-      contract_version: string;
-      entries: Array<Record<string, unknown>>;
-    };
-    expect(reparsed.contract_version).toBe("audit-host-task-bindings/v1alpha3");
-    expect(reparsed.entries[0]!.tags).toEqual([]);
+    expect(step.run_id).not.toBe(runId);
+    const current = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
+    expect(current.work_items[0].binding.question.revision_id).toBeTruthy();
+    expect(await readFile(bindingsPath)).toEqual(historicalBytes);
+
   });
 });
 

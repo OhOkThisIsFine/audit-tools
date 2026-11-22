@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { readOptionalJsonFile, writeJsonFile } from "../../src/shared/index.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION } from "../../src/shared/types/reviewQuestion.js";
 import type { IntentCheckpoint } from "../../src/shared/types/intentCheckpoint.js";
 import {
   ingestExecutionPlan, readCanonicalPlan, readExecutionIntent, readPlanSource, readApprovedExecutionPlan, readPlanReviewHistory,
@@ -40,6 +41,50 @@ async function bindIntent(f: Awaited<ReturnType<typeof fixture>>, scope: Partial
   });
   await writeJsonFile(f.paths.source, { ...(await readPlanSource(f.artifactsDir))!, intent: await readExecutionIntent(f.artifactsDir) });
 }
+
+test("a question report cannot grant writes to optional work with no approved source", async () => {
+  const f = await fixture();
+  const { request: _request, ...source } = (await readPlanSource(f.artifactsDir))!;
+  await writeJsonFile(f.paths.source, { ...source, question_report: true });
+  expect((await submit(f)).issues).toContain(
+    `Unit ${f.plan.units[0]!.id} has write scope without an approved confirmed finding.`,
+  );
+});
+
+test("the actual plan intake rejects dropping an accepted source assertion", async () => {
+  const f = await fixture();
+  const { request: _request, ...source } = (await readPlanSource(f.artifactsDir))!;
+  const finding = {
+    id: "canonical-a", title: "Greeting contract", category: "behavior", severity: "high",
+    confidence: "high", lens: "behavior", summary: "Greeting must be retained",
+    affected_files: [{ path: "greeting.ts" }], evidence: ["Expected greeting"],
+    question_review_sources: [{
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: "question-a", revision_id: "revision-a",
+      finding_id: "original-a", kind: "confirmed_defect", severity: "high", confidence: "high",
+      claim: "Greeting is lost", consequence: "No greeting is shown", next_step: "Keep the greeting",
+      evidence_ids: ["greeting-example"], source_refs: [{ path: "greeting.ts" }],
+      verification: [{
+        kind: "assertion", obligation_id: "retain-greeting", expected: "Same greeting on resume",
+        source_refs: [{ path: "greeting.ts" }],
+      }],
+    }],
+  };
+  await writeJsonFile(f.paths.source, { ...source, question_report: true, findings: [finding] });
+  const unit = f.plan.units[0]!;
+  const requirement = f.plan.requirements[0]!;
+  unit.source_finding_ids = [finding.id];
+  requirement.source_finding_ids = [finding.id];
+  expect((await submit(f)).issues).toContain(
+    "Source assertion original-a/retain-greeting has no exact scoped plan assertion.",
+  );
+  const assertion = requirement.assertions[0]!;
+  assertion.description = "Same greeting on resume";
+  assertion.scope_paths = ["greeting.ts"];
+  assertion.source_obligation = { finding_id: "original-a", obligation_id: "retain-greeting" };
+  expect((await submit(f)).issues).toEqual([]);
+  const canonical = (await readCanonicalPlan(f.artifactsDir))!;
+  expect(canonical.plan.requirements[0]!.assertions[0]).toEqual(assertion);
+});
 
 test("mechanical path normalization precedes independent review and produces dispatchable grants", async () => {
   const f = await fixture();

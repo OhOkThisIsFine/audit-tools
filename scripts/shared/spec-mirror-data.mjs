@@ -143,10 +143,6 @@ export const SPEC_MIRROR_REGIONS = [
         purpose: "**Transient host submission** — NOT registered, NOT a staleness-DAG participant: the DD-9 gate's verdict on whether a re-stated intent still means what the confirmed checkpoint meant. Authored only for a prose-only delta — every other arm resolves deterministically without host input. Written by the host to the tool-computed path its step contract binds (`submissions/<sha256(submission_id)>.json`), validated, and — once applied — consumed and DELETED; a submission that validates but cannot be applied is quarantined and recorded, never dropped; the accepted judgment is materialized into `artifact_metadata.intent_baseline`, which is the revision authority. Per DD-9 no verdict-pair cache is persisted, so the executor writes no artifact — do not \"fix\" its absence from the registry by adding a row.",
       },
       {
-        artifact: "flow_coverage.json",
-        purpose: "Coverage of critical flows by ingested results.",
-      },
-      {
         artifact: "risk_register.json",
         purpose: "Per-unit risk signals (see `src/audit/extractors/risk.ts` for the full signal list).",
       },
@@ -203,16 +199,8 @@ export const SPEC_MIRROR_REGIONS = [
         purpose: "How this run was scoped (`full` vs. `delta` with `--since` seed/expanded file sets).",
       },
       {
-        artifact: "coverage_matrix.json",
-        purpose: "Task allocation matrix (files × lens buckets) that tracks which are queued/complete.",
-      },
-      {
-        artifact: "runtime_validation_tasks.json",
-        purpose: "Runtime-validation task specs derived from risk + coverage.",
-      },
-      {
-        artifact: "runtime_validation_report.json",
-        purpose: "Runtime-validation results (initial + import-refreshed).",
+        artifact: "review_plan.json",
+        purpose: "Current snapshot-bound review questions, their scoped evidence and assignments, and recorded coverage omissions.",
       },
       {
         artifact: "external_analyzer_results.json",
@@ -222,27 +210,7 @@ export const SPEC_MIRROR_REGIONS = [
         artifact: "syntax_resolution_status.json",
         purpose: "Per-file syntax-parse status and failures.",
       },
-      {
-        artifact: "audit_results.jsonl",
-        purpose: "Ingested `AuditResult` records, one per line — not a `.json` array.",
-      },
-      {
-        artifact: "audit_tasks.json",
-        purpose: "Task specifications for external (host-delegated) audit execution.",
-      },
-      {
-        artifact: "audit_plan_metrics.json",
-        purpose: "Planning metrics and cost estimates for the current task set.",
-      },
-      {
-        artifact: "task_affinity_graph.json",
-        purpose: "Provider-neutral task-affinity graph derived from `audit_tasks.json`; consumed during planning packet composition.",
-      },
-      {
-        artifact: "requeue_tasks.json",
-        purpose: "Re-audit tasks derived from coverage/flow-coverage gaps.",
-      },
-    ],
+         ],
   },
   {
     id: "artifact-contract#reporting",
@@ -371,7 +339,7 @@ export const SPEC_MIRROR_REGIONS = [
     doc: EXECUTOR_CATALOG_DOC,
     kind: "executors",
     rows: [
-      { executor: "planning_executor", note: "emits all planning artifacts in one call" },
+      { executor: "planning_executor", note: "writes the confirmed scope and the snapshot-bound question plan" },
       {
         executor: "semantic_review_executor",
         note: "emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing",
@@ -379,18 +347,6 @@ export const SPEC_MIRROR_REGIONS = [
       {
         executor: "external_analyzer_import_executor",
         note: "imported normalized external-analyzer results",
-      },
-      {
-        executor: "result_ingestion_executor",
-        note: "ingests prompt-bound host results and refreshes the downstream planning/coverage view",
-      },
-      {
-        executor: "runtime_validation_executor",
-        note: "the first runtime-validation pass; applies selective deepening",
-      },
-      {
-        executor: "runtime_validation_update_executor",
-        note: "re-runs that pass over imported evidence",
       },
     ],
   },
@@ -445,14 +401,7 @@ export const SPEC_MIRROR_REGIONS = [
     doc: DEPENDENCY_MAP_DOC,
     kind: "dependencies",
     rows: [
-      { artifact: "coverage_matrix.json" },
-      { artifact: "audit_tasks.json" },
-      { artifact: "audit_plan_metrics.json" },
-      { artifact: "task_affinity_graph.json" },
-      { artifact: "flow_coverage.json" },
-      { artifact: "requeue_tasks.json" },
-      { artifact: "runtime_validation_tasks.json" },
-      { artifact: "runtime_validation_report.json" },
+      { artifact: "review_plan.json" },
     ],
   },
   {
@@ -461,6 +410,7 @@ export const SPEC_MIRROR_REGIONS = [
     kind: "dependencies",
     rows: [
       { artifact: "audit-report.md" },
+      { artifact: "audit-findings.json" },
       { artifact: "synthesis-narrative.json" },
     ],
   },

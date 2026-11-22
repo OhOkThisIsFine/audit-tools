@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/wrapper-response-contract.test.ts, tests/audit/review-run-lifecycle.test.ts
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -16,9 +17,6 @@ import type {
 
 export interface AuditCodeHandoffInput {
   flag:
-    | "--results"
-    | "--batch-results"
-    | "--updates"
     | "--external-analyzer-results";
   suggested_path: string;
   description: string;
@@ -64,8 +62,7 @@ export interface AuditCodeHandoff {
 
 /**
  * Where an OPERATOR drops files they pass to a CLI import flag
- * (`--results`, `--batch-results`, `--updates`,
- * `--external-analyzer-results`). Distinct from `submissions/`: those paths are
+ * (`--external-analyzer-results`). Distinct from `submissions/`: those paths are
  * tool-computed and a host may not choose them, whereas these are advisory
  * suggestions for a human who names the file on the command line.
  */
@@ -122,21 +119,6 @@ function buildSuggestedInputs(
   const inputsDir = join(artifactsDir, OPERATOR_INPUTS_DIRNAME);
   return [
     {
-      flag: "--results",
-      suggested_path: join(inputsDir, "audit-results.json"),
-      description: "Import structured audit-review results.",
-    },
-    {
-      flag: "--batch-results",
-      suggested_path: join(inputsDir, "audit-results-batch"),
-      description: "Import a directory of canonical per-task audit results.",
-    },
-    {
-      flag: "--updates",
-      suggested_path: join(inputsDir, "runtime-validation-updates.json"),
-      description: "Merge runtime validation evidence gathered outside the wrapper.",
-    },
-    {
       flag: "--external-analyzer-results",
       suggested_path: join(inputsDir, "external-analyzer-results.json"),
       description: "Import normalized external-analyzer results.",
@@ -157,7 +139,7 @@ function buildSuggestedCommands(
   return inputs.map((input) =>
     renderPromptCommand([
       "audit-code",
-      input.flag === "--updates" ? "update-runtime-validation" : "ingest-results",
+      "import-external-analyzer",
       input.flag,
       input.suggested_path,
       "--artifacts-dir",

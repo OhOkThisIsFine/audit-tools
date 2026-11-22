@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/selective-deepening-conflicts.test.ts, tests/audit/selective-deepening-handoff.test.ts
+// sites-pinned: tests/audit/selective-deepening-conflicts.test.ts
 import { compareCodeUnits, stableStringify, uniqueSorted } from "audit-tools/shared";
 import { lineCountForPath } from "../lineCounts.js";
 import type { AuditResult, AuditTask, Lens } from "../../types.js";

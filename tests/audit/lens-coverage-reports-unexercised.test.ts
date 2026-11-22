@@ -67,7 +67,7 @@ const CHECKPOINT = {
   scope_summary: "scope",
   intent_summary: "full-audit",
   lens_selection: {
-    include: ["architecture", "performance", "provenance_labelling"],
+    include: ["architecture", "performance", "custom:provenance-labelling"],
     exclude: [],
   },
 } as unknown as NonNullable<ArtifactBundle["intent_checkpoint"]>;
@@ -100,12 +100,10 @@ describe("lens coverage states what a selected lens delivered", () => {
       outcome: "not_run",
     });
     // A custom (non-canonical) lens the operator invented is reported exactly
-    // like a canonical one — `resolveEffectiveLenses` appends it verbatim, so
+    // like a canonical one — the selected set retains it verbatim, so
     // dropping it here would silently void half the operator's own choice.
-    expect(byLens.get("provenance_labelling")?.outcome).toBe("not_run");
-    // The mandatory base lenses are re-unioned by the resolver, so they are
-    // part of the selection and must be stated too.
-    expect(byLens.has("security")).toBe(true);
+    expect(byLens.get("custom:provenance-labelling")?.outcome).toBe("not_run");
+    expect([...byLens.keys()].sort()).toEqual(["architecture", "custom:provenance-labelling", "performance"]);
   });
 
   it("reports every selected lens not_run when NO lens-open channel was ingested", () => {
@@ -135,7 +133,7 @@ describe("lens coverage states what a selected lens delivered", () => {
     const markdown = renderAuditReportMarkdown(modelWithSelection());
     expect(markdown).toContain("Selected lenses without findings");
     expect(markdown).toContain("performance");
-    expect(markdown).toContain("provenance_labelling");
+    expect(markdown).toContain("custom:provenance-labelling");
   });
 });
 

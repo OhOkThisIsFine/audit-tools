@@ -1,0 +1,149 @@
+import { expect, test } from "vitest";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
+import { runBounded } from "../helpers/spawn.mjs";
+import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
+import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+
+test("the normal next-step path dispatches questions bound to a snapshot rather than required file lenses", async () => {
+  await withTempRepo(async (root) => {
+    const step = await advancePastDesignReview(root);
+    expect(step.step_kind).toBe("dispatch_review");
+    expect(step.allowed_commands).toHaveLength(1);
+    expect(step.allowed_commands[0]).toMatch(/next-step/u);
+    expect(step.artifact_paths.dispatch_plan).toBeUndefined();
+    expect(step.artifact_paths.dispatch_quota).toBeUndefined();
+    const workload: unknown = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8"));
+    expect(workload).toMatchObject({
+      contract_version: "audit-tools/question-review/v1",
+      work_items: expect.arrayContaining([
+        expect.objectContaining({
+          binding: expect.objectContaining({
+            question: expect.objectContaining({ question_id: expect.any(String), snapshot_id: expect.any(String) }),
+            assignment: expect.objectContaining({ assignment_id: expect.any(String), authorized_scope: expect.anything() }),
+          }),
+        }),
+      ]),
+    });
+  });
+});
+
+type WorkItem = { binding: { question: ReviewQuestion; assignment: ReviewAssignment }; result_path: string };
+
+test("normal CLI resumes durable answers and hands off an honestly incomplete question report", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "src", "resume.ts"), "export function resumePending(): string { return 'pending'; }\n");
+    const next = () => runWrapper(["next-step"], { cwd: root }).then(({ stdout }) => JSON.parse(stdout));
+    const workloadFor = async (step: Awaited<ReturnType<typeof next>>) => {
+      expect(step.step_kind).toBe("dispatch_review");
+      return JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as { run_id: string; work_items: WorkItem[] };
+    };
+    const initial = await workloadFor(await advancePastDesignReview(root));
+    expect(initial.work_items.length).toBeGreaterThan(1);
+    const first = initial.work_items[0]!;
+    const responseFor = (item: WorkItem): ReviewSubmission => {
+      const { question, assignment } = item.binding;
+      return { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, submission_id: `fixture-${assignment.assignment_id}`,
+        assignment_id: assignment.assignment_id, question_id: question.question_id, revision_id: question.revision_id,
+        snapshot_id: question.snapshot_id, inspected_sources: assignment.suggested_sources.slice(0, 1), evidence_ids: [],
+        limitations: ["Synthetic fixture could not establish the requested behavior."],
+        answer: { outcome: "inconclusive", findings: [], observations: [], parts: [
+          { part_id: question.requested_parts[0]!.part_id, outcome: "inconclusive", observation_ids: [], reason: "No observation for this case." },
+        ] } };
+    };
+    const put = async (item: WorkItem, result = responseFor(item)) => {
+      const file = resolve(root, item.result_path);
+      expect(file.startsWith(join(root, ".audit-tools"))).toBe(true);
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify(result));
+      return result;
+    };
+    const second = initial.work_items[1]!;
+    const privatePath = "synthetic-private-path-never-print.txt";
+    const badSource = responseFor(second);
+    badSource.inspected_sources = [{ path: privatePath, start_line: 1 }];
+    await put(first, { ...responseFor(first), revision_id: "stale-revision-never-print" });
+    await put(second, badSource);
+    const { stdout, stderr } = await runWrapper(["next-step"], { cwd: root });
+    const rejected = JSON.parse(stdout);
+    expect(rejected).toMatchObject({
+      step_kind: "dispatch_review",
+      progress: { summary: expect.stringContaining("Could not accept 2 saved question results"), pending_tasks: initial.work_items.length },
+    });
+    const repair = await workloadFor(rejected);
+    expect(repair.work_items.map(({ binding }) => binding.assignment.assignment_id))
+      .toEqual(initial.work_items.map(({ binding }) => binding.assignment.assignment_id));
+    const prompt = await readFile(rejected.artifact_paths.current_prompt, "utf8");
+    expect(prompt).toContain(first.binding.assignment.assignment_id + "`" + ": Binding mismatch.");
+    expect(prompt).toContain(second.binding.assignment.assignment_id + "`" + ": Source is outside the assignment.");
+    expect(prompt).toContain("matching workload item's result_path");
+    expect(stdout + stderr + prompt).not.toContain(privatePath);
+    expect(stdout + stderr + prompt).not.toContain("stale-revision-never-print");
+    await unlink(resolve(root, second.result_path));
+    const firstAnswer = await put(first);
+    const resumed = await workloadFor(await next());
+    expect(resumed.run_id).toBe(initial.run_id);
+    expect(resumed.work_items.some(({ binding }) => binding.assignment.assignment_id === firstAnswer.assignment_id)).toBe(false);
+    const base = join(root, ".audit-tools", "audit");
+    const ledgerPath = join(base, "runs", resumed.run_id, "host-accepted-results-ledger.json");
+    const accepted = async () => (JSON.parse(await readFile(ledgerPath, "utf8")) as { answers: { submission: ReviewSubmission }[] }).answers.map(({ submission }) => submission);
+    expect(await accepted()).toEqual([firstAnswer]);
+    const repeated = await workloadFor(await next());
+    expect(repeated.run_id).toBe(resumed.run_id);
+    expect(await accepted()).toEqual([firstAnswer]);
+    const secondAnswer = await put(repeated.work_items[0]!);
+    for (const item of repeated.work_items.slice(1)) await put(item);
+    const trail: string[] = [];
+    let complete = false;
+    for (let i = 0; i < 8; i++) {
+      const step = await next();
+      trail.push(`${step.step_kind}:${step.status}`);
+      if (step.step_kind === "synthesis_narrative") {
+        const target = step.artifact_paths.synthesis_narrative_results;
+        expect(typeof target).toBe("string");
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, JSON.stringify({ themes: [], top_risks: [] }));
+      } else if (step.step_kind === "present_report") {
+        if (step.status === "complete") { complete = true; break; }
+        const friction = step.artifact_paths.friction_record;
+        if (step.status === "ready" && typeof friction === "string") {
+          const record = JSON.parse(await readFile(friction, "utf8").catch(() => "{}"));
+          record.category_attestations = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"].map(category => ({ category, note: "Synthetic fixture." }));
+          await mkdir(dirname(friction), { recursive: true });
+          await writeFile(friction, JSON.stringify(record));
+        }
+      }
+    }
+    expect(complete, trail.join(" -> ")).toBe(true);
+    const reportPath = join(base, "audit-findings.json");
+    const reportBytes = await readFile(reportPath, "utf8");
+    const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(reportBytes));
+    expect(report.question_review.completion).toBe("incomplete");
+    expect(report.question_review.accepted.map(({ submission }) => submission)).toEqual(expect.arrayContaining([firstAnswer, secondAnswer]));
+    const row = report.question_review.questions.find(({ question_id }) => question_id === firstAnswer.question_id);
+    expect(row).toMatchObject({ state: "inconclusive", accepted_answer_ids: [firstAnswer.submission_id] });
+    expect(row?.parts.some(part => part.state === "clean")).toBe(false);
+    expect(report.findings).toEqual([]);
+    expect(validateSuppliedInput(reportPath, reportBytes)).toEqual({ ok: true });
+    const remediate = fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url));
+    const { CLAUDECODE: _cc, ...env } = process.env;
+    const nextRemediation = () => runBounded(process.execPath, [remediate, "next-step"], { cwd: root, env })
+      .then(({ stdout }) => JSON.parse(stdout));
+    const discover = await nextRemediation();
+    expect(discover).toMatchObject({ step_kind: "confirm_auto_discovered_input" });
+    const ack = discover.artifact_paths.confirm_auto_discovered_input_ack;
+    expect(typeof ack).toBe("string");
+    await writeFile(ack, JSON.stringify({ status: "confirmed" }));
+    const intake = await nextRemediation();
+    expect(intake).toMatchObject({ step_kind: "synthesize_intake" });
+    const manifest = JSON.parse(await readFile(join(root, ".audit-tools", "remediation", "intake", "source-manifest.json"), "utf8"));
+    const source = manifest.sources.find((item: { type: string }) => item.type === "structured_audit");
+    expect(typeof source?.path).toBe("string");
+    const intakeReport = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(source.path, "utf8")));
+    expect(intakeReport.question_review.accepted.map(({ submission }) => submission.submission_id)).toContain(firstAnswer.submission_id);
+  });
+});

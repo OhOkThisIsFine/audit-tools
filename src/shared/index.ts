@@ -1351,3 +1351,5 @@ export type { ContractReviewOutcome, AcceptedConformanceReview } from "./types/r
 export { readRecursiveTrackedPaths } from "./gitTrackedPaths.js";
 
 export { defaultBinaryFetcher } from "./analyzers/binaryFetcher.js";
+export * from "./types/reviewQuestion.js";
+export * from "./types/questionReviewReport.js";

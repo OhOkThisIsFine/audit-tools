@@ -3,8 +3,7 @@
  *  - computeScopePreDigest excluded-scope collapse
  *  - disposition_override_proposals
  *  - lens_proposals
- *  - runPlanningExecutor disposition_overrides wiring
- *  - runPlanningExecutor lens_selection wiring
+ *  - disposition overrides in question planning and structural context
  *  - IntentCheckpoint round-trip (disposition_overrides + lens_selection)
  */
 import { test, expect } from "vitest";
@@ -17,7 +16,7 @@ import {
   type AggregatedExcludedRow,
 } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
 import { renderSharedStructuralContext } from "../../src/audit/orchestrator/designReviewPrompt.js";
-import { runPlanningExecutor } from "../../src/audit/orchestrator/planningExecutors.js";
+import { buildReviewQuestionPlan, reviewSourceScope } from "../../src/audit/orchestrator/questionPlanning.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 // ---------------------------------------------------------------------------
@@ -160,20 +159,17 @@ test("computeScopePreDigest does NOT propose override for clean included source 
 // 3. lens_propositions (note 1: canonical table, one disposition per lens)
 // ---------------------------------------------------------------------------
 
-const MANDATORY = ["security", "correctness", "reliability", "data_integrity"];
+const QUESTION_LENSES = ["behavior", "security", "architecture", "performance", "operability", "config_deployment", "tests"];
 
 test("computeScopePreDigest emits one proposition per canonical lens", async () => {
   const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
   const digest = await computeScopePreDigest(bundle, "/repo");
 
-  // 11 canonical lenses, each appears exactly once.
+  // Pin the actual seven names, not the prior per-file lens taxonomy.
   const lenses = digest.lens_propositions.map((p) => p.lens);
-  expect(new Set(lenses).size, "no duplicate lens rows").toBe(lenses.length);
-  for (const m of MANDATORY) {
-    expect(lenses.includes(m), `${m} should appear in the table`).toBeTruthy();
-  }
+  expect([...lenses].sort()).toEqual([...QUESTION_LENSES].sort());
   for (const p of digest.lens_propositions) {
-    expect(["mandatory", "recommend_include", "recommend_exclude"].includes(p.disposition), `disposition must be one of the three, got ${p.disposition}`).toBeTruthy();
+    expect(["recommend_include", "recommend_exclude"].includes(p.disposition), `disposition must express applicability, got ${p.disposition}`).toBeTruthy();
     expect(p.reason, "every proposition has a reason").toBeTruthy();
   }
 });
@@ -194,14 +190,21 @@ test("computeScopePreDigest recommends excluding tests when no test units", asyn
   expect(tests?.disposition).toBe("recommend_exclude");
 });
 
-test("computeScopePreDigest marks mandatory lenses as mandatory, never recommend_exclude", async () => {
-  const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
-  const digest = await computeScopePreDigest(bundle, "/repo");
-
-  for (const m of MANDATORY) {
-    const row = digest.lens_propositions.find((p) => p.lens === m);
-    expect(row?.disposition, `${m} must be disposition=mandatory`).toBe("mandatory");
-  }
+test("computeScopePreDigest recommends lenses from applicable source instead of fixed mandatory lenses", async () => {
+  const paths = ["src/routes/job.ts", "worker/background.ts", "tests/job.test.ts", "deploy.yaml"];
+  const empty = await computeScopePreDigest(makeBaseBundle(), "/repo");
+  expect(empty.lens_propositions.map(({ disposition }) => disposition)).toEqual(
+    QUESTION_LENSES.map(() => "recommend_exclude"),
+  );
+  const bundle = questionScopeFixture(paths);
+  bundle.surface_manifest = { surfaces: [
+    { id: "job", kind: "interface", exposure: "network", entrypoint: paths[0] },
+    { id: "worker", kind: "background", entrypoint: paths[1] },
+  ] };
+  const applicable = await computeScopePreDigest(bundle, "/repo");
+  expect(applicable.lens_propositions.map(({ disposition }) => disposition)).toEqual(
+    QUESTION_LENSES.map(() => "recommend_include"),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -355,341 +358,74 @@ test("computeScopePreDigest counts each rule's delivered exclusions off the per-
 });
 
 // ---------------------------------------------------------------------------
-// 4. runPlanningExecutor — disposition_overrides wiring
+// 4. confirmed disposition overrides in question planning
 // ---------------------------------------------------------------------------
 
-const nonExistentRoot = "/nonexistent_repo_root_fixture";
-
-// Line index providing non-trivial line counts so files don't get auto-completed
-// as trivial (lineCount=0 → isTrivialAuditPath returns true, producing no tasks).
-const TEST_LINE_INDEX = {
-  "dist/index.js": 100,
-  "src/app.ts": 100,
-  "src/b.ts": 100,
-};
-
-// Repo manifest including test source files so initializeCoverageFromPlan can
-// register them in the coverage matrix (coverage is built from repo_manifest.files,
-// not unit_manifest.units).
-function makeRepoManifestWithFiles(paths: string[]) {
-  return {
-    repository: { name: "fixture" },
-    generated_at: "2026-01-01T00:00:00.000Z",
-    files: paths.map((path: string) => ({ path, language: "typescript", size_bytes: 500 })),
-  };
+function questionScopeFixture(paths: string[]) {
+  return makeBaseBundle({
+    repo_manifest: {
+      repository: { name: "fixture" }, generated_at: "x",
+      files: paths.map(path => ({ path, language: "typescript", size_bytes: 500, hash: path })),
+    },
+    file_disposition: { files: paths.map(path => ({ path, status: "included" })) },
+    unit_manifest: { units: paths.map((path, index) => ({
+      unit_id: "unit-" + index, name: "u" + index, files: [path], required_lenses: [],
+    })) },
+    surface_manifest: { surfaces: paths.map((path, index) => ({
+      id: "surface-" + index, kind: "interface", entrypoint: path,
+    })) },
+    intent_checkpoint: {
+      schema_version: "intent-checkpoint/v1", confirmed_at: "x", confirmed_by: "host",
+      scope_summary: "test", intent_summary: "test",
+    },
+  });
 }
 
-test("runPlanningExecutor applies disposition_overrides before coverage initialization", async () => {
-  // A file that is `included` but has a disposition_override marking it `generated`
-  // should NOT appear in any audit task.
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["dist/index.js", "src/app.ts"]),
-    file_disposition: {
-      files: [
-        { path: "dist/index.js", status: "included", reason: "" },
-        { path: "src/app.ts", status: "included", reason: "" },
-      ],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u1",
-          name: "app",
-          files: ["dist/index.js", "src/app.ts"],
-          required_lenses: ["correctness"],
-        },
-      ],
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      disposition_overrides: [
-        { path: "dist/index.js", status: "generated", reason: "build output override" },
-      ],
-    },
-  });
-
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, TEST_LINE_INDEX);
-  const tasks = result.updated.audit_tasks ?? [];
-  const distTaskPaths = tasks.flatMap((task) => task.file_paths ?? []);
-  expect(!distTaskPaths.includes("dist/index.js"), "dist/index.js should not appear in any audit task after disposition override").toBeTruthy();
-});
-
-test.each([
-  "src/generated",
-  "src/generated/",
-  "src\\generated",
-  "src\\generated\\",
-])("runPlanningExecutor shares review scope matching for %s", async (path) => {
-  const paths = ["src/generated/a.ts", "src/generated/nested/b.ts", "src/generated-other/c.ts"];
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(paths),
-    file_disposition: { files: paths.map((path) => ({ path, status: "included" })) },
-    unit_manifest: {
-      units: paths.map((path, index) => ({
-        unit_id: `u${index}`, name: path, files: [path], required_lenses: ["correctness"],
-      })),
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host", scope_summary: "test", intent_summary: "test",
-      disposition_overrides: [{ path, status: "generated", reason: "generated output" }],
-    },
-  });
-  const result = await runPlanningExecutor(
-    bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
-  );
-  expect(result.updated.coverage_matrix!.files.map((file) => [file.path, file.audit_status])).toEqual([
-    [paths[0], "excluded"], [paths[1], "excluded"], [paths[2], "pending"],
-  ]);
-  const taskPaths = (result.updated.audit_tasks ?? []).flatMap((task) => task.file_paths ?? []);
-  expect(taskPaths).not.toContain(paths[0]);
-  expect(taskPaths).not.toContain(paths[1]);
-  expect(taskPaths).toContain(paths[2]);
-  const review = renderSharedStructuralContext(bundle, 5);
-  expect(review).toContain("u0 [excluded: generated output]");
-  expect(review).toContain("u1 [excluded: generated output]");
-  expect(review).toContain("u2 [in scope]");
-
-  // The same scope without its sibling has no work to dispatch at all.
-  bundle.repo_manifest!.files.pop();
-  bundle.file_disposition!.files.pop();
-  bundle.unit_manifest!.units.pop();
-  const excludedOnly = await runPlanningExecutor(
-    bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
-  );
-  expect(excludedOnly.updated.coverage_matrix!.files.every((file) => file.audit_status === "excluded")).toBe(true);
-  expect(excludedOnly.updated.audit_tasks).toEqual([]);
-});
-
-test.each(["included", "excluded", "generated", "vendor", "binary", "doc_only"] as const)(
-  "runPlanningExecutor preserves first-match %s disposition and exact file matching",
-  async (status) => {
-    const paths = ["src/app.ts", "src/app.tsx"];
-    const bundle = makeBaseBundle({
-      repo_manifest: makeRepoManifestWithFiles(paths),
-      file_disposition: { files: paths.map((path) => ({ path, status: "included" })) },
-      unit_manifest: {
-        units: [{ unit_id: "u1", name: "app", files: paths, required_lenses: ["correctness"] }],
-      },
-      intent_checkpoint: {
-        schema_version: "intent-checkpoint/v1",
-        confirmed_at: "2026-01-01T00:00:00.000Z",
-        confirmed_by: "host", scope_summary: "test", intent_summary: "test",
-        disposition_overrides: [
-          { path: "src/app.ts", status, reason: "first match" },
-          { path: "src/app.ts", status: status === "included" ? "excluded" : "included", reason: "later match" },
-        ],
-      },
-    });
-    const result = await runPlanningExecutor(
-      bundle, nonExistentRoot, Object.fromEntries(paths.map((path) => [path, 100])),
-    );
-    expect(result.updated.coverage_matrix!.files.map((file) => [file.path, file.audit_status])).toEqual([
-      [paths[0], status === "included" ? "pending" : "excluded"], [paths[1], "pending"],
-    ]);
-    const taskPaths = (result.updated.audit_tasks ?? []).flatMap((task) => task.file_paths ?? []);
-    expect(taskPaths.includes(paths[0])).toBe(status === "included");
-    expect(taskPaths).toContain(paths[1]);
+test.each(["src/generated", "src/generated/", "src\\generated", "src\\generated\\"])(
+  "question coverage and structural context share disposition prefix matching for %s", (path) => {
+    const paths = ["src/generated/a.ts", "src/generated/nested/b.ts", "src/generated-other/c.ts"];
+    const bundle = questionScopeFixture(paths);
+    bundle.intent_checkpoint!.disposition_overrides = [{ path, status: "generated", reason: "generated output" }];
+    expect(reviewSourceScope(bundle).allowedSourcePaths).toEqual([paths[2]]);
+    const plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot" });
+    expect(plan.omissions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface_id: "surface-0", reason: "generated output" }),
+      expect.objectContaining({ surface_id: "surface-1", reason: "generated output" }),
+    ]));
+    expect(plan.questions.some(question => question.source_dependencies.some(dep => dep.key === paths[2]))).toBe(true);
+    expect(plan.questions.every(question => question.source_dependencies.every(dep =>
+      dep.kind !== "source" || dep.key === paths[2],
+    ))).toBe(true);
+    const review = renderSharedStructuralContext(bundle, 1);
+    bundle.risk_register = { items: paths.map((_, index) => ({
+      unit_id: "unit-" + index, risk_score: 100 - index, signals: [],
+    })) };
+    const rankedReview = renderSharedStructuralContext(bundle, 1);
+    for (const prompt of [review, rankedReview]) {
+      const starts = prompt.split("### Starting points (orient, then roam)")[1]!;
+      expect(starts).toContain("**unit-2**");
+      expect(starts).not.toMatch(/\*\*unit-[01]\*\*|src\/generated\//u);
+      expect(starts).toContain("Excluded units are dependency context only");
+    }
+    expect(review).toContain("unit-0 [excluded: generated output]");
+    expect(review).toContain("unit-1 [excluded: generated output]");
+    expect(review).toContain("unit-2 [in scope]");
   },
 );
 
-test("runPlanningExecutor does not affect files without a disposition_override", async () => {
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["src/app.ts"]),
-    file_disposition: {
-      files: [{ path: "src/app.ts", status: "included", reason: "" }],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u1",
-          name: "app",
-          files: ["src/app.ts"],
-          required_lenses: ["correctness"],
-        },
-      ],
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      disposition_overrides: [],
-    },
-  });
-
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, TEST_LINE_INDEX);
-  const tasks = result.updated.audit_tasks ?? [];
-  // src/app.ts should produce tasks since line count is non-trivial
-  const srcPaths = tasks.flatMap((t) => t.file_paths ?? []);
-  expect(srcPaths.includes("src/app.ts"), "src/app.ts should appear in tasks when not overridden and line count is non-trivial").toBeTruthy();
-});
-
-// ---------------------------------------------------------------------------
-// 5. runPlanningExecutor — lens_selection wiring
-// ---------------------------------------------------------------------------
-
-test("runPlanningExecutor lens_selection.include limits task lenses", async () => {
-  // Use tooling_scripts path → gets "correctness", "operability", "config_deployment"
-  // Use runtime path → gets "correctness", "maintainability", "tests", "observability"
-  // With include: ["security", "correctness"], only correctness (mandatory-adjacent) tasks survive.
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["scripts/deploy.ts", "src/app.ts"]),
-    file_disposition: {
-      files: [
-        { path: "scripts/deploy.ts", status: "included", reason: "" },
-        { path: "src/app.ts", status: "included", reason: "" },
-      ],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u1",
-          name: "deploy-scripts",
-          files: ["scripts/deploy.ts"],
-          required_lenses: ["correctness", "operability", "config_deployment"],
-        },
-        {
-          unit_id: "u2",
-          name: "app",
-          files: ["src/app.ts"],
-          required_lenses: ["correctness", "maintainability"],
-        },
-      ],
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      lens_selection: { include: ["security", "correctness"] },
-    },
-  });
-
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, TEST_LINE_INDEX);
-  const tasks = result.updated.audit_tasks ?? [];
-  const lensesUsed = new Set(tasks.map((t) => t.lens));
-  expect(!lensesUsed.has("operability"), "operability should not appear in tasks when not in lens_selection.include").toBeTruthy();
-  expect(!lensesUsed.has("maintainability"), "maintainability should not appear in tasks when not in lens_selection.include").toBeTruthy();
-});
-
-test("runPlanningExecutor lens_selection.exclude removes non-mandatory lenses", async () => {
-  // concurrency_state path derives: reliability, performance, correctness, tests, observability
-  // Excluding performance → performance tasks should not appear.
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["src/queue.ts"]),
-    file_disposition: {
-      files: [{ path: "src/queue.ts", status: "included", reason: "" }],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u1",
-          name: "queue",
-          files: ["src/queue.ts"],
-          required_lenses: ["correctness", "reliability", "performance"],
-        },
-      ],
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      lens_selection: { exclude: ["performance"] },
-    },
-  });
-
-  const lineIndex = { "src/queue.ts": 100 };
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
-  const tasks = result.updated.audit_tasks ?? [];
-  const lensesUsed = new Set(tasks.map((t) => t.lens));
-  expect(!lensesUsed.has("performance"), "performance should not appear in tasks when in lens_selection.exclude").toBeTruthy();
-});
-
-test("runPlanningExecutor mandatory lenses always included regardless of lens_selection.exclude", async () => {
-  // security_sensitive path → derives: security, correctness, reliability, tests
-  // Attempt to exclude security and correctness (both mandatory) → must be ignored.
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["src/auth.ts"]),
-    file_disposition: {
-      files: [{ path: "src/auth.ts", status: "included", reason: "" }],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u-auth",
-          name: "auth",
-          files: ["src/auth.ts"],
-          required_lenses: ["security", "correctness"],
-        },
-      ],
-    },
-    intent_checkpoint: {
-      schema_version: "intent-checkpoint/v1",
-      confirmed_at: "2026-01-01T00:00:00.000Z",
-      confirmed_by: "host",
-      scope_summary: "test",
-      intent_summary: "test",
-      // Attempt to exclude mandatory lenses — must be ignored
-      lens_selection: { exclude: ["security", "correctness"] },
-    },
-  });
-
-  const lineIndex = { "src/auth.ts": 100 };
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
-  const tasks = result.updated.audit_tasks ?? [];
-  const lensesUsed = new Set(tasks.map((t) => t.lens));
-  // Mandatory lenses must be retained even when excluded.
-  // src/auth.ts matches security_sensitive (auth token), so security and correctness
-  // should both appear as tasks.
-  const lensesFromRequiredUnits = ["security", "correctness"];
-  for (const lens of lensesFromRequiredUnits) {
-    expect(lensesUsed.has(lens), `mandatory lens ${lens} must be present in tasks even when in lens_selection.exclude`).toBeTruthy();
-  }
-});
-
-test("runPlanningExecutor with no lens_selection includes all lenses (existing behavior)", async () => {
-  // concurrency_state path (queue) → derives: reliability, performance, correctness, tests, observability
-  // Without lens_selection, all derived lenses should produce tasks.
-  const bundle = makeBaseBundle({
-    repo_manifest: makeRepoManifestWithFiles(["src/queue-worker.ts"]),
-    file_disposition: {
-      files: [{ path: "src/queue-worker.ts", status: "included", reason: "" }],
-    },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "u-queue",
-          name: "queue",
-          files: ["src/queue-worker.ts"],
-          required_lenses: ["correctness", "performance", "reliability"],
-        },
-      ],
-    },
-  });
-
-  const lineIndex = { "src/queue-worker.ts": 100 };
-  const result = await runPlanningExecutor(bundle, nonExistentRoot, lineIndex);
-  const tasks = result.updated.audit_tasks ?? [];
-  const lensesUsed = new Set(tasks.map((t) => t.lens));
-  // All lenses derived from the path should be present when no lens_selection is set
-  expect(lensesUsed.has("correctness"), "correctness should be in tasks").toBeTruthy();
-  expect(lensesUsed.has("performance"), "performance should be in tasks").toBeTruthy();
-  expect(lensesUsed.has("reliability"), "reliability should be in tasks").toBeTruthy();
-});
-
-// ---------------------------------------------------------------------------
-// 6. IntentCheckpoint schema round-trip
-// ---------------------------------------------------------------------------
+test.each(["included", "excluded", "generated", "vendor", "binary", "doc_only"] as const)(
+  "question scope preserves first-match %s and exact file matching", (status) => {
+    const paths = ["src/app.ts", "src/app.tsx"];
+    const bundle = questionScopeFixture(paths);
+    bundle.intent_checkpoint!.disposition_overrides = [
+      { path: paths[0], status, reason: "first match" },
+      { path: paths[0], status: status === "included" ? "excluded" : "included", reason: "later match" },
+    ];
+    const scope = reviewSourceScope(bundle);
+    expect(scope.allowedSourcePaths).toEqual(status === "included" ? paths : [paths[1]]);
+    expect(scope.allowedContractPaths).toEqual(status === "included" || status === "doc_only" ? paths : [paths[1]]);
+  },
+);
 
 test("IntentCheckpoint with disposition_overrides round-trips through JSON without loss", () => {
   const checkpoint = {

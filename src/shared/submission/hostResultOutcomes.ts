@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/semantic-review-step.test.ts, tests/audit/host-handoff.test.ts
+// sites-pinned: tests/audit/host-handoff.test.ts
 // (the remedy map decides which section a refusal renders under, so inverting
 // any entry moves a work item to the wrong heading in the semantic-review
 // prompt)

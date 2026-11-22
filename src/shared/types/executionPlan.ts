@@ -14,6 +14,7 @@ export const ExecutionRequirementSchema = z.object({
     kind: z.enum(["positive", "negative"]),
     description: text,
     scope_paths: z.array(text).min(1),
+    source_obligation: z.object({ finding_id: text, obligation_id: text }).strict().optional(),
   }).strict()),
   inapplicable_reason: text.optional(),
 }).strict().superRefine((requirement, ctx) => {

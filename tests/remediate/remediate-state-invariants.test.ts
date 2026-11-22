@@ -29,7 +29,7 @@ import { StateStore } from "../../src/remediate/state/store.js";
 import type { RemediationState } from "../../src/remediate/state/store.js";
 import type { Finding } from "../../src/remediate/state/types.js";
 import { withFileLock } from "../../src/shared/io/fileLock.js";
-import { buildAuditFindingsDeliverable } from "audit-tools/shared";
+import { buildQuestionAuditReportFixture } from "./helpers/questionAuditReportFixture.js";
 import {
   auditFindingsPath,
   auditArtifactsDir,
@@ -127,12 +127,7 @@ describe("blockingIntakeQuestions — INV-remediate-state-06: blocking===true se
 describe("isAuditFindingsReport — INV-remediate-state-07: contract_version must be present", () => {
   it("accepts a report with the canonical contract_version and findings array", () => {
     expect(
-      isAuditFindingsReport({
-        contract_version: "audit-tools/audit-findings/v1alpha2",
-        findings: [],
-        work_blocks: [],
-        summary: {},
-      }),
+      isAuditFindingsReport(buildQuestionAuditReportFixture([]).report),
     ).toBe(true);
   });
 
@@ -503,7 +498,7 @@ describe("canonical plan changes preserve authored evidence", () => {
 /** Two findings, one of which the autonomous allowlist will not auto-approve. */
 function autonomousAuditReport(): string {
   return JSON.stringify(
-    buildAuditFindingsDeliverable([
+    buildQuestionAuditReportFixture([
       {
         id: "ARC-leftover-001",
         title: "Module boundaries leak persistence concerns",
@@ -526,7 +521,7 @@ function autonomousAuditReport(): string {
         affected_files: [{ path: "src/parser.ts" }],
         evidence: ["src/parser.ts:9 evidence"],
       },
-    ] as Finding[], LEFTOVER_SOURCE_AUDIT_READ),
+    ] as Finding[], LEFTOVER_SOURCE_AUDIT_READ).report,
   );
 }
 

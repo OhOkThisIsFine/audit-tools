@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review_submission.schema.json",
+  "title": "Question Review Submission",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "audit-tools/question-review/v1"
+    },
+    "question_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "submission_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assignment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inspected_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_line": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "end_line": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "answer": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "findings",
+            "clean",
+            "inconclusive"
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "schema_version": {
+                "type": "string",
+                "const": "audit-tools/question-review/v1"
+              },
+              "question_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "snapshot_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observation_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "part_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "source_confirmed",
+                  "runtime_observed",
+                  "unverified"
+                ]
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "symbol": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start_line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "end_line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "evidence_refs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "evidence_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "observation_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "evidence_id"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "schema_version",
+              "question_id",
+              "revision_id",
+              "snapshot_id",
+              "observation_id",
+              "part_id",
+              "kind",
+              "statement",
+              "source_refs",
+              "evidence_refs"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "part_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "findings",
+                  "clean",
+                  "inconclusive"
+                ]
+              },
+              "observation_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "part_id",
+              "outcome",
+              "observation_ids"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "schema_version": {
+                "type": "string",
+                "const": "audit-tools/question-review/v1"
+              },
+              "question_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "finding_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "confirmed_defect",
+                  "design_opportunity",
+                  "lead"
+                ]
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "info"
+                ]
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "claim": {
+                "type": "string",
+                "minLength": 1
+              },
+              "consequence": {
+                "type": "string",
+                "minLength": 1
+              },
+              "next_step": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "observation_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "To support a findings part, cite its supported observations here (including for leads and design opportunities). Confirmed defects require a linked findings part."
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "symbol": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start_line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "end_line": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "verification": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "analyzer"
+                        },
+                        "obligation_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "provenance": {
+                          "type": "object",
+                          "properties": {
+                            "analyzer_id": {
+                              "type": "string"
+                            },
+                            "rule": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "snippet_hash": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "analyzer_id",
+                            "path",
+                            "snippet_hash"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "obligation_id",
+                        "provenance"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "assertion"
+                        },
+                        "obligation_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "expected": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "source_refs": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "symbol": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "start_line": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              },
+                              "end_line": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0
+                              }
+                            },
+                            "required": [
+                              "path"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "obligation_id",
+                        "expected",
+                        "source_refs"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "disposition"
+                        },
+                        "obligation_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "disposition": {
+                          "type": "string",
+                          "enum": [
+                            "implemented",
+                            "deferred",
+                            "rejected",
+                            "already_fixed",
+                            "out_of_scope"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "obligation_id",
+                        "disposition",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 1
+              },
+              "divergence": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "schema_version",
+              "question_id",
+              "revision_id",
+              "finding_id",
+              "kind",
+              "severity",
+              "confidence",
+              "claim",
+              "consequence",
+              "next_step",
+              "evidence_ids",
+              "source_refs",
+              "verification"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "outcome",
+        "observations",
+        "parts",
+        "findings"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "question_id",
+    "revision_id",
+    "snapshot_id",
+    "submission_id",
+    "assignment_id",
+    "inspected_sources",
+    "evidence_ids",
+    "limitations",
+    "answer"
+  ],
+  "additionalProperties": false
+}

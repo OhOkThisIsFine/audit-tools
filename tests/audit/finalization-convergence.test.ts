@@ -1,220 +1,63 @@
-import { buildDesignReviewSnapshot } from "../../src/audit/orchestrator/designReviewSnapshot.js";
-import { persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
 import { test, expect } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ARTIFACT_FILE_TO_BUNDLE_KEY, loadArtifactBundle, writeCoreArtifacts } from "../../src/audit/io/artifacts.js";
+import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { advanceToDispatchReady } from "./helpers/completion-harness.js";
+import { presentQuestionReport, readQuestionFindings, readQuestionWorkload, submitQuestions } from "./helpers/question-completion-harness.js";
+import { withTempDir } from "./helpers/withTempDir.mjs";
 
-import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
-import type { AdvanceAuditResult } from "../../src/audit/orchestrator/advanceTypes.js";
+// Every next-step loads what the previous one persisted. An unpublished run
+// must finish within the helper's ten-step bound without dispatching again or
+// re-planning after its report appears.
+test("bound question finalization converges through persist/reload without oscillating", async () => {
+  await withTempRepo(async (root) => {
+    await writeFile(join(root, "src", "api", "resume.ts"), "export function resume(): string { return 'pending'; }\n");
+    const dir = join(root, ".audit-tools", "audit");
+    // Use the same in-process handler as finalization. Every call still
+    // reloads persisted artifacts; starting a fresh CLI process for each
+    // unrelated design phase adds startup time without exercising more of
+    // the reload and convergence invariants below.
+    const first = await advanceToDispatchReady(root);
+    const workload = await readQuestionWorkload(first);
+    const planFile = join(dir, "review_plan.json");
+    const planHash = async () => hashArtifactValue("review_plan.json", JSON.parse(await readFile(planFile, "utf8")));
+    const initialPlanHash = await planHash();
+    const initial = await loadArtifactBundle(dir);
+    const initialRevision = initial.artifact_metadata?.artifacts["review_plan.json"]?.revision;
+    expect(typeof initialRevision).toBe("number");
+    const answers = await submitQuestions(root, workload.work_items);
+    let reportAppeared = false;
+    const completed = await presentQuestionReport(root, async (step) => {
+      expect(step.step_kind).not.toBe("dispatch_review");
+      const current = await loadArtifactBundle(dir);
+      if (current.audit_report !== undefined) reportAppeared = true;
+      if (reportAppeared) expect(current.audit_report).toBeDefined();
+      expect(current.artifact_metadata?.artifacts["review_plan.json"]?.revision).toBe(initialRevision);
+      expect(await planHash()).toBe(initialPlanHash);
+    });
+    expect(reportAppeared).toBe(true);
+    expect(completed.status).toBe("complete");
+    const report = await readQuestionFindings(join(dir, "audit-findings.json"));
+    expect(report.question_review.accepted.map(({ submission }) => submission)).toEqual(expect.arrayContaining(answers));
+    expect(report.question_review.accepted).toHaveLength(answers.length);
 
-const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
-const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
-const { loadArtifactBundle, writeCoreArtifacts, ARTIFACT_FILE_TO_BUNDLE_KEY } =
-  await import("../../src/audit/io/artifacts.js");
-const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
-const { runSynthesisExecutor: runSynthesisExecutorRaw } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
-const runSynthesisExecutor = (
-  bundle: Parameters<typeof runSynthesisExecutorRaw>[0],
-  results?: Parameters<typeof runSynthesisExecutorRaw>[1],
-) => runSynthesisExecutorRaw(bundle, results, { auditRead: null });
-
-const LINE_INDEX: Record<string, number> = {
-  "src/api/auth.ts": 6,
-  "src/lib/session.ts": 8,
-  "package.json": 5,
-};
-
-// The hermetic per-worker analyzer cache resolves every dep-carrying analyzer
-// ABSENT, and the plan draw halts on an undecided install (CX-02: every draw
-// classifies before dispatch). Model the operator's recorded decision the same
-// way the intent confirmation is modeled — typescript stays skipped.
-const ANALYZERS = { typescript: "skip" } as const;
-
-const { withTempDir } = await import("./helpers/withTempDir.mjs");
-
-async function writeFixture(root: string): Promise<void> {
-  await mkdir(join(root, "src", "api"), { recursive: true });
-  await mkdir(join(root, "src", "lib"), { recursive: true });
-  await writeFile(
-    join(root, "package.json"),
-    JSON.stringify(
-      { name: "conv", version: "0.0.0", scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    ) + "\n",
-  );
-  // src/api/auth.ts → a security-lens high-risk unit → runtime validation tasks,
-  // so the finalization loop genuinely exercises runtime_validation ↔ synthesis.
-  await writeFile(
-    join(root, "src", "api", "auth.ts"),
-    // The import graph-corroborates auth.ts's critical flow, so flow inference
-    // meets its confidence bar and no host critical-flow fallback is owed.
-    'import { createSession } from "../lib/session.js";\nexport function authenticate(token: string): boolean {\n  if (!token) return false;\n  return createSession(token).id.trim().length > 0;\n}\n',
-  );
-  await writeFile(
-    join(root, "src", "lib", "session.ts"),
-    "export interface Session { id: string; }\nexport function createSession(id: string): Session {\n  return { id };\n}\n",
-  );
-}
-
-function resultsForPending(bundle: ArtifactBundle) {
-  const have = new Set((bundle.audit_results ?? []).map((r) => r.task_id));
-  return (bundle.audit_tasks ?? [])
-    .filter((t) => t.status !== "complete" && !have.has(t.task_id))
-    .map((task) => ({
-      task_id: task.task_id,
-      unit_id: task.unit_id,
-      pass_id: task.pass_id,
-      lens: task.lens,
-      agent_role: "test",
-      file_coverage: (task.file_paths ?? []).map((p) => ({
-        path: p,
-        total_lines: LINE_INDEX[p] ?? 10,
-      })),
-      findings: [],
-      reviewed_clean: true,
-      notes: [],
-      requires_followup: false,
-    }));
-}
-
-// Drives the SAME load → decide → advance → persist(prune) loop the production
-// CLI runs (cli/nextStepCommand.ts), auto-answering the agent handoff. A1 was a
-// finalization oscillation that spun to the iteration cap; this asserts the
-// deterministic loop reaches `complete` quickly and never re-runs planning after
-// synthesis (a planning re-run rewrites runtime_validation_report.json and
-// re-stales synthesis — the oscillation engine).
-test("finalization converges through the real persist/reload loop without oscillating", async () => {
-  await withTempDir("audit-code-finalization-", async (root) => {
-    await writeFixture(root);
-    const artDir = join(root, ".audit-tools/audit");
-    await mkdir(artDir, { recursive: true });
-
-    const trail: (string | null)[] = [];
-    let completedAt = -1;
-    let lastUpdated: ArtifactBundle | null = null;
-    let sawRuntimeTasks = false;
-    let synthesisReachedIter = -1;
-    let planningReRanAfterSynthesis = false;
-    const MAX_ITERS = 25;
-
-    for (let i = 0; i < MAX_ITERS; i++) {
-      const bundle = await loadArtifactBundle(artDir);
-      if ((bundle.runtime_validation_tasks?.tasks ?? []).length > 0) {
-        sawRuntimeTasks = true;
+    // Round-trip the completed active registry independently of its run files.
+    // A value that changes meaning on a write/reload can re-stale its dependents.
+    const final = await loadArtifactBundle(dir);
+    await withTempDir("question-finalization-roundtrip-", async (copy) => {
+      await mkdir(copy, { recursive: true });
+      await writeCoreArtifacts(copy, final, { prune: true });
+      const loaded = await loadArtifactBundle(copy);
+      for (const [name, key] of Object.entries(ARTIFACT_FILE_TO_BUNDLE_KEY)) {
+        if (name === "tooling_manifest.json") continue; // rebuilt by the loader
+        const before = final[key];
+        const after = loaded[key];
+        expect(after == null ? undefined : hashArtifactValue(name, after), name)
+          .toBe(before == null ? undefined : hashArtifactValue(name, before));
       }
-      // Synthesis is detected by the report bundle appearing, NOT by a discrete
-      // `synthesis_current` trail entry: advanceAudit now DRAINS the consecutive
-      // deterministic regen frontier (runtime_validation → synthesis → …) within
-      // one call, so only the FIRST obligation of each call surfaces in `trail`.
-      const reportAlreadyPresent = bundle.audit_report != null;
-      const decision = decideNextStep(bundle);
-      if (decision.state.status === "complete") {
-        completedAt = i;
-        break;
-      }
-      expect(decision.selected_executor, `iter ${i}: an executor should be selected (trail: ${trail.join(" -> ")})`).toBeTruthy();
-      trail.push(decision.selected_obligation);
-      // Oscillation guard (the real A1 bug): once the report exists, a later step
-      // must never re-open planning (a planning re-run rewrites
-      // runtime_validation_report.json and re-stales synthesis).
-      if (reportAlreadyPresent && decision.selected_obligation === "planning_artifacts") {
-        planningReRanAfterSynthesis = true;
-      }
-
-      let res: AdvanceAuditResult;
-      if (decision.selected_executor === "intent_checkpoint_executor") {
-        // Host-delegation boundaries never manufacture semantic input. Model
-        // the conversation host's canonical confirmation, then let the engine
-        // bind its intent-equivalence baseline and continue deterministically.
-        res = await advanceAudit(
-          {
-            ...bundle,
-            intent_checkpoint: {
-              schema_version: "intent-checkpoint/v1",
-              confirmed_at: "2026-04-22T00:00:00Z",
-              confirmed_by: "host",
-              scope_summary: "full fixture repository",
-              intent_summary: "complete audit",
-            },
-          },
-          { root, lineIndex: LINE_INDEX, analyzers: ANALYZERS },
-        );
-      } else if (
-        decision.selected_executor === "design_review_contract" ||
-        decision.selected_executor === "design_review_conceptual"
-      ) {
-        const assessment = bundle.design_assessment;
-        if (!assessment) {
-          throw new Error("design-review handoff requires design_assessment");
-        }
-        const pass = decision.selected_executor === "design_review_contract"
-          ? "contract"
-          : "conceptual";
-        res = await advanceAudit(
-          {
-            ...bundle,
-            design_assessment: {
-              ...assessment,
-              [`${pass}_findings`]: [],
-              [`${pass}_reviewed`]: true,
-            },
-            design_review_snapshots: {
-              ...bundle.design_review_snapshots,
-              [pass]: buildDesignReviewSnapshot(pass, [], bundle, "2026-04-22T00:00:00Z"),
-            },
-          },
-          { root, lineIndex: LINE_INDEX, analyzers: ANALYZERS },
-        );
-      } else if (decision.selected_executor === "semantic_review_executor") {
-        const results = resultsForPending(bundle);
-        expect(results.length > 0, "semantic-review handoff must have pending tasks to answer").toBeTruthy();
-        res = await advanceAudit(bundle, {
-          root,
-          lineIndex: LINE_INDEX,
-          analyzers: ANALYZERS,
-          preferredExecutor: "result_ingestion_executor",
-          auditResults: results,
-        });
-      } else {
-        res = await advanceAudit(bundle, {
-          root,
-          lineIndex: LINE_INDEX,
-          analyzers: ANALYZERS,
-          // This driver models a session with NO narrative turn: the draw's
-          // classification is session-owned tri-state (CX-02), so the omit arm
-          // needs the session's explicit `false` — an absent value halts at
-          // the boundary rather than durably omitting a turn a real session
-          // might be owed.
-          narrativeEnabled: false,
-        });
-      }
-      // A drain that produced the report (synthesis ran) is recorded the first
-      // time audit_report becomes present in the accumulated bundle.
-      if (synthesisReachedIter < 0 && res.updated_bundle.audit_report != null) {
-        synthesisReachedIter = i;
-      }
-      lastUpdated = res.updated_bundle;
-      await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });
-      await persistDesignReviewSnapshots(artDir, res.updated_bundle);
-    }
-
-    expect(completedAt >= 0, `finalization must converge to complete within ${MAX_ITERS} iterations; trail: ${trail.join(" -> ")}`).toBeTruthy();
-    expect(sawRuntimeTasks, "fixture should exercise runtime validation tasks").toBeTruthy();
-
-    expect(synthesisReachedIter >= 0, `synthesis should run (audit_report must be produced); trail: ${trail.join(" -> ")}`).toBeTruthy();
-    expect(!planningReRanAfterSynthesis, `planning must not re-run after synthesis; trail: ${trail.join(" -> ")}`).toBeTruthy();
-
-    // Every persisted artifact must survive a reload with an identical content
-    // hash — a round-trip-unstable artifact perpetually re-stales its downstream.
-    const reloaded = await loadArtifactBundle(artDir);
-    for (const [fileName, key] of Object.entries(ARTIFACT_FILE_TO_BUNDLE_KEY)) {
-      if (fileName === "tooling_manifest.json") continue; // generated_at excluded from hash
-      const mem = lastUpdated?.[key];
-      const disk = reloaded[key];
-      if ((mem ?? null) === null && (disk ?? null) === null) continue;
-      expect(mem == null ? "ABSENT" : hashArtifactValue(fileName, mem), `${fileName} must round-trip identically across persist/reload`).toBe(disk == null ? "ABSENT" : hashArtifactValue(fileName, disk));
-    }
+    });
   });
 });
 
@@ -240,32 +83,12 @@ test("writeCoreArtifacts prunes cleared artifacts only when asked", async () => 
   });
 });
 
-// Fix: synthesis renders findings but does not own audit_results; rewriting it
-// (or materializing an empty one) desyncs it from its metadata entry and
-// re-stales coverage_matrix → planning.
-test("synthesis renders findings without rewriting or materializing audit_results", () => {
-  const noResults = runSynthesisExecutor({ coverage_matrix: { files: [] } }, undefined);
-  expect(noResults.updated.audit_results).toBe(undefined);
-  expect(!noResults.artifacts_written.includes("audit_results.jsonl")).toBeTruthy();
-  expect(noResults.artifacts_written.includes("audit-report.md")).toBeTruthy();
-
-  const ingested = [
-    { task_id: "u:security", unit_id: "u", pass_id: "p", lens: "security", file_coverage: [], findings: [] },
-  ];
-  const withResults = runSynthesisExecutor(
-    { coverage_matrix: { files: [] }, audit_results: ingested },
-    undefined,
-  );
-  expect(withResults.updated.audit_results).toBe(ingested);
-});
-
 // Fix: a rebuilt artifact's wall-clock generated_at is provenance, not content;
 // it must not change the metadata content hash (else its revision churns and
 // perpetually re-stales downstreams).
 test("metadata content hash ignores generated_at for rebuilt timestamped artifacts", () => {
-  for (const name of ["audit_plan_metrics.json", "design_assessment.json"]) {
+  for (const name of ["design_assessment.json", "repo_manifest.json"]) {
     expect(hashArtifactValue(name, { generated_at: "2026-01-01T00:00:00Z", data: 1 }), `${name} hash should ignore generated_at`).toBe(hashArtifactValue(name, { generated_at: "2026-12-31T23:59:59Z", data: 1 }));
   }
-  // coverage_matrix is intentionally NOT stripped (its timestamp is content).
-  expect(hashArtifactValue("coverage_matrix.json", { generated_at: "a", files: [] })).not.toBe(hashArtifactValue("coverage_matrix.json", { generated_at: "b", files: [] }));
+  expect(hashArtifactValue("design_assessment.json", { data: 1 })).not.toBe(hashArtifactValue("design_assessment.json", { data: 2 }));
 });

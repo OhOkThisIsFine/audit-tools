@@ -326,6 +326,16 @@ export async function runRuntimeValidationExecutor(
       });
       continue;
     }
+    if (task.evidence_requirements?.length && !sourceKey) {
+      byTaskId.set(task.id, {
+        task_id: task.id,
+        status: "inconclusive",
+        summary: "Not run: the audit source is not bound to a hashed repository manifest.",
+        evidence: [],
+        notes: task.evidence_requirements,
+      });
+      continue;
+    }
 
     const signature = task.command.join("\0");
     if (byCommand.has(signature)) {
@@ -338,10 +348,15 @@ export async function runRuntimeValidationExecutor(
     byCommand.set(signature, outcome);
     byTaskId.set(task.id, {
       task_id: task.id,
-      status: outcome.status,
-      summary: outcome.summary,
+      status: "inconclusive",
+      summary: `Shared command only: ${outcome.summary} Task-specific evidence is required.`,
       evidence: outcome.evidence,
-      notes: [`Target paths: ${task.target_paths.join(", ")}`],
+      notes: [
+        `Target paths: ${task.target_paths.join(", ")}`,
+        `Command argv: ${JSON.stringify(task.command)}`,
+        `Command working directory: ${root}`,
+        `Planned manifest key (not execution proof): ${sourceKey ?? "unavailable"}`,
+      ],
     });
   }
 
@@ -389,6 +404,7 @@ export function runRuntimeValidationUpdateExecutor(
     bundle.runtime_validation_tasks,
     existingReport,
     updates,
+    sourceKey,
   );
   const baseUpdatedBundle: ArtifactBundle = {
     ...bundle,
@@ -426,14 +442,6 @@ export function runExternalAnalyzerImportExecutor(
         bundle.external_analyzer_results,
         externalResults,
       ),
-      coverage_matrix: undefined,
-      flow_coverage: undefined,
-      runtime_validation_tasks: undefined,
-      runtime_validation_report: undefined,
-      audit_tasks: undefined,
-      task_affinity_graph: undefined,
-      audit_plan_metrics: undefined,
-      requeue_tasks: undefined,
       audit_report: undefined,
     },
     artifacts_written: ["external_analyzer_results.json"],

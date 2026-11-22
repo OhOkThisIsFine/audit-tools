@@ -165,110 +165,24 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "repo_manifest.json",
   ],
 
-  // Phase 3 — planning & execution. scope.json (delta vs. full) gates coverage;
-  // it is also a DIRECT input to audit_tasks so a scope change that produces an
-  // identical coverage_matrix (same files/buckets) still re-stales tasks
-  // (ARC-cebe3421-3) — the transitive scope→coverage_matrix→audit_tasks path
-  // only fires when coverage_matrix content changes. No cycle: planning writes
-  // scope.json, coverage_matrix.json, and audit_tasks.json in one advanceAudit
-  // call, dependency-first.
-  "coverage_matrix.json": [
+  // Phase 3: source, confirmed scope, and evidence freeze the question plan.
+  "review_plan.json": [
     "repo_manifest.json",
     "file_disposition.json",
-    "unit_manifest.json",
-    "intent_checkpoint.json",
-    "external_analyzer_results.json",
     "scope.json",
-    "audit_results.jsonl",
-  ],
-  // sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/staleness.test.ts
-  // Architecture-discovery tasks (architectureDiscovery.ts) are stored here too,
-  // derived from the design-review, charter, clarification and systemic findings
-  // plus the current result ledger — so each is a declared input, and a change
-  // to any of them re-stales the task set through this DAG like every other
-  // input. A listed write of audit_tasks.json is stamped against these inputs'
-  // current revisions, so every producer re-derives that family before it
-  // writes: planning wholesale, and the result-ingestion and both
-  // runtime-validation executors through the one assembly they share
-  // (`reviewTaskArtifacts` in ingestionExecutors.ts, which calls
-  // `reconcileArchitectureDiscoveryTasks`; ingestion appends
-  // audit_results.jsonl in the same call, so it assembles against the
-  // post-append ledger). coverage_matrix.json (read for its exclusions) needs
-  // no edge: every one of its inputs is declared here.
-  "audit_tasks.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "unit_manifest.json",
-    "critical_flows.json",
     "intent_checkpoint.json",
-    "external_analyzer_results.json",
-    "scope.json",
-    "design_assessment.json",
-    "charter_register.json",
-    "charter_clarification.json",
-    "systemic_challenge.json",
-    "audit_results.jsonl",
-  ],
-  "audit_plan_metrics.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "unit_manifest.json",
-    "critical_flows.json",
-    "intent_checkpoint.json",
-    "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "audit_tasks.json",
-    "audit_results.jsonl",
-  ],
-  // Provider-neutral task-affinity graph derived from audit_tasks (Phase A of
-  // the plan/dispatch seam). Dispatch partitions it just-in-time and persists
-  // nothing back. See spec/audit-workflow-design.md.
-  "task_affinity_graph.json": ["audit_tasks.json"],
-  "flow_coverage.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "critical_flows.json",
-    "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "audit_results.jsonl",
-  ],
-  "requeue_tasks.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "unit_manifest.json",
-    "critical_flows.json",
-    "intent_checkpoint.json",
-    "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "flow_coverage.json",
-    "audit_results.jsonl",
-  ],
-  "runtime_validation_tasks.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "unit_manifest.json",
     "surface_manifest.json",
     "critical_flows.json",
+    "unit_manifest.json",
+    "graph_bundle.json",
+    "charter_register.json",
+    "design_assessment.json",
     "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "flow_coverage.json",
-    "audit_results.jsonl",
-  ],
-  "runtime_validation_report.json": [
-    "repo_manifest.json",
-    "file_disposition.json",
-    "critical_flows.json",
-    "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "flow_coverage.json",
-    "audit_results.jsonl",
   ],
 
-  // Phase 4 — reporting. The human render depends on every analysis artifact;
-  // the canonical machine contract (audit-findings.json) is co-produced by
-  // synthesis. The optional narrative marker tracks audit-findings so a
-  // re-synthesized contract re-stales the themes/exec-summary/top-risks pass.
+  // Phase 4: the human report and its separate narrative marker.
   [AUDIT_REPORT_FILENAME]: [
+    "review_plan.json",
     "repo_manifest.json",
     "file_disposition.json",
     "unit_manifest.json",
@@ -282,10 +196,6 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     "systemic_challenge.json",
     "syntax_resolution_status.json",
     "external_analyzer_results.json",
-    "coverage_matrix.json",
-    "flow_coverage.json",
-    "runtime_validation_report.json",
-    "audit_results.jsonl",
     // Opt-in worker reflections (appended by workers, read-only to the
     // orchestrator). Only the markdown render's "Process Feedback" section
     // depends on it — NOT audit-findings.json, whose machine contract carries
@@ -294,6 +204,7 @@ export const ARTIFACT_DEPENDS_ON_MAP = {
     // an unchanged file never churns finalization.
     AGENT_FEEDBACK_FILENAME,
   ],
+  "audit-findings.json": ["review_plan.json"],
   "synthesis-narrative.json": ["audit-findings.json"],
 } satisfies DependencyMap;
 
@@ -340,13 +251,7 @@ export const ARTIFACT_DEPENDENTS_MAP: DependencyMap =
  * `findPriorityOrderingViolations` (advance.ts) checks every declared pair is
  * genuinely late; an ordinary slice edge must be early instead.
  */
-export const LATE_INPUT_EDGES: Partial<Record<ArtifactFileName, readonly ArtifactFileName[]>> = {
-  "audit_tasks.json": [
-    "charter_register.json",
-    "charter_clarification.json",
-    "systemic_challenge.json",
-  ],
-};
+export const LATE_INPUT_EDGES: Partial<Record<ArtifactFileName, readonly ArtifactFileName[]>> = {};
 
 /** True when `downstream ← upstream` is a declared late-input edge. */
 export function isLateInputEdge(downstream: string, upstream: string): boolean {

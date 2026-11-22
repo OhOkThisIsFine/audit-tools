@@ -1,10 +1,10 @@
 import { test, expect } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 import type { AuditFindingsReport } from "audit-tools/shared";
+import { buildQuestionAuditFindingsReport } from "../../src/audit/reporting/questionReport.js";
 import {
   FINDINGS_DRAW_COHERENCE_POLICY,
   buildContentCoherenceTrace,
@@ -152,51 +152,107 @@ test("normalizeExistingFindingsReport is deterministic: calling twice yields the
 
 // ── resynthesize CLI command ──────────────────────────────────────────────────
 
-test("resynthesize rewrites audit-findings.json and audit-report.md from promoted findings", async () => {
+const makePlan = (snapshot_id = "current") => ({
+  schema_version: "audit-tools/question-review/v1" as const, snapshot_id,
+  questions: [], inventory: [], omissions: [], lens_decisions: [],
+});
+const currentReport = (plan = makePlan()) => buildQuestionAuditFindingsReport({
+  plan, accepted: [], evidence: [], auditRead: null, dependenciesByQuestion: new Map(),
+});
+
+test("resynthesize refuses the archived default without rewriting its output pair", async () => {
   await withTempRoot(async (root) => {
     const auditToolsDir = join(root, ".audit-tools");
     await mkdir(auditToolsDir, { recursive: true });
 
     const inputPath = join(auditToolsDir, "audit-findings.json");
-    await writeFile(inputPath, JSON.stringify(makeReport(), null, 2), "utf8");
+    const archived = JSON.stringify(makeReport(), null, 2);
+    const markdown = join(auditToolsDir, "audit-report.md");
+    await writeFile(inputPath, archived, "utf8");
+    await writeFile(markdown, "archived report\n");
 
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];
     const { stdout, stderr, exitCode } = await runResynthesize(argv);
 
-    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
-
-    const outputJson = JSON.parse(
-      await readFile(join(auditToolsDir, "audit-findings.json"), "utf8"),
-    );
-    expect(outputJson.contract_version).toBe(AUDIT_FINDINGS_CONTRACT_VERSION);
-    expect(outputJson.summary.finding_count).toBe(2);
-    expect(outputJson.summary.work_block_count).toBe(1);
-
-    expect(existsSync(join(auditToolsDir, "audit-report.md")), "audit-report.md should be written").toBeTruthy();
-
-    const parsed = JSON.parse(stdout);
-    expect("findings_output" in parsed, "stdout JSON should include findings_output").toBeTruthy();
-    expect("report_output" in parsed, "stdout JSON should include report_output").toBeTruthy();
-    expect(parsed.finding_count).toBe(2);
-    expect(parsed.contract_version).toBe(AUDIT_FINDINGS_CONTRACT_VERSION);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("Archived reports are left unchanged");
+    expect(stdout).toBe("");
+    expect(await readFile(inputPath, "utf8")).toBe(archived);
+    expect(await readFile(markdown, "utf8")).toBe("archived report\n");
   });
 });
 
-test("resynthesize does not require the .audit-tools/audit working directory", async () => {
+test("resynthesize preserves the promoted v2 pair after rollover removes its working plan", async () => {
   await withTempRoot(async (root) => {
     const auditToolsDir = join(root, ".audit-tools");
     await mkdir(auditToolsDir, { recursive: true });
-    // Only the promoted findings file — no audit/ subdirectory.
-    await writeFile(
-      join(auditToolsDir, "audit-findings.json"),
-      JSON.stringify(makeReport(), null, 2),
-      "utf8",
-    );
-
+    const bytes = JSON.stringify(currentReport(), null, 2) + "\n";
+    const promoted = join(auditToolsDir, "audit-findings.json");
+    const markdown = join(auditToolsDir, "audit-report.md");
+    const preserved = "# Audit Report\n\n## Process Feedback\n\nOriginal run feedback.\n\n### Charter evidence coverage\n\n71 of 72 delivered.\n";
+    await writeFile(promoted, bytes, "utf8");
+    await writeFile(markdown, preserved, "utf8");
+    await writeFile(join(auditToolsDir, "audit-agent-feedback.jsonl"), "A historical sidecar is not bound to this report.");
     const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root];
-    const { exitCode, stderr } = await runResynthesize(argv);
-    expect(exitCode, `Unexpected exit code. stderr: ${stderr}`).toBe(0);
-    expect(!existsSync(join(root, ".audit-tools", "audit")), ".audit-tools/audit should not be created").toBeTruthy();
+    const { exitCode, stderr, stdout } = await runResynthesize(argv);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("No current review_plan.json owns the promoted report");
+    expect(stdout).toBe("");
+    expect(await readFile(promoted, "utf8")).toBe(bytes);
+    expect(await readFile(markdown, "utf8")).toBe(preserved);
+    // The artifact lock may create the directory; no work artifacts were written.
+    expect(await readdir(join(auditToolsDir, "audit"))).toEqual([]);
+  });
+});
+
+test.each(["archived", "same-version other run", "stale active run"] as const)(
+  "resynthesize refuses %s without changing the current or explicit pair", async (mode) => {
+    await withTempRoot(async root => {
+      const dir = join(root, ".audit-tools");
+      const active = join(dir, "audit");
+      await mkdir(active, { recursive: true });
+      const promoted = join(dir, "audit-findings.json");
+      const markdown = join(dir, "audit-report.md");
+      const explicit = join(root, "another-findings.json");
+      const bytes = JSON.stringify(currentReport());
+      const other = JSON.stringify(mode === "archived" ? makeReport() : currentReport(makePlan("other")));
+      await writeFile(promoted, bytes);
+      await writeFile(markdown, "current markdown");
+      await writeFile(explicit, other);
+      await writeFile(join(active, "review_plan.json"), JSON.stringify(makePlan(mode === "stale active run" ? "other" : "current")));
+      await writeFile(join(active, "audit-findings.json"), mode === "stale active run" ? other : bytes);
+      const argv = [process.execPath, "cli.ts", "resynthesize", "--root", root,
+        ...(mode === "stale active run" ? [] : ["--input", explicit])];
+      expect((await runResynthesize(argv)).exitCode).toBe(1);
+      expect(await readFile(promoted, "utf8")).toBe(bytes);
+      expect(await readFile(markdown, "utf8")).toBe("current markdown");
+      expect(await readFile(explicit, "utf8")).toBe(other);
+    });
+  },
+);
+
+test("resynthesize permits an exact explicit copy of the active owned report", async () => {
+  await withTempRoot(async root => {
+    const dir = join(root, ".audit-tools");
+    const active = join(dir, "audit");
+    await mkdir(active, { recursive: true });
+    const plan = makePlan();
+    const report = currentReport(plan);
+    const bytes = JSON.stringify(report);
+    const promoted = join(dir, "audit-findings.json");
+    const copy = join(root, "copy.json");
+    await writeFile(promoted, bytes);
+    await writeFile(copy, bytes);
+    await writeFile(join(active, "review_plan.json"), JSON.stringify(plan));
+    await writeFile(join(active, "audit-findings.json"), JSON.stringify(report, null, 2) + "\n");
+    await writeFile(join(active, "agent-feedback.jsonl"), "not this audit's evidence");
+    const result = await runResynthesize([process.execPath, "cli.ts", "resynthesize", "--root", root, "--input", copy]);
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(await readFile(promoted, "utf8")).toBe(bytes);
+    expect(await readFile(copy, "utf8")).toBe(bytes);
+    const markdown = await readFile(join(dir, "audit-report.md"), "utf8");
+    expect(markdown).toContain("Snapshot: current");
+    expect(markdown).not.toContain("not this audit's evidence");
   });
 });
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAuditFlowPhase, STEP_CONTRACT_VERSION } from "../../scripts/audit/smoke-audit-flow.mjs";
@@ -11,12 +11,14 @@ async function exercise(pauses: string[], finalPauses: string[] = []) {
   try {
     await mkdir(artifacts, { recursive: true });
     await writeFile(join(root, "a.ts"), "export {};\n");
-    await writeFile(join(artifacts, "audit_tasks.json"), JSON.stringify([{
-      task_id: "task", unit_id: "unit", pass_id: "pass", lens: "correctness", file_paths: ["a.ts"], rationale: "Smoke",
-    }]));
-    await writeFile(join(root, ".audit-tools", "audit-report.md"), "# Audit Report\n");
-    await writeFile(join(root, ".audit-tools", "audit-findings.json"), "{}");
-    await writeFile(join(artifacts, "run-ended.json"), "{}");
+    const contractVersion = "audit-tools/question-review/v1";
+    const question = { question_id: "question", revision_id: "revision", snapshot_id: "snapshot", requested_parts: [{ part_id: "part" }] };
+    const assignment = { assignment_id: "assignment" };
+    const hostWorkload = join(artifacts, "host-workload.json");
+    await writeFile(hostWorkload, JSON.stringify({ contract_version: contractVersion, run_id: "run",
+      work_items: [{ binding: { question, assignment } }] }));
+    await writeFile(join(artifacts, "review_plan.json"), "{}");
+    const accepted: { submission: { submission_id: string } }[] = [];
     const steps = [
       ...pauses.map(hash => ["analyzer_consent", hash]),
       ["dispatch_review", "ready"],
@@ -24,18 +26,36 @@ async function exercise(pauses: string[], finalPauses: string[] = []) {
       ["present_report", "complete"], ["functional_preflight", "next-run"],
     ];
     const respondToSmokeCommand = async (_cmd: string, args: string[]) => {
-      if (args[0] !== "next-step") return { stdout: JSON.stringify({ selected_executor: "result_ingestion_executor" }) };
+      if (args[0] !== "next-step") {
+        expect(args.slice(0, 4)).toEqual(["submit", "--work-item", assignment.assignment_id, "--from"]);
+        const submission = JSON.parse(await readFile(args[4]!, "utf8"));
+        expect(submission).toMatchObject({
+          schema_version: contractVersion, assignment_id: assignment.assignment_id,
+          question_id: question.question_id, revision_id: question.revision_id, snapshot_id: question.snapshot_id,
+          answer: { outcome: "inconclusive", findings: [], observations: [], parts: [{ part_id: "part", outcome: "inconclusive" }] },
+        });
+        accepted.push({ submission });
+        return { stdout: JSON.stringify({ disposition: "accepted", submission_id: submission.submission_id }) };
+      }
       const entry = steps[index++];
       if (!entry) throw new Error("Producer ran out of steps");
       const [kind, hash] = entry;
-      await writeFile(join(artifacts, "artifact_metadata.json"), JSON.stringify({ artifacts: { "audit_tasks.json": { content_hash: hash } } }));
+      if (kind === "present_report") {
+        expect(accepted).toHaveLength(1);
+        await writeFile(join(root, ".audit-tools", "audit-report.md"), "# Audit Report\n");
+        await writeFile(join(root, ".audit-tools", "audit-findings.json"), JSON.stringify({
+          findings: [], question_review: { completion: "incomplete", accepted, questions: [{ parts: [{ state: "inconclusive" }] }] },
+        }));
+        await writeFile(join(artifacts, "run-ended.json"), "{}");
+      }
+      await writeFile(join(artifacts, "artifact_metadata.json"), JSON.stringify({ artifacts: { "review_plan.json": { content_hash: hash } } }));
       return { stdout: JSON.stringify({ step_kind: kind, status: kind === "present_report" ? "complete" : "ready",
         contract_version: STEP_CONTRACT_VERSION, run_id: "run", agent_id: "process-" + index,
         prompt_path: join(artifacts, "steps", "process-" + index, "current-prompt.md"), artifacts_dir: artifacts,
-        artifact_paths: { analyzer_consent_decisions: join(artifacts, "consent.json"), synthesis_narrative_results: join(artifacts, "narrative.json") } }) };
+        artifact_paths: { host_workload: hostWorkload, analyzer_consent_decisions: join(artifacts, "consent.json"), synthesis_narrative_results: join(artifacts, "narrative.json") } }) };
     };
-    await runAuditFlowPhase({ root, runCommand: respondToSmokeCommand, log: { step() {}, detail() {}, elapsed() {} }, smokeLabel: "fixture",
-      auditCodeCommand: "audit-code", distCliPath: "fixture-cli" });
+    await runAuditFlowPhase({ root, runCommand: respondToSmokeCommand, log: { step() {}, detail() {}, elapsed() {} },
+      auditCodeCommand: "audit-code" });
     return index;
   } finally {
     await rm(root, { recursive: true, force: true });

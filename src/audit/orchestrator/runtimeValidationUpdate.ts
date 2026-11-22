@@ -15,17 +15,19 @@ function normalizeResult(
   };
 }
 
+// sites-pinned: tests/audit/runtime-validation-update.test.ts, tests/audit/runtime-validation-source.test.ts
 export function updateRuntimeValidationReport(
   tasks: RuntimeValidationTaskManifest,
   existing: RuntimeValidationReport,
   updates: RuntimeValidationReport,
+  sourceKey?: string,
 ): RuntimeValidationReport {
-  const validTaskIds = new Set(tasks.tasks.map((task) => task.id));
+  const tasksById = new Map(tasks.tasks.map((task) => [task.id, task]));
   const merged = new Map<string, RuntimeValidationResult>();
   const staleIds = new Set<string>();
 
   for (const result of existing.results) {
-    if (!validTaskIds.has(result.task_id)) {
+    if (!tasksById.has(result.task_id)) {
       staleIds.add(result.task_id);
       continue;
     }
@@ -33,9 +35,17 @@ export function updateRuntimeValidationReport(
   }
 
   for (const update of updates.results) {
-    if (!validTaskIds.has(update.task_id)) {
+    const task = tasksById.get(update.task_id);
+    if (!task) {
       staleIds.add(update.task_id);
       continue;
+    }
+
+    if (task.evidence_requirements?.length && (update.status === "confirmed" || update.status === "not_confirmed") &&
+        (!sourceKey || update.verification?.source_key !== sourceKey ||
+         !update.verification.observations.some((entry) => entry.trim().length > 0) ||
+         !update.evidence?.some((entry) => entry.trim().length > 0))) {
+      throw new Error(`Runtime validation ${update.task_id} requires observations and evidence bound to the current source.`);
     }
 
     const prior = merged.get(update.task_id);
@@ -48,6 +58,7 @@ export function updateRuntimeValidationReport(
       task_id: update.task_id,
       status: update.status,
       summary: update.summary,
+      ...(update.verification ? { verification: update.verification } : {}),
       evidence: [
         ...new Set([...(prior.evidence ?? []), ...(update.evidence ?? [])]),
       ],

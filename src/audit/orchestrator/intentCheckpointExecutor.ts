@@ -1,7 +1,6 @@
 // sites-pinned: tests/audit/intent-checkpoint.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { FileDispositionStatus } from "audit-tools/shared";
-import type { Lens } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { DocsDigestEntry } from "../types/docsDigest.js";
 import { resolveAuditScope } from "./scope.js";
@@ -22,9 +21,8 @@ import {
   isGeneratedTestArtifactPath,
   normalizeExtractorPath,
 } from "../extractors/pathPatterns.js";
-import { isMandatoryLens } from "./lensSelection.js";
-import { ARCHITECTURE_REVIEW_SCOPE } from "./architectureDiscovery.js";
-import { compareCodeUnits, LENSES } from "audit-tools/shared";
+import { compareCodeUnits } from "audit-tools/shared";
+import { BUILT_IN_REVIEW_LENSES } from "../../shared/types/reviewQuestion.js";
 
 /**
  * A row in the excluded_summary that represents a collapsed directory.
@@ -65,7 +63,6 @@ export interface DispositionOverrideProposal {
  * canonical rows. Dispositions are exactly three: there is no "available".
  */
 export type LensDisposition =
-  | "mandatory"
   | "recommend_include"
   | "recommend_exclude";
 
@@ -105,7 +102,7 @@ export interface ScopePreDigest {
    * Canonical lens proposition table (dogfood note 1) — ONE disposition per
    * canonical lens, in registry order, derived deterministically from codebase
    * character (language distribution, test presence, network surface, config
-   * files). Mandatory lenses always carry the `mandatory` disposition. The host
+   * files). Every row is a recommendation; the operator owns the selection. The host
    * reviews/adjusts these (and may add custom rows) invisibly before showing the
    * user the final table.
    */
@@ -327,8 +324,7 @@ function describeLensEvidence(lens: string, evidence: LensEvidence): string {
 /**
  * Derive the canonical lens proposition table from codebase character (dogfood
  * note 1). Emits exactly ONE disposition per canonical lens, in registry order:
- * mandatory lenses always `mandatory`; the rest `recommend_include` or
- * `recommend_exclude` from deterministic heuristics (network surface, test
+ * `recommend_include` or `recommend_exclude` from intake evidence (network surface, test
  * units, config files, module spread), overlaid with design-assessment evidence
  * (change 3: a lens-tagged structural finding flips that lens's heuristic
  * exclude to an include — evidence only ever widens, absence never narrows).
@@ -337,12 +333,14 @@ function describeLensEvidence(lens: string, evidence: LensEvidence): string {
  * final table is shown to the user.
  */
 function buildLensPropositions(
-  unitManifest: { units: Array<{ kind?: string; required_lenses?: string[] }> } | undefined,
+  unitManifest: { units: Array<{ kind?: string; files: string[] }> } | undefined,
   inScopePaths: string[],
-  dispositionFiles: Array<{ path: string; status: string }>,
   designAssessment?: DesignAssessment,
+  surfaces?: ArtifactBundle["surface_manifest"],
 ): LensProposition[] {
-  const units = unitManifest?.units ?? [];
+  const inScope = new Set(inScopePaths);
+  const units = (unitManifest?.units ?? []).filter((unit) => unit.files.some((path) => inScope.has(path)));
+  const observedSurfaces = (surfaces?.surfaces ?? []).filter(({ entrypoint }) => inScope.has(entrypoint));
   // Each kind lower-cased and each in-scope path normalized ONCE; every signal
   // below tests these.
   const unitKinds = units.map((u) => (u.kind ?? "").toLowerCase());
@@ -354,7 +352,7 @@ function buildLensPropositions(
   const basename = (path: string) => path.split("/").at(-1) ?? "";
 
   // Network-surface signal (kind contains interface/api/http, or path heuristics).
-  const hasNetworkSurface =
+  const hasNetworkSurface = observedSurfaces.some(({ exposure }) => exposure === "network") ||
     kindHasAny("interface", "api", "http", "network") ||
     pathHasAny("/api/", "/routes/", "/controllers/");
 
@@ -366,12 +364,11 @@ function buildLensPropositions(
   // Config/deployment signal.
   const hasConfigFiles = normalizedPaths.some((path) => {
     const base = basename(path);
-    return base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".env") ||
+    return base === "package.json" || base === "pyproject.toml" || base === "cargo.toml" ||
+      base.startsWith("runtime-config.") || base.startsWith("config.") ||
+      base.endsWith(".yaml") || base.endsWith(".yml") || base.endsWith(".env") ||
       base.endsWith(".config.js") || base.endsWith(".config.ts") ||
       base.startsWith(".env") || base === "config.json" || base === "settings.json";
-  }) || dispositionFiles.some((f) => {
-    const base = basename(normalizeExtractorPath(f.path));
-    return base.endsWith(".yaml") || base.endsWith(".yml");
   });
 
   // Logging/metrics-surface signal (kind contains logging/metrics/telemetry, or path heuristics).
@@ -381,7 +378,11 @@ function buildLensPropositions(
 
   // Structural-complexity signal: code spread across more than one top-level dir.
   const topDirs = new Set(normalizedPaths.map((path) => path.split("/")[0] || "."));
-  const isMultiModule = topDirs.size > 1;
+  const isMultiModule = topDirs.size > 1 || units.length > 1;
+  const hasBackground = observedSurfaces.some(({ kind }) => kind === "background") ||
+    kindHasAny("background", "worker", "queue", "schedule");
+  const hasOperatorSurface = observedSurfaces.length > 0 || hasNetworkSurface || hasBackground ||
+    kindHasAny("cli", "ops") || pathHasAny("/cli/", "/ops/", "/logging/", "logger.");
 
   const include = (lens: string, reason: string): LensProposition => ({
     lens,
@@ -395,17 +396,23 @@ function buildLensPropositions(
   });
 
   const propositions: LensProposition[] = [];
-  for (const lens of LENSES as readonly Lens[]) {
-    if (isMandatoryLens(lens)) {
-      propositions.push({ lens, disposition: "mandatory", reason: "always audited" });
-      continue;
-    }
+  for (const lens of BUILT_IN_REVIEW_LENSES) {
     switch (lens) {
+      case "behavior":
+        propositions.push(inScopePaths.length > 0
+          ? include(lens, "in-scope source may implement supported operations and state invariants")
+          : exclude(lens, "no in-scope implementation candidate detected"));
+        break;
+      case "security":
+        propositions.push(hasNetworkSurface || pathHasAny("/auth/", "/keys/", "/permissions/")
+          ? include(lens, "external caller or authority-boundary signals detected")
+          : exclude(lens, "no authority-boundary signal detected yet; include for a known trust boundary"));
+        break;
       case "architecture":
         propositions.push(
           hasNetworkSurface || isMultiModule
-            ? include(lens, `network-surface units and/or multi-module structure; ${ARCHITECTURE_REVIEW_SCOPE}`)
-            : exclude(lens, `single small module; limited structural surface; ${ARCHITECTURE_REVIEW_SCOPE}`),
+            ? include(lens, "cross-component design or trust-boundary scenario detected")
+            : exclude(lens, "no structural signal yet; include for a charter scenario or local maintainability concern"),
         );
         break;
       case "tests":
@@ -424,31 +431,18 @@ function buildLensPropositions(
         break;
       case "operability":
         propositions.push(
-          hasNetworkSurface
-            ? include(lens, "network-surface units present")
-            : exclude(lens, "no network-surface units detected"),
+          hasOperatorSurface || hasLoggingMetricsSurface
+            ? include(lens, "operator entry point, background transition, or diagnostic signal detected")
+            : exclude(lens, "no operator decision surface detected"),
         );
         break;
       case "performance":
         propositions.push(
-          exclude(lens, "no hot-path / perf-sensitive units detected"),
+          hasBackground
+            ? include(lens, "repeating workload candidate detected")
+            : exclude(lens, "no representative repeating workload detected yet; include for a known costly operation"),
         );
         break;
-      case "observability":
-        propositions.push(
-          hasLoggingMetricsSurface
-            ? include(lens, "logging, metrics, or tracing surfaces detected in scope")
-            : exclude(lens, "heuristic default: the scan patterns matched zero logging/metrics/tracing surfaces"),
-        );
-        break;
-      case "maintainability":
-        propositions.push(
-          exclude(lens, "broadly applicable but low signal-to-noise; include on request"),
-        );
-        break;
-      default:
-        // Any future canonical lens defaults to recommend_include.
-        propositions.push(include(lens, "applies to this codebase"));
     }
   }
 
@@ -547,8 +541,8 @@ export async function computeScopePreDigest(
   const lens_propositions = buildLensPropositions(
     bundle.unit_manifest,
     inScopePaths,
-    dispositionFiles,
     bundle.design_assessment,
+    bundle.surface_manifest,
   );
 
   return {

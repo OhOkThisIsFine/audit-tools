@@ -31,6 +31,11 @@ function checksForFlow(requiredLenses: string[]): string[] {
   return checks;
 }
 
+const evidenceRequirements = [
+  "Before execution, verify exact source and argv, project dependencies, required runtime and fixtures, and authorized isolated execution.",
+  "Retain command outcome, skips, and a log reference. Link named executed test cases or observations to this task's checks; command success alone is not verification.",
+];
+
 export async function discoverRuntimeValidationCommand(
   root: string,
 ): Promise<string[] | undefined> {
@@ -70,6 +75,7 @@ export function buildRuntimeValidationTasks(params: {
       reason: `Unit ${unit.unit_id} is high risk or touches sensitive concerns.`,
       priority: (unit.risk_score ?? 0) >= 7 ? "high" : "medium",
       command: params.command,
+      evidence_requirements: evidenceRequirements,
       suggested_checks: [
         "Run the deterministic runtime command for the repository.",
         "Confirm the affected unit does not regress under the command output.",
@@ -101,6 +107,7 @@ export function buildRuntimeValidationTasks(params: {
         reason: `Critical flow ${record.flow_id} is still ${record.status} and needs deterministic runtime validation.`,
         priority: record.status === "pending" ? "high" : "medium",
         command: params.command,
+        evidence_requirements: evidenceRequirements,
         suggested_checks: checksForFlow(record.required_lenses),
         source_artifacts: ["critical_flows.json", "flow_coverage.json"],
       });
@@ -173,6 +180,14 @@ export function mergeRuntimeValidationReport(
       const prior = previousTask && validationInputs(previousTask) === validationInputs(task)
         ? existingMap.get(task.id)
         : undefined;
+      if (prior && task.evidence_requirements?.length &&
+          (prior.status === "confirmed" || prior.status === "not_confirmed") && !prior.verification) {
+        return {
+          ...prior,
+          status: "inconclusive",
+          summary: `Historical result without task-specific verification: ${prior.summary}`,
+        };
+      }
       return (
         prior ?? {
           task_id: task.id,

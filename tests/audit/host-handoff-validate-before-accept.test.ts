@@ -24,7 +24,6 @@ import {
   ingestAuditHostResults,
   prepareAuditHostHandoff,
 } from "../../src/audit/cli/dispatch/hostHandoff.js";
-import { runAuditStep } from "../../src/audit/cli/auditStep.js";
 import { contentSha256, recordHostResultOutcomes, readSubmissionLedger } from "audit-tools/shared";
 import { deriveLaneDemand } from "../../src/shared/types/stepContract.js";
 import type { AuditTask } from "../../src/audit/types.js";
@@ -179,28 +178,6 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     expect(second.completed_work_item_ids).toEqual([AUDIT_TASK.task_id]);
     const pairAfterRepair = await ctx.acceptedPair();
     expect(pairAfterRepair.results).toHaveLength(1);
-
-    // The downstream auditStep gate (kept as defense in depth) now has nothing
-    // to reject: feeding the accepted result to the ordinary result-ingestion
-    // executor completes without throwing formatAuditResultValidationError.
-    await writeFile(
-      join(ctx.artifactsDir, "coverage_matrix.json"),
-      JSON.stringify({ files: [] }),
-      "utf8",
-    );
-    await writeFile(
-      join(ctx.artifactsDir, "audit_tasks.json"),
-      JSON.stringify([AUDIT_TASK]),
-      "utf8",
-    );
-    await expect(
-      runAuditStep({
-        root: ctx.root,
-        artifactsDir: ctx.artifactsDir,
-        preferredExecutor: "result_ingestion_executor",
-        auditResultsData: [...second.accepted_results],
-      }),
-    ).resolves.toBeDefined();
   });
 
   it("a derived span outside the declared coverage is refused at the door, not accepted-and-wedged", async () => {
@@ -295,25 +272,6 @@ describe("contract:host-handoff-validates-before-it-accepts", () => {
     const pair = await ctx.acceptedPair();
     expect(pair.ledgerEntries).toEqual([]);
 
-    // The batch gate the fold feeds is now consistent with the current tree.
-    await writeFile(
-      join(ctx.artifactsDir, "coverage_matrix.json"),
-      JSON.stringify({ files: [] }),
-      "utf8",
-    );
-    await writeFile(
-      join(ctx.artifactsDir, "audit_tasks.json"),
-      JSON.stringify([AUDIT_TASK]),
-      "utf8",
-    );
-    await expect(
-      runAuditStep({
-        root: ctx.root,
-        artifactsDir: ctx.artifactsDir,
-        preferredExecutor: "result_ingestion_executor",
-        auditResultsData: [...grown.accepted_results],
-      }),
-    ).resolves.toBeDefined();
   });
 
   it.each([false, true])("partial withdrawal keeps a surviving item accepted (stale bindings: %s)", async (staleBindings) => {

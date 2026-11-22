@@ -17,19 +17,10 @@ import { AnalyzerLeadProvenanceSchema } from "../analyzers/provenance.js";
 import { ContentCoherenceTraceSchema } from "../decompose/contentCoherence.js";
 import { MeasuredOutcomeSchema } from "../measurement/measuredOutcome.js";
 
-/** Canonical finding severity vocabulary (most-severe-first). */
-export const FindingSeveritySchema = z.enum([
-  "critical",
-  "high",
-  "medium",
-  "low",
-  "info",
-]);
-export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
-
-/** Canonical finding confidence vocabulary (most-confident-first). */
-export const FindingConfidenceSchema = z.enum(["high", "medium", "low"]);
-export type FindingConfidence = z.infer<typeof FindingConfidenceSchema>;
+import { FindingConfidenceSchema, FindingSeveritySchema, type FindingSeverity } from "./findingVocabulary.js";
+import { ReviewFindingClaimSchema } from "./reviewQuestion.js";
+export { FindingConfidenceSchema, FindingSeveritySchema } from "./findingVocabulary.js";
+export type { FindingConfidence, FindingSeverity } from "./findingVocabulary.js";
 
 // <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
 /**
@@ -418,6 +409,8 @@ export const FindingSchema = z.object({
   verification_obligation_ids: z.array(z.string()).optional(),
   /** Commands recommended by the implementation DAG for focused verification. */
   targeted_commands: z.array(z.string()).optional(),
+  /** Accepted source claims retained by canonical question-review reports and approved plans. */
+  question_review_sources: z.array(ReviewFindingClaimSchema).min(1).optional(),
   /**
    * Content-anchored identity of the analyzer lead this finding was born from
    * (item C). Copied verbatim from the injected lead by the auditing worker;
@@ -591,6 +584,8 @@ export const LensCoverageEntrySchema = z
     selected: z.boolean(),
     findings_count: z.number().int().min(0),
     outcome: MeasuredOutcomeSchema,
+    /** Evidence state of the explicitly requested bounded source sample, not a whole-repository result. */
+    source_sample: z.enum(["not_planned", "planned_not_run", "reviewed_no_findings", "reviewed_with_findings"]).optional(),
   })
   .strict();
 export type LensCoverageEntry = z.infer<typeof LensCoverageEntrySchema>;

@@ -51,27 +51,21 @@ test("CLI flag parsing falls back when values are missing or malformed", () => {
   expect(cliTestUtils.getFlag(["node", "cli", "plan", "--root"], "--root", ".")).toBe(".");
 });
 
-test("ingest-results rejects a value-less --results alongside --batch-results (COR-79283e3b)", async () => {
-  const tempRoot = await mkdtemp(join(tmpdir(), "ingest-mutex-"));
-  try {
-    // `--results` is present as a token but value-less (the next token is the
-    // end of argv). The required-value guard must fire rather than
-    // silently running the batch path. runCli catches the thrown Error, prints
-    // its message to stderr, and sets exitCode=1.
-    const { stderr, exitCode } = await captureRunCli([
-      "node",
-      "cli",
-      "ingest-results",
-      "--batch-results",
-      tempRoot,
-      "--results",
-    ]);
-    expect(stderr).toMatch(/--results requires a value/i);
-    expect(exitCode).toBe(1);
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true });
-  }
+test("submit rejects a value-less --from alongside --work-item", async () => {
+  const { stderr, exitCode } = await captureRunCli([
+    "node", "cli", "submit", "--work-item", "fixture-assignment", "--from",
+  ]);
+  expect(stderr).toMatch(/--from requires a value/i);
+  expect(exitCode).toBe(1);
 });
+
+test("the retired batch ingest command is not a live question submission route", async () => {
+  const { stderr, exitCode } = await captureRunCli(["node", "cli", "ingest-results"]);
+  expect(stderr).toMatch(/Unknown command: ingest-results/);
+  expect(stderr).toMatch(/Available commands: .*\bsubmit\b/);
+  expect(exitCode).toBe(1);
+});
+
 
 test("CLI timeout reads argv and otherwise uses the documented default", () => {
   expect(cliTestUtils.getTimeoutMs(["node", "cli", "--timeout", "1200"])).toBe(1200);
@@ -327,12 +321,7 @@ test("each extracted command module exports the expected function (ARC-3579b443)
     ["importExternalAnalyzerCommand.js", "cmdImportExternalAnalyzer"],
     ["intakeCommand.js", "cmdIntake"],
     ["planCommand.js", "cmdPlan"],
-    ["ingestResultsCommand.js", "cmdIngestResults"],
-    ["explainTaskCommand.js", "cmdExplainTask"],
-    ["updateRuntimeValidationCommand.js", "cmdUpdateRuntimeValidation"],
     ["validateCommand.js", "cmdValidate"],
-    ["validateResultsCommand.js", "cmdValidateResults"],
-    ["requeueCommand.js", "cmdRequeue"],
     ["synthesizeCommand.js", "cmdSynthesize"],
     ["forceSynthesisCommand.js", "cmdForceSynthesis"],
     ["resynthesizeCommand.js", "cmdResynthesize"],

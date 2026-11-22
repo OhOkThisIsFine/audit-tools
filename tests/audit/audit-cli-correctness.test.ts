@@ -6,7 +6,7 @@
  */
 import { createFoldTransaction } from "../../src/audit/cli/foldTransaction.js";
 import { test, expect, vi } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditState } from "../../src/audit/types/auditState.js";
@@ -34,46 +34,22 @@ const { submissionsDir } = await import(
 );
 const { runSample } = await import("../../src/audit/cli/sampleRunCommand.js");
 
-test("COR-a278fbe0: runSample task_id matches the unit_id:lens pattern", async () => {
-  await withTempDir(async (dir) => {
-    const artifactsDir = join(dir, ".audit-tools", "audit");
-    await mkdir(artifactsDir, { recursive: true });
-    // runSample writes core artifacts and prints a JSON summary to stdout.
-    // We redirect stdout so the console.log output doesn't pollute test output,
-    // and verify the persisted artifacts contain the correct task_id format.
-    // audit_results.jsonl is registered as an ndjsonArtifact, so it MUST be read
-    // with the NDJSON reader. It was being read with readJsonFile(...).catch(() =>
-    // null): JSON.parse on a multi-record NDJSON body throws, the JsonParseError
-    // was swallowed to null, and the `if (results && ...)` block below — the only
-    // real assertions in this test — never executed at all (COR-4802dc9e).
-    const { readNdjsonFile } = await import("audit-tools/shared");
-    await runSample(["node", "audit-code.mjs", "--artifacts-dir", artifactsDir]);
-    const results = await readNdjsonFile<{ task_id?: string }>(
-      join(artifactsDir, "audit_results.jsonl"),
-    );
-
-    // Unconditional: an empty read is a broken fixture, not a pass. The old
-    // `if (results && Array.isArray(results))` guard made every assertion below
-    // optional, which is how they went unexecuted for so long.
-    expect(
-      results.length,
-      "the sample run must persist at least one result to assert against",
-    ).toBeGreaterThan(0);
-    for (const r of results) {
-      expect(
-        r.task_id,
-        "every persisted result carries a task_id",
-      ).toBeTruthy();
-      expect(
-        r.task_id,
-        "Hardcoded task_id must not appear in persisted results",
-      ).not.toBe("src-api:security:src/api/auth.ts:1-100");
-      // `<unit_id>:<lens>` — derived from planning output, no file path embedded.
-      expect(
-        r.task_id!.split(":").length >= 2,
-        `task_id '${r.task_id}' must have at least 2 colon-separated parts`,
-      ).toBeTruthy();
+test("sample-run writes a v2 report in a separate sample directory, not audit state", async () => {
+  await withTempDir(async root => {
+    const { QuestionAuditFindingsReportSchema } = await import("../../src/shared/types/questionReviewReport.js");
+    await runSample(["--root", root]);
+    const target = join(root, ".audit-tools", "sample");
+    const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(join(target, "audit-findings.json"), "utf8")));
+    expect(report.question_review).toMatchObject({
+      snapshot_id: "fabricated-sample", completion: "incomplete",
+      questions: [{ question_id: "sample-review-queue", state: "unreviewed" }],
+    });
+    expect(report.findings).toEqual([]);
+    expect(await readFile(join(target, "audit-report.md"), "utf8")).toContain("## Questions and review limits");
+    for (const name of ["audit_state.json", "review_session.json", "audit_results.jsonl"]) {
+      await expect(readFile(join(target, name), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     }
+    await expect(readFile(join(root, ".audit-tools", "audit", "audit-findings.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 
@@ -177,37 +153,27 @@ test("COR-4c72c062: getFlag returns fallback (not undefined) when next token is 
   expect(getFlag(["--root", "--artifacts-dir", "something"], "--root"), "When next token is a long flag and no fallback given, returns undefined").toBe(undefined);
 });
 
-// ── COR-570cb86b: sampleRunCommand argv is used for artifactsDir only (verified) ─
-// The sample path builds data from SAMPLE_REPO_FILES constants — argv is only
-// consumed for --artifacts-dir resolution. This is correct: the sample is
-// a demo/testing path, not a real project scan. Verified by structural inspection.
-test("COR-570cb86b: sampleRunCommand argv is consumed only for artifactsDir", async () => {
-  // FALSIFIABLE: run the sample twice with DIFFERENT extra argv and the same
-  // artifacts dir shape, and assert the persisted results are identical. If any
-  // flag other than --artifacts-dir fed the sample data, the two runs would
-  // diverge. `expect(true)` asserted the same sentence and could never fail.
-  const { readNdjsonFile } = await import("audit-tools/shared");
-  const run = async (extra: string[]): Promise<unknown[]> =>
-    withTempDir(async (dir) => {
-      const artifactsDir = join(dir, ".audit-tools", "audit");
-      await mkdir(artifactsDir, { recursive: true });
-      await runSample([
-        "node",
-        "audit-code.mjs",
-        ...extra,
-        "--artifacts-dir",
-        artifactsDir,
-      ]);
-      return readNdjsonFile(join(artifactsDir, "audit_results.jsonl"));
-    });
-
-  const plain = await run([]);
-  const withOtherFlags = await run(["--root", "/nonexistent", "--since", "HEAD~5"]);
-  expect(plain.length, "the sample must persist results to compare").toBeGreaterThan(0);
-  expect(
-    withOtherFlags,
-    "no argv other than --artifacts-dir may influence the sample's data",
-  ).toEqual(plain);
+test("sample-run refuses to overwrite active question review or an existing report", async () => {
+  await withTempDir(async root => {
+    const artifactsDir = join(root, "sample-target");
+    await mkdir(artifactsDir, { recursive: true });
+    const session = join(artifactsDir, "review_session.json");
+    const findings = join(artifactsDir, "audit-findings.json");
+    await writeFile(session, "active review");
+    const argv = ["--artifacts-dir", artifactsDir];
+    const before = process.exitCode;
+    try {
+      await runSample(argv);
+      expect(process.exitCode).toBe(1);
+      expect(await readFile(session, "utf8")).toBe("active review");
+      await expect(readFile(findings)).rejects.toMatchObject({ code: "ENOENT" });
+      await rm(session);
+      await writeFile(findings, "preexisting report");
+      await runSample(argv);
+      expect(process.exitCode).toBe(1);
+      expect(await readFile(findings, "utf8")).toBe("preexisting report");
+    } finally { process.exitCode = before; }
+  });
 });
 
 // ── COR-2cf46bf7: ensureSemanticReviewRun writeJsonFile(pendingTasksPath) ─────

@@ -55,6 +55,11 @@ import { buildWorkBlockPartition, type WorkBlock } from "./workBlocks.js";
 import { mergeFindings } from "./mergeFindings.js";
 import { selectCurrentResults } from "../orchestrator/ledger.js";
 import { assignStableFindingIds } from "./findingIdentity.js";
+import {
+  QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION,
+  QuestionAuditFindingsReportSchema,
+  type QuestionReviewReport,
+} from "../../shared/types/questionReviewReport.js";
 
 const CONCEPTUAL_ATTRIBUTION_IDS = Symbol("conceptual-attribution-ids");
 const CONCEPTUAL_ID_MARKER_PREFIX = "\u0000audit-tools:conceptual-final-id:";
@@ -104,6 +109,7 @@ export const AUDIT_FINDINGS_CONTRACT_VERSION =
  * produces the base report and the narrative-enriched report.
  */
 export interface RenderableAuditReport {
+  question_review?: QuestionReviewReport;
   summary: AuditReportSummary;
   // Widened to the shared Finding (lens: string) so both AuditReportModel (lens
   // narrowed to Lens) and the canonical AuditFindingsReport render unchanged.
@@ -447,6 +453,7 @@ export function buildAuditReportModel(params: {
   designAssessment?: DesignAssessment;
   /** Existing accepted review snapshots bind the reviewed lenses and unit scope. */
   designReviewSnapshots?: DesignReviewSnapshotBundle;
+  architectureSourceSample?: { status: NonNullable<LensCoverageEntry["source_sample"]>; taskId?: string };
   structureDecomposition?: StructureDecomposition;
   charterRegister?: CharterRegister;
   systemicChallenge?: SystemicChallengeRegister;
@@ -530,7 +537,8 @@ export function buildAuditReportModel(params: {
   // lenses in its accepted snapshot only if its reviewed scope was nonempty.
   // This is exercised-lens evidence, not a claim of full per-file coverage.
   const exercisedLenses = exercisedReviewLenses(
-    currentResults, params.designAssessment, params.designReviewSnapshots,
+    currentResults.filter((result) => result.task_id !== params.architectureSourceSample?.taskId),
+    params.designAssessment, params.designReviewSnapshots,
   );
   const selectedLenses = resolveIntentLensSelection(
     params.intentCheckpoint?.lens_selection,
@@ -556,7 +564,9 @@ export function buildAuditReportModel(params: {
               selectedLenses,
               findings,
               exercisedLenses,
-            }),
+            }).map((entry) => entry.lens === "architecture" && params.architectureSourceSample !== undefined
+              ? { ...entry, source_sample: params.architectureSourceSample.status }
+              : entry),
           }),
       audited_file_count: coverage.audited_file_count,
       excluded_file_count: coverage.excluded_file_count,
@@ -739,6 +749,8 @@ export interface RenderAuditReportOptions {
   reflections?: AgentReflection[];
   /** Deep conceptual judge provenance and semantic attribution record. */
   conceptual_adjudication?: ConceptualReviewAdjudication;
+  /** Report identity map reconstructed after JSON reload, when needed. */
+  conceptual_attribution_id_source?: RenderableAuditReport;
   /**
    * The accepted intent checkpoint; its `excluded_scope` is surfaced in an
    * "Excluded / Out-of-Scope" section so omissions are explicit in the report.
@@ -785,7 +797,7 @@ function renderUnexercisedLensLine(
   coverage: readonly LensCoverageEntry[] | undefined,
 ): string[] {
   const unexercised = (coverage ?? []).filter(
-    (entry) => entry.selected && entry.outcome !== "findings",
+    (entry) => entry.selected && entry.outcome !== "findings" && entry.source_sample === undefined,
   );
   if (unexercised.length === 0) return [];
   const byOutcome = new Map<MeasuredOutcome, string[]>();
@@ -801,6 +813,22 @@ function renderUnexercisedLensLine(
         `${outcome === "not_run" ? "no qualifying inspection" : "reviewed, no findings"}: ${lenses.join(", ")}`,
     );
   return [`- Selected lenses without findings: ${parts.join("; ")}`];
+}
+
+function renderArchitectureSourceSample(coverage: readonly LensCoverageEntry[] | undefined): string[] {
+  const entry = coverage?.find((item) => item.lens === "architecture");
+  switch (entry?.source_sample) {
+    case "not_planned":
+      return ["- Architecture source sample: no cross-component workflow sample was planned."];
+    case "planned_not_run":
+      return ["- Architecture source sample: planned, but no current qualifying result."];
+    case "reviewed_no_findings":
+      return ["- Architecture source sample: reviewed one bounded workflow with no findings; not a whole-repository inspection."];
+    case "reviewed_with_findings":
+      return ["- Architecture source sample: reviewed one bounded workflow and reported findings; not a whole-repository inspection."];
+    default:
+      return [];
+  }
 }
 
 /**
@@ -865,6 +893,7 @@ function renderAnalyzerDegradationLines(
 function renderCharterCoverageSection(
   coverage: readonly CharterPacketCoverage[],
   archive: readonly CharterPacketArchiveRow[],
+  reportVerifiedRetention = false,
 ): string[] {
   // Its OWN top-level section, not a sub-head of "Process Feedback": coverage is
   // a delivery measurement about the tool's inputs, not feedback about the host —
@@ -899,9 +928,14 @@ function renderCharterCoverageSection(
         unarchived
           .map((row) => `\`${row.kind}\` (${row.reason ?? "unstated reason"})`)
           .join(", ") +
-        ". The lane-asset copy was left in place rather than deleted, so the " +
-        "evidence still exists — but it is not in the run's archive.",
+        ". No verified archive is available for these records.",
     );
+  }
+  if (reportVerifiedRetention) {
+    const retained = archive.filter(row => row.archived);
+    if (!retained.length) lines.push("", "No verified charter packet retention record is available.");
+    else for (const row of retained) lines.push("", "- Verified retained packet: " + row.kind +
+      " (" + row.byte_length + " bytes; SHA-256 " + row.sha256 + ").");
   }
   lines.push("");
   return lines;
@@ -1061,15 +1095,31 @@ function pushFindingBlock(finding: SharedFinding, lines: string[]): void {
   lines.push(...renderFindingBlockLines(finding));
 }
 
+function reportFindingIds(report: RenderableAuditReport): Set<string> {
+  return new Set([
+    ...report.findings.map((finding) => finding.id),
+    ...(report.quarantined_findings ?? []).map((finding) => finding.id),
+  ]);
+}
+
+export function conceptualAttributionNeedsIdSource(
+  report: RenderableAuditReport,
+  adjudication: ConceptualReviewAdjudication | undefined,
+): boolean {
+  if (!adjudication) return false;
+  const ids = reportFindingIds(report);
+  return adjudication.final_finding_shares.some((share) => !ids.has(share.final_finding_id)) ||
+    adjudication.candidate_dispositions.some((disposition) =>
+      disposition.target_final_finding_ids.some((id) => !ids.has(id)),
+    );
+}
+
 export function canonicalizeConceptualAttributionIds(
   report: RenderableAuditReport,
   adjudication: ConceptualReviewAdjudication,
   idSource: RenderableAuditReport = report,
-): void {
-  const canonicalIds = new Set([
-    ...report.findings.map((finding) => finding.id),
-    ...(report.quarantined_findings ?? []).map((finding) => finding.id),
-  ]);
+): ConceptualReviewAdjudication {
+  const canonicalIds = reportFindingIds(report);
   const idMap = (idSource as RenderableAuditReport & ConceptualAttributionCarrier)[
     CONCEPTUAL_ATTRIBUTION_IDS
   ];
@@ -1085,10 +1135,8 @@ export function canonicalizeConceptualAttributionIds(
     );
   };
 
-  // Canonicalize the carried adjudication itself, not only the markdown text.
-  // The fold persists every carried core artifact, so subsequent narrative and
-  // resynthesis renders reload canonical targets rather than reviving the
-  // judge-local ids that existed before the synthesis boundary.
+  // Translate judge-local IDs only for this report. Accepted adjudication
+  // is a premise of systemic review, not a synthesis output.
   const sharesByCanonicalId = new Map<
     string,
     Array<{
@@ -1228,19 +1276,20 @@ export function canonicalizeConceptualAttributionIds(
     }),
   );
 
-  // Commit both reference-bearing arrays only after every share and target has
-  // resolved. A late unknown disposition target cannot leave half-canonical
-  // attribution in the caller's carried bundle.
-  adjudication.final_finding_shares = resolvedFinalFindingShares;
-  adjudication.candidate_dispositions = resolvedCandidateDispositions;
+  return {
+    ...adjudication,
+    final_finding_shares: resolvedFinalFindingShares,
+    candidate_dispositions: resolvedCandidateDispositions,
+  };
 }
 
 function renderConceptualAttributionSection(
   report: RenderableAuditReport,
-  adjudication: ConceptualReviewAdjudication | undefined,
+  accepted: ConceptualReviewAdjudication | undefined,
+  idSource: RenderableAuditReport | undefined,
 ): string[] {
-  if (!adjudication) return [];
-  canonicalizeConceptualAttributionIds(report, adjudication);
+  if (!accepted) return [];
+  const adjudication = canonicalizeConceptualAttributionIds(report, accepted, idSource);
   const contributors = new Map(
     adjudication.contributors.map((contributor) => [
       contributor.contributor_id,
@@ -1329,6 +1378,7 @@ export function renderAuditReportMarkdown(
   report: RenderableAuditReport,
   options: RenderAuditReportOptions = {},
 ): string {
+  if (report.question_review !== undefined) return renderQuestionReport(report, report.question_review, options);
   const lines: string[] = [
     AUDITOR_REPORT_MARKER,
     "# Audit Report",
@@ -1384,6 +1434,7 @@ export function renderAuditReportMarkdown(
     // here rather than in *Audit Limitations* (owner working assumption) — terse
     // and always in front of the reader, beside the counts it qualifies.
     ...renderUnexercisedLensLine(report.summary.lens_coverage),
+    ...renderArchitectureSourceSample(report.summary.lens_coverage),
     ...(report.summary.grounding_status_breakdown &&
     Object.keys(report.summary.grounding_status_breakdown).length > 0
       ? [
@@ -1523,17 +1574,15 @@ export function renderAuditReportMarkdown(
     ...renderSubmissionDriftSection(ledgerEvents),
   ];
   lines.push(
-    ...renderConceptualAttributionSection(report, options.conceptual_adjudication),
+    ...renderConceptualAttributionSection(
+      report, options.conceptual_adjudication, options.conceptual_attribution_id_source,
+    ),
   );
   const reflections = options.reflections ?? [];
   // Structural capability limitations are report limitations, not process
   // feedback. Keep the machine contract untouched: this only partitions the
   // human-readable render.
-  const capabilityLimitations = reflections.filter(
-    (reflection) =>
-      reflection.task_id === "audit-capability-preflight" &&
-      (reflection.severity === "high" || reflection.severity === "critical"),
-  );
+  const capabilityLimitations = reflections.filter(isCapabilityLimitationReflection);
   const processFeedback = reflections.filter(
     (reflection) => !capabilityLimitations.includes(reflection),
   );
@@ -1607,6 +1656,97 @@ export function renderAuditReportMarkdown(
   return escapeControlCharacters(lines.join("\n"));
 }
 
+function isCapabilityLimitationReflection(reflection: AgentReflection): boolean {
+  return reflection.task_id === "audit-capability-preflight" &&
+    (reflection.severity === "high" || reflection.severity === "critical");
+}
+
+function renderQuestionReport(report: RenderableAuditReport, review: QuestionReviewReport, options: RenderAuditReportOptions): string {
+  const reflections = options.reflections ?? [];
+  const lines = [
+    AUDITOR_REPORT_MARKER, "# Audit Report", "",
+    `Coverage: **${review.completion}**. Snapshot: ${review.snapshot_id}.`,
+    `Actionable confirmed defects: ${report.findings.length}. Repair work blocks: ${report.work_blocks.length}.`,
+  ];
+  if (report.executive_summary?.trim() || report.themes?.length || report.top_risks?.length) {
+    lines.push("", "## Narrative (does not change coverage or findings)", "");
+    if (report.executive_summary?.trim()) lines.push(report.executive_summary.trim());
+    for (const theme of report.themes ?? []) {
+      lines.push(`- ${theme.title}: ${theme.root_cause} [${theme.finding_ids.join(", ")}]`);
+    }
+    for (const risk of report.top_risks ?? []) lines.push(`- Risk: ${risk}`);
+  }
+  lines.push("", "## Lens coverage", "");
+  for (const lens of review.lens_decisions) {
+    const questions = review.questions.filter(row => row.lens === lens.lens);
+    const counts = Object.entries(countBy(questions, question => question.state))
+      .sort(([a], [b]) => compareCodeUnits(a, b))
+      .map(([state, count]) => `${state}: ${count}`).join(", ");
+    lines.push(`- ${lens.lens}: ${lens.decision}. ${lens.reason}${counts ? ` (${counts})` : ""}`);
+  }
+  lines.push("", "## Questions and review limits", "");
+  for (const row of review.questions) {
+    lines.push(`### ${row.question_id} (${row.lens}): ${row.state}`, "", row.expected_outcome);
+    if (row.plan_reason) lines.push(`- Planning: ${row.plan_status}: ${row.plan_reason}`);
+    for (const part of row.parts) {
+      lines.push(`- ${part.part_id}: **${part.state}**. ${part.expectation}`);
+      for (const reason of part.reasons) lines.push(`  - ${reason}`);
+    }
+    for (const conflict of row.conflicts) {
+      lines.push(`- Unresolved disagreement on ${conflict.part_id}: ${conflict.answer_ids.join(", ")}.`);
+    }
+    for (const answer of review.accepted.filter(record => record.submission.question_id === row.question_id)) {
+      const submission = answer.submission;
+      const current = row.accepted_answer_ids.includes(submission.submission_id);
+      lines.push(`- ${current ? "Accepted" : "Historical"} answer ${submission.submission_id}`);
+      for (const limit of submission.limitations) lines.push(`  - Limitation: ${limit}`);
+      for (const observation of submission.answer.observations) {
+        const refs = observation.evidence_refs.map(ref => ref.observation_id
+          ? `${ref.evidence_id}/${ref.observation_id}` : ref.evidence_id);
+        lines.push(`  - ${observation.kind} (${observation.part_id}): ${observation.statement}${refs.length ? ` [evidence: ${refs.join(", ")}]` : ""}`);
+      }
+    }
+    for (const decision of review.adjudications.filter(decision => decision.question_id === row.question_id)) {
+      lines.push(`- Recorded decision ${decision.adjudication_id} (${decision.decision}, ${decision.reviewer}): ${decision.rationale}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Scope and omissions", "");
+  for (const item of review.inventory) {
+    if (item.scope !== "in_scope") lines.push(`- ${item.title}: ${item.scope}. ${item.scope_reason ?? ""}`);
+    else if (!review.questions.some(q => q.inventory_item_ids.includes(item.inventory_item_id))) {
+      lines.push(`- ${item.title}: in scope, no question planned.`);
+    }
+  }
+  for (const omission of review.omissions) lines.push(`- ${omission.surface_id}: ${omission.reason}`);
+  lines.push("", "## Findings and leads", "");
+  for (const group of review.findings) {
+    const finding = report.findings.find(row => row.id === group.canonical_finding_id);
+    lines.push(`- ${group.canonical_finding_id}: ${group.kind} (${finding ? `actionable; ${finding.severity}` : "not actionable"}).`);
+    for (const source of group.sources) {
+      lines.push(`  - ${source.finding_id} on ${source.question_id}: ${source.claim}. ${source.consequence}`);
+      lines.push(`    - Next step: ${source.next_step}`);
+      if (source.verification.length) lines.push(`    - Verification: ${source.verification.map(v => v.obligation_id).join(", ")}.`);
+    }
+  }
+  lines.push("", "## Evidence", "");
+  for (const evidence of review.evidence) {
+    const execution = evidence.execution;
+    lines.push(`- ${evidence.evidence_id}: ${evidence.status} (${evidence.kind}). ${evidence.description}`);
+    if (execution) lines.push(execution.executed
+      ? `  - Executed: ${execution.tool} ${execution.tool_version}${execution.elapsed_ms === undefined ? "" : ` (${execution.elapsed_ms} ms observed)`}.`
+      : `  - Not executed: ${execution.tool} ${execution.tool_version}.`);
+  }
+  const limitations = reflections.filter(isCapabilityLimitationReflection);
+  const limitationLines = renderProcessFeedbackSection(limitations);
+  if (limitationLines.length > 0) limitationLines[0] = "## Audit Limitations";
+  lines.push("", ...limitationLines, ...renderProcessFeedbackSection(reflections.filter(reflection => !isCapabilityLimitationReflection(reflection))));
+  if (options.charter_evidence_coverage !== undefined || options.charter_packet_archive !== undefined) {
+    lines.push("", ...renderCharterCoverageSection(options.charter_evidence_coverage ?? [], options.charter_packet_archive ?? [], true));
+  }
+  return escapeControlCharacters(lines.join("\n").trimEnd() + "\n");
+}
+
 /**
  * Re-derive the summary fields that can be computed from the existing findings
  * and work_blocks, bump the contract_version to the current constant, and leave
@@ -1630,6 +1770,9 @@ export function renderAuditReportMarkdown(
 export function normalizeExistingFindingsReport(
   report: AuditFindingsReport,
 ): AuditFindingsReport {
+  if (report.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
+    return QuestionAuditFindingsReportSchema.parse(report);
+  }
   const findings = applyCriticalEvidenceBar(report.findings as Finding[]);
   // Counts read the SAME array the bar produced, not the input: a downgrade
   // moves a finding between severity buckets, so a breakdown derived from the

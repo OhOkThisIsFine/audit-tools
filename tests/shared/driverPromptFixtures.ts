@@ -46,7 +46,7 @@ export const driverPromptRows: PromptContractRegistryRow[] = [
     decisionsPath: answerPath, continueCommand,
   }), { ...checks(["typescript"], [answerPath], [...ANALYZER_SETTINGS]), actor: /(?:ask|operator|user)/i }),
   row("renderEdgeReasoningDispatchPrompt", auditFile, () => renderEdgeReasoningDispatchPrompt({ promptPath: "registry-fixture/edges-prompt.md", resultsPath: answerPath, continueCommand, contentHash: "fixture-content-hash", candidateCount: 1, scratchDirPath: "registry-fixture/scratch" }), checks(["registry-fixture/edges-prompt.md", "registry-fixture/scratch", "fixture-content-hash"], [answerPath]), "dispatch"),
-  row("renderPresentReportPrompt", auditFile, () => renderPresentReportPrompt("registry-fixture/audit-report.md"), checks(["registry-fixture/audit-report.md"], ["Present", "Do not run the orchestrator again"])),
+  row("renderPresentReportPrompt", auditFile, () => renderPresentReportPrompt("registry-fixture/audit-report.md"), { ...checks(["registry-fixture/audit-report.md"], ["Present confirmed work blocks first", "state unresolved coverage"]), continuation: /Do not rerun the orchestrator just to present this report/u }),
   row("clarificationPrompt", remediateFile, () => clarificationPrompt([question], answerPath), checks([question.unit_id, question.description], [answerPath, "unit_id", "action", "rationale"], question.options)),
   row("collectIntakeClarificationsPrompt", remediateFile, () => collectIntakeClarificationsPrompt({
     schema_version: INTAKE_SUMMARY_SCHEMA_VERSION, ready: false, source_type: "conversation", goals: [], non_goals: [], constraints: [], affected_files: [],

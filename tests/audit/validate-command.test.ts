@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -153,11 +153,8 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
     const parsed = parseJsonOutput(result);
 
     expect(result.code).not.toBe(0);
-    // The fixture intentionally also seeds src/ghost.ts / ghost-unit in the
-    // coverage matrix without backing repo_manifest / unit_manifest entries,
-    // which yields two further coverage-integrity issues on top of the four
-    // asserted below (6 total).
-    expect(parsed.issue_count).toBe(6);
+    // A leftover v1 coverage file is evidence to retain, not active audit state.
+    expect(parsed.issue_count).toBe(2);
     expect(parsed.issues.some(
         (issue) =>
           issue.path === "file_disposition" &&
@@ -167,23 +164,11 @@ test("audit-code validate exits non-zero when validation issues exist", async ()
       )).toBeTruthy();
     expect(parsed.issues.some(
         (issue) =>
-          issue.path === "coverage_matrix" &&
-          /missing coverage entry for src\/lib\/session\.ts/i.test(
-            issue.message,
-          ),
-      )).toBeTruthy();
-    expect(parsed.issues.some(
-        (issue) =>
           issue.path === "unit_manifest:auth-unit" &&
           /unknown file src\/ghost\.ts/i.test(issue.message),
       )).toBeTruthy();
-    expect(parsed.issues.some(
-        (issue) =>
-          issue.path === "coverage_matrix:src/api/auth.ts" &&
-          /completed lens tests is not listed in required_lenses/i.test(
-            issue.message,
-          ),
-      ), "expected a completed_lenses superset violation issue for src/api/auth.ts").toBeTruthy();
+    expect(parsed.issues.every(issue => !issue.path.startsWith("coverage_matrix"))).toBe(true);
+    expect(await readFile(join(artifactsDir, "coverage_matrix.json"), "utf8")).toContain("ghost-unit");
   });
 });
 

@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
+import ts from "typescript";
 
 interface Params {
   timeoutMs: number;
@@ -15,10 +16,12 @@ interface Params {
  */
 function boundary() {
   const source = readFileSync(new URL("../../src/audit/cli/nextStepHelpers.ts", import.meta.url), "utf8");
-  const start = source.indexOf("export async function runDeterministicForNextStep(");
-  const end = source.indexOf("\nconst ARCHITECTURE_WORK_STEPS", start);
-  expect(start).toBeGreaterThanOrEqual(0); expect(end).toBeGreaterThan(start);
-  const wrapper = stripTypeScriptTypes(source.slice(start, end)).replace("export async function", "async function");
+  const module = ts.createSourceFile("nextStepHelpers.ts", source, ts.ScriptTarget.Latest, true);
+  const declaration = module.statements.find((node): node is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(node) && node.name?.text === "runDeterministicForNextStep",
+  );
+  expect(declaration).toBeDefined();
+  const wrapper = stripTypeScriptTypes(declaration!.getText(module)).replace("export async function", "async function");
   let now = 1000;
   const observed: Params[] = [];
   const run = new Function("Date", "startAdvanceHeartbeat", "runDeterministicFold", "requireSourceRoot",

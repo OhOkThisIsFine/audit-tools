@@ -2,8 +2,10 @@ import { beforeEach, afterEach, expect, test } from "vitest";
 import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { buildAuditFindingsReport, buildAuditReportModel } from "../../src/audit/reporting/synthesis.js";
-import type { AuditFindingsReport } from "audit-tools/shared";
+import { buildQuestionAuditFindingsReport } from "../../src/audit/reporting/questionReport.js";
+import type { QuestionAuditFindingsReport } from "../../src/shared/types/questionReviewReport.js";
+import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAcceptedAnswer, type ReviewDependency, type ReviewFindingClaim, type ReviewPlan } from "../../src/shared/types/reviewQuestion.js";
 import { createNextStepHarness, makePlanningState } from "./helpers/nextStepHarness.js";
 import { decideNextStep } from "../../src/remediate/steps/nextStep.js";
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
@@ -11,22 +13,60 @@ import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 const harness = createNextStepHarness(".test-intake-finding-selection");
 const { REPO_DIR, ARTIFACTS_DIR } = harness;
 const sourcePath = (): string => join(REPO_DIR, "audit-findings.json");
-let report: AuditFindingsReport;
+let report: QuestionAuditFindingsReport;
 
 beforeEach(async () => {
   await harness.resetTestRepo();
   await writeFile(join(REPO_DIR, "package.json"), JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }));
   await mkdir(join(REPO_DIR, "src"), { recursive: true });
   for (const file of ["alpha", "beta", "gamma"]) await writeFile(join(REPO_DIR, "src", `${file}.ts`), `export const ${file} = 1;\n`);
-  report = buildAuditFindingsReport(buildAuditReportModel({ results: [{
-    task_id: "task", unit_id: "unit", pass_id: "pass", lens: "correctness", file_coverage: [],
-    findings: ["alpha", "beta", "gamma"].map((name, index) => ({
-      id: name, title: `${name} unique failure`, category: name, lens: index === 1 ? "security" : "correctness",
-      severity: index === 0 ? "high" as const : "low" as const, confidence: "high" as const,
-      summary: `${name} requires repair`, affected_files: [{ path: `src/${name}.ts`, line_start: 1, line_end: 1 }],
-      evidence: [`export const ${name} = 1;`],
-    })),
-  }] }), null);
+  const schema_version = REVIEW_QUESTION_CONTRACT_VERSION;
+  const snapshot_id = "snapshot-a";
+  const plan: ReviewPlan = {
+    schema_version, snapshot_id, inventory: [], omissions: [], lens_decisions: [], questions: [],
+  };
+  const accepted: ReviewAcceptedAnswer[] = [];
+  const dependenciesByQuestion = new Map<string, ReviewDependency[]>();
+  for (const [index, name] of ["alpha", "beta", "gamma"].entries()) {
+    const identity = { schema_version, snapshot_id, question_id: `question-${name}`, revision_id: `revision-${name}` } as const;
+    const source = { path: `src/${name}.ts`, start_line: 1, end_line: 1 };
+    const dependency = { kind: "source" as const, key: source.path, fingerprint: name };
+    dependenciesByQuestion.set(identity.question_id, [dependency]);
+    const observation_id = `observation-${name}`;
+    plan.inventory.push({
+      inventory_item_id: name, kind: "operation", title: name, scope: "in_scope", source_refs: [source], contract_refs: [],
+    });
+    plan.questions.push({
+      ...identity, lens: index === 1 ? "security" : "behavior", inventory_item_ids: [name],
+      expected_outcome: "Declared behavior", requested_parts: [{ part_id: "repair", expectation: "Retain declared behavior" }],
+      source_dependencies: [], evidence_dependencies: [], plan_status: "active",
+    });
+    const claim: ReviewFindingClaim = {
+      schema_version, question_id: identity.question_id, revision_id: identity.revision_id,
+      finding_id: name, kind: "confirmed_defect", severity: index === 0 ? "high" : "low", confidence: "high",
+      claim: `${name} unique failure`, consequence: `${name} requires repair`, next_step: "Fix the behavior",
+      evidence_ids: [], source_refs: [source], observation_ids: [observation_id], verification: [],
+    };
+    accepted.push({
+      schema_version, dependency_bindings: [dependency], accepted_at: "2026-11-21T00:00:00Z",
+      submission: {
+        ...identity, submission_id: `answer-${name}`, assignment_id: `assignment-${name}`,
+        inspected_sources: [source], evidence_ids: [], limitations: [],
+        answer: {
+          outcome: "findings",
+          observations: [{
+            ...identity, observation_id, part_id: "repair", kind: "source_confirmed",
+            statement: "The declared path does not meet the contract.", source_refs: [source], evidence_refs: [],
+          }],
+          parts: [{ part_id: "repair", outcome: "findings", observation_ids: [observation_id] }],
+          findings: [claim, ...(index === 0 ? [{ ...claim, finding_id: "optional-improvement", kind: "design_opportunity" as const }] : [])],
+        },
+      },
+    });
+  }
+  report = QuestionAuditFindingsReportSchema.parse(buildQuestionAuditFindingsReport({
+    plan, accepted, auditRead: null, evidence: [], dependenciesByQuestion,
+  }));
   report.top_risks = [...report.findings.map((finding) => `${finding.id}: ${finding.title}`), "Unbound whole-report risk"];
   report.executive_summary = "Whole-report conclusions";
   await writeFile(sourcePath(), JSON.stringify(report));
@@ -39,11 +79,11 @@ function cli(...flags: string[]) {
     env: { ...process.env, TSX_TSCONFIG_PATH: resolve("tsconfig.test.json") },
   });
 }
-async function projected(): Promise<AuditFindingsReport> {
+async function projected(): Promise<QuestionAuditFindingsReport> {
   return JSON.parse(await readFile(join(ARTIFACTS_DIR, "intake", "selected-audit-findings.json"), "utf8"));
 }
 
-function id(name: string): string { return report.findings.find((finding) => finding.category === name)!.id; }
+function id(name: string): string { return report.findings.find((finding) => finding.question_review_sources?.[0]?.finding_id === name)!.id; }
 
 test("--input severity and explicit finding IDs form a union with intact canonical topology", async () => {
   const before = await readFile(sourcePath(), "utf8");
@@ -55,6 +95,13 @@ test("--input severity and explicit finding IDs form a union with intact canonic
   expect(selected.work_blocks.flatMap((block) => block.finding_ids).sort()).toEqual([id("alpha"), id("beta")].sort());
   expect(selected.top_risks).toEqual(report.top_risks!.filter((risk) => risk.includes(id("alpha")) || risk.includes(id("beta"))));
   expect(selected.executive_summary).toBeUndefined();
+  expect(selected.question_review.findings.find((row) => row.canonical_finding_id === id("gamma"))?.actionable).toBe(false);
+  expect(selected.question_review.findings.find((row) => row.sources.some(source => source.finding_id === "optional-improvement"))).toEqual(
+    report.question_review.findings.find((row) => row.sources.some(source => source.finding_id === "optional-improvement")),
+  );
+  expect(selected.findings.map((item) => item.question_review_sources)).toEqual(
+    report.findings.filter((item) => item.id === id("alpha") || item.id === id("beta")).map((item) => item.question_review_sources),
+  );
   expect(await readFile(sourcePath(), "utf8")).toBe(before);
   const resumed = await decideNextStep({ root: REPO_DIR, input: sourcePath() });
   expect(resumed.step_kind).toBe("synthesize_intake");
@@ -90,6 +137,10 @@ test("other scope exclusions still intersect a selected explicit ID", async () =
     await decideNextStep({ root: REPO_DIR, input: sourcePath() });
   }
   const filter = JSON.parse(await readFile(join(ARTIFACTS_DIR, "review_filter_dispositions.json"), "utf8"));
+  expect(filter.droppedNoEvidence).toEqual([]);
+  expect(report.findings.find(finding => finding.id === id("alpha"))?.evidence).toEqual([
+    "src/alpha.ts:1-1: The declared path does not meet the contract.",
+  ]);
   expect(filter.droppedByCheckpoint).toContain(id("beta"));
   expect(filter.originals.map((finding: { id: string }) => finding.id).sort()).toEqual([id("alpha"), id("beta")].sort());
 });
@@ -142,6 +193,10 @@ test("a later explicitly confirmed severity filter can narrow the native union",
     await decideNextStep({ root: REPO_DIR, input: sourcePath() });
   }
   const filter = JSON.parse(await readFile(join(ARTIFACTS_DIR, "review_filter_dispositions.json"), "utf8"));
+  expect(filter.droppedNoEvidence).toEqual([]);
+  expect(report.findings.find(finding => finding.id === id("alpha"))?.evidence).toEqual([
+    "src/alpha.ts:1-1: The declared path does not meet the contract.",
+  ]);
   expect(filter.droppedByCheckpoint).toContain(id("beta"));
 });
 

@@ -5,6 +5,14 @@
 // a 9,935-line audit-report.md, and no coverage figure for the charter channel
 // existed in it at all. A correct measurement that dies in the JSON is not a fix.
 import { test, expect } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildSampleAuditBundle } from "../../src/audit/cli/sampleRunCommand.js";
+import { readQuestionReportCharterOptions } from "../../src/audit/io/artifacts.js";
+import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../src/audit/types/charterRegister.js";
+import { charterPacketArchiveDir, charterPacketArchiveFilename, charterPacketIndexPath } from "../../src/audit/orchestrator/charterPacketArchive.js";
+import { hashContent } from "../../src/shared/hash.js";
 import type { RenderableAuditReport } from "../../src/audit/reporting/synthesis.js";
 import type { CharterPacketCoverage } from "audit-tools/shared";
 import { renderAuditReportMarkdown } from "../../src/audit/reporting/synthesis.js";
@@ -82,4 +90,39 @@ test("a FAILED packet archive is surfaced beside the coverage figures", () => {
   expect(rendered).toContain("EPERM");
   // A successful row says nothing — only the failure is news.
   expect(rendered).not.toMatch(/Packet retention FAILED for.*`stated`/);
+});
+
+test("question Markdown distinguishes what the charter saw from what the archive still verifies", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "question-charter-coverage-"));
+  try {
+    const text = "Synthetic archived charter packet.\n";
+    const sha256 = hashContent(text);
+    const missingHash = hashContent("Another packet");
+    await mkdir(charterPacketArchiveDir(dir));
+    await writeFile(join(dir, "charter_register.json"), JSON.stringify({
+      schema_version: CHARTER_REGISTER_SCHEMA_VERSION, evidence_coverage: [SHORT_DELIVERY],
+    }));
+    await writeFile(charterPacketIndexPath(dir), JSON.stringify([
+      { kind: "stated", sha256, byte_length: Buffer.byteLength(text), archived: true },
+      { kind: "revealed", sha256: missingHash, byte_length: 14, archived: true },
+    ]));
+    const retained = join(charterPacketArchiveDir(dir), charterPacketArchiveFilename("stated", sha256));
+    await writeFile(retained, text);
+    const { auditFindings } = buildSampleAuditBundle();
+    const first = renderAuditReportMarkdown(auditFindings, await readQuestionReportCharterOptions(dir));
+    expect(first).toContain("comment: 71 of 72 delivered");
+    expect(first).toContain("src/a.ts (unreadable_or_oversized)");
+    expect(first).toContain("Verified retained packet: stated");
+    expect(first).toContain("Packet retention FAILED");
+    expect(first).toContain("revealed");
+    expect(first).not.toContain("evidence still exists");
+    expect(first).toBe(renderAuditReportMarkdown(auditFindings, await readQuestionReportCharterOptions(dir)));
+    await writeFile(retained, text.replace("Synthetic", "Different"));
+    const altered = renderAuditReportMarkdown(auditFindings, await readQuestionReportCharterOptions(dir));
+    expect(altered).toContain("No verified charter packet retention record");
+    expect(altered).not.toContain("Verified retained packet:");
+    expect(JSON.stringify(auditFindings)).not.toContain("unreadable_or_oversized");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -7,21 +7,20 @@ import { captureCompletedDesignReviews } from "./helpers/designReviewSnapshotFix
  *         → covered by executor-registry-sync.test.mjs (not duplicated here)
  * INV-02: unknown executor → no-progress handoff, never silently claims progress
  *         → covered by advance-error-paths.test.mjs (not duplicated here)
- * INV-03: staleness DAG covers scope.json→coverage/audit_tasks/flow_coverage and
+ * INV-03: staleness DAG covers scope.json → review_plan.json → report and
  *         the dependents map matches executor write sets
  * INV-04: computeStaleArtifacts is fixpoint-idempotent (re-running on its own output
  *         produces the same stale set, no synthesis↔runtime oscillation)
  * INV-05: the dependency graph (ARTIFACT_DEPENDENCIES_MAP) is acyclic; every present
  *         artifact set can be dependency-first-ordered without a cycle
- * INV-06: obligation derivation reflects real content: audit_results_ingested is
- *         not_applicable on zero-task runs (nothing owed, so nothing achieved);
- *         missing when tasks present but results absent
+ * INV-06: review obligations follow the active question plan and bound-answer
+ *         ledger; retired obligations do not appear.
  * INV-07: obligation/planning code stays language-neutral — no per-ecosystem branches
  * INV-08: no hardcoded model identities anywhere in orchestrator source
  */
 
 import { test, expect } from "vitest";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,8 +29,13 @@ import { computeStaleArtifacts } from "../../src/audit/orchestrator/staleness.js
 import { computeArtifactMetadata } from "../../src/audit/orchestrator/artifactMetadata.js";
 import { deriveAuditState } from "../../src/audit/orchestrator/state.js";
 import { ARTIFACT_DEFINITIONS, AUDIT_REPORT_FILENAME, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
-import { AGENT_FEEDBACK_FILENAME } from "audit-tools/shared";
-import { buildPendingAuditTasks } from "../../src/audit/cli/dispatch/packetFilter.js";
+import { AGENT_FEEDBACK_FILENAME, hashContent } from "audit-tools/shared";
+import { publishAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+import { withTempRepo } from "./helpers/next-step-harness.js";
 import type { AuditTask, RepoManifest } from "../../src/audit/types.js";
 import type { DesignAssessment } from "../../src/audit/types/designAssessment.js";
 import type { AuditScopeManifest } from "../../src/audit/types/auditScope.js";
@@ -103,71 +107,39 @@ function makeAuditScope(overrides: Partial<AuditScopeManifest> = {}): AuditScope
 }
 
 // ---------------------------------------------------------------------------
-// INV-03: staleness DAG — scope.json → coverage_matrix chain
+// INV-03: staleness DAG — scope.json → review plan and report
 // ---------------------------------------------------------------------------
 
-test("INV-03: scope.json → coverage_matrix is in ARTIFACT_DEPENDENTS_MAP", () => {
-  const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"]!;
-  expect(Array.isArray(scopeDeps), "scope.json must have a dependents entry in ARTIFACT_DEPENDENTS_MAP").toBeTruthy();
-  expect(scopeDeps.includes("coverage_matrix.json"), "scope.json must list coverage_matrix.json as a dependent so a scope change re-stales coverage").toBeTruthy();
+test("INV-03: scope.json directly invalidates the question plan", () => {
+  expect(ARTIFACT_DEPENDENTS_MAP["scope.json"]).toContain("review_plan.json");
+  expect(ARTIFACT_DEPENDS_ON_MAP["review_plan.json"]).toContain("scope.json");
 });
 
-test("INV-03: scope.json has direct edges to coverage_matrix.json AND audit_tasks.json", () => {
-  // ARC-cebe3421-3: without a direct scope→audit_tasks edge, a scope change that
-  // produces coverage_matrix with identical content (same files/buckets) silently
-  // carries stale tasks built under the old scope — the transitive path
-  // scope→coverage_matrix→audit_tasks only fires when coverage_matrix content changes.
-  const scopeDeps = ARTIFACT_DEPENDENTS_MAP["scope.json"] ?? [];
-  expect(scopeDeps.includes("coverage_matrix.json"), "scope.json must list coverage_matrix.json as a direct dependent").toBeTruthy();
-  expect(scopeDeps.includes("audit_tasks.json"), "scope.json must list audit_tasks.json as a DIRECT dependent (ARC-cebe3421-3: scope change that produces identical coverage_matrix content must still re-stale tasks)").toBeTruthy();
-});
-
-test("INV-03: coverage_matrix.json is downstream of scope.json transitively to flow_coverage.json and audit-report.md", () => {
-  // scope → coverage_matrix → [flow_coverage, audit-report.md, ...]
-  const dependents = ARTIFACT_DEPENDENTS_MAP;
-
-  function transitiveDownstream(start: string) {
-    const visited = new Set<string>();
-    const queue: string[] = [start];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (visited.has(current)) continue;
-      visited.add(current);
-      for (const dep of (dependents as Record<string, string[] | undefined>)[current] ?? []) {
-        queue.push(dep);
-      }
-    }
-    return visited;
+test("INV-03: frozen source and confirmed intent directly invalidate the question plan", () => {
+  for (const parent of ["repo_manifest.json", "intent_checkpoint.json"] as const) {
+    expect(ARTIFACT_DEPENDENTS_MAP[parent]).toContain("review_plan.json");
   }
-
-  const fromScope = transitiveDownstream("scope.json");
-  expect(fromScope.has("coverage_matrix.json"), "scope.json must transitively reach coverage_matrix.json").toBeTruthy();
-  expect(fromScope.has("flow_coverage.json"), "scope.json must transitively reach flow_coverage.json (via coverage_matrix)").toBeTruthy();
-  expect(fromScope.has("audit-report.md"), "scope.json must transitively reach audit-report.md so scope changes re-stale synthesis").toBeTruthy();
 });
 
-test("INV-03: planning_executor write set is covered by ARTIFACT_DEPENDENTS_MAP as upstream sources", () => {
-  // The planning executor writes: scope.json, coverage_matrix.json, flow_coverage.json,
-  // runtime_validation_tasks.json, runtime_validation_report.json (conditional),
-  // audit_tasks.json, audit_plan_metrics.json, requeue_tasks.json.
-  // Each of these must either appear as a key in ARTIFACT_DEPENDENTS_MAP (upstream)
-  // OR appear in some entry's value (downstream of something) so staleness propagates.
-  const planningWriteSet = [
-    "scope.json",
-    "coverage_matrix.json",
-    "flow_coverage.json",
-    "runtime_validation_tasks.json",
-    "audit_tasks.json",
-    "audit_plan_metrics.json",
-    "requeue_tasks.json",
-  ];
-  const allKnownArtifacts = new Set([
-    ...Object.keys(ARTIFACT_DEPENDENTS_MAP),
-    ...(Object.values(ARTIFACT_DEPENDENTS_MAP).filter(Boolean) as string[][]).flat(),
-  ]);
-  for (const artifact of planningWriteSet) {
-    expect(allKnownArtifacts.has(artifact), `planning_executor writes "${artifact}" but it is absent from ARTIFACT_DEPENDENTS_MAP (neither key nor value) — staleness cannot propagate to/from it`).toBeTruthy();
+test("INV-03: scope transitively reaches both machine and human reports", () => {
+  const visited = new Set<string>();
+  const queue = ["scope.json"];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    queue.push(...((ARTIFACT_DEPENDENTS_MAP as Record<string, readonly string[] | undefined>)[current] ?? []));
   }
+  expect(visited).toContain("review_plan.json");
+  expect(visited).toContain("audit-findings.json");
+  expect(visited).toContain(AUDIT_REPORT_FILENAME);
+});
+
+test("INV-03: question planner writes exactly the scope and its question plan", () => {
+  const result = buildQuestionPlanArtifacts({ repo_manifest: makeRepoManifest() }, fullAuditScope());
+  expect(result.artifacts_written).toEqual(["scope.json", "review_plan.json"]);
+  expect(result.updated.scope).toBeDefined();
+  expect(result.updated.review_plan).toBeDefined();
 });
 
 test("INV-03: synthesis_executor write set is reachable from planning artifacts in the dependency DAG", () => {
@@ -337,36 +309,18 @@ test("INV-05: computeArtifactMetadata processes a full planning bundle without t
   expect(Object.keys(metadata.artifacts).length > 0, "metadata must contain at least one artifact entry").toBeTruthy();
 });
 
-// CP-NODE-10 residual 3: the producer-side affinity hash is GUARDED. The affinity
-// canonicalizer throws on a malformed body, and this path reaches every present
-// DAG artifact unconditionally on every advance — so an unguarded restamp turned
-// one bad persisted artifact into a run that dies before it can even restamp.
-test("INV-05: a malformed affinity body restamps instead of killing the metadata pass", () => {
-  const malformed = {
+test("INV-05: malformed archived affinity cannot change active metadata", () => {
+  const base = buildQuestionPlanArtifacts({ repo_manifest: makeRepoManifest() }, fullAuditScope()).updated;
+  const baseline = computeArtifactMetadata(base);
+  const archived = { ...base, task_affinity_graph: {
     nodes: [{ task_id: "t1", file_paths: ["a.ts"] }],
-    // Dangling edge — `canonicalizeTaskAffinityGraph` throws on exactly this.
     edges: [{ from: "t1", to: "MISSING", kind: "cochange", weight: 0.5 }],
-  };
-  const bundle = { task_affinity_graph: malformed } as unknown as ArtifactBundle;
-
-  let metadata: ReturnType<typeof computeArtifactMetadata>;
-  expect(
-    () => {
-      metadata = computeArtifactMetadata(bundle);
-    },
-    "a malformed affinity body must not take down the whole restamp",
-  ).not.toThrow();
-  const entry = metadata!.artifacts["task_affinity_graph.json"];
-  expect(entry, "the malformed artifact still gets an entry").toBeDefined();
-
-  // It CONVERGES: the fallback hash is content-derived, so an unchanged body
-  // neither churns (which would phantom-stale its dependents) nor re-derives.
-  const again = computeArtifactMetadata(bundle, metadata!, []);
-  expect(again.artifacts["task_affinity_graph.json"]!.content_hash).toBe(
-    entry!.content_hash,
-  );
-  expect(again.artifacts["task_affinity_graph.json"]!.revision).toBe(
-    entry!.revision,
+  } } as unknown as ArtifactBundle;
+  const compared = computeArtifactMetadata(archived, baseline, []);
+  expect(compared.artifacts["review_plan.json"]).toEqual(baseline.artifacts["review_plan.json"]);
+  expect(compared.artifacts["task_affinity_graph.json"]).toBeUndefined();
+  expect(computeStaleArtifacts({ ...archived, artifact_metadata: compared })).toEqual(
+    computeStaleArtifacts({ ...base, artifact_metadata: baseline }),
   );
 });
 
@@ -374,76 +328,12 @@ test("INV-05: a malformed affinity body restamps instead of killing the metadata
 // INV-06: obligation derivation reflects real content
 // ---------------------------------------------------------------------------
 
-test("INV-06: audit_results_ingested is not_applicable for a zero-task run (nothing was owed)", () => {
-  // When audit_tasks is empty (or absent), nothing is owed and nothing was
-  // ingested. The zero-task bypass is unchanged BEHAVIOURALLY — the obligation
-  // is still non-actionable, so the drain still passes over it — but it no
-  // longer SAYS `satisfied`, which read as "results were ingested" on a run
-  // where none existed.
-  const zeroTaskBundle: ArtifactBundle = { audit_tasks: [] };
-  const state = deriveAuditState(zeroTaskBundle);
-  const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  expect(obligation, "audit_results_ingested obligation must be present").toBeTruthy();
-  expect(obligation!.state, "audit_results_ingested must be 'not_applicable' when audit_tasks is empty (nothing to ingest)").toBe("not_applicable");
-  expect(obligation!.reason, "the empty input set must be STATED, not left to be inferred from the state").toBe("No audit tasks were planned, so no results are owed.");
-});
-
-test("INV-06: audit_results_ingested is not_applicable when audit_tasks is absent (no tasks planned)", () => {
-  const bundle: ArtifactBundle = {};
-  const state = deriveAuditState(bundle);
-  const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  expect(obligation, "audit_results_ingested must be derived").toBeTruthy();
-  expect(obligation!.state, "audit_results_ingested must be 'not_applicable' when no tasks are planned").toBe("not_applicable");
-});
-
-test("INV-06: audit_results_ingested is missing when tasks are present but audit_results is absent", () => {
-  const bundle: ArtifactBundle = {
-    audit_tasks: [
-      {
-        task_id: "u:security",
-        unit_id: "u",
-        pass_id: "p",
-        lens: "security",
-        file_paths: ["src/a.ts"],
-        rationale: "r",
-        status: "pending",
-      },
-    ],
-    // audit_results deliberately absent
-  };
-  const state = deriveAuditState(bundle);
-  const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  expect(obligation, "audit_results_ingested must be derived").toBeTruthy();
-  expect(obligation!.state, "audit_results_ingested must be 'missing' when tasks are present but audit_results is absent").toBe("missing");
-});
-
-test("INV-06: audit_results_ingested is satisfied when all tasks have matching results", () => {
-  const task: AuditTask = {
-    task_id: "u:security",
-    unit_id: "u",
-    pass_id: "p",
-    lens: "security",
-    file_paths: ["src/a.ts"],
-    rationale: "r",
-    status: "pending",
-  };
-  const bundle: ArtifactBundle = {
-    audit_tasks: [task],
-    audit_results: [
-      {
-        task_id: task.task_id,
-        unit_id: task.unit_id,
-        pass_id: task.pass_id,
-        lens: task.lens,
-        file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
-        findings: [],
-        reviewed_clean: true,
-      },
-    ],
-  };
-  const state = deriveAuditState(bundle);
-  const obligation = state.obligations.find((o) => o.id === "audit_results_ingested");
-  expect(obligation?.state, "audit_results_ingested must be satisfied when results are present").toBe("satisfied");
+test("INV-06: an unplanned review is missing rather than already complete", () => {
+  const state = deriveAuditState({});
+  expect(state.obligations.find(o => o.id === "planning_artifacts")?.state).toBe("missing");
+  expect(state.obligations.find(o => o.id === "audit_tasks_completed")?.state).toBe("missing");
+  expect(state.obligations.map(o => o.id)).not.toContain("audit_results_ingested");
+  expect(state.obligations.map(o => o.id)).not.toContain("runtime_validation_current");
 });
 
 // ---------------------------------------------------------------------------
@@ -611,35 +501,25 @@ test("INV-09: split design_assessment with matching snapshots satisfies both obl
 });
 
 // ---------------------------------------------------------------------------
-// INV-10: scope.json → audit_tasks.json direct staleness edge (ARC-cebe3421-3)
+// INV-10: scope.json → review_plan.json direct staleness edge
 // ---------------------------------------------------------------------------
 
-test("INV-10: a scope change stales audit_tasks.json even when coverage_matrix content is unchanged", () => {
-  // This is the ARC-cebe3421-3 regression guard. Without a direct scope→audit_tasks edge,
-  // if scope changes but coverage_matrix content happens to be identical, audit_tasks
-  // would not re-stale (the transitive path never fires). The direct edge ensures
-  // scope revision changes always propagate to audit_tasks.
-
-  // Build initial bundle with scope.json and audit_tasks.json present.
-  const base: ArtifactBundle = {
-    scope: makeAuditScope({ mode: "full", seed_files: [] }),
-    coverage_matrix: { files: [] },
-    audit_tasks: [],
-    requeue_tasks: [],
-    audit_plan_metrics: makeAuditPlanMetrics(),
+test("INV-10: changed confirmed scope stales the plan with the same included source", () => {
+  const path = "src/auth.ts";
+  const input: ArtifactBundle = {
+    repo_manifest: makeRepoManifest({ files: [{ path, language: "typescript", size_bytes: 10, hash: "source-a" }] }),
+    file_disposition: { files: [{ path, status: "included" }] },
+    surface_manifest: { surfaces: [{ id: "auth", kind: "interface", entrypoint: path }] },
   };
-  const metadata = computeArtifactMetadata(base);
-
-  // Simulate scope content change (different --since produces different seed_files).
-  const changedScopeBundle: ArtifactBundle = {
-    ...base,
-    scope: makeAuditScope({ mode: "delta", seed_files: ["src/auth.ts"] }),
-    artifact_metadata: metadata,
-  };
-
-  const stale = computeStaleArtifacts(changedScopeBundle);
-  expect(stale.has("coverage_matrix.json"), "coverage_matrix.json must be stale when scope changes").toBeTruthy();
-  expect(stale.has("audit_tasks.json"), "audit_tasks.json must be stale when scope changes (direct edge guards against identical-coverage no-fire)").toBeTruthy();
+  const full = buildQuestionPlanArtifacts(input, fullAuditScope()).updated;
+  const deltaScope = makeAuditScope({ mode: "delta", since: "base", seed_files: [path] });
+  const delta = buildQuestionPlanArtifacts(input, deltaScope).updated;
+  expect(delta.scope).not.toEqual(full.scope);
+  expect(delta.review_plan).toEqual(full.review_plan);
+  const metadata = computeArtifactMetadata(full);
+  expect(computeStaleArtifacts({ ...full, artifact_metadata: metadata }).has("review_plan.json")).toBe(false);
+  const changed = { ...full, scope: delta.scope, artifact_metadata: metadata };
+  expect(computeStaleArtifacts(changed).has("review_plan.json")).toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -707,56 +587,66 @@ test("INV-STATE-PURE: deriveAuditState is synchronous (returns a state object, n
 });
 
 // ---------------------------------------------------------------------------
-// INV-PENDING-SINGLE-SOURCE: buildPendingAuditTasks (dispatch) and
-// deriveAuditState's audit_tasks_completed obligation must agree on the pending
-// set — one shared derivation, so dispatch and the completion gate can never
-// disagree on which tasks still need work.
+// INV-PENDING-SINGLE-SOURCE: use the actual projection that drives host dispatch
+// and obligation derivation, including a durable bound submission and resume.
 // ---------------------------------------------------------------------------
 
-test("INV-PENDING-SINGLE-SOURCE: dispatch pending set and audit_tasks_completed agree (pending case)", () => {
-  const t1 = pendingTaskFixture("u:security");
-  const t2 = pendingTaskFixture("u:correctness");
-  const bundle: ArtifactBundle = {
-    repo_manifest: makeRepoManifest(),
-    audit_tasks: [t1, t2],
-    audit_results: [
-      {
-        task_id: t1.task_id,
-        unit_id: t1.unit_id,
-        pass_id: t1.pass_id,
-        lens: t1.lens,
-        file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
-        findings: [],
-        reviewed_clean: true,
+test("INV-PENDING-SINGLE-SOURCE: scoped host work remains owed until its current binding is answered", async () => {
+  await withTempRepo(async root => {
+    const path = "src/api/auth.ts";
+    const source = "export const online = true;\n";
+    await writeFile(join(root, path), source);
+    const planned = buildQuestionPlanArtifacts({
+      repo_manifest: makeRepoManifest({ files: [
+        { path, language: "typescript", size_bytes: Buffer.byteLength(source), hash: hashContent(source) },
+      ] }),
+      file_disposition: { files: [{ path, status: "included" }] },
+      surface_manifest: { surfaces: [{ id: "fixture-operation", kind: "interface", entrypoint: path }] },
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1", confirmed_at: "2026-01-01T00:00:00Z",
+        confirmed_by: "host", scope_summary: "Fixture source", intent_summary: "Review behavior",
+        lens_selection: { include: ["behavior"] },
       },
-    ],
-  };
-  const pendingIds = buildPendingAuditTasks(bundle).map((t) => t.task_id);
-  expect(pendingIds).toEqual([t2.task_id]);
-  const state = deriveAuditState(bundle);
-  const completed = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(completed?.state, "gate must see the same pending set dispatch sees").toBe("missing");
-});
+    }, fullAuditScope()).updated;
+    const boundary = { root, sourceRoot: root, artifactsDir: join(root, ".audit-tools", "audit") };
+    const first = await deriveQuestionCycleUnlocked({ ...boundary, bundle: planned });
+    expect(first.pending).toHaveLength(1);
+    const binding = first.pending[0]!;
+    const { question, assignment } = binding;
+    expect(question.lens).toBe("behavior");
+    expect(assignment.suggested_sources.map(ref => ref.path)).toContain(path);
 
-test("INV-PENDING-SINGLE-SOURCE: dispatch pending set and audit_tasks_completed agree (all-complete case)", () => {
-  const t1 = pendingTaskFixture("u:security");
-  const bundle: ArtifactBundle = {
-    repo_manifest: makeRepoManifest(),
-    audit_tasks: [t1],
-    audit_results: [
-      {
-        task_id: t1.task_id,
-        unit_id: t1.unit_id,
-        pass_id: t1.pass_id,
-        lens: t1.lens,
-        file_coverage: [{ path: "src/a.ts", total_lines: 10 }],
-        findings: [],
-        reviewed_clean: true,
-      },
-    ],
-  };
-  expect(buildPendingAuditTasks(bundle)).toEqual([]);
-  const state = deriveAuditState(bundle);
-  const completed = state.obligations.find((o) => o.id === "audit_tasks_completed");
-  expect(completed?.state).toBe("satisfied");
+    const stateFor = (cycle: typeof first) => deriveAuditState({ ...planned, question_cycle: cycle }).obligations;
+    expect(stateFor(first).find(o => o.id === "planning_artifacts")?.state).toBe("satisfied");
+    expect(stateFor(first).find(o => o.id === "audit_tasks_completed")?.state).toBe("missing");
+    await publishAuditQuestionWorkload({ ...boundary, runId: first.runId, bindings: first.pending });
+
+    const submission: ReviewSubmission = {
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+      submission_id: "invariant-bound-answer",
+      assignment_id: assignment.assignment_id, question_id: question.question_id,
+      revision_id: question.revision_id, snapshot_id: question.snapshot_id,
+      inspected_sources: [{ path, start_line: 1 }], evidence_ids: [],
+      limitations: ["Synthetic fixture has no runtime evidence."],
+      answer: { outcome: "inconclusive", findings: [], observations: [], parts: [{
+        part_id: question.requested_parts[0]!.part_id, outcome: "inconclusive",
+        observation_ids: [], reason: "No runtime evidence.",
+      }] },
+    };
+    const send = (answer: ReviewSubmission) => submitAuditQuestionResult({
+      ...boundary, runId: first.runId, assignmentId: assignment.assignment_id, source: JSON.stringify(answer),
+    });
+    await expect(send({ ...submission, revision_id: hashContent("different revision") }))
+      .rejects.toThrow(/does not match the current issued assignment, question revision and snapshot/);
+    const stillOwed = await deriveQuestionCycleUnlocked({ ...boundary, bundle: structuredClone(planned) });
+    expect(stillOwed.pending.map(item => item.assignment.assignment_id)).toEqual([assignment.assignment_id]);
+    expect(stateFor(stillOwed).find(o => o.id === "audit_tasks_completed")?.state).toBe("missing");
+
+    expect((await send(submission)).kind).toBe("accepted");
+    const resumed = await deriveQuestionCycleUnlocked({ ...boundary, bundle: structuredClone(planned) });
+    expect(resumed.runId).toBe(first.runId);
+    expect(resumed.answers.map(({ submission }) => submission)).toEqual([submission]);
+    expect(resumed.pending).toEqual([]);
+    expect(stateFor(resumed).find(o => o.id === "audit_tasks_completed")?.state).toBe("satisfied");
+  });
 });

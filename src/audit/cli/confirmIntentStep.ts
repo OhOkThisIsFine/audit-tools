@@ -1,7 +1,7 @@
 // sites-pinned: tests/audit/intent-checkpoint.test.ts
-import { LENSES, IntentCheckpointSchema, FileDispositionStatusSchema } from "audit-tools/shared";
-import { MANDATORY_LENSES } from "../orchestrator/lensSelection.js";
-import { lensDefinition } from "../types.js";
+import { IntentCheckpointSchema, FileDispositionStatusSchema } from "audit-tools/shared";
+import { BUILT_IN_REVIEW_LENSES } from "../../shared/types/reviewQuestion.js";
+import { REVIEW_LENS_PLAYBOOKS } from "../orchestrator/reviewLensPlaybooks.js";
 import {
   CONCEPTUAL_PERSPECTIVES,
   DEFAULT_CONCEPTUAL_PERSPECTIVES,
@@ -128,10 +128,8 @@ export function renderConfirmIntentPrompt(
     .map((p) => `- \`${p.path}\` → \`${p.proposed_status}\` (${p.reason})`)
     .join("\n");
 
-  // Render the canonical lens proposition table (note 1) — one glyph-labelled
-  // row per lens, in registry order. Mandatory rows always show ● mandatory.
+  // Render one recommendation per built-in question lens, in registry order.
   const dispositionCell: Record<string, string> = {
-    mandatory: "● mandatory",
     recommend_include: "✓ recommend include",
     recommend_exclude: "✗ recommend exclude",
   };
@@ -143,10 +141,6 @@ export function renderConfirmIntentPrompt(
     .join("\n");
 
   const hasOverrideProposals = preDigest.disposition_override_proposals.length > 0;
-  // Derive the mandatory-lens prose from the authoritative MANDATORY_LENSES
-  // constant so the rendered guidance can never drift from the enforced set
-  // (MNT-df8c4551).
-  const mandatoryLensList = MANDATORY_LENSES.join(", ");
   const unresolvedClauses = opts.unresolvedConstraintClauses ?? [];
   const hasBlockingClauses = unresolvedClauses.length > 0;
   const proposedDepth = proposeConceptualDepth(opts.intentSummary, opts.freeFormIntent, preDigest.mode);
@@ -252,24 +246,18 @@ export function renderConfirmIntentPrompt(
       : []),
     "## Lens proposition",
     "",
-    "Deterministic first pass over the codebase. ● = mandatory (always audited,",
-    "never re-confirmed), ✓ = recommend include, ✗ = recommend exclude.",
+    "Intake evidence suggests which questions may be useful. Recommendations are not coverage and no lens is mandatory.",
     "",
     "| Lens               | Disposition           | Why |",
     "|--------------------|-----------------------|-----|",
     lensTableRows,
     "",
     "Use this prepared table as the proposal for the operator's choices.",
-    "The operator may change optional selections or add custom lenses; do not start a separate code-research task during confirmation.",
-    `Mandatory lenses (${mandatoryLensList}) stay enabled.`,
+    "The operator can narrow the selection or request a materially different custom question; do not start separate code research during confirmation.",
     "",
     "Canonical lens meanings (for your review; you need not show these to the user):",
     "",
-    ...LENSES.map((lens) => {
-      // The one-line meaning lives in the lens registry, the one home for lens prose.
-      const desc = lensDefinition(lens)?.summary;
-      return `- **${lens}**${desc ? ` — ${desc}` : ""}`;
-    }),
+    ...BUILT_IN_REVIEW_LENSES.map((lens) => `- **${lens}**: ${REVIEW_LENS_PLAYBOOKS[lens]}`),
     "",
     "## Conceptual design-review depth",
     "",
@@ -297,17 +285,15 @@ export function renderConfirmIntentPrompt(
     "specific tool). Ask:",
     "",
     "1. Present the scope summary above.",
-    "2. Show the prepared lens table. Ask which **optional** lenses to",
-    "   **layer on top** of the always-on mandatory set (and whether to flip any",
-    "   recommend-include / recommend-exclude). Do NOT ask the user about the",
-    "   mandatory (●) rows — they are always on. The user may add **any number** of",
-    "   additional custom lenses (freeform names).",
+    "2. Confirm the question lenses that matter for this audit. For targeted work,",
+    "   record the exact chosen set and any reasons the operator gives for omissions.",
+    "   Add a custom lens only when it represents a materially different question.",
     `3. Ask the conceptual design-review depth (proposed **${proposedDepth}** for this intent). The choice is fresh each run and remains the user's confirmation.`,
     "4. Wait for the user to confirm before proceeding.",
     "",
-    "Record the result in `lens_selection`: optional + custom lenses the user wants",
-    "go in `include`; recommend-include lenses the user drops go in `exclude`.",
-    "(Mandatory lenses are always audited and need not be listed.)",
+    "Record a deliberate `lens_selection.include` as an exact list, not an addition to a default set.",
+    "Use `exclude` to remove named lenses from otherwise applicable planning, and record operator reasons in `omission_reasons`.",
+    "Omit the selection if the operator asked the planner to choose all applicable lenses. Do not infer an explicit omission from weak evidence.",
     "",
     "## What to do",
     "",
@@ -339,7 +325,7 @@ export function renderConfirmIntentPrompt(
     '  "excluded_scope": [{ "path": "<path or prefix>", "reason": "<why>" }],',
     '  "must_not_touch": ["<glob>"],',
     `  "disposition_overrides": [{ "path": "<path>", "status": "<${FileDispositionStatusSchema.options.join("|")}>", "reason": "<why>" }],`,
-    '  "lens_selection": { "include": ["<lens>"], "exclude": ["<lens>"] },',
+    '  "lens_selection": { "include": ["behavior"], "exclude": ["performance"], "omission_reasons": {"performance":"not needed for this retry-focused review"} },',
     // The example carries the PROPOSED depth; on deep it carries the default
     // perspective count the prose above promises, and on shallow it omits
     // `perspectives` (the bullet below says to), so copying it is never wrong.
@@ -364,9 +350,8 @@ export function renderConfirmIntentPrompt(
     '  "Excluded / Out-of-Scope".',
     "- `disposition_overrides` patches the file disposition before coverage",
     "  initialization — overridden files never enter coverage at all.",
-    "- `lens_selection.include` and `lens_selection.exclude` accept both canonical",
-    "  and custom lens names. Custom lenses generate tasks using the unit's files",
-    "  with context derived from the lens name and `free_form_intent`.",
+    "- Lens IDs are the seven above or `custom:<slug>`. Reconfirm archived or invalid IDs instead of silently translating them.",
+    "  A custom name alone does not establish a reviewable question or grant access to files.",
     "- `design_review.answered_at` MUST repeat this run's `confirmed_at` verbatim.",
     "  These dials are answered **per run** — the tool honors them only for the",
     "  confirmation that supplied them, so the next audit asks again rather than",

@@ -188,33 +188,15 @@ export const EXECUTOR_WRITE_SITES = [
   },
   {
     executor: "planning_executor",
-    file: "src/audit/orchestrator/planningExecutors.ts",
-    scope: "runPlanningExecutor",
-    rule: "runnerWriteSet",
-  },
-  {
-    executor: "result_ingestion_executor",
-    file: "src/audit/orchestrator/ingestionExecutors.ts",
-    scope: "runResultIngestionExecutor",
-    rule: "runnerWriteSet",
-  },
-  {
-    executor: "runtime_validation_executor",
-    file: "src/audit/orchestrator/ingestionExecutors.ts",
-    scope: "runRuntimeValidationExecutor",
-    rule: "runnerWriteSet",
-  },
-  {
-    executor: "runtime_validation_update_executor",
-    file: "src/audit/orchestrator/ingestionExecutors.ts",
-    scope: "runRuntimeValidationUpdateExecutor",
+    file: "src/audit/orchestrator/questionPlanExecutor.ts",
+    scope: "buildQuestionPlanArtifacts",
     rule: "runnerWriteSet",
   },
   {
     executor: "semantic_review_executor",
     rule: "no-writes",
     reason:
-      "the host returns audit results through the submission ledger; result_ingestion_executor is what persists them",
+      "bound question answers are persisted by the host-ledger acceptance path, not by the review executor",
   },
   {
     executor: "structure_decomposition_executor",
@@ -237,13 +219,13 @@ export const EXECUTOR_WRITE_SITES = [
   {
     executor: "synthesis_executor",
     file: "src/audit/orchestrator/synthesisExecutors.ts",
-    scope: "runSynthesisExecutor",
+    scope: "runQuestionSynthesisExecutor",
     rule: "runnerWriteSet",
   },
   {
     executor: "synthesis_narrative_executor",
     file: "src/audit/orchestrator/synthesisExecutors.ts",
-    scope: "runSynthesisNarrativeExecutor",
+    scope: "runQuestionSynthesisNarrativeExecutor",
     rule: "runnerWriteSet",
   },
   {
@@ -265,38 +247,7 @@ export const EXECUTOR_WRITE_SITES = [
  *
  * @type {ReadonlyArray<{executor: string, artifact: string, reason: string}>}
  */
-export const DYNAMIC_WRITE_CONTRIBUTORS = [
-  {
-    executor: "runtime_validation_executor",
-    artifact: "audit_plan_metrics.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-  {
-    executor: "runtime_validation_executor",
-    artifact: "audit_tasks.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-  {
-    executor: "runtime_validation_executor",
-    artifact: "task_affinity_graph.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-  {
-    executor: "runtime_validation_update_executor",
-    artifact: "audit_plan_metrics.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-  {
-    executor: "runtime_validation_update_executor",
-    artifact: "audit_tasks.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-  {
-    executor: "runtime_validation_update_executor",
-    artifact: "task_affinity_graph.json",
-    reason: "spread of applySelectiveDeepening().artifacts (ingestionExecutors.ts)",
-  },
-];
+export const DYNAMIC_WRITE_CONTRIBUTORS = [];
 
 /** `<NAME>_FILENAME` → its literal value, from the constant-source modules. */
 function readFilenameConstants(root) {

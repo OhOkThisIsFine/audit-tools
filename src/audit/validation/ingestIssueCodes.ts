@@ -1,4 +1,3 @@
-// sites-pinned: tests/audit/semantic-review-step.test.ts
 // (the draw's own two remedies decide which section `workload_stale` and
 // `result_validation_failed` render under)
 /**

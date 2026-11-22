@@ -1,123 +1,109 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
-import type { AuditResult } from "../../src/audit/types.js";
-import { runSynthesisExecutor } from "../../src/audit/orchestrator/synthesisExecutors.js";
-import { buildDesignReviewSnapshot } from "../../src/audit/orchestrator/designReviewSnapshot.js";
+import { buildReviewQuestionPlan } from "../../src/audit/orchestrator/questionPlanning.js";
 import {
-  buildAuditFindingsReport,
-  buildAuditReportModel,
-  renderAuditReportMarkdown,
-} from "../../src/audit/reporting/synthesis.js";
-import { validateAuditFindingsReport } from "../../src/shared/validation/findingsReport.js";
+  acceptQuestionReview, type AuditQuestionBinding,
+} from "../../src/audit/cli/dispatch/questionReviewAcceptance.js";
+import { buildQuestionAuditFindingsReport } from "../../src/audit/reporting/questionReport.js";
+import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questionReviewReport.js";
+import {
+  REVIEW_QUESTION_CONTRACT_VERSION as version, type ReviewAcceptedAnswer, type ReviewSubmission,
+} from "../../src/shared/types/reviewQuestion.js";
 
-const fixture = new URL("../fixtures/audit-real-lens-coverage/", import.meta.url);
-function read<T>(name: string): T {
-  return JSON.parse(readFileSync(new URL(name, fixture), "utf8")) as T;
-}
-function inputs() {
-  return {
-    results: readFileSync(new URL("audit_results.jsonl", fixture), "utf8")
-      .trim().split("\n").map((line) => JSON.parse(line) as AuditResult),
-    coverageMatrix: read<ArtifactBundle["coverage_matrix"]>("coverage_matrix.json"),
-    designAssessment: read<ArtifactBundle["design_assessment"]>("design_assessment.json"),
-    intentCheckpoint: read<ArtifactBundle["intent_checkpoint"]>("intent_checkpoint.json"),
-    unitManifest: read<ArtifactBundle["unit_manifest"]>("unit_manifest.json"),
-    designReviewSnapshots: {
-      contract: read<NonNullable<ArtifactBundle["design_review_snapshots"]>["contract"]>("design-review-snapshots/contract.json"),
-      conceptual: read<NonNullable<ArtifactBundle["design_review_snapshots"]>["conceptual"]>("design-review-snapshots/conceptual.json"),
+const path = "src/handler.ts";
+const sourceRef = { path, start_line: 1 };
+
+function planned(fingerprint = "first", selective = false) {
+  const bundle: ArtifactBundle = {
+    repo_manifest: { repository: { name: "fixture" }, generated_at: "x", files: [
+      { path, hash: fingerprint, size_bytes: 10, language: "typescript" },
+      { path: "src/generated.ts", hash: "generated", size_bytes: 10, language: "typescript" },
+    ] },
+    file_disposition: { files: [
+      { path, status: "included" },
+      { path: "src/generated.ts", status: "generated", reason: "Generated registration" },
+    ] },
+    surface_manifest: { surfaces: [
+      { id: "handler", kind: "interface", entrypoint: path, exposure: "network" },
+      { id: "generated", kind: "interface", entrypoint: "src/generated.ts" },
+    ] },
+    intent_checkpoint: { schema_version: "intent-checkpoint/v1", confirmed_at: "x",
+      confirmed_by: "host", scope_summary: "fixture", intent_summary: "review",
+      ...(selective ? { lens_selection: { include: ["behavior"] } } : {}),
     },
   };
+  const plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot-" + fingerprint });
+  const question = plan.questions.find(q => q.lens === "behavior");
+  expect(question).toBeDefined();
+  const identity = { schema_version: version, question_id: question!.question_id,
+    revision_id: question!.revision_id, snapshot_id: question!.snapshot_id } as const;
+  const binding: AuditQuestionBinding = {
+    question: question!,
+    assignment: { ...identity, assignment_id: "job-" + fingerprint, authorized_scope: { include: ["src"], exclude: [] },
+      suggested_sources: [sourceRef], available_evidence_ids: [] },
+    dependencies: question!.source_dependencies,
+    sourceFiles: [{ path, line_count: 2, fingerprint }],
+    evidence: [],
+  };
+  const submission: ReviewSubmission = {
+    ...identity, submission_id: "answer-" + fingerprint, assignment_id: binding.assignment.assignment_id,
+    inspected_sources: [sourceRef], evidence_ids: [], limitations: [],
+    answer: { outcome: "clean", findings: [],
+      parts: question!.requested_parts.map(({ part_id }, i) => ({
+        part_id, outcome: "clean", observation_ids: ["seen-" + i],
+      })),
+      observations: question!.requested_parts.map(({ part_id }, i) => ({
+        ...identity, observation_id: "seen-" + i, part_id, kind: "source_confirmed",
+        statement: "The scoped source supports the question.", source_refs: [sourceRef], evidence_refs: [],
+      })),
+    },
+  };
+  const report = (accepted: ReviewAcceptedAnswer[]) => QuestionAuditFindingsReportSchema.parse(
+    buildQuestionAuditFindingsReport({
+      plan, accepted, evidence: [], auditRead: null,
+      dependenciesByQuestion: new Map(plan.questions.map(q => [q.question_id, q.source_dependencies])),
+    }),
+  ).question_review;
+  return { plan, question: question!, binding, submission, report };
 }
-function synthesize(input: ReturnType<typeof inputs>) {
-  return runSynthesisExecutor({
-    audit_results: input.results,
-    coverage_matrix: input.coverageMatrix,
-    design_assessment: input.designAssessment,
-    design_review_snapshots: input.designReviewSnapshots,
-    unit_manifest: input.unitManifest,
-    intent_checkpoint: input.intentCheckpoint,
-  }, undefined, { auditRead: null }).updated.audit_findings!;
-}
-function outcomes(model: Pick<ReturnType<typeof buildAuditReportModel>, "summary">) {
-  return Object.fromEntries(model.summary.lens_coverage!.map((entry) => [entry.lens, entry.outcome]));
-}
 
-describe("real audit report lens coverage", () => {
-  it("does not turn correctness-only inspection and excluded design packets into other clean lenses", () => {
-    const model = buildAuditReportModel(inputs());
-    expect(outcomes(model)).toEqual({
-      correctness: "findings", security: "not_run", reliability: "not_run", data_integrity: "not_run",
-    });
-    expect(outcomes(synthesize(inputs()))).toEqual(outcomes(model));
-    expect(model.summary.finding_count).toBe(3);
-    expect(model.summary.audited_file_count).toBe(0);
-    const report = buildAuditFindingsReport(model, null);
-    expect(validateAuditFindingsReport(report).filter((issue) => issue.severity === "error")).toEqual([]);
-    const markdown = renderAuditReportMarkdown(model);
-    expect(markdown).toContain("no qualifying inspection: security, reliability, data_integrity");
-    expect(markdown).not.toContain("exercised, no findings: security");
+describe("real question-led report scope", () => {
+  it("credits a bound behavior answer without treating other applicable or excluded work as clean", () => {
+    const fixture = planned();
+    const record = acceptQuestionReview([], fixture.binding, fixture.submission, "2026-11-21T00:00:00Z").record;
+    const report = fixture.report([record]);
+    expect(report.completion).toBe("incomplete");
+    expect(report.questions.find(row => row.question_id === fixture.question.question_id)?.state).toBe("clean");
+    const unresolved = report.questions.filter(row => row.question_id !== fixture.question.question_id);
+    expect(unresolved.length).toBeGreaterThan(0);
+    expect(unresolved.every(row => row.state === "unreviewed")).toBe(true);
+    expect(report.omissions).toContainEqual(expect.objectContaining({
+      surface_id: "generated", reason: "Generated registration",
+    }));
   });
 
-  it("keeps the truly inspected clean credit lens distinct from whole-file completeness", () => {
-    const real = inputs();
-    const credit = real.results.find((result) => result.unit_id === "src-credit-mjs")!;
-    expect(credit.reviewed_clean).toBe(true);
-    expect(credit.findings).toEqual([]);
-    const model = buildAuditReportModel({ ...real, results: [credit], designAssessment: undefined });
-    expect(outcomes(model)).toEqual({
-      correctness: "clean", security: "not_run", reliability: "not_run", data_integrity: "not_run",
-    });
-    expect(model.summary.audited_file_count).toBe(0);
+  it("keeps selectively excluded lenses and an empty or unbound submission out of clean coverage", () => {
+    const fixture = planned("first", true);
+    expect(fixture.plan.lens_decisions).toContainEqual(expect.objectContaining({ lens: "security", decision: "excluded" }));
+    expect(() => acceptQuestionReview([], fixture.binding, {
+      ...fixture.submission, assignment_id: "another-job",
+    }, "2026-11-21T00:00:00Z")).toThrow(/current issued assignment/);
+    const empty = { ...fixture.submission, inspected_sources: [],
+      answer: { ...fixture.submission.answer, observations: [], parts: [] } };
+    const unanswered = acceptQuestionReview([], fixture.binding, empty, "2026-11-21T00:00:00Z").record;
+    const report = fixture.report([unanswered]);
+    expect(report.questions.every(row => row.state === "unreviewed")).toBe(true);
+    expect(report.completion).toBe("incomplete");
   });
 
-  it("credits a completed, bound design review without removing read-only protection", () => {
-    const real = inputs();
-    const assessment = { generated_at: "2026-10-19T00:00:00Z", findings: [], conceptual_reviewed: true };
-    const checkpoint = real.intentCheckpoint!;
-    const snapshot = buildDesignReviewSnapshot("conceptual", [], {
-      unit_manifest: real.unitManifest,
-      intent_checkpoint: checkpoint,
-      design_assessment: assessment,
-    }, "2026-10-19T00:00:00Z");
-    const model = synthesize({
-      ...real, results: [], designAssessment: assessment, intentCheckpoint: checkpoint,
-      designReviewSnapshots: { conceptual: snapshot, contract: undefined },
-    });
-    expect(outcomes(model)).toEqual({
-      correctness: "clean", security: "clean", reliability: "clean", data_integrity: "clean",
-    });
-  });
-
-  it.each(["excluded", "empty", "unbound"] as const)("does not credit %s design-review scope", (scope) => {
-    const real = inputs();
-    const snapshot = real.designReviewSnapshots.conceptual!;
-    if (scope === "empty") snapshot.reviewed_inputs.unit_manifest = [];
-    const model = buildAuditReportModel({
-      ...real, results: [],
-      designAssessment: { generated_at: "2026-10-19T00:00:00Z", findings: [], conceptual_reviewed: true },
-      designReviewSnapshots: scope === "unbound" ? undefined : { conceptual: snapshot },
-    });
-    expect(Object.values(outcomes(model))).toEqual(["not_run", "not_run", "not_run", "not_run"]);
-  });
-
-  it("does not reuse coverage from a superseded result", () => {
-    const real = inputs();
-    const credit = real.results.find((result) => result.unit_id === "src-credit-mjs")!;
-    const model = buildAuditReportModel({
-      ...real,
-      results: [credit, { ...credit, file_coverage: [], emit_source: "redispatch", attempt: 1 }],
-      designAssessment: undefined,
-    });
-    expect(Object.values(outcomes(model))).toEqual(["not_run", "not_run", "not_run", "not_run"]);
-  });
-
-  it("does not call an empty selective inspection clean", () => {
-    const real = inputs();
-    const credit = real.results.find((result) => result.unit_id === "src-credit-mjs")!;
-    const model = buildAuditReportModel({
-      ...real, results: [{ ...credit, file_coverage: [] }], designAssessment: undefined,
-    });
-    expect(Object.values(outcomes(model))).toEqual(["not_run", "not_run", "not_run", "not_run"]);
+  it("does not reuse a clean answer when the actual source revision changes", () => {
+    const before = planned();
+    const prior = acceptQuestionReview([], before.binding, before.submission, "2026-11-21T00:00:00Z").record;
+    const after = planned("second");
+    expect(after.question.question_id).toBe(before.question.question_id);
+    expect(after.question.revision_id).not.toBe(before.question.revision_id);
+    const report = after.report([prior]);
+    expect(report.questions.find(row => row.question_id === after.question.question_id)?.state).toBe("stale");
+    expect(report.completion).toBe("incomplete");
   });
 });

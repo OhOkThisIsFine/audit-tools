@@ -3,6 +3,8 @@ import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 // metadata stamping terms, and the staleness slice compare that replaces the
 // whole-hash disjunction on projected edges.
 import { test, expect } from "vitest";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type { StructureDecomposition } from "../../src/audit/types/structureDecomposition.js";
 import type { CharterRegister } from "../../src/audit/types/charterRegister.js";
@@ -130,9 +132,8 @@ function makeBundle(over: Partial<ArtifactBundle> = {}): ArtifactBundle {
   };
 }
 
-test("the registry is contract-pinned: charter_register's three edges, charter_clarification's two edges, and audit_tasks' three late inputs", () => {
+test("the registry is contract-pinned: charter_register's three edges, and charter_clarification's two edges", () => {
   expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS).sort()).toEqual([
-    "audit_tasks.json",
     "charter_clarification.json",
     "charter_register.json",
   ]);
@@ -142,11 +143,6 @@ test("the registry is contract-pinned: charter_register's three edges, charter_c
   expect(
     Object.keys(DEPENDENCY_SLICE_PROJECTIONS["charter_clarification.json"]!).sort(),
   ).toEqual(["repo_manifest.json", "structure_decomposition.json"]);
-  expect(Object.keys(DEPENDENCY_SLICE_PROJECTIONS["audit_tasks.json"]!).sort()).toEqual([
-    "charter_clarification.json",
-    "charter_register.json",
-    "systemic_challenge.json",
-  ]);
   // graph_bundle joined at design resolution 4: the STRUCTURAL channel's packet
   // embeds member-member dependency edges, so enrichment-merged edges must
   // re-stale the register (sliced to the member-member set the packet renders).
@@ -885,31 +881,29 @@ test("recovery: the emitted record carries the explanation, not just the stale l
   expect(record.recovery?.caused_by).toEqual(["tooling_manifest.json"]);
 });
 
-test("a late discovery input with nothing discovery reads projects exactly as an absent file; a real entry moves the slice", () => {
-  const finding = { id: "F-1", title: "Ownership gap", category: "architecture", severity: "high" as const,
-    confidence: "medium" as const, lens: "correctness", summary: "s", affected_files: [{ path: "src/a.ts" }] };
-  const register = (over: Partial<CharterRegister> = {}) => ({
-    schema_version: 5, generated_at: "2026-10-01T00:00:00Z", target: "charter", ceiling: { rung: "deep" },
-    ...EMPTY_REGISTER_BODY, ...over,
-  }) as unknown as CharterRegister;
-  const slice = (upstream: string, over: Partial<ArtifactBundle>) =>
-    computeDependencySliceHash("audit_tasks.json", upstream, makeBundle(over));
-  const cases: Array<[string, Partial<ArtifactBundle>, Partial<ArtifactBundle>]> = [
-    ["charter_register.json", { charter_register: register() }, { charter_register: register({ findings: [finding] } as Partial<CharterRegister>) }],
-    ["charter_clarification.json",
-      { charter_clarification: { asked: [] } as unknown as ArtifactBundle["charter_clarification"] },
-      { charter_clarification: { asked: [{ request_id: "q1", difference_id: "d1" }] } as unknown as ArtifactBundle["charter_clarification"] }],
-    ["systemic_challenge.json",
-      { systemic_challenge: { findings: [] } as unknown as ArtifactBundle["systemic_challenge"] },
-      { systemic_challenge: { findings: [finding] } as unknown as ArtifactBundle["systemic_challenge"] }],
-  ];
-  for (const [upstream, empty, populated] of cases) {
-    expect(slice(upstream, empty), `${upstream}: empty == absent`).toBe(slice(upstream, {}));
-    expect(slice(upstream, populated), `${upstream}: a real entry moves the slice`).not.toBe(slice(upstream, {}));
-  }
-  // A lane-only register (no finding, no clarification question naming it) is
-  // nothing discovery reads either.
-  const lanes = [{ kind: "structural", nodes: [{ node_id: "n1", files: ["src/a.ts"] }] }];
-  expect(slice("charter_register.json", { charter_register: register({ lanes } as unknown as Partial<CharterRegister>) }))
-    .toBe(slice("charter_register.json", {}));
+test("a source-backed charter divergence invalidates the question plan on its whole-artifact edge", () => {
+  const scope = fullAuditScope();
+  const initial = buildQuestionPlanArtifacts(makeBundle({ charter_register: makeCharterRegister() }), scope).updated;
+  expect(hasDependencySliceProjection("review_plan.json", "charter_register.json")).toBe(false);
+  expect(ARTIFACT_DEPENDS_ON_MAP["review_plan.json"]).toContain("charter_register.json");
+  expect(initial.review_plan!.questions.some(question => question.lens === "architecture")).toBe(false);
+  const edited = {
+    ...initial,
+    artifact_metadata: computeArtifactMetadata(initial),
+    charter_register: makeCharterRegister({
+      differences: [{
+        difference_id: "fixture-difference", correspondence_id: "fixture-correspondence",
+        dimension: "purpose", relation: "incompatible", split: { kind: "two_against_one", odd: "revealed" },
+        accounts: [
+          { kind: "stated", claim: "One operation", provenance: [{ kind: "code", ref: "src/a.ts" }] },
+          { kind: "revealed", claim: "Two operations", provenance: [{ kind: "code", ref: "src/a.ts" }] },
+        ],
+        gap: "One versus two", routed_to: "remediator", finding_candidate: true,
+      }],
+    }),
+  };
+  expect(computeStaleArtifacts(edited, { emit: false })).toContain("review_plan.json");
+  const replanned = buildQuestionPlanArtifacts(edited, scope).updated.review_plan!;
+  expect(replanned.questions.find(question => question.lens === "architecture")?.source_dependencies)
+    .toEqual(expect.arrayContaining([expect.objectContaining({ kind: "source", key: "src/a.ts" })]));
 });

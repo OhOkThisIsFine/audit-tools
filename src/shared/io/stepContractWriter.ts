@@ -1,5 +1,5 @@
 import { AccessDeclarationSchema } from "../types/accessDeclaration.js";
-// sites-pinned: tests/shared/step-contract-writer.test.ts, tests/audit/semantic-review-step.test.ts
+// sites-pinned: tests/shared/step-contract-writer.test.ts
 // (THE boundary every step renderer's prompt passes through: dropping the body
 // normalization puts a backslashed path back into every rendered prompt)
 import { mkdir, writeFile, readFile, readdir, stat, rm } from "node:fs/promises";

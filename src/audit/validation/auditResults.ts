@@ -97,7 +97,7 @@ export function isSignificantLineCountDivergence(got: number, expected: number):
  * THE ONE KEY SPACE for every path this module joins on:
  * coverage entries, affected-finding locations, followup-task file paths, the
  * line index, and the packet boundary. Delegates to the shared
- * {@link normalizeGraphPath} — the same normalizer `taskBuilder` applies once at
+ * {@link normalizeGraphPath} — the same normalizer the old task planner applied once at
  * the coverage/flow-planning boundary — rather than re-deriving the rules here,
  * because two hand-rolled normalizers ARE two key spaces the moment one of them
  * learns something the other has not (this one previously stripped only a

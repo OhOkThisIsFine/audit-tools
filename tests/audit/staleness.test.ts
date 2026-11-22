@@ -1,7 +1,17 @@
 import { EMPTY_REGISTER_BODY } from "../helpers/charterRegisterFixture.js";
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { hashContent } from "audit-tools/shared";
+import { withTempRepo } from "./helpers/next-step-harness.js";
+import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
+import { publishAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
+import { runQuestionSynthesisExecutor } from "../../src/audit/orchestrator/synthesisExecutors.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
+import { hasCurrentQuestionReport, writeCoreArtifacts, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
 import type {
   ArtifactMetadataEntry,
   ArtifactMetadataManifest,
@@ -12,17 +22,22 @@ const { computeArtifactMetadata, computeArtifactStateSignature, present } =
 const { computeStaleArtifacts, resetStalenessDedup } =
   await import("../../src/audit/orchestrator/staleness.js");
 const { deriveAuditState } = await import("../../src/audit/orchestrator/state.js");
-const { runRuntimeValidationUpdateExecutor } = await import("../../src/audit/orchestrator/ingestionExecutors.js");
 const { ARTIFACT_DEPENDENTS_MAP, ARTIFACT_DEPENDS_ON_MAP, invertDependencyMap } = await import("../../src/audit/orchestrator/dependencyMap.js");
 const { hashArtifactValue } = await import("../../src/shared/artifactFreshness.js");
 const { stableStringify } = await import("../../src/shared/stableStringify.js");
+
+const FIXTURE_SOURCE = "export const online = true;\n";
+
+function withQuestionPlan(bundle = makeBaseBundle()): ArtifactBundle {
+  return buildQuestionPlanArtifacts(bundle, fullAuditScope()).updated;
+}
 
 function makeBaseBundle(overrides: Partial<ArtifactBundle> = {}): ArtifactBundle {
   return {
     repo_manifest: {
       repository: { name: "fixture" },
       generated_at: "2026-03-23T00:00:00Z",
-      files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: 100 }],
+      files: [{ path: "src/api/auth.ts", language: "ts", size_bytes: Buffer.byteLength(FIXTURE_SOURCE), hash: hashContent(FIXTURE_SOURCE) }],
     },
     file_disposition: {
       files: [{ path: "src/api/auth.ts", status: "included" }],
@@ -56,52 +71,6 @@ function makeBaseBundle(overrides: Partial<ArtifactBundle> = {}): ArtifactBundle
       fallback_required: false,
     },
     risk_register: { items: [] },
-    coverage_matrix: {
-      files: [
-        {
-          path: "src/api/auth.ts",
-          unit_ids: ["src-api-auth"],
-          classification_status: "classified",
-          audit_status: "pending",
-          required_lenses: ["correctness", "security"],
-          completed_lenses: [],
-        },
-      ],
-    },
-    flow_coverage: {
-      flows: [
-        {
-          flow_id: "auth-session",
-          paths: ["src/api/auth.ts"],
-          status: "pending",
-          required_lenses: ["security", "correctness"],
-          completed_lenses: [],
-        },
-      ],
-    },
-    runtime_validation_tasks: { tasks: [] },
-    audit_tasks: [
-      {
-        task_id: "src-api-auth:security",
-        unit_id: "src-api-auth",
-        pass_id: "pass:security",
-        lens: "security",
-        file_paths: ["src/api/auth.ts"],
-        rationale: "Audit auth under security lens.",
-        priority: "high",
-      },
-    ],
-    requeue_tasks: [
-      {
-        task_id: "requeue:correctness:src/api/auth.ts",
-        unit_id: "requeue:src/api/auth.ts",
-        pass_id: "requeue:correctness",
-        lens: "correctness",
-        file_paths: ["src/api/auth.ts"],
-        rationale: "Mandatory audit coverage is still missing.",
-        priority: "medium",
-      },
-    ],
     audit_report: "# Audit Report\n",
     ...overrides,
   };
@@ -145,16 +114,16 @@ test("artifact freshness helpers normalize deterministic metadata hashes", () =>
       generated_at: "b",
       files: [],
     }));
-  expect(hashArtifactValue("coverage_matrix.json", {
-      generated_at: "a",
-      files: [],
-    })).not.toBe(hashArtifactValue("coverage_matrix.json", {
-      generated_at: "b",
-      files: [],
-    }));
-  expect(ARTIFACT_DEPENDS_ON_MAP["coverage_matrix.json"].includes(
-      "external_analyzer_results.json",
-    )).toBeTruthy();
+  const initial = withQuestionPlan();
+  const edited = withQuestionPlan(makeBaseBundle({
+    repo_manifest: { ...initial.repo_manifest!, files: initial.repo_manifest!.files.map(file => ({
+      ...file, hash: hashContent("export const online = false;"),
+    })) },
+  }));
+  expect(initial.review_plan!.questions.length).toBeGreaterThan(0);
+  expect(hashArtifactValue("review_plan.json", initial.review_plan))
+    .not.toBe(hashArtifactValue("review_plan.json", edited.review_plan));
+  expect(ARTIFACT_DEPENDS_ON_MAP["review_plan.json"]).toContain("external_analyzer_results.json");
 });
 
 test("charter-family artifacts strip generated_at provenance from the content hash", () => {
@@ -216,8 +185,8 @@ test("a mutated-but-unlisted artifact is restamped, never carried frozen (write/
   expect(carried.artifacts["repo_manifest.json"]).toEqual(before);
 });
 
-test("dependency revision changes mark downstream artifacts stale under the new audit-report model", () => {
-  const initialBundle = makeBaseBundle();
+test("a frozen manifest change invalidates the review plan and report", () => {
+  const initialBundle = withQuestionPlan();
 
   const metadata = computeArtifactMetadata(initialBundle);
   const revisedBundle = {
@@ -235,7 +204,7 @@ test("dependency revision changes mark downstream artifacts stale under the new 
   const stale = computeStaleArtifacts(revisedBundle);
   expect(stale.has("file_disposition.json")).toBeTruthy();
   expect(stale.has("unit_manifest.json")).toBeTruthy();
-  expect(stale.has("coverage_matrix.json")).toBeTruthy();
+  expect(stale.has("review_plan.json")).toBeTruthy();
   expect(stale.has("audit-report.md")).toBeTruthy();
 
   const state = deriveAuditState(revisedBundle);
@@ -269,87 +238,62 @@ test("new dependency inputs invalidate previously derived artifacts", () => {
   expect(state.obligations.find((item) => item.id === "file_disposition")?.state).toBe("stale");
 });
 
-test("runtime_validation_current obligation: stale when report exists but tasks incomplete", () => {
-  // Case 1: report exists but the task's result is 'pending' -> obligation is 'stale'.
-  const bundleWithPendingResult: ArtifactBundle = {
-    runtime_validation_tasks: {
-      tasks: [
-        {
-          id: "rv-task-1",
-          kind: "unit-risk-check",
-          target_paths: ["src/api/auth.ts"],
-          reason: "Confirm auth risk mitigation.",
-          priority: "medium",
+test("a current accepted question answer invalidates the persisted report pair without changing the plan", async () => {
+  await withTempRepo(async root => {
+    const path = "src/api/auth.ts";
+    await writeFile(join(root, path), FIXTURE_SOURCE);
+    const bundle = withQuestionPlan(makeBaseBundle({
+      intent_checkpoint: {
+        schema_version: "intent-checkpoint/v1", confirmed_at: "2026-01-01T00:00:00Z",
+        confirmed_by: "host", scope_summary: "Fixture source", intent_summary: "Review behavior",
+        lens_selection: { include: ["behavior"] },
+      },
+    }));
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    const boundary = { root, sourceRoot: root, artifactsDir };
+    const initial = await deriveQuestionCycleUnlocked({ ...boundary, bundle });
+    expect(initial.pending.length).toBeGreaterThan(0);
+    const persistReport = async (cycle: typeof initial) => {
+      const result = runQuestionSynthesisExecutor(bundle, {
+        auditRead: null,
+        questionReview: {
+          accepted: cycle.answers, adjudications: cycle.adjudications, evidence: cycle.evidence,
+          dependenciesByQuestion: cycle.dependenciesByQuestion,
         },
-      ],
-    },
-    runtime_validation_report: {
-      results: [{ task_id: "rv-task-1", status: "pending", summary: "Not yet run." }],
-    },
-  };
-  const stateStale = deriveAuditState(bundleWithPendingResult);
-  expect(stateStale.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'stale' when report exists but result is pending").toBe("stale");
+      });
+      await writeCoreArtifacts(artifactsDir, result.updated);
+    };
+    await persistReport(initial);
+    expect(await hasCurrentQuestionReport(artifactsDir)).toBe(true);
 
-  // Case 2: no report at all -> obligation is 'missing'.
-  const bundleNoReport: ArtifactBundle = {
-    runtime_validation_tasks: {
-      tasks: [
-        {
-          id: "rv-task-1",
-          kind: "unit-risk-check",
-          target_paths: ["src/api/auth.ts"],
-          reason: "Confirm auth risk mitigation.",
-          priority: "medium",
-        },
-      ],
-    },
-  };
-  const stateMissing = deriveAuditState(bundleNoReport);
-  expect(stateMissing.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'missing' when no report exists").toBe("missing");
+    await publishAuditQuestionWorkload({ ...boundary, runId: initial.runId, bindings: initial.pending });
+    const { question, assignment } = initial.pending[0]!;
+    const answer: ReviewSubmission = {
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION, submission_id: "staleness-ledger-answer",
+      assignment_id: assignment.assignment_id, question_id: question.question_id,
+      revision_id: question.revision_id, snapshot_id: question.snapshot_id,
+      inspected_sources: assignment.suggested_sources.slice(0, 1), evidence_ids: [],
+      limitations: ["Synthetic fixture has no runtime evidence."],
+      answer: { outcome: "inconclusive", findings: [], observations: [], parts: [{
+        part_id: question.requested_parts[0]!.part_id, outcome: "inconclusive",
+        observation_ids: [], reason: "No runtime evidence.",
+      }] },
+    };
+    expect((await submitAuditQuestionResult({ ...boundary, runId: initial.runId,
+      assignmentId: answer.assignment_id, source: JSON.stringify(answer) })).kind).toBe("accepted");
+    expect(await hasCurrentQuestionReport(artifactsDir)).toBe(false);
 
-  // Case 3: source-bound observations satisfy a nonempty validation task set.
-  const bundleComplete: ArtifactBundle = {
-    repo_manifest: {
-      repository: { name: "fixture" },
-      generated_at: "2026-11-04T00:00:00Z",
-      files: [{ path: "src/api/auth.ts", language: "typescript", size_bytes: 100, hash: "a".repeat(64) }],
-    },
-    runtime_validation_tasks: {
-      tasks: [
-        {
-          id: "rv-task-1",
-          kind: "unit-risk-check",
-          target_paths: ["src/api/auth.ts"],
-          reason: "Confirm auth risk mitigation.",
-          priority: "medium",
-        },
-      ],
-    },
-    runtime_validation_report: {
-      results: [{ task_id: "rv-task-1", status: "confirmed", summary: "Mitigation confirmed." }],
-    },
-  };
-  const observed = runRuntimeValidationUpdateExecutor(bundleComplete, bundleComplete.runtime_validation_report!);
-  const stateSatisfied = deriveAuditState(observed.updated);
-  expect(stateSatisfied.obligations.find((o) => o.id === "runtime_validation_current")?.state, "obligation should be 'satisfied' when all tasks have non-pending results").toBe("satisfied");
+    const resumed = await deriveQuestionCycleUnlocked({ ...boundary, bundle });
+    expect(resumed.answers.map(row => row.submission)).toEqual([answer]);
+    expect(resumed.bindings.map(row => row.question.revision_id)).toEqual(initial.bindings.map(row => row.question.revision_id));
+    await persistReport(resumed);
+    expect(await hasCurrentQuestionReport(artifactsDir)).toBe(true);
+  });
 });
 
-test("external analyzer results invalidate planning-derived artifacts", () => {
-  for (const artifact of [
-    "coverage_matrix.json",
-    "audit_tasks.json",
-    "requeue_tasks.json",
-    "audit-report.md",
-  ]) {
-    expect(ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"]!.includes(artifact), `${artifact} should depend on external analyzer results`).toBeTruthy();
-  }
-
-  const initialBundle = {
-    coverage_matrix: { files: [] },
-    audit_tasks: [],
-    requeue_tasks: [],
-    audit_report: "# stale\n",
-  };
+test("external analyzer results invalidate the admitted question plan and report", () => {
+  const initialBundle = withQuestionPlan();
+  expect(ARTIFACT_DEPENDENTS_MAP["external_analyzer_results.json"]).toContain("review_plan.json");
   const bundle = {
     ...initialBundle,
     artifact_metadata: computeArtifactMetadata(initialBundle),
@@ -357,10 +301,8 @@ test("external analyzer results invalidate planning-derived artifacts", () => {
   };
   const stale = computeStaleArtifacts(bundle);
 
-  expect(stale.has("coverage_matrix.json")).toBeTruthy();
-  expect(stale.has("audit_tasks.json")).toBeTruthy();
-  expect(stale.has("requeue_tasks.json")).toBeTruthy();
-  expect(stale.has("audit-report.md")).toBeTruthy();
+  expect(stale).toContain("review_plan.json");
+  expect(stale).toContain("audit-report.md");
 });
 
 test("absent dependency with recordedRevision > 0 marks artifact stale", async () => {
@@ -427,26 +369,7 @@ test("absent dependency with recordedRevision > 0 marks artifact stale", async (
 test("external analyzer results do not falsely mark unrelated upstream artifacts stale", () => {
   // graph_bundle and unit_manifest are NOT downstream of external_analyzer_results
   // in the dependency map — they should not be marked stale when it is added.
-  const initialBundle = {
-    graph_bundle: { graphs: {} },
-    unit_manifest: {
-      units: [
-        {
-          unit_id: "src-api-auth",
-          name: "src-api-auth",
-          kind: "interface",
-          files: ["src/api/auth.ts"],
-          required_lenses: ["correctness"],
-          risk_score: 3,
-          critical_flows: [],
-        },
-      ],
-    },
-    coverage_matrix: { files: [] },
-    audit_tasks: [],
-    requeue_tasks: [],
-    audit_report: "# stale\n",
-  };
+  const initialBundle = withQuestionPlan();
   const bundle = {
     ...initialBundle,
     artifact_metadata: computeArtifactMetadata(initialBundle),
@@ -459,8 +382,8 @@ test("external analyzer results do not falsely mark unrelated upstream artifacts
   expect(!stale.has("unit_manifest.json"), "unit_manifest.json should not be stale").toBeTruthy();
 
   // Downstream artifacts must still be stale (positive path).
-  expect(stale.has("coverage_matrix.json"), "coverage_matrix.json should be stale").toBeTruthy();
-  expect(stale.has("audit_tasks.json"), "audit_tasks.json should be stale").toBeTruthy();
+  expect(stale).toContain("review_plan.json");
+  expect(stale).toContain("audit-report.md");
 });
 
 // TST-aa3c406e: computeStaleArtifacts must handle an absent artifact_metadata field
@@ -1201,8 +1124,6 @@ type CharterRegister =
   import("../../src/audit/types/charterRegister.js").CharterRegister;
 type UnitManifest =
   import("../../src/audit/types.js").UnitManifest;
-type TaskAffinityGraph =
-  import("../../src/audit/orchestrator/taskAffinityGraph.js").TaskAffinityGraph;
 
 /** Collect the JSONL records `computeStaleArtifacts` writes to stderr while `run` executes. */
 function captureStalenessRecords(run: () => void): Array<Record<string, unknown>> {
@@ -1502,64 +1423,22 @@ test("CP-NODE-10 fail-4: a present-but-truncated body classifies partial (stale)
   expect(stale.has("unit_manifest.json")).toBe(false);
 });
 
-test("CP-NODE-10 fail-safe: a malformed affinity body classifies partial instead of killing the walk", () => {
-  const intactGraph: TaskAffinityGraph = {
-    schema_version: "task-affinity-graph/v1",
-    nodes: [
-      {
-        task_id: "t1",
-        unit_id: "src-api-auth",
-        lens: "security",
-        file_paths: ["src/api/auth.ts"],
-        token_estimate: 10,
-        risk_estimate: 0.5,
-      },
-      {
-        task_id: "t2",
-        unit_id: "src-api-auth",
-        lens: "correctness",
-        file_paths: ["src/api/auth.ts"],
-        token_estimate: 10,
-        risk_estimate: 0.5,
-      },
-    ],
-    edges: [{ from: "t1", to: "t2", kind: "shared_file", weight: 0.5 }],
-  };
-  const base = makeBaseBundle({ task_affinity_graph: intactGraph });
+test("a truncated question cohort marks the plan and dependent report stale", () => {
+  const base = withQuestionPlan();
+  expect(base.review_plan!.questions.length).toBeGreaterThan(0);
   const metadata = computeArtifactMetadata(base);
+  const intact = computeStaleArtifacts({ ...base, artifact_metadata: metadata }, { emit: false });
+  expect(intact).not.toContain("review_plan.json");
+  expect(intact).not.toContain("audit-report.md");
 
-  // Control: the intact body is not stale.
-  const intactStale = computeStaleArtifacts(
-    { ...base, artifact_metadata: metadata },
-    { emit: false },
-  );
-  expect(intactStale.has("task_affinity_graph.json")).toBe(false);
-
-  // A truncated copy: the edge's target node did not survive the write. The
-  // affinity canonicalizer THROWS on this shape, and the presence pass reaches
-  // every tracked artifact unconditionally, so without the fail-safe this takes
-  // down the whole staleness computation.
-  const malformedBundle: ArtifactBundle = {
+  const truncated = {
     ...base,
-    task_affinity_graph: { ...intactGraph, nodes: [intactGraph.nodes[0]!] },
+    review_plan: { ...base.review_plan!, questions: base.review_plan!.questions.slice(1) },
     artifact_metadata: metadata,
   };
-  // The premise: this body genuinely is unhashable.
-  assert.throws(
-    () =>
-      hashArtifactValue(
-        "task_affinity_graph.json",
-        malformedBundle.task_affinity_graph,
-      ),
-    /Dangling task-affinity edge/,
-  );
-
-  let stale!: ReturnType<typeof computeStaleArtifacts>;
-  assert.doesNotThrow(() => {
-    stale = computeStaleArtifacts(malformedBundle, { emit: false });
-  });
-  expect(
-    stale.has("task_affinity_graph.json"),
-    "an unhashable body is definitionally not what the manifest describes — it must classify partial, i.e. stale",
-  ).toBe(true);
+  expect(present(truncated, "review_plan.json")).toBe(true);
+  const stale = computeStaleArtifacts(truncated, { emit: false });
+  expect(stale).toContain("review_plan.json");
+  expect(stale).toContain("audit-report.md");
+  expect(stale).not.toContain("repo_manifest.json");
 });

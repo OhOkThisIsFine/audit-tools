@@ -10,6 +10,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { AGENT_FEEDBACK_FILENAME } from "../../src/shared/agentReflections.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION } from "../../src/shared/types/reviewQuestion.js";
 import type { ExternalAnalyzerToolStatus } from "../../src/shared/analyzers/types.js";
 
 import {
@@ -161,27 +163,28 @@ test("artifact bundle definitions round-trip joined paths, falsey values, and cl
         files: [{ path: "src/index.ts", language: "ts", size_bytes: 10 }],
       },
       auto_fixes_applied: false,
-      audit_results: [
-        {
-          task_id: "task-1",
-          unit_id: "unit-1",
-          pass_id: "pass-1",
-          lens: "correctness",
-          file_coverage: [{ path: "src/index.ts", total_lines: 10 }],
-          findings: [],
-          reviewed_clean: true,
-        },
-      ],
+      review_plan: {
+        schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+        snapshot_id: "fixture-snapshot",
+        inventory: [],
+        questions: [],
+        omissions: [],
+        lens_decisions: [],
+      },
       audit_report: "# Audit Report\n",
-      audit_tasks: [],
     };
 
-    await writeCoreArtifacts(tempDir, bundle);
+    const oldResults = join(tempDir, "audit_results.jsonl");
+    const rawResults = Buffer.from([0xff, 0x0d, 0x0a]);
+    await writeFile(oldResults, rawResults);
+    await writeCoreArtifacts(tempDir, bundle, { prune: true });
 
     const loaded = await loadArtifactBundle(`${tempDir}${sep}`);
     expect(loaded.repo_manifest).toEqual(bundle.repo_manifest);
     expect(loaded.auto_fixes_applied).toBe(false);
-    expect(loaded.audit_results).toEqual(bundle.audit_results);
+    expect(loaded.review_plan).toEqual(bundle.review_plan);
+    expect(loaded).not.toHaveProperty("audit_results");
+    expect(await readFile(oldResults)).toEqual(rawResults);
     expect(getArtifactValue(loaded, "audit-report.md")).toBe("# Audit Report\n");
     expect(getArtifactValue(loaded, "missing.json")).toBe(undefined);
     expect(loaded.tooling_manifest).toBeTruthy();
@@ -1024,47 +1027,22 @@ test("INV 11: the bundle exposes every field its named consumers read", async ()
   });
 });
 
-// INV 4, MECHANIZED. The rewritten runSample test proves ONE caller pairs the
-// right reader with audit_results.jsonl; it cannot stop the next `.jsonl` entry
-// from being registered with the JSON reader. This does: the registry is the
-// single place the pairing is declared, so the pairing is checked there.
-test("INV 4: every .jsonl registry entry binds the NDJSON reader, not readJsonFile", async () => {
-  const { ARTIFACT_DEFINITIONS } = await import("../../src/audit/io/artifacts.js");
-  const { readFile } = await import("node:fs/promises");
-  const source = await readFile(
-    join(__dirname, "..", "..", "src", "audit", "io", "artifacts.ts"),
-    "utf8",
-  );
+// Run logs are append-owned, not registered core artifacts. The bundle still
+// projects worker feedback without claiming the right to rewrite its bytes.
+test("INV 4: the active bundle reads append-only feedback without owning its NDJSON file", async () => {
+  await withTempDir("audit-code-io-feedback-", async (dir: string) => {
+    const path = join(dir, AGENT_FEEDBACK_FILENAME);
+    const rows = [
+      { task_id: "review-a", instruction_clarity: "clear", severity: "info" },
+      { task_id: "review-b", instruction_clarity: "mostly_clear", severity: "low" },
+    ];
+    const bytes = rows.map(row => JSON.stringify(row)).join("\r\n") + "\r\n";
+    await writeFile(path, bytes);
 
-  const jsonlKeys = Object.entries(
-    ARTIFACT_DEFINITIONS as Record<string, { fileName: string }>,
-  )
-    .filter(([, definition]) => definition.fileName.endsWith(".jsonl"))
-    .map(([key]) => key);
-
-  expect(
-    jsonlKeys.length,
-    "the registry must actually carry .jsonl entries for this check to mean anything",
-  ).toBeGreaterThan(0);
-
-  for (const key of jsonlKeys) {
-    // The declaration site: `<key>: ndjsonArtifact("<name>.jsonl", ...)`. A
-    // future `.jsonl` registered through jsonArtifact reds here, because
-    // JSON.parse on a multi-record NDJSON body throws and the mismatch would
-    // otherwise surface only as a swallowed read at some caller.
-    // Match the FACTORY CALL directly. Searching for `<key>:` alone finds the
-    // ArtifactPayloadMap TYPE declaration higher in the same file, not the
-    // registry entry, and then "found no factory" for the wrong reason.
-    const ndjsonDecl = key + ": ndjsonArtifact(";
-    const jsonDecl = key + ": jsonArtifact(";
-    expect(
-      source.includes(jsonDecl),
-      "'" + key + "' is a .jsonl artifact registered with jsonArtifact — JSON.parse on a " +
-        "multi-record NDJSON body throws, so this pairing can only fail at a caller",
-    ).toBe(false);
-    expect(
-      source.includes(ndjsonDecl),
-      "'" + key + "' is a .jsonl artifact and must be registered with ndjsonArtifact",
-    ).toBe(true);
-  }
+    const loaded = await loadArtifactBundle(dir);
+    expect(loaded.agent_reflections).toEqual(rows);
+    expect(Object.values(ARTIFACT_DEFINITIONS).map(({ fileName }) => fileName)).not.toContain(AGENT_FEEDBACK_FILENAME);
+    await writeCoreArtifacts(dir, loaded, { prune: true });
+    expect(await readFile(path, "utf8")).toBe(bytes);
+  });
 });

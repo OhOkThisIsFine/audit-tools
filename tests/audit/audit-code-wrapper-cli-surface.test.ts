@@ -131,7 +131,7 @@ test.concurrent("audit-code wrapper prints help text", async () => {
   expect(stdout.includes("Primary usage (conversation-first):")).toBeTruthy();
   expect(stdout.includes("next-step advances deterministic audit state")).toBeTruthy();
   expect(stdout.includes("advance-audit")).toBe(false);
-  expect(stdout.includes("explain-task <task_id>")).toBeTruthy();
+  expect(stdout).not.toMatch(/explain-task|validate-results|update-runtime-validation|\brequeue\b/u);
   // The four installer-verb lines are RENDERED from wrapper/installer-verb-help.mjs
   // and pinned against that declaration by tests/shared/installer-verb-help.test.ts;
   // restating them here is the drift this listing already suffered.
@@ -339,10 +339,10 @@ test.concurrent("hasLeadingFlag recognizes an informational flag only before the
   // A leading flag is still recognized after OTHER leading flags.
   expect(hasLeadingFlag(["--verbose", "--version"], "--version")).toBe(true);
   // A flag AFTER the first non-flag token (the command) is NOT hijacked — it
-  // belongs to the dist CLI. This is the CE-007 regression: `explain-task -v`
+  // belongs to the dist CLI. This is the CE-007 regression: `status -v`
   // must forward `-v`, not print the wrapper version.
-  expect(hasLeadingFlag(["explain-task", "-v"], "-v")).toBe(false);
-  expect(hasLeadingFlag(["explain-task", "--version"], "--version")).toBe(false);
+  expect(hasLeadingFlag(["status", "-v"], "-v")).toBe(false);
+  expect(hasLeadingFlag(["status", "--version"], "--version")).toBe(false);
   expect(hasLeadingFlag(["next-step", "--help"], "--help")).toBe(false);
   // Absent flag.
   expect(hasLeadingFlag(["next-step"], "--version")).toBe(false);
@@ -361,11 +361,11 @@ test.concurrent("setFlag overwrites an existing flag value and appends when abse
 });
 
 test.concurrent("audit-code wrapper does not hijack a post-command informational flag (CE-007)", async () => {
-  // `explain-task -v` forwards `-v` to the dist CLI rather than printing the
-  // wrapper version. Without a task the dist command exits non-zero, so
+  // `status -v` forwards `-v` to the dist CLI rather than printing the
+  // wrapper version. The dist command rejects the unsupported flag, so
   // runWrapper rejects — the key assertion is that stdout is NOT just the
   // wrapper's version string (which would prove the wrapper hijacked `-v`).
-  await runWrapper(["explain-task", "-v"]).then(
+  await runWrapper(["status", "-v"]).then(
     ({ stdout }) => {
       expect(stdout.trim()).not.toBe(packageVersion);
     },

@@ -156,35 +156,6 @@ test("INV-audit-cli-11: isFileMissingError correctly classifies ENOENT vs EACCES
   expect(!isFileMissingError(eperm), "EPERM must NOT be classified as 'file missing' (COR-6e84f23c)").toBeTruthy();
 });
 
-// ── INV-audit-cli-12: ingestResultsCommand mutex check is explicit and symmetric (COR-d40e2710) ─
-// The old check `if (batchResultsDir && getFlag(argv, "--results"))` relied on short-circuit
-// evaluation and was opaque. The new check evaluates both flags independently and throws only
-// when both are provided simultaneously. Verified structurally: the check now uses explicit booleans.
-test("INV-audit-cli-12: ingest-results mutex check requires both flags to trigger (COR-d40e2710)", async () => {
-  // Drives the real cmdIngestResults. The mutex throws before any work, so the
-  // both-flags cases need no artifact tree; the value-less `--results` token
-  // (COR-79283e3b) must still trip it.
-  const { cmdIngestResults } = await import("../../src/audit/cli/ingestResultsCommand.js");
-  const mutex = /not both/;
-  const base = ["--root", repoRoot, "--artifacts-dir", join(repoRoot, ".audit-tools", "__no_such_artifacts__")];
-  await expect(
-    cmdIngestResults([...base, "--results", "r.json", "--batch-results", "batch"]),
-    "both present → mutex fires",
-  ).rejects.toThrow(mutex);
-  await expect(
-    cmdIngestResults([...base, "--batch-results", "batch", "--results"]),
-    "a value-less --results token still counts as present",
-  ).rejects.toThrow(mutex);
-  // Only --batch-results: the batch path runs and may fail for its own reasons,
-  // but never with the mutex error.
-  await cmdIngestResults([...base, "--batch-results", join(repoRoot, "__no_such_batch__")]).then(
-    () => undefined,
-    (error: unknown) => {
-      expect(String(error), "only --batch-results → no mutex error").not.toMatch(mutex);
-    },
-  );
-});
-
 // ── INV-audit-cli-10: all-invalid analyzer decisions emits diagnostic (COR-03418a9f-2) ─
 // handleGraphEnrichmentBranch must emit a stderr diagnostic when analyzer-decisions.json
 // contains only unrecognized values so the operator knows why no settings were applied.

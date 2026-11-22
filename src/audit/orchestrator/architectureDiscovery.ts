@@ -1,5 +1,5 @@
-// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/intent-checkpoint.test.ts, tests/audit/semantic-review-step.test.ts
-import { hashContent, stableStringify, findingReEmissionKey } from "audit-tools/shared";
+// sites-pinned: tests/audit/audit-frontier.test.ts, tests/audit/intent-checkpoint.test.ts
+import { hashContent, stableStringify, findingReEmissionKey, pathMatchesPrefix } from "audit-tools/shared";
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { AuditResult, AuditTask, Finding } from "../types.js";
 import { uniqueSorted } from "audit-tools/shared";
@@ -11,18 +11,11 @@ import { resolveIntentLensSelection } from "./lensSelection.js";
 import { lineCountForPath } from "./lineCounts.js";
 
 const ARCHITECTURE_DISCOVERY_TAG = "architecture_discovery";
+const ARCHITECTURE_SAMPLE_TAG = "architecture_source_sample";
+const ARCHITECTURE_SAMPLE_ID = "architecture-sample";
+const MAX_SAMPLE_FILES = 4;
+const MAX_SAMPLE_BYTES = 64 * 1024;
 
-/**
- * Where the architecture lens is reviewed — the one statement of it. No file
- * category requires the lens (`LENS_MAP` in `unitBuilder.ts`), so per-file
- * inspection never carries it: the design review, the charter and the
- * discovery follow-ups minted below do. Told to the operator when choosing the
- * lens and again at the review pause, so an inspection workload with no
- * architecture item never reads as a dropped lens.
- */
-export const ARCHITECTURE_REVIEW_SCOPE =
-  "reviewed whole-system by the design review, the charter and architecture-discovery follow-ups, " +
-  "not by a blanket per-file inspection sweep";
 const QUESTION_DEPENDENCY_TAG = "requires_question:";
 
 /**
@@ -95,6 +88,47 @@ export function charterQuestionFiles(bundle: Pick<ArtifactBundle, "charter_regis
       .filter((node) => member.node_ids.includes(node.node_id)).flatMap((node) => node.files ?? []) ?? []));
 }
 
+/** One real workflow spanning units, not the same review applied to every file. */
+function selectArchitectureSample(bundle: ArtifactBundle, inScope: (path: string) => boolean) {
+  const scope = bundle.scope?.mode === "delta" ? new Set([...bundle.scope.seed_files, ...bundle.scope.expanded_files]) : undefined;
+  const disposition = new Map(bundle.file_disposition?.files.map((file) => [file.path, file.status]));
+  const files = new Map(bundle.repo_manifest?.files.map((file) => [file.path, file]));
+  const owners = new Map<string, string>();
+  const risks = new Map<string, number>();
+  for (const unit of [...(bundle.unit_manifest?.units ?? [])].sort((a, b) => compareCodeUnits(a.unit_id, b.unit_id))) {
+    risks.set(unit.unit_id, unit.risk_score ?? 0);
+    for (const path of unit.files) if (!owners.has(path)) owners.set(path, unit.unit_id);
+  }
+  const risk = (path: string) => risks.get(owners.get(path) ?? "") ?? 0;
+  const entryRisk = (paths: readonly string[]) => paths.reduce((max, path) => Math.max(max, risk(path)), 0);
+  const flows = [...(bundle.critical_flows?.flows ?? [])].sort((a, b) =>
+    Number(b.confidence === "high") - Number(a.confidence === "high") ||
+    entryRisk(b.entrypoints) - entryRisk(a.entrypoints) || compareCodeUnits(a.id, b.id));
+  for (const flow of flows) {
+    const paths: string[] = [];
+    const crossing = new Set<string>();
+    let bytes = 0;
+    const ordered = [...uniqueSorted(flow.entrypoints), ...uniqueSorted(flow.paths)];
+    for (const path of ordered) {
+      const file = files.get(path);
+      const owner = owners.get(path);
+      const override = bundle.intent_checkpoint?.disposition_overrides?.find((entry) => pathMatchesPrefix(path, entry.path));
+      if (!file?.hash || file.size_bytes <= 0 || bytes + file.size_bytes > MAX_SAMPLE_BYTES ||
+          !owner || crossing.has(owner) || !inScope(path) || (scope && !scope.has(path)) ||
+          (override?.status ?? disposition.get(path)) !== "included") continue;
+      crossing.add(owner);
+      paths.push(path);
+      bytes += file.size_bytes;
+      if (paths.length === MAX_SAMPLE_FILES) break;
+    }
+    // A non-entry slice cannot establish how the workflow crosses its first boundary.
+    if (paths.length >= 2 && paths.some((path) => flow.entrypoints.includes(path))) {
+      return { flow, paths, components: [...crossing] };
+    }
+  }
+  return undefined;
+}
+
 /** Concrete unverified discoveries earn bounded follow-up, never another full audit. */
 export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Record<string, number> = {}): AuditTask[] {
   const selected = resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection);
@@ -123,6 +157,23 @@ export function architectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Re
     inputs: Object.fromEntries(paths.map((path) => [`source:${path}`, sourceHashes.get(path) ?? "unversioned"])),
     rationale, priority: "high", status: "pending", tags: [DEEPENING_TAG, ARCHITECTURE_DISCOVERY_TAG, ...tags],
   });
+  if (bundle.intent_checkpoint?.lens_selection?.include?.includes("architecture") && allowsLens("architecture")) {
+    const sample = selectArchitectureSample(bundle, inScope);
+    if (sample) {
+      const { flow, paths, components } = sample;
+      const id = taskIdFor(ARCHITECTURE_SAMPLE_ID, [flow.id, ...paths]);
+      const task = make(id, paths, "architecture",
+        `Trace this bounded source sample of the ${flow.name.slice(0, 160)} workflow across its component boundaries. ` +
+        `Entry points: ${flow.entrypoints.filter((path) => paths.includes(path)).join(", ")}. ` +
+        `Components: ${components.map((component) => component.slice(0, 100)).join(", ")}. ` +
+        `Recorded concerns: ${flow.concerns.join("; ").slice(0, 400) || "none"}. ` +
+        "Use the frozen source to trace the user contract, responsibility for state and decisions, and the observable hand-off. " +
+        "Distinguish upstream-owned behavior and uninspected callers from evidence in this sample. " +
+        "Only report source-anchored architecture findings; an empty result applies to this sample, not to the entire repository.",
+        [ARCHITECTURE_SAMPLE_TAG]);
+      tasks.set(id, { ...task, coverage_policy: "complete" });
+    }
+  }
   for (const finding of findings) {
     if (!allowsLens(finding.lens)) continue;
     if (finding.verification_status === "judge_confirmed" || finding.verification_status === "refuted_at_head") continue;
@@ -160,6 +211,36 @@ export function isArchitectureDiscoveryTask(task: AuditTask): boolean {
   return task.tags?.includes(ARCHITECTURE_DISCOVERY_TAG) ?? false;
 }
 
+/** Do not turn a broad design snapshot or an obsolete task into sampled source coverage. */
+export function projectArchitectureSourceSample(bundle: ArtifactBundle):
+  { status: "not_planned" | "planned_not_run" } |
+  { status: "reviewed_no_findings" | "reviewed_with_findings"; taskId: string } | undefined {
+  if (!bundle.intent_checkpoint?.lens_selection?.include?.includes("architecture") ||
+      !resolveIntentLensSelection(bundle.intent_checkpoint.lens_selection)?.includes("architecture")) return undefined;
+  const task = bundle.audit_tasks?.find((entry) => entry.tags?.includes(ARCHITECTURE_SAMPLE_TAG));
+  if (!task) return { status: "not_planned" };
+  const current = selectCurrentResults(bundle.audit_results ?? []).find((result) => result.task_id === task.task_id);
+  const baselines = bundle.artifact_metadata?.result_baselines;
+  const fresh = current?.idempotency_key && baselines?.[current.idempotency_key] !== undefined &&
+    !computeStaleResultTaskIds([current], [task], baselines).has(task.task_id);
+  const hashes = new Map(bundle.repo_manifest?.files.map((file) => [file.path, file.hash]));
+  // Host ingestion refuses reviewed_lines != total_lines even for selective
+  // work; the ledger preserves just total_lines. The seed binds complete coverage.
+  const reviewed = task.coverage_policy === "complete" && fresh && current?.lens === task.lens && current.pass_id === task.pass_id &&
+    current.unit_id === task.unit_id && (current.reviewed_clean === true || current.findings.length > 0) &&
+    task.file_paths.every((path) => hashes.has(path) && hashes.get(path) !== undefined &&
+      hashes.get(path) === task.inputs?.[`source:${path}`] &&
+      current.file_coverage.some((file) => file.path === path && file.total_lines > 0 &&
+        file.total_lines === task.file_line_counts?.[path]));
+  return reviewed
+    ? { status: current.findings.length === 0 ? "reviewed_no_findings" : "reviewed_with_findings", taskId: task.task_id }
+    : { status: "planned_not_run" };
+}
+
+export function isArchitectureSourceSampleResult(result: AuditResult): boolean {
+  return result.pass_id === "deepening:architecture" && result.task_id.startsWith(`deepening:${ARCHITECTURE_SAMPLE_ID}:`);
+}
+
 /**
  * Re-derive the discovery family inside `bundle.audit_tasks` for a producer that
  * rewrites audit_tasks.json without replanning (result ingestion). The DAG stamps
@@ -169,7 +250,9 @@ export function isArchitectureDiscoveryTask(task: AuditTask): boolean {
  */
 export function reconcileArchitectureDiscoveryTasks(bundle: ArtifactBundle, lineIndex: Record<string, number> = {}): AuditTask[] {
   const tasks = bundle.audit_tasks ?? [];
-  const derivation = (task: AuditTask) => stableStringify({ paths: task.file_paths, inputs: task.inputs, rationale: task.rationale });
+  const derivation = (task: AuditTask) => stableStringify({
+    paths: task.file_paths, inputs: task.inputs, rationale: task.rationale, coverage_policy: task.coverage_policy,
+  });
   const issued = new Map(tasks.filter(isArchitectureDiscoveryTask).map((task) => [task.task_id, task]));
   const discovery = architectureDiscoveryTasks(bundle, lineIndex).map((task) => {
     const existing = issued.get(task.task_id);

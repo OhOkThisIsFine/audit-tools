@@ -6,6 +6,8 @@ import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
+import { ReviewPlanSchema } from "../../shared/types/reviewQuestion.js";
+import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
@@ -44,19 +46,23 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     }
   }
 
-  // 2. Read the ACTIVE run's pending-audit-tasks.json
-  //
-  // The active run is the one the loop is on, named by the review-run manifest
-  // the pause wrote — never "the newest directory under runs/". That inference
-  // sorted the directory NAMES, which only meant "newest" while a run id began
-  // with a UTC timestamp: with the derived id (obligation slug + digest) the
-  // sort is alphabetical, so the command would report an arbitrary obligation's
-  // pending count and call it current.
-  //
-  // Both reads degrade to "no run" rather than to a stack. A malformed
-  // manifest, an unreadable manifest and an absent manifest all say the same
-  // true thing about the ACTIVE run: `status` does not know of one. A status
-  // command that throws tells an operator nothing it could have reported.
+  // Read only the prepared plan; planned questions are not outstanding answers.
+  let questionReview: { run_id: string | null; snapshot_id: string; planned_questions: number } | null = null;
+  let questionReviewUnreadable = false;
+  try {
+    const plan = ReviewPlanSchema.parse(await readJsonFile<unknown>(
+      join(artifactsDir, ARTIFACT_DEFINITIONS.review_plan.fileName),
+    ));
+    questionReview = {
+      run_id: await readQuestionReviewRunId(artifactsDir) ?? null,
+      snapshot_id: plan.snapshot_id,
+      planned_questions: plan.questions.length,
+    };
+  } catch (error) {
+    questionReviewUnreadable = !isFileMissingError(error);
+  }
+
+  // Legacy task counts describe an archive, not current dispatch.
   let pendingTasksSummary: {
     run_id: string;
     total: number;
@@ -94,6 +100,8 @@ export async function cmdStatus(argv: string[]): Promise<void> {
     last_executor: auditState.last_executor ?? null,
     blockers: auditState.blockers ?? [],
     obligations_summary: obligationStates,
-    pending_tasks: pendingTasksSummary,
+    archived_pending_tasks: pendingTasksSummary,
+    question_review: questionReview,
+    question_review_unreadable: questionReviewUnreadable,
   });
 }

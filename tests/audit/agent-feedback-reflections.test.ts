@@ -1,8 +1,9 @@
-import { persistDesignReviewSnapshots } from "./helpers/designReviewSnapshotFixture.js";
-import { readOptionalTextFile } from "../../src/shared/io/json.js";
+import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
+import { runWrapper } from "./helpers/run-wrapper.mjs";
+import type { ReviewAssignment, ReviewQuestion } from "../../src/shared/types/reviewQuestion.js";
 import { test, expect } from "vitest";
 import { mkdir, writeFile, readFile, appendFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // Disk-load + staleness wiring for the opt-in worker feedback channel
 // (agent-feedback.jsonl → bundle.agent_reflections → "Process Feedback").
@@ -11,17 +12,13 @@ import { join } from "node:path";
 // and a change to it must re-stale exactly one downstream (audit-report.md).
 
 import type { AgentReflection } from "audit-tools/shared";
-import type { AdvanceAuditOptions } from "../../src/audit/orchestrator/advanceTypes.js";
 
-const { loadArtifactBundle, writeCoreArtifacts, getArtifactValue } =
+const { loadArtifactBundle, writeCoreArtifacts, getArtifactValue, hasCurrentQuestionReport } =
   await import("../../src/audit/io/artifacts.js");
 const { computeArtifactMetadata } = await import("../../src/audit/orchestrator/artifactMetadata.js");
 const { computeStaleArtifacts } = await import("../../src/audit/orchestrator/staleness.js");
 const { runSynthesisExecutor } = await import("../../src/audit/orchestrator/synthesisExecutors.js");
 const { renderAuditReportMarkdown } = await import("../../src/audit/reporting/synthesis.js");
-const { advanceAudit } = await import("../../src/audit/orchestrator/advance.js");
-const { decideNextStep } = await import("../../src/audit/orchestrator/nextStep.js");
-const { buildAdvancedBundle } = await import("./helpers/advancedBundle.mjs");
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
 const FEEDBACK_FILE = "agent-feedback.jsonl";
@@ -141,119 +138,91 @@ test("changed reflections re-stale audit-report.md exactly once; unchanged refle
   expect(computeStaleArtifacts({ ...noFeedback, artifact_metadata: noFeedbackMetadata }).size).toBe(0);
 });
 
-// The real persist/reload loop. A reflection appended mid-run AFTER the first
-// synthesis (but before the run finalizes — here, in the synthesis →
-// synthesis-narrative window) must re-stale the report for exactly one extra
-// synthesis step, render Process Feedback, and still converge to complete.
-// (Once audit_state.json records `complete`, decideNextStep latches it by
-// design — post-completion appends are out of scope; reflections are a
-// mid-run channel.)
+// Exercise the real question-review next-step loop and promoted pair.
 test("a reflection appended after synthesis re-synthesizes once and the run still converges", async () => {
-  await withTempDir("audit-code-feedback-loop-", async (root) => {
-    await mkdir(join(root, "src"), { recursive: true });
-    await writeFile(
-      join(root, "package.json"),
-      JSON.stringify(
-        { name: "feedback-loop", version: "0.0.0", scripts: { test: 'node -e "process.exit(0)"' } },
-        null,
-        2,
-      ) + "\n",
-    );
-    await writeFile(
-      join(root, "src", "util.ts"),
-      "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
-    );
-    const lineIndex: Record<string, number> = { "src/util.ts": 3, "package.json": 5 };
-    const artDir = join(root, ".audit-tools/audit");
-    await mkdir(artDir, { recursive: true });
-
-    // Seed the ready-inspection frontier through the shared scripted-host
-    // fixture. Direct advanceAudit calls intentionally stop at semantic host
-    // boundaries, so repeatedly calling them cannot manufacture checkpoint,
-    // charter, or design-review results.
-    const preplanningBundle = await buildAdvancedBundle(root, "audit_tasks_completed");
-    await writeCoreArtifacts(artDir, preplanningBundle, { prune: true });
-    await persistDesignReviewSnapshots(artDir, preplanningBundle);
-
-    // Advance one bounded step, supplying explicit scripted-host results at the
-    // semantic review and synthesis-narrative boundaries, while mirroring the
-    // production load → decide → advance → persist(prune) loop.
-    const step = async () => {
-      const bundle = await loadArtifactBundle(artDir);
-      const decision = decideNextStep(bundle);
-      if (decision.state.status === "complete") return null;
-      // The hermetic analyzer cache resolves typescript@5 ABSENT and the plan
-      // draw halts on an undecided install — model the operator's recorded
-      // decision so the deterministic loop stays deterministic.
-      const options: AdvanceAuditOptions = {
-        root,
-        lineIndex,
-        analyzers: { typescript: "skip" },
-      };
-      if (decision.selected_executor === "semantic_review_executor") {
-        const have = new Set((bundle.audit_results ?? []).map((r) => r.task_id));
-        options.preferredExecutor = "result_ingestion_executor";
-        options.auditResults = (bundle.audit_tasks ?? [])
-          .filter((t) => t.status !== "complete" && !have.has(t.task_id))
-          .map((t) => ({
-            task_id: t.task_id,
-            unit_id: t.unit_id,
-            pass_id: t.pass_id,
-            lens: t.lens,
-            agent_role: "test",
-            file_coverage: (t.file_paths ?? []).map((p) => ({
-              path: p,
-              total_lines: lineIndex[p] ?? 10,
-            })),
-            findings: [],
-            reviewed_clean: true,
-            notes: [],
-            requires_followup: false,
-          }));
-      }
-      if (decision.selected_executor === "synthesis_narrative_executor") {
-        options.preferredExecutor = "synthesis_narrative_executor";
-        options.narrativeResults = { themes: [], top_risks: [] };
-      }
-      const res = await advanceAudit(bundle, options);
-      await writeCoreArtifacts(artDir, res.updated_bundle, { prune: true });
-      return decision.selected_obligation;
+  await withTempRepo(async (root) => {
+    const call = async (...args: string[]) => JSON.parse((await runWrapper(args, { cwd: root })).stdout);
+    const artDir = join(root, ".audit-tools", "audit");
+    const reportPath = join(artDir, "audit-report.md");
+    const findingsPath = join(artDir, "audit-findings.json");
+    const dispatch = await advancePastDesignReview(root);
+    expect(dispatch.step_kind).toBe("dispatch_review");
+    const workload = JSON.parse(await readFile(dispatch.artifact_paths.host_workload, "utf8")) as {
+      contract_version: string; run_id: string;
+      work_items: { binding: { question: ReviewQuestion; assignment: ReviewAssignment } }[];
     };
-
-    // Drive until the first synthesis has produced a report.
-    const preTrail = [];
-    let initialReport: string | undefined;
-    for (let i = 0; i < 25; i++) {
-      const obligation = await step();
-      preTrail.push(obligation);
-      initialReport = await readOptionalTextFile(join(artDir, "audit-report.md"));
-      // A clean audit can render its first report in the narrative transition;
-      // the production artifact, not a separately scheduled synthesis label,
-      // establishes the point after which this regression appends feedback.
-      if (initialReport !== undefined) break;
-      expect(obligation, `run completed without a report? trail: ${preTrail.join(" -> ")}`).not.toBe(null);
+    expect(workload.work_items.length).toBeGreaterThan(0);
+    const submissionPath = join(root, "feedback-smoke-answer.json");
+    const submissions: string[] = [];
+    for (const { binding: { question, assignment } } of workload.work_items) {
+      const submission_id = `feedback-${assignment.assignment_id}`;
+      await writeFile(submissionPath, JSON.stringify({
+        schema_version: workload.contract_version, submission_id, assignment_id: assignment.assignment_id,
+        question_id: question.question_id, revision_id: question.revision_id, snapshot_id: question.snapshot_id,
+        inspected_sources: [], evidence_ids: [], limitations: ["Synthetic feedback fixture."],
+        answer: { outcome: "inconclusive", findings: [], observations: [],
+          parts: question.requested_parts.map(({ part_id }) => ({
+            part_id, outcome: "inconclusive", observation_ids: [], reason: "No behavioral observation.",
+          })) },
+      }));
+      const receipt = await call("submit", "--work-item", assignment.assignment_id, "--from", submissionPath);
+      expect(receipt.disposition).toBe("accepted");
+      submissions.push(submission_id);
     }
-    expect(initialReport, `synthesis should produce a report; trail: ${preTrail.join(" -> ")}`).toBeDefined();
-    expect(await readFile(join(artDir, "audit-report.md"), "utf8"), "no reflections yet → no Process Feedback section").not.toMatch(/## Process Feedback/);
 
-    // Worker appends a reflection while the run is still active, then a
-    // malformed line (which must parse away to nothing).
-    await appendFile(join(artDir, FEEDBACK_FILE), JSON.stringify(REFLECTION) + "\n");
-    await appendFile(join(artDir, FEEDBACK_FILE), "worker crashed mid-line{\n");
+    const before = await call("next-step");
+    expect(before.step_kind).toBe("synthesis_narrative");
+    expect(await hasCurrentQuestionReport(artDir)).toBe(true);
+    expect(await readFile(reportPath, "utf8")).not.toMatch(/## Process Feedback/);
+    const machine = await readFile(findingsPath, "utf8");
+    expect(JSON.parse(machine).question_review.accepted.map(
+      (entry: { submission: { submission_id: string } }) => entry.submission.submission_id,
+    ).sort()).toEqual(submissions.sort());
+    const ledgerPath = join(artDir, "runs", workload.run_id, "host-accepted-results-ledger.json");
+    const ledger = await readFile(ledgerPath, "utf8");
 
-    const postTrail = [];
-    for (let i = 0; i < 6; i++) {
-      const obligation = await step();
-      if (obligation === null) break;
-      postTrail.push(obligation);
+    await appendFile(join(artDir, FEEDBACK_FILE), JSON.stringify(REFLECTION) + "\nworker crashed mid-line{\n");
+    expect(await hasCurrentQuestionReport(artDir)).toBe(false);
+    const resynthesized = await call("next-step");
+    expect(resynthesized.step_kind).toBe("synthesis_narrative");
+    expect(await hasCurrentQuestionReport(artDir)).toBe(true);
+    const rendered = await readFile(reportPath, "utf8");
+    expect(rendered.match(/## Process Feedback/g)).toHaveLength(1);
+    expect(rendered.match(/packet path was stale/g)).toHaveLength(1);
+    expect(await readFile(findingsPath, "utf8")).toBe(machine);
+
+    await appendFile(join(artDir, FEEDBACK_FILE), "malformed-only-line{\n");
+    expect(await hasCurrentQuestionReport(artDir)).toBe(true);
+    const unchanged = await call("next-step");
+    expect(unchanged.step_kind).toBe("synthesis_narrative");
+    expect(await readFile(reportPath, "utf8")).toBe(rendered);
+    const narrativePath = unchanged.artifact_paths.synthesis_narrative_results;
+    await mkdir(dirname(narrativePath), { recursive: true });
+    await writeFile(narrativePath, JSON.stringify({ themes: [], top_risks: [] }));
+
+    const trail: string[] = [];
+    let complete = false;
+    for (let i = 0; i < 8; i++) {
+      const step = await call("next-step");
+      trail.push(`${step.step_kind}:${step.status}`);
+      if (step.step_kind === "present_report" && step.status === "complete") { complete = true; break; }
+      const friction = step.artifact_paths?.friction_record;
+      if (step.step_kind === "present_report" && friction) {
+        const existing = JSON.parse(await readFile(friction, "utf8").catch(() => "{}"));
+        existing.category_attestations = ["ambiguous_direction", "tool_should_decide", "inefficient_feeding"]
+          .map(category => ({ category, note: "Synthetic feedback fixture." }));
+        await mkdir(dirname(friction), { recursive: true });
+        await writeFile(friction, JSON.stringify(existing));
+      }
     }
-    expect(postTrail.filter((o) => o === "synthesis_current").length, `the appended reflection must trigger exactly one re-synthesis; post trail: ${postTrail.join(" -> ")}`).toBe(1);
-    const report = await readFile(join(artDir, "audit-report.md"), "utf8");
-    expect(report).toMatch(/## Process Feedback/);
-    expect(report).toMatch(/packet path was stale/);
-
-    // Converged: the loop reached complete and stays complete.
-    const finalBundle = await loadArtifactBundle(artDir);
-    expect(decideNextStep(finalBundle).state.status).toBe("complete");
+    expect(complete, trail.join(" -> ")).toBe(true);
+    expect(await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8")).toBe(rendered);
+    expect(await readFile(join(root, ".audit-tools", "audit-findings.json"), "utf8")).toBe(machine);
+    expect(await readFile(ledgerPath, "utf8")).toBe(ledger);
+    expect(await readFile(join(root, ".audit-tools", "audit-agent-feedback.jsonl"), "utf8"))
+      .toBe(await readFile(join(artDir, FEEDBACK_FILE), "utf8"));
+    expect(await hasCurrentQuestionReport(artDir)).toBe(true);
+    await call("resynthesize");
+    expect(await readFile(join(root, ".audit-tools", "audit-report.md"), "utf8")).toBe(rendered);
   });
 });

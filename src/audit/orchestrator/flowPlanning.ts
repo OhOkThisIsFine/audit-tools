@@ -88,7 +88,7 @@ function lensPathKey(lens: string, path: string): string {
  * keys of `assigned` is already normalized into ONE key space by the caller.
  * This module does no normalizing of its own — an unnormalized path simply
  * fails to intersect and the flow is silently under-claimed. The sole caller,
- * `buildChunkedAuditTasks`, now SATISFIES that precondition by normalizing every
+ * the retired task planner, now SATISFIES that precondition by normalizing every
  * repo path once at its own boundary, rather than assuming it upstream.
  *
  * NO WRITE-BACK: the post-claim state is reported ONLY on the returned

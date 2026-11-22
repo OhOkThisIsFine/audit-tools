@@ -46,7 +46,7 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   //   • remediate step machine + host-handoff/landing + risk/pipeline core
   //   • shared obligation engine + submission core
   // Workload composition (backlog 2026-10-01): `nextStepCommand.ts` and
-  // `semanticReviewStep.ts` COMPOSE the step a host is handed, and the prompt
+  // the question-review cycle COMPOSE the step a host is handed, and the prompt
   // and issue-code modules below are reachable only through them (the closure
   // rule claims them). A change to any of these alters what every audit host
   // does next — the same blast radius as the dispatch and orchestrator modules,
@@ -76,7 +76,10 @@ export const LOOP_CORE_PATTERNS: readonly string[] = [
   "src/audit/cli/nextStepCommand.ts",
   "src/audit/cli/nextStepHelpers.ts",
   "src/audit/cli/prompts.ts",
-  "src/audit/cli/semanticReviewStep.ts",
+  "src/audit/cli/questionReviewCycle.ts",
+  "src/audit/cli/questionWorkloadBindings.ts",
+  "src/audit/cli/submitCommand.ts",
+  "src/audit/cli/submitGateResult.ts",
   "src/audit/io/rollover.ts",
   "src/audit/io/runSnapshot.ts",
   "src/audit/orchestrator/",

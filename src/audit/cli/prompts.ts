@@ -123,18 +123,6 @@ export function nextStepCommand(root: string, artifactsDir: string): string {
   ]);
 }
 
-/** The pre-ingest check of one result file, with its path left as a placeholder. */
-export function validateResultsCommand(root: string, artifactsDir: string): string {
-  return `${renderCommand([
-    ...cliInvocationTokens(),
-    "validate-results",
-    "--root",
-    root,
-    "--artifacts-dir",
-    artifactsDir,
-  ])} --results <result file>`;
-}
-
 export function renderEdgeReasoningDispatchPrompt(params: {
   promptPath: string;
   resultsPath: string;
@@ -180,12 +168,12 @@ export function renderPresentReportPrompt(finalReportPath: string): string {
   return [
     "# audit-code present report",
     "",
-    "The deterministic audit is complete.",
+    "The audit report has been rendered. Some coverage may remain incomplete.",
     "",
     `Read the final audit report from: ${finalReportPath}`,
     "",
-    "Present the completed audit with work blocks first.",
-    "Do not run the orchestrator again for this completed audit.",
+    "Present confirmed work blocks first and state unresolved coverage from the report.",
+    "Do not rerun the orchestrator just to present this report.",
     "",
   ].join("\n");
 }

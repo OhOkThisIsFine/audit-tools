@@ -13,6 +13,7 @@ import type {
   AnalyzerLeadProvenance,
   AcquisitionRunner,
 } from "audit-tools/shared";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewFindingClaim } from "../../src/shared/types/reviewQuestion.js";
 import { hashAnalyzerSnippet } from "../../src/shared/analyzers/provenance.js";
 import { contentSha256 } from "../../src/shared/submission/hostHandoffCore.js";
 import { makeState as makeBaseState } from "./test-helpers.js";
@@ -205,6 +206,58 @@ describe("runClosePhase — item C mechanical re-verify leg", () => {
   // trusts an entry only when both of its hashes match the CURRENT plan. The
   // re-verify leg must stamp those hashes over its own verdict only — never
   // over a source determination an earlier plan revision recorded.
+  it.each([
+    { input: FLAGGED_SOURCE, present: true, expected: "triage", verdict: "lead_persists" },
+    { input: FIXED_SOURCE, present: true, expected: "complete", verdict: "verified_mechanically" },
+    { input: FIXED_SOURCE, present: false, expected: "triage", verdict: "skipped" },
+  ] as const)("requires every original analyzer obligation to clear: $verdict", async ({ input, present, expected, verdict }) => {
+    writeFileSync(join(REPO_DIR, "src", "dup.ts"), input);
+    const state = makeState(provenanceFor("a distinct earlier reported snippet"));
+    const finding = state.plan!.findings[0]!;
+    const original = (id: string, provenance: AnalyzerLeadProvenance): ReviewFindingClaim => ({
+      schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+      question_id: "question-a",
+      revision_id: "revision-a",
+      finding_id: id,
+      kind: "confirmed_defect",
+      severity: "medium",
+      confidence: "high",
+      claim: "Duplicate branch",
+      consequence: "Two copies drift",
+      next_step: "Use one branch",
+      evidence_ids: ["comparison-a"],
+      source_refs: [{ path: "src/dup.ts" }],
+      verification: [{ kind: "analyzer", obligation_id: `verify-${id}`, provenance }],
+    });
+    finding.question_review_sources = [
+      original("original-a", finding.analyzer_provenance!),
+      original("original-b", {
+        ...provenanceFor(FLAGGED_SOURCE),
+        analyzer_id: present ? "fake-analyzer" : "unavailable-analyzer",
+      }),
+    ];
+    await writeApprovedPlanFixture(TEST_DIR, state, REPO_DIR);
+    const next = await runClosePhase(state, {
+      skipFinalGate: true,
+      root: REPO_DIR,
+      artifactsDir: TEST_DIR,
+      analyzerLeadVerifyOverrides: { candidates: [fakeCandidate()], run: fakeRun },
+    });
+    expect(next.status).toBe(expected);
+    const originalVerdicts = next.source_verifications?.F1?.mechanical_obligation_verifications;
+    expect(originalVerdicts).toMatchObject([
+      { source_finding_id: "original-a", obligation_id: "verify-original-a", status: "verified_mechanically" },
+      { source_finding_id: "original-b", obligation_id: "verify-original-b", status: verdict },
+    ]);
+    if (expected === "complete") {
+      const outcomes = JSON.parse(await readFile(join(OUTPUT_DIR, "remediation-outcomes.json"), "utf8"));
+      expect(outcomes.outcomes.find((item: { finding_id: string }) => item.finding_id === "F1")
+        .mechanical_obligation_verifications).toEqual(originalVerdicts);
+    } else {
+      expect(next.items!.F1.status).toBe("blocked");
+    }
+  });
+
   it("never re-binds a source determination from an earlier plan revision to the current one", async () => {
     writeFileSync(join(REPO_DIR, "src", "dup.ts"), FIXED_SOURCE);
     const state = makeState(provenanceFor(FLAGGED_SOURCE));

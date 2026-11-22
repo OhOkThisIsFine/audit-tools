@@ -17,22 +17,19 @@ import { executionPlanPaths, ingestExecutionPlan, readCanonicalPlan, readPlanSou
 import type { ExecutableChangePlan } from "../../src/shared/types/executionPlan.js";
 import { StateStore } from "../../src/remediate/state/store.js";
 import { readOptionalJsonFile, writeJsonFile } from "../../src/shared/index.js";
-import {
-  buildAuditFindingsDeliverable,
-  type Finding,
-} from "audit-tools/shared";
+import type { Finding } from "audit-tools/shared";
+import { buildQuestionAuditReportFixture } from "./helpers/questionAuditReportFixture.js";
 
 const harness = createNextStepHarness(".test-next-step-review-gate");
 const { REPO_DIR, ARTIFACTS_DIR, writeReadyStructuredAuditIntake, acknowledgeResume } = harness;
 
-const STRATEGIC_ID = "ARC-design-001";
-const CONCRETE_ID = "SEC-fix-001";
+const STRATEGIC_LOCAL_ID = "ARC-design-001";
+const CONCRETE_LOCAL_ID = "SEC-fix-001";
 
 /** Two-finding audit report: one architecture (strategic), one security (concrete). */
-function auditReport(): string {
-  const findings: Finding[] = [
+const auditFixture = buildQuestionAuditReportFixture([
       {
-        id: STRATEGIC_ID,
+        id: STRATEGIC_LOCAL_ID,
         title: "Module boundaries leak persistence concerns",
         category: "architecture",
         severity: "medium",
@@ -47,7 +44,7 @@ function auditReport(): string {
         evidence: ["src/store.ts:1 evidence"],
       },
       {
-        id: CONCRETE_ID,
+        id: CONCRETE_LOCAL_ID,
         title: "Unvalidated input in login handler",
         category: "security",
         severity: "high",
@@ -60,9 +57,9 @@ function auditReport(): string {
         ],
         evidence: ["src/auth/login.ts:42 evidence"],
       },
-    ];
-  return JSON.stringify(buildAuditFindingsDeliverable(findings, null));
-}
+    ]);
+const STRATEGIC_ID = auditFixture.ids.get(STRATEGIC_LOCAL_ID)!;
+const CONCRETE_ID = auditFixture.ids.get(CONCRETE_LOCAL_ID)!;
 
 // A non-default-candidate path: bare `next-step` then resumes the persisted
 // intake instead of re-deriving the manifest from default-discovery candidates
@@ -71,7 +68,7 @@ function auditReport(): string {
 const auditPath = join(REPO_DIR, "my-audit.json");
 
 async function writeAuditIntake(): Promise<string> {
-  await writeFile(auditPath, auditReport(), "utf8");
+  await writeFile(auditPath, JSON.stringify(auditFixture.report), "utf8");
   await writeReadyStructuredAuditIntake(auditPath);
   return auditPath;
 }
@@ -517,7 +514,7 @@ describe("review-approval gate: skip conditions", () => {
   it("an empty-findings report skips the gate entirely", async () => {
     await writeFile(
       auditPath,
-      JSON.stringify(buildAuditFindingsDeliverable([], null)),
+      JSON.stringify(buildQuestionAuditReportFixture([]).report),
       "utf8",
     );
     await writeReadyStructuredAuditIntake(auditPath);

@@ -18,8 +18,6 @@ const SOURCE_READ_ONLY = [
   "docs_digest_executor",
   "external_analyzer_import_executor",
   "intent_equivalence_executor",
-  "result_ingestion_executor",
-  "runtime_validation_update_executor",
   "structure_decomposition_executor",
 ];
 

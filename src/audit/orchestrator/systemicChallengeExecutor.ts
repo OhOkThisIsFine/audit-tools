@@ -231,10 +231,12 @@ export function runSystemicChallengeExecutor(
   const priorFindings = prior?.findings ?? [];
   const priorRounds = prior?.rounds ?? [];
 
-  // No submission this turn: (re)compute the digest and leave the loop OPEN so the
-  // relay step can dispatch the second-order adversary. The prior findings/rounds
-  // carry forward unchanged (idempotent — re-running never loses a round).
+  // A reload is not a round. Preserve the stop on the same bound premise,
+  // while leaving the previous migration behavior for tokenless registers.
   if (!submission) {
+    const stopReason = prior?.round_token === round_token && prior.converged
+      ? prior.stop_reason
+      : undefined;
     const register: SystemicChallengeRegister = {
       generated_at,
       target: "systemic_challenge",
@@ -246,7 +248,8 @@ export function runSystemicChallengeExecutor(
       ...(prior?.folded_submission_hashes
         ? { folded_submission_hashes: prior.folded_submission_hashes }
         : {}),
-      converged: false,
+      converged: stopReason !== undefined,
+      ...(stopReason === undefined ? {} : { stop_reason: stopReason }),
       convergence_rule: appliedConvergenceRule(),
       findings: priorFindings,
       validation_issues: prior?.validation_issues ?? [],
@@ -254,9 +257,10 @@ export function runSystemicChallengeExecutor(
     return {
       updated: { ...bundle, systemic_challenge: register },
       artifacts_written: ["systemic_challenge.json"],
-      progress_summary:
-        `Systemic challenge loop open: ${priorFindings.length} improvement(s) so far, ` +
-        `${priorRounds.length} round(s) run — awaiting the next adversary round.`,
+      progress_summary: stopReason === undefined
+        ? `Systemic challenge loop open: ${priorFindings.length} improvement(s) so far, ` +
+          `${priorRounds.length} round(s) run - awaiting the next adversary round.`
+        : `Systemic challenge stays ended (${stopReason}): ${priorFindings.length} improvement(s), ${priorRounds.length} round(s).`,
     };
   }
 

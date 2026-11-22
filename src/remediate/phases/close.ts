@@ -548,6 +548,9 @@ export function buildRemediationOutcomesReport(
       ...(item.mechanical_verification
         ? { mechanical_verification: item.mechanical_verification }
         : {}),
+      ...(item.mechanical_obligation_verifications
+        ? { mechanical_obligation_verifications: item.mechanical_obligation_verifications }
+        : {}),
       ...(evidence ? { evidence } : {}),
       ...(recordedByModule ? { recorded_by_module: recordedByModule } : {}),
     };
@@ -2246,22 +2249,29 @@ export async function runClosePhase(
       state.source_verifications[findingId] = bindSourceVerification(
         state.source_verifications[findingId],
         { review_revision_sha256: state.plan.review_revision_sha256, source_sha256: contentSha256(source) },
-        { mechanical_verification: verdict },
+        {
+          mechanical_verification: verdict,
+          ...(analyzerVerify.obligations[findingId]
+            ? { mechanical_obligation_verifications: analyzerVerify.obligations[findingId] }
+            : {}),
+        },
       );
-      if (verdict.status === "lead_persists") {
+      if (verdict.status === "lead_persists" || analyzerVerify.unverified.includes(findingId)) {
         for (const unit of state.plan.units.filter(unit => unit.source_finding_ids.includes(findingId))) {
           const item = state.items[unit.id];
           if (!item || !isVerifiedCompleteStatus(item.status)) continue;
           item.status = "blocked";
           item.completed_at = now;
-          item.failure_reason = `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}. Rework the linked execution unit.`;
+          item.failure_reason = verdict.status === "lead_persists"
+            ? `Mechanical re-verify: analyzer '${verdict.analyzer_id}' still reports source ${findingId}. Rework the linked execution unit.`
+            : `Mechanical re-verify: required analyzer evidence for source ${findingId} is unavailable: ${verdict.reason ?? "reason not reported"}. Restore the verifier before closing.`;
         }
       }
     }
-    if (analyzerVerify.persisting.length > 0) {
+    if (analyzerVerify.persisting.length > 0 || analyzerVerify.unverified.length > 0) {
       console.log(
         `Analyzer lead re-verify: ${analyzerVerify.persisting.length} lead(s) persist ` +
-        `(${analyzerVerify.persisting.join(", ")}). Transitioning back to triage.`,
+        `(${analyzerVerify.persisting.join(", ")}); ${analyzerVerify.unverified.length} with unavailable required evidence. Transitioning back to triage.`,
       );
       runLogger?.event({
         phase: "close",

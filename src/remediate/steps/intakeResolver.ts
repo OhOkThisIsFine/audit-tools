@@ -5,6 +5,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { hashContent, isRecord, readOptionalJsonFile, writeJsonFile } from "audit-tools/shared";
 import { isAuditFindingsReport } from "../phases/plan.js";
+import { QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION, QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
 import { writeCurrentStep } from "./stepWriter.js";
 import type { InputResolution, RemediationStep } from "./types.js";
 import {
@@ -50,8 +51,16 @@ export function validateSuppliedInput(
   }
   if (isRecord(parsed)) {
     const sv = parsed.schema_version;
-    if (sv === "audit-findings/v1alpha1") {
-      return { ok: false, reason: `${path} uses retired schema_version ${sv}. Regenerate the audit with contract_version audit-tools/audit-findings/v1alpha2.` };
+    if (sv === "audit-findings/v1alpha1" || parsed.contract_version === "audit-tools/audit-findings/v1alpha2") {
+      return { ok: false, reason: `${path} is an archived audit report. Regenerate it with ${QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION} before remediation.` };
+    }
+    if (parsed.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
+      const report = QuestionAuditFindingsReportSchema.safeParse(parsed);
+      if (!report.success) return { ok: false, reason: `Invalid audit report: ${report.error.issues.map(issue => issue.message).join("; ")}` };
+      return { ok: true };
+    }
+    if (typeof parsed.contract_version === "string" && parsed.contract_version.startsWith("audit-tools/audit-findings/")) {
+      return { ok: false, reason: `Unsupported audit report version: ${parsed.contract_version}.` };
     }
     if (!allowDocumentFallback && typeof sv === "string" && !KNOWN_SCHEMA_VERSIONS.has(sv)) {
       return { ok: false, reason: `unrecognised schema_version: ${sv}` };
@@ -279,10 +288,22 @@ export async function resolveIntakeStep(params: {
       inputResolution.existing.length === 1 &&
       singleInput.toLowerCase().endsWith(".json");
 
-    if (inputResolution.supplied && inputResolution.existing.length > 1) {
+    if (inputResolution.existing.length > 1) {
+      const reports: string[] = [];
       for (const path of inputResolution.existing.filter(path => path.toLowerCase().endsWith(".json"))) {
-        const validation = validateSuppliedInput(path, await readFile(path, "utf8"), true);
+        const content = await readFile(path, "utf8");
+        const validation = validateSuppliedInput(path, content, true);
         if (!validation.ok) return collectStartingPointStep([path], validation.reason);
+        try {
+          if (isAuditFindingsReport(JSON.parse(content))) reports.push(path);
+        } catch { /* Non-audit documents retain the usual intake path. */ }
+      }
+      if (reports.length > 1) return collectStartingPointStep(reports, "Select one canonical audit report for remediation.");
+      if (reports.length === 1) {
+        const from = inputResolution.supplied ? "input" : "default_candidates";
+        const audit = buildStructuredAuditSourceManifest(reports[0]!, from);
+        const guidance = buildDocumentSourceManifest(inputResolution.existing.filter(path => path !== reports[0]), from);
+        nextManifest = { ...audit, sources: [...audit.sources, ...guidance.sources] };
       }
     }
 
@@ -290,8 +311,8 @@ export async function resolveIntakeStep(params: {
       const content = await readFile(singleInput, "utf8");
       // Recognize an explicit audit even alongside guidance, while preserving
       // mixed document intake's existing fallback for non-audit JSON content.
-      if (inputResolution.supplied) {
-        const allowDocumentFallback = Boolean(intake.conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined;
+      {
+        const allowDocumentFallback = !inputResolution.supplied || (Boolean(intake.conversationStart) && requestedSelection === undefined && previousManifest?.finding_selection === undefined);
         const validation = validateSuppliedInput(singleInput, content, allowDocumentFallback);
         if (!validation.ok) {
           return collectStartingPointStep(

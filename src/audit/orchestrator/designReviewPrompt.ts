@@ -1,4 +1,4 @@
-// sites-pinned: tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
+// sites-pinned: tests/audit/intent-checkpoint-extended.test.ts, tests/audit/conceptual-charter-context.test.ts, tests/audit/review-submission.test.ts, tests/shared/design-check-provenanced-input.test.ts, tests/audit/review-file-map-context.test.ts, tests/audit/review-evidence-right-sizing.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import { compareCodeUnits, confidenceRank, severityRank, uniqueSorted } from "audit-tools/shared";
@@ -20,6 +20,8 @@ import { ReviewSubmissionEnvelopeSchema } from "audit-tools/shared";
 import type { ConceptualPerspective } from "../../shared/types/conceptualPerspective.js";
 import { ConceptualJudgeSubmissionSchema } from "../types/conceptualAdjudication.js";
 import { DesignLeadCategorySchema } from "../types/designAssessment.js";
+import { BUILT_IN_REVIEW_LENSES, BuiltInReviewLensSchema } from "../../shared/types/reviewQuestion.js";
+import { REVIEW_LENS_PLAYBOOKS } from "./reviewLensPlaybooks.js";
 
 /**
  * Where the judge's object sits, DERIVED from the two schemas that parse it.
@@ -144,22 +146,27 @@ function summarizeRisk(bundle: ArtifactBundle): string {
 interface StartingPoints {
   /** Total risk items (ranked) — 0 when the unranked fallback was used. */
   risk_item_count: number;
+  all_units_excluded: boolean;
   entries: Array<{ unit_id: string; risk_score?: number; files: readonly string[] }>;
 }
 
 function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): StartingPoints {
-  const items = bundle.risk_register?.items ?? [];
-  const units = bundle.unit_manifest?.units ?? [];
+  const allUnits = bundle.unit_manifest?.units ?? [];
+  const units = allUnits.filter(unit => deriveUnitScopeDisposition(unit.files, bundle.intent_checkpoint).kind === "in_scope");
+  const all_units_excluded = allUnits.length > 0 && units.length === 0;
   const unitFiles = new Map<string, string[]>();
   for (const unit of units) {
     unitFiles.set(unit.unit_id, unit.files);
   }
 
-  // Sort risk items by score descending, then take the top-N
-  const top = [...items].sort((a, b) => b.risk_score - a.risk_score).slice(0, maxUnits);
+  const items = (bundle.risk_register?.items ?? []).filter(item => allUnits.length === 0 || unitFiles.has(item.unit_id));
+
+  // Sort eligible risk items by score descending, then take the top-N
+  const top = items.sort((a, b) => b.risk_score - a.risk_score).slice(0, maxUnits);
   if (top.length === 0) {
     return {
       risk_item_count: 0,
+      all_units_excluded,
       entries: units
         .slice(0, maxUnits)
         .map((unit) => ({ unit_id: unit.unit_id, files: unit.files })),
@@ -167,6 +174,7 @@ function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): Startin
   }
   return {
     risk_item_count: items.length,
+    all_units_excluded,
     entries: top.map((item) => ({
       unit_id: item.unit_id,
       risk_score: item.risk_score,
@@ -219,6 +227,7 @@ export function designReviewFileMapContext(
 }
 
 function buildPrioritizedReadingList(points: StartingPoints): string {
+  if (points.all_units_excluded) return "No in-scope starting units; excluded units are context only.";
   if (points.entries.length === 0) {
     return "No risk or unit data available; read the repository root files to orient yourself.";
   }
@@ -408,17 +417,20 @@ export interface DesignReviewOptions {
  * example a lens to echo instead of a hard-coded one.
  */
 function renderLensScope(options: DesignReviewOptions): string[] {
-  const lenses = options.lenses ?? [];
-  if (lenses.length === 0) return [];
+  const lenses = options.lenses ?? BUILT_IN_REVIEW_LENSES;
   return [
     "## Lenses in scope",
     "",
-    `The operator selected these lenses for this audit: ${lenses.join(", ")}. ` +
-      "Set each finding's `lens` to the one it genuinely belongs to, from that list. " +
-      "Do NOT default every finding to the same lens — a lens with no findings is " +
-      "reported as un-exercised, which is a truthful outcome; a finding filed under " +
-      "the wrong lens is not. If a finding genuinely belongs to no selected lens, " +
-      "report it with the lens it does belong to rather than forcing it into one.",
+    ...(lenses.length === 0
+      ? ["The operator selected no question lens. Keep any separate design discussion distinct from findings and coverage."]
+      : [
+          `Question lenses for this review: ${lenses.join(", ")}.`,
+          ...lenses.map((lens) => {
+            const builtIn = BuiltInReviewLensSchema.safeParse(lens);
+            return `- ${lens}: ${builtIn.success ? REVIEW_LENS_PLAYBOOKS[builtIn.data] : "Answer the independently declared custom question; do not infer its scope from its ID."}`;
+          }),
+          "Assign each finding its owning selected lens. Preserve a discovery for a different lens as a linked lead or unresolved question; do not claim coverage of an unassigned lens.",
+        ]),
     "",
   ];
 }
@@ -829,7 +841,7 @@ export function renderSharedStructuralContext(
     "",
     "### Starting points (orient, then roam)",
     "",
-    `Use the ${maxUnits} highest-risk units below to orient yourself, then follow the code wherever it leads. You need not read every file, but do NOT confine yourself to this list — the most important problems often live in the connections between ordinary-looking parts that no per-unit risk score flags.`,
+    `Use the in-scope units below to orient yourself, then follow the code wherever it leads. Excluded units are dependency context only, not primary review targets. You need not read every file, but do NOT confine yourself to this list — the most important problems often live in the connections between ordinary-looking parts that no per-unit risk score flags.`,
     "",
     prioritizedReadingList,
     "",

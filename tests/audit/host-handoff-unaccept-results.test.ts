@@ -1,5 +1,5 @@
 /**
- * The un-accept verb: an operator-facing path back out of an accepted entry.
+ * Archived per-file accepted-pair recovery, not a live question CLI verb.
  *
  * Property (docs/backlog/open-bugs.md, 2026-08-21): any state a failed gate can
  * poison has a supported path back out. Before this change, an accepted result
@@ -238,17 +238,21 @@ describe("contract:unaccept-results-drops-an-accepted-entry", () => {
     expect(results).toEqual([]);
   });
 
-  it("is registered as the audit-code `unaccept-results` command", async () => {
-    // src, not dist: the release-checks CI job typechecks the test tree without a build.
+  it("refuses the retired CLI verb without changing the archived accepted pair", async () => {
+    const ctx = await setup();
+    expect((await ctx.ingest()).accepted_count).toBe(2);
+    const ledgerPath = ctx.acceptedLedgerPath();
+    const resultsPath = join(ctx.artifactsDir, "runs", RUN_ID, "host-accepted-results.json");
+    const before = await Promise.all([readFile(ledgerPath), readFile(resultsPath)]);
     const { runCli } = await import("../../src/audit/cli.js");
     const { captureConsole } = await import("./helpers/captureConsole.mjs");
-    const result = await captureConsole(() =>
-      runCli([process.execPath, "cli.js", "this-is-not-a-command"]),
-    );
-    expect(result.code, "unknown command must exit 1").toBe(1);
-    expect(result.stderr, "the command listing must name the new verb").toContain(
-      "unaccept-results",
-    );
+    const result = await captureConsole(() => runCli([
+      process.execPath, "cli.js", "unaccept-results", "--root", ctx.root,
+      "--artifacts-dir", ctx.artifactsDir, "--run-id", RUN_ID, "--all",
+    ]));
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Unknown command: unaccept-results");
     expect(result.stderr).toContain("recover-submission");
+    expect(await Promise.all([readFile(ledgerPath), readFile(resultsPath)])).toEqual(before);
   });
 });

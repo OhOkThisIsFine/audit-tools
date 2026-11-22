@@ -1,3 +1,4 @@
+// sites-pinned: tests/remediate/finding-filter.test.ts, tests/remediate/intake-mixed-audit-provenance.test.ts
 // <!-- comment-citation-exempt: names deliberately-retired symbols; this block records that history -->
 // Single finding-filter pass (review-gate convergence, chunk A).
 //
@@ -79,8 +80,13 @@ export async function runFindingFilterPass(
   );
 
   // 2. Cross-lens dedup.
-  const dedup = deduplicateCrossLensFindings(kept);
-  kept = dedup.findings;
+  // The question report has already adjudicated canonical causes. A second
+  // similarity fold could hide distinct defects and their source obligations.
+  const canonical = kept.filter((finding) => finding.question_review_sources);
+  const dedup = deduplicateCrossLensFindings(
+    kept.filter((finding) => !finding.question_review_sources),
+  );
+  kept = [...canonical, ...dedup.findings];
 
   // 3. Phantom-path grounding.
   const grounding = await groundExtractedFindings(kept, {

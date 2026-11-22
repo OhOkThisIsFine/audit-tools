@@ -65,7 +65,6 @@ export function aggregateMetricsDigest(bundle: ArtifactBundle): AggregateMetrics
   const unitCount = bundle.unit_manifest?.units?.length ?? 0;
   const consensusCount = bundle.structure_decomposition?.consensus?.length ?? 0;
   const contestedCount = bundle.structure_decomposition?.contested?.length ?? 0;
-  const taskCount = bundle.audit_tasks?.length ?? 0;
   const { total: totalEdges, maxFanOut } = countEdges(bundle);
   const metricCoveredNodes = countMetricCoveredNodes(bundle);
 
@@ -75,7 +74,6 @@ export function aggregateMetricsDigest(bundle: ArtifactBundle): AggregateMetrics
     { label: "Consensus subsystems", count: consensusCount, unit: "subsystems" },
     { label: "Contested subsystems", count: contestedCount, unit: "subsystems" },
     { label: "Dependency edges", count: totalEdges, unit: "edges" },
-    { label: "Planned audit tasks", count: taskCount, unit: "tasks" },
     { label: "Metric-covered nodes", count: metricCoveredNodes, unit: "nodes" },
   ];
 

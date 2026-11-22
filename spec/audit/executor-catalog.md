@@ -25,13 +25,12 @@ catalog is the by-executor view and deliberately does **not** re-list producers,
 so the relation cannot drift between homes — consult the generated table for the
 producing/refreshing executors of any artifact.
 
-Two executors carry `obligation_ids: []` and are never selected by the priority
-scan — they run only via an explicit `preferredExecutor` override:
-`runtime_validation_update_executor` (imported runtime-validation evidence) and
-`external_analyzer_import_executor` (imported normalized external-analyzer
-results). Development friction reflection belongs to the repository sprint
-closeout; ordinary target audits capture and archive diagnostics without a
-reflection gate.
+The `external_analyzer_import_executor` has no obligation and runs only via an
+explicit `preferredExecutor` override to import normalized analyzer evidence.
+The retired per-file result ingestion and runtime-validation executors are not
+in the current priority chain. Development friction reflection belongs to the
+repository sprint closeout; ordinary target audits capture and archive
+diagnostics without a reflection gate.
 
 ## Executors
 
@@ -80,13 +79,16 @@ hand-edit between the markers.
 <!-- BEGIN GENERATED spec-mirror executor-catalog#execution — scripts/shared/generate-spec-mirrors.mjs — DO NOT EDIT BY HAND -->
 | Executor | Kind | Obligation | Notes |
 |---|---|---|---|
-| `planning_executor` | deterministic | `planning_artifacts` | emits all planning artifacts in one call |
+| `planning_executor` | deterministic | `planning_artifacts` | writes the confirmed scope and the snapshot-bound question plan |
 | `semantic_review_executor` | host_delegation | `audit_tasks_completed` | emits a complete provider-neutral host workload and ingests prompt-bound results; performs no backend launch or routing |
 | `external_analyzer_import_executor` | deterministic | *(none — `preferredExecutor` only)* | imported normalized external-analyzer results |
-| `result_ingestion_executor` | deterministic | `audit_results_ingested` | ingests prompt-bound host results and refreshes the downstream planning/coverage view |
-| `runtime_validation_executor` | deterministic | `runtime_validation_current` | the first runtime-validation pass; applies selective deepening |
-| `runtime_validation_update_executor` | deterministic | *(none — `preferredExecutor` only)* | re-runs that pass over imported evidence |
 <!-- END GENERATED spec-mirror executor-catalog#execution -->
+
+The semantic review step issues scoped question assignments and resumes from
+bound answers, not per-file review tasks. A returned answer may still be
+inconclusive. The historical obligation ID `audit_tasks_completed` tracks
+whether the current question dispatch still owes an answer; it is not a
+coverage verdict.
 
 ### Reporting
 

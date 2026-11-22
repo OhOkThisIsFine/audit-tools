@@ -17,6 +17,7 @@ const ExecutionIntentSchema=IntentCheckpointSchema.omit({confirmed_at:true,closi
 export const PlanSourceSchema = z.object({
   plan_id: text,
   findings: z.array(FindingSchema),
+  question_report: z.literal(true).optional(),
   request: ExecutionRequestSchema.optional(),
   audit_read: AuditReadSchema.nullable(),
   sources: z.array(z.object({ path: text, sha256: digest }).strict()),
@@ -205,6 +206,9 @@ export function executionPlanIssues(root: string, source: PlanSource, plan: Exec
   }
   for (const unit of plan.units) {
     validatePaths(unit.read_paths,`Unit ${unit.id} read scope`); validatePaths(unit.allowed_files,`Unit ${unit.id} write scope`);
+    if (source.question_report && !source.request && unit.allowed_files.length && !unit.source_finding_ids.length) {
+      issues.push(`Unit ${unit.id} has write scope without an approved confirmed finding.`);
+    }
     if(source.intent){
       const checkpoint={...source.intent,confirmed_at:"bound"};
       for(const path of unit.allowed_files){
@@ -223,6 +227,34 @@ export function executionPlanIssues(root: string, source: PlanSource, plan: Exec
     for (const dependency of unit.dependencies) {
       const prerequisite = plan.units.find(entry=>entry.id===dependency);
       if (prerequisite && (prerequisite.phase_ordinal ?? 0) > (unit.phase_ordinal ?? 0)) issues.push(`Unit ${unit.id} depends on a later integration phase.`);
+    }
+  }
+  const originalAssertions = source.findings.flatMap(finding =>
+    (finding.question_review_sources ?? []).flatMap(original =>
+      original.verification.flatMap(obligation => obligation.kind === "assertion"
+        ? [{ finding, original, obligation }] : []),
+    ),
+  );
+  const bindings = plan.requirements.flatMap(requirement =>
+    requirement.assertions.flatMap(assertion => assertion.source_obligation
+      ? [{ requirement, assertion, ref: assertion.source_obligation }] : []),
+  );
+  const matchesAssertion = (
+    { requirement, assertion, ref }: typeof bindings[number],
+    { finding, original, obligation }: typeof originalAssertions[number],
+  ): boolean => requirement.source_finding_ids.includes(finding.id) &&
+    ref.finding_id === original.finding_id && ref.obligation_id === obligation.obligation_id &&
+    assertion.description === obligation.expected &&
+    obligation.source_refs.every(({ path }) => assertion.scope_paths.includes(path));
+  for (const binding of bindings) {
+    if (!originalAssertions.some(original => matchesAssertion(binding, original))) {
+      issues.push(`Requirement ${binding.requirement.id} has an unknown or changed source assertion ${binding.ref.finding_id}/${binding.ref.obligation_id}.`);
+    }
+  }
+  for (const original of originalAssertions) {
+    if (plan.units.some(unit => unit.source_finding_ids.includes(original.finding.id)) &&
+        !bindings.some(binding => matchesAssertion(binding, original))) {
+      issues.push(`Source assertion ${original.original.finding_id}/${original.obligation.obligation_id} has no exact scoped plan assertion.`);
     }
   }
   for (const finding of source.findings) if (!plan.units.some(unit=>unit.source_finding_ids.includes(finding.id)) && !plan.source_dispositions.some(entry=>entry.finding_id===finding.id)) issues.push(`Source finding ${finding.id} has no execution or explicit disposition.`);

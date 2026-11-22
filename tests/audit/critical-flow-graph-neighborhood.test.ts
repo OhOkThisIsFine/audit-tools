@@ -22,8 +22,8 @@ function makeRepoManifest(paths: string[]): RepoManifest {
 // high confidence. A flow's paths must come from its own entrypoint's graph
 // neighborhood instead.
 const FILES = [
-  "src/audit/cli/workerResult.ts",
-  "src/audit/contracts/workerSchemas.ts",
+  "src/jobs/reviewWorker.ts",
+  "src/jobs/workerSchemas.ts",
   "src/shared/tooling/windowsOwnedJob.ts",
   "src/shared/tooling/exec.ts",
   "src/shared/tooling/ownedProcessLifecycle.ts",
@@ -34,9 +34,9 @@ const FILES = [
 const SURFACES: SurfaceManifest = {
   surfaces: [
     {
-      id: "surface:src/audit/cli/workerResult.ts",
+      id: "surface:src/jobs/reviewWorker.ts",
       kind: "background",
-      entrypoint: "src/audit/cli/workerResult.ts",
+      entrypoint: "src/jobs/reviewWorker.ts",
     },
     {
       id: "surface:src/shared/tooling/windowsOwnedJob.ts",
@@ -54,8 +54,8 @@ const SURFACES: SurfaceManifest = {
 const GRAPH: GraphBundle = {
   graphs: {
     imports: [
-      // workerResult imports workerSchemas.
-      { from: "src/audit/cli/workerResult.ts", to: "src/audit/contracts/workerSchemas.ts" },
+      // reviewWorker imports workerSchemas.
+      { from: "src/jobs/reviewWorker.ts", to: "src/jobs/workerSchemas.ts" },
       // windowsOwnedJob imports nothing; exec and ownedProcessLifecycle import it.
       { from: "src/shared/tooling/exec.ts", to: "src/shared/tooling/windowsOwnedJob.ts" },
       {
@@ -87,13 +87,13 @@ test("unrelated background entrypoints get their own graph neighborhood, not one
     { graphBundle: GRAPH },
   );
 
-  const worker = flowFor(manifest, "src/audit/cli/workerResult.ts");
+  const worker = flowFor(manifest, "src/jobs/reviewWorker.ts");
   const job = flowFor(manifest, "src/shared/tooling/windowsOwnedJob.ts");
   const queue = flowFor(manifest, "src/audit/clarification/voiQueue.ts");
 
   expect(worker.paths).toEqual([
-    "src/audit/cli/workerResult.ts",
-    "src/audit/contracts/workerSchemas.ts",
+    "src/jobs/reviewWorker.ts",
+    "src/jobs/workerSchemas.ts",
   ]);
   expect(job.paths).toEqual([
     "src/shared/tooling/exec.ts",

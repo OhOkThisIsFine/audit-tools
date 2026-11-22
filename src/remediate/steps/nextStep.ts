@@ -1,3 +1,4 @@
+import { QuestionAuditFindingsReportSchema, type QuestionAuditFindingsReport } from "../../shared/types/questionReviewReport.js";
 import { backtickList } from "../../shared/reporting/markdown.js";
 import { readPlanClarificationResolutions, planClarificationRefusal, pausedClarifications, type PlanClarificationResolution } from "./clarificationResolution.js";
 import { admitRemediationDirtyBaseline, RemediationDirtyBaselineError } from "../state/dirtyBaseline.js";
@@ -38,7 +39,6 @@ import {
   buildAuditDeliverablePair,
   auditReadOf,
   type AuditRead,
-  isRecord,
   renderIngestReportLines,
   withFsRetry,
   RunLogger,
@@ -1126,16 +1126,6 @@ async function archiveConsumedInputs(paths: readonly string[]): Promise<void> {
   }
 }
 
-/** Pull the Finding[] out of a parsed audit-findings.json payload. */
-function extractAuditFindings(parsed: unknown): Finding[] {
-  if (isRecord(parsed) && Array.isArray(parsed.findings)) {
-    return (parsed.findings as unknown[]).filter(
-      (f): f is Finding => isRecord(f) && typeof f.id === "string",
-    );
-  }
-  return [];
-}
-
 async function handleWaitingForReviewApproval(
   root: string,
   artifactsDir: string,
@@ -1410,37 +1400,32 @@ async function handleReadyIntakeContractPipeline(
     return null;
   }
 
-  // Resolve the manifest sources ONCE for the whole step (risk signal, Path A,
-  // and the pipeline source inputs all consume the same snapshot), and read the
-  // structured-audit source file at most once via a memoized reader (an
-  // unreadable source memoizes `undefined`; extractAuditFindings on undefined
-  // yields the empty set, so consumers degrade exactly as before).
+  // A persisted manifest names an input; it is not authority for its current
+  // contents. Validate every structured source before using any of its findings.
   const manifestSources = intake.manifest
     ? resolveManifestSources(root, intake.manifest).resolved
     : [];
-  const auditSource = manifestSources.find((s) => s.type === "structured_audit");
-  // Guidance remains a separate request alongside immutable audit findings.
-  // Do not turn the synthesized brief back into request text: it can describe
-  // audit findings that the review gate subsequently excludes from the seed.
+  const auditSources = manifestSources.filter(source => source.type === "structured_audit");
+  const auditSource = auditSources[0];
   const guidancePaths = auditSource
-    ? manifestSources.filter((source) => source.type !== "structured_audit").map((source) => source.path)
+    ? manifestSources.filter(source => source.type !== "structured_audit").map(source => source.path)
     : [];
-  let auditFindingsCache: { value: unknown } | undefined;
-  const readAuditFindingsOnce = async (): Promise<unknown> => {
-    if (!auditSource) {
-      return undefined;
+  let auditFindings: QuestionAuditFindingsReport | undefined;
+  for (const source of auditSources) {
+    let raw: unknown;
+    try { raw = JSON.parse(await readFile(source.path, "utf8")); } catch { raw = undefined; }
+    const parsed = QuestionAuditFindingsReportSchema.safeParse(raw);
+    if (!parsed.success) {
+      return writeCurrentStep({
+        stepKind: "collect_starting_point", status: "blocked", runId: randomRunId("INPUT"),
+        repoRoot: root, artifactsDir,
+        prompt: "The saved structured audit input is unreadable, invalid, or uses a retired format. Supply a current question-based audit report before continuing remediation.",
+        allowedCommands: [loaderCommand("next-step --input <path>")],
+        stopCondition: "Stop until a current structured audit report is supplied.",
+      });
     }
-    if (!auditFindingsCache) {
-      let value: unknown;
-      try {
-        value = JSON.parse(await readFile(auditSource.path, "utf8")) as unknown;
-      } catch {
-        value = undefined;
-      }
-      auditFindingsCache = { value };
-    }
-    return auditFindingsCache.value;
-  };
+    auditFindings ??= parsed.data;
+  }
 
   // Slice 2 — compute & persist the shared intake risk/complexity signal the
   // self-scaling dials (Slices 3/4) will read. Idempotent: recorded once from
@@ -1455,8 +1440,7 @@ async function handleReadyIntakeContractPipeline(
   await ensureIntakeRiskSignal(artifactsDir, async () => {
     const summary = intake.summary!;
     const affectedFiles = summary.affected_files.map((f) => f.path);
-    const parsed = await readAuditFindingsOnce();
-    affectedFiles.push(...distinctAffectedFiles(extractAuditFindings(parsed)));
+    affectedFiles.push(...distinctAffectedFiles(auditFindings?.findings ?? []));
     return { affectedFiles, goals: summary.goals };
   });
 
@@ -1469,9 +1453,8 @@ async function handleReadyIntakeContractPipeline(
   // ledger is built over the originals (every audit finding → exactly one
   // disposition). The gate may halt to collect the user's decision.
   let reviewSourceSwap: { from: string; to: string } | undefined;
-  if (auditSource) {
-    const auditFindings = await readAuditFindingsOnce();
-    const originals = extractAuditFindings(auditFindings);
+  if (auditSource && auditFindings) {
+    const originals = auditFindings.findings;
     if (originals.length > 0) {
       const checkpoint = await readIntentCheckpoint(intakePaths(artifactsDir).intentCheckpoint);
       const filter = await runFindingFilterPass(structuredClone(originals), {
@@ -1545,7 +1528,7 @@ async function handleReadyIntakeContractPipeline(
     }
   }
 
-  if (auditSource && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, await readAuditFindingsOnce(), guidancePaths);
+  if (auditSource && auditFindings && !await readPlanSource(artifactsDir)) await writePathASeedFromFindings(artifactsDir, auditSource.path, auditFindings, guidancePaths);
 
   const paths = intakePaths(artifactsDir);
   const sourcePaths = new Set<string>();

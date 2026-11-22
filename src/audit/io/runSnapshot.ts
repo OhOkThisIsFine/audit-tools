@@ -764,7 +764,7 @@ export async function lookupRunSince(artifactsDir: string, since: string): Promi
 }
 
 /**
- * The source root of the run in `artifactsDir`, WITHOUT creating a snapshot —
+ * The source root of the run in `artifactsDir`, WITHOUT creating a snapshot ΓÇö
  * for a read-only command that holds no lock. With no run started there is no
  * frozen tree, and the live root is the only content there is.
  */

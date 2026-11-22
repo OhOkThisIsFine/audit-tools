@@ -4,10 +4,13 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { RunLogger, AuditFindingsReportSchema } from "audit-tools/shared";
 import type { AuditFindingsReport, AuditRead } from "audit-tools/shared";
+import { deriveQuestionCycleUnlocked } from "../../src/audit/cli/questionReviewCycle.js";
+import { buildQuestionPlanArtifacts } from "../../src/audit/orchestrator/questionPlanExecutor.js";
+import { fullAuditScope } from "../../src/audit/orchestrator/scope.js";
 import { EXECUTOR_RUNNERS } from "../../src/audit/orchestrator/executorRunners.js";
 import {
-  runSynthesisExecutor,
-  runSynthesisNarrativeExecutor,
+  runQuestionSynthesisExecutor,
+  runQuestionSynthesisNarrativeExecutor,
 } from "../../src/audit/orchestrator/synthesisExecutors.js";
 import {
   buildAuditFindingsReport,
@@ -29,7 +32,13 @@ const RECORDED: AuditRead = {
 };
 const LATER: AuditRead = { commit: "b".repeat(40), dirty_paths: [] };
 
-const EMPTY_BUNDLE = { audit_results: [] } as unknown as ArtifactBundle;
+function emptyQuestionPlan(): ArtifactBundle {
+  return buildQuestionPlanArtifacts({
+    repo_manifest: { repository: { name: "fixture" }, generated_at: "2026-01-01", files: [] },
+  }, fullAuditScope()).updated;
+}
+
+const emptyQuestionReview = { accepted: [], evidence: [], dependenciesByQuestion: new Map() };
 
 describe("the pure writers state exactly what they are handed", () => {
   it("buildAuditFindingsReport stamps the supplied value, and a schema-valid null", () => {
@@ -59,28 +68,25 @@ describe("the pure writers state exactly what they are handed", () => {
     expect(AuditFindingsReportSchema.safeParse(report).success).toBe(false);
   });
 
-  it("runSynthesisExecutor carries options.auditRead onto the report it writes", () => {
-    const run = runSynthesisExecutor(EMPTY_BUNDLE, undefined, { auditRead: RECORDED });
+  it("runQuestionSynthesisExecutor carries options.auditRead onto the report it writes", () => {
+    const run = runQuestionSynthesisExecutor(emptyQuestionPlan(), { auditRead: RECORDED, questionReview: emptyQuestionReview });
 
     expect(run.updated.audit_findings?.audit_read).toEqual(RECORDED);
   });
 });
 
 describe("a later writer CARRIES the value, never re-stamps it", () => {
-  it("the narrative pass keeps the persisted report's audit_read even when handed a later one", () => {
-    const synth = runSynthesisExecutor(EMPTY_BUNDLE, undefined, { auditRead: RECORDED });
-
-    const omitted = runSynthesisNarrativeExecutor(synth.updated, undefined, {
-      auditRead: LATER,
-    });
-    const applied = runSynthesisNarrativeExecutor(
-      synth.updated,
-      { executive_summary: "A summary.", themes: [], top_risks: [] },
-      { auditRead: LATER },
-    );
+  it("the narrative pass carries recorded audit_read and refuses a restamped baseline", () => {
+    const synthesisOptions = { auditRead: RECORDED, questionReview: emptyQuestionReview };
+    const synth = runQuestionSynthesisExecutor(emptyQuestionPlan(), synthesisOptions);
+    const narrative = { executive_summary: "A summary.", themes: [], top_risks: [] };
+    const omitted = runQuestionSynthesisNarrativeExecutor(synth.updated, undefined, synthesisOptions);
+    const applied = runQuestionSynthesisNarrativeExecutor(synth.updated, narrative, synthesisOptions);
 
     expect(omitted.updated.audit_findings?.audit_read).toEqual(RECORDED);
     expect(applied.updated.audit_findings?.audit_read).toEqual(RECORDED);
+    expect(() => runQuestionSynthesisNarrativeExecutor(synth.updated, narrative, { ...synthesisOptions, auditRead: LATER }))
+      .toThrow(/stale question evidence/);
   });
 
   it("resynthesize's normalizer carries a recorded value through a version upgrade", () => {
@@ -109,6 +115,16 @@ describe("a later writer CARRIES the value, never re-stamps it", () => {
 
 describe("the RUNNER is the writer: synthesis_executor records the repository it audits", () => {
   const REPO_DIR = scratchDir(".test-audit-read-synthesis");
+  // Keep test artifacts under the authorized root but outside the source inventory.
+  const ARTIFACTS_DIR = join(REPO_DIR, ".audit-tools", "audit");
+  async function readyBundle(): Promise<ArtifactBundle> {
+    const bundle = emptyQuestionPlan();
+    const question_cycle = await deriveQuestionCycleUnlocked({
+      root: REPO_DIR, sourceRoot: REPO_DIR, artifactsDir: ARTIFACTS_DIR, bundle,
+    });
+    expect(question_cycle.pending).toEqual([]);
+    return { ...bundle, question_cycle };
+  }
   const git = (command: string): string =>
     String(execSync(`git ${command}`, { cwd: REPO_DIR })).trim();
   const ctx = (root: string | undefined) => ({
@@ -136,7 +152,7 @@ describe("the RUNNER is the writer: synthesis_executor records the repository it
   it("stamps HEAD and the uncommitted paths of the audited root", async () => {
     writeFileSync(join(REPO_DIR, "src", "a.ts"), "export const a = 2;\n");
 
-    const run = await EXECUTOR_RUNNERS.synthesis_executor!(EMPTY_BUNDLE, ctx(REPO_DIR) as never);
+    const run = await EXECUTOR_RUNNERS.synthesis_executor!(await readyBundle(), ctx(REPO_DIR) as never);
 
     expect(run.updated.audit_findings?.audit_read).toEqual({
       commit: git("rev-parse HEAD"),
@@ -145,7 +161,7 @@ describe("the RUNNER is the writer: synthesis_executor records the repository it
   });
 
   it("a re-synthesis after a commit that changed nothing keeps the report's audit_read byte-identical", async () => {
-    const first = await EXECUTOR_RUNNERS.synthesis_executor!(EMPTY_BUNDLE, ctx(REPO_DIR) as never);
+    const first = await EXECUTOR_RUNNERS.synthesis_executor!(await readyBundle(), ctx(REPO_DIR) as never);
     git("commit --allow-empty -m unrelated");
 
     const second = await EXECUTOR_RUNNERS.synthesis_executor!(first.updated, ctx(REPO_DIR) as never);
@@ -156,7 +172,7 @@ describe("the RUNNER is the writer: synthesis_executor records the repository it
   });
 
   it("states null when the run has no root to read", async () => {
-    const run = await EXECUTOR_RUNNERS.synthesis_executor!(EMPTY_BUNDLE, ctx(undefined) as never);
+    const run = await EXECUTOR_RUNNERS.synthesis_executor!(await readyBundle(), ctx(undefined) as never);
 
     expect(run.updated.audit_findings?.audit_read).toBeNull();
   });

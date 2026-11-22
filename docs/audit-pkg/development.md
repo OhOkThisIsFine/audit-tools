@@ -87,12 +87,13 @@ generic ownership root before another ecosystem parser — have their one home i
 
 ## Production readiness
 
-Drive priorities from field trials, not speculation: run representative
-repositories through planning, validate the bundle (`audit-code validate`), and
-compare `audit_plan_metrics.json` (packet count, weak-packet count, cohesion,
-merge/boundary edge kinds) across runs. Promote an extractor or planner change
-when those metrics expose a deterministic gap (the parser-versus-ownership-root preference is the
-second of the three convictions homed in `CLAUDE.md`).
+Drive priorities from field trials, not speculation: plan representative
+repositories, validate the bundle (`audit-code validate`), and compare the
+questions, source coverage, and stated omissions in `review_plan.json` across
+runs. Promote extractor or planner changes when those comparisons expose a
+concrete gap in how the plan covers the selected lenses. Suggested source files
+are starting points, not proof that review happened. The preference for a
+generic ownership root over another ecosystem parser is documented in `CLAUDE.md`.
 
 Before treating a build as production-ready, verify the full review loop in one
 real host (`next-step` emits the complete workload → the host writes each bound

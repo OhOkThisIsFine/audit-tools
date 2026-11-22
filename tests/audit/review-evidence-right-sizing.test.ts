@@ -119,7 +119,7 @@ const excludesPerformance: IntentCheckpoint = {
   confirmed_by: "host",
   scope_summary: "everything",
   intent_summary: "full audit",
-  lens_selection: { include: ["architecture", "maintainability"], exclude: ["performance", "operability"] },
+  lens_selection: { include: ["architecture", "behavior"], exclude: ["performance", "operability"] },
 } as IntentCheckpoint;
 
 describe("design-review call-site map: an index plus one slice per unit", () => {
@@ -275,7 +275,7 @@ describe("systemic lens selection is the focus, and findings keep their true len
       bundle: b,
       evidencePaths: [],
     });
-    expect(prompt).toMatch(/selected these lenses for this audit: .*architecture.*maintainability/);
+    expect(prompt).toMatch(/selected these lenses for this audit: .*behavior.*architecture/);
     // The closed vocabulary is the whole lens set: a true lens is always fileable.
     const lensLine = prompt.split("\n").find((line) => line.startsWith("- `lens`:"))!;
     for (const lens of LENSES) expect(lensLine).toContain(lens);

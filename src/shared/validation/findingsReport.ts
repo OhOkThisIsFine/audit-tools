@@ -12,6 +12,7 @@ import {
   type WorkBlock,
   type WorkBlockSeam,
 } from "../types/finding.js";
+import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../types/questionReviewReport.js";
 import type { ContentCoherenceTrace } from "../decompose/contentCoherence.js";
 import { workBlockSeamRationale } from "../decompose/workBlockSeams.js";
 import { uniqueSorted } from "../compareCodeUnits.js";
@@ -452,7 +453,7 @@ function inspectAuditFindingsReport(value: unknown, path = ""): Inspection {
       contractPath,
       `contract_version must be a string, got ${typeof value.contract_version}.`,
     );
-  } else if (value.contract_version !== AUDIT_FINDINGS_CONTRACT_VERSION) {
+  } else if (value.contract_version !== AUDIT_FINDINGS_CONTRACT_VERSION && value.contract_version !== QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION) {
     pushValidationIssue(
       issues,
       contractPath,
@@ -460,7 +461,9 @@ function inspectAuditFindingsReport(value: unknown, path = ""): Inspection {
     );
   }
 
-  const parsed = AuditFindingsReportSchema.safeParse(value);
+  const parsed = value.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION
+    ? QuestionAuditFindingsReportSchema.safeParse(value)
+    : AuditFindingsReportSchema.safeParse(value);
   if (!parsed.success) {
     for (const zodIssue of parsed.error.issues) {
       const suffix = zodIssue.path.map(String).join(".");
@@ -636,8 +639,20 @@ export function projectAuditFindingsReportSubset(
     ...(report.quarantined_findings ?? []),
   ];
 
+  const questionReport = report.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION
+    ? QuestionAuditFindingsReportSchema.parse(report)
+    : undefined;
   const projected: AuditFindingsReport = {
     ...report,
+    ...(questionReport ? {
+      question_review: {
+        ...questionReport.question_review,
+        findings: questionReport.question_review.findings.map(row => ({
+          ...row,
+          actionable: row.actionable && selectedIds.has(row.canonical_finding_id),
+        })),
+      },
+    } : {}),
     findings,
     // construction-site: ContentCoherenceTrace fields=normalized_items,components
     //   The trace is REBUILT here from the narrowed populations rather than
@@ -771,7 +786,7 @@ export function isValidAuditFindingsReport(
 export function claimsAuditFindingsContract(value: unknown): boolean {
   return (
     isRecord(value) &&
-    value.contract_version === AUDIT_FINDINGS_CONTRACT_VERSION &&
-    Array.isArray(value.findings)
+    ((value.contract_version === AUDIT_FINDINGS_CONTRACT_VERSION && Array.isArray(value.findings)) ||
+      value.contract_version === QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION)
   );
 }

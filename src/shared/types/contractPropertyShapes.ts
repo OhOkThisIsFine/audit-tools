@@ -180,6 +180,13 @@ const FINDING_SHAPE: Record<string, ContractPropertyShape> = {
   targeted_commands: arrayOf(str(), true),
   analyzer_provenance: object(ANALYZER_LEAD_PROVENANCE_SHAPE, true),
   lead_lineage: object({ producer: str(), source_hash: str() }, true),
+  question_review_sources: arrayOf(object({
+    schema_version: str(), question_id: str(), revision_id: str(), finding_id: str(),
+    kind: str(), severity: str(), confidence: str(), claim: str(), consequence: str(), next_step: str(),
+    evidence_ids: arrayOf(str()), observation_ids: arrayOf(str(), true),
+    source_refs: arrayOf(object({ path: str(), symbol: str(true), start_line: str(true), end_line: str(true) })),
+    verification: arrayOf(object({})), purpose: str(true), divergence: str(true),
+  }), true),
 };
 
 // Each nested contract a finding carries, walked as its own type as well. Each

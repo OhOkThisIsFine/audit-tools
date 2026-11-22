@@ -1,4 +1,4 @@
-// sites-pinned: tests/shared/lane-demand.test.ts, tests/audit/semantic-review-step.test.ts
+// sites-pinned: tests/shared/lane-demand.test.ts
 import { z } from "zod";
 
 import { compareCodeUnits } from "../compareCodeUnits.js";

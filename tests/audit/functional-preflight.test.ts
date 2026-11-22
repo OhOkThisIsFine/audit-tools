@@ -109,10 +109,10 @@ it("unsupported arguments fail before artifacts change and help/values use decla
   expect(() => validateAuditArguments("next-step", ["--root=--odd", "--auto-fix"], NEXT_STEP_ARGUMENTS)).not.toThrow();
   expect(getFlag(["--root=--odd"], "--root")).toBe("--odd");
 });
-it("the public semantic ingestion CLI cannot skip preflight", async () => {
+it("the public recovery CLI cannot skip preflight", async () => {
   const { root } = await fixture();
   const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  await runCli(["node", "audit-code", "ingest-results", "--root", root, "--results", "never-read.json"]);
+  await runCli(["node", "audit-code", "recover-submission", "--root", root, "--from", "never-read.json"]);
   expect(process.exitCode).toBe(1);
   expect(errors.mock.calls.flat().join(" ")).toMatch(/functional preflight first/);
 });

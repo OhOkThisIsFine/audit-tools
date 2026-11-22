@@ -82,29 +82,43 @@ one bounded, persisted step. Useful diagnostic and recovery commands include:
 
 ```bash
 audit-code status
-audit-code explain-task <task_id>
 audit-code validate
-audit-code validate-results --results <file>
-audit-code requeue
 audit-code synthesize
 audit-code resynthesize
-audit-code unaccept-results --work-item <id>   # repeatable, or --all
 audit-code cleanup --dry-run
 ```
 
-Lower-level `intake`, `plan`, `ingest-results`,
-`import-external-analyzer`, and `update-runtime-validation` commands exist for
-debugging and artifact recovery. Normal conversation use should stay on
-`next-step`.
+Use `audit-code plan` to prepare the question plan without dispatching review.
+Submit a response to an issued question with the exact `audit-code submit`
+command in its assignment. Submit validates the binding and records the result
+in the current run; a refusal does not change the ledger.
 
-`audit-code unaccept-results` removes entries from the run's accepted
-host-results pair — the supported way back out of an acceptance that turned out
-bad and that `next-step` does not withdraw itself (it withdraws a pending
-task's entry that no longer validates, for example after a validator change).
-It refuses a
-pair it cannot validate, records each removal so a repaired run stays
-distinguishable from a clean one, invalidates the persisted step contract, and
-the next `next-step` re-reads the bound result files for the dropped items.
+The question-based machine report records current and historical accepted
+answers, part-level coverage, gaps, disagreements and their recorded decisions,
+and evidence identities. A report can be incomplete while carrying confirmed
+defects. Findings on one part don't close another. Design opportunities and
+leads are visible but are not actionable remediation findings. Consolidation
+requires a recorded same-cause, same-repair decision; each source claim and
+its verification obligations remain distinct.
+
+Before finalizing the active run, use `audit-code consolidate-findings --from <path>`
+only for a reviewed same-cause, same-repair decision. The JSON records a
+`decision_id`, `decided_by`, a `reason`, and at least two `sources` with exact
+`answer_id` and `finding_id` values from current accepted answers. Stale or
+overlapping decisions are refused. This does not rewrite a finished report.
+
+`audit-code resynthesize` regenerates Markdown only while the current question
+plan and working report still own the promoted v2 machine report. It leaves
+the machine JSON unchanged and requires any explicit input to match it exactly.
+After rollover, retained Markdown is left intact together with its charter
+and process feedback evidence.
+
+A reported observation should say what actually ran and under what conditions.
+Analyzer findings are leads, not proof that a particular behavior occurred.
+Report cases you could not observe as unmeasured or inconclusive. A copied log,
+an old source key, or a reviewer assertion cannot stand in for a bound execution
+receipt. Accepted question answers remain in the ledger; do not edit or delete
+them to hide disagreements.
 
 A completed audit keeps `.audit-tools/audit/`: the next `next-step` rolls it
 over, keeping the derived work (so only what changed is reviewed again) and the

@@ -1,3 +1,4 @@
+// sites-pinned: none — the changed line only describes the completed smoke command in its success message
 // Packaged smoke: install the packed tarball into a throwaway prefix, then run
 // the whole audit flow through the installed bin. Flow + assertions live in
 // ./smoke-audit-flow.mjs, shared with the linked smoke; this file owns only the
@@ -50,10 +51,6 @@ function installedAuditCodeCommand(installDir) {
   return process.platform === "win32"
     ? join(installDir, "node_modules", ".bin", "audit-code.cmd")
     : join(installDir, "node_modules", ".bin", "audit-code");
-}
-
-function installedDistCliPath(installDir) {
-  return join(installDir, "node_modules", "audit-tools", "dist", "audit", "cli.js");
 }
 
 // `npm publish --dry-run` can leak dry-run flags, registry overrides, and auth
@@ -186,13 +183,11 @@ async function main() {
         auditCodeCommand,
         root,
         log,
-        smokeLabel: SMOKE_LABEL,
-        distCliPath: installedDistCliPath(installDir),
       });
     });
 
     log.success(
-      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the next-step/ingest-results/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
+      `Validated tarball ${tarballFilename}, packaged install bootstrap surfaces, and the next-step/submit/present_report audit flow. Total elapsed: ${Math.round((Date.now() - smokeStart) / 1000)}s.`,
     );
   } finally {
     // The tarball is deliberately left in the shared pack cache — it is the artifact

@@ -1,90 +1,64 @@
 // sites-pinned: tests/audit/resynthesize-command.test.ts
 import { join } from "node:path";
-import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { getFlag, getRootDir } from "./args.js";
+import { readQuestionReportCharterOptions, readQuestionReportReflections } from "../io/artifacts.js";
+import { renderAuditReportMarkdown } from "../reporting/synthesis.js";
 import {
-  normalizeExistingFindingsReport,
-  renderAuditReportMarkdown,
-} from "../reporting/synthesis.js";
-import {
-  AGENT_FEEDBACK_FILENAME,
-  AUDIT_FINDINGS_FILENAME,
-  auditArtifactsDir,
-  auditToolsDir as resolveAuditToolsDir,
-  parseReflectionsNdjson,
-  promotedAuditFindingsPath,
-  promotedAuditReportPath,
-  readOptionalTextFile,
-  reportDiscardedReflections,
+  AUDIT_FINDINGS_FILENAME, auditArtifactsDir, promotedAuditFindingsPath, promotedAuditReportPath,
+  readOptionalTextFile, stableStringify, writeTextFile,
 } from "audit-tools/shared";
-import type { AuditFindingsReport } from "audit-tools/shared";
-import { readOptionalJsonFile } from "audit-tools/shared";
-import type { ConceptualReviewAdjudication } from "../types/conceptualAdjudication.js";
-import { outputJson } from "./cliHelpers.js";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { errorMessage } from "../../shared/io/json.js";
+import { ReviewPlanSchema } from "../../shared/types/reviewQuestion.js";
+import { QuestionAuditFindingsReportSchema } from "../../shared/types/questionReviewReport.js";
+import { outputJson } from "./cliHelpers.js";
 
+/** Render only from the current promoted machine report. Never restamp or import another audit. */
 export async function cmdResynthesize(argv: string[]): Promise<void> {
-  const root = getRootDir(argv);
-  const auditToolsDir = resolveAuditToolsDir(root);
-  const artifactsDir = auditArtifactsDir(root);
-  const defaultInput = promotedAuditFindingsPath(artifactsDir);
-  // Use the shared flag parser, which rejects a flag-shaped next token so an
-  // invocation like `--input --root foo` falls back to the default instead of
-  // mis-resolving the input path to "--root" (COR-bc35a171).
-  const inputPath = getFlag(argv, "--input") ?? defaultInput;
-
-  if (!existsSync(inputPath)) {
-    console.error(
-      `resynthesize: ${AUDIT_FINDINGS_FILENAME} not found at ${inputPath}. ` +
-        `Run the full audit first, or supply --input <path>.`,
-    );
-    process.exitCode = 1;
-    return;
-  }
-
-  const raw = await readFile(inputPath, "utf8");
-  let report: AuditFindingsReport;
+  const artifactsDir = auditArtifactsDir(getRootDir(argv));
+  const findingsPath = promotedAuditFindingsPath(artifactsDir);
+  const inputPath = getFlag(argv, "--input") ?? findingsPath;
   try {
-    report = JSON.parse(raw) as AuditFindingsReport;
+    const raw = await readOptionalTextFile(findingsPath);
+    if (raw === undefined) throw new Error(`Current ${AUDIT_FINDINGS_FILENAME} not found at ${findingsPath}.`);
+    const parsed = QuestionAuditFindingsReportSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) throw new Error("Only the current question-based v2 report can be regenerated. Archived reports are left unchanged.");
+    if (inputPath !== findingsPath && await readOptionalTextFile(inputPath) !== raw) {
+      throw new Error("Explicit input is not the current promoted machine report; no report was overwritten.");
+    }
+    await withArtifactTreeHold(artifactsDir, undefined, async assertOwnership => {
+      if (await readOptionalTextFile(findingsPath) !== raw) {
+        throw new Error("The current promoted report changed before regeneration.");
+      }
+      const planRaw = await readOptionalTextFile(join(artifactsDir, "review_plan.json"));
+      if (planRaw === undefined) {
+        throw new Error("No current review_plan.json owns the promoted report. Its original charter and reflection inputs cannot be reconstructed; the promoted files were left unchanged.");
+      }
+      const plan = ReviewPlanSchema.parse(JSON.parse(planRaw));
+      const working = await readOptionalTextFile(join(artifactsDir, AUDIT_FINDINGS_FILENAME));
+      if (plan.snapshot_id !== parsed.data.question_review.snapshot_id ||
+          working === undefined || stableStringify(JSON.parse(working)) !== stableStringify(JSON.parse(raw))) {
+        throw new Error("The active audit does not own the promoted report; no report was overwritten.");
+      }
+      const report = parsed.data;
+      const reportPath = promotedAuditReportPath(artifactsDir);
+      const markdown = renderAuditReportMarkdown(report, {
+        reflections: await readQuestionReportReflections(artifactsDir),
+        ...await readQuestionReportCharterOptions(artifactsDir),
+      });
+      assertOwnership();
+      await writeTextFile(reportPath, markdown);
+      outputJson({
+        source: inputPath,
+        findings_output: findingsPath,
+        report_output: reportPath,
+        finding_count: report.summary.finding_count,
+        work_block_count: report.summary.work_block_count,
+        contract_version: report.contract_version,
+      });
+    });
   } catch (error) {
-    const msg = errorMessage(error);
-    console.error(`resynthesize: could not parse ${inputPath}: ${msg}`);
+    console.error(`resynthesize: ${errorMessage(error)}`);
     process.exitCode = 1;
-    return;
   }
-
-  const normalized = normalizeExistingFindingsReport(report);
-  // Best-effort: if the working artifacts dir (and its worker-appended
-  // feedback) still exists — e.g. an interrupted run being compiled by hand —
-  // carry the Process Feedback section into the re-rendered report.
-  const feedbackText = await readOptionalTextFile(
-    join(artifactsDir, AGENT_FEEDBACK_FILENAME),
-  );
-  const feedback = feedbackText ? parseReflectionsNdjson(feedbackText) : undefined;
-  if (feedback) reportDiscardedReflections(feedback.discarded, "audit-code resynthesize");
-  const markdown = renderAuditReportMarkdown(normalized, {
-    reflections: feedback?.reflections,
-    conceptual_adjudication:
-      await readOptionalJsonFile<ConceptualReviewAdjudication>(
-        join(artifactsDir, "conceptual_review_adjudication.json"),
-      ),
-  });
-
-  await mkdir(auditToolsDir, { recursive: true });
-
-  const outputFindingsPath = promotedAuditFindingsPath(artifactsDir);
-  const outputReportPath = promotedAuditReportPath(artifactsDir);
-
-  await writeFile(outputFindingsPath, JSON.stringify(normalized, null, 2), "utf8");
-  await writeFile(outputReportPath, markdown, "utf8");
-
-  outputJson({
-    source: inputPath,
-    findings_output: outputFindingsPath,
-    report_output: outputReportPath,
-    finding_count: normalized.summary.finding_count,
-    work_block_count: normalized.summary.work_block_count,
-    contract_version: normalized.contract_version,
-  });
 }

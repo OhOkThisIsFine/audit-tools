@@ -1,218 +1,150 @@
-/**
- * `audit-code submit --work-item <id> --from <file>` — the reader hands the
- * tool its result and the tool writes the bound path (decision 4, 2026-11-06,
- * docs/reviews/result-submit-design-2026-11-06.md).
- *
- * Only an id and a path pass the shell, so a quote that holds a backslash
- * reaches the bound path byte-exact. The tool judges the document by the rules
- * ingestion applies BEFORE it writes: a refused result never lands at the bound
- * path, and the reader gets the same refusal text it would get from ingestion.
- */
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+/** The CLI and MCP command use the same durable question-review submission route. */
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { expect, test } from "vitest";
-
-const packageRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-
-import { cmdSubmit } from "../../src/audit/cli/submitCommand.js";
-import { cmdValidateResults } from "../../src/audit/cli/validateResultsCommand.js";
-import { runSnapshotPath } from "../../src/audit/io/runSnapshot.js";
-import { countLines } from "../../src/audit/cli/args.js";
+import { deriveCurrentQuestionBindings } from "../../src/audit/cli/questionReviewCycle.js";
+import { writeCoreArtifacts, loadArtifactBundle, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { ensureRunSourceRoot } from "../../src/audit/io/runSnapshot.js";
+import { hashContent } from "../../src/shared/hash.js";
+import { cmdSubmit, submitWorkItemResult } from "../../src/audit/cli/submitCommand.js";
+import { ingestAuditQuestionResults, publishAuditQuestionWorkload } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 import { captureConsole } from "./helpers/captureConsole.mjs";
-import { advancePastDesignReview, withTempRepo } from "./helpers/next-step-harness.js";
 
-interface WorkItem {
-  id: string;
-  lens: string;
-  result_path: string;
-  prompt: { sha256: string };
-  scope: { files: string[] };
+const cli = fileURLToPath(new URL("../../dist/audit/cli.js", import.meta.url));
+const runId = "question-review-51c7103a-91f9-4446-9882-58106c448b50";
+const identity = { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: "resume", revision_id: "r1", snapshot_id: "frozen" } as const;
+const ref = { path: "src/resume.ts", start_line: 1 };
+const submission: ReviewSubmission = {
+  ...identity, assignment_id: "assignment-a", submission_id: "submission-a", inspected_sources: [ref], evidence_ids: [], limitations: ["Scheduled resume not inspected"],
+  answer: { outcome: "clean", findings: [], parts: [{ part_id: "manual", outcome: "clean", observation_ids: ["obs"] }],
+    observations: [{ ...identity, part_id: "manual", observation_id: "obs", kind: "source_confirmed", statement: "The manual path retains unfinished work", source_refs: [ref], evidence_refs: [] }] },
+};
+
+async function fixture(run: (params: { root: string; artifactsDir: string; runId: string; ledgerPath: string }) => Promise<void>) {
+  const root = await mkdtemp(join(tmpdir(), "audit-question-submit-"));
+  const artifactsDir = join(root, ".audit-tools", "audit");
+  const ledgerPath = join(artifactsDir, "runs", runId, "host-accepted-results-ledger.json");
+  try {
+    await mkdir(artifactsDir, { recursive: true });
+    await run({ root, artifactsDir, runId, ledgerPath });
+  } finally { await rm(root, { recursive: true, force: true }); }
 }
 
-// One backslash in the source: `\s` inside a regular expression literal.
-const BACKSLASH_LINE = "  return token.replace(/\\s+/g, \"\").length > 0;";
-
-// captureConsole restores process.exitCode and hands back the command's as `code`.
-async function run<T>(fn: () => Promise<void>): Promise<{ exitCode: number; report: T; stdout: string }> {
-  const { code, stdout } = await captureConsole(fn);
-  return { exitCode: Number(code), report: JSON.parse(stdout) as T, stdout };
+async function issue(params: { root: string; artifactsDir: string; runId: string }, publish = true) {
+  await writeFile(join(params.artifactsDir, "review_session.json"), JSON.stringify({
+    schema_version: "audit-tools/question-review-session/v1", run_id: params.runId,
+  }));
+  const source = "export const pending = true;\n";
+  await mkdir(join(params.root, "src"), { recursive: true });
+  await writeFile(join(params.root, ref.path), source);
+  const sourceRoot = await ensureRunSourceRoot(params.root, params.artifactsDir);
+  const fingerprint = hashContent(source);
+  const dependency = { kind: "source" as const, key: ref.path, fingerprint };
+  const bundle: ArtifactBundle = {
+    repo_manifest: { repository: { name: "submit fixture" }, generated_at: "2026-11-22T00:00:00Z",
+      files: [{ path: ref.path, language: "ts", size_bytes: Buffer.byteLength(source), hash: fingerprint }] },
+    file_disposition: { files: [{ path: ref.path, status: "included" }] },
+    review_plan: {
+      schema_version: identity.schema_version, snapshot_id: identity.snapshot_id,
+      inventory: [{ inventory_item_id: "resume", kind: "operation", title: "Resume",
+        source_refs: [ref], contract_refs: [], scope: "in_scope" }],
+      questions: [{
+        ...identity, lens: "behavior", inventory_item_ids: ["resume"], expected_outcome: "retain unfinished work",
+        requested_parts: [{ part_id: "manual", expectation: "retain work" }, { part_id: "scheduled", expectation: "retain work" }],
+        source_dependencies: [dependency], evidence_dependencies: [], plan_status: "pending",
+      }],
+      lens_decisions: [], omissions: [],
+    },
+  };
+  await writeCoreArtifacts(params.artifactsDir, bundle);
+  const { bindings } = await deriveCurrentQuestionBindings(bundle, sourceRoot);
+  if (publish) await publishAuditQuestionWorkload({ ...params, sourceRoot, bindings });
+  return { sourceRoot, answer: { ...submission, assignment_id: bindings[0]!.assignment.assignment_id } };
 }
 
-async function exists(path: string): Promise<boolean> {
-  return stat(path).then(() => true, () => false);
-}
 
-test("submit writes a judged result to its bound path byte-exact, and refuses one ingestion would refuse", async () => {
-  await withTempRepo(async (root) => {
-    await writeFile(
-      join(root, "src", "api", "auth.ts"),
-      ["export function authenticate(token: string): boolean {", BACKSLASH_LINE, "}", ""].join("\n"),
-    );
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as {
-      source_root: string;
-    };
-    const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as {
-      run_id: string;
-      work_items: WorkItem[];
-    };
-    const item = workload.work_items.find((entry) => entry.scope.files.includes("src/api/auth.ts"))!;
-    expect(item).toBeDefined();
-    const boundPath = resolve(root, item.result_path);
-    const lines = await countLines(join(sourceRoot, "src/api/auth.ts"));
-    const document = (lens: string) => ({
-      contract_version: "audit-host-result/v1alpha1",
-      result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
-      run_id: workload.run_id,
-      work_item_id: item.id,
-      prompt_sha256: item.prompt.sha256,
-      file_coverage: [{ path: "src/api/auth.ts", reviewed_lines: lines, total_lines: lines }],
-      findings: [
-        {
-          id: "F-1",
-          title: "Whitespace-only token is stripped, then any remainder authenticates",
-          category: "auth",
-          severity: "medium",
-          confidence: "medium",
-          lens,
-          summary: "Any token with one non-space character authenticates.",
-          evidence: ["src/api/auth.ts - length check only"],
-          affected_files: [{ path: "src/api/auth.ts", quoted_text: 'token.replace(/\\s+/g, "")' }],
-        },
-      ],
-    });
-    const scratch = await mkdtemp(join(tmpdir(), "audit-submit-"));
-    try {
-      // Refused: a finding whose lens is not the task's fails the per-result
-      // rule ingestion enforces. Nothing reaches the bound path.
-      const wrongLens = item.lens === "security" ? "correctness" : "security";
-      const refusedFile = join(scratch, "refused.json");
-      await writeFile(refusedFile, JSON.stringify(document(wrongLens)));
-      const refused = await run<{ error_count: number; issues: Array<{ message: string }> }>(() =>
-        cmdSubmit(["--root", root, "--work-item", item.id, "--from", refusedFile]),
-      );
-      expect(refused.exitCode, refused.stdout).toBe(1);
-      expect(refused.report.issues.map((issue) => issue.message).join("\n")).toMatch(/assigned task lens/u);
-      expect(await exists(boundPath)).toBe(false);
-
-      // Accepted: the bound path holds the submitted bytes, backslash intact,
-      // and the read-only check finds nothing to refuse.
-      const bytes = JSON.stringify(document(item.lens), null, 2);
-      expect(bytes).toContain("\\\\s+");
-      const acceptedFile = join(scratch, "accepted.json");
-      await writeFile(acceptedFile, bytes);
-      const accepted = await run<{ error_count: number; work_item_id: string; result_path: string }>(() =>
-        cmdSubmit(["--root", root, "--work-item", item.id, "--from", acceptedFile]),
-      );
-      expect(accepted.exitCode, accepted.stdout).toBe(0);
-      expect(accepted.report.work_item_id).toBe(item.id);
-      expect(accepted.report.result_path).toBe(item.result_path);
-      expect(await readFile(boundPath, "utf8")).toBe(bytes);
-      const check = await run<{ error_count: number }>(() =>
-        cmdValidateResults(["--root", root, "--results", boundPath]),
-      );
-      expect(check.report.error_count, check.stdout).toBe(0);
-    } finally {
-      await rm(scratch, { recursive: true, force: true });
-    }
+test("CLI submission durably records the answer and exact replay does not rewrite the ledger", async () => {
+  await fixture(async (params) => {
+    const { answer } = await issue(params);
+    const from = join(params.root, "answer.json");
+    const argv = ["--root", params.root, "--artifacts-dir", params.artifactsDir, "--work-item", answer.assignment_id, "--from", from];
+    await writeFile(from, JSON.stringify({ contract_version: "audit-host-result/v1alpha1", work_item_id: answer.assignment_id, file_coverage: [], findings: [] }));
+    await expect(cmdSubmit(argv)).rejects.toThrow();
+    await expect(readFile(params.ledgerPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await writeFile(from, JSON.stringify(answer));
+    const first = await captureConsole(() => cmdSubmit(argv));
+    expect(JSON.parse(first.stdout)).toMatchObject({ disposition: "accepted", submission_id: answer.submission_id, written: true });
+    const before = await readFile(params.ledgerPath, "utf8");
+    const second = await captureConsole(() => cmdSubmit(argv));
+    expect(JSON.parse(second.stdout)).toMatchObject({ disposition: "replay", written: true });
+    expect(await readFile(params.ledgerPath, "utf8")).toBe(before);
+    expect((await ingestAuditQuestionResults(params)).answers.map((answer) => answer.submission)).toEqual([answer]);
   });
 });
 
-test("the built `audit-code mcp` process serves submit_result over clean stdio and writes the bound path", async () => {
-  await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    const artifactsDir = join(root, ".audit-tools", "audit");
-    const { source_root: sourceRoot } = JSON.parse(await readFile(runSnapshotPath(artifactsDir), "utf8")) as {
-      source_root: string;
-    };
-    const workload = JSON.parse(await readFile(step.artifact_paths.host_workload, "utf8")) as {
-      run_id: string;
-      work_items: WorkItem[];
-    };
-    const item = workload.work_items[0]!;
-    const coverage = await Promise.all(
-      item.scope.files.map(async (path) => {
-        const lines = await countLines(join(sourceRoot, path));
-        return { path, reviewed_lines: lines, total_lines: lines };
-      }),
-    );
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [join(packageRoot, "dist", "audit", "cli.js"), "mcp"],
-      env: process.env as Record<string, string>,
-      stderr: "pipe",
-    });
-    const client = new Client({ name: "test-host", version: "0.0.0" });
-    await client.connect(transport);
+test("built MCP submit_result accepts the exact question assignment and refuses conflicting reuse", async () => {
+  await fixture(async (params) => {
+    const { answer } = await issue(params);
+    const transport = new StdioClientTransport({ command: process.execPath, args: [cli, "mcp"] });
+    const client = new Client({ name: "question-submission-test", version: "1" });
     try {
-      const { tools } = await client.listTools();
-      expect(tools.map((tool) => tool.name)).toEqual(["submit_result", "submit_gate"]);
-      const gate = await client.callTool({ name: "submit_gate", arguments: {
-        root, lane: "synthesis_narrative", result: { themes: [], executive_summary: "Transport intact" },
-      } });
-      expect(gate.isError).not.toBe(true);
-      const gateReport = JSON.parse((gate.content as Array<{ text: string }>)[0]!.text);
-      expect(gateReport.written).toBe(true);
-      expect(JSON.parse(await readFile(gateReport.path, "utf8"))).toEqual({ themes: [], executive_summary: "Transport intact" });
-      const flowGate = await client.callTool({ name: "submit_gate", arguments: {
-        root, lane: "critical_flow_fallback", result: { flows: [] },
-      } });
-      expect(flowGate.isError).not.toBe(true);
-      const flowReport = JSON.parse((flowGate.content as Array<{ text: string }>)[0]!.text);
-      expect(flowReport.written).toBe(true);
-      const { laneSubmissionPath } = await import("../../src/audit/cli/laneSubmissions.js");
-      expect(flowReport.path).toBe(laneSubmissionPath(artifactsDir, "critical_flow_fallback"));
-      const { tryConsumeSubmission } = await import("../../src/audit/cli/nextStepHelpers.js");
-      expect(await tryConsumeSubmission(artifactsDir, "critical_flow_fallback"))
-        .toMatchObject({ status: "ok", value: { flows: [] } });
-      const call = await client.callTool({
-        name: "submit_result",
-        arguments: {
-          root,
-          work_item_id: item.id,
-          result: {
-            contract_version: "audit-host-result/v1alpha1",
-            result_id: `${item.id}-${item.prompt.sha256.slice(0, 12)}`,
-            run_id: workload.run_id,
-            work_item_id: item.id,
-            prompt_sha256: item.prompt.sha256,
-            file_coverage: coverage,
-            findings: [],
-          },
-        },
+      await client.connect(transport);
+      const tools = (await client.listTools()).tools;
+      expect(tools.map(({ name }) => name)).toEqual(["submit_result", "submit_gate"]);
+      expect(tools[0]?.description).toContain("durably accepts");
+      const request = { root: params.root, artifacts_dir: params.artifactsDir, work_item_id: answer.assignment_id };
+      const submit = (result: ReviewSubmission) => client.callTool({ name: "submit_result", arguments: { ...request, result } });
+      const first = await submit(answer);
+      expect(first.isError).not.toBe(true);
+      expect(first.content).toEqual([expect.objectContaining({ text: expect.stringContaining('"accepted"') })]);
+      const conflict = await submit({ ...answer, limitations: ["different observation limits"] });
+      expect(conflict.isError).toBe(true);
+      expect(conflict.content).toEqual([expect.objectContaining({ text: expect.stringMatching(/Conflicting reuse/) })]);
+      expect((await ingestAuditQuestionResults(params)).answers).toHaveLength(1);
+    } finally { await client.close(); }
+  });
+});
+
+test("submit refuses an archive and a session without issued work without writing a ledger", async () => {
+  await fixture(async (params) => {
+    const send = () => submitWorkItemResult({ ...params, workItemId: submission.assignment_id, source: JSON.stringify(submission) });
+    const archive = join(params.artifactsDir, "dispatch");
+    await mkdir(archive, { recursive: true });
+    await writeFile(join(archive, "current-review-run.json"), JSON.stringify({ run_id: "legacy-archived-run" }));
+    await expect(send()).rejects.toThrow(/legacy file-review runs are archival/i);
+    await issue(params, false);
+    await expect(send()).rejects.toThrow();
+    await expect(readFile(params.ledgerPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await issue(params);
+    await writeFile(join(params.artifactsDir, "run-ended.json"), "{}");
+    await expect(send()).rejects.toThrow(/no active question-review run/i);
+    await expect(readFile(params.ledgerPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+test.each(["changed frozen bytes", "replanned revision"] as const)(
+  "direct submission refuses %s without appending old history",
+  async change => fixture(async params => {
+    const { answer, sourceRoot } = await issue(params);
+    const send = () => submitWorkItemResult({
+      ...params, workItemId: answer.assignment_id, source: JSON.stringify(answer),
+    });
+    if (change === "changed frozen bytes") {
+      const path = join(sourceRoot, ref.path);
+      await writeFile(path, (await readFile(path, "utf8")).replace("pending", "settled"));
+    } else {
+      const bundle = await loadArtifactBundle(params.artifactsDir);
+      const plan = bundle.review_plan!;
+      await writeCoreArtifacts(params.artifactsDir, {
+        review_plan: { ...plan, questions: [{ ...plan.questions[0]!, revision_id: "new-revision" }] },
       });
-      const text = (call.content as Array<{ text: string }>).map((part) => part.text).join("\n");
-      expect(call.isError, text).not.toBe(true);
-      expect(JSON.parse(text).written).toBe(true);
-      expect(await exists(resolve(root, item.result_path))).toBe(true);
-    } finally {
-      await client.close();
     }
-  });
-});
-
-test("submit refuses a work item the current run does not publish, and writes nothing", async () => {
-  await withTempRepo(async (root) => {
-    const step = await advancePastDesignReview(root);
-    expect(step.step_kind).toBe("dispatch_review");
-    const scratch = await mkdtemp(join(tmpdir(), "audit-submit-"));
-    try {
-      const file = join(scratch, "result.json");
-      await writeFile(file, "{}");
-      await expect(cmdSubmit(["--root", root, "--work-item", "no-such-item", "--from", file])).rejects.toThrow(
-        /no-such-item.*not a work item/u,
-      );
-    } finally {
-      await rm(scratch, { recursive: true, force: true });
-    }
-  });
-});
+    await expect(send()).rejects.toThrow(/frozen source changed|issued review assignment is no longer current/);
+    await expect(readFile(params.ledgerPath)).rejects.toMatchObject({ code: "ENOENT" });
+  }),
+);

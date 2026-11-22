@@ -2,7 +2,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
-import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted } from "../io/artifacts.js";
+import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
 import { removeRunSnapshot } from "../io/runSnapshot.js";
 import type { AuditState } from "../types/auditState.js";
 
@@ -66,6 +66,10 @@ export async function cleanupStaleArtifactsDir(
       throw error;
     }
     // State file missing — status stays "unknown".
+  }
+
+  if (!force && status === "not_started" && !(await retiredRunEvidenceIsArchived(artifactsDir))) {
+    return { action: "skipped", status, reason: "Historical audit evidence is not safely archived. The working audit was kept." };
   }
 
   const stale =
