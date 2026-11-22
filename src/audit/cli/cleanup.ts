@@ -1,9 +1,8 @@
 // sites-pinned: tests/audit/frozen-snapshot.test.ts
 import { readdir, rm, rmdir, stat } from "node:fs/promises";
-import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
-import { artifactTreeLockPath } from "../../shared/io/auditToolsPaths.js";
+import { isArtifactTreeHoldEntry, withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
 import { removeRunSnapshot } from "../io/runSnapshot.js";
@@ -152,7 +151,7 @@ async function cleanupHeld(
   }
   for (const entry of await readdir(artifactsDir)) {
     const target = join(artifactsDir, entry);
-    if (entry === basename(artifactTreeLockPath(artifactsDir))) continue;
+    if (isArtifactTreeHoldEntry(artifactsDir, entry)) continue;
     await assertOwnership();
     await rm(target, { recursive: true, force: true });
   }

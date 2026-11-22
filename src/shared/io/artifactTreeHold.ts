@@ -1,4 +1,5 @@
 // sites-pinned: tests/audit/artifact-tree-lock-single-surface.test.ts, tests/audit/artifact-tree-lock.test.ts
+import { basename } from "node:path";
 import { artifactTreeLockPath } from "./auditToolsPaths.js";
 import { withFileLock, type AssertLockOwnership } from "./fileLock.js";
 import type { RunLogger } from "../observability/runLog.js";
@@ -8,6 +9,11 @@ import type { RunLogger } from "../observability/runLog.js";
 // the waiter window; the stale-lock threshold and live-holder heartbeat remain
 // owned by fileLock. Every artifact-tree acquisition uses this one surface.
 export const ARTIFACT_TREE_LOCK_TIMEOUT_MS = 120_000;
+
+/** Directory-entry guard for cleanup performed while holding the tree. */
+export function isArtifactTreeHoldEntry(artifactsDir: string, name: string): boolean {
+  return name === basename(artifactTreeLockPath(artifactsDir));
+}
 
 /** Non-reentrant artifact-tree hold shared by folding, consent and publication. */
 export async function withArtifactTreeHold<T>(
