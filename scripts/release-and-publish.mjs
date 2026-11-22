@@ -6,7 +6,8 @@
 //
 // Usage: node scripts/release-and-publish.mjs <patch|minor|major> [--bump-only] [--dry-run] [--skip-ci-green]
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -156,6 +157,15 @@ function getRepoSlug() {
     throw new Error(`Unable to determine GitHub repository from remote URL: ${remoteUrl}`);
   }
   return `${httpsMatch[1]}/${httpsMatch[2]}`;
+}
+
+/** @param {string} repoSlug @param {string} remote */
+function verifyReleasePushDestination(repoSlug, remote) {
+  const urls = run("git", ["remote", "get-url", "--push", "--all", remote], { capture: true }).stdout.trim().split(/\r?\n/);
+  const match = urls.length === 1 && urls[0].match(/^(?:https:\/\/(?:[^/@]+@)?github\.com\/|ssh:\/\/(?:git@)?github\.com\/|git@github\.com:)([^/]+\/[^/]+?)(?:\.git)?$/i);
+  if (!match || match[1].toLowerCase() !== repoSlug.toLowerCase()) {
+    throw new Error("Cannot release: the Git push destination does not resolve to the exact release repository.");
+  }
 }
 
 function ensureCleanWorktree() {
@@ -525,16 +535,28 @@ export async function ensureCiGreenOnHeadSha(
   return { headSha, successfulRuns: verdict.successfulRuns };
 }
 
-function bumpVersionAndTag(npm) {
+/** @param {string} npm @param {(prepared: {tag: string, version: string}) => void} [beforeCommit] */
+function bumpVersionAndTag(npm, beforeCommit) {
   run(npm, ["version", bump, "--no-git-tag-version"]);
   const packageAfter = readPackageJson();
   const tag = `v${packageAfter.version}`;
 
   run("git", ["add", "package.json", "package-lock.json"]);
+  beforeCommit?.({ tag, version: packageAfter.version });
   run("git", ["commit", "-m", `release: ${tag}`]);
-  run("git", ["tag", "-a", tag, "-m", tag]);
+  if (!beforeCommit) run("git", ["tag", "-a", tag, "-m", tag]);
 
   return { packageAfter, tag };
+}
+
+/** @param {string} tag @param {string} commit */
+function ensurePreparedLocalTag(tag, commit) {
+  const ref = `refs/tags/${tag}`;
+  if (tryGitSha(ref) === null) run("git", ["tag", "-a", tag, commit, "-m", tag]);
+  const type = run("git", ["cat-file", "-t", ref], { capture: true }).stdout.trim();
+  if (type !== "tag" || tryGitSha(`${ref}^{commit}`) !== commit) {
+    throw new Error(`Cannot resume ${tag}: its local tag conflicts with the prepared release commit.`);
+  }
 }
 
 // Skew tolerance (ms) applied to the created_at > tagPushedAtMs fallback gate:
@@ -659,7 +681,7 @@ export async function waitForReleaseRun(
 ) {
   const startedAt = Date.now();
   const deadline = startedAt + detectionTimeoutMs;
-  run("gh", ["workflow", "view", "publish-package.yml"], {
+  run("gh", ["workflow", "view", "publish-package.yml", "--repo", repoSlug], {
     timeoutMs: discoveryRemainingMs(deadline),
   });
   discoveryRemainingMs(deadline);
@@ -1060,16 +1082,65 @@ export function releaseJournalPath(root) {
   return resolve(root, ".audit-tools-profile", "release-journal.json");
 }
 
-/**
- * @param {string} root
- * @returns {{schema?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>} | null}
- */
+/** @typedef {{repo: string, base: string, previousVersion: string, bump: string, skipped: boolean, prepared?: {tree: string, tag: string, version: string}}} ReleaseIntent */
+/** @typedef {{schema?: string, repo?: string, tag?: string, version?: string, commit?: string, updated_at?: string, phases?: Record<string, unknown>, intent?: ReleaseIntent, preTagCiSkipped?: boolean}} ReleaseJournal */
+
+/** @param {string} root @returns {ReleaseJournal | null} */
 export function readReleaseJournal(root) {
   try {
-    return JSON.parse(readFileSync(releaseJournalPath(root), "utf8"));
-  } catch {
-    return null;
+    const journal = JSON.parse(readFileSync(releaseJournalPath(root), "utf8"));
+    if (!journal || typeof journal !== "object" || Array.isArray(journal)) throw new Error("expected an object");
+    return journal;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return null;
+    throw new Error(`Cannot read release journal: ${error instanceof Error ? error.message : String(error)}. No new release was started.`, { cause: error });
   }
+}
+
+/** @param {string} root @param {ReleaseJournal} journal */
+function writeReleaseJournal(root, journal) {
+  const path = releaseJournalPath(root);
+  mkdirSync(dirname(path), { recursive: true });
+  const temp = `${path}.${randomUUID()}.tmp`;
+  // A killed process leaves either the previous checkpoint or the new one.
+  // An orphan temp is never a resume input. This is not a power-loss guarantee.
+  writeFileSync(temp, `${JSON.stringify(journal, null, 2)}\n`, { flag: "wx" });
+  renameSync(temp, path);
+}
+
+/** @param {string} root @param {{repo: string, tag: string, version: string, commit: string, preTagCiSkipped: boolean}} identity */
+function checkpointReleaseCommit(root, identity) {
+  const journal = {
+    schema: "release-journal/v1alpha1", ...identity,
+    phases: { "bump+tag": { at: new Date().toISOString(), tag: identity.tag, version: identity.version } },
+  };
+  writeReleaseJournal(root, journal);
+  return journal;
+}
+
+// Use an exclusive marker in the Git common directory: linked worktrees have
+// separate journals but share tags. Do not time-steal this marker: a running
+// npm/Git subprocess can outlive a blocked or stopped Node runner.
+function claimReleaseWriter() {
+  const commonDir = run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { capture: true }).stdout.trim();
+  if (!commonDir) throw new Error("Cannot release: the Git common directory is unavailable.");
+  const path = resolve(commonDir, "audit-tools-release.lock");
+  const owner = JSON.stringify({ pid: process.pid, token: randomUUID() });
+  try {
+    writeFileSync(path, owner, { flag: "wx" });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      throw new Error(`Cannot release: another invocation holds ${path}. If its runner was interrupted, verify the runner and its npm/Git/GitHub child commands have stopped before removing just this marker and retrying from the original checkout.`);
+    }
+    throw error;
+  }
+  return () => {
+    try {
+      if (readFileSync(path, "utf8") === owner) unlinkSync(path);
+    } catch {
+      console.warn(`[release] could not remove the release writer marker ${path}; verify the runner has stopped before removing it.`);
+    }
+  };
 }
 
 /**
@@ -1081,29 +1152,40 @@ export function readReleaseJournal(root) {
  * @param {Record<string, unknown>} [detail]
  */
 export function recordReleasePhase(root, phase, detail = {}) {
-  const path = releaseJournalPath(root);
   try {
-    mkdirSync(dirname(path), { recursive: true });
     const journal = readReleaseJournal(root) ?? {};
     journal.phases = { ...(journal.phases ?? {}), [phase]: { at: new Date().toISOString(), ...detail } };
     journal.updated_at = new Date().toISOString();
-    writeFileSync(path, `${JSON.stringify(journal, null, 2)}\n`);
+    writeReleaseJournal(root, journal);
   } catch {
     /* the journal is a convenience; failing to write it must not fail the release */
   }
 }
 
-/** @param {string} root @param {{tag: string, version: string, commit: string|null}} identity */
-function openReleaseJournal(root, identity) {
-  try {
-    mkdirSync(dirname(releaseJournalPath(root)), { recursive: true });
-    writeFileSync(
-      releaseJournalPath(root),
-      `${JSON.stringify({ schema: "release-journal/v1alpha1", ...identity, phases: {} }, null, 2)}\n`,
-    );
-  } catch {
-    /* see recordReleasePhase */
+/**
+ * @param {ReleaseIntent} intent
+ * @param {{repoSlug: string, head: string|null, version: string}} current
+ */
+function hasPreparedReleaseCommit(intent, { repoSlug, head, version }) {
+  if (intent.repo !== repoSlug || !intent.base || !allowedBumps.has(intent.bump) || typeof intent.skipped !== "boolean") {
+    throw new Error("Cannot resume release: the pending intent does not match this repository or is incomplete.");
   }
+  if (head === intent.base && version === intent.previousVersion) {
+    if (bump !== intent.bump) throw new Error(`Cannot start a different release: pending intent requests ${intent.bump}.`);
+    return false;
+  }
+  const prepared = intent.prepared;
+  if (!head || !prepared || prepared.version !== version || prepared.tag !== `v${version}`) {
+    throw new Error("Cannot resume release: HEAD or version does not match the pending intent.");
+  }
+  const [parents, tree, subject] = run("git", ["show", "-s", "--format=%P%n%T%n%s", head], { capture: true }).stdout.trim().split(/\r?\n/);
+  if (parents !== intent.base || tree !== prepared.tree || subject !== `release: ${prepared.tag}`) {
+    throw new Error("Cannot resume release: HEAD is not the exact prepared version commit.");
+  }
+  if (intent.skipped && !skipCiGreen) {
+    throw new Error("Cannot resume release: the pending version commit was prepared with --skip-ci-green, which this invocation did not select.");
+  }
+  return true;
 }
 
 /**
@@ -1225,6 +1307,16 @@ async function finishGlobalInstall(npm, packageName, version) {
 
 // sites-pinned: tests/audit/release-resume-main.test.ts
 export async function main() {
+  if (dryRun) return runRelease();
+  const releaseWriter = claimReleaseWriter();
+  try {
+    return await runRelease();
+  } finally {
+    releaseWriter();
+  }
+}
+
+async function runRelease() {
   const npm = commandName("npm");
   const repoSlug = getRepoSlug();
   const packageBefore = readPackageJson();
@@ -1257,8 +1349,13 @@ export async function main() {
   };
 
   ensureCleanWorktree();
+  let journal = readReleaseJournal(repoRoot);
+  if (journal && (Object.hasOwn(journal, "repo") || Object.hasOwn(journal, "preTagCiSkipped")) && journal.repo !== repoSlug) {
+    throw new Error("Cannot resume release: the finalized journal names a different or missing repository.");
+  }
 
   if (bumpOnly) {
+    if (journal && Object.hasOwn(journal, "intent")) throw new Error("Cannot bump only while a full release intent is pending.");
     console.log(`[release] bumping ${bump} version`);
     const { packageAfter, tag } = bumpVersionAndTag(npm);
     console.log(`[release] created ${tag} for ${packageAfter.name}@${packageAfter.version}.`);
@@ -1271,10 +1368,20 @@ export async function main() {
   // half is idempotent and always safe to re-enter; the bump is not, so a
   // resume skips it and re-verifies the refs it already produced instead of
   // re-deriving which phases happened by hand.
-  // The journal records the POST-bump package version. Predicting the next
-  // version here would turn every observation retry into a second release.
+  // Pending intents name the checked base, then the staged tree produced by
+  // npm. Finalized journals name the post-bump version and its exact commit.
   const headAtStart = tryGitSha("HEAD");
-  const journal = readReleaseJournal(repoRoot);
+  if (journal && Object.hasOwn(journal, "intent")) {
+    const intent = journal.intent;
+    if (!intent || typeof intent !== "object" || Array.isArray(intent)) throw new Error("Cannot resume release: invalid pending intent.");
+    if (hasPreparedReleaseCommit(intent, { repoSlug, head: headAtStart, version: packageBefore.version })) {
+      if (!headAtStart || !intent.prepared) throw new Error("Cannot resume release: missing prepared commit identity.");
+      const { tag, version } = intent.prepared;
+      verifyReleasePushDestination(repoSlug, getRemoteName());
+      ensurePreparedLocalTag(tag, headAtStart);
+      journal = checkpointReleaseCommit(repoRoot, { repo: repoSlug, tag, version, commit: headAtStart, preTagCiSkipped: intent.skipped });
+    }
+  }
   const resume = planReleaseResume(journal, {
     tag: `v${packageBefore.version}`,
     headSha: headAtStart,
@@ -1288,8 +1395,12 @@ export async function main() {
     ? { branch: run("git", ["branch", "--show-current"], { capture: true }).stdout.trim(), defaultBranch: getDefaultBranch(), reason: "resume" }
     : ensureMainBranch();
   const published = resume.resume && Boolean(journal?.phases?.["tag+release"]);
+  let ciGate;
 
   if (resume.resume) {
+    if (journal?.preTagCiSkipped && !skipCiGreen) {
+      throw new Error("Cannot resume release: the version commit was prepared with --skip-ci-green, which this invocation did not select.");
+    }
     if (tryGitSha(`${resume.tag}^{commit}`) !== headAtStart) {
       throw new Error(`Cannot resume ${resume.tag}: its local tag is missing or does not name the recorded release commit. Restore the recorded tag before retrying; no new release was started.`);
     }
@@ -1310,7 +1421,7 @@ export async function main() {
     // leaves. The vitest suite stays in CI (sharded, parallel) — this adds the ~27
     // non-test gates, not minutes of tests, and it fails BEFORE the tag exists.
     console.log("[release] checking pre-tag CI-green gate");
-    await runPhase("pre-tag-gate(ci-green)", () => ensureCiGreenOnHeadSha(repoSlug));
+    ciGate = await runPhase("pre-tag-gate(ci-green)", () => ensureCiGreenOnHeadSha(repoSlug));
 
     console.log("[release] running local pre-tag gate (verify:checks)");
     await runPhase("pre-tag-gate(verify:checks)", () => run(npm, ["run", "verify:checks"]));
@@ -1326,18 +1437,46 @@ export async function main() {
     tag = /** @type {string} */ (resume.tag);
     packageAfter = readPackageJson();
   } else {
+    if (!headAtStart || ciGate?.headSha !== headAtStart || tryGitSha("HEAD") !== headAtStart || readPackageJson().version !== packageBefore.version) {
+      throw new Error("The verified release base changed before version preparation. No new release was started.");
+    }
+    ensureCleanWorktree();
+    verifyReleasePushDestination(repoSlug, remoteName);
+    /** @type {ReleaseIntent} */
+    const intent = { repo: repoSlug, base: headAtStart, previousVersion: packageBefore.version, bump, skipped: skipCiGreen };
+    const pendingJournal = { schema: "release-journal/v1alpha1", intent };
+    writeReleaseJournal(repoRoot, pendingJournal);
     console.log(`[release] bumping ${bump} version`);
-    const bumped = await runPhase("bump+tag", () => bumpVersionAndTag(npm));
+    const bumped = await runPhase("bump+tag", () => bumpVersionAndTag(npm, ({ tag, version }) => {
+      const staged = run("git", ["diff", "--cached", "--name-only"], { capture: true }).stdout.trim().split(/\r?\n/).sort();
+      if (version === intent.previousVersion || staged.join("\n") !== "package-lock.json\npackage.json" || tryGitSha(`refs/tags/${tag}`) !== null) {
+        throw new Error("Cannot commit prepared release: unexpected staged paths or a local tag already exists.");
+      }
+      const tree = run("git", ["write-tree"], { capture: true }).stdout.trim();
+      if (!tree) throw new Error("Cannot prepare release: staged tree is unavailable.");
+      intent.prepared = { tree, tag, version };
+      writeReleaseJournal(repoRoot, pendingJournal);
+    }));
     packageAfter = bumped.packageAfter;
     tag = bumped.tag;
-    openReleaseJournal(repoRoot, { tag, version: packageAfter.version, commit: tryGitSha("HEAD") });
-    recordReleasePhase(repoRoot, "bump+tag", { tag, version: packageAfter.version });
+    const commit = tryGitSha("HEAD");
+    ensureCleanWorktree();
+    if (!commit || !hasPreparedReleaseCommit(intent, { repoSlug, head: commit, version: packageAfter.version })) {
+      throw new Error("Cannot release: the prepared commit is unavailable.");
+    }
+    ensurePreparedLocalTag(tag, commit);
+    journal = checkpointReleaseCommit(repoRoot, { repo: repoSlug, tag, version: packageAfter.version, commit, preTagCiSkipped: intent.skipped });
   }
 
   // Resolve the tag commit SHA so the publish-run waiter can key on run identity
   // (head_sha) rather than the reusable display name. Degrade to timestamp-only
   // selection if rev-parse fails.
   headSha = tryGitSha(`${tag}^{commit}`);
+  const journalBoundCommit = journal?.repo ? journal.commit : undefined;
+  if (journal?.repo) verifyReleasePushDestination(repoSlug, remoteName);
+  if (journalBoundCommit && headSha !== journalBoundCommit) {
+    throw new Error(`Cannot release ${tag}: its tag no longer names the prepared release commit.`);
+  }
   if (headSha === null) {
     console.log(`[release] could not resolve tag commit SHA for ${tag}; falling back to timestamp-only run selection.`);
   }
@@ -1368,7 +1507,7 @@ export async function main() {
     if (recordedLand) {
       console.log(`[release] ${tag} already landed (${prUrl || "recorded"}) — skipping the landing.`);
     } else {
-      const bumpSha = tryGitSha("HEAD");
+      const bumpSha = journalBoundCommit ?? tryGitSha("HEAD");
       if (bumpSha === null) throw new Error(`Cannot land ${tag}: HEAD does not resolve to a commit. Nothing was pushed.`);
       console.log(`[release] landing ${tag} on ${remoteName}/${releaseGate.defaultBranch} through a pull request`);
       const landed = await runPhase("land", () =>
@@ -1404,7 +1543,7 @@ export async function main() {
         console.log(`[release] GitHub Release ${tag} already exists — leaving it untouched.`);
       } else {
         console.log(`[release] creating GitHub Release ${tag}`);
-        run("gh", ["release", "create", tag, "--title", tag, "--generate-notes"]);
+        run("gh", ["release", "create", tag, "--repo", repoSlug, "--title", tag, "--generate-notes"]);
       }
     });
     recordReleasePhase(repoRoot, "tag+release", { tag, headSha, tagPushedAtMs });
