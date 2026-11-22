@@ -189,6 +189,23 @@
         "src/remediate/steps/dispatch/hostHandoff.ts": "6a5a628c22cd6485fa36bcd8a7ed7b3c4a7b5e86"
       }
     },
+    "2d81b5839649716c": {
+      "reviewed_by": "audit_recovery_independent",
+      "attester_class": "agent",
+      "checked": "Independently compared exact foldTransaction and nextStepHelpers blobs, challenged no-clobber ownership, cross-volume restore and original failure attribution, and reviewed cumulative synthesis isolation. Full-suite evidence is the integration worker exact-tree green stamp.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "147662608e37b0efe988a30a34502e22d0f172d1",
+        "ran_at": "2026-11-22T13:36:52.704Z"
+      },
+      "attested_at": "2026-11-22T13:37:30.109Z",
+      "vouches": {
+        "src/audit/cli/foldTransaction.ts": "bc231c5fcf412b90a390fb06599ea2550c6b11be",
+        "src/audit/cli/nextStepHelpers.ts": "c956dd95af02e18d5bf1128fefe06636553ddd71"
+      }
+    },
     "392554939aa89e3b": {
       "reviewed_by": "a2b9be05ae07da55c-opus-round3",
       "attester_class": "agent",
@@ -813,7 +830,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/cli/foldTransaction.ts": {
-      "review": "daa728eac345f91f"
+      "review": "2d81b5839649716c"
     },
     "src/audit/cli/laneSubmissions.ts": {
       "review": "5a1d216870700235"
@@ -825,7 +842,7 @@
       "review": "daa728eac345f91f"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "daa728eac345f91f"
+      "review": "2d81b5839649716c"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
