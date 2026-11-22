@@ -33,6 +33,8 @@ import { createStepEmissionScaffold } from "../../shared/steps/stepEmissionScaff
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import { cleanupStaleArtifactsDir } from "./cleanup.js";
 import { rollOverFinishedRun } from "../io/rollover.js";
+import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
+import { recoverFoldReceipt } from "./foldTransaction.js";
 import { materializeFanoutLanes } from "./fanoutLanes.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
@@ -350,6 +352,9 @@ async function cmdNextStepBody(
       throw new Error("An active question review cannot change guidance.");
     }
   };
+  if (await hasPendingFoldReceipt(artifactsDir)) {
+    await withArtifactTreeHold(artifactsDir, undefined, ownership => recoverFoldReceipt(artifactsDir, ownership));
+  }
   if (changesGuidance) await requireMutableGuidance();
   // Rollover (owner decision 2026-10-08, "keep the artifacts dir"): a run that
   // ENDED — its terminal step presented a promoted report — becomes this run's

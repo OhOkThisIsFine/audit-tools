@@ -19,14 +19,11 @@
  * durable analyzer consent/settings stores (idempotent merges outside the
  * artifact tree).
  *
- * Staging (landing 3's decided replacement for unlink deferral): a submission
- * is RENAMED into `submission-staging/` before it is parsed or applied, so
- * recovery can tell a consumption was in flight. On commit an APPLIED staged
- * file is deleted (its effect is on disk); an UN-applied one is restored to
- * its bound path for the retry. A crash between the core write and the staged
- * cleanup can therefore restore an ALREADY-FOLDED submission — iterative-fold
- * executors guard that window with a content-hash register and ignore a
- * duplicate (see `runSystemicChallengeExecutor`).
+ * A submission is renamed to staging before parsing. An immutable receipt
+ * records the core/snapshot plan and applied submissions before publication.
+ * The next holder replays that exact plan before staging recovery. Only
+ * after core and snapshots land is applied staging removed and acknowledged.
+ * Un-applied files stay staged for ordinary safe restoration.
  */
 
 import { randomUUID } from "node:crypto";
@@ -43,18 +40,24 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { z } from "zod";
 import {
   hashContent,
   isFileMissingError,
   readSubmissionIngestHistory,
+  readOptionalJsonFile,
+  writeJsonFile,
 } from "audit-tools/shared";
-import { writeCoreArtifacts, type ArtifactBundle } from "../io/artifacts.js";
+import { applyCoreArtifactPlan, planCoreArtifacts, type ArtifactBundle, type CoreArtifactPlan } from "../io/artifacts.js";
+import { assertNoPendingFoldReceipt, foldReceiptPath } from "../io/foldReceiptPath.js";
 import {
+  DESIGN_REVIEW_PASSES,
   writeDesignReviewSnapshot,
   type DesignReviewSnapshot,
 } from "../orchestrator/designReviewSnapshot.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
+  laneSubmissionId,
   laneSubmissionPath,
   recordLaneOutcome,
 } from "./laneSubmissions.js";
@@ -399,6 +402,7 @@ export async function recoverStagedSubmissions(
   artifactsDir: string,
   recoverLane: (lane: string) => boolean = () => true,
 ): Promise<void> {
+  await assertNoPendingFoldReceipt(artifactsDir);
   let entries: string[];
   try {
     entries = await readdir(submissionStagingDir(artifactsDir));
@@ -418,69 +422,123 @@ export async function recoverStagedSubmissions(
   }
 }
 
-/**
- * THE commit — the fold's one core write boundary, run on EVERY fold exit
- * including the throw path. Order is load-bearing:
- * 1. the core artifacts (one authoritative pruned write of the carried bundle);
- * 2. the design-review snapshots (state-critical companions of that bundle);
- * 3. applied staged submissions: delete + `accepted` ledger event — only now,
- *    so a crash before (1) leaves the submission restorable and event-free;
- * 4. un-applied staged submissions: restore to their bound paths for the retry.
- *
- * Each deferred entry leaves the transaction the moment it completes, because
- * the throw path re-runs commitFold on the SAME transaction: a re-entry after
- * a mid-loop I/O error must RESUME at the failed entry, never re-record an
- * `accepted` event the first attempt already appended.
- */
+const ReceiptSchema = z.object({
+  version: z.literal(1),
+  core: z.object({
+    writes: z.record(z.unknown()),
+    prunes: z.array(z.string()),
+    graphEdgeCache: z.unknown().optional(),
+  }).strict(),
+  snapshots: z.array(z.object({
+    pass: z.enum(DESIGN_REVIEW_PASSES),
+    schema_version: z.literal("audit-code/design-review-snapshot/v2alpha1"),
+    reviewed_at: z.string(),
+    prior_findings: z.array(z.unknown()),
+    reviewed_inputs: z.record(z.unknown()),
+    reviewed_task: z.unknown(),
+  }).strict()),
+  applied: z.array(z.object({
+    lane: z.string().min(1),
+    submissionId: z.string(),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+    acceptedMessage: z.string().optional(),
+  }).strict()),
+}).strict();
+
+type FoldReceipt = {
+  version: 1;
+  core: CoreArtifactPlan;
+  snapshots: DesignReviewSnapshot[];
+  applied: Array<Pick<StagedSubmission, "lane" | "contentHash" | "acceptedMessage"> & { submissionId: string }>;
+};
+
+const ownNoop = async (): Promise<void> => undefined;
+
+async function applyFoldReceipt(
+  artifactsDir: string,
+  receipt: FoldReceipt,
+  assertOwnership: () => Promise<void>,
+): Promise<void> {
+  for (const staged of receipt.applied) {
+    if (staged.submissionId !== laneSubmissionId(staged.lane, AUDIT_GATE_SUBMISSION_SCOPE)) {
+      throw new Error("The fold receipt does not own the staged submission.");
+    }
+    const path = join(submissionStagingDir(artifactsDir), stagedFileName(staged.lane));
+    try {
+      if (hashContent(await readFile(path)) !== staged.contentHash) {
+        throw new Error("Staged submission bytes do not match the fold receipt; recovery stopped.");
+      }
+    } catch (error) {
+      // Missing is valid after an interrupted acknowledgment cleanup.
+      if (!isFileMissingError(error)) throw error;
+    }
+  }
+
+  await assertOwnership();
+  await applyCoreArtifactPlan(artifactsDir, receipt.core, assertOwnership);
+  for (const snapshot of receipt.snapshots) {
+    await assertOwnership();
+    await writeDesignReviewSnapshot(artifactsDir, snapshot);
+  }
+  if (receipt.applied.length > 0) {
+    const history = await readSubmissionIngestHistory(artifactsDir, { runId: AUDIT_GATE_SUBMISSION_SCOPE });
+    for (const staged of receipt.applied) {
+      const path = join(submissionStagingDir(artifactsDir), stagedFileName(staged.lane));
+      await assertOwnership();
+      try {
+        await unlink(path);
+      } catch (error) {
+        if (!isFileMissingError(error)) throw error;
+      }
+      await assertOwnership();
+      await recordLaneOutcome(artifactsDir, staged.lane, {
+        kind: "accepted",
+        ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
+      }, history);
+    }
+  }
+  await assertOwnership();
+  await unlink(foldReceiptPath(artifactsDir));
+}
+
+/** Call only under the artifact-tree hold, before loading or staging the live bundle. */
+export async function recoverFoldReceipt(
+  artifactsDir: string,
+  assertOwnership: () => Promise<void>,
+): Promise<boolean> {
+  const raw = await readOptionalJsonFile<unknown>(foldReceiptPath(artifactsDir));
+  if (raw === undefined) return false;
+  const receipt = ReceiptSchema.parse(raw) as FoldReceipt;
+  await applyFoldReceipt(artifactsDir, receipt, assertOwnership);
+  return true;
+}
+
+/** Persist the exact redo intent before changing any core files. */
 export async function commitFold(
   artifactsDir: string,
   bundle: ArtifactBundle,
   tx: FoldTransaction,
+  assertOwnership: () => Promise<void> = ownNoop,
 ): Promise<void> {
-  await writeCoreArtifacts(artifactsDir, bundle, { prune: true });
-  while (tx.pendingSnapshots.length > 0) {
-    await writeDesignReviewSnapshot(artifactsDir, tx.pendingSnapshots[0]!);
-    tx.pendingSnapshots.shift();
+  if (!(await recoverFoldReceipt(artifactsDir, assertOwnership))) {
+    const receipt: FoldReceipt = {
+      version: 1,
+      core: planCoreArtifacts(bundle, true),
+      snapshots: tx.pendingSnapshots,
+      applied: tx.staged.filter(staged => staged.applied).map(({ lane, contentHash, acceptedMessage }) => ({
+        lane, contentHash, acceptedMessage, submissionId: laneSubmissionId(lane, AUDIT_GATE_SUBMISSION_SCOPE),
+      })),
+    };
+    await assertOwnership();
+    await writeJsonFile(foldReceiptPath(artifactsDir), receipt);
+    await applyFoldReceipt(artifactsDir, receipt, assertOwnership);
   }
-  // ONE ledger read for the whole applied register. Each `recordLaneOutcome`
-  // below would otherwise re-read the ledger, once per staged submission, over
-  // a file this loop is itself appending to; the read is refreshed by each
-  // accepted append (see `recordLaneOutcome`), so it stays consistent with what
-  // this pass has already landed. `commitFold` re-enters on the same transaction
-  // after a mid-loop I/O error, and a re-entry reaches THIS line again — a fresh
-  // read of a ledger that already carries the first attempt's rows, which is
-  // exactly the question the re-entry has to ask.
-  const ingestHistory = await readSubmissionIngestHistory(artifactsDir, {
-    runId: AUDIT_GATE_SUBMISSION_SCOPE,
-  });
-  while (tx.staged.length > 0) {
-    const staged = tx.staged[0]!;
-    if (staged.applied) {
-      // The delete must SUCCEED before the `accepted` event records. A swallowed
-      // EBUSY/EPERM (an AV scan holding the file on Windows) left the ledger
-      // saying consumed while the file survived for the next fold's recovery
-      // sweep to restore — a disagreement the crash window cannot produce, and
-      // the one state where the ledger is affirmatively wrong. Failing the
-      // commit instead lands the ALREADY-ACCEPTED crash state: no event, file
-      // restorable, duplicates suppressed per lane by the content-hash register.
-      // ENOENT stays ignored: the file is gone, which is the outcome asked for.
-      try {
-        await unlink(staged.stagingPath);
-      } catch (error) {
-        if (!isFileMissingError(error)) throw error;
-      }
-      await recordLaneOutcome(
-        artifactsDir,
-        staged.lane,
-        {
-          kind: "accepted",
-          ...(staged.acceptedMessage ? { message: staged.acceptedMessage } : {}),
-        },
-        ingestHistory,
-      );
-    } else {
+  tx.pendingSnapshots.length = 0;
+  for (const staged of tx.staged) {
+    if (!staged.applied) {
+      await assertOwnership();
       await restoreStagedSubmission(artifactsDir, staged.lane, staged.stagingPath, staged.boundPath);
     }
-    tx.staged.shift();
   }
+  tx.staged.length = 0;
 }

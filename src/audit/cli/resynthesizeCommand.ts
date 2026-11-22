@@ -1,3 +1,4 @@
+import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 // sites-pinned: tests/audit/resynthesize-command.test.ts
 import { join } from "node:path";
 import { getArtifactsDir, getFlag } from "./args.js";
@@ -27,6 +28,7 @@ export async function cmdResynthesize(argv: string[]): Promise<void> {
       throw new Error("Explicit input is not the current promoted machine report; no report was overwritten.");
     }
     await withArtifactTreeHold(artifactsDir, undefined, async assertOwnership => {
+      await assertNoPendingFoldReceipt(artifactsDir);
       if (await readOptionalTextFile(findingsPath) !== raw) {
         throw new Error("The current promoted report changed before regeneration.");
       }

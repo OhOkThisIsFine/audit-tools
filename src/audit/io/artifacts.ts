@@ -1,3 +1,4 @@
+import { assertNoPendingFoldReceipt } from "./foldReceiptPath.js";
 // sites-pinned: tests/audit/producer-contract-boundaries.test.ts, tests/audit/io-remediation.test.ts, tests/audit/seam-atomic-promote-findings.test.ts
 import { z, type ZodTypeAny } from "zod";
 import { cp, lstat, mkdir, readFile, unlink } from "node:fs/promises";
@@ -355,6 +356,7 @@ export async function loadArtifactBundle(
   root: string,
   review?: { requestedTooling?: ReviewToolingTransition },
 ): Promise<ArtifactBundle> {
+  await assertNoPendingFoldReceipt(root);
   const bundle: ArtifactBundle = {};
   const bundleRecord = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
   for (const entry of ARTIFACT_ENTRIES) {
@@ -457,33 +459,48 @@ export async function loadArtifactBundle(
   return bundle;
 }
 
-export async function writeCoreArtifacts(
-  root: string,
-  bundle: ArtifactBundle,
-  options: { prune?: boolean } = {},
-): Promise<void> {
-  const bundleRecord = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
-  // Validate the whole supplied draw before the first write or prune. Missing
-  // artifacts are legitimate intermediate state; only defined payloads are
-  // checked. The writer checks again for callers using a registry entry directly.
+export type CoreArtifactPlan = {
+  writes: Partial<Record<ArtifactBundleKey, unknown>>;
+  prunes: ArtifactBundleKey[];
+  graphEdgeCache?: GraphEdgeCache;
+};
+
+export function planCoreArtifacts(bundle: ArtifactBundle, prune: boolean): CoreArtifactPlan {
+  const writes: CoreArtifactPlan["writes"] = {};
+  const prunes: ArtifactBundleKey[] = [];
+  const record = bundle as Partial<Record<ArtifactBundleKey, unknown>>;
   for (const [key, definition] of ARTIFACT_ENTRIES) {
-    const value = bundleRecord[key];
+    const value = record[key];
     if (value !== undefined) definition.validate?.(value);
-  }
-  for (const entry of ARTIFACT_ENTRIES) {
-    const [key, definition] = entry;
     if (key === "tooling_manifest" && bundle.review_tooling_qualification) continue;
-    const value = bundleRecord[key];
+    if (value !== undefined) writes[key] = value;
+    else if (prune) prunes.push(key);
+  }
+  return { writes, prunes, graphEdgeCache: bundle.graph_edge_cache };
+}
+
+export async function applyCoreArtifactPlan(
+  root: string, plan: CoreArtifactPlan, assertOwnership?: () => Promise<void>,
+): Promise<void> {
+  const allowed = new Set<string>(ARTIFACT_ENTRIES.map(([key]) => key));
+  if ([...Object.keys(plan.writes), ...plan.prunes].some(key => !allowed.has(key))) {
+    throw new Error("The fold receipt names an unknown core artifact.");
+  }
+  const prunes = new Set(plan.prunes);
+  for (const [key, definition] of ARTIFACT_ENTRIES) {
+    if (!Object.hasOwn(plan.writes, key)) continue;
+    if (prunes.has(key) || plan.writes[key] === undefined) {
+      throw new Error("The fold receipt contains an ambiguous core artifact operation.");
+    }
+    definition.validate?.(plan.writes[key]);
+  }
+  for (const [key, definition] of ARTIFACT_ENTRIES) {
     const path = join(root, definition.fileName);
-    if (value !== undefined) {
-      await definition.write(path, value as never);
-    } else if (options.prune) {
-      // The bundle is authoritative. An executor that clears an artifact to
-      // `undefined` (to force a downstream rebuild — e.g. planning/ingestion
-      // reset audit_report) intends the file gone; if it lingers it reloads as a
-      // stale "present" artifact with no metadata entry, which deriveAuditState
-      // reads as satisfied — masking the invalidation and stranding a stale
-      // report. Only callers passing the full accumulated bundle may prune.
+    if (Object.hasOwn(plan.writes, key)) {
+      await assertOwnership?.();
+      await definition.write(path, plan.writes[key] as never);
+    } else if (prunes.has(key)) {
+      await assertOwnership?.();
       try {
         await unlink(path);
       } catch (error) {
@@ -491,15 +508,20 @@ export async function writeCoreArtifacts(
       }
     }
   }
-
-  // Per-file graph-edge cache (C2): written specially here — symmetric with the
-  // special read in loadArtifactBundle — so every persist seam handles it without
-  // per-seam edits. It is not an ARTIFACT_DEFINITIONS entry (internal cache, not a
-  // staleness-DAG node); a stale cache is self-invalidating via its path_lookup_hash
-  // / content_key, so it is never pruned, only overwritten on the next structure build.
-  if (bundle.graph_edge_cache !== undefined) {
-    await writeGraphEdgeCache(root, bundle.graph_edge_cache);
+  // The per-file graph cache is written separately and is never pruned.
+  if (plan.graphEdgeCache !== undefined) {
+    await assertOwnership?.();
+    await writeGraphEdgeCache(root, plan.graphEdgeCache);
   }
+}
+
+export async function writeCoreArtifacts(
+  root: string,
+  bundle: ArtifactBundle,
+  options: { prune?: boolean } = {},
+): Promise<void> {
+  await assertNoPendingFoldReceipt(root);
+  await applyCoreArtifactPlan(root, planCoreArtifacts(bundle, options.prune === true));
 }
 
 /**

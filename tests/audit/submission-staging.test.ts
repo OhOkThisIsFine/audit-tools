@@ -18,7 +18,7 @@
  *    whose content hash the register already folded is IGNORED — never
  *    counted as a quiet round.
  */
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -37,6 +37,7 @@ import {
   commitFold,
   createFoldTransaction,
   markSubmissionApplied,
+  recoverFoldReceipt,
   recoverStagedSubmissions,
   stageLaneSubmission,
   submissionStagingDir,
@@ -48,7 +49,10 @@ import {
 import { submissionsDir } from "../../src/shared/io/auditToolsPaths.js";
 import { readSubmissionLedger } from "../../src/shared/submission/submissionLedger.js";
 import { runSystemicChallengeExecutor } from "../../src/audit/orchestrator/systemicChallengeExecutor.js";
-import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { loadArtifactBundle, type ArtifactBundle } from "../../src/audit/io/artifacts.js";
+import { foldReceiptPath } from "../../src/audit/io/foldReceiptPath.js";
+import { cleanupStaleArtifactsDir } from "../../src/audit/cli/cleanup.js";
+import { markRunEnded, rollOverFinishedRun } from "../../src/audit/io/rollover.js";
 
 async function withArtifactsDir(
   fn: (artifactsDir: string) => Promise<void>,
@@ -129,18 +133,7 @@ test("a FAILED delete of an applied staged file fails the commit — it never re
     await mkdir(staged.staged.stagingPath, { recursive: true });
     await writeFile(join(staged.staged.stagingPath, "held"), "x", "utf8");
 
-    // An `accepted` event over a file that SURVIVED is the state the crash
-    // window cannot produce: recovery would restore the file and re-consume
-    // it while the ledger already called it consumed. Fail the commit instead.
-    //
-    // ⚠ What this does NOT close, stated so the absence is not read as a fix:
-    // the re-consumption itself. The core artifacts are already written, the
-    // staging file still survives, and the next fold's recovery sweep still
-    // restores it. That is the ACCEPTED crash window this module's header
-    // documents — harmless for a one-shot lane (the same content folds to the
-    // same bundle) and suppressed for an iterative one by the content-hash
-    // register. What the throw removes is the LEDGER LIE, which no crash
-    // produces: a recorded consumption over a file that is still there.
+    // Reject unexpected staging state without acknowledging the submission.
     await expect(commitFold(artifactsDir, {}, tx)).rejects.toThrow();
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
@@ -466,5 +459,39 @@ test("a repeated rejection is still recorded — only the accepted arm is idempo
       (e) => e.kind === "rejected",
     );
     expect(rejected).toHaveLength(2);
+  });
+});
+
+test("a pending receipt blocks competing reads and cleanup and replays the exact fold", async () => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    await writeFile(bound, JSON.stringify({ themes: [] }));
+    const tx = createFoldTransaction();
+    const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+    if (staged.status !== "staged") throw new Error("expected staged");
+    markSubmissionApplied(tx, staged.staged.stagingPath, "retained across restart");
+    await markRunEnded(artifactsDir);
+
+    const report = "complete payload to replay";
+    const ordinaryStop = async () => {
+      // Stop a synthetic commit between removal and acknowledgment.
+      if (!(await stat(staged.staged.stagingPath).catch(() => undefined))) throw new Error("interrupted");
+    };
+    await expect(commitFold(artifactsDir, { audit_report: report }, tx, ordinaryStop)).rejects.toThrow("interrupted");
+    const receipt = JSON.parse(await readFile(foldReceiptPath(artifactsDir), "utf8"));
+    expect(receipt.applied[0]).toMatchObject({ lane: LANE, acceptedMessage: "retained across restart" });
+    expect((await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "accepted")).toEqual([]);
+    await expect(loadArtifactBundle(artifactsDir)).rejects.toThrow("incomplete fold receipt");
+    await expect(cleanupStaleArtifactsDir(artifactsDir, { force: true })).resolves.toMatchObject({ action: "skipped" });
+    await expect(rollOverFinishedRun(artifactsDir)).resolves.toBe(false);
+    expect(await readFile(foldReceiptPath(artifactsDir), "utf8")).toContain(report);
+
+    const own = async () => undefined;
+    await expect(recoverFoldReceipt(artifactsDir, own)).resolves.toBe(true);
+    await expect(recoverFoldReceipt(artifactsDir, own)).resolves.toBe(false);
+    expect((await loadArtifactBundle(artifactsDir)).audit_report).toBe(report);
+    const accepted = (await readSubmissionLedger(artifactsDir)).filter(event => event.kind === "accepted");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]!.message).toBe("retained across restart");
   });
 });

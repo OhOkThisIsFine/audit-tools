@@ -1,3 +1,4 @@
+import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
 import { assertQualifiedReviewObligation, assertQualifiedReviewStillCurrent, deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
 import { publishAuditQuestionWorkload } from "./dispatch/hostHandoff.js";
 import { preservesSourceIndexes } from "../orchestrator/executorRunners.js";
@@ -122,6 +123,7 @@ import {
   quarantineLocationPhrase,
   quarantineSubmissionFile,
   quarantineSurvivalNote,
+  recoverFoldReceipt,
   recoverStagedSubmissions,
   stageLaneSubmission,
   type FoldTransaction,
@@ -424,6 +426,7 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
  * target repository's audit completion contract.
  */
 async function promoteCompletedReport(root: string, artifactsDir: string): Promise<string> {
+  await assertNoPendingFoldReceipt(artifactsDir);
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -3137,6 +3140,7 @@ async function runDeterministicFold(
       const holdStartMs = Date.now();
       let chargedExecutions: number | undefined;
       let intakeExecutions = 0;
+      await recoverFoldReceipt(params.artifactsDir, assertOwnership);
       let startBundle = await loadArtifactBundle(params.artifactsDir, {});
       if (startBundle.review_tooling_qualification) {
         if (params.since !== undefined || params.autoFix?.enabled !== undefined || params.autoFix?.dryRun) {
@@ -3163,6 +3167,7 @@ async function runDeterministicFold(
         delete startBundle.auto_fixes_applied;
       }
       ctx.currentBundleRef.value = startBundle;
+      let committing = false;
       try {
         // Check the same frozen read set that the active review stage uses.
         // Before question planning, deep charter lanes also bind admitted source.
@@ -3206,10 +3211,12 @@ async function runDeterministicFold(
           },
         );
         chargedExecutions = engineOutcome.executions + intakeExecutions;
-        await assertOwnership();
-        await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx);
+        committing = true;
+        await commitFold(params.artifactsDir, engineOutcome.state, ctx.tx, assertOwnership);
         return engineOutcome;
       } catch (error) {
+        // A commit I/O failure leaves an exact replay receipt, not a new failure-state commit.
+        if (committing) throw error;
         // A suspended fold may have lost its lease. Do not let the throw-path
         // commit overwrite a successor or consume staging it no longer owns.
         // Leave staging for the next holder's ordinary recovery + bundle reload.
@@ -3241,6 +3248,7 @@ async function runDeterministicFold(
             params.artifactsDir,
             { ...bundle, audit_state: failedState },
             ctx.tx,
+            assertOwnership,
           );
         } catch (commitError) {
           throw new AggregateError(
@@ -3325,7 +3333,7 @@ async function runDeterministicFold(
   // budget makes unreachable in practice — a backstop firing IS the anomaly).
   const stalled = describeStoppedFold(outcome);
   if (stalled) {
-    const bundle = await loadArtifactBundle(params.artifactsDir, {});
+    const bundle = await withArtifactTreeHold(params.artifactsDir, undefined, () => loadArtifactBundle(params.artifactsDir, {}));
     const decision = decideNextStep(bundle);
     return {
       kind: "blocked",
@@ -3342,7 +3350,7 @@ async function runDeterministicFold(
   // the state to complete and every obligation is now satisfied). Build the
   // terminal: `complete` when the state is complete / a report is rendered,
   // else blocked. A complete state's summary is the decision's own reason.
-  const bundle = await loadArtifactBundle(params.artifactsDir, {});
+  const bundle = await withArtifactTreeHold(params.artifactsDir, undefined, () => loadArtifactBundle(params.artifactsDir, {}));
   const decision = decideNextStep(bundle);
   const state = decision.state;
   return buildTerminalStep(

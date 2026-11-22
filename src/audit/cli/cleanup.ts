@@ -1,6 +1,9 @@
 // sites-pinned: tests/audit/frozen-snapshot.test.ts
-import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, rm, rmdir, stat } from "node:fs/promises";
+import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
+import { artifactTreeLockPath } from "../../shared/io/auditToolsPaths.js";
+import { hasPendingFoldReceipt } from "../io/foldReceiptPath.js";
+import { basename, join } from "node:path";
 import { isFileMissingError, readJsonFile } from "audit-tools/shared";
 import { ARTIFACT_DEFINITIONS, isWorkingDirFullyPromoted, retiredRunEvidenceIsArchived } from "../io/artifacts.js";
 import { removeRunSnapshot } from "../io/runSnapshot.js";
@@ -53,7 +56,35 @@ export async function cleanupStaleArtifactsDir(
   artifactsDir: string,
   options: CleanupOptions = {},
 ): Promise<CleanupResult> {
+  try {
+    await stat(artifactsDir);
+  } catch (error) {
+    if (!isFileMissingError(error)) throw error;
+    return { action: "skipped", status: "unknown" };
+  }
+  const result = await withArtifactTreeHold(artifactsDir, undefined, assertOwnership => cleanupHeld(
+    artifactsDir, options, assertOwnership,
+  ));
+  if (result.action === "deleted") {
+    try {
+      await rmdir(artifactsDir);
+    } catch (error) {
+      if (!isFileMissingError(error) &&
+        !(error && typeof error === "object" && "code" in error && error.code === "ENOTEMPTY")) throw error;
+    }
+  }
+  return result;
+}
+
+async function cleanupHeld(
+  artifactsDir: string,
+  options: CleanupOptions,
+  assertOwnership: () => Promise<void>,
+): Promise<CleanupResult> {
   const { force = false, dryRun = false } = options;
+  if (await hasPendingFoldReceipt(artifactsDir)) {
+    return { action: "skipped", status: "unknown", reason: "An incomplete fold receipt must be recovered using next-step." };
+  }
 
   let status: AuditState["status"] | "unknown" = "unknown";
   try {
@@ -105,6 +136,7 @@ export async function cleanupStaleArtifactsDir(
   // registration and a ref in the user's repository) — unless the operator
   // forces it: `--force` is the escape hatch, and a corrupt record would
   // otherwise refuse it for good. A forced delete names what it leaves behind.
+  await assertOwnership();
   const problems = await removeRunSnapshot(artifactsDir, options.repositoryRoot);
   if (problems.length > 0) {
     if (!force) {
@@ -118,6 +150,11 @@ export async function cleanupStaleArtifactsDir(
       process.stderr.write(`[audit-code] run snapshot cleanup (left behind): ${problem}\n`);
     }
   }
-  await rm(artifactsDir, { recursive: true, force: true });
+  for (const entry of await readdir(artifactsDir)) {
+    const target = join(artifactsDir, entry);
+    if (entry === basename(artifactTreeLockPath(artifactsDir))) continue;
+    await assertOwnership();
+    await rm(target, { recursive: true, force: true });
+  }
   return { action: "deleted", status };
 }

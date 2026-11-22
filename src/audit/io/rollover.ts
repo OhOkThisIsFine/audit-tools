@@ -1,3 +1,4 @@
+import { hasPendingFoldReceipt } from "./foldReceiptPath.js";
 // sites-pinned: tests/audit/artifacts-dir-rollover.test.ts, tests/audit/rollover-legacy-archive.test.ts
 /**
  * The rollover of a finished audit's working dir into the next run (owner
@@ -116,7 +117,7 @@ function warn(message: string): void {
 export async function rollOverFinishedRun(artifactsDir: string, root?: string, runLogger?: RunLogger): Promise<boolean> {
   if (!existsSync(runEndedPath(artifactsDir))) return false;
   return await withArtifactTreeHold(artifactsDir, runLogger, async () => {
-    if (!existsSync(runEndedPath(artifactsDir))) return false;
+    if (await hasPendingFoldReceipt(artifactsDir) || !existsSync(runEndedPath(artifactsDir))) return false;
     if (!(await refreshEndedQuestionReport(artifactsDir))) {
       warn("the finished question review was not rolled over: its current report pair is not fully promoted");
       return false;

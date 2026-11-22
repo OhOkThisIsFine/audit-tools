@@ -51,34 +51,37 @@ export async function submitGateResult(params: { artifactsDir: string; lane: str
   if (!validate) throw new Error(`No submission validator for ${params.lane}`);
   const issue = validate(value);
   if (issue) return { written: false, issues: [issue] };
-  if (params.lane === GATE_LANES.charter_clarification) {
-    const bundle = await loadArtifactBundle(params.artifactsDir);
-    const register = bundle.charter_clarification;
-    if (charterClarificationOmits(bundle) || !bundle.charter_register || bundle.charter_register.status === "omitted" ||
-      !register || register.status === "omitted" || !register.asked.some(question => question.answer === undefined)) {
-      return { written: false, issues: [{ code: "charter_clarification_not_pending", message: "No interactive charter clarification is pending; obtain the current clarification step." }] };
+  return withArtifactTreeHold(params.artifactsDir, undefined, async assertOwnership => {
+    if (params.lane === GATE_LANES.charter_clarification) {
+      const bundle = await loadArtifactBundle(params.artifactsDir);
+      const register = bundle.charter_clarification;
+      if (charterClarificationOmits(bundle) || !bundle.charter_register || bundle.charter_register.status === "omitted" ||
+        !register || register.status === "omitted" || !register.asked.some(question => question.answer === undefined)) {
+        return { written: false, issues: [{ code: "charter_clarification_not_pending", message: "No interactive charter clarification is pending; obtain the current clarification step." }] };
+      }
+      try {
+        // Apply schema defaults for validation, but preserve the original file
+        // shape below. The executor remains the authority when consuming it.
+        refuseUnaskedRequestIds(ClarificationAnswersSubmissionSchema.parse(value), register.asked);
+      } catch (error) {
+        return { written: false, issues: [{ code: "invalid_charter_clarification", message: errorMessage(error) }] };
+      }
     }
-    try {
-      // Apply schema defaults for validation, but preserve the original file
-      // shape below. The executor remains the authority when consuming it.
-      refuseUnaskedRequestIds(ClarificationAnswersSubmissionSchema.parse(value), register.asked);
-    } catch (error) {
-      return { written: false, issues: [{ code: "invalid_charter_clarification", message: errorMessage(error) }] };
+    if (params.lane === GATE_LANES.intent_equivalence) {
+      const status = deriveIntentEquivalenceStatus(await loadArtifactBundle(params.artifactsDir));
+      if (status.kind !== "prose_judgment_pending") {
+        return { written: false, issues: [{ code: "intent_judgment_not_pending", message: `No prose intent judgment is pending (${status.kind}).` }] };
+      }
+      const verdict = value as IntentEquivalenceVerdictSubmission; // Validated by the lane's shared schema above.
+      if (verdict.judged_pair.prior_hash !== status.prior_hash || verdict.judged_pair.new_hash !== status.new_hash) {
+        return { written: false, issues: [{ code: "stale_intent_pair", message: "Intent verdict does not judge the current pair; obtain the current intent-equivalence step." }] };
+      }
+      // Admission stores a submission, not a resolution. The executor rechecks the
+      // live pair at consumption, including changes after this preflight.
     }
-  }
-  if (params.lane === GATE_LANES.intent_equivalence) {
-    const status = deriveIntentEquivalenceStatus(await loadArtifactBundle(params.artifactsDir));
-    if (status.kind !== "prose_judgment_pending") {
-      return { written: false, issues: [{ code: "intent_judgment_not_pending", message: `No prose intent judgment is pending (${status.kind}).` }] };
-    }
-    const verdict = value as IntentEquivalenceVerdictSubmission; // Validated by the lane's shared schema above.
-    if (verdict.judged_pair.prior_hash !== status.prior_hash || verdict.judged_pair.new_hash !== status.new_hash) {
-      return { written: false, issues: [{ code: "stale_intent_pair", message: "Intent verdict does not judge the current pair; obtain the current intent-equivalence step." }] };
-    }
-    // Admission stores a submission, not a resolution. The executor rechecks the
-    // live pair at consumption, including changes after this preflight.
-  }
-  const path = laneSubmissionPath(params.artifactsDir, params.lane);
-  await writeJsonFile(path, value);
-  return { written: true, path, issues: [] };
+    const path = laneSubmissionPath(params.artifactsDir, params.lane);
+    await assertOwnership();
+    await writeJsonFile(path, value);
+    return { written: true, path, issues: [] };
+  });
 }
