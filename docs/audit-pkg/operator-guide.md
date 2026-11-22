@@ -88,6 +88,11 @@ audit-code resynthesize
 audit-code cleanup --dry-run
 ```
 
+`synthesize` (also `force-synthesis`) renders the deterministic working report
+once all current review questions have accepted answers. It does not accept
+staged results, skip earlier obligations, or finish the narrative and report
+handoff. Run `next-step` to advance any of those steps.
+
 Use `audit-code plan` to prepare the question plan without dispatching review.
 Submit a response to an issued question with the exact `audit-code submit`
 command in its assignment. Submit validates the binding and records the result

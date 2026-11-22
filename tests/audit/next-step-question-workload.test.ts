@@ -10,7 +10,7 @@ import { QuestionAuditFindingsReportSchema } from "../../src/shared/types/questi
 import { hashArtifactValue } from "../../src/shared/artifactFreshness.js";
 import { REVIEW_QUESTION_CONTRACT_VERSION, type ReviewAssignment, type ReviewQuestion, type ReviewSubmission } from "../../src/shared/types/reviewQuestion.js";
 
-test("the normal next-step path dispatches questions bound to a snapshot rather than required file lenses", async () => {
+test("snapshot-bound questions feed standalone synthesis only after accepted answers", async () => {
   await withTempRepo(async (root) => {
     const step = await advancePastDesignReview(root);
     expect(step.step_kind).toBe("dispatch_review");
@@ -30,6 +30,39 @@ test("the normal next-step path dispatches questions bound to a snapshot rather 
         }),
       ]),
     });
+    const { work_items: workItems } = workload as { work_items: WorkItem[] };
+    const ledgerFile = join(root, ".audit-tools", "audit", "runs", (workload as { run_id: string }).run_id, "host-accepted-results-ledger.json");
+    for (const [index, item] of workItems.entries()) {
+      const { question, assignment } = item.binding;
+      const response: ReviewSubmission = {
+        schema_version: REVIEW_QUESTION_CONTRACT_VERSION,
+        submission_id: `standalone-${assignment.assignment_id}`,
+        assignment_id: assignment.assignment_id, question_id: question.question_id,
+        snapshot_id: question.snapshot_id, revision_id: question.revision_id,
+        inspected_sources: assignment.suggested_sources.slice(0, 1), evidence_ids: [],
+        limitations: ["Synthetic review did not establish the requested behavior."],
+        answer: { outcome: "inconclusive", findings: [], observations: [], parts: question.requested_parts.map(part => ({
+          part_id: part.part_id, outcome: "inconclusive", observation_ids: [],
+        })) },
+      };
+      const file = resolve(root, item.result_path);
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, JSON.stringify(response));
+      if (index === 0) {
+        await expect(runWrapper(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
+      }
+      await runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root });
+    }
+    const ledgerBefore = await readFile(ledgerFile, "utf8");
+    const { stdout } = await runWrapper(["synthesize"], { cwd: root });
+    expect(JSON.parse(stdout)).toMatchObject({ selected_executor: "synthesis_executor" });
+    const working = join(root, ".audit-tools", "audit", "audit-findings.json");
+    const report = QuestionAuditFindingsReportSchema.parse(JSON.parse(await readFile(working, "utf8")));
+    expect(report.question_review.questions).toHaveLength(workItems.length);
+    expect(report.question_review.completion).toBe("incomplete");
+    expect(await readFile(ledgerFile, "utf8")).toBe(ledgerBefore);
+    const next = await runWrapper(["next-step"], { cwd: root });
+    expect(JSON.parse(next.stdout).step_kind).toBe("synthesis_narrative");
   });
 });
 

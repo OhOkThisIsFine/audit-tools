@@ -1,5 +1,5 @@
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
-import { ensureRunSourceRoot, resolveRunSince } from "../io/runSnapshot.js";
+import { ensureRunSourceRoot, readRunSourceRoot, resolveRunSince } from "../io/runSnapshot.js";
 import { readAuditReviewSubmission, currentAuditReviewInputRevision } from "./reviewSubmission.js";
 import { GATE_LANES, systemicChallengeLane } from "./laneSubmissions.js";
 // sites-pinned: tests/audit/next-step-helpers.test.ts, tests/audit/charter-emit-order.test.ts, tests/audit/executor-registry-sync.test.ts, tests/audit/pipeline-integration.test.ts, tests/audit/review-evidence-right-sizing.test.ts
@@ -31,6 +31,11 @@ import type { AnalyzerSetting, SynthesisNarrative, CriticalFlowFallbackResult } 
 import type { ExternalAnalyzerResults } from "audit-tools/shared";
 import type { ExternalAcquisitionAdvanceOptions } from "../orchestrator/acquisitionExecutor.js";
 import type { ScopeIndexMemo } from "../orchestrator/scopeIndexBaseline.js";
+import { readQuestionReviewRunId } from "./questionReviewSession.js";
+import { deriveQuestionCycleUnlocked } from "./questionReviewCycle.js";
+import { decideNextStep } from "../orchestrator/nextStep.js";
+import { reviewSourceScope } from "../orchestrator/questionPlanning.js";
+import { checkFileIntegrity } from "../orchestrator/fileIntegrity.js";
 
 export interface RunAuditStepOptions {
   /** The LIVE repository root: identity (consent, manifest name, write-back). */
@@ -91,6 +96,9 @@ export async function runAuditStep(
     // Check admitted tooling policy before an unsupported standalone executor
     // can restore, create or change the qualified review's frozen snapshot.
     const bundle = await loadArtifactBundle(options.artifactsDir);
+    if (options.preferredExecutor === "synthesis_executor") {
+      return runStandaloneSynthesis(options, runLogger, bundle);
+    }
     // The run's frozen snapshot is run state: created once per run, under the
     // hold, and read by every content reader of this step.
     const sourceRoot = await ensureRunSourceRoot(options.root, options.artifactsDir);
@@ -128,6 +136,36 @@ export async function runAuditStepUnlocked(
       enabled: options.runLog ?? true,
     });
   return await executeAdvance(options, bundle, logger, options.sourceRoot);
+}
+
+/** Standalone synthesis may render the active accepted ledger, but cannot
+ * advance earlier obligations, accept submissions, or reopen a finished run. */
+async function runStandaloneSynthesis(
+  options: RunAuditStepOptions,
+  runLogger: RunLogger,
+  bundle: ArtifactBundle,
+): Promise<AdvanceAuditResult> {
+  const { root, artifactsDir } = options;
+  const runId = await readQuestionReviewRunId(artifactsDir);
+  if (!runId || !bundle.repo_manifest || !bundle.review_plan ||
+      decideNextStep(bundle, { emitStaleness: false }).selected_obligation !== "audit_tasks_completed") {
+    throw new Error("No active review ready for standalone synthesis. Run audit-code next-step.");
+  }
+  const sourceRoot = await readRunSourceRoot(root, artifactsDir);
+  const scope = reviewSourceScope(bundle);
+  const admitted = [...new Set([...scope.allowedSourcePaths, ...scope.allowedContractPaths])];
+  if (!(await checkFileIntegrity(sourceRoot, bundle.repo_manifest, admitted)).is_clean) {
+    throw new Error("The frozen source changed. Run audit-code next-step before synthesis.");
+  }
+  const question_cycle = await deriveQuestionCycleUnlocked({ root, sourceRoot, artifactsDir, bundle, readOnlyRunId: runId });
+  const projected = { ...bundle, question_cycle };
+  if (question_cycle.pending.length > 0) {
+    throw new Error("Question review must reach report-ready state before synthesis. Run audit-code next-step.");
+  }
+  if (decideNextStep(projected, { emitStaleness: false }).selected_obligation !== "synthesis_current") {
+    throw new Error("No deterministic synthesis is pending. Run audit-code next-step.");
+  }
+  return runAuditStepLocked(options, runLogger, sourceRoot, projected);
 }
 
 async function runAuditStepLocked(
