@@ -189,23 +189,6 @@
         "src/remediate/steps/dispatch/hostHandoff.ts": "6a5a628c22cd6485fa36bcd8a7ed7b3c4a7b5e86"
       }
     },
-    "2d81b5839649716c": {
-      "reviewed_by": "audit_recovery_independent",
-      "attester_class": "agent",
-      "checked": "Independently compared exact foldTransaction and nextStepHelpers blobs, challenged no-clobber ownership, cross-volume restore and original failure attribution, and reviewed cumulative synthesis isolation. Full-suite evidence is the integration worker exact-tree green stamp.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "147662608e37b0efe988a30a34502e22d0f172d1",
-        "ran_at": "2026-11-22T13:36:52.704Z"
-      },
-      "attested_at": "2026-11-22T13:37:30.109Z",
-      "vouches": {
-        "src/audit/cli/foldTransaction.ts": "bc231c5fcf412b90a390fb06599ea2550c6b11be",
-        "src/audit/cli/nextStepHelpers.ts": "c956dd95af02e18d5bf1128fefe06636553ddd71"
-      }
-    },
     "392554939aa89e3b": {
       "reviewed_by": "a2b9be05ae07da55c-opus-round3",
       "attester_class": "agent",
@@ -307,6 +290,26 @@
         "scripts/check-loop-core-attestations.mjs": "5e0cf43a19e6397bf394c5cb5e3e6f0b0476cabe",
         "scripts/shared/loopCoreAttestationLedger.mjs": "8857e52161ae230e69f72d3871b3c2927e6599f6",
         "src/shared/loopCorePaths.ts": "ad16e7aad71704934349dc4b16e7110e1194192a"
+      }
+    },
+    "435c17a0f11016cc": {
+      "reviewed_by": "audit_recovery_independent",
+      "attester_class": "agent",
+      "checked": "Independent exact-blob review of sealed fold replay, mandatory ownership, pre-cleanup recovery, terminal read and promotion fences, gate submission consistency, and rollover refusal. Separate integration worker provided exact-tree green stamp.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "fd1d7fe9682f0f970ba260c8c9a26fc4590af49b",
+        "ran_at": "2026-11-22T14:38:53.583Z"
+      },
+      "attested_at": "2026-11-22T14:40:12.444Z",
+      "vouches": {
+        "src/audit/cli/foldTransaction.ts": "3612e2b9cd9f46f7534469c10aaf9e30f53aa438",
+        "src/audit/cli/nextStepCommand.ts": "f42776fc7bbd7bcbe3f017f194b1c20c870681b3",
+        "src/audit/cli/nextStepHelpers.ts": "c3019c32f349e2387a158140e53c40a53e85e2df",
+        "src/audit/cli/submitGateResult.ts": "05c8e623cac2139e3d04c952bdf50a81498d205b",
+        "src/audit/io/rollover.ts": "e14ad9ae183c298ce0760964cd8757004a416607"
       }
     },
     "491762bb82302829": {
@@ -830,7 +833,7 @@
       "review": "74f5fdb4c95e9366"
     },
     "src/audit/cli/foldTransaction.ts": {
-      "review": "2d81b5839649716c"
+      "review": "435c17a0f11016cc"
     },
     "src/audit/cli/laneSubmissions.ts": {
       "review": "5a1d216870700235"
@@ -839,10 +842,10 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "daa728eac345f91f"
+      "review": "435c17a0f11016cc"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "2d81b5839649716c"
+      "review": "435c17a0f11016cc"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -857,10 +860,10 @@
       "review": "daa728eac345f91f"
     },
     "src/audit/cli/submitGateResult.ts": {
-      "review": "e36223304299f9c6"
+      "review": "435c17a0f11016cc"
     },
     "src/audit/io/rollover.ts": {
-      "review": "e36223304299f9c6"
+      "review": "435c17a0f11016cc"
     },
     "src/audit/io/runSnapshot.ts": {
       "review": "e36223304299f9c6"
