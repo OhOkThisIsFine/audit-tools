@@ -396,8 +396,8 @@ test("S4: retired completed file tasks cannot close an unprojected question fron
   ] });
   expect(deriveAuditState(bundle).obligations.find((o) => o.id === "audit_tasks_completed")?.state).toBe("missing");
   const projected: ArtifactBundle = { ...bundle, question_cycle: {
-    runId: "question-run", bindings: [], pending: [], evidence: [], dependenciesByQuestion: new Map(),
-    accepted_count: 0, answers: [], adjudications: [], consolidations: [], issues: [],
+    pending: [], evidence: [], dependenciesByQuestion: new Map(),
+    answers: [], adjudications: [], consolidations: [],
   } };
   expect(deriveAuditState(projected).obligations.find((o) => o.id === "audit_tasks_completed")?.state).toBe("satisfied");
 });

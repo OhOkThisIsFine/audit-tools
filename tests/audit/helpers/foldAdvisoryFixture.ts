@@ -2,10 +2,9 @@ import { captureCompletedDesignReviews, persistDesignReviewSnapshots } from "./d
 import { declineDefaultAcquiredAnalyzers } from "../../helpers/analyzerConsentFixture.js";
 import { EMPTY_REGISTER_BODY } from "../../helpers/charterRegisterFixture.js";
 import { CHARTER_REGISTER_SCHEMA_VERSION } from "../../../src/audit/types/charterRegister.js";
-// Shared fixture for the host-delegation-fold-carries-advisories contract files:
-// the seeded planning-shaped bundle and the real next-step driver.
+// Seeded audit bundle for the analyzer-consent fixture test.
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,41 +32,6 @@ const TASK = {
   file_paths: ["src/a.ts"],
   rationale: "Review src/a.ts",
 };
-
-/** cmdNextStep logs the step contract on stdout; silence it like the harnesses do. */
-export async function callNextStep(root: string, artifactsDir: string): Promise<unknown> {
-  const { cmdNextStep } = await import("../../../src/audit/cli/nextStepCommand.js");
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalStderr = process.stderr.write.bind(process.stderr);
-  console.log = () => {};
-  console.warn = () => {};
-  process.stderr.write = () => true;
-  try {
-    await cmdNextStep(["--root", root, "--artifacts-dir", artifactsDir]);
-  } finally {
-    console.log = originalLog;
-    console.warn = originalWarn;
-    process.stderr.write = originalStderr;
-  }
-  return JSON.parse(
-    await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"),
-  );
-}
-
-/**
- * Drive next-step past the scripted host pauses (analyzer consent/install,
- * intent confirmation…) with the SHARED walker, stopping at dispatch_review.
- * The pauses are incidental to this test — only the dispatch emission matters.
- */
-export async function advanceToDispatchReview(root: string, artifactsDir: string) {
-  const { walkStepsUntilTerminal } = await import("./step-driver.js");
-  return walkStepsUntilTerminal({
-    transport: () => callNextStep(root, artifactsDir),
-    terminalKinds: new Set(["dispatch_review"]),
-    label: "fold-advisory",
-  });
-}
 
 export async function setup() {
   const { ensureSupervisorDirs } = await import(
@@ -245,16 +209,6 @@ export async function setup() {
   // than relying on an enabled:false artifact to suppress external acquisition.
   await declineDefaultAcquiredAnalyzers(root);
   return { root, artifactsDir };
-}
-
-/** True when the carry file is still on disk (presence is the carry's signal). */
-export async function carryFileStillPresent(carryPath: string): Promise<boolean> {
-  try {
-    await readFile(carryPath, "utf8");
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export const CONTRACT_NAME =

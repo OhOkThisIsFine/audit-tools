@@ -259,9 +259,9 @@ test("advanceAudit applies a narrative to the current question report without al
   const findingId = auditFindings.findings[0]!.id;
   const advanced = await advanceAudit({
     review_plan: plan, audit_findings: auditFindings,
-    question_cycle: { runId: "sample-narrative", bindings: [], pending: [], evidence: review.evidence,
-      dependenciesByQuestion, accepted_count: 1, answers: review.accepted, adjudications: review.adjudications,
-      consolidations: review.consolidations, issues: [] },
+    question_cycle: { pending: [], evidence: review.evidence,
+      dependenciesByQuestion, answers: review.accepted, adjudications: review.adjudications,
+      consolidations: review.consolidations },
   }, {
     preferredExecutor: "synthesis_narrative_executor",
     narrativeResults: {

@@ -55,8 +55,8 @@ import type { CharterClarificationRegister } from "../types/charterClarification
 import type { SystemicChallengeRegister } from "../types/systemicChallenge.js";
 import type { AnalyzerCapabilityRecord } from "../types/analyzerCapability.js";
 import type { AuditScopeManifest } from "../types/auditScope.js";
-import { ReviewPlanSchema, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
-import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION } from "../../shared/types/questionReviewReport.js";
+import { ReviewPlanSchema, type ReviewAcceptedAnswer, type ReviewAdjudication, type ReviewDependency, type ReviewEvidence, type ReviewPlan, type ReviewQuestion } from "../../shared/types/reviewQuestion.js";
+import { QuestionAuditFindingsReportSchema, QUESTION_AUDIT_FINDINGS_CONTRACT_VERSION, type ReviewFindingConsolidation } from "../../shared/types/questionReviewReport.js";
 import { readVerifiedCharterPacketIndex } from "../orchestrator/charterPacketArchive.js";
 import { renderAuditReportMarkdown, type RenderAuditReportOptions } from "../reporting/synthesis.js";
 import { readQuestionReviewRunId } from "../cli/questionReviewSession.js";
@@ -165,7 +165,14 @@ type ArtifactPayloadMap = {
  */
 export type ArtifactBundle = Partial<ArtifactPayloadMap> & {
   /** Transient projection from the one accepted ledger, owned by this fold. */
-  question_cycle?: Awaited<ReturnType<typeof import("../cli/questionReviewCycle.js").deriveQuestionCycleUnlocked>>;
+  question_cycle?: {
+    pending: readonly { question: ReviewQuestion }[];
+    answers: readonly ReviewAcceptedAnswer[];
+    evidence: readonly ReviewEvidence[];
+    adjudications: readonly ReviewAdjudication[];
+    dependenciesByQuestion: ReadonlyMap<string, readonly ReviewDependency[]>;
+    consolidations: readonly ReviewFindingConsolidation[];
+  };
   agent_reflections?: AgentReflection[];
   /**
    * The design-review pass snapshots (B2 parity port), keyed by pass. Loaded
