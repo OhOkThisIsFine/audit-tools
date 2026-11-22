@@ -20,6 +20,8 @@ const fixture = vi.hoisted(() => ({
   journalError: false,
   corruptJournal: false,
   journalTemp: "",
+  releaseLock: "",
+  pushUrl: "https://github.com/test/repo.git",
 }));
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -27,11 +29,17 @@ vi.mock("node:fs", async (importOriginal) => {
     ...actual,
     readFileSync: (path: string, ...args: unknown[]) => {
       if (String(path).endsWith("release-journal.json")) return fixture.corruptJournal ? "{" : JSON.stringify(fixture.journal);
+      if (String(path).endsWith("audit-tools-release.lock")) return fixture.releaseLock;
       if (String(path).endsWith("package.json")) return JSON.stringify({ name: "audit-tools", version: fixture.version });
       return Reflect.apply(actual.readFileSync, actual, [path, ...args]);
     },
     mkdirSync: vi.fn(),
     writeFileSync: (path: string, text: string) => {
+      if (String(path).endsWith("audit-tools-release.lock")) {
+        if (fixture.releaseLock) throw Object.assign(new Error("writer already active"), { code: "EEXIST" });
+        fixture.releaseLock = text;
+        return;
+      }
       if (!/release-journal\.json\..+\.tmp$/.test(String(path))) throw new Error(`unexpected write: ${path}`);
       if (fixture.journalError) throw new Error("fixture journal unavailable");
       fixture.journalTemp = text;
@@ -40,6 +48,10 @@ vi.mock("node:fs", async (importOriginal) => {
       if (!from.includes("release-journal.json.") || !to.endsWith("release-journal.json")) throw new Error("unexpected rename");
       fixture.journal = JSON.parse(fixture.journalTemp);
       fixture.calls.push("journal checkpoint");
+    },
+    unlinkSync: (path: string) => {
+      if (!String(path).endsWith("audit-tools-release.lock")) throw new Error(`unexpected unlink: ${path}`);
+      fixture.releaseLock = "";
     },
     existsSync: () => true,
   };
@@ -58,6 +70,8 @@ vi.mock("node:child_process", () => ({
     let stdout = "";
     if (cmd === "git remote") stdout = "origin";
     else if (cmd === "git remote get-url origin") stdout = "https://github.com/test/repo.git";
+    else if (cmd === "git remote get-url --push --all origin") stdout = fixture.pushUrl;
+    else if (cmd === "git rev-parse --path-format=absolute --git-common-dir") stdout = "/synthetic/common.git";
     else if (cmd.startsWith("git status ")) stdout = fixture.status;
     else if (cmd === "git branch --show-current") stdout = "main";
     else if (cmd === "git symbolic-ref refs/remotes/origin/HEAD") stdout = "refs/remotes/origin/main";
@@ -133,6 +147,8 @@ beforeEach(() => {
   fixture.version = "0.52.1";
   fixture.status = fixture.journalTemp = "";
   fixture.allowPreTagGate = fixture.journalError = fixture.corruptJournal = false;
+  fixture.releaseLock = "";
+  fixture.pushUrl = "https://github.com/test/repo.git";
   fixture.registryMisses = 0;
   fixture.badBin = fixture.badFlag = fixture.badOutput = "";
   fixture.journal = {
@@ -239,7 +255,7 @@ test.each([true, false])("clean base requires the journal before npm changes ver
   await main();
   expect(fixture.calls.indexOf("journal checkpoint")).toBeGreaterThan(fixture.calls.indexOf("npm run verify:checks"));
   expect(fixture.calls.indexOf("journal checkpoint")).toBeLessThan(fixture.calls.indexOf("npm version patch --no-git-tag-version"));
-  expect(fixture.journal).toMatchObject({ tag: "v0.52.1", commit: fixture.head });
+  expect(fixture.journal).toMatchObject({ repo: "test/repo", tag: "v0.52.1", commit: fixture.head });
   expect(fixture.journal).not.toHaveProperty("intent");
 });
 
@@ -264,6 +280,37 @@ test("main can retry a failed final checkpoint without pushing or creating a sec
   await main();
   expect(fixture.calls.filter((cmd) => cmd.startsWith("git tag -a"))).toHaveLength(1);
   expect(fixture.calls.some((cmd) => /npm version|git commit/.test(cmd))).toBe(false);
+});
+
+test("paired clean release invocations cannot both prepare or mutate a version", async () => {
+  fixture.journal = {};
+  fixture.head = fixture.parent;
+  fixture.tagHead = "";
+  fixture.version = "0.52.0";
+  fixture.allowPreTagGate = true;
+  const first = main();
+  await expect(main()).rejects.toThrow(/another invocation holds/);
+  await first;
+  expect(fixture.calls.filter((cmd) => cmd === "npm version patch --no-git-tag-version")).toHaveLength(1);
+  expect(fixture.releaseLock).toBe("");
+});
+
+test("an interrupted writer marker is not stolen or mistaken for the journal", async () => {
+  fixture.releaseLock = "fixture interrupted runner";
+  await expect(main()).rejects.toThrow(/verify the runner and its .* child commands have stopped/);
+  expect(fixture.releaseLock).toBe("fixture interrupted runner");
+  expect(fixture.calls.some((cmd) => /git status|git (tag|push|commit)|npm version|gh release create/.test(cmd))).toBe(false);
+});
+
+test.each(["different recorded repo", "missing recorded repo", "different effective push repo", "multiple push URLs"])("main refuses finalized resume with %s before remote writes", async (kind) => {
+  fixture.journal = { ...fixture.journal, preTagCiSkipped: false, repo: "test/repo", phases: { "bump+tag": {} } };
+  if (kind === "different recorded repo") fixture.journal.repo = "test/other";
+  if (kind === "missing recorded repo") delete fixture.journal.repo;
+  if (kind === "different effective push repo") fixture.pushUrl = "git@github.com:test/other.git";
+  if (kind === "multiple push URLs") fixture.pushUrl += "\nhttps://github.com/test/other.git";
+  await expect(main()).rejects.toThrow(/finalized journal names a different or missing repository|exact release repository/);
+  expect(fixture.calls.some((cmd) => /git (tag|push|commit)|npm version|gh release create/.test(cmd))).toBe(false);
+  expect(fixture.releaseLock).toBe("");
 });
 
 test.each(["dirty", "wrong parent", "wrong tree", "conflicting tag", "malformed journal", "recorded skipped gate"])("main refuses %s without mutating local or remote release state", async (kind) => {
