@@ -81,7 +81,7 @@ test("an accepted current-run answer replaces an earlier decline without a stale
     const externalAcquisition: ExternalAcquisitionAdvanceOptions = { enabled: true, analyzerConsent: { eslint: "declined" } };
     const tx = createFoldTransaction();
     const branch = await handleAnalyzerConsentBranch({ root, sourceRoot: root, artifactsDir, externalAcquisition }, {}, { status: "active", obligations: [] }, { value: undefined }, tx);
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
     expect(branch.action).toBe("continue");
     expect(externalAcquisition.analyzerConsent).toEqual({ knip: "declined" });
     expect(externalAcquisition.consentToken?.tools).toEqual(["eslint"]);

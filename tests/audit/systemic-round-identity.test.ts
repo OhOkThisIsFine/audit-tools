@@ -301,7 +301,7 @@ describe("systemic challenge round identity", () => {
     );
     expect(round2.action).toBe("continue");
     if (round2.action !== "continue") throw new Error("round 2 was not consumed");
-    await commitFold(artifactsDir, round2.bundle, tx2);
+    await commitFold(artifactsDir, round2.bundle, tx2, async () => undefined);
     expect(round2.bundle.systemic_challenge?.rounds.map((round) => round.dry)).toEqual([
       false,
       true,
@@ -333,7 +333,7 @@ describe("systemic challenge round identity", () => {
     );
     expect(round3.action).toBe("continue");
     if (round3.action !== "continue") throw new Error("round 3 was not consumed");
-    await commitFold(artifactsDir, round3.bundle, tx3);
+    await commitFold(artifactsDir, round3.bundle, tx3, async () => undefined);
     expect(round3.bundle.systemic_challenge?.rounds.map((round) => round.dry)).toEqual([
       false,
       true,

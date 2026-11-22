@@ -466,7 +466,7 @@ describe("conceptual review adjudication", () => {
       current.round_id,
     );
 
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
     const writtenAssessment = await readJsonFile<{
       conceptual_findings: Finding[];
     }>(join(artifactsDir, "design_assessment.json"));
@@ -523,7 +523,7 @@ describe("conceptual review adjudication", () => {
     if (branch.action !== "continue") throw new Error("expected continue");
     expect(branch.bundle.conceptual_review_adjudication).toBeUndefined();
 
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
     await expect(
       readJsonFile(join(artifactsDir, "conceptual_review_adjudication.json")),
     ).rejects.toThrow();

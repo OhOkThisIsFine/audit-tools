@@ -103,7 +103,7 @@ test("commit deletes an APPLIED staged submission and records its accepted event
     );
     expect(before).toEqual([]);
 
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     await expect(readFile(staged.staged.stagingPath, "utf8")).rejects.toThrow();
     await expect(readFile(bound, "utf8")).rejects.toThrow();
@@ -134,7 +134,7 @@ test("a FAILED delete of an applied staged file fails the commit — it never re
     await writeFile(join(staged.staged.stagingPath, "held"), "x", "utf8");
 
     // Reject unexpected staging state without acknowledging the submission.
-    await expect(commitFold(artifactsDir, {}, tx)).rejects.toThrow();
+    await expect(commitFold(artifactsDir, {}, tx, async () => undefined)).rejects.toThrow();
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (e) => e.kind === "accepted",
@@ -153,7 +153,7 @@ test("commit RESTORES an un-applied staged submission to its bound path (the thr
     if (staged.status !== "staged") throw new Error("expected staged");
     // No markSubmissionApplied: the fold threw before the apply landed.
 
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     expect(JSON.parse(await readFile(bound, "utf8"))).toEqual({ themes: ["kept"] });
     const events = (await readSubmissionLedger(artifactsDir)).filter(
@@ -213,7 +213,7 @@ test("restoring an un-applied submission retains a different result already in t
     await stageLaneSubmission(tx, artifactsDir, LANE);
     await writeFile(bound, current);
 
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
     expect(await readFile(bound, "utf8")).toBe(current);
     expect(await readdir(submissionStagingDir(artifactsDir))).toEqual([]);
     const [saved] = await readdir(join(artifactsDir, "quarantine"));
@@ -253,7 +253,7 @@ test.each([false, true])("split mounts publish a complete copy without replaceme
 
     splitMount.stagingPath = staged.staged.stagingPath;
     try {
-      await commitFold(artifactsDir, {}, tx);
+      await commitFold(artifactsDir, {}, tx, async () => undefined);
     } finally {
       splitMount.stagingPath = undefined;
     }
@@ -286,10 +286,10 @@ test("a re-entered commit RESUMES: an entry the first attempt processed is never
     // throw AFTER the accepted entry was processed — the mid-commit I/O error
     // the catch-path re-commit then runs into.
     await mkdir(restoredBound);
-    await expect(commitFold(artifactsDir, {}, tx)).rejects.toThrow();
+    await expect(commitFold(artifactsDir, {}, tx, async () => undefined)).rejects.toThrow();
 
     await rm(restoredBound, { recursive: true, force: true });
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     // The re-entered commit resumed at the failed entry: exactly one accepted
     // event, and the un-applied submission restored for the retry.
@@ -363,7 +363,7 @@ test("a RE-ENTERED commit does not append a second accepted event for the same s
     if (staged.status !== "staged") throw new Error("expected staged");
     markSubmissionApplied(tx, staged.staged.stagingPath, "with a note");
 
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
     const acceptedAfterFirst = (await readSubmissionLedger(artifactsDir)).filter(
       (e) => e.kind === "accepted",
     );
@@ -371,7 +371,7 @@ test("a RE-ENTERED commit does not append a second accepted event for the same s
 
     // The throw window: the event landed, the entry never left the register.
     tx.staged.push(staged.staged);
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (e) => e.kind === "accepted",
@@ -405,7 +405,7 @@ test("an accepted already on the ledger suppresses a re-entry even when a REJECT
     const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
     if (staged.status !== "staged") throw new Error("expected staged");
     markSubmissionApplied(tx, staged.staged.stagingPath, "with a note");
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     // The interleaving: the host resubmitted at the bound path and the repair
     // was refused, so the TRAILING ingest event is now a rejection.
@@ -418,7 +418,7 @@ test("an accepted already on the ledger suppresses a re-entry even when a REJECT
     // The re-entry: the entry is still on the register, exactly as a mid-loop
     // throw after the durable append would leave it.
     tx.staged.push(staged.staged);
-    await commitFold(artifactsDir, {}, tx);
+    await commitFold(artifactsDir, {}, tx, async () => undefined);
 
     const accepted = (await readSubmissionLedger(artifactsDir)).filter(
       (e) => e.kind === "accepted",
@@ -480,7 +480,7 @@ test("a pending receipt blocks competing reads and cleanup and replays the exact
     await expect(commitFold(artifactsDir, { audit_report: report }, tx, ordinaryStop)).rejects.toThrow("interrupted");
     const receiptBytes = await readFile(foldReceiptPath(artifactsDir), "utf8");
     const receipt = JSON.parse(receiptBytes);
-    await expect(commitFold(artifactsDir, { audit_report: "unrelated" }, createFoldTransaction()))
+    await expect(commitFold(artifactsDir, { audit_report: "unrelated" }, createFoldTransaction(), async () => undefined))
       .rejects.toThrow("incomplete fold receipt");
     expect(await readFile(foldReceiptPath(artifactsDir), "utf8")).toBe(receiptBytes);
     expect(receipt.applied[0]).toMatchObject({ lane: LANE, acceptedMessage: "retained across restart" });

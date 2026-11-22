@@ -69,7 +69,7 @@ test("unavailable review pauses without consuming or quarantining the bound resp
   const tx = createFoldTransaction();
   await expect(tryConsumeSubmission(artifactsDir, lane, tx)).rejects.toThrow("unavailable");
   expect(tx.staged.every(entry => !entry.applied)).toBe(true);
-  await commitFold(artifactsDir, {}, tx);
+  await commitFold(artifactsDir, {}, tx, async () => undefined);
   expect(await readFile(path, "utf8")).toBe(bytes);
   expect((await readSubmissionLedger(artifactsDir)).some(event => event.kind === "accepted")).toBe(false);
 });

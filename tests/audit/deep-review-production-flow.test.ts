@@ -305,7 +305,7 @@ test("the conceptual ingest fold stamps a verification status on every admitted 
       tx,
     );
     if (branch.action !== "continue") throw new Error("expected continue");
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     const committed = JSON.parse(
       await readFile(join(artifactsDir, "design_assessment.json"), "utf8"),
@@ -434,7 +434,7 @@ test("the ingest fold quarantines a judge submission that supplies verification_
     if (branch.action !== "return") throw new Error("unreachable");
     expect(branch.result.kind).toBe("design_review_conceptual");
     // The `return` arm carries the bundle on the RESULT, not on the branch.
-    await commitFold(artifactsDir, branch.result.bundle, tx);
+    await commitFold(artifactsDir, branch.result.bundle, tx, async () => undefined);
 
     const ledger = await readFile(
       join(artifactsDir, "submissions", "submission-ledger.jsonl"),

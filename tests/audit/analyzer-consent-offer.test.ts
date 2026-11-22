@@ -255,7 +255,7 @@ describe("the consent gate refuses a submission it understands nothing in", () =
           { value: undefined },
           tx,
         );
-        await commitFold(artifactsDir, {}, tx);
+        await commitFold(artifactsDir, {}, tx, async () => undefined);
         return branch;
       },
     };

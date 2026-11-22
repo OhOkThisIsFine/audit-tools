@@ -266,7 +266,7 @@ await test("handleDesignReviewBranch returns continue after merging contract fin
     expect(branch.action).toBe("continue");
     if (branch.action !== "continue") throw new Error("expected continue");
     // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     // Written design_assessment.json should have contract_reviewed === true
     const { readFile } = await import("node:fs/promises");
@@ -293,7 +293,7 @@ await test("handleDesignReviewBranch returns continue after merging conceptual f
     expect(branch.action).toBe("continue");
     if (branch.action !== "continue") throw new Error("expected continue");
     // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -319,7 +319,7 @@ await test("handleDesignReviewBranch returns continue after merging both lane su
     expect(branch.action).toBe("continue");
     if (branch.action !== "continue") throw new Error("expected continue");
     // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     const { readFile } = await import("node:fs/promises");
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -387,7 +387,7 @@ await test("handleDesignReviewBranch ignores a leftover pre-split findings file 
     expect(branch.result.bundle.design_assessment?.contract_reviewed).not.toBe(true);
     expect(branch.result.bundle.design_assessment?.conceptual_reviewed).not.toBe(true);
 
-    await commitFold(artifactsDir, branch.result.bundle, tx);
+    await commitFold(artifactsDir, branch.result.bundle, tx, async () => undefined);
     // The file is left where it is: a retired lane's leftovers are not this
     // release's business to move, and quarantining them would record a refusal
     // against a lane nothing can repair.
@@ -593,7 +593,7 @@ await test("handleDesignReviewBranch accepts an object-wrapped {findings:[...]} 
     expect(branch.action).toBe("continue");
     if (branch.action !== "continue") throw new Error("expected continue");
     // The handler CARRIES the merge; the fold commit lands it (CX-02 persist-once).
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
     expect(written.contract_reviewed).toBe(true);
@@ -638,7 +638,7 @@ await test("handleDesignReviewBranch quarantines a bare-string malformed contrac
     if (branch.action !== "return") throw new Error("expected action=return");
     expect(["design_review_contract", "design_review_parallel"]).toContain(branch.result.kind);
     // The rejection note rides the carried bundle; the fold commit lands it.
-    await commitFold(artifactsDir, branch.result.bundle, tx);
+    await commitFold(artifactsDir, branch.result.bundle, tx, async () => undefined);
 
     // The original submission is gone from its bound path ...
     let stillInIncoming = true;
@@ -706,7 +706,7 @@ await test("handleDesignReviewBranch quarantines a syntactically malformed conce
     const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("continue");
     if (branch.action !== "continue") throw new Error("expected continue");
-    await commitFold(artifactsDir, branch.bundle, tx);
+    await commitFold(artifactsDir, branch.bundle, tx, async () => undefined);
 
     // The valid contract lane merged and PERSISTED.
     const written = JSON.parse(await readFile(designAssessmentPath, "utf8"));
@@ -751,7 +751,7 @@ await test("handleDesignReviewBranch quarantines an ambiguous two-array-property
     const branch = await handleDesignReviewBranch(params, bundle, state, tx);
     expect(branch.action).toBe("return");
     if (branch.action !== "return") throw new Error("expected action=return");
-    await commitFold(artifactsDir, branch.result.bundle, tx);
+    await commitFold(artifactsDir, branch.result.bundle, tx, async () => undefined);
 
     const quarantined = await quarantinedFiles(artifactsDir);
     expect(quarantined.length).toBe(1);
@@ -791,7 +791,7 @@ await test("a malformed file on the retired pre-split lane is not quarantined â€
     await commitFold(
       artifactsDir,
       branch.action === "return" ? branch.result.bundle : branch.bundle,
-      tx,
+      tx, async () => undefined,
     );
 
     // Nothing was quarantined: a refusal recorded against a retired lane could

@@ -99,7 +99,7 @@ test.each([false, true])("a resumed fold cannot commit after stale takeover (dis
       await commitFold(artifactsDir, {
         ...bundle, audit_report: "successor authority\n",
         audit_state: { ...bundle.audit_state!, last_executor: "successor" },
-      }, createFoldTransaction());
+      }, createFoldTransaction(), async () => undefined);
       successorEntered.resolve();
       await releaseSuccessor.promise;
     });

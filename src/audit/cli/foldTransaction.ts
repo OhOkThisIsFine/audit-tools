@@ -452,8 +452,6 @@ type FoldReceipt = {
   applied: Array<Pick<StagedSubmission, "lane" | "contentHash" | "acceptedMessage"> & { submissionId: string }>;
 };
 
-const ownNoop = async (): Promise<void> => undefined;
-
 async function applyFoldReceipt(
   artifactsDir: string,
   receipt: FoldReceipt,
@@ -518,7 +516,7 @@ export async function commitFold(
   artifactsDir: string,
   bundle: ArtifactBundle,
   tx: FoldTransaction,
-  assertOwnership: () => Promise<void> = ownNoop,
+  assertOwnership: () => Promise<void>,
 ): Promise<void> {
   await assertNoPendingFoldReceipt(artifactsDir);
   const receipt: FoldReceipt = {
