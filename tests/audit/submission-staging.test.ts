@@ -22,7 +22,16 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
+
+const splitMount = vi.hoisted(() => ({ stagingPath: undefined as string | undefined }));
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, link: async (from: Parameters<typeof actual.link>[0], to: Parameters<typeof actual.link>[1]) => {
+    if (from === splitMount.stagingPath) throw Object.assign(new Error("split mount"), { code: "EXDEV" });
+    return actual.link(from, to);
+  } };
+});
 
 import {
   commitFold,
@@ -235,6 +244,29 @@ test("restoring identical bytes is idempotent and leaves the bound result intact
     expect(await readFile(bound, "utf8")).toBe(payload);
     expect(await readdir(submissionStagingDir(artifactsDir))).toEqual([]);
     expect((await readSubmissionLedger(artifactsDir)).filter((e) => e.kind !== "expected")).toEqual([]);
+  });
+});
+
+test.each([false, true])("split mounts publish a complete copy without replacement (occupied: %s)", async (occupied) => {
+  await withArtifactsDir(async (artifactsDir) => {
+    const bound = laneSubmissionPath(artifactsDir, LANE);
+    const stagedBytes = JSON.stringify({ themes: ["staged"] });
+    const boundBytes = JSON.stringify({ themes: ["bound"] });
+    await writeFile(bound, stagedBytes);
+    const tx = createFoldTransaction();
+    const staged = await stageLaneSubmission(tx, artifactsDir, LANE);
+    if (staged.status !== "staged") throw new Error("expected staged");
+    if (occupied) await writeFile(bound, boundBytes);
+
+    splitMount.stagingPath = staged.staged.stagingPath;
+    try {
+      await commitFold(artifactsDir, {}, tx);
+    } finally {
+      splitMount.stagingPath = undefined;
+    }
+    expect(await readFile(bound, "utf8")).toBe(occupied ? boundBytes : stagedBytes);
+    expect(await readdir(submissionStagingDir(artifactsDir))).toEqual([]);
+    expect((await readdir(submissionsDir(artifactsDir))).filter((file) => file.endsWith(".restore"))).toEqual([]);
   });
 });
 

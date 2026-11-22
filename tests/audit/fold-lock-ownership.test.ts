@@ -9,6 +9,7 @@ const pause = vi.hoisted(() => ({
   drained: undefined as undefined | ((bundle: ArtifactBundle) => Promise<void>),
   beforeDrain: undefined as undefined | ((bundle: ArtifactBundle) => void),
   fail: false,
+  commitFailure: undefined as Error | undefined,
 }));
 vi.mock("audit-tools/shared", async (original) => {
   const actual = await original<typeof import("audit-tools/shared")>();
@@ -30,6 +31,14 @@ vi.mock("../../src/shared/io/fileLock.js", async (original) => {
   }) as typeof actual.withFileLock };
 });
 
+vi.mock("../../src/audit/cli/foldTransaction.js", async (original) => {
+  const actual = await original<typeof import("../../src/audit/cli/foldTransaction.js")>();
+  return { ...actual, commitFold: async (...args: Parameters<typeof actual.commitFold>) => {
+    if (pause.commitFailure) throw pause.commitFailure;
+    return actual.commitFold(...args);
+  } };
+});
+
 const { runDeterministicForNextStep } = await import("../../src/audit/cli/nextStepCommand.js");
 const { withArtifactTreeHold } = await import("../../src/shared/io/artifactTreeHold.js");
 const { artifactTreeLockPath, submissionsDir } = await import("../../src/shared/io/auditToolsPaths.js");
@@ -38,7 +47,7 @@ const { GATE_LANES, laneSubmissionPath } = await import("../../src/audit/cli/lan
 const { commitFold, createFoldTransaction, recoverStagedSubmissions, submissionStagingDir } = await import("../../src/audit/cli/foldTransaction.js");
 const { withTempDir } = await import("./helpers/withTempDir.mjs");
 
-afterEach(() => { pause.drained = undefined; pause.beforeDrain = undefined; pause.fail = false; });
+afterEach(() => { pause.drained = undefined; pause.beforeDrain = undefined; pause.fail = false; pause.commitFailure = undefined; });
 
 function gate<T>() {
   let resolve!: (value: T) => void;
@@ -137,5 +146,19 @@ test.each([false, true])("an owned fold still commits and cleans staging (dispat
     expect(JSON.parse(await readFile(join(artifactsDir, "audit_state.json"), "utf8"))).toHaveProperty("status");
     await expect(stat(stagedPath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(artifactTreeLockPath(artifactsDir))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+test("a failed fold persistence preserves both the engine error and persistence diagnostics", async () => {
+  await withTempDir("fold-failure-diagnostics-", async (root) => {
+    const { artifactsDir } = await fixture(root);
+    pause.fail = true;
+    pause.commitFailure = Object.assign(new Error("restore unavailable"), { code: "EIO" });
+    await expect(run(root, artifactsDir)).rejects.toMatchObject({
+      name: "AggregateError",
+      message: "injected dispatch failure; also failed to persist the audit fold: restore unavailable",
+      cause: { message: "injected dispatch failure" },
+      errors: [{ message: "injected dispatch failure" }, { code: "EIO" }],
+    });
   });
 });

@@ -29,7 +29,10 @@
  * duplicate (see `runSystemicChallengeExecutor`).
  */
 
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
+  copyFile,
   link,
   mkdir,
   readFile,
@@ -39,7 +42,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   hashContent,
   isFileMissingError,
@@ -309,10 +312,33 @@ export function markSubmissionApplied(
 // a missing staging file as already-handled (see commitFold). One lifecycle,
 // no second bookkeeping call a gate could forget.
 
+function hasIoCode(error: unknown, code: string): boolean {
+  return error !== null && typeof error === "object" && "code" in error && error.code === code;
+}
+
+async function linkStagedWithoutReplacing(stagingPath: string, boundPath: string): Promise<void> {
+  try {
+    await link(stagingPath, boundPath);
+  } catch (error) {
+    if (!hasIoCode(error, "EXDEV")) throw error;
+    // A split mount needs a copy first, but only a complete sibling may be
+    // published, and publishing must still fail if the destination exists.
+    const tempPath = join(dirname(boundPath), "." + basename(boundPath) + "." + randomUUID() + ".restore");
+    await copyFile(stagingPath, tempPath, constants.COPYFILE_EXCL);
+    try {
+      await link(tempPath, boundPath);
+    } finally {
+      // A stale private sibling is not an input slot and must not hide the
+      // publication outcome or cause an unsafe retry.
+      await unlink(tempPath).catch(() => undefined);
+    }
+  }
+}
+
 /**
  * Restore complete bytes only into a free bound slot. A rename can replace a
  * newer result, and a check before rename cannot protect unlocked submitters.
- * Both paths are under the artifact root. If hard links are unsupported, keep
+ * A split mount copies into a private sibling first. If hard links are unsupported, keep
  * the staged copy and surface the error rather than falling back to overwrite.
  */
 async function restoreStagedSubmission(
@@ -322,7 +348,7 @@ async function restoreStagedSubmission(
   boundPath: string,
 ): Promise<void> {
   try {
-    await link(stagingPath, boundPath);
+    await linkStagedWithoutReplacing(stagingPath, boundPath);
   } catch (error) {
     if (isFileMissingError(error)) {
       // ENOENT can also mean the bound directory is missing.
@@ -334,7 +360,7 @@ async function restoreStagedSubmission(
       }
       throw error;
     }
-    if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+    if (!hasIoCode(error, "EEXIST")) throw error;
     // A retry after linking but before removing staging sees identical bytes.
     // An identical resubmission is likewise already available in the slot.
     let staged: Buffer;

@@ -3236,11 +3236,19 @@ async function runDeterministicFold(
         const failedState = deriveAuditState(bundle, { emitStaleness: false });
         failedState.last_executor = failure?.executor ?? undefined;
         failedState.last_obligation = failure?.obligation ?? undefined;
-        await commitFold(
-          params.artifactsDir,
-          { ...bundle, audit_state: failedState },
-          ctx.tx,
-        );
+        try {
+          await commitFold(
+            params.artifactsDir,
+            { ...bundle, audit_state: failedState },
+            ctx.tx,
+          );
+        } catch (commitError) {
+          throw new AggregateError(
+            [error, commitError],
+            errorMessage(error) + "; also failed to persist the audit fold: " + errorMessage(commitError),
+            { cause: error },
+          );
+        }
         throw error;
       } finally {
         foldLogger.event({
