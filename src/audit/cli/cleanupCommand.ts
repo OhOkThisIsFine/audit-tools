@@ -102,7 +102,9 @@ export async function cmdCleanup(argv: string[]): Promise<void> {
     return;
   }
 
-  const result = await cleanupStaleArtifactsDir(artifactsDir, { force, dryRun, repositoryRoot: getRootDir(argv) });
+  const result = await cleanupStaleArtifactsDir(artifactsDir, {
+    force, dryRun, requireAuditMarker: true, repositoryRoot: getRootDir(argv),
+  });
 
   if (result.action === "skipped") {
     outputJson(

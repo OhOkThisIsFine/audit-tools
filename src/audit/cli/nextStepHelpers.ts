@@ -426,7 +426,6 @@ export const FINALIZATION_CYCLE_TOLERANCE = 16;
  * target repository's audit completion contract.
  */
 async function promoteCompletedReport(root: string, artifactsDir: string): Promise<string> {
-  await assertNoPendingFoldReceipt(artifactsDir);
   const promotedPath = promotedAuditReportPath(artifactsDir);
   // "Already promoted" must mean THIS run's render, not any file at the promoted
   // path: a PREVIOUS audit's promoted report satisfies a bare existence check,
@@ -506,12 +505,13 @@ export async function buildTerminalStep(
   if (!reportRendered) {
     return { kind: "blocked", state, bundle, reason: blockedReason };
   }
-  const questionRun = bundle.review_plan !== undefined ||
-    Boolean(await readQuestionReviewRunId(params.artifactsDir, { includeEnded: true })) ||
-    await hasWorkingQuestionReportMarker(params.artifactsDir);
-  const finalReportPath = questionRun
-    ? await withArtifactTreeHold(params.artifactsDir, undefined, () => promoteCompletedReport(params.root, params.artifactsDir))
-    : await promoteCompletedReport(params.root, params.artifactsDir);
+  const { questionRun, finalReportPath } = await withArtifactTreeHold(params.artifactsDir, undefined, async () => {
+    await assertNoPendingFoldReceipt(params.artifactsDir);
+    const questionRun = bundle.review_plan !== undefined ||
+      Boolean(await readQuestionReviewRunId(params.artifactsDir, { includeEnded: true })) ||
+      await hasWorkingQuestionReportMarker(params.artifactsDir);
+    return { questionRun, finalReportPath: await promoteCompletedReport(params.root, params.artifactsDir) };
+  });
   if (questionRun && finalReportPath === auditReportPath(params.artifactsDir)) {
     return { kind: "blocked", state, bundle,
       reason: "The current question report and its custody records could not be verified and promoted. Restore the matching question plan, accepted answers and report or resolve the reported archive issue, then run next-step again. The working audit was kept." };

@@ -12,6 +12,7 @@ export type CleanupOptions = {
   repositoryRoot?: string;
   force?: boolean;
   dryRun?: boolean;
+  requireAuditMarker?: boolean;
 };
 
 export type CleanupResult = {
@@ -96,6 +97,10 @@ async function cleanupHeld(
       throw error;
     }
     // State file missing — status stays "unknown".
+  }
+
+  if (force && options.requireAuditMarker && status === "unknown") {
+    return { action: "skipped", status, reason: "The working audit no longer has its identity marker; refusing forced cleanup." };
   }
 
   if (!force && status === "not_started" && !(await retiredRunEvidenceIsArchived(artifactsDir))) {
