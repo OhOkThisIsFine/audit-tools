@@ -42,7 +42,7 @@ export async function questionWorkloadBindings(
   const sourcesFor = (inventory: string[]): ReviewSourceRef[] => {
     const refs = inventory.flatMap(id => {
       const item = byInventory.get(id);
-      return item ? [...item.source_refs, ...item.contract_refs] : [];
+      return item ? [...item.source_refs, ...item.contract_refs, ...(item.suggested_sources ?? [])] : [];
     }).filter(ref => measured.has(ref.path) && (ref.end_line ?? ref.start_line ?? 0) <= (lineIndex[ref.path] ?? 0));
     return [...new Map(refs.map(ref => [stableStringify(ref), ref])).values()];
   };

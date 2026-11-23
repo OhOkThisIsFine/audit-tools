@@ -14,6 +14,7 @@ import {
   runStructureDecompositionExecutor,
 } from "./structureExecutors.js";
 import { buildQuestionPlanArtifacts } from "./questionPlanExecutor.js";
+import { addConfigurationStartingSources } from "./configDeploymentSources.js";
 import {
   runExternalAnalyzerImportExecutor,
 } from "./ingestionExecutors.js";
@@ -189,7 +190,9 @@ export const EXECUTOR_RUNNERS: Record<string, AuditExecutorRunner> = {
           ? `delta since ${plannedScope.since}: ${plannedScope.seed_files.length} changed + ${plannedScope.expanded_files.length} neighbors; full audit advised before release`
           : "full audit scope",
     });
-    return buildQuestionPlanArtifacts(bundle, plannedScope);
+    const result = buildQuestionPlanArtifacts(bundle, plannedScope);
+    await addConfigurationStartingSources(result.updated, root);
+    return result;
   },
   // The PRIOR report's `audit_read` is handed in so a re-synthesis over an
   // unchanged tree keeps it byte-identical and does not re-stale the narrative

@@ -76,7 +76,7 @@ const claimLens = (lens: string): BuiltInLens => isBuiltIn(lens) ? lens :
   lens === "correctness" || lens === "reliability" || lens === "data_integrity" ? "behavior" :
     lens === "observability" ? "operability" : "architecture";
 
-function classifyConfiguration(path: string): "release" | "runtime" | undefined {
+export function classifyConfiguration(path: string): "release" | "runtime" | undefined {
   if (/(?:^|\/)(?:\.github\/workflows\/|\.gitlab-ci\.ya?ml$|Jenkinsfile$|Dockerfile(?:\.[^/]+)?$|(?:docker-)?compose\.ya?ml$|render\.ya?ml$)/iu.test(path)) return "release";
   if (/(?:^|\/)(?:package\.json$|pyproject\.toml$|Cargo\.toml$|\.env\.example$|(?:runtime[-_.]config|config[-_.]runtime|config\.runtime|config\.(?:[cm]?[jt]s|py)$)(?:\.|$)|(?:install|setup|deploy|rollback)\/)/iu.test(path)) return "runtime";
   return undefined;

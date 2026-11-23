@@ -50,6 +50,8 @@ export const ReviewInventoryItemSchema = z.strictObject({
   title: value,
   contract_refs: z.array(ReviewSourceRefSchema),
   source_refs: z.array(ReviewSourceRefSchema),
+  /** Optional starting points, outside the question's revision dependencies. */
+  suggested_sources: z.array(ReviewSourceRefSchema).optional(),
   scope: z.enum(["in_scope", "excluded", "not_applicable", "deferred"]),
   scope_reason: value.optional(),
 }).refine((item) => item.scope === "in_scope" || item.scope_reason !== undefined, "non-active inventory requires a reason");

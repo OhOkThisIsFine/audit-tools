@@ -509,6 +509,25 @@
         "src/shared/submission/hostHandoffCore.ts": "acc2336b1fa419dc1539a90d74b95b8531eb0bf8"
       }
     },
+    "a6bf59c41c6e9e97": {
+      "reviewed_by": "codex-design-review",
+      "attester_class": "agent",
+      "checked": "Independent agent verified the integrated tree on bc4c5ac7, unchanged Tests assignments, frozen source scope, static setting and release links, direct-submit identity, and optional dependencies.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "0bf33665fd736b91ba502d3b3a1bae3cb9d52e07",
+        "ran_at": "2026-11-23T08:52:07.290Z"
+      },
+      "attested_at": "2026-11-23T08:52:51.977Z",
+      "vouches": {
+        "src/audit/cli/questionWorkloadBindings.ts": "cb47da266bc9d64d6a9df88337d959b5d768130d",
+        "src/audit/orchestrator/configDeploymentSources.ts": "dc5fb712358416d19a61520029624df64ee8ace0",
+        "src/audit/orchestrator/executorRunners.ts": "28f2078dd91a45a06060658254750557bb1b7844",
+        "src/audit/orchestrator/questionPlanning.ts": "afe3f0fe02b3b347767042f5f3b330e6ee959a26"
+      }
+    },
     "ad938761f1a24d50": {
       "reviewed_by": "claude-opus-5-5 session; field deletion checked by repo-wide grep and the closeout auditor",
       "attester_class": "agent",
@@ -887,7 +906,7 @@
       "review": "daa728eac345f91f"
     },
     "src/audit/cli/questionWorkloadBindings.ts": {
-      "review": "51642764524969f9"
+      "review": "a6bf59c41c6e9e97"
     },
     "src/audit/cli/submitCommand.ts": {
       "review": "daa728eac345f91f"
@@ -943,6 +962,9 @@
     "src/audit/orchestrator/charterPackets.ts": {
       "review": "f20b857654eebefb"
     },
+    "src/audit/orchestrator/configDeploymentSources.ts": {
+      "review": "a6bf59c41c6e9e97"
+    },
     "src/audit/orchestrator/criticalFlowFallbackExecutor.ts": {
       "baseline": "7b79934e86baf378"
     },
@@ -971,7 +993,7 @@
       "review": "ad938761f1a24d50"
     },
     "src/audit/orchestrator/executorRunners.ts": {
-      "review": "daa728eac345f91f"
+      "review": "a6bf59c41c6e9e97"
     },
     "src/audit/orchestrator/executors.ts": {
       "review": "e36223304299f9c6"
@@ -1055,7 +1077,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "d9e2661ac6e501dd"
+      "review": "a6bf59c41c6e9e97"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
