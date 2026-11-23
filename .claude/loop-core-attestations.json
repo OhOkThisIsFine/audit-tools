@@ -525,22 +525,6 @@
         "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
       }
     },
-    "af7d8f5510f9877b": {
-      "reviewed_by": "audit_recovery_independent",
-      "attester_class": "agent",
-      "checked": "Independently reviewed and byte matched the full-scope planner change: admit only bound production-file complexity cues, keep each cue distinct and non-verdict, retain delta and unbound exclusions. Verified native exact full-suite stamp from integration.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "b24e09a67b99c6f0241c779b52b1302e66102418",
-        "ran_at": "2026-11-22T15:18:42.966Z"
-      },
-      "attested_at": "2026-11-22T15:19:17.355Z",
-      "vouches": {
-        "src/audit/orchestrator/questionPlanning.ts": "ba06dc7e85d463d8a03341e85652ad94df0622c4"
-      }
-    },
     "be526ca9e4e1d631": {
       "reviewed_by": "Codex Windows qualification",
       "attester_class": "agent",
@@ -639,6 +623,23 @@
       "attested_at": "2026-11-16T17:02:12.089Z",
       "vouches": {
         "src/shared/observability/rootLogObservations.ts": "c7497a421c8fa84a6b19c713bc0b0bfdc9ea6ef6"
+      }
+    },
+    "d9e2661ac6e501dd": {
+      "reviewed_by": "codex-design-check",
+      "attester_class": "agent",
+      "checked": "Checked source-bound questions for workers, critical flows, native routes and package entrypoints, explicit lens selection, docs and delta exclusions, and stable revisions for fixture-backed operations.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "9b73eb6a2360aa639bf08f8ad4075a4ecfdb2472",
+        "ran_at": "2026-11-23T08:29:18.277Z"
+      },
+      "attested_at": "2026-11-23T08:29:47.977Z",
+      "vouches": {
+        "src/audit/orchestrator/intentCheckpointExecutor.ts": "6fe8caa0ff440c505b644a66af4a7441047fe9df",
+        "src/audit/orchestrator/questionPlanning.ts": "041cd15a2e1f9d0c2ac65146b453d6e38d285880"
       }
     },
     "daa728eac345f91f": {
@@ -1006,7 +1007,7 @@
       "review": "392554939aa89e3b"
     },
     "src/audit/orchestrator/intentCheckpointExecutor.ts": {
-      "review": "e36223304299f9c6"
+      "review": "d9e2661ac6e501dd"
     },
     "src/audit/orchestrator/intentCheckpointGate.ts": {
       "review": "f20b857654eebefb"
@@ -1054,7 +1055,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "af7d8f5510f9877b"
+      "review": "d9e2661ac6e501dd"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"

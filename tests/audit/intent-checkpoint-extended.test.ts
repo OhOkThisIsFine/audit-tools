@@ -17,6 +17,7 @@ import {
 } from "../../src/audit/orchestrator/intentCheckpointExecutor.js";
 import { renderSharedStructuralContext } from "../../src/audit/orchestrator/designReviewPrompt.js";
 import { buildReviewQuestionPlan, reviewSourceScope } from "../../src/audit/orchestrator/questionPlanning.js";
+import { questionWorkloadBindings } from "../../src/audit/cli/questionWorkloadBindings.js";
 import type { ArtifactBundle } from "../../src/audit/io/artifacts.js";
 
 // ---------------------------------------------------------------------------
@@ -182,12 +183,32 @@ test("computeScopePreDigest recommends excluding operability when no network-sur
   expect(operability?.disposition).toBe("recommend_exclude");
 });
 
-test("computeScopePreDigest recommends excluding tests when no test units", async () => {
-  const bundle = makeBaseBundle({ unit_manifest: { units: [] } });
+test("Tests remains inapplicable when the only candidate is outside admitted source", async () => {
+  const bundle = questionScopeFixture(["docs/resume.md"]);
+  bundle.file_disposition!.files[0]!.status = "doc_only";
   const digest = await computeScopePreDigest(bundle, "/repo");
-
   const tests = digest.lens_propositions.find((p) => p.lens === "tests");
   expect(tests?.disposition).toBe("recommend_exclude");
+  const plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot" });
+  expect(plan.lens_decisions).toContainEqual(expect.objectContaining({ lens: "tests", decision: "not_applicable" }));
+});
+
+test("an operation with no detected tests can receive a Tests assignment through the recommended scope", async () => {
+  const entry = "src/resume.ts";
+  const bundle = questionScopeFixture([entry]);
+  const digest = await computeScopePreDigest(bundle, "/repo");
+  const include = digest.lens_propositions.filter(row => row.disposition === "recommend_include").map(row => row.lens);
+  expect.soft(include).toContain("tests");
+  bundle.intent_checkpoint!.lens_selection = { include };
+  bundle.review_plan = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot" });
+  const bindings = await questionWorkloadBindings(bundle, "/repo", [], [{ path: entry, fingerprint: entry, line_count: 1 }]);
+  const coverage = bindings.find(binding => binding.question.lens === "tests");
+  expect(coverage?.assignment.suggested_sources).toEqual([{ path: entry }]);
+
+  bundle.intent_checkpoint!.lens_selection = { exclude: ["tests"], omission_reasons: { tests: "Reviewed separately" } };
+  const narrowed = buildReviewQuestionPlan(bundle, { snapshotId: "snapshot" });
+  expect(narrowed.questions.some(question => question.lens === "tests")).toBe(false);
+  expect(narrowed.lens_decisions).toContainEqual({ lens: "tests", decision: "excluded", reason: "Reviewed separately" });
 });
 
 test("computeScopePreDigest recommends lenses from applicable source instead of fixed mandatory lenses", async () => {

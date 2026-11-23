@@ -112,14 +112,7 @@ export function reviewSourceScope(bundle: ArtifactBundle, overrideScope?: AuditS
   };
 }
 
-/**
- * Reconcile discovered execution surfaces and native wiring before assigning questions.
- * Neither planner priority nor the presence of a follow-up can make an entry disappear.
- */
-export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOptions): ReviewPlan {
-  if (!options.snapshotId) throw new Error("Question planning requires a frozen snapshot identity");
-  const intent = bundle.intent_checkpoint;
-  const { files, dispositions, sourceStatus } = reviewSourceScope(bundle, options.scope);
+function discoverOperationEntries(bundle: ArtifactBundle, { files, sourceStatus }: ReturnType<typeof reviewSourceScope>) {
   const resolveRef = (ref: string): ReviewSourceRef | undefined => {
     if (files.has(ref)) return source(ref);
     const boundary = ref.search(/[:#]/u);
@@ -140,35 +133,6 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       byEntry.set(path, related);
     }
   }
-  const subjects: Subject[] = [];
-  const inventory: ReviewInventoryItem[] = [];
-  const omissions: ReviewPlan["omissions"] = [];
-  const signalDispositions: SignalDisposition[] = [];
-  const owners = new Map<string, Set<string>>();
-  for (const unit of bundle.unit_manifest?.units ?? []) for (const path of unit.files) {
-    const units = owners.get(path) ?? new Set<string>();
-    units.add(unit.unit_id);
-    owners.set(path, units);
-  }
-  const ownership = (refs: readonly ReviewSourceRef[]) => ordered(refs.flatMap((ref) => [...(owners.get(ref.path) ?? [])]));
-  const statements = bundle.charter_register?.lanes.find(({ kind }) => kind === "stated")?.nodes ?? [];
-  const externalPaths = getExternalSignalPaths(bundle.external_analyzer_results);
-  const add = (lens: Lens, key: string, kind: InventoryKind, title: string, refs: ReviewSourceRef[],
-    contract: ReviewSourceRef[], expectation: string, linked?: Pick<Subject, "membership" | "evidence"> & { parts?: Part[] }) => {
-    const item: ReviewInventoryItem = { inventory_item_id: ids(kind, key), kind,
-      title, source_refs: refs, contract_refs: contract, scope: "in_scope" };
-    if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
-    subjects.push({ lens, inventory: item, expectation,
-      parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],
-      membership: linked?.membership, evidence: linked?.evidence });
-    return ids(lens, item.inventory_item_id);
-  };
-  const disposition = (signal_id: string, outcome: SignalDisposition["outcome"], reason: string,
-    refs: ReviewSourceRef[], question_id?: string) => {
-    signalDispositions.push({ signal_id, outcome, reason,
-      ...(refs.length ? { source_refs: refs } : {}), ...(question_id ? { question_id } : {}) });
-  };
-  const operationRows: Operation[] = [];
   const routeCandidates = new Map<string, Set<string>>();
   for (const route of bundle.graph_bundle?.graphs.routes ?? []) {
     const id = `route:${route.method ?? "unspecified"}:${route.path}`;
@@ -210,6 +174,58 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       byEntry.get(path)?.some((flow) => flow.paths.includes(entry))).length > 1;
     if (!crossesOperation) entrySurfaces.push({ id: `flow-entry:${entry}`, kind: "interface", entrypoint: entry, registered: false, alternatives: [], registrationSources: [] });
   }
+  return { resolveRef, byEntry, entrySurfaces, declaredEntries };
+}
+
+/** Use the same admitted operation candidates for the checkpoint and for review assignments. */
+export function hasReviewableOperation(bundle: ArtifactBundle, scope: AuditScopeManifest): boolean {
+  const sourceScope = reviewSourceScope(bundle, scope);
+  const { resolveRef, entrySurfaces } = discoverOperationEntries(bundle, sourceScope);
+  return entrySurfaces.some(({ entrypoint }) => {
+    const ref = resolveRef(entrypoint);
+    return ref !== undefined && sourceScope.sourceStatus(ref.path) === undefined;
+  });
+}
+
+/**
+ * Reconcile discovered execution surfaces and native wiring before assigning questions.
+ * Neither planner priority nor the presence of a follow-up can make an entry disappear.
+ */
+export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOptions): ReviewPlan {
+  if (!options.snapshotId) throw new Error("Question planning requires a frozen snapshot identity");
+  const intent = bundle.intent_checkpoint;
+  const sourceScope = reviewSourceScope(bundle, options.scope);
+  const { files, dispositions, sourceStatus } = sourceScope;
+  const { resolveRef, byEntry, entrySurfaces, declaredEntries } = discoverOperationEntries(bundle, sourceScope);
+  const subjects: Subject[] = [];
+  const inventory: ReviewInventoryItem[] = [];
+  const omissions: ReviewPlan["omissions"] = [];
+  const signalDispositions: SignalDisposition[] = [];
+  const owners = new Map<string, Set<string>>();
+  for (const unit of bundle.unit_manifest?.units ?? []) for (const path of unit.files) {
+    const units = owners.get(path) ?? new Set<string>();
+    units.add(unit.unit_id);
+    owners.set(path, units);
+  }
+  const ownership = (refs: readonly ReviewSourceRef[]) => ordered(refs.flatMap((ref) => [...(owners.get(ref.path) ?? [])]));
+  const statements = bundle.charter_register?.lanes.find(({ kind }) => kind === "stated")?.nodes ?? [];
+  const externalPaths = getExternalSignalPaths(bundle.external_analyzer_results);
+  const add = (lens: Lens, key: string, kind: InventoryKind, title: string, refs: ReviewSourceRef[],
+    contract: ReviewSourceRef[], expectation: string, linked?: Pick<Subject, "membership" | "evidence"> & { parts?: Part[] }) => {
+    const item: ReviewInventoryItem = { inventory_item_id: ids(kind, key), kind,
+      title, source_refs: refs, contract_refs: contract, scope: "in_scope" };
+    if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
+    subjects.push({ lens, inventory: item, expectation,
+      parts: linked?.parts ?? [{ part_id: "supported-outcome", expectation }],
+      membership: linked?.membership, evidence: linked?.evidence });
+    return ids(lens, item.inventory_item_id);
+  };
+  const disposition = (signal_id: string, outcome: SignalDisposition["outcome"], reason: string,
+    refs: ReviewSourceRef[], question_id?: string) => {
+    signalDispositions.push({ signal_id, outcome, reason,
+      ...(refs.length ? { source_refs: refs } : {}), ...(question_id ? { question_id } : {}) });
+  };
+  const operationRows: Operation[] = [];
   for (const surface of entrySurfaces.sort((a, b) => compareCodeUnits(a.id, b.id))) {
     const ref = resolveRef(surface.entrypoint);
     const reason = ref ? sourceStatus(ref.path) : "The discovered surface has no unique source binding in the frozen snapshot.";
@@ -275,8 +291,9 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
     }
     if (surface.kind === "interface" || op.background) add("operability", op.id, "operator_transition", `Interpreting ${title}`, refs, contract,
       "Determine how a caller or operator distinguishes outcomes and chooses the next action from available output and state.");
-    if (refs.some(({ path }) => isTestPath(path))) add("tests", op.id, "operation", title, refs, contract,
-      "Name the support contract each reachable fixture asserts, what regression it would catch, and material gaps or execution cost.");
+    add("tests", op.id, "operation", title, refs, contract, refs.some(({ path }) => isTestPath(path))
+      ? "Name the support contract each reachable fixture asserts, what regression it would catch, and material gaps or execution cost."
+      : "Trace this operation's supported outcome to any available tests. Identify a material regression that could escape detection if the evidence supports a gap.");
   }
 
   // Existing source discovery supplies the shared state surface; do not infer

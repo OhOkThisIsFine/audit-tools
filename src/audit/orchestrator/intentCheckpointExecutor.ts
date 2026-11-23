@@ -1,9 +1,11 @@
 // sites-pinned: tests/audit/intent-checkpoint.test.ts
 import type { ArtifactBundle } from "../io/artifacts.js";
+import type { AuditScopeManifest } from "../types/auditScope.js";
 import type { FileDispositionStatus } from "audit-tools/shared";
 import type { DesignAssessment } from "../types/designAssessment.js";
 import type { DocsDigestEntry } from "../types/docsDigest.js";
 import { resolveAuditScope } from "./scope.js";
+import { hasReviewableOperation } from "./questionPlanning.js";
 import { detectMisScopeSmells } from "./intakeExecutors.js";
 import {
   isAuditExcludedStatus,
@@ -333,11 +335,11 @@ function describeLensEvidence(lens: string, evidence: LensEvidence): string {
  * final table is shown to the user.
  */
 function buildLensPropositions(
-  unitManifest: { units: Array<{ kind?: string; files: string[] }> } | undefined,
+  bundle: ArtifactBundle,
   inScopePaths: string[],
-  designAssessment?: DesignAssessment,
-  surfaces?: ArtifactBundle["surface_manifest"],
+  scope: AuditScopeManifest,
 ): LensProposition[] {
+  const { unit_manifest: unitManifest, surface_manifest: surfaces, design_assessment: designAssessment } = bundle;
   const inScope = new Set(inScopePaths);
   const units = (unitManifest?.units ?? []).filter((unit) => unit.files.some((path) => inScope.has(path)));
   const observedSurfaces = (surfaces?.surfaces ?? []).filter(({ entrypoint }) => inScope.has(entrypoint));
@@ -416,11 +418,12 @@ function buildLensPropositions(
         );
         break;
       case "tests":
-        propositions.push(
-          hasTestUnits
-            ? include(lens, "test units present")
-            : exclude(lens, "no test units detected"),
-        );
+        if (hasTestUnits) propositions.push(include(lens, "test units present"));
+        else if (hasReviewableOperation(bundle, scope)) {
+          propositions.push(include(lens, "in-scope operation whose regression coverage can be reviewed"));
+        } else {
+          propositions.push(exclude(lens, "no test units or reviewable operations detected"));
+        }
         break;
       case "config_deployment":
         propositions.push(
@@ -538,12 +541,7 @@ export async function computeScopePreDigest(
 
   const excluded_summary = buildExcludedSummary(excluded);
   const disposition_override_proposals = buildDispositionOverrideProposals(dispositionFiles);
-  const lens_propositions = buildLensPropositions(
-    bundle.unit_manifest,
-    inScopePaths,
-    bundle.design_assessment,
-    bundle.surface_manifest,
-  );
+  const lens_propositions = buildLensPropositions(bundle, inScopePaths, scope);
 
   return {
     mode: scope.mode,
