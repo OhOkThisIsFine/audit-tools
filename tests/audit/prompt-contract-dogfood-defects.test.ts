@@ -133,6 +133,13 @@ describe("prompt contracts found by the 0.55.15 dogfood run", () => {
     }
   });
 
+  it("keeps a deterministic lead outside the selected lens as context, not a confirmation target", () => {
+    const prompt = renderContractReviewPrompt(designReviewBundle, { lenses: ["behavior"] });
+    expect(confirmationCategories(prompt)).not.toContain("dependency_cycle");
+    expect(prompt).toMatch(/Context-only lead identity: .*"category":"dependency_cycle"/);
+    expect(prompt).toContain("do not promote, relabel, or count them as coverage");
+  });
+
   it("judge prompt places round_id inside the envelope's result, and that placement validates", () => {
     const prompt = renderConceptualJudgePrompt(
       designReviewBundle,

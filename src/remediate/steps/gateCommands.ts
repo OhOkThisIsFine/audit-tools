@@ -121,7 +121,7 @@ export interface GateRedAttribution {
   /**
    * `run`         — at least one failing path is one the run itself touched.
    * `environment` — a non-empty failing set of NON-TEST paths, none of which the
-   *                 run touched: the dirt is not this run's doing. FAIL-CLOSED
+   *                 run touched: path non-overlap only, not causal proof. FAIL-CLOSED
    *                 on the test-file case — see {@link isTestFilePath}: a red
    *                 located in a test file names a path a run edits source and
    *                 never touches, so it can never be the evidence that excuses
@@ -395,26 +395,11 @@ export async function attributeGateRed(params: {
   const runSet = new Set(runPaths);
   const own = failing.filter((path) => runSet.has(path));
   const foreign = failing.filter((path) => !runSet.has(path));
-  // THE FAIL-CLOSED FLOOR. `environment` is the one verdict that tells the host
-  // to do LESS, and its evidence — "no failing path is one this run touched" —
-  // is exactly what an ordinary test red looks like: a suite that fails prints
-  // the TEST file it choked on, and a run edits source, so the intersection is
-  // <!-- comment-citation-exempt: illustrative example path -->
-  // empty. `src/x.ts` edited + `FAIL tests/x.test.ts > adds` printed is a red
-  // this run most plausibly caused, and the predecessor rendered it as "do NOT
-  // rework remediation items for it". So a failing TEST path is never evidence
-  // of innocence: the verdict degrades to `unattributable`, which claims
-  // nothing and sends the host to look, rather than to skip.
-  //
-  // Bounded by the run's surface being NON-EMPTY, which the early return above
-  // already guarantees: a run that touched nothing has no surface to be wrong
-  // about, and its red is `unattributable` either way.
+  // Test failures often name a test rather than the source it exercises;
+  // even the narrower non-overlap heuristic is not useful in that case.
   const testPathInvolved = failing.some(isTestFilePath);
   return {
-    // Own wins when both are present: a red that implicates ANY path the run
-    // touched is the run's to answer for, even if unrelated dirt is also failing.
-    // Reporting it as `environment` because SOME failing path was foreign would
-    // be the fail-open direction on the only verdict that assigns work.
+    // Preserve any observed overlap, even if some failure paths are foreign.
     verdict:
       own.length > 0 ? "run" : testPathInvolved ? "unattributable" : "environment",
     run_paths_considered: sample(runPaths),
@@ -425,16 +410,7 @@ export async function attributeGateRed(params: {
   };
 }
 
-/**
- * Whether a red may carry the "not this run's doing" directive.
- *
- * The ONE draw of that question, shared by the renderer and by anything asking
- * the same thing, so the directive and the verdict that licenses it cannot be
- * two separate hand-written lists. `environment` is the only verdict whose every
- * failing path is a non-test file outside the run's surface; anything else —
- * including `unattributable`, which is what a test red degrades to — carries no
- * such claim.
- */
+/** Whether the persisted path heuristic found only outside-run non-test paths. */
 export function carriesEnvironmentVerdict(
   attribution: GateRedAttribution | undefined,
 ): boolean {
@@ -445,8 +421,7 @@ export function carriesEnvironmentVerdict(
  * Render the attribution verdict for the paused step's prompt.
  *
  * ALWAYS returns a block, including for `unattributable` — the three verdicts
- * are three DIFFERENT things for the host to do (fix the run's work / confirm
- * unrelated dirt / investigate with no path evidence at all), and a missing
+ * distinguish run overlap, non-overlap and insufficient path evidence, and a missing
  * block would collapse the third into silence. Never the raw path lists in full:
  * the record holds them, and the prompt names the record.
  */
@@ -468,22 +443,15 @@ export function renderGateAttribution(
       "Fix these before re-running; the red is plausibly this run's own breakage.",
     ].join("\n");
   }
-  // The "do NOT rework" directive renders ONLY for a verdict that licenses it
-  // (`carriesEnvironmentVerdict`), never for a bare `verdict === "environment"`
-  // written out a second time here. That directive is the expensive half: it
-  // tells a host to skip work it owes, so it must be unreachable by any route
-  // other than the verdict that established "none of this is yours" over
-  // non-test paths.
   if (carriesEnvironmentVerdict(attribution)) {
     return [
       `Attribution: ENVIRONMENT — none of the ${attribution.failing_paths_count} failing path(s)`,
-      "is one this run touched, and none is a test file. The suite is broken by work",
-      "that is not this run's:",
+      "is one this run touched, and none is a test file:",
       ...attribution.foreign_paths.map((path) => `  - ${path}`),
       "",
-      "Nothing in this run caused it, so do NOT rework remediation items for it.",
-      "Make the tree green (or get the other work reverted/fixed), then re-run —",
-      "the run resumes exactly where it left off.",
+      "These paths do not overlap the run's edits. That does not establish the cause:",
+      "a change in this run can still break an untouched file. Inspect the failure",
+      "before deciding what needs to change, then re-run the gate.",
     ].join("\n");
   }
   return [

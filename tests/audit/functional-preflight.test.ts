@@ -89,6 +89,21 @@ it("unavailable capability cannot silently downgrade; explicit degraded approval
   expect(feedback).toHaveLength(1);
   expect(JSON.parse(feedback[0]!)).toMatchObject({ task_id: "audit-capability-preflight", severity: "high" });
 });
+it("next-step refuses degraded reports when both inspections worked", async () => {
+  const { root, artifactsDir } = await fixture();
+  await satisfyFunctionalPreflight(root, artifactsDir);
+  const file = functionalPreflightPath(artifactsDir);
+  const report = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, JSON.stringify({
+    ...report, decision: "degraded", operator_approved_degraded: true, limitation: "Missing relationship evidence.",
+  }));
+  vi.spyOn(console, "log").mockImplementation(() => undefined);
+  await runCli(["node", "audit-code", "next-step", "--root", root]);
+  const step = JSON.parse(await readFile(join(artifactsDir, "steps", "current-step.json"), "utf8"));
+  expect(step.step_kind).toBe("functional_preflight");
+  expect(step.progress.summary).toMatch(/unavailable relationship inspection/);
+});
+
 it("stop persists; malformed content re-emits while IO failures remain failures", async () => {
   const { root, artifactsDir } = await fixture(); await satisfyFunctionalPreflight(root, artifactsDir);
   const path = functionalPreflightPath(artifactsDir);

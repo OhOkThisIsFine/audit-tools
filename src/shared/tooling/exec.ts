@@ -43,6 +43,12 @@ export interface RunTrackedOptions {
  */
 export type RunTrackedSyncOptions = RunTrackedOptions & { timeout: number };
 
+type RunTrackedAsyncOptions = RunTrackedOptions & {
+  /** Retain this many UTF-16 code units per stream, from the end. Retention
+   * does not terminate the child; maxBuffer remains a separate strict bound. */
+  diagnosticTailChars?: number;
+};
+
 // sites-pinned: tests/shared/exec.test.ts, tests/shared/exec-utf8-capture.test.ts, tests/shared/exec-owned-bounds.test.ts
 export interface RunTrackedResult {
   status: number | null;
@@ -65,6 +71,8 @@ export interface RunTrackedResult {
    * ruled out.
    */
   signal?: string | null;
+  /** Present in diagnostic-tail mode: which streams dropped earlier text. */
+  outputTruncated?: { stdout: boolean; stderr: boolean };
   /** Observed owned-job cleanup/capture state on a bounded failure. */
   cleanup?: OwnedProcessCleanup;
 }
@@ -636,7 +644,7 @@ export function runTracked(
  */
 export async function runTrackedAsync(
   argv: string[],
-  options: RunTrackedOptions = {},
+  options: RunTrackedAsyncOptions = {},
 ): Promise<RunTrackedResult> {
   if (argv.length === 0) {
     return {
@@ -696,6 +704,18 @@ export async function runTrackedAsync(
     // which corrupts the caller where a refusal would have degraded cleanly.
     const MAX_CAPTURE = Math.max(10 * 1024 * 1024, options.maxBuffer ?? 0);
     const overflowLimit = options.maxBuffer;
+    const tailLimit = options.diagnosticTailChars;
+    const outputTruncated = { stdout: false, stderr: false };
+    const appendOutput = (stream: "stdout" | "stderr", previous: string, text: string): string => {
+      const combined = previous + text;
+      if (tailLimit === undefined || combined.length <= tailLimit) return combined;
+      outputTruncated[stream] = true;
+      let start = combined.length - tailLimit;
+      // A clipped UTF-16 tail must not begin inside a supplementary character.
+      const first = combined.charCodeAt(start);
+      if (first >= 0xDC00 && first <= 0xDFFF) start++;
+      return combined.slice(start);
+    };
 
     let cancelTermination: (() => void) | undefined;
     let stdoutEnded = false;
@@ -750,8 +770,9 @@ export async function runTrackedAsync(
       owned.release();
       // Flush only at terminal settlement (including spawn errors), after the
       // settled guard. Uncaptured chunks must never complete a pending sequence.
-      result.stdout += stdoutDecoder?.end() ?? "";
-      result.stderr += stderrDecoder?.end() ?? "";
+      result.stdout = appendOutput("stdout", result.stdout, stdoutDecoder?.end() ?? "");
+      result.stderr = appendOutput("stderr", result.stderr, stderrDecoder?.end() ?? "");
+      if (tailLimit !== undefined) result.outputTruncated = outputTruncated;
       resolve(result);
     };
     const finishResult = (code: number | null, signal: string | null, spawnError?: Error): void => {
@@ -798,7 +819,7 @@ export async function runTrackedAsync(
       // can hold at most three pending bytes, so corrected decoding can admit a
       // chunk the old replacement-character decoding discarded. An admitted
       // chunk (or terminal flush) can overshoot; this is not a strict output cap.
-      if (kept() < MAX_CAPTURE) {
+      if (tailLimit !== undefined || kept() < MAX_CAPTURE) {
         append(decoder ? decoder.write(chunk) : chunk.toString(encoding));
       }
       if (
@@ -816,7 +837,7 @@ export async function runTrackedAsync(
         chunk,
         stdoutDecoder,
         (text) => {
-          stdout += text;
+          stdout = appendOutput("stdout", stdout, text);
         },
         () => stdoutBytes,
         () => stdout.length,
@@ -828,7 +849,7 @@ export async function runTrackedAsync(
         chunk,
         stderrDecoder,
         (text) => {
-          stderr += text;
+          stderr = appendOutput("stderr", stderr, text);
         },
         () => stderrBytes,
         () => stderr.length,

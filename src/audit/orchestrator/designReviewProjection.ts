@@ -10,15 +10,10 @@
  * critical flows, the risk register, and the deterministic structural findings.
  * When any of those upstreams change, the review's verdict can go stale.
  *
- * The naive trigger — "any byte changed" — re-runs the (expensive, LLM-driven)
- * review on cosmetic churn: a re-derived `generated_at`, a file's content hash
- * moving, a reordered list. Each reviewed input is projected to ONLY
- * the load-bearing structure the review actually reasons about — provenance and
- * metrics stripped, each entry narrowed to its derivable fields and the
- * collections canonically ordered. A cosmetic upstream edit projects to the same
- * value (review stays fresh); a real structural change (a new module, a changed
- * interface, a new surface, a re-scored risk) projects differently and correctly
- * re-stales the review.
+ * Keep genuine source changes as well as structural changes in the input
+ * revision. Intake supplies the digest from the frozen source; this projection
+ * never reads files. Raw-byte binding remains separate from design freshness.
+ * Timestamps, display coordinates, and raw CRLF conversion are not evidence.
  *
  * The generic diff + hashing machinery is single-sourced in
  * `audit-tools/shared/reReview`.
@@ -35,7 +30,7 @@ import {
 import { projectDesignReviewTask, type DesignReviewTaskBundle } from "./designReviewTask.js";
 import type { RepoManifest, UnitManifest } from "../types.js";
 import type { DesignAssessment } from "../types/designAssessment.js";
-import { deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
+import { designReviewPrimaryFiles, deriveUnitScopeDisposition } from "./intentScopeDisposition.js";
 
 /**
  * The narrow read-only slice of the artifact bundle the design-review projection
@@ -87,20 +82,17 @@ function sortStrings(values: readonly string[] | undefined): string[] {
 }
 
 /**
- * Project the file inventory to repository identity + the set of source files
- * by path and language. Per-file metrics (`size_bytes`, `hash`) and the
- * `generated_at` stamp are provenance — a content edit that does not add/remove a
- * file or change its language does not re-stale the architecture review (which
- * re-roams the live code regardless). Excluded files are dropped: they are not
- * part of the reviewed surface, and toggling exclusion is captured via their
- * presence/absence here.
+ * Project in-scope source paths, languages and their intake code identities.
+ * The optional normalized digest is present only where CRLF was converted;
+ * other files use the original hash. The raw byte count is not evidence.
  */
 function projectRepoManifest(bundle: DesignReviewBundle): unknown {
   const manifest = bundle.repo_manifest;
   if (!manifest) return null;
-  const files = (manifest.files ?? [])
-    .filter((file) => !file.excluded)
-    .map((file) => ({ path: file.path, language: file.language }));
+  const inScope = new Set(designReviewPrimaryFiles(manifest.files.filter(file => !file.excluded).map(file => file.path), bundle.intent_checkpoint));
+  const files = manifest.files
+    .filter(file => inScope.has(file.path))
+    .map((file) => ({ path: file.path, language: file.language, code_identity: file.normalized_hash ?? file.hash ?? null }));
   return {
     name: manifest.repository?.name ?? null,
     files: sortByProjection(files),
@@ -127,11 +119,13 @@ function projectUnitManifest(bundle: DesignReviewBundle): unknown {
   const units = bundle.unit_manifest?.units;
   if (!units) return null;
   const checkpoint = bundle.intent_checkpoint;
+  const excluded = new Set(bundle.repo_manifest?.files.filter(file => file.excluded).map(file => file.path));
   const projected = units.map((unit) => ({
     unit_id: unit.unit_id,
     name: unit.name,
     kind: unit.kind ?? null,
     files: sortStrings(unit.files),
+    primary_files: sortStrings(designReviewPrimaryFiles(unit.files, checkpoint, excluded)),
     required_lenses: sortStrings(unit.required_lenses),
     critical_flows: sortStrings(unit.critical_flows),
     scope: deriveUnitScopeDisposition(unit.files, checkpoint).kind,
@@ -162,6 +156,7 @@ function projectGraphBundle(bundle: DesignReviewBundle): unknown {
           path: record.path ?? null,
           handler: record.handler ?? null,
           method: record.method ?? null,
+          provenance: record.provenance ?? null,
         };
       }
       return record;
@@ -212,6 +207,16 @@ function projectRiskRegister(bundle: DesignReviewBundle): unknown {
   return sortByProjection(projected);
 }
 
+/** Coordinates are navigation, not identity; retain only actual citation content. */
+export function sortedDesignLeadLocations(locations: NonNullable<DesignAssessment["findings"]>[number]["affected_files"]) {
+  return sortByProjection(locations.map(({ path, symbol, quoted_text, no_quotable_span }) => ({
+    path,
+    ...(symbol ? { symbol } : {}),
+    ...(quoted_text ? { quoted_text: quoted_text.replaceAll("\r\n", "\n") } : {}),
+    ...(no_quotable_span ? { no_quotable_span } : {}),
+  })));
+}
+
 /**
  * Project the design assessment to ONLY its deterministic structural `findings`
  * (the slice the review actually reads), each narrowed to its identity/content
@@ -232,9 +237,7 @@ function projectDesignAssessmentFindings(bundle: DesignReviewBundle): unknown {
     confidence: finding.confidence,
     lens: finding.lens,
     summary: finding.summary,
-    affected_files: sortStrings(
-      (finding.affected_files ?? []).map((location) => location.path),
-    ),
+    affected_files: sortedDesignLeadLocations(finding.affected_files),
     systemic: finding.systemic ?? false,
     // The lead lineage rides the projection: this slice IS what a review pass
     // reads, so dropping the lineage here would hand the reviewer a deterministic
@@ -242,7 +245,7 @@ function projectDesignAssessmentFindings(bundle: DesignReviewBundle): unknown {
     // promotion-without-a-boundary failure the property forbids. `null` when the
     // finding has no lineage (a host-authored finding), so an old artifact and a
     // new one project identically where there is nothing to say.
-    lead_lineage: finding.lead_lineage ?? null,
+    lead_lineage: finding.lead_lineage ? { producer: finding.lead_lineage.producer, confirmation: finding.lead_lineage.confirmation } : null,
   }));
   return sortByProjection(projected);
 }

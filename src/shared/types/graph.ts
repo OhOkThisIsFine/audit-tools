@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/graph-framework-routes.test.ts
 import { z } from "zod";
 
 export const GraphEdgeSchema = z
@@ -17,6 +18,7 @@ export const RouteEdgeSchema = z
     path: z.string(),
     handler: z.string(),
     method: z.string().optional(),
+    provenance: z.literal("filename_inference").optional(),
   })
   .strict();
 export type RouteEdge = z.infer<typeof RouteEdgeSchema>;

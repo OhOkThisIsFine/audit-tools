@@ -106,6 +106,11 @@ to `next`.
 
 Publishing a GitHub Release triggers the same workflow.
 
+The non-test gate packs once and both packaged smokes install that tarball. The
+publish job downloads the gate's artifact and checks its SHA-256 and packed
+package name and version against the verified checkout. Both live publish and
+dry-run use those same tarball bytes without rebuilding or repacking.
+
 ## Trusted publisher setup
 
 npm Trusted Publishing is configured for this repository. If repository,

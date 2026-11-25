@@ -103,9 +103,9 @@ test("projection: provenance + per-file metrics are stripped (cosmetic edit proj
       repository: { name: "test-repo" },
       generated_at: "2099-12-31T23:59:59Z", // changed stamp
       files: [
-        // size_bytes + hash changed (content edit), path/language same
-        { path: "src/a.ts", language: "typescript", size_bytes: 9999, hash: "zzz" },
-        { path: "src/b.ts", language: "typescript", size_bytes: 1, hash: "qqq" },
+        // Size + raw hashes changed from newline conversion; code identity is the same.
+        { path: "src/a.ts", language: "typescript", size_bytes: 9999, hash: "zzz", normalized_hash: "aaa" },
+        { path: "src/b.ts", language: "typescript", size_bytes: 1, hash: "qqq", normalized_hash: "bbb" },
       ],
     },
     design_assessment: { generated_at: "2099-12-31T23:59:59Z", findings: [] },
@@ -145,6 +145,27 @@ test("projection: a real structural change projects differently", () => {
 
 // ── Staleness + delta ─────────────────────────────────────────────────────────
 
+test("a normalized code change or distinct declaration stales the review, not moved line coordinates", () => {
+  const original = bundle();
+  const file = original.repo_manifest!.files[0]!;
+  const snapshot = buildDesignReviewSnapshot("contract", [], original, "2026-01-01T00:00:00Z");
+  expect(isDesignReviewStale(snapshot, { ...original, repo_manifest: {
+    ...original.repo_manifest!, files: [{ ...file, hash: "changed" }, ...original.repo_manifest!.files.slice(1)],
+  } })).toBe(true);
+  const lead = {
+    id: "lead-1", title: "Lead", summary: "Lead summary", lens: "architecture", category: "bug",
+    severity: "low" as const, confidence: "medium" as const, evidence: [],
+    affected_files: [{ path: file.path, symbol: "originalDeclaration", line_start: 1 }],
+  };
+  const withLead = (location: typeof lead.affected_files[number]) => ({ ...original, design_assessment: {
+    ...original.design_assessment!, findings: [{ ...lead, affected_files: [location] }],
+  } });
+  const location = lead.affected_files[0]!;
+  const leadSnapshot = buildDesignReviewSnapshot("contract", [], withLead(location), "2026-01-01T00:00:00Z");
+  expect(isDesignReviewStale(leadSnapshot, withLead({ ...location, line_start: 9 }))).toBe(false);
+  expect(isDesignReviewStale(leadSnapshot, withLead({ ...location, symbol: "anotherDeclaration" }))).toBe(true);
+});
+
 test("isDesignReviewStale: false on cosmetic edit, true on structural change", () => {
   const base = bundle();
   const snap = snapshotFrom(base);
@@ -154,7 +175,7 @@ test("isDesignReviewStale: false on cosmetic edit, true on structural change", (
       repository: { name: "test-repo" },
       generated_at: "2099-01-01T00:00:00Z",
       files: [
-        { path: "src/a.ts", language: "typescript", size_bytes: 12345, hash: "new" },
+        { path: "src/a.ts", language: "typescript", size_bytes: 12345, hash: "new", normalized_hash: "aaa" },
         { path: "src/b.ts", language: "typescript", size_bytes: 200, hash: "bbb" },
       ],
     },
@@ -275,8 +296,8 @@ test("state.ts: a cosmetic-only change keeps a completed pass satisfied (no re-s
       repository: { name: "test-repo" },
       generated_at: "2099-09-09T00:00:00Z",
       files: [
-        { path: "src/a.ts", language: "typescript", size_bytes: 1, hash: "new" },
-        { path: "src/b.ts", language: "typescript", size_bytes: 2, hash: "new2" },
+        { path: "src/a.ts", language: "typescript", size_bytes: 1, hash: "new", normalized_hash: "aaa" },
+        { path: "src/b.ts", language: "typescript", size_bytes: 2, hash: "new2", normalized_hash: "bbb" },
       ],
     },
     design_assessment: { generated_at: "2099-09-09T00:00:00Z", findings: [], contract_reviewed: true },

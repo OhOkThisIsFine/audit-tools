@@ -135,6 +135,7 @@ function discoverOperationEntries(bundle: ArtifactBundle, { files, sourceStatus 
   }
   const routeCandidates = new Map<string, Set<string>>();
   for (const route of bundle.graph_bundle?.graphs.routes ?? []) {
+    if (route.provenance === "filename_inference") continue;
     const id = `route:${route.method ?? "unspecified"}:${route.path}`;
     const handlers = routeCandidates.get(id) ?? new Set<string>();
     handlers.add(route.handler);

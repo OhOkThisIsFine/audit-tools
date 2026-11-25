@@ -1,3 +1,4 @@
+// sites-pinned: tests/audit/fs-intake.test.ts
 import type { RepoManifest } from "../types.js";
 import { normalizeExtractorPath } from "./pathPatterns.js";
 import { LANGUAGE_BY_EXTENSION } from "./languageMap.generated.js";
@@ -7,6 +8,7 @@ export interface InventoryInputFile {
   path: string;
   size_bytes: number;
   hash?: string;
+  normalized_hash?: string;
 }
 
 // The generated linguist map resolves a few common extensions to obscure
@@ -57,6 +59,7 @@ export function buildRepoManifest(
         language: inferLanguage(file.path),
         size_bytes: file.size_bytes,
         hash: file.hash,
+        ...(file.normalized_hash === undefined ? {} : { normalized_hash: file.normalized_hash }),
       }))
       .sort((a, b) => compareCodeUnits(a.path, b.path)),
   };

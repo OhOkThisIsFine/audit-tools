@@ -269,42 +269,15 @@ test("addFileLineCountHints annotates each task with per-file line counts", asyn
   }
 });
 
-test("addFileLineCountHints maps a missing file to 0 in file_line_counts", async () => {
+test("addFileLineCountHints preserves measured zero but omits unmeasured paths", async () => {
   const dir = setup();
   try {
+    writeFileSync(join(dir, "empty.ts"), "", "utf8");
     const tasks: AuditTask[] = [
-      { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "correctness", file_paths: ["ghost.ts"], rationale: "Fixture task" },
+      { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "correctness", file_paths: ["ghost.ts", "empty.ts"], rationale: "Fixture task" },
     ];
-
-    const result = await addFileLineCountHints(dir, tasks);
-    if (!result[0]?.file_line_counts) {
-      throw new Error("addFileLineCountHints must annotate every returned task");
-    }
-
-    expect(result[0].file_line_counts["ghost.ts"], "Missing file should map to 0").toBe(0);
-  } finally {
-    teardown();
-  }
-});
-
-// CP-NODE-6: file_line_counts is the schema-constrained contract field
-// (`z.number().int().min(0)`) with no "unmeasured" concept — addFileLineCountHints
-// is the deliberate boundary that degrades UNMEASURED_LINE_COUNT (NaN) to a
-// schema-valid 0 rather than leaking the sentinel into a persisted artifact.
-test("addFileLineCountHints degrades the UNMEASURED sentinel to a schema-valid 0, never leaking NaN into file_line_counts", async () => {
-  const dir = setup();
-  try {
-    const tasks: AuditTask[] = [
-      { task_id: "t1", unit_id: "u1", pass_id: "p1", lens: "correctness", file_paths: ["ghost.ts"], rationale: "Fixture task" },
-    ];
-
-    const result = await addFileLineCountHints(dir, tasks);
-    const counts = result[0]?.file_line_counts;
-    if (!counts) throw new Error("addFileLineCountHints must annotate every returned task");
-
-    expect(Number.isNaN(counts["ghost.ts"]), "NaN must never leak into file_line_counts").toBe(false);
-    expect(Number.isInteger(counts["ghost.ts"]), "must stay schema-valid (z.number().int().min(0))").toBe(true);
-    expect(counts["ghost.ts"]).toBe(0);
+    const [task] = await addFileLineCountHints(dir, tasks);
+    expect(JSON.parse(JSON.stringify(task)).file_line_counts).toEqual({ "empty.ts": 0 });
   } finally {
     teardown();
   }

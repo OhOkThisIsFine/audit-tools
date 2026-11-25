@@ -1,8 +1,10 @@
+// sites-pinned: tests/audit/score-audit-command.test.ts
 import { join } from "node:path";
 import {
   readJsonFile,
   writeJsonFile,
   writeTextFile,
+  FindingSchema,
   type Finding,
 } from "audit-tools/shared";
 import {
@@ -13,10 +15,6 @@ import {
   type Scorecard,
 } from "../reporting/scoreAudit.js";
 import { getArtifactsDir, getFlag } from "./args.js";
-
-interface FindingsContainer {
-  findings?: Finding[];
-}
 
 /**
  * `score-audit` — emit the deterministic finding-quality scorecard for a fresh
@@ -30,7 +28,7 @@ interface FindingsContainer {
  *
  * The exit code is wired SOLELY to a hallucination-rate REGRESSION vs --baseline
  * (track-don't-gate: precision/recall are printed but never gate). With no
- * baseline the run only emits the scorecard and always exits 0.
+ * baseline a valid input emits the scorecard without gating on its metrics.
  */
 export async function cmdScoreAudit(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
@@ -48,9 +46,17 @@ export async function cmdScoreAudit(argv: string[]): Promise<void> {
     return;
   }
 
-  let findingsDoc: FindingsContainer;
+  let findings: Finding[];
   try {
-    findingsDoc = await readJsonFile<FindingsContainer>(findingsPath);
+    const document = await readJsonFile<{ findings?: unknown } | null>(findingsPath);
+    if (!document || !Array.isArray(document.findings)) {
+      throw new Error("Expected a findings array. Use an empty array for a zero-findings report.");
+    }
+    findings = document.findings.map((finding, index) => {
+      const parsed = FindingSchema.safeParse(finding);
+      if (!parsed.success) throw new Error(`Invalid finding at index ${index}: ${parsed.error.issues[0]?.message}`);
+      return parsed.data;
+    });
   } catch (error) {
     console.error(
       `Could not read findings at ${findingsPath}: ${(error as Error).message}`,
@@ -58,7 +64,6 @@ export async function cmdScoreAudit(argv: string[]): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const findings = Array.isArray(findingsDoc.findings) ? findingsDoc.findings : [];
 
   let labels: CorpusLabels;
   try {

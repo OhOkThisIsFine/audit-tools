@@ -85,6 +85,9 @@ jobs:
       (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      tarball_sha256: ${{ steps.tarball.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v4
@@ -108,7 +111,27 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm run verify:checks failed."' ERR
+          AUDIT_TOOLS_RELEASE_PACK_DIR=$(mktemp -d "$RUNNER_TEMP/npm-release-pack.XXXXXX")
+          export AUDIT_TOOLS_RELEASE_PACK_DIR
+          echo "AUDIT_TOOLS_RELEASE_PACK_DIR=$AUDIT_TOOLS_RELEASE_PACK_DIR" >> "$GITHUB_ENV"
           npm run verify:checks
+      - name: Identify the smoke-qualified tarball
+        id: tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball=$(node scripts/shared/smoke-tarball.mjs --verify-release)
+          digest=$(sha256sum "$tarball")
+          echo "path=$tarball" >> "$GITHUB_OUTPUT"
+          echo "sha256=${digest%% *}" >> "$GITHUB_OUTPUT"
+      - name: Upload the smoke-qualified tarball
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qualified-npm-tarball-${{ github.run_attempt }}
+          path: ${{ steps.tarball.outputs.path }}
+          if-no-files-found: error
+          compression-level: 0
 
   test:
     needs: [validate-source]
@@ -201,34 +224,37 @@ jobs:
           VERIFIED_RELEASE_SHA: ${{ needs.validate-source.outputs.commit }}
         run: |
           node scripts/shared/verify-release-source.mjs
-      - name: Validate package-lock.json
-        timeout-minutes: 2
+      - name: Download the smoke-qualified tarball
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.gate.outputs.artifact_id }}
+          path: ${{ runner.temp }}/qualified-npm-tarball
+      - name: Verify the tarball bytes and package identity
         shell: bash
+        env:
+          QUALIFIED_SHA256: ${{ needs.gate.outputs.tarball_sha256 }}
         run: |
           set -euo pipefail
-          trap 'echo "::error::package-lock.json is missing or malformed."' ERR
-          node -e "const fs=require('node:fs'); const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); if (typeof lock.lockfileVersion !== 'number') throw new Error('lockfileVersion missing'); if (typeof lock.name !== 'string' || lock.name.length === 0) throw new Error('name missing'); console.log('Validated package-lock.json (lockfileVersion=' + lock.lockfileVersion + ', name=' + lock.name + ')');"
+          shopt -s nullglob
+          tarballs=("$RUNNER_TEMP/qualified-npm-tarball/"*.tgz)
+          [[ ${#tarballs[@]} -eq 1 ]]
+          tarball=${tarballs[0]}
+          echo "$QUALIFIED_SHA256  $tarball" | sha256sum --check --strict
+          tar -xOzf "$tarball" package/package.json | node -e '
+            const fs = require("node:fs");
+            const packed = JSON.parse(fs.readFileSync(0, "utf8"));
+            const source = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            if (packed.name !== source.name || packed.version !== source.version) {
+              throw new Error("Qualified tarball does not match the verified package name and version.");
+            }
+          '
+          echo "RELEASE_TARBALL=$tarball" >> "$GITHUB_ENV"
       - name: Upgrade npm for trusted publishing
         timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
           npm install -g npm@11.5.1 --ignore-scripts
-      - name: Install dependencies
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --prefer-offline --no-audit --no-fund
-      - name: Build dist for packing
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The gate + test jobs already ran the full verify chain. This job only
-          # needs a fresh dist/ so `npm publish --ignore-scripts` packs the shipped
-          # files (files[] includes dist/**) without re-running prepack.
-          npm run build
       - name: Resolve publish metadata
         id: publish_meta
         timeout-minutes: 2
@@ -266,7 +292,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm pack --dry-run
+          tar -tzf "$RELEASE_TARBALL"
       - name: Publish to npm (trusted publishing / tokenless OIDC)
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false' }}
         timeout-minutes: 10
@@ -274,13 +300,10 @@ jobs:
         run: |
           set -euo pipefail
           trap 'echo "::error::npm publish failed. Confirm npm Trusted Publishing is configured for publish-package.yml in OhOkThisIsFine/audit-tools."' ERR
-          # --ignore-scripts: the gate + test jobs already ran verify:release and
-          # this job rebuilt dist; without it, `npm publish` re-runs verify:release
-          # via prepublishOnly on EVERY retry attempt (≈6 min each), blowing the
-          # step timeout.
+          # Publish the artifact installed by both packaged smokes, not this checkout.
           BACKOFF_SECONDS=(5 15)
           for attempt in 1 2 3; do
-            if output=$(npm publish --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
+            if output=$(npm publish "$RELEASE_TARBALL" --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}" 2>&1); then
               echo "$output"
               echo "Publish succeeded on attempt ${attempt}."
               {
@@ -342,7 +365,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm publish --dry-run --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
+          npm publish --dry-run "$RELEASE_TARBALL" --ignore-scripts --access public --tag "${{ steps.publish_meta.outputs.publish_tag }}"
           {
             echo "### Publish outcome"
             echo "- status: dry-run (no upload)"

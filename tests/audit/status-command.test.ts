@@ -1,10 +1,13 @@
 import { test, expect } from "vitest";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ObligationStateSchema } from "audit-tools/shared";
+import { publishAuditQuestionWorkload, submitAuditQuestionResult } from "../../src/audit/cli/dispatch/hostHandoff.js";
+import { writeCurrentStep } from "../../src/audit/cli/steps.js";
+import { REVIEW_QUESTION_CONTRACT_VERSION as version, type ReviewQuestion } from "../../src/shared/types/reviewQuestion.js";
 import { captureConsole } from "./helpers/captureConsole.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -213,6 +216,7 @@ test("cmdStatus includes pending task counts from the ACTIVE run, not the newest
     const parsed = JSON.parse(result.stdout);
 
     expect(parsed.archived_pending_tasks !== null, "pending_tasks should not be null").toBeTruthy();
+    expect(parsed.archived_pending_tasks_state).toBe("available");
     expect(parsed.archived_pending_tasks.total).toBe(3);
     expect(parsed.archived_pending_tasks.remaining).toBe(2);
     expect(parsed.archived_pending_tasks.run_id).toBe(activeRunId);
@@ -240,6 +244,7 @@ test("cmdStatus degrades to no run when the active review-run manifest is malfor
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.archived_pending_tasks).toBe(null);
+    expect(parsed.archived_pending_tasks_state).toBe("unavailable");
     expect(parsed.status).toBe("active");
   });
 });
@@ -266,6 +271,7 @@ test("cmdStatus degrades to no run when no active review run exists, even with r
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.archived_pending_tasks).toBe(null);
+    expect(parsed.archived_pending_tasks_state).toBe("absent");
   });
 });
 
@@ -367,5 +373,52 @@ test("cmdStatus separates a bound question plan from historical task counts", as
     const malformed = JSON.parse((await runStatus(artifactsDir)).stdout);
     expect(malformed.question_review).toBeNull();
     expect(malformed.question_review_unreadable).toBe(true);
+  });
+});
+
+test("status projects the verified current question handoff without ingesting or advancing", async () => {
+  await withTempDir(async (root) => {
+    const artifactsDir = join(root, ".audit-tools", "audit");
+    await mkdir(artifactsDir, { recursive: true });
+    const writeJson = (name: string, value: unknown) => writeFile(join(artifactsDir, name), JSON.stringify(value));
+    const runId = "question-review-status-fixture";
+    const identity = { schema_version: version, question_id: "behavior:test", revision_id: "r1", snapshot_id: "s1" } as const;
+    const question: ReviewQuestion = {
+      ...identity, lens: "behavior", inventory_item_ids: ["item"], expected_outcome: "Inspect",
+      requested_parts: [{ part_id: "scope", expectation: "Inspect" }],
+      source_dependencies: [], evidence_dependencies: [], plan_status: "pending",
+    };
+    const assignment = { ...identity, assignment_id: "review-assignment", authorized_scope: { include: [], exclude: [] }, suggested_sources: [], available_evidence_ids: [] };
+    const boundary = { root, artifactsDir, runId };
+    const plan = { schema_version: version, snapshot_id: "s1", inventory: [], questions: [question], omissions: [], lens_decisions: [] };
+    await writeJson("audit_state.json", { status: "active" });
+    await writeJson("review_session.json", { schema_version: "audit-tools/question-review-session/v1", run_id: runId });
+    await writeJson("review_plan.json", plan);
+    const status = async () => JSON.parse((await runStatus(artifactsDir)).stdout).question_review_handoff;
+    expect(await status()).toEqual({ state: "unavailable" });
+
+    const { workload_path } = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root,
+      bindings: [{ question, assignment, sourceFiles: [], evidence: [], dependencies: [] }] });
+    const emit = (rejected: number) => writeCurrentStep({
+      artifactsDir, repoRoot: root, stepKind: "dispatch_review", status: "ready", runId,
+      progress: { summary: rejected ? "Correct the saved result." : "Wait for answers.", pending_tasks: 1, rejected_tasks: rejected },
+      allowedCommands: [], stopCondition: "Submit then continue.", artifactPaths: { host_workload: workload_path }, prompt: "Fixture",
+    });
+    const step = await emit(0);
+    expect(await status()).toMatchObject({ state: "current", action: "await_results", pending_answers: 1, workload_path: step.artifact_paths.host_workload });
+    await emit(1);
+    expect(await status()).toMatchObject({ state: "current", action: "correct_results", pending_answers: 1 });
+    const source = JSON.stringify({ ...identity, assignment_id: assignment.assignment_id, submission_id: "answer-1",
+      inspected_sources: [], evidence_ids: [], limitations: ["synthetic test"],
+      answer: { outcome: "inconclusive", findings: [], observations: [], parts: [{ part_id: "scope", outcome: "inconclusive", observation_ids: [] }] },
+    });
+    const ledger = join(artifactsDir, "runs", runId, "host-accepted-results-ledger.json");
+    await expect(readFile(ledger)).rejects.toMatchObject({ code: "ENOENT" });
+    await submitAuditQuestionResult({ ...boundary, assignmentId: assignment.assignment_id, source });
+    const before = await readFile(ledger, "utf8");
+    expect(await status()).toMatchObject({ state: "current", action: "continue", pending_answers: 0 });
+    expect(await readFile(ledger, "utf8")).toBe(before);
+    await writeJson("review_plan.json", { ...plan, questions: [{ ...question, revision_id: "r2" }] });
+    expect(await status()).toEqual({ state: "stale" });
   });
 });

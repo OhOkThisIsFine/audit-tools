@@ -542,9 +542,9 @@ test("uniqueSortedRoutes dedupes by signature and sorts by path/handler/method",
   expect(result.map((r) => `${r.method} ${r.path} ${r.handler}`)).toEqual(["GET /a h1", "POST /a h1", "GET /a h2", "GET /b h2"]);
 });
 
-test("fallbackRouteEdge returns a GET edge for api/route paths and undefined otherwise", () => {
+test("fallbackRouteEdge labels api/route paths as inferred, with no claimed verb", () => {
   expect(fallbackRouteEdge("src/api/users.ts")).toEqual({
-    method: "GET",
+    provenance: "filename_inference",
     handler: "src/api/users.ts",
     path: "/src_api_users.ts",
   });
@@ -552,7 +552,7 @@ test("fallbackRouteEdge returns a GET edge for api/route paths and undefined oth
   // convention) produces a defined fallback edge.
   const routeEdge = fallbackRouteEdge("app/dashboard/route.ts");
   expect(routeEdge).toBeTruthy();
-  expect(routeEdge?.method).toBe("GET");
+  expect(routeEdge?.method).toBeUndefined();
   expect(routeEdge?.handler).toBe("app/dashboard/route.ts");
   // An unrelated path yields no fallback edge.
   expect(fallbackRouteEdge("src/lib/util.ts")).toBe(undefined);

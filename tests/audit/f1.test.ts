@@ -156,8 +156,8 @@ test("excluded field: per-file size_bytes/hash churn (content edit) projects byt
         repository: { name: "test-repo" },
         generated_at: "2026-01-01T00:00:00Z",
         files: [
-          { path: "src/a.ts", language: "typescript", size_bytes: 9999, hash: "zzz" },
-          { path: "src/b.ts", language: "typescript", size_bytes: 1, hash: "qqq" },
+          { path: "src/a.ts", language: "typescript", size_bytes: 9999, hash: "zzz", normalized_hash: "aaa" },
+          { path: "src/b.ts", language: "typescript", size_bytes: 1, hash: "qqq", normalized_hash: "bbb" },
         ],
       },
     }),
@@ -383,7 +383,7 @@ test("scope-change re-stale: a disposition_overrides exclusion also re-stales", 
   expect(isDesignReviewStale(snap, scoped)).toBe(true);
 });
 
-test("scope-change re-stale: a partially-excluded unit stays in scope (no spurious re-stale)", () => {
+test("scope-change stales the prior file set even when the partially excluded unit remains in scope", () => {
   // U1 has src/a.ts; excluding only src/a.ts would leave U1 with no in-scope file,
   // so use a unit-internal partial: exclude one of two files and confirm the unit
   // stays in_scope, hence projects identically (no re-stale).
@@ -406,7 +406,7 @@ test("scope-change re-stale: a partially-excluded unit stays in scope (no spurio
     unit_manifest: twoFileUnit.unit_manifest,
     intent_checkpoint: checkpoint({ excluded_scope: [{ path: "src/a.ts", reason: "one file only" }] }),
   });
-  expect(isDesignReviewStale(snap, partiallyExcluded), "a unit with any in-scope file stays in scope → no re-stale").toBe(false);
+  expect(isDesignReviewStale(snap, partiallyExcluded), "a changed primary file set must be reviewed even when its unit stays in scope").toBe(true);
 });
 
 test("scope-change re-stale: rewording an exclusion reason does NOT re-stale (cosmetic)", () => {

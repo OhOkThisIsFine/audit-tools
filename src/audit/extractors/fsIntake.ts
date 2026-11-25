@@ -4,7 +4,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { hashContent, hashContentStream, toPosixPath } from "audit-tools/shared";
 import { join, relative, resolve } from "node:path";
 import type { RepoManifest } from "../types.js";
-import { buildRepoManifest } from "./fileInventory.js";
+import { buildRepoManifest, type InventoryInputFile } from "./fileInventory.js";
+import { hashTextIdentity } from "../../shared/hash.js";
+import { isBinaryArtifact, normalizeExtractorPath } from "./pathPatterns.js";
 
 export interface IntakeOptions {
   root: string;
@@ -63,15 +65,6 @@ function shouldIgnore(relativePath: string, ignores: string[]): boolean {
   });
 }
 
-async function maybeHashFile(
-  path: string,
-  enabled: boolean,
-): Promise<string | undefined> {
-  if (!enabled) return undefined;
-  const content = await readFile(path);
-  return hashContent(content);
-}
-
 interface WalkContext {
   root: string;
   ignores: string[];
@@ -82,7 +75,7 @@ interface WalkContext {
 async function walk(
   ctx: WalkContext,
   current: string,
-  results: Array<{ path: string; size_bytes: number; hash?: string }>,
+  results: InventoryInputFile[],
 ): Promise<void> {
   let entries;
   try {
@@ -121,17 +114,16 @@ async function walk(
     }
 
     // sites-pinned: tests/audit/fs-intake.test.ts
-    let hash: string | undefined;
-    if (info.size <= ctx.maxFileSizeBytes) {
-      hash = await maybeHashFile(absolutePath, ctx.hashFiles);
-    } else if (ctx.hashFiles) {
-      hash = await hashContentStream(createReadStream(absolutePath));
+    let fingerprints: Pick<InventoryInputFile, "hash" | "normalized_hash"> = {};
+    if (ctx.hashFiles) {
+      const source = info.size <= ctx.maxFileSizeBytes
+        ? await readFile(absolutePath) : createReadStream(absolutePath);
+      const binary = isBinaryArtifact(normalizeExtractorPath(relativePath));
+      fingerprints = binary
+        ? { hash: Buffer.isBuffer(source) ? hashContent(source) : await hashContentStream(source) }
+        : await hashTextIdentity(source);
     }
-    results.push({
-      path: relativePath,
-      size_bytes: info.size,
-      hash,
-    });
+    results.push({ path: relativePath, size_bytes: info.size, ...fingerprints });
   }
 }
 
@@ -139,7 +131,7 @@ export async function buildRepoManifestFromFs(
   options: IntakeOptions,
 ): Promise<RepoManifest> {
   const root = resolve(options.root);
-  const files: Array<{ path: string; size_bytes: number; hash?: string }> = [];
+  const files: InventoryInputFile[] = [];
 
   const ctx: WalkContext = {
     root,

@@ -270,7 +270,8 @@ test("the design-review projection carries lead lineage into the reviewed slice"
   ).toBeGreaterThan(0);
   const lineage = withLineage[0].lead_lineage as Record<string, unknown>;
   expect(lineage.producer).toBeDefined();
-  expect(lineage.source_hash).toBeDefined();
+  expect(lineage.source_hash).toBeUndefined();
+  expect(bundle.design_assessment?.findings.some(finding => finding.lead_lineage?.source_hash)).toBe(true);
   expect(lineage.confirmation).toBe("lead");
 });
 
@@ -352,8 +353,8 @@ test("review prompts expose the exact lead identity to retain while independentl
   const lead = design.findings.find(finding => finding.lead_lineage)!;
   expect(lead).toBeDefined();
   const prompt = renderContractReviewPrompt({ design_assessment: design });
-  expect(prompt).toContain("retain the lead's lens, category, title, and affected_files");
+  expect(prompt).toContain("retain the lead's true lens, category, title, and affected file paths");
   expect(prompt).toContain("independently determine severity, confidence, summary, and evidence");
-  expect(prompt).toContain(JSON.stringify({ lens: lead.lens, category: lead.category, title: lead.title, affected_files: lead.affected_files }));
+  expect(prompt).toContain(JSON.stringify({ lens: lead.lens, category: lead.category, title: lead.title, affected_files: lead.affected_files.map(({ path, symbol }) => ({ path, ...(symbol ? { symbol } : {}) })) }));
   expect(prompt).toContain("Do NOT supply `verification_status`, `evidence_lane` or `lead_lineage`");
 });

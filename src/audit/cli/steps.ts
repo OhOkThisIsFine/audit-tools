@@ -52,6 +52,7 @@ export const StepProgressSchema = z
     pending_packets: z.number().int().optional(),
     /** Audit tasks covered by the pending packets. */
     pending_tasks: z.number().int().optional(),
+    rejected_tasks: z.number().int().nonnegative().optional(),
     /** Audit tasks already completed before this run (skipped as done). */
     completed_tasks: z.number().int().optional(),
     /** Packets GRANTED for dispatch this pass (the emergent admission width). */

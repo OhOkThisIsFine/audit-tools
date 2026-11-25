@@ -472,10 +472,7 @@ export const VERBOSE_RED_SCRIPT_SOURCE = [
 
 export const OVERFLOW_SCRIPT = "outrun-capture-buffer.mjs";
 export const OVERFLOW_TEST = `node ${OVERFLOW_SCRIPT}`;
-// NO `process.exit(0)`, deliberately: on linux a pipe write is ASYNCHRONOUS and
-// `process.exit` truncates whatever is still pending, so the child would exit 0
-// for real and never overflow the cap. Left to exit naturally, node stays alive
-// until the stream drains, so all 9MiB must cross the pipe on every platform.
+// Exit naturally so all 9 MiB of output drains on every platform.
 export const OVERFLOW_SCRIPT_SOURCE = [
   'process.stdout.write("x".repeat(9 * 1024 * 1024));',
   "",

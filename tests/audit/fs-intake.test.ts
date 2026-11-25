@@ -124,3 +124,21 @@ test("same-size changes above 1 MiB invalidate content identity and integrity", 
     expect(integrity.is_clean).toBe(false);
   });
 });
+
+
+test("intake binds raw bytes while normalizing CRLF in text, in buffered and streaming modes", async () => {
+  await withTempRepo(async root => {
+    const lf = "export const value = 1;\n";
+    const crlf = lf.replaceAll("\n", "\r\n");
+    await writeFile(join(root, "lf.ts"), lf);
+    await writeFile(join(root, "crlf.ts"), crlf);
+    await writeFile(join(root, "binary.png"), crlf);
+    for (const max_file_size_bytes of [1, 1024]) {
+      const manifest = await buildRepoManifestFromFs({ root, hash_files: true, max_file_size_bytes });
+      const byPath = new Map(manifest.files.map(file => [file.path, file]));
+      expect(byPath.get("lf.ts")?.hash).toBe(byPath.get("crlf.ts")?.normalized_hash);
+      expect(byPath.get("lf.ts")?.hash).not.toBe(byPath.get("crlf.ts")?.hash);
+      expect(byPath.get("binary.png")?.normalized_hash).toBeUndefined();
+    }
+  });
+});

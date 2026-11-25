@@ -1,20 +1,51 @@
 // sites-pinned: tests/audit/status-command.test.ts
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { withArtifactTreeHold } from "../../shared/io/artifactTreeHold.js";
 import { assertNoPendingFoldReceipt } from "../io/foldReceiptPath.js";
-import { isFileMissingError, readJsonFile } from "audit-tools/shared";
-import type { AuditTask } from "../types.js";
+import { assertSubmissionRunId, isFileMissingError, readJsonFile } from "audit-tools/shared";
+import { AuditTaskSchema } from "../types.js";
 import type { AuditState, ObligationState } from "../types/auditState.js";
 import { getArtifactsDir } from "./args.js";
 import { outputJson } from "./cliHelpers.js";
 import { ARTIFACT_DEFINITIONS } from "../io/artifacts.js";
-import { ReviewPlanSchema } from "../../shared/types/reviewQuestion.js";
+import { ReviewPlanSchema, type ReviewPlan } from "../../shared/types/reviewQuestion.js";
 import { readQuestionReviewRunId } from "./questionReviewSession.js";
 import { loadCurrentActiveReviewRun } from "./reviewRun.js";
+import { StepArtifactSchema } from "./steps.js";
+import { inspectAuditQuestionHandoff } from "./dispatch/hostHandoff.js";
+import { getRunPaths } from "../io/runArtifacts.js";
 
 export async function cmdStatus(argv: string[]): Promise<void> {
   const artifactsDir = getArtifactsDir(argv);
   await withArtifactTreeHold(artifactsDir, undefined, () => reportHeldStatus(artifactsDir));
+}
+
+async function questionHandoff(artifactsDir: string, plan: ReviewPlan, runId: string) {
+  try {
+    const step = StepArtifactSchema.parse(await readJsonFile<unknown>(
+      join(artifactsDir, "steps", "current-step.json"),
+    ));
+    const boundPath = step.artifact_paths.host_workload;
+    if (step.step_kind !== "dispatch_review" || step.run_id !== runId ||
+        step.status !== "ready" || !boundPath ||
+        resolve(step.artifacts_dir) !== resolve(artifactsDir)) return { state: "stale" };
+    const issued = await inspectAuditQuestionHandoff({ root: step.repo_root, artifactsDir, runId });
+    const revisions = new Map(plan.questions.map(question => [question.question_id, question.revision_id]));
+    if (resolve(issued.path) !== resolve(boundPath) || issued.stale || issued.questions.some(question =>
+      question.snapshot_id !== plan.snapshot_id || revisions.get(question.question_id) !== question.revision_id
+    ) || step.progress?.pending_tasks !== issued.questions.length) return { state: "stale" };
+
+    const rejectedAtPublication = step.progress.rejected_tasks;
+    const action = issued.pending === 0 ? "continue"
+      : rejectedAtPublication === undefined ? "await_or_correct_results"
+      : rejectedAtPublication > 0 ? "correct_results" : "await_results";
+    return {
+      state: "current", action, workload_path: boundPath, pending_answers: issued.pending,
+      summary: issued.pending === 0 ? "Issued answers are accepted. Run next-step to continue." : step.progress.summary,
+    };
+  } catch {
+    return { state: "unavailable" };
+  }
 }
 
 async function reportHeldStatus(artifactsDir: string): Promise<void> {
@@ -53,15 +84,19 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     }
   }
 
-  // Read only the prepared plan; planned questions are not outstanding answers.
+  // Planned questions are not outstanding answers. Only the published handoff
+  // and accepted ledger can report answer status.
+  let handoff: Awaited<ReturnType<typeof questionHandoff>> | null = null;
   let questionReview: { run_id: string | null; snapshot_id: string; planned_questions: number } | null = null;
   let questionReviewUnreadable = false;
   try {
     const plan = ReviewPlanSchema.parse(await readJsonFile<unknown>(
       join(artifactsDir, ARTIFACT_DEFINITIONS.review_plan.fileName),
     ));
+    const runId = await readQuestionReviewRunId(artifactsDir);
+    if (runId && auditState.status !== "complete") handoff = await questionHandoff(artifactsDir, plan, runId);
     questionReview = {
-      run_id: await readQuestionReviewRunId(artifactsDir) ?? null,
+      run_id: runId ?? null,
       snapshot_id: plan.snapshot_id,
       planned_questions: plan.questions.length,
     };
@@ -76,28 +111,25 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     remaining: number;
   } | null = null;
 
+  let archivedTasksState: "available" | "absent" | "unavailable" = "absent";
   try {
     const activeRun = await loadCurrentActiveReviewRun(artifactsDir);
     if (activeRun) {
-      const tasks = await readJsonFile<AuditTask[]>(
-        activeRun.pending_audit_tasks_path,
-      );
-      if (Array.isArray(tasks)) {
-        // Count remaining: tasks without status "complete"
-        const total = tasks.length;
-        const remaining = tasks.filter(
-          (t) => t.status !== "complete",
-        ).length;
-
-        pendingTasksSummary = {
-          run_id: activeRun.run_id,
-          total,
-          remaining,
-        };
+      assertSubmissionRunId(activeRun.run_id);
+      const path = getRunPaths(artifactsDir, activeRun.run_id).pendingTasksPath;
+      if (resolve(activeRun.pending_audit_tasks_path) !== resolve(path)) {
+        throw new Error("Archived task manifest differs from its run path.");
       }
+      const tasks = AuditTaskSchema.array().parse(await readJsonFile<unknown>(path));
+      pendingTasksSummary = {
+        run_id: activeRun.run_id,
+        total: tasks.length,
+        remaining: tasks.filter(task => task.status !== "complete").length,
+      };
+      archivedTasksState = "available";
     }
   } catch {
-    // Malformed / unreadable active-run manifest: report "no run", never throw.
+    archivedTasksState = "unavailable";
   }
 
   outputJson({
@@ -108,6 +140,8 @@ async function reportHeldStatus(artifactsDir: string): Promise<void> {
     blockers: auditState.blockers ?? [],
     obligations_summary: obligationStates,
     archived_pending_tasks: pendingTasksSummary,
+    archived_pending_tasks_state: archivedTasksState,
+    question_review_handoff: handoff,
     question_review: questionReview,
     question_review_unreadable: questionReviewUnreadable,
   });

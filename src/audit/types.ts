@@ -138,6 +138,8 @@ export const FileRecordSchema = z.object({
   language: z.string(),
   size_bytes: z.number(),
   hash: z.string().optional(),
+  /** Optional LF-normalized code identity; raw hash remains the evidence binding. */
+  normalized_hash: z.string().optional(),
   excluded: z.boolean().optional(),
   exclusion_reason: z.string().optional(),
 });

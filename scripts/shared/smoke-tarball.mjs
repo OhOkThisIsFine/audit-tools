@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// sites-pinned: tests/shared/packaged-smoke-single-pack.test.ts, tests/audit/publish-source-contract.test.ts
 // The single pack behind both packaged smokes.
 //
 // Both packaged smokes install the SAME single audit-tools package, and packing it
@@ -15,6 +16,7 @@
 // into dist/) — and directories are stat'd alongside files so a deletion invalidates
 // too. Anything else forces a repack, so a reused tarball can never be a false green.
 
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -33,6 +35,8 @@ import { hashContent } from './primitives.mjs';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CACHE_MANIFEST = "pack-manifest.json";
+// A fresh release-only directory pins one pack; neither smoke may repack it.
+const RELEASE_PACK_DIR = "AUDIT_TOOLS_RELEASE_PACK_DIR";
 
 /**
  * Per-checkout cache dir under the OS temp root — keyed by repo path so parallel
@@ -111,7 +115,8 @@ function readCachedPack(cacheDir, version) {
     !manifest ||
     manifest.version !== version ||
     typeof manifest.filename !== "string" ||
-    typeof manifest.metadata?.filename !== "string" ||
+    manifest.metadata?.filename !== manifest.filename ||
+    basename(manifest.filename) !== manifest.filename ||
     !Array.isArray(manifest.metadata?.files)
   ) {
     return null;
@@ -230,13 +235,34 @@ export function resolveSmokeTarball(options = {}) {
   const repoRoot = options.repoRoot ?? REPO_ROOT;
   const cacheDir = options.cacheDir ?? cacheDirFor(repoRoot);
   const pack = options.pack ?? packWithNpm;
-  const version = readJsonOrNull(join(repoRoot, "package.json"))?.version;
+  const pkg = readJsonOrNull(join(repoRoot, "package.json"));
+  const version = pkg?.version;
   // The version keys the cache entry; without one there is nothing to key on, and a
   // checkout whose package.json will not parse has a bigger problem than a stale pack.
   if (typeof version !== "string") {
     throw new Error(`no package version in ${join(repoRoot, "package.json")} — cannot key the smoke tarball`);
   }
 
+  if (process.env[RELEASE_PACK_DIR]) {
+    return { ...readReleasePack(process.env[RELEASE_PACK_DIR], pkg), packed: false };
+  }
+
+  return packOrReuse({ repoRoot, cacheDir, pack, version });
+}
+
+function readReleasePack(cacheDir, pkg) {
+  const cached = readCachedPack(cacheDir, pkg.version);
+  if (!cached || cached.metadata.name !== pkg.name || cached.metadata.version !== pkg.version) {
+    throw new Error("Missing or mismatched release tarball; only pack:smoke may create it.");
+  }
+  const digest = createHash("sha512").update(readFileSync(cached.tarballPath)).digest("base64");
+  if (cached.metadata.integrity !== `sha512-${digest}`) {
+    throw new Error("Release tarball does not match the original npm pack integrity.");
+  }
+  return cached;
+}
+
+function packOrReuse({ repoRoot, cacheDir, pack, version }) {
   const cached = readCachedPack(cacheDir, version);
   if (cached && statSync(cached.tarballPath).mtimeMs > newestInputMtimeMs(repoRoot)) {
     return { ...cached, packed: false };
@@ -256,11 +282,30 @@ export function resolveSmokeTarball(options = {}) {
   return { tarballPath, metadata, packed: true };
 }
 
+function prepareReleasePack(cacheDir) {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+  if (existsSync(join(cacheDir, CACHE_MANIFEST))) {
+    throw new Error("A release pack has already been prepared; use a fresh release pack directory.");
+  }
+  const result = packOrReuse({ repoRoot: REPO_ROOT, cacheDir, pack: packWithNpm, version: pkg.version });
+  readReleasePack(cacheDir, pkg);
+  return result;
+}
+
 // `pack:smoke` gate step: produce the tarball the smokes that follow will install.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const { tarballPath, packed } = resolveSmokeTarball();
-    process.stdout.write(`[pack:smoke] ${packed ? "packed" : "reused"} ${tarballPath}\n`);
+    const releaseDir = process.env[RELEASE_PACK_DIR];
+    if (process.argv[2] === "--verify-release") {
+      if (!releaseDir) throw new Error(`Set ${RELEASE_PACK_DIR} to verify the release tarball.`);
+      // Output just the verified path for the workflow to upload and fingerprint.
+      process.stdout.write(resolveSmokeTarball().tarballPath + "\n");
+    } else {
+      const result = releaseDir
+        ? prepareReleasePack(releaseDir)
+        : resolveSmokeTarball();
+      process.stdout.write(`[pack:smoke] ${result.packed ? "packed" : "reused"} ${result.tarballPath}\n`);
+    }
   } catch (error) {
     process.stderr.write(`[pack:smoke] ${/** @type {any} */ (error).message}\n`);
     process.exit(1);

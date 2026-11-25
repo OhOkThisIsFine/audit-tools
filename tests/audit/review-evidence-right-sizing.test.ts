@@ -141,6 +141,20 @@ describe("design-review call-site map: an index plus one slice per unit", () => 
     expect(summary).not.toMatch(/Read it\s+BEFORE re-deriving/);
   });
 
+  test("a mixed unit anchors only primary files; excluded paths remain dependency context", () => {
+    const base = bundle();
+    const context = prepareDesignReviewRecon({
+      ...base, intent_checkpoint: { ...excludesPerformance, excluded_scope: [{ path: "src/a/two.ts", reason: "third party" }] },
+    }, { max_units: 2 }).fileMap;
+    const unitA = context.contextFiles.find(file => file.filename === "review-call-site-map.unit-a.md")!;
+    const unitB = context.contextFiles.find(file => file.filename === "review-call-site-map.unit-b.md")!;
+    expect(unitA.text).toContain("- **src/a/one.ts**");
+    expect(unitA.text).not.toContain("- **src/a/two.ts**");
+    expect(unitB.text).toContain("references: src/a/two.ts");
+    const inventory = JSON.parse(context.contextFiles.find(file => file.filename === "design-review-file-inventory.json")!.text);
+    expect(inventory.excluded).toContain("src/a/two.ts");
+  });
+
   test("a co-change pair is not listed as a call site, and the omission is stated", () => {
     const context = prepareDesignReviewRecon(bundle(), { max_units: 2 }).fileMap;
     const unitA = context.contextFiles[0]!.text;

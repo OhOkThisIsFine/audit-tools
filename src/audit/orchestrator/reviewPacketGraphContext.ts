@@ -90,7 +90,7 @@ function packetEntrypoints(
   for (const path of fileSet) {
     for (const { route } of index.routesByHandler.get(path) ?? []) {
       const method = typeof route.method === "string" ? `${route.method} ` : "";
-      entrypoints.push(`${method}${route.path} -> ${route.handler}`);
+      entrypoints.push(`${method}${route.path} -> ${route.handler}${route.provenance === "filename_inference" ? " (inferred from filename; verify in code)" : ""}`);
     }
   }
   return entrypoints.sort((a, b) => compareCodeUnits(a, b));

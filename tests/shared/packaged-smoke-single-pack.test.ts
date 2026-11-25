@@ -7,7 +7,8 @@
 // rather than rebuilt, and anything that would change the tarball's contents forces
 // a repack (so a reused tarball can never be a false green).
 
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import { statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -124,6 +125,30 @@ describe("packaged smokes share one tarball", () => {
     await utimes(join(root, "README.md"), later, later);
     expect(resolveSmokeTarball({ repoRoot: root, cacheDir, pack }).packed).toBe(true);
     expect(calls.length).toBe(3);
+  });
+
+  test("release smokes only accept the original pack bytes and never silently repack", async () => {
+    const { root, cacheDir } = await fakeCheckout();
+    const { pack, calls } = countingPack();
+    const filename = "audit-tools-9.9.9.tgz";
+    const integrity = `sha512-${createHash("sha512").update("tarball-bytes").digest("base64")}`;
+    const options = { repoRoot: root, cacheDir, pack };
+    const first = resolveSmokeTarball({ ...options, pack: context => {
+      const cached = pack(context);
+      return { ...cached, metadata: { ...cached.metadata, name: "audit-tools", version: "9.9.9", integrity } };
+    } });
+    vi.stubEnv("AUDIT_TOOLS_RELEASE_PACK_DIR", cacheDir);
+    try {
+      expect(resolveSmokeTarball(options)).toMatchObject({ tarballPath: first.tarballPath, packed: false });
+      expect(resolveSmokeTarball(options)).toMatchObject({ tarballPath: first.tarballPath, packed: false });
+      await writeFile(join(cacheDir, filename), "different-bytes");
+      expect(() => resolveSmokeTarball(options)).toThrow(/original npm pack integrity/);
+      await writeFile(join(root, "package.json"), JSON.stringify({ name: "different", version: "9.9.9" }));
+      expect(() => resolveSmokeTarball(options)).toThrow(/mismatched release tarball/);
+      expect(calls).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   test("verify:checks packs once, ahead of both packaged smokes", async () => {

@@ -41,7 +41,7 @@ test("publish contract uses public access and GitHub OIDC trusted publishing", a
   expect(packageJson.scripts?.["release:major:publish"]).toBe("node scripts/release-and-publish.mjs major");
   expect(workflow).toMatch(/id-token: write/);
   expect(workflow).toMatch(/npm install -g npm@11\.5\.1 --ignore-scripts/);
-  expect(workflow).toMatch(/npm pack --dry-run/);
+  expect(workflow).toContain('tar -tzf "$RELEASE_TARBALL"');
   expect(workflow).toMatch(/Registry propagation succeeded after/);
   expect(workflow).toMatch(/for attempt in \{1\.\.24\}/);
   expect(workflow).toMatch(/publish_tag/);

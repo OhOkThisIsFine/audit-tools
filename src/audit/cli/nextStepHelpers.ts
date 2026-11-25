@@ -2979,6 +2979,7 @@ async function runHostDelegationObligation(
     .map(issue => ({ assignmentId: issue.assignment_id, guidance: questionResultCorrection(issue.reason) }));
   const published = await publishAuditQuestionWorkload({
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
+    inventoryOmissionCount: bundle.review_plan?.omissions.length,
   });
   return {
     kind: "emit",

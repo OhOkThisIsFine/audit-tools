@@ -327,7 +327,8 @@ describe("a red is attributed to the run or to the environment", () => {
     const prompt = await readFile(step.prompt_path, "utf8");
     expect(prompt).toContain("Attribution: ENVIRONMENT");
     expect(prompt).toContain("src/other.ts");
-    expect(prompt).toContain("do NOT rework remediation items");
+    expect(prompt).toContain("That does not establish the cause");
+    expect(prompt).not.toContain("do NOT rework remediation items");
   });
 
   it("RUN: a failing path the run itself touched attributes to the run", async () => {

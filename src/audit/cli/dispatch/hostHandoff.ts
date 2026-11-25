@@ -626,6 +626,7 @@ const QuestionWorkloadSchema = z.strictObject({
   run_id: z.string().min(1),
   source_root: z.string().min(1),
   source_files: z.array(QuestionSourceFileSchema),
+  inventory_omission_count: z.number().int().positive().optional(),
   evidence: z.array(ReviewEvidenceSchema),
   work_items: z.array(z.strictObject({ binding: QuestionHandoffBindingSchema, result_path: z.string().min(1) })),
 });
@@ -649,21 +650,25 @@ const questionWorkloadSnapshot = (paths: ResolvedBoundaryPaths, digest: string) 
   join(paths.runDir, "question-workloads", digest, "host-workload.json");
 const questionWorkloadDigest = (workload: QuestionWorkload) => contentSha256(workload);
 
-async function readQuestionWorkload(paths: ResolvedBoundaryPaths) {
+async function readQuestionPublication(paths: ResolvedBoundaryPaths) {
   let digest: string | undefined;
   try {
     digest = z.strictObject({ sha256: z.string().regex(/^[0-9a-f]{64}$/u) })
       .parse(await readJsonFile<unknown>(questionWorkloadPointer(paths))).sha256;
   } catch (error) { if (!isFileMissingError(error)) throw error; }
   // Preserve the old mutable filename as read-only legacy dispatch input.
-  const workload = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(
-    digest ? questionWorkloadSnapshot(paths, digest) : paths.workloadPath));
+  const path = digest ? questionWorkloadSnapshot(paths, digest) : paths.workloadPath;
+  const workload = QuestionWorkloadSchema.parse(await readJsonFile<unknown>(path));
   if (workload.run_id !== paths.runId) throw new Error("Question workload belongs to a different run");
   for (const item of workload.work_items) {
     if (item.result_path !== resultPathFor(paths, item.binding.assignment.assignment_id)) throw new Error("Question result path differs from its issued assignment");
   }
   if (digest && digest !== questionWorkloadDigest(workload)) throw new Error("Question workload no longer matches its issued digest");
-  return workload;
+  return { path, workload };
+}
+
+async function readQuestionWorkload(paths: ResolvedBoundaryPaths) {
+  return (await readQuestionPublication(paths)).workload;
 }
 
 async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
@@ -679,7 +684,7 @@ async function readQuestionLedger(paths: ResolvedBoundaryPaths) {
 }
 
 export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
-  sourceRoot: string; bindings: readonly AuditQuestionBinding[];
+  sourceRoot: string; bindings: readonly AuditQuestionBinding[]; inventoryOmissionCount?: number;
 }) {
   const paths = resolveBoundaryPaths(params);
   const ids = new Set<string>();
@@ -700,6 +705,7 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
   const workload = QuestionWorkloadSchema.parse({
     contract_version: REVIEW_QUESTION_CONTRACT_VERSION, run_id: paths.runId, source_root: toPosixPath(params.sourceRoot),
     source_files: sourceFiles,
+    ...(params.inventoryOmissionCount ? { inventory_omission_count: params.inventoryOmissionCount } : {}),
     evidence: [...evidence.values()].sort((a, b) => compareCodeUnits(a.evidence_id, b.evidence_id)),
     work_items: params.bindings.map((binding) => {
       const { question, assignment } = binding;
@@ -742,6 +748,23 @@ export async function publishAuditQuestionWorkload(params: QuestionBoundary & {
 export async function readAuditQuestionWorkload(params: QuestionBoundary) {
   const paths = resolveBoundaryPaths(params);
   return withFileLock(paths.acceptedLockPath, () => readQuestionWorkload(paths));
+}
+
+/** Inspect the current published work and ledger without consuming queued results. */
+export async function inspectAuditQuestionHandoff(params: QuestionBoundary) {
+  const paths = resolveBoundaryPaths(params);
+  return withFileLock(paths.acceptedLockPath, async () => {
+    const { path, workload } = await readQuestionPublication(paths);
+    const ledger = await readQuestionLedger(paths);
+    const acceptedIds = new Set(ledger.answers.map(row => row.submission.assignment_id));
+    const epochs = questionReopenDependencies(ledger.reopens);
+    return {
+      path,
+      questions: workload.work_items.map(item => item.binding.question),
+      stale: workload.work_items.some(item => !isCurrentQuestionEpoch(item.binding, epochs)),
+      pending: workload.work_items.filter(item => !acceptedIds.has(item.binding.assignment.assignment_id)).length,
+    };
+  });
 }
 
 /** Operator inspection never folds queued worker results. */

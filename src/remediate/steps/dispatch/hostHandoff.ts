@@ -1338,7 +1338,7 @@ export async function precomputeRecoveryTestVerdicts(params: {
   readonly state: unknown;
   /**
    * Per-command deadline, forwarded to {@link runRequiredTest}. Optional for the
-   * same reason `runRequiredTest` takes one: a `timed_out` or `output_overflow`
+   * same reason `runRequiredTest` takes one: a `timed_out`
    * verdict is a first-class outcome of this function, and an outcome reachable
    * only by waiting ten real minutes is an outcome nothing ever tests.
    */

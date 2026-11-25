@@ -287,7 +287,9 @@ it("refuses findings parts without a linked claim and accepts a linked lead", as
 it("keeps the issued manifest stable when a pending subset is published", async () => fixture(async root => {
   const boundary = { root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-run" };
   const a = makeBinding("a"), b = makeBinding("b");
-  const first = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [a, b] });
+  const first = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [a, b], inventoryOmissionCount: 3 });
+  expect(first.workload.inventory_omission_count).toBe(3);
+  expect((await readAuditQuestionWorkload(boundary)).inventory_omission_count).toBe(3);
   const original = await readFile(first.workload_path, "utf8");
   await submitAuditQuestionResult({ ...boundary, assignmentId: "a", source: JSON.stringify(submission("a", "clean")) });
   const second = await publishAuditQuestionWorkload({ ...boundary, sourceRoot: root, bindings: [b] });

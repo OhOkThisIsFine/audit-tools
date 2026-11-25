@@ -8,32 +8,19 @@ import type { RemediationHostWorkItem, RemediationHostIngestIssue } from "./host
 /**
  * A required-test rerun that did not pass, CLASSIFIED.
  *
- * `outcome` is the whole point. A suite that exceeded its deadline, a suite that
- * outran the capture buffer, and a suite that returned non-zero are different
- * facts — the first two are environment signals, only the last is the work being
- * wrong — and they used to arrive as one joined string (`"<cmd> (exit 1)"` /
- * `"<cmd> (ETIMEDOUT)"`) that a caller could only tell apart by parsing prose.
- * Output was not captured at all (`stdio: "ignore"`), so an operator staring at
- * a red ingest had nothing to read.
- *
- * `output_overflow` is separate from `timed_out` because node kills BOTH an
- * over-deadline and an over-`maxBuffer` child with a signal: a discriminator
- * that read `signal !== null` as "the deadline fired" reported a command that
- * was running fine and merely verbose as a hang. `output_overflow` does
- * NOT claim the tests were fine — see {@link describeRequiredTestFailure}; the
- * verdict is simply unknown, because a child killed mid-stream may equally have
- * been on its way to exit 3.
+ * Output is diagnostic only: keep a bounded tail without ending a verbose
+ * child early. The command's exit, deadline, or startup error decides the verdict.
  */
 export interface RequiredTestFailure {
   readonly command: string;
-  readonly outcome: "failed" | "timed_out" | "output_overflow" | "spawn_error";
+  readonly outcome: "failed" | "timed_out" | "spawn_error";
   readonly exit_code: number | null;
   readonly stdout: string;
   readonly stderr: string;
-  /** Full output captured before excerpting; capture itself remains bounded. */
+  /** Bounded diagnostic tails captured before excerpting. */
   readonly output_log?: string;
   /**
-   * The signal that killed the child, when one did and the runner's own caps did
+   * The signal that killed the child, when one did and the runner's deadline did
    * not (an operator `kill`, an OOM reaper). Absent on every other outcome —
    * there is no signal to report — which is why it is optional rather than
    * `string | null`: a caller that reads it gets a name or nothing, never a
@@ -77,27 +64,18 @@ export const REQUIRED_TEST_MESSAGE_LIMIT = 8_000;
 const REQUIRED_TEST_TRUNCATION_MARKER =
   "… [excerpt truncated — captured logs are in .audit-tools/remediation/required-test-logs]";
 
-/**
- * The spawn's raw capture buffer. Exceeding it does not truncate — node KILLS
- * the child — so the cap is a named constant the `output_overflow` message can
- * quote, rather than a literal buried in the spawn options.
- */
-const REQUIRED_TEST_MAX_BUFFER_BYTES = 8 * 1_024 * 1_024;
+/** Bounded diagnostic retention per stream; unlike maxBuffer, never a kill trigger. */
+const REQUIRED_TEST_LOG_TAIL_CHARS = 64 * 1_024;
 
-function tail(value: string | undefined): string {
+function tail(value: string | undefined, clipped = false): string {
   const text = value ?? "";
   return text.length <= CAPTURED_OUTPUT_LIMIT
-    ? text
+    ? (clipped ? "…" + text : text)
     : `…${text.slice(text.length - CAPTURED_OUTPUT_LIMIT)}`;
 }
 
 /**
  * Render one classified failure for a host-facing issue message.
- *
- * `output_overflow` says the verdict is UNKNOWN, not that the tests were fine: a
- * child killed at the buffer cap may have been heading for exit 0 or exit 3, and
- * the runner cannot tell which. Either way the item is refused — the honest
- * report is "we could not find out", and it fails closed.
  *
  * A signal-killed child renders the SIGNAL, not `exit null`: `exit_code` is null
  * for every non-exit outcome, so printing it there described nothing.
@@ -106,14 +84,11 @@ function describeRequiredTestFailure(failure: RequiredTestFailure): string {
   const head =
     failure.outcome === "timed_out"
       ? `${failure.command} (timed out)`
-      : failure.outcome === "output_overflow"
-        ? `${failure.command} (killed after exceeding the ${String(REQUIRED_TEST_MAX_BUFFER_BYTES)}-byte ` +
-          "output buffer — the run ended at the capture cap, so whether the tests pass is UNKNOWN)"
-        : failure.outcome === "spawn_error"
-          ? `${failure.command} (could not be started)`
-          : failure.exit_code === null
-            ? `${failure.command} (terminated by ${failure.signal ?? "an unreported signal"})`
-            : `${failure.command} (exit ${String(failure.exit_code)})`;
+      : failure.outcome === "spawn_error"
+        ? `${failure.command} (could not be started)`
+        : failure.exit_code === null
+          ? `${failure.command} (terminated by ${failure.signal ?? "an unreported signal"})`
+          : `${failure.command} (exit ${String(failure.exit_code)})`;
   const captured = [failure.stdout, failure.stderr]
     .filter((stream) => stream.trim().length > 0)
     .join("\n");
@@ -162,7 +137,7 @@ export async function runRequiredTest(
     // Captured, not discarded: without it a red ingest reports that something
     // failed and nothing about why.
     encoding: "utf8",
-    maxBuffer: REQUIRED_TEST_MAX_BUFFER_BYTES,
+    diagnosticTailChars: REQUIRED_TEST_LOG_TAIL_CHARS,
     timeout: timeoutMs,
     windowsHide: true,
   });
@@ -172,33 +147,30 @@ export async function runRequiredTest(
   await writeJsonFile(output_log, {
     command, stdout: result.stdout ?? "", stderr: result.stderr ?? "",
     status: result.status, signal: result.signal ?? null,
-    overflow_limit_bytes: REQUIRED_TEST_MAX_BUFFER_BYTES, error: result.error?.message ?? null,
+    diagnostic_tail_chars: REQUIRED_TEST_LOG_TAIL_CHARS,
+    stdout_truncated: result.outputTruncated?.stdout ?? false,
+    stderr_truncated: result.outputTruncated?.stderr ?? false,
+    error: result.error?.message ?? null,
   });
-  const stdout = tail(result.stdout);
-  const stderr = tail(result.stderr);
-  // The ERROR CODE discriminates, never `signal`. node kills an over-deadline
-  // child AND an over-`maxBuffer` child, and an external `kill` sets `signal`
-  // too — so `signal !== null` was true for three unrelated facts and reported
-  // all of them as a hang, including a command killed purely for printing more
-  // than the buffer holds.
-  //
-  // ASSUMPTION, stated: a deadline miss reports `ETIMEDOUT`. Verified on win32;
-  // it is node's documented contract, not a platform quirk this code confirmed
-  // everywhere. On a platform that killed a child at the deadline WITHOUT that
-  // code, the case degrades to `spawn_error` — a less specific refusal, still a
-  // refusal, so the fail direction holds and only the label is lost.
+  const stdout = tail(result.stdout, result.outputTruncated?.stdout);
+  const stderr = tail(result.stderr, result.outputTruncated?.stderr);
   const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
   if (code === "ETIMEDOUT") {
     return { command, output_log, outcome: "timed_out", exit_code: null, stdout, stderr };
   }
-  if (code === "ENOBUFS") {
+  // Killed by something outside this runner (an operator `kill`, an OOM reaper).
+  // Reported as FAILED with the signal named: the command did not complete, and
+  // calling it a deadline miss would attribute it to a bound this runner set.
+  //
+  if (result.signal !== null && result.signal !== undefined) {
     return {
       command,
       output_log,
-      outcome: "output_overflow",
+      outcome: "failed",
       exit_code: null,
       stdout,
       stderr,
+      signal: result.signal,
     };
   }
   if (result.error) {
@@ -209,26 +181,6 @@ export async function runRequiredTest(
       exit_code: null,
       stdout,
       stderr: stderr.length > 0 ? stderr : result.error.message,
-    };
-  }
-  // Killed by something outside this runner (an operator `kill`, an OOM reaper).
-  // Reported as FAILED with the signal named: the command did not complete, and
-  // calling it a deadline miss would attribute it to a bound this runner set.
-  //
-  // POSIX-ONLY IN PRACTICE, and UNTESTED for that reason: Windows has no signal
-  // delivery to report here — a killed child surfaces as an ordinary non-zero
-  // `status` with `signal` null — so this branch is unreachable on the platform
-  // this repo runs its suites on, and no test exercises it. It is kept because
-  // the runner is OS-agnostic by contract, not because it has been observed.
-  if (result.signal !== null && result.signal !== undefined) {
-    return {
-      command,
-      output_log,
-      outcome: "failed",
-      exit_code: null,
-      stdout,
-      stderr,
-      signal: result.signal,
     };
   }
   // Every other outcome returned above, so the status is non-zero here.
@@ -273,12 +225,8 @@ export async function rerunRequiredTests(
 }
 
 /**
- * The classified issue for a set of required-test failures. An ENVIRONMENT fact
- * anywhere in the set wins over a red sibling, timeout first: a hung or
- * buffer-killed suite is the fact that explains the ingest, and burying it under
- * a sibling's exit code is exactly the conflation the code split exists to end.
- * Only a set where every failure is a genuine non-zero exit reads as
- * `required_test_failed`.
+ * A timeout takes precedence over other failed required tests in the same batch.
+ * Diagnostic clipping is not a failure and never changes this issue code.
  */
 export function requiredTestIssue(
   workItem: RemediationHostWorkItem,
@@ -294,9 +242,7 @@ export function requiredTestIssue(
   return {
     code: failures.some((failure) => failure.outcome === "timed_out")
       ? "required_test_timed_out"
-      : failures.some((failure) => failure.outcome === "output_overflow")
-        ? "required_test_output_overflow"
-        : "required_test_failed",
+      : "required_test_failed",
     check: "required_tests",
     work_item_id: workItem.id,
     result_path: workItem.result_path,

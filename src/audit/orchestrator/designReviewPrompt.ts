@@ -3,8 +3,9 @@ import type { ArtifactBundle } from "../io/artifacts.js";
 import type { Finding } from "../types.js";
 import { compareCodeUnits, confidenceRank, severityRank, uniqueSorted } from "audit-tools/shared";
 import type { NodeMetrics } from "audit-tools/shared";
+import { resolveIntentLensSelection } from "./lensSelection.js";
 import { projectConceptualCharterContext } from "./designReviewTask.js";
-import { designReviewInputRevision } from "./designReviewProjection.js";
+import { designReviewInputRevision, sortedDesignLeadLocations } from "./designReviewProjection.js";
 import { degradedAnalyzerEntries } from "../types/analyzerCapability.js";
 import {
   buildReviewFileMap,
@@ -14,6 +15,7 @@ import {
 } from "../systemic/reviewFileMap.js";
 import {
   deriveUnitScopeDisposition,
+  designReviewPrimaryFiles,
   type UnitScopeDisposition,
 } from "./intentScopeDisposition.js";
 import { ReviewSubmissionEnvelopeSchema } from "audit-tools/shared";
@@ -152,7 +154,9 @@ interface StartingPoints {
 
 function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): StartingPoints {
   const allUnits = bundle.unit_manifest?.units ?? [];
-  const units = allUnits.filter(unit => deriveUnitScopeDisposition(unit.files, bundle.intent_checkpoint).kind === "in_scope");
+  const excluded = new Set(bundle.repo_manifest?.files.filter(file => file.excluded).map(file => file.path));
+  const units = allUnits.map(unit => ({ ...unit, files: designReviewPrimaryFiles(unit.files, bundle.intent_checkpoint, excluded) }))
+    .filter((unit, index) => unit.files.length > 0 || allUnits[index]!.files.length === 0);
   const all_units_excluded = allUnits.length > 0 && units.length === 0;
   const unitFiles = new Map<string, string[]>();
   for (const unit of units) {
@@ -329,7 +333,7 @@ function omittedByKind(omitted: Finding[]): string[] {
   return [`  Not shown by kind: ${parts.join(", ")}`];
 }
 
-function formatDeterministicFindings(findings: Finding[], nodeMetrics?: NodeMetrics, max = 20): string {
+function formatDeterministicFindings(findings: Finding[], nodeMetrics: NodeMetrics | undefined, lenses: readonly string[] | undefined, max = 20): string {
   if (findings.length === 0)
     return "No structural issues detected by deterministic analysis.";
 
@@ -340,6 +344,7 @@ function formatDeterministicFindings(findings: Finding[], nodeMetrics?: NodeMetr
   // not know which rows are leads will treat them all as verdicts.
   const unlineaged = findings.filter((finding) => finding.lead_lineage === undefined);
   const ordered = representativeOrder(findings, nodeMetrics);
+  const selected = new Set(lenses ?? BUILT_IN_REVIEW_LENSES);
 
   return [
     formatTopNList(
@@ -349,14 +354,14 @@ function formatDeterministicFindings(findings: Finding[], nodeMetrics?: NodeMetr
         `${total} structural findings from deterministic analysis — **leads, not verdicts**. ` +
         "Each is a deterministic heuristic over a generation of the repo; a heuristic can be " +
         "right about the structure and wrong about the project. Confirm one against real code " +
-        "before treating it as a finding. If confirmed, retain the lead's lens, category, title, and affected_files " +
+        "before treating it as a finding. If confirmed under a selected lens, retain the lead's true lens, category, title, and affected file paths " +
         "from its identity below so the tool can match the confirmation; independently determine severity, confidence, summary, and evidence " +
-        "from real code. Do not copy an unverified verdict or supply lead_lineage: the tool attaches provenance after matching.",
+        "from real code. Leads whose owning lens was not selected are context only: do not promote, relabel, or count them as coverage. Do not copy an unverified verdict or supply lead_lineage: the tool attaches provenance after matching.",
       (finding) =>
         `- [${finding.severity}] ${finding.title}: ${finding.summary}` +
         (finding.lead_lineage
-          ? ` _(lead: ${finding.lead_lineage.producer} @ ${finding.lead_lineage.source_hash.slice(0, 12)})_` +
-            `\n  Confirmation identity: ${JSON.stringify({ lens: finding.lens, category: finding.category, title: finding.title, affected_files: finding.affected_files })}`
+          ? ` _(lead: ${finding.lead_lineage.producer})_` +
+            `\n  ${selected.has(finding.lens) ? "Confirmation identity" : "Context-only lead identity"}: ${JSON.stringify({ lens: finding.lens, category: finding.category, title: finding.title, affected_files: sortedDesignLeadLocations(finding.affected_files) })}`
           : ""),
     ),
     ...omittedByKind(ordered.slice(max)),
@@ -564,7 +569,7 @@ export const CONTRACT_FINDING_CATEGORIES = [
  * (`groundDesignFindings`).
  */
 const GROUND_EVERY_FINDING =
-  "**Ground every finding.** Cite at least one real `affected_files` path that exists in this repository — the component your observation is actually about. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.";
+  "**Ground every finding.** Cite at least one real `affected_files` path and quote the relevant code or name the identifiable declaration and behavior in the evidence. Use line numbers only to navigate; they do not substantiate a finding. A finding that cites no real component is surfaced as ungrounded (quarantined), not admitted as confirmed: point at the code, do not invent paths. A whole-system observation should anchor on the file(s) where the structure is clearest.";
 
 /**
  * The JUDGE's worked example: the whole submission, not the findings half.
@@ -786,18 +791,20 @@ export function prepareDesignReviewRecon(
   const inventory = bundle.repo_manifest?.files ?? [];
   if (inventory.length > 0 || units.length > 0) {
     const assigned = new Set(units.flatMap(unit => unit.files));
+    const excluded = new Set(inventory.filter(file => file.excluded).map(file => file.path));
+    const primary = new Set(designReviewPrimaryFiles(inventory.map(file => file.path), bundle.intent_checkpoint, excluded));
     fileMap.contextFiles.push({
       filename: "design-review-file-inventory.json",
       label: "Complete design-review file inventory (look up specific units or paths as needed)",
       text: JSON.stringify({
         units: Object.fromEntries(units.map(unit => [unit.unit_id, uniqueSorted(unit.files)])),
         unassigned: uniqueSorted(inventory.map(file => file.path).filter(path => !assigned.has(path))),
-        excluded: uniqueSorted(inventory.filter(file => file.excluded).map(file => file.path)),
+        excluded: uniqueSorted(inventory.map(file => file.path).filter(path => !primary.has(path))),
       }, null, 2) + "\n",
     });
   }
   return {
-    structuralContext: renderStructuralContext(bundle, startingPoints, fileMap),
+    structuralContext: renderStructuralContext(bundle, startingPoints, fileMap, options.lenses ?? resolveIntentLensSelection(bundle.intent_checkpoint?.lens_selection)),
     charterContext: renderCharterContext(bundle),
     fileMap,
   };
@@ -807,7 +814,7 @@ export function renderSharedStructuralContext(bundle: ArtifactBundle, maxUnits: 
   return prepareDesignReviewRecon(bundle, { max_units: maxUnits }).structuralContext;
 }
 
-function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext): string {
+function renderStructuralContext(bundle: ArtifactBundle, startingPoints: StartingPoints, fileMap: ReviewFileMapContext, lenses: readonly string[] | undefined): string {
   const deterministicFindings = bundle.design_assessment?.findings ?? [];
   const prioritizedReadingList = buildPrioritizedReadingList(startingPoints);
 
@@ -855,7 +862,7 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     "",
     "### Deterministic structural findings",
     "",
-    formatDeterministicFindings(deterministicFindings, bundle.graph_bundle?.node_metrics),
+    formatDeterministicFindings(deterministicFindings, bundle.graph_bundle?.node_metrics, lenses),
     "",
     "### Starting points (orient, then roam)",
     "",

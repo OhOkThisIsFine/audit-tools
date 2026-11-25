@@ -35,6 +35,14 @@ export type UnitScopeDisposition =
  * directory in practice, so one reason is representative). No checkpoint, or any
  * in-scope file ⇒ `in_scope`.
  */
+export function designReviewPrimaryFiles(
+  files: readonly string[],
+  checkpoint: IntentCheckpoint | undefined,
+  excluded: ReadonlySet<string> = new Set(),
+): string[] {
+  return files.filter(file => !excluded.has(file) && (!checkpoint || fileExclusionReason(file, checkpoint, "review") === null));
+}
+
 export function deriveUnitScopeDisposition(
   files: readonly string[],
   checkpoint: IntentCheckpoint | undefined,

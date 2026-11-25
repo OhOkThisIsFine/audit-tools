@@ -580,32 +580,6 @@
         "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
       }
     },
-    "be526ca9e4e1d631": {
-      "reviewed_by": "Codex Windows qualification",
-      "attester_class": "agent",
-      "checked": "Inspected independently reviewed PR70 provenance, mixed finding intake and truthful lens coverage, snapshot trusted-root and cleanup deletion boundaries, tree-sitter disposal, shared scope matching and numeric severity. Native positive and negative ownership, restoration and rollover regressions passed. Fresh unfiltered Windows npm test on exact staged source tree 07714c18605304d83e3c411f6b14619f5579d230 completed 8309 passed, zero failed or unfinished, 38 capability skips. Attribution is agent review; no human identity or OS containment claim.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "07714c18605304d83e3c411f6b14619f5579d230",
-        "ran_at": "2026-10-19T17:58:31.765Z"
-      },
-      "attested_at": "2026-10-19T17:58:51.412Z",
-      "vouches": {
-        "src/audit/cli/nextStepCommand.ts": "9e5ce26ff94fadf6dba273d66236dc91b121708d",
-        "src/audit/cli/nextStepHelpers.ts": "558fa1df7608a1bf482d6c8bfd9e0bb1c3bd5b5c",
-        "src/audit/io/rollover.ts": "3299c92da67e40380a870a02d8daf2f01c853d9e",
-        "src/audit/io/runSnapshot.ts": "b6bba61fe5d33af5391928f577f8481c457a2f78",
-        "src/audit/orchestrator/autoFixExecutor.ts": "dddad389f9db55aafd1c52dc1149230b07722641",
-        "src/audit/orchestrator/intentScopeDisposition.ts": "00bdc2c2efa1c8dc8e39516392d2e375b4a6915d",
-        "src/audit/orchestrator/planningExecutors.ts": "b22f62e2afb5e377dc4c9d1ab1fe7bf2f9d9cfd4",
-        "src/audit/orchestrator/synthesisExecutors.ts": "0b6909d43ddc3212aa9fc01d95ee3254c28fddc1",
-        "src/remediate/steps/contractPipeline.ts": "604ddeda5fd18078378542f5cd86aaf92d5b7c70",
-        "src/remediate/steps/dispatch/hostHandoff.ts": "3c0fd8d922d3ccb90e59dac64ca3c08a1919310d",
-        "src/remediate/steps/nextStep.ts": "72bff5e5d8da4596c8aef2511cd285e52b4ab500"
-      }
-    },
     "c15f5d5c1f74ca4f": {
       "reviewed_by": "claude-opus-5-5-independent-review-subagent,agy-gemini-3.8-flash-high-design-check",
       "attester_class": "agent",
@@ -641,6 +615,31 @@
         "src/shared/engine/obligationEngine.ts": "cbd4d1d26ee2d82b1f13fe788f4a51351814c98d",
         "src/shared/submission/submissionLedger.ts": "e165082d6f38143d8815f2f7db92a298436671a8",
         "src/shared/submission/submissionScan.ts": "ea78d47480eb219dc233b3382793a9c625130e78"
+      }
+    },
+    "cfe244114db006a2": {
+      "reviewed_by": "dot-root",
+      "attester_class": "agent",
+      "checked": "Traced normalized input identity from frozen intake through verdict projection and scoped prompt emission; checked quoted evidence identity, mixed-unit filtering, out-of-lens routing, and verified status ledger/publication without ingest. Compared tail capture and strict-output boundaries, and smoke-qualified archive identity through workflow publishing steps against component tests and final integrated suite.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "389e262e3b19089ec42439b7ec72b3b1c7b8efda",
+        "ran_at": "2026-11-25T17:16:07.410Z"
+      },
+      "attested_at": "2026-11-25T17:16:20.164Z",
+      "vouches": {
+        "src/audit/cli/dispatch/hostHandoff.ts": "60d66d52cc97cc05b9c349e579005b8484e0f111",
+        "src/audit/cli/nextStepCommand.ts": "fabd2eef0d53ab037b8cff8584c4aac229a3819c",
+        "src/audit/cli/nextStepHelpers.ts": "59b6a93f28be4ad6c9c054c8100ca28770ab7bda",
+        "src/audit/orchestrator/designReviewProjection.ts": "3419d5992c52da7e83918ef0303fefc0593f00de",
+        "src/audit/orchestrator/designReviewPrompt.ts": "16a6e1361185d830c230fd94e3c271ba485b8611",
+        "src/audit/orchestrator/intentScopeDisposition.ts": "2f1763b940b95384ec9fa694140aaa6f19a9329d",
+        "src/audit/orchestrator/questionPlanning.ts": "239ea5cde29c79fe6332f61acc6cc31ece026d6a",
+        "src/audit/orchestrator/reviewPacketGraphContext.ts": "c145acd2f08ba28e9c45c5060adc70c0a962752a",
+        "src/remediate/steps/dispatch/hostHandoff.ts": "da20016c26f7bf11b8525bb2236cd41e1fe2e3b5",
+        "src/remediate/steps/dispatch/requiredTests.ts": "dbbcb8b76ae84892fa142ba69b453181825c624c"
       }
     },
     "d261aef2988bbeb5": {
@@ -909,7 +908,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "daa728eac345f91f"
+      "review": "cfe244114db006a2"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -930,10 +929,10 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "07c0619b47133a4a"
+      "review": "cfe244114db006a2"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "435c17a0f11016cc"
+      "review": "cfe244114db006a2"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1011,10 +1010,10 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/designReviewProjection.ts": {
-      "review": "f20b857654eebefb"
+      "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "07c0619b47133a4a"
+      "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "93ab3b5081cedfc1"
@@ -1077,7 +1076,7 @@
       "baseline": "7b79934e86baf378"
     },
     "src/audit/orchestrator/intentScopeDisposition.ts": {
-      "review": "be526ca9e4e1d631"
+      "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/ledger.ts": {
       "baseline": "7b79934e86baf378"
@@ -1113,7 +1112,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "a6bf59c41c6e9e97"
+      "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"
@@ -1137,7 +1136,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/reviewPacketGraphContext.ts": {
-      "review": "f20b857654eebefb"
+      "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/reviewPacketGraphEdges.ts": {
       "review": "f20b857654eebefb"
@@ -1275,10 +1274,10 @@
       "review": "185e1a9338c25bfc"
     },
     "src/remediate/steps/dispatch/hostHandoff.ts": {
-      "review": "185e1a9338c25bfc"
+      "review": "cfe244114db006a2"
     },
     "src/remediate/steps/dispatch/requiredTests.ts": {
-      "review": "e27b7c336e51764b"
+      "review": "cfe244114db006a2"
     },
     "src/remediate/steps/frictionCloseout.ts": {
       "review": "e27b7c336e51764b"

@@ -26,8 +26,7 @@ const LINE_COUNT_BATCH_SIZE = 25;
  * read as a genuine empty file by an unaware call site. A schema-validated
  * contract field that can only ever hold a real count (`AuditTask.file_line_counts`,
  * `z.number().int().min(0)`) must never persist this value — see
- * `addFileLineCountHints` below, which is the boundary that degrades it to 0
- * before the value crosses into that schema-constrained artifact.
+ * `addFileLineCountHints` below omits unmeasured keys when persisting hints.
  */
 export const UNMEASURED_LINE_COUNT = Number.NaN;
 
@@ -113,15 +112,11 @@ export async function addFileLineCountHints(
     tasks.map((task) => ({
       ...task,
       file_line_counts: Object.fromEntries(
-        task.file_paths.map((path) => {
+        task.file_paths.flatMap((path) => {
           const measured = lineIndex[path];
-          // `file_line_counts` is the schema-constrained contract field
-          // (`z.number().int().min(0)` — schemas/audit_result.schema.json,
-          // src/audit/types.ts) with no "unmeasured" concept of its own: degrade
-          // explicitly to 0 HERE, at the boundary where the value leaves this
-          // diagnostic index and enters a persisted, schema-validated artifact,
-          // rather than leaking the UNMEASURED_LINE_COUNT sentinel into it.
-          return [path, isUnmeasuredLineCount(measured) ? 0 : measured] as const;
+          // Absent means this artifact has no measurement; a real zero wins
+          // over fallbacks, so never manufacture one for a failed read.
+          return measured === undefined || isUnmeasuredLineCount(measured) ? [] : [[path, measured]];
         }),
       ),
     })),

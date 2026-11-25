@@ -24,14 +24,17 @@ test("source validation binds gate, every shard and publish to one immutable SHA
   expect(doc.jobs.test.strategy.matrix.shard).toEqual([1, 2, 3, 4]);
 });
 
-test("OIDC publish rechecks the source before any install/build; no floating metadata gate", () => {
+test("OIDC publish rechecks the source before transferring the qualified artifact", () => {
   const doc = workflow();
   const steps = doc.jobs.publish.steps;
   const recheck = steps.findIndex((step: { name: string }) => step.name === "Recheck verified release source");
   expect(recheck).toBeGreaterThan(0);
   expect(steps[recheck].run).toBe("node scripts/shared/verify-release-source.mjs\n");
   expect(steps[recheck].env.VERIFIED_RELEASE_SHA).toBe("${{ needs.validate-source.outputs.commit }}");
-  expect(steps.findIndex((step: { run?: string }) => /npm (?:ci|install)|npm run build/.test(step.run ?? ""))).toBeGreaterThan(recheck);
+  const download = steps.findIndex((step: { uses?: string }) => step.uses?.startsWith("actions/download-artifact@"));
+  expect(download).toBeGreaterThan(recheck);
+  expect(steps[download].with["artifact-ids"]).toBe("${{ needs.gate.outputs.artifact_id }}");
+  expect(steps.map((step: { run?: string }) => step.run ?? "").join("\n")).not.toMatch(/npm ci|npm run build|npm pack/);
   expect(steps[0].with["fetch-depth"]).toBe(0);
   for (const [name, job] of Object.entries(doc.jobs) as [string, { permissions?: Record<string, string> }][]) {
     expect(job.permissions?.["id-token"]).toBe(name === "publish" ? "write" : undefined);
@@ -51,6 +54,33 @@ test("OIDC publish rechecks the source before any install/build; no floating met
   const dry = steps.find((step: { name: string }) => step.name === "Dry run publish (no upload)");
   expect(dry.if).toBe("${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true' }}");
   expect(dry.run).toContain("npm publish --dry-run");
+});
+
+test("publish and dry run consume the single tarball qualified and uploaded by the gate", () => {
+  const { gate, publish } = workflow().jobs;
+  const checks = gate.steps.findIndex((step: { run?: string }) => step.run?.includes("npm run verify:checks"));
+  const tarball = gate.steps.findIndex((step: { id?: string }) => step.id === "tarball");
+  const upload = gate.steps.findIndex((step: { id?: string }) => step.id === "upload");
+  expect(checks).toBeGreaterThan(-1);
+  expect(gate.steps[checks].run).toContain('echo "AUDIT_TOOLS_RELEASE_PACK_DIR=$AUDIT_TOOLS_RELEASE_PACK_DIR" >> "$GITHUB_ENV"');
+  expect(tarball).toBeGreaterThan(checks);
+  expect(gate.steps[tarball].run).toContain("smoke-tarball.mjs --verify-release");
+  expect(upload).toBeGreaterThan(tarball);
+  expect(gate.steps[upload].with.path).toBe("${{ steps.tarball.outputs.path }}");
+  expect(gate.outputs).toEqual({
+    artifact_id: "${{ steps.upload.outputs.artifact-id }}",
+    tarball_sha256: "${{ steps.tarball.outputs.sha256 }}",
+  });
+
+  const verify = publish.steps.findIndex((step: { env?: Record<string, string> }) => step.env?.QUALIFIED_SHA256);
+  const live = publish.steps.findIndex((step: { name: string }) => step.name.startsWith("Publish to npm"));
+  const dry = publish.steps.findIndex((step: { name: string }) => step.name.startsWith("Dry run publish"));
+  expect(verify).toBeGreaterThan(-1);
+  expect(publish.steps[verify].env.QUALIFIED_SHA256).toBe("${{ needs.gate.outputs.tarball_sha256 }}");
+  expect(live).toBeGreaterThan(verify);
+  expect(dry).toBeGreaterThan(verify);
+  expect(publish.steps[live].run).toContain('npm publish "$RELEASE_TARBALL" --ignore-scripts');
+  expect(publish.steps[dry].run).toContain('npm publish --dry-run "$RELEASE_TARBALL" --ignore-scripts');
 });
 
 // Disposable repositories exercise the SAME helper invoked by the workflow.

@@ -279,7 +279,7 @@ test("formatDeterministicFindings — within a metric kind, the strongest value 
   ]);
 });
 
-test("formatDeterministicFindings — a lineage-stamped lead renders its producer and source hash", () => {
+test("formatDeterministicFindings — a lineage-stamped lead renders its producer, not its generation digest", () => {
   const findings = [
     {
       id: "F-0",
@@ -308,8 +308,8 @@ test("formatDeterministicFindings — a lineage-stamped lead renders its produce
   );
 
   expect(
-    section.includes("lead: detectSeams @ abcdef012345"),
-    `a stamped lead must name its producer and source hash in the prompt, got: ${section}`,
+    section.includes("lead: detectSeams") && !section.includes("abcdef012345"),
+    `a stamped lead must name its producer without using its generation digest as code evidence in the prompt, got: ${section}`,
   ).toBeTruthy();
   expect(
     section.includes("carry NO producer lineage record"),

@@ -1760,6 +1760,7 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
         summary: rejected ? rejectionSummary + " See the prompt for how to correct pending results."
           : "Review questions are ready for the host.",
         pending_tasks: result.pendingCount,
+        rejected_tasks: result.rejectedCount,
       },
       stopCondition: "Submit the bound question answers and then run next-step.",
       artifactPaths: { host_workload: result.workloadPath },
@@ -1776,6 +1777,10 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
           "For pending assignments, correct the saved result at the matching workload item's result_path, or submit the corrected bound answer through MCP.",
         ] : []),
         "Use the frozen source, question scope and supplied evidence in each binding. Suggested source files are starting points, not the review boundary.",
+        ...(result.bundle.review_plan?.omissions.length ? [
+          `${result.bundle.review_plan.omissions.length} inventory entr${result.bundle.review_plan.omissions.length === 1 ? "y was" : "ies were"} omitted from issued questions. See the review plan for reasons. Omission is not evidence of clean coverage; do not treat these entries as reviewed.`,
+        ] : []),
+        "Cite the relevant code or identifiable declaration. Line numbers help locate the evidence; they do not establish the claim.",
         "Record scoped supported observations and any unanswered parts. Do not convert missing evidence into a clean answer.",
         "Copy the exact assignment_id, question_id, revision_id and snapshot_id into the answer. Use a distinct submission_id for each independent answer and replay only the same answer under the same ID.",
         "For each part marked findings, include at least one claim linked by observation_ids to a supported observation in that part. This applies to leads and design opportunities as well as confirmed defects; a claim on a different part does not count.",

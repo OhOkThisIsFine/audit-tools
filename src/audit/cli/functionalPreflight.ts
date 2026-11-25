@@ -25,8 +25,8 @@ export const FunctionalPreflightSchema = z.object({
   if (report.decision === "ready" && (!report.source_inspection.available || !report.relationship_inspection.available)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Ready requires working source and relationship inspection." });
   }
-  if (report.decision === "degraded" && (!report.source_inspection.available || !report.operator_approved_degraded || !report.limitation)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "A degraded audit requires source inspection, explicit operator approval, and a concrete limitation." });
+  if (report.decision === "degraded" && (!report.source_inspection.available || report.relationship_inspection.available || !report.operator_approved_degraded || !report.limitation)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "A degraded audit requires working source inspection, unavailable relationship inspection, explicit operator approval, and a concrete limitation." });
   }
 });
 

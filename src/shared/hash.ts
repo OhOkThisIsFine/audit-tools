@@ -22,6 +22,37 @@ export async function hashContentStream(content: AsyncIterable<Uint8Array>): Pro
   return hash.digest("hex");
 }
 
+/** Raw evidence hash plus a distinct CRLF-normalized identity where needed.
+ * A zero byte is treated as binary; no text decoding or semantic whitespace
+ * cleanup occurs. Streaming callers consume one source read, even across CRLF
+ * split between two chunks.
+ */
+export async function hashTextIdentity(content: Buffer | AsyncIterable<Uint8Array>): Promise<{ hash: string; normalized_hash?: string }> {
+  if (Buffer.isBuffer(content)) {
+    const hash = hashContent(content);
+    if (content.includes(0) || !content.includes("\r\n")) return { hash };
+    return { hash, normalized_hash: hashContent(Buffer.from(content.toString("latin1").replaceAll("\r\n", "\n"), "latin1")) };
+  }
+  const raw = createHash("sha256");
+  const normalized = createHash("sha256");
+  let carry = "";
+  let converted = false;
+  let nul = false;
+  for await (const chunk of content) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    raw.update(bytes);
+    if (nul || bytes.includes(0)) { nul = true; continue; }
+    let text = carry + bytes.toString("latin1");
+    carry = text.endsWith("\r") ? "\r" : "";
+    if (carry) text = text.slice(0, -1);
+    if (text.includes("\r\n")) { converted = true; text = text.replaceAll("\r\n", "\n"); }
+    normalized.update(text, "latin1");
+  }
+  const hash = raw.digest("hex");
+  if (nul || !converted) return { hash };
+  return { hash, normalized_hash: normalized.update(carry, "latin1").digest("hex") };
+}
+
 export interface HashContentOptions {
   /**
    * Truncate the hex digest to this many leading characters. Omit for the full

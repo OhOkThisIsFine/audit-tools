@@ -1,9 +1,11 @@
 import { REQUIRED_TEST_MESSAGE_LIMIT, runRequiredTest, type RequiredTestFailure } from "../../src/remediate/steps/dispatch/requiredTests.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanupHostHandoffFixtures, fixture, boundState, resultFor, writeResult, landA, HANG_SCRIPT, HANG_TEST, HANG_SCRIPT_SOURCE, VERBOSE_RED_SCRIPT, VERBOSE_RED_TEST, VERBOSE_RED_SCRIPT_SOURCE, OVERFLOW_SCRIPT, OVERFLOW_TEST, OVERFLOW_SCRIPT_SOURCE, recoveryOptions, orphanBaselineAndLand } from "./helpers/hostHandoffCorroborationFixture.js";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { cleanupHostHandoffFixtures, fixture, boundState, persistBoundState, resultFor, writeResult, landA, HANG_SCRIPT, HANG_TEST, HANG_SCRIPT_SOURCE, VERBOSE_RED_SCRIPT, VERBOSE_RED_TEST, VERBOSE_RED_SCRIPT_SOURCE, OVERFLOW_SCRIPT, OVERFLOW_TEST, OVERFLOW_SCRIPT_SOURCE, recoveryOptions, orphanBaselineAndLand } from "./helpers/hostHandoffCorroborationFixture.js";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSyncHidden } from "../helpers/spawn.mjs";
 
 import { ingestRemediationHostResults } from "../../src/remediate/steps/dispatch/hostHandoff.js";
 
@@ -15,7 +17,7 @@ describe("remediation host handoff repository corroboration", () => {
 
   /**
    * An isolated cwd for the runner tests, deliberately NOT registered for
-   * cleanup: a timed-out or buffer-killed child holds its cwd open until Windows
+   * cleanup: a timed-out child holds its cwd open until Windows
    * releases the handle, so deleting the directory is a race (EBUSY). Isolated
    * per test rather than the shared `tmpdir()` so two runner tests cannot
    * interact through a directory every process on the box also uses.
@@ -32,14 +34,14 @@ describe("remediation host handoff repository corroboration", () => {
     // have STARTED and printed, and a node cold start on a loaded Windows box is
     // not a fixed cost. The child hangs for a minute, so the deadline is the only
     // thing that ends it and the test still finishes in seconds.
-    const hanging = `node -e "console.log('starting'); setTimeout(function () {}, 60000)"`;
+    const hanging = `node -e "process.stdout.write('x'.repeat(9 * 1024 * 1024) + 'before hang'); setTimeout(function () {}, 60000)"`;
     const timedOut = await runRequiredTest(cwd, hanging, 5_000);
     expect(timedOut).not.toBeNull();
     expect(timedOut!.outcome).toBe("timed_out");
     expect(timedOut!.command).toBe(hanging);
     // Captured, not discarded: the old path ran with stdio "ignore" and
     // returned a joined string, so an operator had nothing to read.
-    expect(timedOut!.stdout).toContain("starting");
+    expect(timedOut!.stdout).toContain("before hang");
 
     const failed = await runRequiredTest(
       cwd,
@@ -53,29 +55,22 @@ describe("remediation host handoff repository corroboration", () => {
     expect(await runRequiredTest(cwd, `node -e "process.exit(0)"`)).toBeNull();
   });
 
-  it("classifies a command that outran the capture buffer as overflow, never as a hang", async () => {
+  it("retains bounded tails while a verbose required test reaches its real exit", async () => {
     const cwd = await runnerCwd();
-    // A child that INTENDS a clean exit after printing more than the 8MiB capture
-    // buffer holds — the kill lands first. node terminates it with SIGTERM and
-    // reports ENOBUFS, and a discriminator that read `signal !== null` as "the
-    // deadline fired" called that a timeout, i.e. an environment hang, for a
-    // command whose only sin was being verbose.
-    //
-    // NO `process.exit(0)`, deliberately: on linux a pipe write is ASYNCHRONOUS
-    // and `process.exit` truncates whatever is still pending, so the child emitted
-    // far less than the cap and exited 0 for real — green was the correct reading
-    // of what it actually did, and the fixture never overflowed there at all. Left
-    // to exit naturally, node stays alive until the stream drains, so all 9MiB
-    // must cross the pipe and the cap is hit on every platform. (win32 never
-    // showed this: its pipe writes are synchronous, so the full 9MiB landed either
-    // way.)
-    const overflowing =
-      `node -e "process.stdout.write('x'.repeat(9 * 1024 * 1024))"`;
-    const overflowed = await runRequiredTest(cwd, overflowing);
-    expect(overflowed).not.toBeNull();
-    expect(overflowed!.outcome).toBe("output_overflow");
-    expect(overflowed!.exit_code).toBeNull();
-    expect(overflowed!.command).toBe(overflowing);
+    // Let Node drain both streams rather than calling process.exit early.
+    const noisy = "process.stdout.write('start' + 'x'.repeat(9 * 1024 * 1024) + 'stdout end'); process.stderr.write('y'.repeat(9 * 1024 * 1024) + 'stderr end')";
+    expect(await runRequiredTest(cwd, `node -e "${noisy}"`)).toBeNull();
+    const failed = await runRequiredTest(cwd, `node -e "${noisy}; process.exitCode = 3"`);
+    expect(failed).toMatchObject({ outcome: "failed", exit_code: 3 });
+    expect(failed?.stdout).toMatch(/stdout end$/);
+    expect(failed?.stderr).toMatch(/stderr end$/);
+    const log = JSON.parse(await readFile(failed!.output_log!, "utf8"));
+    expect(log).toMatchObject({ status: 3, stdout_truncated: true, stderr_truncated: true });
+    expect(log.stdout.length).toBeLessThanOrEqual(64 * 1024);
+    expect(log.stderr.length).toBeLessThanOrEqual(64 * 1024);
+    expect(log.stdout).not.toContain("start");
+    expect(log.stdout).toMatch(/stdout end$/);
+    expect(log.stderr).toMatch(/stderr end$/);
   });
 
   // ── OBL-impl-block-1296-inv-2: A REQUIRED TEST MUST NOT STARVE LIVENESS ───
@@ -211,12 +206,7 @@ describe("remediation host handoff repository corroboration", () => {
     ).toBe(true);
   });
 
-  it("reports a buffer-killed required test under its own code, calling the verdict unknown", async () => {
-    // A child that INTENDS a clean exit after printing more than the capture
-    // buffer holds, so node kills it and reports ENOBUFS. The verdict is
-    // produced by the real minter (the table is its brand), so this is the
-    // runner's own classification rather than a hand-written record — which is
-    // the property that makes the `output_overflow` arm trustworthy at all.
+  it("accepts a verbose passing required test through host result recovery", async () => {
     const value = await fixture({ requiredTest: OVERFLOW_TEST });
     await writeFile(
       join(value.root, OVERFLOW_SCRIPT),
@@ -226,22 +216,12 @@ describe("remediation host handoff repository corroboration", () => {
     const landed = await orphanBaselineAndLand(value);
     await writeResult(value, resultFor(value, landed));
 
-    const refused = await ingestRemediationHostResults({
-      root: value.root,
-      artifactsDir: value.artifactsDir,
-      runId: value.runId,
-      state: boundState(value),
-      recovery: await recoveryOptions(value),
-    });
-    if (refused === "unsupported_retired_state") throw new Error("state rejected");
-    expect(refused.accepted_count).toBe(0);
-    // Its OWN code — under required_test_failed the operator would read a
-    // capture-cap kill as the work being wrong. And the message claims UNKNOWN,
-    // not innocence: a child killed mid-stream may equally have been heading for
-    // a non-zero exit, so the honest report is that the run never found out.
-    expect(refused.issues.map((issue) => issue.code)).toEqual([
-      "required_test_output_overflow",
-    ]);
-    expect(refused.issues[0]!.message).toMatch(/UNKNOWN/u);
+    await persistBoundState(value);
+
+    const output = execFileSyncHidden(process.execPath, [
+      fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url)),
+      "recover-ingest", "--root", value.root, "--artifacts-dir", value.artifactsDir, "--run-id", value.runId,
+    ], { cwd: value.root, encoding: "utf8", timeout: 15_000 });
+    expect(JSON.parse(String(output))).toMatchObject({ accepted_count: 1, issues: [] });
   });
 });

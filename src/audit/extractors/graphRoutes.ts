@@ -249,7 +249,7 @@ function scanRequireDestructuring(content: string): DestructuringMatch[] {
 }
 
 function routeSignature(route: RouteEdge): string {
-  return `${route.method ?? ""}\0${route.path}\0${route.handler}`;
+  return `${route.method ?? ""}\0${route.path}\0${route.handler}\0${route.provenance ?? ""}`;
 }
 
 /**
@@ -269,7 +269,8 @@ export function uniqueSortedRoutes(routes: RouteEdge[]): RouteEdge[] {
     (a, b) =>
       compareCodeUnits(a.path, b.path) ||
       compareCodeUnits(a.handler, b.handler) ||
-      compareCodeUnits(a.method ?? "", b.method ?? ""),
+      compareCodeUnits(a.method ?? "", b.method ?? "") ||
+      compareCodeUnits(a.provenance ?? "", b.provenance ?? ""),
   );
 }
 
@@ -867,7 +868,7 @@ export function fallbackRouteEdge(filePath: string): RouteEdge | undefined {
     return {
       path: `/${filePath.replaceAll("/", "_")}`,
       handler: filePath,
-      method: "GET",
+      provenance: "filename_inference",
     };
   }
   return undefined;
