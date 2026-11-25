@@ -99,16 +99,15 @@ export const WORKER_REFUSED_FINDING_VERDICTS = {
     "lead_lineage is stamped by the deterministic producer and must not be supplied",
   question_review_sources:
     "question_review_sources is derived from accepted question submissions and must not be supplied",
-} as const;
+} as const satisfies Partial<Record<keyof typeof FindingSchema.shape, string>>;
 
-export const WorkerFindingSchema = FindingSchema.omit({
-  grounding: true,
-  verification_status: true,
-  severity_downgraded_from: true,
-  evidence_lane: true,
-  lead_lineage: true,
-  question_review_sources: true,
-})
+type ToolOwnedFindingField = keyof typeof WORKER_REFUSED_FINDING_VERDICTS;
+const TOOL_OWNED_FINDING_FIELDS = Object.keys(WORKER_REFUSED_FINDING_VERDICTS) as ToolOwnedFindingField[];
+const workerFindingOmitMask = Object.fromEntries(
+  TOOL_OWNED_FINDING_FIELDS.map((field) => [field, true]),
+) as Record<ToolOwnedFindingField, true>;
+
+export const WorkerFindingSchema = FindingSchema.omit(workerFindingOmitMask)
   .extend({
     category: z.string().min(1),
     // Optionality itself is stated by the prompt renderer (`… is optional:`);
@@ -236,22 +235,14 @@ export const CONTRACT_SCHEMA_PRODUCERS: Record<
 > = {
   "schemas/finding.schema.json": {
     contract: "Finding",
-    omitted: [
-      "grounding",
-      "verification_status",
-      "severity_downgraded_from",
-      "evidence_lane",
-      "lead_lineage",
-      "question_review_sources",
-    ],
+    omitted: TOOL_OWNED_FINDING_FIELDS,
     requiredOverride: ["evidence", "affected_files"],
     added: [],
     message:
       "a FIELD was added to or dropped from the shared FindingSchema without updating the worker " +
       "projection in the SAME change — run `npm run generate-schemas` and commit the rendered " +
-      "schema/ file. If the new field is TOOL-OWNED, add it to WorkerFindingSchema's `.omit`, to " +
-      "WORKER_REFUSED_FINDING_VERDICTS, and to this pairing's `omitted` list; if it is " +
-      "worker-facing, extend the projection.",
+      "schema/ file. Add tool-owned fields to WORKER_REFUSED_FINDING_VERDICTS; " +
+      "for worker-facing fields, extend the projection.",
   },
   "schemas/audit_result.schema.json": {
     contract: "AuditResult",

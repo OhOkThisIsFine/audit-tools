@@ -1,12 +1,13 @@
 import { test, expect, describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { spawnSyncHidden as spawnSync } from "../helpers/spawn.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   WORKER_SCHEMA_SOURCES,
-  renderWorkerJsonSchema,
   WorkerAuditResultsSchema,
   WorkerAuditResultSchema,
   WorkerFindingSchema,
@@ -21,19 +22,26 @@ const schemasDir = join(
   "schemas",
 );
 
-// A6 drift guard: the committed worker-facing JSON schemas are generated from
-// their zod sources. If a contract changes and `generate-schemas.mjs` was not
-// rerun, the committed file diverges from what the source would render — this
-// test catches it so the JSON schema can never drift from the TypeScript type.
-describe("committed worker schemas match their zod sources (run generate-schemas.mjs)", () => {
-  for (const filename of Object.keys(WORKER_SCHEMA_SOURCES)) {
-    it(filename, async () => {
-      const committed = JSON.parse(
-        await readFile(join(schemasDir, filename), "utf8"),
-      );
-      const regenerated = renderWorkerJsonSchema(filename);
-      expect(committed, `schemas/${filename} is stale — run \`node --import tsx/esm scripts/audit/generate-schemas.mjs\``).toEqual(regenerated);
+// Invoke the actual writer once so skipping a registry entry or writing to
+// the wrong destination fails even when the underlying renderer is unchanged.
+test("schema generator writes the full registered set matching committed files", async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), "audit-worker-schemas-"));
+  try {
+    const script = join(schemasDir, "..", "scripts", "audit", "generate-schemas.mjs");
+    const result = spawnSync(process.execPath, ["--import", "tsx/esm", script, "--output-dir", outputDir], {
+      cwd: join(schemasDir, ".."), encoding: "utf8",
     });
+    expect(result.status, result.stderr).toBe(0);
+    const expected = Object.keys(WORKER_SCHEMA_SOURCES).sort();
+    expect((await readdir(outputDir)).sort()).toEqual(expected);
+    for (const filename of expected) {
+      const committed = await readFile(join(schemasDir, filename), "utf8");
+      const generated = await readFile(join(outputDir, filename), "utf8");
+      expect(generated, `schemas/${filename} is stale; run node --import tsx/esm scripts/audit/generate-schemas.mjs`)
+        .toBe(committed.replaceAll("\r\n", "\n"));
+    }
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
   }
 });
 

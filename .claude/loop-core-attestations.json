@@ -899,6 +899,22 @@
         "src/audit/orchestrator/structureExecutors.ts": "5dc0a0e672d564a155a86ee8540620f51c3ebbfb",
         "src/audit/orchestrator/taskAffinityGraph.ts": "259eb5c8a84f8a4e368278168aa5ab21ac4cdda6"
       }
+    },
+    "f30c17fe81b44075": {
+      "reviewed_by": "dogfood_narrative",
+      "attester_class": "agent",
+      "checked": "Independent exact-blob review verified prior planner routing stays before transitions, with unchanged question IDs, selection and data ordering. The sole loop-core source blob matches the reviewed version.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "6e317bee1db1f6dea8265aaace3671ace790cd0b",
+        "ran_at": "2026-11-25T18:35:58.592Z"
+      },
+      "attested_at": "2026-11-25T18:35:58.654Z",
+      "vouches": {
+        "src/audit/orchestrator/questionPlanning.ts": "d4f82b466971bc6d5774b38e5689a88e240e9518"
+      }
     }
   },
   "entries": {
@@ -1131,7 +1147,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/orchestrator/questionPlanning.ts": {
-      "review": "cfe244114db006a2"
+      "review": "f30c17fe81b44075"
     },
     "src/audit/orchestrator/requeue.ts": {
       "review": "42e42270e8c264c9"

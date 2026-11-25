@@ -91,6 +91,19 @@ test.each(["--help", "-h"])("help-looking positionals after -- do not bypass val
   expect(result.stdout).not.toContain("Usage:");
 });
 
+test.each([
+  [["--findings", "-h"], "Could not read findings at -h"],
+  [["--findings=--help"], "Could not read findings at --help"],
+  [["--findings", "--help"], "--findings requires a value"],
+] as const)("help-looking findings operands do not request usage: %j", async (args, error) => {
+  const result = await captureConsole(() =>
+    runCli([process.execPath, "cli.js", "score-audit", ...args, "--labels", "does-not-exist.json"]),
+  );
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain(error);
+  expect(result.stdout).not.toContain("Usage:");
+});
+
 test.each(["--help", "-h"])("help before -- still displays command help: %s", async flag => {
   const result = await captureConsole(() => runCli([process.execPath, "cli.js", "status", flag, "--", "literal"]));
   expect(result.code).toBe(0);

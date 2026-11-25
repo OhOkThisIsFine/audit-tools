@@ -264,6 +264,31 @@ describe("a baseline records starting content and claims no review", () => {
     expect(s.stderr).toContain("already has a baseline");
   });
 
+  test("a seed interrupted during its first write leaves the ledger retryable", () => {
+    writeLoopCore("export const x = 1;\n");
+    g("add", "--", STAGED_LOOP_CORE_PATH);
+    g("commit", "-qm", "unreviewed initial fixture");
+    const interrupt = join(repo, "interrupt-seed.mjs");
+    writeFileSync(interrupt, `
+      import fs from "node:fs";
+      import { syncBuiltinESMExports } from "node:module";
+      const write = fs.writeFileSync;
+      fs.writeFileSync = (path, bytes, options) => {
+        write(path, bytes.slice(0, 3), options);
+        process.exit(73);
+      };
+      syncBuiltinESMExports();
+    `);
+    const interrupted = spawnSync(process.execPath, ["--import", interrupt, SEED, "--commit", "HEAD"], {
+      cwd: repo, encoding: "utf8",
+    });
+    expect(interrupted.status).toBe(73);
+    expect(existsSync(join(repo, LEDGER_PATH))).toBe(false);
+    const retry = seed("--commit", "HEAD");
+    expect(retry.status, retry.stderr).toBe(0);
+    expect(Object.keys(JSON.parse(readFileSync(join(repo, LEDGER_PATH), "utf8")).baselines)).toHaveLength(1);
+  });
+
   test("the gate and the seed refuse a mistyped flag and a flag missing its value with the shared refusal", () => {
     // A bare trailing `--rev` used to be read as "no rev" and judge the index;
     // a mistyped seed flag used to fail with its own wording. Both go through

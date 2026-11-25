@@ -12,12 +12,28 @@ export const NEXT_STEP_ARGUMENTS: AuditArgumentContract = {
   switches: ["--auto-fix", "--dry-run"],
 };
 export function auditArgumentNames(contract: AuditArgumentContract): string[] {
-  return [...COMMON_VALUES, ...(contract.values ?? []), ...(contract.switches ?? []), "--help", "-h"];
+  return [...auditValueNames(contract), ...(contract.switches ?? []), "--help", "-h"];
+}
+
+/** Detect help as an option, not as the operand of a declared value flag. */
+export function auditHelpRequested(args: readonly string[], contract: AuditArgumentContract): boolean {
+  const values = auditValueNames(contract);
+  for (let index = 0; index < args.length; index++) {
+    const token = args[index]!;
+    if (token === "--") break;
+    if (token === "--help" || token === "-h") return true;
+    if (values.includes(token) && args[index + 1] !== "--") index++;
+  }
+  return false;
+}
+
+function auditValueNames(contract: AuditArgumentContract): string[] {
+  return [...COMMON_VALUES, ...(contract.values ?? [])];
 }
 
 /** Validate options and return only positional arguments, respecting option values and `--`. */
 export function validateAuditArguments(command: string, args: readonly string[], contract: AuditArgumentContract): string[] {
-  const values = new Set<string>([...COMMON_VALUES, ...(contract.values ?? [])]);
+  const values = new Set(auditValueNames(contract));
   const switches = new Set(["--help", "-h", ...(contract.switches ?? [])]);
   const positionals: string[] = [];
   let positionalOnly = false;

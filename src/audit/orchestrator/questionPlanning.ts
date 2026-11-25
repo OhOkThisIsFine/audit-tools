@@ -54,6 +54,12 @@ interface Subject {
   evidence?: readonly (readonly [string, string])[];
 }
 
+type AddSubject = (lens: Lens, key: string, kind: InventoryKind, title: string,
+  refs: ReviewSourceRef[], contract: ReviewSourceRef[], expectation: string,
+  linked?: Pick<Subject, "membership" | "evidence"> & { parts?: Part[] }) => string;
+type RecordSignalDisposition = (signalId: string, outcome: SignalDisposition["outcome"],
+  reason: string, refs: ReviewSourceRef[], questionId?: string) => void;
+
 interface Operation {
   id: string;
   title: string;
@@ -211,8 +217,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   const ownership = (refs: readonly ReviewSourceRef[]) => ordered(refs.flatMap((ref) => [...(owners.get(ref.path) ?? [])]));
   const statements = bundle.charter_register?.lanes.find(({ kind }) => kind === "stated")?.nodes ?? [];
   const externalPaths = getExternalSignalPaths(bundle.external_analyzer_results);
-  const add = (lens: Lens, key: string, kind: InventoryKind, title: string, refs: ReviewSourceRef[],
-    contract: ReviewSourceRef[], expectation: string, linked?: Pick<Subject, "membership" | "evidence"> & { parts?: Part[] }) => {
+  const add: AddSubject = (lens, key, kind, title, refs, contract, expectation, linked) => {
     const item: ReviewInventoryItem = { inventory_item_id: ids(kind, key), kind,
       title, source_refs: refs, contract_refs: contract, scope: "in_scope" };
     if (!inventory.some(({ inventory_item_id }) => inventory_item_id === item.inventory_item_id)) inventory.push(item);
@@ -221,8 +226,7 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       membership: linked?.membership, evidence: linked?.evidence });
     return ids(lens, item.inventory_item_id);
   };
-  const disposition = (signal_id: string, outcome: SignalDisposition["outcome"], reason: string,
-    refs: ReviewSourceRef[], question_id?: string) => {
+  const disposition: RecordSignalDisposition = (signal_id, outcome, reason, refs, question_id) => {
     signalDispositions.push({ signal_id, outcome, reason,
       ...(refs.length ? { source_refs: refs } : {}), ...(question_id ? { question_id } : {}) });
   };
@@ -312,6 +316,92 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
       })) });
   }
 
+  routePriorReviewSignals(bundle, (options.scope ?? bundle.scope)?.mode === "full",
+    operationRows, resolveRef, sourceStatus, add, disposition);
+
+  const transitionPaths = [...files.keys()].filter((path) => sourceStatus(path) === undefined && classifyConfiguration(path) !== undefined);
+  const runtimeConfiguration = sourceRefs(transitionPaths.filter((path) => classifyConfiguration(path) === "runtime"));
+  if (runtimeConfiguration.length) add("config_deployment", "runtime", "release_transition", "Runtime configuration", runtimeConfiguration, [],
+    "Confirm supported configuration precedence and the selected runtime behavior.");
+  for (const release of ordered(transitionPaths.filter((path) => classifyConfiguration(path) === "release"))) {
+    add("config_deployment", `release:${release}`, "release_transition", `Release and recovery via ${release}`, [source(release)], [],
+      "Trace the candidate revision, which checks actually qualify it, the artifact that ships, and recovery. If this is not a release workflow, determine its role.");
+  }
+  for (const declaration of options.declaredQuestions ?? []) {
+    const refs = declaration.source_refs.filter(({ path }) => sourceStatus(path) === undefined);
+    const contracts = declaration.contract_refs?.filter(({ path }) => sourceStatus(path, true) === undefined) ?? [];
+    const deferred = refs.length !== declaration.source_refs.length || refs.length === 0;
+    if (deferred) {
+      omissions.push({ surface_id: declaration.key, source_refs: refs,
+        reason: "The explicitly declared question cannot be bound to all requested in-scope inputs." });
+      continue;
+    }
+    add(declaration.lens, `declared:${declaration.key}`, declaration.kind, declaration.title, refs, contracts, declaration.expectation,
+      { parts: declaration.parts ? [...declaration.parts] : undefined });
+  }
+
+  const requested = intent?.lens_selection?.include;
+  const effective = resolveIntentLensSelection(intent?.lens_selection);
+  const allowed = effective === undefined ? undefined : new Set<string>(effective);
+  const excluded = intent?.lens_selection?.exclude ?? [];
+  const eligible = new Set(subjects.map(({ lens }) => lens));
+  const lensDecisions: ReviewPlan["lens_decisions"] = [...BUILT_IN_REVIEW_LENSES,
+    ...ordered([...subjects.map(({ lens }) => lens), ...(requested ?? []), ...excluded]
+      .filter((lens) => !isBuiltIn(lens) && ReviewLensSchema.safeParse(lens).success)) as Lens[]].map((lens) => {
+    if (allowed && !allowed.has(lens)) {
+      return { lens, decision: "excluded",
+        reason: intent?.lens_selection?.omission_reasons?.[lens] ?? "Not selected in the confirmed audit lens scope." };
+    }
+    if (!eligible.has(lens)) return { lens, decision: "not_applicable", reason: "No applicable subject was established from the admitted source, contract and structure evidence." };
+    return { lens, decision: "selected", reason: requested ? "Selected in the confirmed audit lens scope." : "Applicable to a discovered in-scope subject." };
+  });
+  const selected = new Set(lensDecisions.filter(({ decision }) => decision === "selected").map(({ lens }) => lens));
+  const questions = new Map<string, ReviewQuestion>();
+  for (const subject of subjects) {
+    const { inventory: item, lens } = subject;
+    if (!selected.has(lens)) continue;
+    const questionId = ids(lens, item.inventory_item_id);
+    if (questions.has(questionId)) throw new Error(`Duplicate review question identity for ${item.inventory_item_id}`);
+    const sourceDependencies: ReviewQuestion["source_dependencies"] = ordered([...item.source_refs, ...item.contract_refs].map(({ path }) => path))
+      .map((path) => ({ kind: "source", key: path, fingerprint: files.get(path)!.hash! }));
+    if (subject.membership !== undefined) sourceDependencies.push(
+      fingerprintDiscoveredSet(item.inventory_item_id, QUESTION_DISCOVERY_RULE, subject.membership),
+    );
+    const evidenceDependencies: ReviewQuestion["evidence_dependencies"] = (subject.evidence ?? []).map(([key, fingerprint]) => ({ kind: "evidence", key, fingerprint }));
+    const expectedOutcome = isBuiltIn(lens) ? `${subject.expectation} Optional review guidance: ${REVIEW_LENS_PLAYBOOKS[lens]}` : subject.expectation;
+    const revision = digest({ lens, expectedOutcome, parts: subject.parts, sourceDependencies, evidenceDependencies });
+    questions.set(questionId, { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: questionId, revision_id: revision, lens,
+      inventory_item_ids: [item.inventory_item_id], expected_outcome: expectedOutcome, snapshot_id: options.snapshotId,
+      requested_parts: subject.parts, source_dependencies: sourceDependencies, evidence_dependencies: evidenceDependencies,
+      plan_status: "pending" });
+  }
+  const assigned = new Set([...questions.values()].flatMap(({ inventory_item_ids }) => inventory_item_ids));
+  for (const item of inventory) if (item.scope === "in_scope" && !assigned.has(item.inventory_item_id)) {
+    omissions.push({ surface_id: item.inventory_item_id, source_refs: item.source_refs,
+      reason: "Applicable question lies outside the selected lens scope." });
+  }
+  const signal_dispositions = signalDispositions.map(({ question_id, ...item }): SignalDisposition =>
+    question_id && questions.has(question_id) ? { ...item, question_id }
+      : question_id ? { ...item, outcome: "not_promoted", reason: "Verification is outside the selected lens scope." } : item)
+    .sort((a, b) => compareCodeUnits(a.signal_id, b.signal_id));
+  return { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: options.snapshotId,
+    inventory: inventory.sort((a, b) => compareCodeUnits(a.inventory_item_id, b.inventory_item_id)),
+    questions: [...questions.values()].sort((a, b) => compareCodeUnits(a.question_id, b.question_id)),
+    omissions: omissions.sort((a, b) => compareCodeUnits(a.surface_id, b.surface_id)), lens_decisions: lensDecisions,
+    ...(signal_dispositions.length ? { signal_dispositions } : {}) };
+}
+
+// Prior claims and structural/analyzer cues nominate bounded subjects; only the
+// planner applies lens selection and turns those subjects into final questions.
+function routePriorReviewSignals(
+  bundle: ArtifactBundle,
+  fullScope: boolean,
+  operationRows: readonly Operation[],
+  resolveRef: ReturnType<typeof discoverOperationEntries>["resolveRef"],
+  sourceStatus: ReturnType<typeof reviewSourceScope>["sourceStatus"],
+  add: AddSubject,
+  disposition: RecordSignalDisposition,
+): void {
   const distinctRefs = (refs: readonly ReviewSourceRef[]) => [...new Map(
     refs.map(ref => [stableStringify(ref), ref]),
   ).entries()].sort(([a], [b]) => compareCodeUnits(a, b)).map(([, ref]) => ref);
@@ -369,7 +459,6 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
   // Prefer actual relationship endpoints, exact in-file sites, or a unique
   // workflow. Full scope can also verify a file-wide complexity cue without
   // mistaking the metric for a particular mechanism or a verdict.
-  const fullScope = (options.scope ?? bundle.scope)?.mode === "full";
   const groups = new Map<string, { operation?: Operation; fileWide?: boolean; items: Array<{ lead: Finding; refs: ReviewSourceRef[] }> }>();
   const namedRelationship = new Set(["architectural_seam", "dependency_cycle", "hidden_coupling"]);
   const metricFamily = new Set(["complexity_hotspot", "code_duplication"]);
@@ -452,75 +541,4 @@ export function buildReviewQuestionPlan(bundle: ArtifactBundle, options: PlanOpt
           : index ? "Same source relationship or exact site and mechanism." : "Concrete structural mechanism for review.", refs, target);
     }
   }
-
-  const transitionPaths = [...files.keys()].filter((path) => sourceStatus(path) === undefined && classifyConfiguration(path) !== undefined);
-  const runtimeConfiguration = sourceRefs(transitionPaths.filter((path) => classifyConfiguration(path) === "runtime"));
-  if (runtimeConfiguration.length) add("config_deployment", "runtime", "release_transition", "Runtime configuration", runtimeConfiguration, [],
-    "Confirm supported configuration precedence and the selected runtime behavior.");
-  for (const release of ordered(transitionPaths.filter((path) => classifyConfiguration(path) === "release"))) {
-    add("config_deployment", `release:${release}`, "release_transition", `Release and recovery via ${release}`, [source(release)], [],
-      "Trace the candidate revision, which checks actually qualify it, the artifact that ships, and recovery. If this is not a release workflow, determine its role.");
-  }
-  for (const declaration of options.declaredQuestions ?? []) {
-    const refs = declaration.source_refs.filter(({ path }) => sourceStatus(path) === undefined);
-    const contracts = declaration.contract_refs?.filter(({ path }) => sourceStatus(path, true) === undefined) ?? [];
-    const deferred = refs.length !== declaration.source_refs.length || refs.length === 0;
-    if (deferred) {
-      omissions.push({ surface_id: declaration.key, source_refs: refs,
-        reason: "The explicitly declared question cannot be bound to all requested in-scope inputs." });
-      continue;
-    }
-    add(declaration.lens, `declared:${declaration.key}`, declaration.kind, declaration.title, refs, contracts, declaration.expectation,
-      { parts: declaration.parts ? [...declaration.parts] : undefined });
-  }
-
-  const requested = intent?.lens_selection?.include;
-  const effective = resolveIntentLensSelection(intent?.lens_selection);
-  const allowed = effective === undefined ? undefined : new Set<string>(effective);
-  const excluded = intent?.lens_selection?.exclude ?? [];
-  const eligible = new Set(subjects.map(({ lens }) => lens));
-  const lensDecisions: ReviewPlan["lens_decisions"] = [...BUILT_IN_REVIEW_LENSES,
-    ...ordered([...subjects.map(({ lens }) => lens), ...(requested ?? []), ...excluded]
-      .filter((lens) => !isBuiltIn(lens) && ReviewLensSchema.safeParse(lens).success)) as Lens[]].map((lens) => {
-    if (allowed && !allowed.has(lens)) {
-      return { lens, decision: "excluded",
-        reason: intent?.lens_selection?.omission_reasons?.[lens] ?? "Not selected in the confirmed audit lens scope." };
-    }
-    if (!eligible.has(lens)) return { lens, decision: "not_applicable", reason: "No applicable subject was established from the admitted source, contract and structure evidence." };
-    return { lens, decision: "selected", reason: requested ? "Selected in the confirmed audit lens scope." : "Applicable to a discovered in-scope subject." };
-  });
-  const selected = new Set(lensDecisions.filter(({ decision }) => decision === "selected").map(({ lens }) => lens));
-  const questions = new Map<string, ReviewQuestion>();
-  for (const subject of subjects) {
-    const { inventory: item, lens } = subject;
-    if (!selected.has(lens)) continue;
-    const questionId = ids(lens, item.inventory_item_id);
-    if (questions.has(questionId)) throw new Error(`Duplicate review question identity for ${item.inventory_item_id}`);
-    const sourceDependencies: ReviewQuestion["source_dependencies"] = ordered([...item.source_refs, ...item.contract_refs].map(({ path }) => path))
-      .map((path) => ({ kind: "source", key: path, fingerprint: files.get(path)!.hash! }));
-    if (subject.membership !== undefined) sourceDependencies.push(
-      fingerprintDiscoveredSet(item.inventory_item_id, QUESTION_DISCOVERY_RULE, subject.membership),
-    );
-    const evidenceDependencies: ReviewQuestion["evidence_dependencies"] = (subject.evidence ?? []).map(([key, fingerprint]) => ({ kind: "evidence", key, fingerprint }));
-    const expectedOutcome = isBuiltIn(lens) ? `${subject.expectation} Optional review guidance: ${REVIEW_LENS_PLAYBOOKS[lens]}` : subject.expectation;
-    const revision = digest({ lens, expectedOutcome, parts: subject.parts, sourceDependencies, evidenceDependencies });
-    questions.set(questionId, { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, question_id: questionId, revision_id: revision, lens,
-      inventory_item_ids: [item.inventory_item_id], expected_outcome: expectedOutcome, snapshot_id: options.snapshotId,
-      requested_parts: subject.parts, source_dependencies: sourceDependencies, evidence_dependencies: evidenceDependencies,
-      plan_status: "pending" });
-  }
-  const assigned = new Set([...questions.values()].flatMap(({ inventory_item_ids }) => inventory_item_ids));
-  for (const item of inventory) if (item.scope === "in_scope" && !assigned.has(item.inventory_item_id)) {
-    omissions.push({ surface_id: item.inventory_item_id, source_refs: item.source_refs,
-      reason: "Applicable question lies outside the selected lens scope." });
-  }
-  const signal_dispositions = signalDispositions.map(({ question_id, ...item }): SignalDisposition =>
-    question_id && questions.has(question_id) ? { ...item, question_id }
-      : question_id ? { ...item, outcome: "not_promoted", reason: "Verification is outside the selected lens scope." } : item)
-    .sort((a, b) => compareCodeUnits(a.signal_id, b.signal_id));
-  return { schema_version: REVIEW_QUESTION_CONTRACT_VERSION, snapshot_id: options.snapshotId,
-    inventory: inventory.sort((a, b) => compareCodeUnits(a.inventory_item_id, b.inventory_item_id)),
-    questions: [...questions.values()].sort((a, b) => compareCodeUnits(a.question_id, b.question_id)),
-    omissions: omissions.sort((a, b) => compareCodeUnits(a.surface_id, b.surface_id)), lens_decisions: lensDecisions,
-    ...(signal_dispositions.length ? { signal_dispositions } : {}) };
 }

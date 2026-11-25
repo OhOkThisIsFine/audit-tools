@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,7 +50,10 @@ test("snapshot-bound questions feed standalone synthesis only after accepted ans
       await mkdir(dirname(file), { recursive: true });
       await writeFile(file, JSON.stringify(response));
       if (index === 0) {
+        const readLedger = () => existsSync(ledgerFile) ? readFile(ledgerFile) : undefined;
+        const ledgerBeforeRefusal = await readLedger();
         await expect(runWrapper(["force-synthesis"], { cwd: root })).rejects.toThrow(/report-ready state/);
+        expect(await readLedger()).toEqual(ledgerBeforeRefusal);
       }
       await runWrapper(["submit", "--work-item", assignment.assignment_id, "--from", file], { cwd: root });
     }

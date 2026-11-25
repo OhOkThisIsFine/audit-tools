@@ -16,6 +16,7 @@ import {
 import { intakeSummaryFixture } from "./helpers/intakeSummaryFixture.js";
 import { validateSuppliedInput } from "../../src/remediate/steps/intakeResolver.js";
 import { normalizePromptBodyPaths } from "../../src/shared/tooling/exec.js";
+import { runBounded } from "../helpers/spawn.mjs";
 import { scratchDir } from "../helpers/scratch.js";
 import { buildSampleAuditBundle, SAMPLE_REPORT_FINDING } from "../../src/audit/cli/sampleRunCommand.js";
 
@@ -190,6 +191,26 @@ describe("resolveIntakeStep", () => {
         label: "audit-findings",
       },
     ]);
+  });
+
+  it("refuses two explicit canonical audit reports without selecting either", async () => {
+    const paths = intakePaths(join(TEST_DIR, ".audit-tools", "remediation"));
+    const first = join(TEST_DIR, "first-audit-findings.json");
+    const second = join(TEST_DIR, "second-audit-findings.json");
+    await writeFile(first, JSON.stringify(buildSampleAuditBundle([SAMPLE_REPORT_FINDING]).auditFindings));
+    await writeFile(second, JSON.stringify(buildSampleAuditBundle().auditFindings));
+
+    const cli = fileURLToPath(new URL("../../remediate-code.mjs", import.meta.url));
+    const { CLAUDECODE: _cc, ...env } = process.env;
+    const { stdout } = await runBounded(process.execPath, [
+      cli, "next-step", "--input", first, "--input", second,
+    ], { cwd: TEST_DIR, env });
+    expect(JSON.parse(stdout)).toMatchObject({
+      step_kind: "collect_starting_point",
+      status: "blocked",
+      stop_condition: "Select one canonical audit report for remediation.",
+    });
+    await expect(readFile(paths.sourceManifest)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("N-R06: ready structured_audit intake returns pipeline_ready (no fast path, no extract_findings)", async () => {

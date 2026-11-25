@@ -13,7 +13,8 @@
 //
 // It writes the ledger and does not stage it; stage and commit it yourself.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   LEDGER_PATH,
@@ -73,7 +74,15 @@ for (const copy of [staged, onDisk]) {
 }
 const { ledger } = /** @type {{ ledger: import('./shared/loopCoreAttestationLedger.mjs').Ledger }} */ (result);
 mkdirSync(dirname(ledgerFile), { recursive: true });
-writeFileSync(ledgerFile, serializeLedger(ledger), 'utf8');
+// Write beside the canonical ledger so an interruption cannot leave it partial.
+const temp = `${ledgerFile}.${randomUUID()}.tmp`;
+try {
+  writeFileSync(temp, serializeLedger(ledger), { encoding: 'utf8', flag: 'wx' });
+  if (onDisk.kind === 'missing') linkSync(temp, ledgerFile);
+  else renameSync(temp, ledgerFile);
+} finally {
+  rmSync(temp, { force: true });
+}
 console.log(
   `seed-loop-core-baseline: wrote ${LEDGER_PATH} with a baseline of ${commitBlobs.size} loop-core path(s) at ` +
     `${commit.slice(0, 12)} (${Object.keys(ledger.entries).length} still tracked). Not staged.`,

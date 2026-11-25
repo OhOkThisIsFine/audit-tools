@@ -53,8 +53,13 @@ describe("itemStatus — statusToDisposition", () => {
       expect(statusToDisposition(status)).toBe(cases[status]);
     });
   }
-  it("unknown status falls back to abandoned", () => {
-    expect(statusToDisposition("not-a-status")).toBe("abandoned");
+  it.each(["not-a-status", "toString"])("unknown status %s is not classified and falls back to abandoned at close", (status) => {
+    expect(isInProgressStatus(status)).toBe(false);
+    expect(isTerminalStatus(status)).toBe(false);
+    expect(isVerifiedCompleteStatus(status)).toBe(false);
+    expect(isSkipStatus(status)).toBe(false);
+    expect(isUnsuccessfulEndStatus(status)).toBe(false);
+    expect(statusToDisposition(status)).toBe("abandoned");
   });
 });
 

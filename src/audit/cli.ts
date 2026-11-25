@@ -1,5 +1,5 @@
 // sites-pinned: tests/audit/cli-dispatcher.test.ts, tests/audit/functional-preflight.test.ts
-import { validateAuditArguments, auditArgumentNames, NEXT_STEP_ARGUMENTS, type AuditArgumentContract } from "./cli/argumentContract.js";
+import { validateAuditArguments, auditArgumentNames, auditHelpRequested, NEXT_STEP_ARGUMENTS, type AuditArgumentContract } from "./cli/argumentContract.js";
 import { requireFunctionalPreflight } from "./cli/functionalPreflight.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -90,9 +90,7 @@ export const COMMAND_ROUTES: ReadonlyArray<
 async function main(argv: string[]): Promise<void> {
   const command = argv[2];
   const route = COMMAND_ROUTES.find(([verb]) => verb === command);
-  const delimiter = argv.indexOf("--", 2);
-  const helpArgs = argv.slice(2, delimiter < 0 ? undefined : delimiter);
-  if (command === undefined || helpArgs.some((arg) => arg === "--help" || arg === "-h")) {
+  if (command === undefined || auditHelpRequested(argv.slice(route ? 3 : 2), route?.[2] ?? {})) {
     console.log(`Usage: audit-code ${route ? command : "<command>"} [options]`);
     if (route) console.log(`Options: ${auditArgumentNames(route[2]).join(", ")}`);
     console.log(

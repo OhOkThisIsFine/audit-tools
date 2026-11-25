@@ -154,8 +154,9 @@ describe("the step-command MODE contract", () => {
   });
 
   it("cmdPlan runs the drain draw: no forced executor reaches runAuditStep", async () => {
-    await cmdPlan(["--root", root]);
+    await cmdPlan(["--root", root, "--since", "HEAD~2"]);
     expect(stepCalls).toHaveLength(1);
+    expect(stepCalls[0]).toHaveProperty("since", "HEAD~2");
     expect(stepCalls[0]).not.toHaveProperty("preferredExecutor");
   });
 });
