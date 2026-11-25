@@ -56,8 +56,8 @@ describe(CONTRACT_NAME, () => {
 
       const prompt = await readFile(next.artifact_paths.current_prompt, "utf8");
       expect(prompt).toContain("## Saved results not accepted");
-      expect(prompt).toContain("`" + rejectedItem.binding.assignment.assignment_id + "`: Binding mismatch.");
-      expect(prompt).not.toContain("`" + acceptedItem.binding.assignment.assignment_id + "`: Binding mismatch.");
+      expect(prompt).toContain("`" + rejectedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
+      expect(prompt).not.toContain("`" + acceptedItem.binding.assignment.assignment_id + "`: Bound answer rejected: Binding mismatch.");
       expect(prompt).not.toContain(unissuedRevision);
     });
 });

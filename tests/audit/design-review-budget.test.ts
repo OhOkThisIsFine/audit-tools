@@ -104,8 +104,11 @@ test("uses the orient-then-roam reading directive (not the old open-ended one)",
   expect(!prompt.includes(
       "Read the project source to understand what it does and how it works",
     ), "old open-ended instruction must be removed").toBeTruthy();
-  expect(prompt.includes("to orient yourself, then follow the code wherever it leads"), "orient-then-roam directive must be present").toBeTruthy();
-  expect(prompt.includes("need not read every file"), "scoped reading directive must be present").toBeTruthy();
+  const guidance = readingList(prompt);
+  expect(guidance).toContain("This short list and its map do not limit the review");
+  expect(guidance).toContain("including units absent from the starting points and map");
+  expect(guidance).toContain("Excluded units are dependency context only");
+  expect(guidance).toContain("Follow the relevant source paths; you need not read every file");
 });
 
 // ── section-cap helpers ───────────────────────────────────────────────────────

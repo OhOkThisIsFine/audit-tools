@@ -891,6 +891,64 @@ export async function submitAuditQuestionResult(params: QuestionBoundary & { ass
   });
 }
 
+/** Raw fallback errors may quote submitted text, paths, or schema values. */
+function questionResultCorrection(reason: string): string {
+  return "Bound answer rejected: " + questionSemanticGuidance(reason);
+}
+
+function questionSemanticGuidance(reason: string): string {
+  if (reason === "Result assignment differs from its destination" ||
+      reason === "Review submission does not match the current issued assignment, question revision and snapshot") {
+    return "Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.";
+  }
+  if (reason.startsWith("Source is outside this assignment:")) {
+    return "Source is outside the assignment. Use only source admitted in the current binding.";
+  }
+  if (reason.startsWith("Source span is outside the issued file:")) {
+    return "Source lines are outside the issued file. Check the span against the frozen source.";
+  }
+  if (reason.startsWith("Evidence was not issued for this assignment:") ||
+      reason.startsWith("Observation links unavailable or unissued evidence:")) {
+    return "Evidence is unavailable or unissued for this assignment. Check the current evidence and observation IDs.";
+  }
+  if (reason === "Conflicting reuse of an accepted review submission ID") {
+    return "Submission ID already used for different content. Replay only the exact accepted answer under that ID.";
+  }
+  if (reason.startsWith("Unknown or duplicate requested part:") ||
+      reason.startsWith("Review part has unsupported observation links:")) {
+    return "Requested part or observation links are invalid. Check the parts and links against the current binding.";
+  }
+  if (reason.startsWith("Findings part requires a claim") ||
+      reason === "Confirmed defect requires its own supported findings-part observation" ||
+      reason === "Finding has unknown or duplicate observation links") {
+    return "Link each finding to a supported observation in its own findings part.";
+  }
+  if (reason === "Unknown, duplicate or misbound review observation" ||
+      reason === "Source confirmation requires inspected source") {
+    return "Check observation IDs, bindings and source references against the current assignment.";
+  }
+  if (reason === "Duplicate local finding ID" || reason === "Finding does not match accepted scope or evidence") {
+    return "Check unique finding IDs, finding bindings and evidence references.";
+  }
+  if (reason.startsWith("An assignment already has an accepted response")) {
+    return "This assignment already has an accepted answer. A separate response requires a new assignment.";
+  }
+  return "Check the current assignment and answer links.";
+}
+
+/** Report only schema-owned paths and categories, never parser text or input values. */
+function questionSchemaCorrection(issue: z.ZodError["issues"][number]): string {
+  // This submission schema only has strict object properties and array indices.
+  // Unknown keys are reported at their containing object, not as path segments.
+  const field = issue.path.join(".") || "<root>";
+  const guidance = issue.code === "invalid_type" ? "expected " + issue.expected + "."
+    : issue.code === "unrecognized_keys" ? "remove fields not declared by the contract."
+      : issue.code === "invalid_enum_value" || issue.code === "invalid_literal" || issue.code === "invalid_union" || issue.code === "invalid_union_discriminator" ? "use a value or shape allowed by the contract."
+        : issue.code === "too_small" ? "provide the required non-empty value."
+          : "check the field's contract constraints.";
+  return "Answer schema mismatch at " + field + ": " + guidance;
+}
+
 export async function ingestAuditQuestionResults(params: QuestionBoundary, currentAssignmentIds?: ReadonlySet<string>) {
   const paths = resolveBoundaryPaths(params);
   return withFileLock(paths.acceptedLockPath, async () => {
@@ -904,14 +962,28 @@ export async function ingestAuditQuestionResults(params: QuestionBoundary, curre
       // the next workload is published. Do not read or admit its old result.
       if (!isCurrentQuestionEpoch(item.binding, epochs) ||
           (currentAssignmentIds && !currentAssignmentIds.has(item.binding.assignment.assignment_id))) continue;
+      const assignmentId = item.binding.assignment.assignment_id;
+      const reject = (reason: string) => issues.push({ assignment_id: assignmentId, reason });
+      let raw: unknown;
       try {
-        const submission = ReviewSubmissionSchema.parse(await readJsonFile<unknown>(
-          resolveContainedPath(paths.root, item.result_path, "issued question result path")));
-        if (submission.assignment_id !== item.binding.assignment.assignment_id) throw new Error("Result assignment differs from its destination");
+        raw = await readJsonFile<unknown>(resolveContainedPath(paths.root, item.result_path, "issued question result path"));
+      } catch (error) {
+        if (isJsonParseError(error)) reject("Invalid JSON. Rewrite the result file as a single JSON object.");
+        else if (!isFileMissingError(error)) reject("Unreadable result file. Check that the issued result path is a readable file.");
+        continue;
+      }
+      const parsed = ReviewSubmissionSchema.safeParse(raw);
+      if (!parsed.success) {
+        reject(questionSchemaCorrection(parsed.error.issues[0]!));
+        continue;
+      }
+      const submission = parsed.data;
+      try {
+        if (submission.assignment_id !== assignmentId) throw new Error("Result assignment differs from its destination");
         const decision = acceptQuestionReview(answers, hydrateQuestionBinding(workload, item.binding), submission, new Date().toISOString());
         if (decision.kind === "accepted") answers.push(decision.record);
       } catch (error) {
-        if (!isFileMissingError(error)) issues.push({ assignment_id: item.binding.assignment.assignment_id, reason: errorMessage(error) });
+        reject(questionResultCorrection(errorMessage(error)));
       }
     }
     const accepted_count = answers.length - ledger.answers.length;

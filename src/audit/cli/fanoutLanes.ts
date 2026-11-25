@@ -27,6 +27,7 @@ import { sourceTreeInstruction } from "../io/runSnapshot.js";
 import {
   AUDIT_GATE_SUBMISSION_SCOPE,
   GATE_LANES,
+  charterKindForLane,
   laneSubmissionPath,
   laneSubmissionId,
   recordDispatchedLanes,
@@ -258,6 +259,10 @@ export function renderLaneResultsFooter(resultPath: string): string {
   ].join("\n");
 }
 
+function usesFrozenSource(lane: string): boolean {
+  return charterKindForLane(lane) === undefined && lane !== GATE_LANES.charter_fidelity;
+}
+
 /**
  * A lane's prompt body with its bound results-path section appended, with every
  * absolute path in the result forward-slashed.
@@ -269,9 +274,10 @@ export function renderLaneResultsFooter(resultPath: string): string {
  * the same file. `normalizePromptBodyPaths` is anchored on a drive letter or a
  * UNC root, so a regex or an escape sequence inside a prompt body is untouched.
  */
-function footedPromptText(promptText: string, resultPath: string, sourceRoot: string): string {
+function footedPromptText(promptText: string, resultPath: string, sourceRoot: string | undefined): string {
+  const sourceFooter = sourceRoot === undefined ? "" : `## Source tree\n\n${sourceTreeInstruction(sourceRoot)}\n\n`;
   return normalizePromptBodyPaths(
-    `${promptText.replace(/\s+$/, "")}\n\n## Source tree\n\n${sourceTreeInstruction(sourceRoot)}\n\n` +
+    `${promptText.replace(/\s+$/, "")}\n\n${sourceFooter}` +
       renderLaneResultsFooter(resultPath),
   );
 }
@@ -296,9 +302,8 @@ export async function materializeFanoutLanes(params: {
    */
   roundId?: string;
   /**
-   * The run's frozen snapshot root. Every lane prompt states it (the shared
-   * source-tree section), so a lane that verifies against source reads the tree
-   * the run audits, not the live repository.
+   * The run's frozen snapshot root. Source-reading lanes use it rather than
+   * the live repository. Packet-only charter lanes get no source instruction.
    */
   sourceRoot: string;
   lanes: FanoutLaneSpec[];
@@ -333,7 +338,7 @@ export async function materializeFanoutLanes(params: {
     const inputBindingText = requirement === "ordinary" || contextInputs.length === 0 ? "" : `\n\n## Bound input fingerprints\n${contextInputs.map(input => `${input.path}: ${input.sha256}`).join("\n")}`;
     const revisionText = spec.semanticInputRevision === undefined ? "" : `\n\nReview input revision: ${spec.semanticInputRevision}`;
     const readOnlyContextText = generated.length === 0 ? "" : renderReadOnlyContextSection(generated.map((file, index) => ({ path: generatedContextPaths[index]!, label: file.label })));
-    const body = footedPromptText(spec.promptText + revisionText + inputBindingText + readOnlyContextText, resultPath, params.sourceRoot) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
+    const body = footedPromptText(spec.promptText + revisionText + inputBindingText + readOnlyContextText, resultPath, usesFrozenSource(spec.id) ? params.sourceRoot : undefined) + (requirement === "ordinary" ? "" : "\nRequired independent review: use a context that did not author the work. If unavailable, return an unavailable declaration; never substitute self-review.");
     const bound = requirement === "ordinary" ? { text: body, sha256: hashContent(body) } : bindWorkerPrompt(body, digest => [
       "## Bound review submission",
       "Place the domain result described above inside `result` in this envelope. Copy the prompt binding exactly. The review declaration reports the host's execution context; it is not proof of identity.",
@@ -419,9 +424,9 @@ export async function materializeFanoutLanes(params: {
     lanes,
     pendingLanes,
     artifactPaths,
-    // The source root is granted too: every lane prompt's footer tells its reader to verify against
-    // that snapshot, so a lane told to check source must hold the read on it.
-    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? []), ...lanes.flatMap(lane => lane.generatedContextPaths), params.sourceRoot])],
+    // Grant the frozen root only if a pending lane reads source. Packet-only lanes
+    // receive just their prompt and materialized evidence.
+    readPaths: [...new Set([...pendingLanes.map((lane) => lane.promptPath), ...params.lanes.flatMap(spec => spec.contextPaths ?? []), ...lanes.flatMap(lane => lane.generatedContextPaths), ...(pendingLanes.some(lane => usesFrozenSource(lane.id)) ? [params.sourceRoot] : [])])],
     writePaths: pendingLanes.map((lane) => lane.resultPath),
     shortfall,
   };

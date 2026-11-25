@@ -1289,8 +1289,8 @@ describe("buildReviewFileMap", () => {
     const rendered = renderAll(
       buildReviewFileMap(wideBundle, { files: ["src/hub.ts"], basis: "the hub" }),
     );
-    expect(rendered).toMatch(/Scope: the hub — 1 file\(s\) under review/);
-    expect(rendered).toMatch(/70 other authored file\(s\) lie outside this scope and are not anchored/);
+    expect(rendered).toMatch(/Map coverage: the hub — 1 file\(s\) considered for anchors/);
+    expect(rendered).toMatch(/70 other authored file\(s\) are not covered by this map and are not anchored/);
     expect(rendered).toMatch(/outside this map, not unconnected/);
   });
 

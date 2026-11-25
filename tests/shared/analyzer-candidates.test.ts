@@ -674,13 +674,13 @@ function parseActionlintSample() {
 }
 
 // type-coverage — pinned read-only JSON contract.
-test("type-coverage: npx runner, read-only JSON argv, detects Node", () => {
+test("type-coverage: locked npm acquisition, read-only JSON argv, detects Node", () => {
   expect(typeCoverageCandidate.runner).toBe("npx");
   const argv = typeCoverageCandidate.buildArgv(
-    ["npx", "-y", "-p", "type-coverage@2.29.7", "-p", "typescript@5.9.3", "type-coverage"],
+    ["node", "/private/type-coverage"],
     "/repo",
   );
-  expect(argv.slice(7)).toEqual(["--json-output", "--detail", "--no-update", "--no-update-if-higher", "--no-history-file", "--no-cache"]);
+  expect(argv.slice(2)).toEqual(["--json-output", "--detail", "--no-update", "--no-update-if-higher", "--no-history-file", "--no-cache"]);
   expect(typeCoverageCandidate.detect("/repo")).toBe(false);
 });
 
@@ -828,7 +828,7 @@ function scriptedRunner(
 ) {
   return async (argv: string[]) => {
     spawned.push(argv);
-    if (argv.includes("--version")) {
+    if (argv.includes("--version") || (argv[0] === "npm" && argv[1] === "ci")) {
       return { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 };
     }
     return { ...tool(), argv, duration_ms: 1 };

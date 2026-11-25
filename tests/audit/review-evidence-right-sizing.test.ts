@@ -141,6 +141,17 @@ describe("design-review call-site map: an index plus one slice per unit", () => 
     expect(summary).not.toMatch(/Read it\s+BEFORE re-deriving/);
   });
 
+  test("the starting-point map never narrows review scope or requires a whole slice read", () => {
+    const recon = prepareDesignReviewRecon(bundle(), { max_units: 1 });
+    const summary = recon.fileMap.summaryLines.join("\n");
+    expect(summary).toContain("Map coverage:");
+    expect(summary).toContain("trace the specific callers and callees in frozen source");
+    expect(summary).not.toContain("slice whole");
+    expect(recon.structuralContext).toContain("Any unit marked [in scope] in Unit structure is reviewable");
+    expect(recon.structuralContext).toContain("including units absent from the starting points and map");
+    expect(recon.fileMap.contextFiles.map(file => file.filename)).not.toContain("review-call-site-map.unit-b.md");
+  });
+
   test("a mixed unit anchors only primary files; excluded paths remain dependency context", () => {
     const base = bundle();
     const context = prepareDesignReviewRecon({

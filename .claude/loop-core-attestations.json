@@ -223,6 +223,30 @@
         "scripts/shared/loopCoreAttestationLedger.mjs": "980bc485edb5cea323f05cf00629f8448b1d43bb"
       }
     },
+    "380a3e547fdf760b": {
+      "reviewed_by": "audit-tools-independent-security-review-v0579",
+      "attester_class": "agent",
+      "checked": "Independent staged-content review of nine exact production blobs: packet-only charter evidence and bindings, safe saved-result diagnostics and unchanged admission/ledger checks, whole-submission guidance, and source fallback when the map lacks coverage. Five subsequent changes update assertions for the same reviewed behavior; this tree passed the full suite.",
+      "verdict": "clear",
+      "override": null,
+      "tests_ran": {
+        "scope": "full-suite",
+        "tree": "5492e4227ee8a4a06f733c4d11f4433ae7deb3e8",
+        "ran_at": "2026-11-25T22:06:50.529Z"
+      },
+      "attested_at": "2026-11-25T22:06:52.065Z",
+      "vouches": {
+        "src/audit/cli/charterExtractionPrompt.ts": "f035d90e7c30f2e24309a3a7ce10852139b4b952",
+        "src/audit/cli/charterFidelityPrompt.ts": "0f11621db1bf04171be8eb573ba484ac4b48bc26",
+        "src/audit/cli/dispatch/hostHandoff.ts": "07aa05ec3fdfac0f7630eced1341ddeb58a3d434",
+        "src/audit/cli/fanoutLanes.ts": "530c9a8db1f7109b2fc404b794eca48216a8bf4f",
+        "src/audit/cli/nextStepCommand.ts": "cd0b30d97c324964eedd80749964aaaceb2d65f2",
+        "src/audit/cli/nextStepHelpers.ts": "9a48c9e20aa6197b6693845b9cbeb6ff86a9a38a",
+        "src/audit/orchestrator/designReviewPrompt.ts": "de5ddbd44e41f612d3714fa7cee65a5035927415",
+        "src/audit/systemic/reviewFileMap.ts": "162a35b4e21ff0f082cd0db284d6e779d47ad41a",
+        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "3b07ac537f0b99be0b881724a2426e34e26a2d2b"
+      }
+    },
     "392554939aa89e3b": {
       "reviewed_by": "a2b9be05ae07da55c-opus-round3",
       "attester_class": "agent",
@@ -501,22 +525,6 @@
         "src/shared/submission/submissionLedger.ts": "545a2b34d94254b6c5e1eb7a1b6ade0b12f44cba"
       }
     },
-    "7d602de291bfef13": {
-      "reviewed_by": "audit_cleanup_review",
-      "attester_class": "agent",
-      "checked": "Checked premature deletion of resumable working evidence and recursive directory traversal through a linked scratch parent via the exact terminal promotion hold; independent bare Vitest confirmed worker-fixture containment and cleanup.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "dde24e338effaeafe4ba4cde0b939ef0824422a7",
-        "ran_at": "2026-11-25T19:48:08.980Z"
-      },
-      "attested_at": "2026-11-25T19:48:09.523Z",
-      "vouches": {
-        "src/audit/cli/nextStepHelpers.ts": "776240758ef712b97bec374d56dda82190f79e26"
-      }
-    },
     "92a14c6e9e3ff056": {
       "reviewed_by": "Codex independent reviewer, task-5 (01a13aa5-86e7-718a-b50b-8a39bff4f03f)",
       "attester_class": "agent",
@@ -613,24 +621,6 @@
       "attested_at": "2026-11-16T19:37:04.712Z",
       "vouches": {
         "src/audit/orchestrator/executorResult.ts": "2082605a09b679e19969b924107ec7e5b5c91dc4"
-      }
-    },
-    "c15f5d5c1f74ca4f": {
-      "reviewed_by": "claude-opus-5-5-independent-review-subagent,agy-gemini-3.8-flash-high-design-check",
-      "attester_class": "agent",
-      "checked": "P07 behavior-neutral simplify. Loop-core sites: runSnapshot.ts applyEditedPaths loop, reviewFileMap.ts inScope, secondOrderAdversaryPrompt.ts evidencePaths now call uniqueSorted (= [...new Set(x)].sort(compareCodeUnits)); inputs are readonly string[]; compareCodeUnits equals bare string .sort() code-unit order, so order, dedup, prompt bytes and persisted bytes are identical. Independent subagent review of all 12 diff hunks: OVERALL NEUTRAL, no source-text pins. AGY design-check: no retired mechanism reintroduced, no new reachable strand; reviewFileMap order pinned by tests/audit/systemic-challenge.test.ts; the other two sites are unpinned but identical by construction. Full suite 8555 passed 0 failed.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "6c6ff3fa92fe88aa4f0c36ed41f7edceca5918bd",
-        "ran_at": "2026-11-18T22:08:12.288Z"
-      },
-      "attested_at": "2026-11-18T22:08:26.473Z",
-      "vouches": {
-        "src/audit/io/runSnapshot.ts": "95c41e25eaf40d3cafb9c58ffc0e79a9af169f5f",
-        "src/audit/systemic/reviewFileMap.ts": "10ba0d7ab52752f5ed12dcd3ad7bc928ffc4a2e8",
-        "src/audit/systemic/secondOrderAdversaryPrompt.ts": "264bbdf90958bed03202ea5099f49f74c4947d15"
       }
     },
     "c2fa0250dd9f5ee5": {
@@ -754,22 +744,6 @@
         "src/audit/cli/submitCommand.ts": "68831f525f17955b585ec730df510f1daf2f5a2b",
         "src/audit/orchestrator/executorRunners.ts": "43d3ff1a079d7f8f65ae845a11e992a37a3b412f",
         "src/remediate/steps/nextStep.ts": "e8d48778eb2bcd88562db99e1664e5643005af0e"
-      }
-    },
-    "e08e0a3e6b64c623": {
-      "reviewed_by": "dogfood_narrative",
-      "attester_class": "agent",
-      "checked": "Independent exact-blob review checked first creation, conflicting writer fallback, existing content digest and atomic replacement failure continuity.",
-      "verdict": "clear",
-      "override": null,
-      "tests_ran": {
-        "scope": "full-suite",
-        "tree": "4cf23886ac10c63c54580d7d6ad67aa6b4ce273a",
-        "ran_at": "2026-11-25T19:04:05.541Z"
-      },
-      "attested_at": "2026-11-25T19:05:13.016Z",
-      "vouches": {
-        "src/audit/cli/fanoutLanes.ts": "1075dfa1f728ec2b4bb31755aa2b9fb18f4c780d"
       }
     },
     "e27b7c336e51764b": {
@@ -963,10 +937,10 @@
       "review": "d261aef2988bbeb5"
     },
     "src/audit/cli/charterExtractionPrompt.ts": {
-      "review": "5a1d216870700235"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/charterFidelityPrompt.ts": {
-      "baseline": "7b79934e86baf378"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/conceptualDispatch.ts": {
       "review": "07c0619b47133a4a"
@@ -975,7 +949,7 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/cli/dispatch/hostHandoff.ts": {
-      "review": "481abf3e9efbbca4"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/dispatch/packetFilter.ts": {
       "baseline": "7b79934e86baf378"
@@ -984,7 +958,7 @@
       "review": "481abf3e9efbbca4"
     },
     "src/audit/cli/fanoutLanes.ts": {
-      "review": "e08e0a3e6b64c623"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/foldTransaction.ts": {
       "review": "435c17a0f11016cc"
@@ -996,10 +970,10 @@
       "review": "5a1d216870700235"
     },
     "src/audit/cli/nextStepCommand.ts": {
-      "review": "cfe244114db006a2"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/nextStepHelpers.ts": {
-      "review": "7d602de291bfef13"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/cli/prompts.ts": {
       "review": "e36223304299f9c6"
@@ -1080,7 +1054,7 @@
       "review": "cfe244114db006a2"
     },
     "src/audit/orchestrator/designReviewPrompt.ts": {
-      "review": "cfe244114db006a2"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/orchestrator/designReviewSnapshot.ts": {
       "review": "93ab3b5081cedfc1"
@@ -1293,10 +1267,10 @@
       "review": "e36223304299f9c6"
     },
     "src/audit/systemic/reviewFileMap.ts": {
-      "review": "c15f5d5c1f74ca4f"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/systemic/secondOrderAdversaryPrompt.ts": {
-      "review": "c15f5d5c1f74ca4f"
+      "review": "380a3e547fdf760b"
     },
     "src/audit/validation/ingestIssueCodes.ts": {
       "review": "e36223304299f9c6"

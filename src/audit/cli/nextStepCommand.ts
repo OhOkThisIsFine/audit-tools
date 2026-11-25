@@ -11,6 +11,7 @@ import { INDEPENDENT_CONTEXT, SEPARATE_CONTEXT_OR_SELF } from "../../shared/prom
 import { errorMessage } from "../../shared/io/json.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   loadAnalyzerPolicy,
   loadSessionIntent,
@@ -1782,9 +1783,11 @@ export const NEXT_STEP_EMISSION_TABLE: Readonly<
         ] : []),
         "Cite the relevant code or identifiable declaration. Line numbers help locate the evidence; they do not establish the claim.",
         "Record scoped supported observations and any unanswered parts. Do not convert missing evidence into a clean answer.",
+        "Read the submission shape at: " + toPromptPathToken(fileURLToPath(new URL("../../../schemas/review_submission.schema.json", import.meta.url))),
+        "Write the whole submission object, not only its nested answer. The top-level limitations field is an array of strings; use [] when there are none.",
         "Copy the exact assignment_id, question_id, revision_id and snapshot_id into the answer. Use a distinct submission_id for each independent answer and replay only the same answer under the same ID.",
         "For each part marked findings, include at least one claim linked by observation_ids to a supported observation in that part. This applies to leads and design opportunities as well as confirmed defects; a claim on a different part does not count.",
-        "For MCP submit_result, set work_item_id to the issued assignment_id and pass the answer as the result JSON object. Without MCP, write the answer to that item's result_path (relative to the repository root). Then run: " + next,
+        "For MCP submit_result, set work_item_id to the issued assignment_id and pass the whole submission as the result JSON object. Without MCP, write the whole submission to that item's result_path (relative to the repository root). Then run: " + next,
       ].join("\n\n"),
     }};
   },

@@ -301,7 +301,7 @@ export function renderReviewFileMapSlice(map: ReviewFileMap, slice: ReviewFileMa
       "and bound into your review: if it disagrees with the source, say so in your finding and name the " +
       "file and symbol that contradict it.",
     "",
-    `${slice.files.length} file(s) of this unit are under review; ${anchors.length} are listed below ` +
+    `${slice.files.length} file(s) of this unit are considered for map anchors; ${anchors.length} are listed below ` +
       `with their COMPLETE caller and callee lists; ${edgeless} carry no graph edge` +
       (edgeless > 0
         ? " — an absent edge is a gap in this extraction, not a finding that nothing depends on the file."
@@ -369,7 +369,7 @@ export function reviewFileMapContext(
     });
   }
   const columns = options.columns ?? [];
-  const header = ["unit", "files under review", "anchored", "no graph edge", ...columns.map((c) => c.header), "slice file"];
+  const header = ["unit", "files considered", "anchored", "no graph edge", ...columns.map((c) => c.header), "slice file"];
   const rows = map.slices.map((slice) => {
     const anchors = sliceAnchors(map, slice);
     const edgeless = slice.files.length - anchors.filter((a) => a.callers.length + a.callees.length > 0).length;
@@ -387,12 +387,10 @@ export function reviewFileMapContext(
     "### Verified call-site map (provenance: machine-derived prior recon — you did NOT author this)",
     "",
     "The audit tool derived a call-site map from the dependency graph and the repository manifest " +
-      "extracted earlier in this run and wrote it as one read-only SLICE file per unit, indexed below; " +
+      "extracted earlier in this run. It wrote a read-only slice for each covered unit with anchors, indexed below; " +
       'each slice\'s full path is listed under "Read-only context files" at the end of this prompt. ' +
-      "Before re-deriving any call site, find the unit of the file you are judging in the index and read " +
-      "that unit's slice whole — it lists every anchored file of the unit with its complete caller and " +
-      "callee lists. Read only the slices of the units you judge. It is a factual input handed to you so " +
-      "this round spends its budget on judgment: TRUST it as a starting point, do not reproduce it.",
+      "Use the entries for the files or symbols you are judging when a slice exists. If a unit, file, or relevant edge is not covered, " +
+      "trace the specific callers and callees in frozen source. Do not reconstruct the whole map. Map coverage is not review scope.",
     "",
     "**You cannot write back to it.** Every slice is read-only and bound into this review, so a " +
       "submission made against an edited copy is refused, and a correction reaches the next round " +
@@ -400,11 +398,11 @@ export function reviewFileMapContext(
       "so explicitly in your finding — name the file and the symbol that contradicts the map. Your " +
       "VERDICT remains entirely your own; only the recon is shared.",
     "",
-    `Scope: ${map.scope.basis} — ${map.scope.file_count} file(s) under review; ` +
+    `Map coverage: ${map.scope.basis} — ${map.scope.file_count} file(s) considered for anchors; ` +
       `${map.anchors.length} anchored with their complete caller and callee lists; ` +
       `${map.files_without_edges} carry no graph edge (an absent edge is a gap in this extraction, ` +
       "not a finding that nothing depends on the file); " +
-      `${map.scope.outside_scope} other authored file(s) lie outside this scope and are not anchored ` +
+      `${map.scope.outside_scope} other authored file(s) are not covered by this map and are not anchored ` +
       "(outside this map, not unconnected — they still appear as callers or callees wherever an edge " +
       "reaches them).",
     `Edges consulted: ${map.provenance.edge_count} — ${edges}.`,

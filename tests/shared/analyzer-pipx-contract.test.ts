@@ -41,7 +41,37 @@ test("registered semgrep remains consent-gated and uses its explicit app operand
     expect((await runExternalAnalyzer(registered, root, { run, consentToken, analyzerConsent: { semgrep: "declined" } })).status.status).toBe("skipped");
     expect(calls).toEqual([]);
     await runExternalAnalyzer(registered, root, { run, consentToken });
-    expect(calls).toEqual([["pipx", "--version"], ["pipx", "run", "--spec", "semgrep==1.63.0", "semgrep", "--json", "--quiet", "--config", "auto", root]]);
+    expect(calls).toEqual([["pipx", "--version"], ["pipx", "run", "--spec", "semgrep==1.187.0", "semgrep", "--json", "--quiet", "--metrics=off", "--disable-version-check", "--config", "p/default", root]]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test.each([
+  { results: [], errors: [], expected: "success", count: 0 },
+  { results: [], errors: [{ type: "Timeout", path: "/private/scanned", message: "fixture raw error" }], expected: "failed", count: 0 },
+  { errors: [{ type: "InvalidRuleSchemaError" }], expected: "failed", count: 0 },
+  { results: [{ check_id: "synthetic", path: "index.ts", start: { line: 1 }, extra: { message: "fixture" } }],
+    errors: [{ type: "ParseError" }], expected: "failed", count: 1 },
+  { results: [], errors: { unexpected: true }, expected: "failed", count: 0 },
+])("Semgrep exit zero with $errors reports $expected and preserves $count findings", async ({ expected, count, ...report }) => {
+  const root = await mkdtemp(join(tmpdir(), "semgrep-report-"));
+  try {
+    await writeFile(join(root, "package.json"), "{}");
+    await writeFile(join(root, "index.ts"), "export const value = 1;\n");
+    const result = await runExternalAnalyzer(semgrepCandidate, root, {
+      run: async (argv, cwd, timeout) => ({
+        ...await recordingRunner([], JSON.stringify(report))(argv, cwd, timeout),
+        stderr: "fixture raw error on stderr",
+      }),
+      consentToken: { value: "synthetic-semgrep-scan", tools: ["semgrep"] },
+    });
+    expect(result.status.status).toBe(expected);
+    expect(result.status.exit_code).toBe(0);
+    expect(result.results.results).toHaveLength(count);
+    if (expected === "failed") expect(result.status.error).toMatch(/semgrep:.*error/i);
+    expect(result.status.output_snippet).toBeUndefined();
+    expect(result.status.stderr_snippet).toBeUndefined();
+    expect(JSON.stringify(result.status)).not.toMatch(/private\/scanned|fixture raw error/);
+    if (count) expect(result.results.results[0]).toMatchObject({ path: "index.ts", rule: "synthetic" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

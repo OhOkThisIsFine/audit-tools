@@ -168,7 +168,7 @@ test("a review round receives the verified map as a bound file, provenanced as r
     expect(await readFile(mapPath!, "utf8")).toContain(TARGET_ANCHOR);
     expect(prompt).not.toContain(TARGET_ANCHOR);
     expect(prompt).toContain(`- \`${toPromptPathToken(mapPath!)}\``);
-    expect(prompt).toMatch(/Scope: .* 1 file\(s\) under review; 1 anchored/);
+    expect(prompt).toMatch(/Map coverage: .* 1 file\(s\) considered for anchors; 1 anchored/);
   } finally {
     await rm(artifactsDir, { recursive: true, force: true });
   }
@@ -269,7 +269,9 @@ test("a design-review round's map anchors its starting-point files, not the alph
   const prompt = renderConceptualReviewPrompt(bundle, { max_units: 1 });
   const map = prepareDesignReviewRecon(bundle, { max_units: 1 }).fileMap.contextFiles.map((file) => file.text).join("\n");
   expect(map).toContain("- **src/f65.ts**\n  - referenced by: (none recorded)\n  - references: src/f00.ts");
-  expect(prompt).toMatch(/Scope: the files of the 1 starting-point unit\(s\) listed under "Starting points" in the review prompt — 1 file\(s\) under review/);
-  // Not under review, so not anchored — however early it sorts.
+  expect(prompt).toMatch(/Map coverage: the files of the 1 starting-point unit\(s\) listed under "Starting points" in the review prompt — 1 file\(s\) considered for anchors/);
+  expect(prompt).toContain("- first [in scope]");
+  expect(prompt).toContain("including units absent from the starting points and map");
+  // The first unit is reviewable but not a map starting point, however early it sorts.
   expect(map).not.toContain("- **src/f00.ts**");
 });

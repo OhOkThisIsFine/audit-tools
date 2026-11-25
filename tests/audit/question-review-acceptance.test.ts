@@ -291,7 +291,7 @@ it("refuses findings parts without a linked claim and accepts a linked lead", as
     await writeFile(path, JSON.stringify(unlinked));
     expect(await ingestAuditQuestionResults(params)).toMatchObject({
       accepted_count: 0, answers: [],
-      issues: [{ assignment_id: "a", reason: expect.stringMatching(/Findings part requires a claim.*manual/u) }],
+      issues: [{ assignment_id: "a", reason: "Bound answer rejected: Link each finding to a supported observation in its own findings part." }],
     });
 
     await writeFile(path, JSON.stringify(valid));
@@ -300,6 +300,30 @@ it("refuses findings parts without a linked claim and accepts a linked lead", as
     });
   });
 });
+it("gives safe, staged corrections for failed saved question answers", async () => fixture(async root => {
+  const params = { root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-rejections" };
+  const { workload } = await publishAuditQuestionWorkload({ ...params, sourceRoot: root, bindings: [makeBinding("a")] });
+  const path = join(root, workload.work_items[0]!.result_path);
+  await mkdir(dirname(path), { recursive: true });
+  const reject = async (reason: string) => {
+    expect(await ingestAuditQuestionResults(params)).toMatchObject({
+      accepted_count: 0, answers: [], issues: [{ assignment_id: "a", reason }],
+    });
+  };
+  await mkdir(path);
+  await reject("Unreadable result file. Check that the issued result path is a readable file.");
+  await rm(path, { recursive: true });
+  await writeFile(path, "unparseable submission text");
+  await reject("Invalid JSON. Rewrite the result file as a single JSON object.");
+  await writeFile(path, JSON.stringify({ ...submission("a", "clean"), limitations: [["not a string"]] }));
+  await reject("Answer schema mismatch at limitations.0: expected string.");
+  await writeFile(path, JSON.stringify({ ...submission("a", "clean"), privateKeyName: "private value" }));
+  await reject("Answer schema mismatch at <root>: remove fields not declared by the contract.");
+  await writeFile(path, JSON.stringify({ ...submission("a", "clean"), question_id: "mismatched binding" }));
+  await reject("Bound answer rejected: Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.");
+  await writeFile(path, JSON.stringify(submission("a", "clean")));
+  expect(await ingestAuditQuestionResults(params)).toMatchObject({ accepted_count: 1, issues: [] });
+}));
 it("keeps the issued manifest stable when a pending subset is published", async () => fixture(async root => {
   const boundary = { root, artifactsDir: join(root, ".audit-tools", "audit"), runId: "question-run" };
   const a = makeBinding("a"), b = makeBinding("b");

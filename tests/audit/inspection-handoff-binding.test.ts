@@ -90,7 +90,7 @@ test("issued question assignments bind their scope, submission and fallback path
     await writeFile(destination, JSON.stringify(stale));
     expect(await fold()).toMatchObject({
       accepted_count: 0, answers: [],
-      issues: [{ assignment_id: assignment.assignment_id, reason: expect.stringMatching(/current issued assignment/u) }],
+      issues: [{ assignment_id: assignment.assignment_id, reason: "Bound answer rejected: Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload." }],
     });
 
     // Path metadata itself is not an authority to redirect the result.

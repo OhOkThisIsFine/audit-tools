@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -818,32 +818,68 @@ test("npx runner: a candidate with no peers spawns the byte-identical `npx -y <s
   ]);
 });
 
-test("npx runner: peers are installed ALONGSIDE the tool via `-p`, and the bin is named explicitly", async () => {
-  // `npx -y <spec>` lets npm resolve the tool's own peer range however it likes —
-  // which is how the default-admitted type-coverage came to be paired with a
-  // typescript major that removed the API it calls. Naming both packages with
-  // `-p` makes the pair exactly the one that was measured to work; naming the
-  // bin is then mandatory, because `-p` supplies packages, not a command.
-  // A real Node marker: type-coverage's own `detect` gates the spawn on one.
+test("type-coverage installs the exact lock privately before running Node from the project", async () => {
   const root = await mkdtemp(join(tmpdir(), "type-coverage-argv-"));
   await writeFile(join(root, "package.json"), "{}", "utf8");
-  const argv = await spawnedArgvFor(typeCoverageCandidate, root);
-  await rm(root, { recursive: true, force: true });
-  expect(argv).toEqual([
-    "npx",
-    "-y",
-    "-p",
-    "type-coverage@2.29.7",
-    "-p",
-    "typescript@5.9.3",
-    "type-coverage",
-    "--json-output",
-    "--detail",
-    "--no-update",
-    "--no-update-if-higher",
-    "--no-history-file",
-    "--no-cache",
-  ]);
+  const calls: { argv: string[]; cwd: string }[] = [];
+  let tools: string | undefined;
+  try {
+    const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+      run: async (argv, cwd) => {
+        calls.push({ argv, cwd });
+        if (argv[1] === "ci") {
+          tools = cwd;
+          expect(cwd).not.toBe(root);
+          const pkg = JSON.parse(await readFile(join(cwd, "package.json"), "utf8"));
+          const lock = JSON.parse(await readFile(join(cwd, "package-lock.json"), "utf8"));
+          expect(pkg).toEqual({ private: true, dependencies: { "type-coverage": "2.29.7", typescript: "5.9.3" } });
+          expect(lock.packages["node_modules/typescript"].version).toBe("5.9.3");
+          expect(lock.packages["node_modules/type-coverage-core"].version).toBe("2.30.4");
+          expect(Object.entries(lock.packages).filter(([name]) => /(?:^|\/)typescript$/.test(name))).toHaveLength(1);
+          expect(argv).toContain("--ignore-scripts");
+          expect(argv).toContain("--no-global");
+          for (const [flag, file] of [["--cache", "npm-cache"], ["--userconfig", "user.npmrc"], ["--globalconfig", "global.npmrc"]]) {
+            expect(argv[argv.indexOf(flag) + 1]).toBe(join(cwd, file));
+          }
+        }
+        return fakeRunner({ toolStdout: '{"details":[],"succeeded":true}' })(argv, cwd);
+      },
+    });
+    expect(outcome.status.status).toBe("success");
+    expect(calls[0]).toEqual({ argv: ["npm", "--version"], cwd: root });
+    expect(calls[2]).toEqual({ argv: [
+      process.execPath, join(tools!, "node_modules/type-coverage/bin/type-coverage"),
+      "--json-output", "--detail", "--no-update", "--no-update-if-higher",
+      "--no-history-file", "--no-cache",
+    ], cwd: root });
+    await expect(access(tools!)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed locked npm acquisition cleans up and never falls back to npx or runs the tool", async () => {
+  const root = await mkdtemp(join(tmpdir(), "type-coverage-failed-"));
+  await writeFile(join(root, "package.json"), "{}", "utf8");
+  const calls: string[][] = [];
+  let tools: string | undefined;
+  try {
+    const outcome = await runExternalAnalyzer(typeCoverageCandidate, root, {
+      run: async (argv, cwd) => {
+        calls.push(argv);
+        if (argv[1] === "ci") {
+          tools = cwd;
+          return { status: 1, stdout: "", stderr: "lock could not be installed", argv, duration_ms: 1 };
+        }
+        return fakeRunner()(argv, cwd);
+      },
+    });
+    expect(outcome.status).toMatchObject({ status: "not_resolved", error: "locked npm acquisition failed: exit 1" });
+    expect(calls).toHaveLength(2);
+    await expect(access(tools!)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("npx runner: the bin name derives from the package name, scope included, unless declared", async () => {

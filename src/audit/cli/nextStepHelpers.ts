@@ -2949,32 +2949,6 @@ async function runDesignReviewObligation(
   return { kind: "transition", state: branch.bundle };
 }
 
-/** Raw fallback errors may quote submitted text, paths, or schema values. */
-function questionResultCorrection(reason: string): string {
-  if (reason === "Result assignment differs from its destination" ||
-      reason === "Review submission does not match the current issued assignment, question revision and snapshot") {
-    return "Binding mismatch. Copy the assignment, question, revision, and snapshot IDs from the current workload.";
-  }
-  if (reason.startsWith("Source is outside this assignment:")) {
-    return "Source is outside the assignment. Use only source admitted in the current binding.";
-  }
-  if (reason.startsWith("Source span is outside the issued file:")) {
-    return "Source lines are outside the issued file. Check the span against the frozen source.";
-  }
-  if (reason.startsWith("Evidence was not issued for this assignment:") ||
-      reason.startsWith("Observation links unavailable or unissued evidence:")) {
-    return "Evidence is unavailable or unissued for this assignment. Check the current evidence and observation IDs.";
-  }
-  if (reason === "Conflicting reuse of an accepted review submission ID") {
-    return "Submission ID already used for different content. Replay only the exact accepted answer under that ID.";
-  }
-  if (reason.startsWith("Unknown or duplicate requested part:") ||
-      reason.startsWith("Review part has unsupported observation links:")) {
-    return "Requested part or observation links are invalid. Check the parts and links against the current binding.";
-  }
-  return "Could not accept the result. Check that it is readable JSON and meets the current answer contract.";
-}
-
 async function runHostDelegationObligation(
   bundle: ArtifactBundle,
   ctx: AuditNextStepCtx,
@@ -2994,7 +2968,7 @@ async function runHostDelegationObligation(
   if (cycle.pending.length === 0) return { kind: "transition", state: carried };
   const pendingIds = new Set(cycle.pending.map(({ assignment }) => assignment.assignment_id));
   const rejections = cycle.issues.filter(issue => pendingIds.has(issue.assignment_id)).slice(0, 8)
-    .map(issue => ({ assignmentId: issue.assignment_id, guidance: questionResultCorrection(issue.reason) }));
+    .map(issue => ({ assignmentId: issue.assignment_id, guidance: issue.reason }));
   const published = await publishAuditQuestionWorkload({
     root: ctx.params.root, sourceRoot, artifactsDir: ctx.params.artifactsDir, runId: cycle.runId, bindings: cycle.pending,
     inventoryOmissionCount: bundle.review_plan?.omissions.length,

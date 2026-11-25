@@ -21,7 +21,7 @@ test("next-step re-derives a saved rejection across calls and clears it on repai
       expect(pending.run_id).toBe(current.run_id);
       expect(pending.work_items.map(entry => entry.binding.assignment.assignment_id)).toContain(assignmentId);
       const prompt = await readFile(next.artifact_paths.current_prompt, "utf8");
-      expect(prompt).toContain("`" + assignmentId + "`: Binding mismatch.");
+      expect(prompt).toContain("`" + assignmentId + "`: Bound answer rejected: Binding mismatch.");
       expect(prompt).not.toContain(staleRevision);
     }
 

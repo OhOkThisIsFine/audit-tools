@@ -8,7 +8,7 @@ import type { FanoutLaneSpec } from "../../src/audit/cli/fanoutLanes.js";
 import { sourceTreeInstruction } from "../../src/audit/io/runSnapshot.js";
 
 const { materializeFanoutLanes } = await import("../../src/audit/cli/fanoutLanes.js");
-const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE, GATE_LANES } = await import(
+const { laneSubmissionPath, AUDIT_GATE_SUBMISSION_SCOPE, GATE_LANES, charterExtractionLane } = await import(
   "../../src/audit/cli/laneSubmissions.js"
 );
 const { laneAssetsDir, expectedSubmissionsPath } = await import("../../src/shared/io/auditToolsPaths.js");
@@ -23,6 +23,39 @@ const { laneAssetsDir, expectedSubmissionsPath } = await import("../../src/share
 // tool where the submission goes rather than re-spelling a filename — which is
 // the property, not an inconvenience.
 describe("materializeFanoutLanes", () => {
+  it("binds packet-only charter lanes without granting or instructing source reads", async () => {
+    const dir = await mkdtemp(join(os.tmpdir(), "review-packet-only-"));
+    try {
+      const sourceRoot = join(dir, "frozen-source");
+      const packet = join(dir, "packet.md");
+      await writeFile(packet, "packet evidence");
+      const ids = [charterExtractionLane("stated"), charterExtractionLane("structural"),
+        charterExtractionLane("revealed"), GATE_LANES.charter_fidelity];
+      const fanout = await materializeFanoutLanes({
+        artifactsDir: dir, sourceRoot, runId: AUDIT_GATE_SUBMISSION_SCOPE,
+        lanes: ids.map(id => ({
+          id, label: id, fileCount: 0, riskScore: 0,
+          promptFilename: `${id}.md`, promptText: "Read your packet only.",
+          contextPaths: [packet],
+        })),
+      });
+      expect(fanout.readPaths).toContain(packet);
+      expect(fanout.readPaths).not.toContain(sourceRoot);
+      for (const lane of fanout.lanes) {
+        const prompt = await readFile(lane.promptPath, "utf8");
+        expect(prompt).toContain("Read your packet only.");
+        expect(prompt).not.toContain("## Source tree");
+        expect(prompt).not.toContain(sourceRoot);
+        expect(prompt).toContain("## Bound review submission");
+        expect(await readAuditReviewBinding(dir, lane.id)).toMatchObject({
+          inputs: [{ path: packet, sha256: expect.any(String) }],
+        });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("binds the pre-trailer body and the completed prompt file independently on emission and replay", async () => {
     const dir = await mkdtemp(join(os.tmpdir(), "review-digests-"));
     const lane = GATE_LANES.design_review_contract;
@@ -87,7 +120,7 @@ describe("materializeFanoutLanes", () => {
       const fanout = await materialize(artifactsDir);
       expect(fanout.pendingLanes.map((l) => l.id)).toEqual(["alpha", "beta"]);
       expect(await readFile(fanout.lanes[0].promptPath, "utf8")).toContain("# alpha lane");
-      // Every lane prompt states where the run's source is (the frozen snapshot).
+      // Source-reading lanes state where the run's frozen snapshot is.
       expect(await readFile(fanout.lanes[0].promptPath, "utf8")).toContain(sourceTreeInstruction(artifactsDir));
       expect(Object.keys(fanout.artifactPaths).sort()).toEqual([
         "alpha_prompt",
@@ -95,8 +128,7 @@ describe("materializeFanoutLanes", () => {
         "beta_prompt",
         "beta_results",
       ]);
-      // Plus the source root: every lane prompt tells its reader to verify against
-      // that snapshot, so the step grants it.
+      // The step grants the frozen root for lanes instructed to read it.
       expect(fanout.readPaths).toEqual([...fanout.pendingLanes.map((l) => l.promptPath), artifactsDir]);
       expect(fanout.writePaths).toEqual(fanout.pendingLanes.map((l) => l.resultPath));
       // The bound path is tool-computed, never the lane's own spelling.

@@ -116,11 +116,18 @@ test("normal CLI resumes durable answers and hands off an honestly incomplete qu
     expect(repair.work_items.map(({ binding }) => binding.assignment.assignment_id))
       .toEqual(initial.work_items.map(({ binding }) => binding.assignment.assignment_id));
     const prompt = await readFile(rejected.artifact_paths.current_prompt, "utf8");
-    expect(prompt).toContain(first.binding.assignment.assignment_id + "`" + ": Binding mismatch.");
-    expect(prompt).toContain(second.binding.assignment.assignment_id + "`" + ": Source is outside the assignment.");
+    expect(prompt).toContain(first.binding.assignment.assignment_id + "`" + ": Bound answer rejected: Binding mismatch.");
+    expect(prompt).toContain(second.binding.assignment.assignment_id + "`" + ": Bound answer rejected: Source is outside the assignment.");
     expect(prompt).toContain("matching workload item's result_path");
     expect(stdout + stderr + prompt).not.toContain(privatePath);
     expect(stdout + stderr + prompt).not.toContain("stale-revision-never-print");
+    expect(prompt).toContain("schemas/review_submission.schema.json");
+    expect(prompt).toContain("limitations field is an array of strings");
+    await put(second, { ...responseFor(second), limitations: [["invalid-secret-array"] as unknown as string] });
+    const schemaRejection = await next();
+    const schemaPrompt = await readFile(schemaRejection.artifact_paths.current_prompt, "utf8");
+    expect(schemaPrompt).toContain("Answer schema mismatch at limitations.0: expected string.");
+    expect(schemaPrompt).not.toContain("invalid-secret-array");
     await unlink(resolve(root, second.result_path));
     const firstAnswer = await put(first);
     const resumed = await workloadFor(await next());

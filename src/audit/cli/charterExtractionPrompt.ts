@@ -164,7 +164,7 @@ export function renderCharterKindLanePrompt(opts: {
     "",
     "## Output",
     "",
-    `Write your submission as JSON to \`${opts.submissionPath}\`:`,
+    `This example is the domain object for \`result\`, not a standalone submission. Submit the complete bound review envelope shown at the end of the prompt to \`${opts.submissionPath}\`.`,
     "",
     "```json",
     "{",

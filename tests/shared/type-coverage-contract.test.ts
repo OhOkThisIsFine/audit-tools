@@ -7,7 +7,7 @@ import { runExternalAnalyzer } from "../../src/shared/analyzers/acquisitionEngin
 import { isDegradedExternalAnalyzerStatus } from "../../src/shared/analyzers/types.js";
 import { typeCoverageCandidate, parseTypeCoverage } from "../../src/shared/analyzers/candidates.js";
 
-// Opt-in real-tool qualification: install the fixture's lock with npm ci
+// Opt-in real-tool qualification: install the production lock with npm ci
 // --ignore-scripts in a disposable tools directory, then point this variable at it.
 // Ordinary unit runs use the captured CLI JSON in analyzer-candidates.test.ts.
 const toolsRoot = process.env.AUDIT_TYPE_COVERAGE_TOOLS;
@@ -15,7 +15,7 @@ const fixture = new URL("../fixtures/type-coverage-2.29.7/", import.meta.url);
 
 test.skipIf(!toolsRoot)("pinned CLI honors observe-only flags despite project write settings", async () => {
   const tools = resolve(toolsRoot!);
-  const lock = JSON.parse(await readFile(new URL("tool-package-lock.json", fixture), "utf8"));
+  const lock = JSON.parse(await readFile(new URL("../../src/shared/analyzers/type-coverage-lock.json", import.meta.url), "utf8"));
   for (const name of ["type-coverage", "typescript", "type-coverage-core", "minimist"]) {
     const pkg = JSON.parse(await readFile(join(tools, "node_modules", name, "package.json"), "utf8"));
     expect(pkg.version).toBe(lock.packages[`node_modules/${name}`].version);
@@ -83,7 +83,7 @@ test.skipIf(!toolsRoot)("pinned CLI honors observe-only flags despite project wr
     expect(suppressed.status).toBe(0);
     expect(JSON.parse(suppressed.stdout).succeeded).toBe(false);
     const outcome = await runExternalAnalyzer(typeCoverageCandidate, project, {
-      run: async (argv) => argv.includes("--version")
+      run: async (argv) => argv.includes("--version") || (argv[0] === "npm" && argv[1] === "ci")
         ? { status: 0, stdout: "1.0.0", stderr: "", argv, duration_ms: 1 }
         : { status: suppressed.status, stdout: suppressed.stdout, stderr: suppressed.stderr, argv, duration_ms: 1 },
     });

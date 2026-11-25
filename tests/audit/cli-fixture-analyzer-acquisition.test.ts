@@ -96,7 +96,7 @@ describe("shared CLI fixtures record the operator decline before any CLI call", 
           expect(
             policy.decisions[id],
             `${label} left default acquired analyzer '${id}' undeclined — the fold ` +
-              "would admit it with no consent token and spawn npx/a release download",
+              "would admit it with no consent token and spawn an npm install or a release download",
           ).toBe("declined");
         }
       });
@@ -135,7 +135,7 @@ test(
         (candidate) => candidate.defaultRun && candidate.detect(root),
       ).map((candidate) => candidate.id);
       // Anti-vacuity: this fixture really does reach both network-bound default
-      // candidates — `gitleaks` (release download) and `type-coverage` (npx).
+      // candidates — `gitleaks` (release download) and `type-coverage` (locked npm install).
       expect(applicable).toEqual(
         expect.arrayContaining(["gitleaks", "type-coverage"]),
       );

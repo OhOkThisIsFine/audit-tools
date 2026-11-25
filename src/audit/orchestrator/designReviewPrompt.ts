@@ -190,7 +190,7 @@ function selectStartingPoints(bundle: ArtifactBundle, maxUnits: number): Startin
 /**
  * What a design-review round is pointed at: the files of its starting-point
  * units. The round may roam past them, but these are the files its prompt names
- * as under review, so they are the ones the call-site map anchors — completely.
+ * as starting points, so they are the ones considered for call-site map anchors.
  */
 function startingPointReviewScope(points: StartingPoints): ReviewFileMapScope {
   return {
@@ -687,7 +687,7 @@ function conceptualOutputFormat(
   return [
     "## Output format",
     "",
-    "Produce ONE JSON object in exactly this shape. Every entry in `findings` must conform to the contract shown:",
+    "The example below is only the domain object for `result`. Submit the complete bound review envelope shown at the end of the prompt:",
     "",
     ...exampleLines,
     "",
@@ -837,7 +837,7 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     "",
     summarizeFiles(bundle),
     ...(fileMap.contextFiles.some(file => file.filename === "design-review-file-inventory.json") ? [
-      "The complete file inventory is a read-only context file. Look up the specific unit or path you need; do not reload or re-list the whole repository. Use the shared call-site map before re-deriving dependencies. These inputs do not substitute for your own source checks or judgment.",
+      "The complete file inventory is a read-only context file. Look up the specific unit or path you need; do not reload or re-list the whole repository. Use the shared call-site map where it covers your target; otherwise trace the relevant dependencies in frozen source. These inputs do not substitute for your own source checks or judgment.",
     ] : []),
     "",
     "### Unit structure",
@@ -866,7 +866,7 @@ function renderStructuralContext(bundle: ArtifactBundle, startingPoints: Startin
     "",
     "### Starting points (orient, then roam)",
     "",
-    `Use the in-scope units below to orient yourself, then follow the code wherever it leads. Excluded units are dependency context only, not primary review targets. You need not read every file, but do NOT confine yourself to this list — the most important problems often live in the connections between ordinary-looking parts that no per-unit risk score flags.`,
+    `This short list and its map do not limit the review. Any unit marked [in scope] in Unit structure is reviewable, including units absent from the starting points and map. Excluded units are dependency context only, not primary review targets. Follow the relevant source paths; you need not read every file.`,
     "",
     prioritizedReadingList,
     "",
@@ -901,7 +901,7 @@ export function renderContractReviewPrompt(
     "",
     "## Output format",
     "",
-    "Produce a JSON object with a top-level `findings` array. Each finding in that array must conform to:",
+    "The example below is only the domain object for `result`. Submit the complete bound review envelope shown at the end of the prompt:",
     "",
     ...findingsEnvelopeExample(
       CONTRACT_FINDING_CATEGORIES,

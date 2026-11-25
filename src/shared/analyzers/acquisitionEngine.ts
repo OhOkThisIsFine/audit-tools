@@ -1,5 +1,5 @@
 // sites-pinned: tests/shared/analyzer-acquisition-engine.test.ts, tests/shared/analyzer-pipx-contract.test.ts, tests/audit/analyzer-run-consent.test.ts
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -145,6 +145,12 @@ export interface ExternalAnalyzerCandidate {
    * sound: the peers-free argv is deliberately unchanged.
    */
   peers?: readonly string[];
+  /** For npm tools whose transitive graph must be fixed, use this bundled npm lock
+   * instead of npx resolution. The entrypoint is relative to the installed tree. */
+  npmLock?: {
+    lock: { packages: { "": { dependencies: Record<string, string> } } };
+    entrypoint: string;
+  };
   /**
    * The tool's executable name. Required explicitly for pipx: a distribution
    * spec does not identify its application. For npx with {@link peers}, defaults
@@ -175,6 +181,8 @@ export interface ExternalAnalyzerCandidate {
   discoverInputs?(root: string): Promise<AnalyzerInputDiscovery>;
   /** Private, engine-owned file report. Raw output/error snippets are withheld. */
   managedReport?: boolean;
+  /** Do not persist raw child stdout/stderr excerpts; retain parsed status and notes. */
+  diagnosticSnippets?: false;
   /**
    * Parse the tool's stdout into the generic item shape consumed by
    * `normalizeGenericExternalResults`. NEVER throws — but a degradation must be
@@ -524,8 +532,9 @@ export async function runSafetyGate(
   }
   const error = deadlineFailure(deadline);
   if (error) return { ok: false, reason: error };
+  const probeArgv = candidate.npmLock ? ["npm", "--version"] : runnerProbeArgv(candidate.runner);
   const probe = await run(
-    runnerProbeArgv(candidate.runner),
+    probeArgv,
     root,
     resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS),
   );
@@ -534,7 +543,7 @@ export async function runSafetyGate(
   if (probe.error || probe.status !== 0) {
     return {
       ok: false,
-      reason: `runner '${candidate.runner}' not available: ${
+      reason: `runner '${probeArgv[0]}' not available: ${
         probe.error?.message ?? `exit ${probe.status}`
       }`,
     };
@@ -673,7 +682,7 @@ export async function runExternalAnalyzer(
         status: { tool: candidate.id, resolved: false, status: "not_resolved", error: gate.reason },
       };
     }
-    prefix = runnerPrefix(candidate);
+    prefix = candidate.npmLock ? [] : runnerPrefix(candidate);
   }
 
   const beforeScan = expiredOutcome();
@@ -707,17 +716,44 @@ export async function runExternalAnalyzer(
     }
   };
   try {
-    if (candidate.managedReport) {
+    if (candidate.npmLock || candidate.managedReport) {
       // mkdtemp creates an exclusive directory; never alter the process umask.
       // Windows uses the temp location's inherited ACL; POSIX mode is verified.
-      ownedDirectory = mkdtempSync(join(tmpdir(), "audit-tools-report-"));
+      ownedDirectory = mkdtempSync(join(tmpdir(), candidate.npmLock ? "audit-tools-tool-" : "audit-tools-report-"));
       if (process.platform !== "win32") {
         chmodSync(ownedDirectory, 0o700);
         if ((statSync(ownedDirectory).mode & 0o777) !== 0o700) {
-          throw new Error("private report directory unavailable");
+          throw new Error("private analyzer directory unavailable");
         }
       }
-      reportPath = join(ownedDirectory, "report.json");
+      if (candidate.managedReport) reportPath = join(ownedDirectory, "report.json");
+    }
+    if (candidate.npmLock && ownedDirectory) {
+      const { lock, entrypoint } = candidate.npmLock;
+      writeFileSync(join(ownedDirectory, "package.json"), JSON.stringify({
+        private: true, dependencies: lock.packages[""].dependencies,
+      }));
+      writeFileSync(join(ownedDirectory, "package-lock.json"), JSON.stringify(lock));
+      const afterSetup = expiredOutcome();
+      if (afterSetup) { outcome = afterSetup; return outcome; }
+      const installArgv = ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund",
+        "--no-global", "--package-lock", "--no-update-notifier", "--install-strategy=hoisted",
+        "--cache", join(ownedDirectory, "npm-cache"),
+        "--userconfig", join(ownedDirectory, "user.npmrc"),
+        "--globalconfig", join(ownedDirectory, "global.npmrc")];
+      const install = await run(installArgv, ownedDirectory, resolveSpawnDeadline(deadline, ANALYZER_CHILD_DEADLINE_MS));
+      const afterInstall = expiredOutcome();
+      if (afterInstall) { outcome = afterInstall; return outcome; }
+      if (install.error || install.status !== 0) {
+        outcome = { results: emptyResults(candidate.id), status: {
+          tool: candidate.id, resolved: false, status: "not_resolved",
+          command: installArgv.join(" "), exit_code: install.status, duration_ms: install.duration_ms,
+          error: `locked npm acquisition failed: ${install.error?.message ?? `exit ${install.status}`}`,
+          ...(install.stderr.trim() ? { stderr_snippet: install.stderr.slice(0, 500) } : {}),
+        } };
+        return outcome;
+      }
+      prefix = [process.execPath, join(ownedDirectory, entrypoint)];
     }
     const context: AnalyzerInvocationContext = { reportPath, inputs };
     const invoke = async (): Promise<AcquisitionOutcome> => {
@@ -781,8 +817,9 @@ export async function runExternalAnalyzer(
       }
 
       const stderrText = typeof result.stderr === "string" ? result.stderr : "";
-      const stderrSnippet =
-        !candidate.managedReport && stderrText.trim().length > 0 ? { stderr_snippet: stderrText.slice(0, 500) } : {};
+      const captureSnippets = !candidate.managedReport && candidate.diagnosticSnippets !== false;
+      const stderrSnippet = captureSnippets && stderrText.trim().length > 0
+        ? { stderr_snippet: stderrText.slice(0, 500) } : {};
 
       let parsed: ReturnType<typeof readParseOutcome>;
       try {
@@ -797,7 +834,7 @@ export async function runExternalAnalyzer(
             status: "parse_error",
             exit_code: result.status,
             error: candidate.managedReport ? "analyzer operation failed (private report)" : error instanceof Error ? error.message : String(error),
-            ...(candidate.managedReport ? {} : { output_snippet: result.stdout.slice(0, 200) }),
+            ...(captureSnippets ? { output_snippet: result.stdout.slice(0, 200) } : {}),
             ...stderrSnippet,
             duration_ms: result.duration_ms,
           },
@@ -872,7 +909,7 @@ export async function runExternalAnalyzer(
                 : exitedNonZero
                   ? `analyzer exited ${result.status} with no parsable findings`
                   : "analyzer produced no output other than stderr",
-              ...(candidate.managedReport ? {} : { output_snippet: result.stdout.slice(0, 200) }),
+              ...(captureSnippets ? { output_snippet: result.stdout.slice(0, 200) } : {}),
               ...degradationFields,
             },
           };
@@ -890,7 +927,7 @@ export async function runExternalAnalyzer(
                 (parsed.parse_failed
                   ? "analyzer output could not be parsed"
                   : `analyzer output parsed with ${droppedRows} unusable row(s)`),
-              ...(candidate.managedReport ? {} : { output_snippet: parseInput.slice(0, 200) }),
+              ...(captureSnippets ? { output_snippet: parseInput.slice(0, 200) } : {}),
               ...degradationFields,
             },
           };
@@ -904,7 +941,7 @@ export async function runExternalAnalyzer(
           command,
           resolved: true,
           status: parsed.measurement_failed ? "failed" : normalized.results.length > 0 ? "findings" : "success",
-          ...(parsed.measurement_failed && !candidate.managedReport ? { output_snippet: parseInput.slice(0, 200) } : {}),
+          ...(parsed.measurement_failed && captureSnippets ? { output_snippet: parseInput.slice(0, 200) } : {}),
           ...(parsed.note !== undefined ? { error: candidate.managedReport
             ? "analyzer reported degraded output (private report)" : parsed.note } : {}),
           ...degradationFields,
@@ -926,7 +963,7 @@ export async function runExternalAnalyzer(
     } catch {
       // Do not replace the original diagnostic or expose filesystem error text.
       if (outcome) {
-        outcome.status.error = [outcome.status.error, "analyzer report cleanup failed"].filter(Boolean).join("; ");
+        outcome.status.error = [outcome.status.error, candidate.npmLock ? "analyzer tool cleanup failed" : "analyzer report cleanup failed"].filter(Boolean).join("; ");
         if (outcome.status.status === "success") outcome.status.status = "failed";
       }
     }

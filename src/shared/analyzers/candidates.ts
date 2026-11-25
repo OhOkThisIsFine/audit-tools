@@ -23,6 +23,7 @@ import type {
 import { parseClippy } from "./clippy.js";
 import { parseRubocopOutcome } from "./rubocop.js";
 import { isRecord } from "../validation/basic.js";
+import typeCoverageLock from "./type-coverage-lock.json" with { type: "json" };
 
 /**
  * The value-curated EXTERNAL analyzer candidate registry. This is the only place
@@ -186,11 +187,17 @@ function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
   } catch {
     return parseFailure("semgrep", "output is not valid JSON");
   }
-  if (!isRecord(payload) || !Array.isArray(payload.results)) {
-    return parseFailure("semgrep", "output has no `results` array");
+  if (!isRecord(payload)) return parseFailure("semgrep", "output is not a JSON object");
+  const scanError = Array.isArray(payload.errors)
+    ? payload.errors.length > 0 ? `semgrep: scan reported ${payload.errors.length} error(s)` : undefined
+    : payload.errors !== undefined ? "semgrep: output has a malformed errors field" : undefined;
+  if (!Array.isArray(payload.results)) {
+    return scanError
+      ? { items: [], measurement_failed: true, note: scanError }
+      : parseFailure("semgrep", "output has no `results` array");
   }
-  const results = payload.results as Record<string, unknown>[];
-  return items(results.map((r) => {
+  const results = payload.results.filter(isRecord);
+  const parsed = results.map((r) => {
     const extra = (r.extra ?? {}) as Record<string, unknown>;
     const start = (r.start ?? {}) as Record<string, unknown>;
     const end = (r.end ?? {}) as Record<string, unknown>;
@@ -207,13 +214,19 @@ function parseSemgrep(stdout: string): ExternalAnalyzerParseReport {
       summary: typeof extra.message === "string" ? extra.message : checkId,
       rule: checkId,
     };
-  }));
+  });
+  const dropped = payload.results.length - results.length;
+  return {
+    items: parsed,
+    ...(dropped > 0 ? { dropped_rows: dropped } : {}),
+    ...(scanError === undefined ? {} : { measurement_failed: true, note: scanError }),
+  };
 }
 
 const semgrepCandidate: ExternalAnalyzerCandidate = {
   id: "semgrep",
   runner: "pipx",
-  spec: "semgrep==1.63.0",
+  spec: "semgrep==1.187.0",
   bin: "semgrep",
   purpose: "security and correctness anti-patterns via community rule sets (pulls rules from the network)",
   safetyProfile: {
@@ -224,7 +237,8 @@ const semgrepCandidate: ExternalAnalyzerCandidate = {
   // CONSENT-GATED: pulls rule sets from network and is heavier; only runs with a consent token.
   defaultRun: false,
   detect: (root) => detectPythonEcosystem(root) || detectNodeEcosystem(root),
-  buildArgv: (prefix, root) => [...prefix, "--json", "--quiet", "--config", "auto", root],
+  buildArgv: (prefix, root) => [...prefix, "--json", "--quiet", "--metrics=off", "--disable-version-check", "--config", "p/default", root],
+  diagnosticSnippets: false,
   parse: parseSemgrep,
 };
 
@@ -1028,7 +1042,7 @@ const actionlintCandidate: ExternalAnalyzerCandidate = {
 };
 
 // ---------------------------------------------------------------------------
-// type-coverage — TypeScript type-coverage ratio reporter via npx (read-only).
+// type-coverage — TypeScript type-coverage ratio reporter via a locked npm install (read-only).
 // ---------------------------------------------------------------------------
 /** Parse pinned type-coverage's --json-output --detail (zero-based locations). */
 function parseTypeCoverage(stdout: string): ExternalAnalyzerParseReport {
@@ -1083,15 +1097,9 @@ const typeCoverageCandidate: ExternalAnalyzerCandidate = {
   id: "type-coverage",
   runner: "npx",
   spec: "type-coverage@2.29.7",
-  // type-coverage reads the project through whatever typescript npm resolves for
-  // it, and its peer range is open at the top. Measured 2026-09-04: a fresh
-  // resolution of the former range `type-coverage@2` paired type-coverage 2.30.1
-  // with typescript 7.0.2, whose compiler API no longer exposes `ts.SyntaxKind` —
-  // so `type-coverage-core/dist/checker.js` threw at LOAD ("Cannot read properties
-  // of undefined (reading 'Unknown')") on every spawn, after paying the two-minute
-  // install first. Naming the typescript peer exactly makes the pair the measured
-  // working one instead of whatever the registry serves that day.
-  peers: ["typescript@5.9.3"],
+  // A top-level npx peer pin does not bind TypeScript resolution inside
+  // type-coverage-core. Keep the full tested graph, including both, in the lock.
+  npmLock: { lock: typeCoverageLock, entrypoint: "node_modules/type-coverage/bin/type-coverage" },
   purpose: "per-file TypeScript any-coverage gaps",
   safetyProfile: {
     config_execution: "inert-data",

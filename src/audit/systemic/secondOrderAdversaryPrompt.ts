@@ -378,7 +378,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
       (evidencePaths.length > 0 ? "" : " No reference artifact exists for this run."),
     ...evidencePaths.map((path) => `- \`${path}\``),
     "",
-    "## Prior verified recon — uncovered ground, read the slices you need BEFORE re-deriving anything",
+    "## Prior verified recon — look up relevant anchors on uncovered ground",
     "",
     // The index only: the slices reach the lane as read-only context files its
     // emission site binds (`adversaryFileMapContext`).
@@ -479,7 +479,7 @@ export function renderSecondOrderAdversaryPrompt(opts: {
     "",
     "## Output",
     "",
-    `Write JSON to \`${opts.submissionPath}\` with this shape:`,
+    `This example is the domain object for \`result\`, not a standalone submission. Submit the complete bound review envelope shown at the end of the prompt to \`${opts.submissionPath}\`.`,
     "",
     "```json",
     "{",
